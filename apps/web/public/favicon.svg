@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Simplified Clawboo mascot for favicon use -->
+  <!-- Body (scaled to fit 32x32, centered) -->
+  <path d="M16,5 C10,5 4,9 4,15 C4,18 5,21 7,23 C9,26 11,23 14,23 C15,26 17,26 19,23 C21,23 23,26 25,23 C28,21 28,18 28,15 C28,9 22,5 16,5 Z" fill="#E94560" stroke="none"/>
+  <!-- Eyes -->
+  <ellipse cx="12" cy="14" rx="2.6" ry="3" fill="rgba(10,14,26,0.92)"/>
+  <circle cx="12" cy="14.2" r="1" fill="#34D399"/>
+  <ellipse cx="20" cy="14" rx="2.6" ry="3" fill="rgba(10,14,26,0.92)"/>
+  <circle cx="20" cy="14.2" r="1" fill="#34D399"/>
+</svg>

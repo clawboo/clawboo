@@ -1,0 +1,50 @@
+@import 'tailwindcss';
+
+@theme {
+  /* ── Core brand colors ── */
+  --color-background: #0a0e1a;
+  --color-surface: #111827;
+  --color-accent: #e94560;
+  --color-blue: #0f3460;
+  --color-mint: #34d399;
+  --color-amber: #fbbf24;
+  --color-text: #e8e8e8;
+  --color-secondary: #6b7280;
+
+  /* ── shadcn/ui semantic aliases (maps our tokens) ── */
+  --color-foreground: #e8e8e8;
+  --color-card: #111827;
+  --color-card-foreground: #e8e8e8;
+  --color-popover: #111827;
+  --color-popover-foreground: #e8e8e8;
+  --color-primary: #e94560;
+  --color-primary-foreground: #ffffff;
+  --color-muted: #1f2937;
+  --color-muted-foreground: #6b7280;
+  --color-border: rgb(255 255 255 / 0.08);
+  --color-input: #1f2937;
+  --color-ring: #e94560;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+
+  /* ── Fonts (CSS variable references let next/font override at runtime) ── */
+  --font-display: var(--font-cabinet-grotesk, 'Cabinet Grotesk', sans-serif);
+  --font-body: var(--font-dm-sans, 'DM Sans', sans-serif);
+  --font-mono: var(--font-geist-mono, ui-monospace, 'Geist Mono', monospace);
+
+  /* ── Border radius ── */
+  --radius: 0.5rem;
+}
+
+html,
+body {
+  background-color: #0a0e1a;
+  color: #e8e8e8;
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  border-color: rgb(255 255 255 / 0.08);
+}

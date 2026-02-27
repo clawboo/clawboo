@@ -1,0 +1,47 @@
+{
+  "name": "@clawboo/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx server/index.ts --dev",
+    "build": "next build",
+    "start": "tsx server/index.ts",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clawboo/config": "workspace:*",
+    "@clawboo/db": "workspace:*",
+    "@clawboo/events": "workspace:*",
+    "@clawboo/gateway-client": "workspace:*",
+    "@clawboo/gateway-proxy": "workspace:*",
+    "@clawboo/logger": "workspace:*",
+    "@clawboo/protocol": "workspace:*",
+    "@clawboo/ui": "workspace:*",
+    "@tanstack/react-query": "^5.0.0",
+    "@xyflow/react": "^12.10.1",
+    "drizzle-orm": "^0.38.0",
+    "elkjs": "^0.9.3",
+    "framer-motion": "^11.0.0",
+    "geist": "^1.3.0",
+    "lucide-react": "^0.468.0",
+    "next": "latest",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^9.0.0",
+    "remark-gfm": "^4.0.0",
+    "zustand": "^5.0.0",
+    "@radix-ui/react-slider": "^1.3.6",
+    "recharts": "^2.13.0"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

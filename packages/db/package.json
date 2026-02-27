@@ -1,0 +1,55 @@
+{
+  "name": "@clawboo/db",
+  "version": "0.0.0",
+  "description": "SQLite database layer for Clawboo using Drizzle ORM and better-sqlite3",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/db"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/db",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "database",
+    "sqlite",
+    "drizzle",
+    "openclaw"
+  ],
+  "files": [
+    "dist",
+    "drizzle"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.0",
+    "drizzle-orm": "^0.38.0"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "drizzle-kit": "^0.30.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0"
+  }
+}

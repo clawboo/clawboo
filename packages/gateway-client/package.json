@@ -1,0 +1,51 @@
+{
+  "name": "@clawboo/gateway-client",
+  "version": "0.0.0",
+  "description": "WebSocket client for the OpenClaw Gateway with typed RPC and event subscription",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/gateway-client"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/gateway-client",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "gateway",
+    "websocket",
+    "openclaw",
+    "rpc"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clawboo/logger": "workspace:*",
+    "@noble/ed25519": "^2.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0"
+  }
+}

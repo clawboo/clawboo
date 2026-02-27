@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/tsconfig" },
+    { "path": "./packages/logger" },
+    { "path": "./packages/config" },
+    { "path": "./packages/gateway-client" },
+    { "path": "./packages/gateway-proxy" },
+    { "path": "./packages/protocol" },
+    { "path": "./packages/events" },
+    { "path": "./packages/db" },
+    { "path": "./packages/boo-avatar" },
+    { "path": "./packages/ui" },
+    { "path": "./apps/web" },
+    { "path": "./apps/cli" }
+  ]
+}

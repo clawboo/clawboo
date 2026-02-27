@@ -1,0 +1,44 @@
+{
+  "name": "@clawboo/boo-avatar",
+  "version": "0.0.0",
+  "description": "Deterministic ghost-lobster SVG avatar generator for Clawboo agents",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/boo-avatar"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/boo-avatar",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "avatar",
+    "svg",
+    "procedural",
+    "ghost"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0"
+  }
+}
