@@ -1,0 +1,11 @@
+{
+  "name": "@clawboo/docs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'Docusaurus docs site — initialized in Phase 6'",
+    "dev": "echo 'Docusaurus docs site — initialized in Phase 6'",
+    "lint": "echo 'skip'",
+    "typecheck": "echo 'skip'"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "name": "@clawboo/events",
+  "version": "0.0.0",
+  "description": "Bridge-Policy-Handler event pipeline for processing OpenClaw Gateway events",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/events"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/events",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "events",
+    "pipeline",
+    "openclaw"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch --no-dts",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clawboo/gateway-client": "workspace:*",
+    "@clawboo/logger": "workspace:*",
+    "@clawboo/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0"
+  }
+}
