@@ -170,7 +170,7 @@ export class GatewayClient {
 
   // ── Request/response ────────────────────────────────────────────────────────
 
-  async call<T = unknown>(method: string, params?: unknown): Promise<T> {
+  async call<T = unknown>(method: string, params?: unknown, timeoutMs = 30_000): Promise<T> {
     if (!method.trim()) throw new Error('Gateway method is required.')
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('Gateway is not connected.')
@@ -180,9 +180,21 @@ export class GatewayClient {
     const frame: ReqFrame = { type: 'req', id, method, params }
 
     const promise = new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) {
+          reject(new Error(`Gateway request "${method}" timed out after ${timeoutMs}ms`))
+        }
+      }, timeoutMs)
+
       this.pending.set(id, {
-        resolve: (v) => resolve(v as T),
-        reject,
+        resolve: (v) => {
+          clearTimeout(timer)
+          resolve(v as T)
+        },
+        reject: (err) => {
+          clearTimeout(timer)
+          reject(err)
+        },
       })
     })
 

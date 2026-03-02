@@ -1,6 +1,7 @@
 import type { ClassifiedEvent, EventHandlerDeps, EventHandlerHandle, EventIntent } from './types'
 
 const CLOSED_RUN_TTL_MS = 30_000
+const CLOSED_RUNS_MAX_SIZE = 500
 
 // ── createEventHandler ─────────────────────────────────────────────────────
 
@@ -13,6 +14,15 @@ export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
     const now = Date.now()
     for (const [runId, expiry] of closedRuns) {
       if (now > expiry) closedRuns.delete(runId)
+    }
+    // Evict oldest entries if map exceeds max size
+    if (closedRuns.size > CLOSED_RUNS_MAX_SIZE) {
+      const excess = closedRuns.size - CLOSED_RUNS_MAX_SIZE
+      const iter = closedRuns.keys()
+      for (let i = 0; i < excess; i++) {
+        const key = iter.next().value
+        if (key !== undefined) closedRuns.delete(key)
+      }
     }
   }
 

@@ -33,7 +33,6 @@
   },
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

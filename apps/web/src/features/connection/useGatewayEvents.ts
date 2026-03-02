@@ -213,6 +213,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
     return () => {
       unsub()
       unsubCost()
+      patchQueue.dispose()
       handler.dispose()
     }
   }, [client])
