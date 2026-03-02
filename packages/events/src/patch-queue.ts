@@ -19,6 +19,7 @@ type PatchQueueEntry = {
 export function createPatchQueue(onFlush: (patches: Patch[]) => void): {
   enqueue: (patch: Patch) => void
   flush: () => void
+  dispose: () => void
 } {
   const state: PatchQueueEntry = { pending: new Map(), rafId: null }
 
@@ -61,5 +62,13 @@ export function createPatchQueue(onFlush: (patches: Patch[]) => void): {
     }
   }
 
-  return { enqueue, flush }
+  const dispose = (): void => {
+    if (state.rafId !== null && typeof cancelAnimationFrame !== 'undefined') {
+      cancelAnimationFrame(state.rafId)
+      state.rafId = null
+    }
+    state.pending.clear()
+  }
+
+  return { enqueue, flush, dispose }
 }

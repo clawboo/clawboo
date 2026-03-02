@@ -121,6 +121,10 @@ export function GatewayBootstrap() {
 
   const handleConnected = useCallback(
     async (newClient: GatewayClient) => {
+      // Disconnect old client before replacing to avoid leaked WS listeners
+      const prev = useConnectionStore.getState().client
+      if (prev && prev !== newClient) prev.disconnect()
+
       setClient(newClient)
       const agentCount = await hydrateFleet(newClient)
       if (agentCount === 0) {
@@ -148,6 +152,10 @@ export function GatewayBootstrap() {
 
         const data = (await resp.json()) as { gatewayUrl?: string; gatewayToken?: string }
         if (!data.gatewayUrl?.trim()) return
+
+        // Disconnect old client before replacing to avoid leaked WS listeners
+        const prev = useConnectionStore.getState().client
+        if (prev) prev.disconnect()
 
         const autoClient = new GatewayClient()
         await autoClient.connect(resolveProxyGatewayUrl(), {
@@ -182,6 +190,10 @@ export function GatewayBootstrap() {
   const handleOnboardingComplete = useCallback(
     async (newClient: GatewayClient, url: string) => {
       markOnboarded()
+
+      // Disconnect old client before replacing to avoid leaked WS listeners
+      const prev = useConnectionStore.getState().client
+      if (prev && prev !== newClient) prev.disconnect()
 
       // Surface the client to the rest of the app
       setStatus('connected')

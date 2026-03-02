@@ -62,5 +62,6 @@ export const useApprovalsStore = create<ApprovalsStore>((set) => ({
       approvalHistory: [record, ...state.approvalHistory].slice(0, 200),
     })),
 
-  hydrateHistory: (records) => set({ approvalHistory: records }),
+  hydrateHistory: (records) =>
+    set({ approvalHistory: records.length > 200 ? records.slice(0, 200) : records }),
 }))

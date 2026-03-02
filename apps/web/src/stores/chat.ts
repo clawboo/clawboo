@@ -28,7 +28,12 @@ export const useChatStore = create<ChatStore>((set) => ({
     set((state) => {
       const next = new Map(state.transcripts)
       const existing = next.get(sessionKey) ?? []
-      next.set(sessionKey, [...existing, ...entries])
+      // Deduplicate by entryId to prevent duplicate React keys
+      const seen = new Set(existing.map((e) => e.entryId))
+      const fresh = entries.filter((e) => !seen.has(e.entryId))
+      if (fresh.length === 0) return state
+      const merged = [...existing, ...fresh]
+      next.set(sessionKey, merged.length > 500 ? merged.slice(-500) : merged)
       return { transcripts: next }
     }),
 

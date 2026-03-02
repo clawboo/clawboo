@@ -31,7 +31,6 @@
   },
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch --no-dts",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit"
   },
