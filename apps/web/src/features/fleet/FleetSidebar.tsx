@@ -1,10 +1,12 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
+import { useConnectionStore } from '@/stores/connection'
+import { useViewStore } from '@/stores/view'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
@@ -138,8 +140,22 @@ export function FleetSidebar() {
   const selectedAgentId = useFleetStore((s) => s.selectedAgentId)
   const selectAgent = useFleetStore((s) => s.selectAgent)
 
+  const connectionStatus = useConnectionStore((s) => s.status)
+
   const [query, setQuery] = useState('')
   const [personalityOpen, setPersonalityOpen] = useState(true)
+
+  // Delayed empty state — only show after 1s to avoid flash during hydration
+  const [showEmpty, setShowEmpty] = useState(false)
+  const isEmptyConnected = agents.length === 0 && connectionStatus === 'connected' && !query
+  useEffect(() => {
+    if (!isEmptyConnected) {
+      setShowEmpty(false)
+      return
+    }
+    const timer = setTimeout(() => setShowEmpty(true), 1000)
+    return () => clearTimeout(timer)
+  }, [isEmptyConnected])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -181,15 +197,31 @@ export function FleetSidebar() {
       <div className="flex-1 overflow-y-auto px-2 pb-2">
         <AnimatePresence initial={false}>
           {filtered.length === 0 ? (
-            <motion.p
+            <motion.div
               key="empty"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="px-3 py-6 text-center text-[12px] text-secondary/50"
+              className="px-3 py-6 text-center"
             >
-              {query ? 'No agents match.' : 'No agents connected.'}
-            </motion.p>
+              {query ? (
+                <p className="text-[12px] text-secondary/50">No agents match.</p>
+              ) : showEmpty ? (
+                <div className="flex flex-col items-center gap-2">
+                  <span className="text-2xl">👻</span>
+                  <p className="text-[12px] text-secondary/50">No Boos yet</p>
+                  <button
+                    type="button"
+                    onClick={() => useViewStore.getState().setView('graph')}
+                    className="text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
+                  >
+                    Deploy a team →
+                  </button>
+                </div>
+              ) : (
+                <p className="text-[12px] text-secondary/50">No agents connected.</p>
+              )}
+            </motion.div>
           ) : (
             <motion.div key="list" className="flex flex-col gap-0.5">
               {filtered.map((agent) => (

@@ -8,7 +8,9 @@ import chalk from 'chalk'
 import * as p from '@clack/prompts'
 import ora from 'ora'
 import { createConnection } from 'net'
-import { exec } from 'child_process'
+import { exec, spawn } from 'child_process'
+import path from 'path'
+import fs from 'fs'
 
 // ─── Version ──────────────────────────────────────────────────────────────────
 
@@ -358,6 +360,52 @@ function probePort(host: string, port: number, timeoutMs = 2_000): Promise<boole
   })
 }
 
+// ─── Monorepo discovery ────────────────────────────────────────────────────────
+
+/**
+ * Walk up from __dirname and cwd looking for the Clawboo monorepo root
+ * (a package.json with "name": "clawboo").
+ */
+function findMonorepoRoot(): string | null {
+  // Env override
+  if (process.env.CLAWBOO_SERVER_PATH) return process.env.CLAWBOO_SERVER_PATH
+
+  const candidates: string[] = []
+
+  // Walk up from this file's directory
+  {
+    let dir = __dirname
+    for (let i = 0; i < 10; i++) {
+      candidates.push(dir)
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  }
+
+  // Walk up from cwd
+  let dir = process.cwd()
+  for (let i = 0; i < 10; i++) {
+    if (!candidates.includes(dir)) candidates.push(dir)
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const pkgPath = path.join(candidate, 'package.json')
+      const raw = fs.readFileSync(pkgPath, 'utf-8')
+      const pkg = JSON.parse(raw) as { name?: string }
+      if (pkg.name === 'clawboo') return candidate
+    } catch {
+      // not found or not parsable — continue
+    }
+  }
+
+  return null
+}
+
 // ─── Minimal gateway client ────────────────────────────────────────────────────
 
 type GatewayHandle = {
@@ -377,7 +425,11 @@ type PendingReq = {
  *
  * Uses the Node.js 22+ global `WebSocket`. No browser dependencies.
  */
-function connectGateway(url: string, token?: string): Promise<GatewayHandle> {
+function connectGateway(
+  url: string,
+  token?: string,
+  opts?: { role?: string; scopes?: string[] },
+): Promise<GatewayHandle> {
   return new Promise((outerResolve, outerReject) => {
     const pending = new Map<string, PendingReq>()
     let connected = false
@@ -439,13 +491,13 @@ function connectGateway(url: string, token?: string): Promise<GatewayHandle> {
             minProtocol: 3,
             maxProtocol: 3,
             client: {
-              id: 'openclaw-control-ui',
+              id: 'clawboo-cli',
               version: VERSION,
               platform: 'node',
               mode: 'webchat',
             },
-            role: 'operator',
-            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing'],
+            role: opts?.role ?? 'operator',
+            scopes: opts?.scopes ?? ['operator.admin', 'operator.approvals', 'operator.pairing'],
             auth: token ? { token } : undefined,
             ...(connectNonce ? { nonce: connectNonce } : {}),
           },
@@ -593,20 +645,33 @@ async function run(): Promise<void> {
   }).start()
 
   let gateway: GatewayHandle
+  let _operatorMode = true
   try {
     gateway = await connectGateway(gatewayUrl, gatewayToken)
     connectSpinner.succeed(chalk.green('Connected to Gateway'))
   } catch (err) {
-    connectSpinner.fail(
-      chalk.red('Failed to connect: ') + (err instanceof Error ? err.message : String(err)),
-    )
-    p.outro(
-      chalk.gray(
-        'Make sure OpenClaw Gateway is running.\n' +
-          '  → See: https://github.com/openclaw/openclaw',
-      ),
-    )
-    process.exit(1)
+    // Fallback: try viewer role if operator connect was rejected
+    const msg = err instanceof Error ? err.message : String(err)
+    connectSpinner.text = chalk.yellow('Operator connect failed, trying viewer mode...')
+    try {
+      gateway = await connectGateway(gatewayUrl, gatewayToken, {
+        role: 'viewer',
+        scopes: ['viewer'],
+      })
+      _operatorMode = false
+      connectSpinner.succeed(
+        chalk.green('Connected to Gateway') + chalk.gray(' (viewer mode — limited permissions)'),
+      )
+    } catch (_err2) {
+      connectSpinner.fail(chalk.red('Failed to connect: ') + msg)
+      p.outro(
+        chalk.gray(
+          'Make sure OpenClaw Gateway is running.\n' +
+            '  → See: https://github.com/openclaw/openclaw',
+        ),
+      )
+      process.exit(1)
+    }
   }
 
   // ── 4. Check for existing agents ──────────────────────────────────────────
@@ -662,22 +727,52 @@ async function run(): Promise<void> {
         for (let i = 0; i < profile.agents.length; i++) {
           const agent = profile.agents[i]!
           deploySpinner.text = `Creating ${chalk.bold(agent.name)} (${i + 1}/${profile.agents.length})...`
-          await gateway.call('agents.create', {
-            name: agent.name,
-            soul: agent.soulTemplate,
-            identity: agent.identityTemplate,
-            tools,
-          })
+          try {
+            await gateway.call('agents.create', {
+              name: agent.name,
+              soul: agent.soulTemplate,
+              identity: agent.identityTemplate,
+              tools,
+            })
+          } catch (createErr) {
+            const msg = createErr instanceof Error ? createErr.message : String(createErr)
+            if (
+              msg.includes('permission') ||
+              msg.includes('unauthorized') ||
+              msg.includes('forbidden') ||
+              msg.includes('DEVICE_IDENTITY')
+            ) {
+              deploySpinner.fail(chalk.red('Agent creation requires additional auth'))
+              p.log.warn(
+                chalk.yellow(
+                  'Tip: Your Gateway requires additional auth for agent creation.\n' +
+                    '     Open http://localhost:3000 and deploy a team from the dashboard instead.',
+                ),
+              )
+              throw createErr // break out of the outer try
+            }
+            throw createErr
+          }
         }
         deploySpinner.succeed(
           chalk.green(`${profile.emoji} ${profile.name} deployed`) +
             chalk.gray(` — ${profile.agents.length} Boos ready!`),
         )
       } catch (err) {
-        deploySpinner.fail(
-          chalk.red('Deployment failed: ') + (err instanceof Error ? err.message : String(err)),
-        )
-        p.log.warn(chalk.gray('You can deploy a team from the dashboard instead.'))
+        if (
+          !(
+            err instanceof Error &&
+            (err.message.includes('permission') ||
+              err.message.includes('unauthorized') ||
+              err.message.includes('forbidden') ||
+              err.message.includes('DEVICE_IDENTITY'))
+          )
+        ) {
+          deploySpinner.fail(
+            chalk.red('Deployment failed: ') + (err instanceof Error ? err.message : String(err)),
+          )
+          p.log.warn(chalk.gray('You can deploy a team from the dashboard instead.'))
+        }
       }
     } else {
       p.log.info(chalk.gray('Starting with an empty fleet — add Boos from the dashboard.'))
@@ -697,21 +792,58 @@ async function run(): Promise<void> {
 
   const DASHBOARD_URL = 'http://localhost:3000'
 
-  const dashboardRunning = await probePort('localhost', 3000, 1_500)
+  let dashboardRunning = await probePort('localhost', 3000, 1_500)
   if (!dashboardRunning) {
-    console.log()
-    p.log.warn(
-      chalk.yellow('Clawboo dashboard is not running at ') + chalk.cyan.underline(DASHBOARD_URL),
-    )
-    p.log.info(
-      chalk.gray('Start it with: ') +
-        chalk.white('pnpm dev') +
-        chalk.gray('  (from the clawboo repo root)'),
-    )
-    p.outro(
-      chalk.gray('Run ') + chalk.white('npx clawboo') + chalk.gray(' again once the server is up.'),
-    )
-    process.exit(0)
+    // Try to find and start the Clawboo web server
+    const monorepoRoot = findMonorepoRoot()
+    if (monorepoRoot) {
+      const serverPath = path.join(monorepoRoot, 'apps/web/server/index.ts')
+      if (fs.existsSync(serverPath)) {
+        const startSpinner = ora({
+          text: 'Starting Clawboo dashboard...',
+          color: 'cyan',
+        }).start()
+
+        const child = spawn('npx', ['tsx', serverPath], {
+          cwd: monorepoRoot,
+          env: { ...process.env, NODE_ENV: 'production' },
+          detached: true,
+          stdio: 'ignore',
+        })
+        child.unref()
+
+        // Poll for up to 15 seconds
+        const maxAttempts = 30
+        for (let i = 0; i < maxAttempts; i++) {
+          await new Promise((r) => setTimeout(r, 500))
+          dashboardRunning = await probePort('localhost', 3000, 1_000)
+          if (dashboardRunning) break
+        }
+
+        if (dashboardRunning) {
+          startSpinner.succeed(chalk.green('Dashboard started'))
+        } else {
+          startSpinner.fail(
+            chalk.yellow('Dashboard is taking too long to start. Try: ') +
+              chalk.white(`cd ${monorepoRoot} && pnpm dev`),
+          )
+          process.exit(0)
+        }
+      } else {
+        p.log.warn(
+          chalk.yellow('Could not find server entry point. Start the dashboard manually: ') +
+            chalk.white(`cd ${monorepoRoot} && pnpm dev`),
+        )
+        process.exit(0)
+      }
+    } else {
+      console.log()
+      p.log.warn(
+        chalk.yellow('Could not find the Clawboo project. Start the dashboard manually: ') +
+          chalk.white('cd <your-clawboo-dir> && pnpm dev'),
+      )
+      process.exit(0)
+    }
   }
 
   const browserSpinner = ora({ text: 'Opening Clawboo dashboard...', color: 'cyan' }).start()
