@@ -1,24 +1,25 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
 import { GhostGraphPanel } from '@/features/graph/GhostGraphPanel'
 import { ChatPanel } from '@/features/chat/ChatPanel'
 import { SchedulerPanel } from '@/features/scheduler/SchedulerPanel'
 import { ApprovalsPanel } from '@/features/approvals/ApprovalsPanel'
+import { CostDashboard } from '@/app/cost/CostDashboard'
 import { useApprovalsStore } from '@/stores/approvals'
-
-type View = 'graph' | 'chat' | 'scheduler' | 'approvals'
+import { useViewStore } from '@/stores/view'
+import type { View } from '@/stores/view'
 
 const TABS: { id: View; label: string }[] = [
   { id: 'graph', label: '👻 Ghost Graph' },
   { id: 'chat', label: '💬 Chat' },
   { id: 'scheduler', label: '⏰ Scheduler' },
   { id: 'approvals', label: '🔐 Approvals' },
+  { id: 'cost', label: '💰 Cost' },
 ]
 
 export default function Home() {
-  const [view, setView] = useState<View>('graph')
+  const view = useViewStore((s) => s.view)
+  const setView = useViewStore((s) => s.setView)
   const pendingApprovals = useApprovalsStore((s) => s.pendingApprovals)
   const approvalCount = pendingApprovals.size
 
@@ -78,26 +79,6 @@ export default function Home() {
             </button>
           )
         })}
-
-        {/* Cost dashboard — separate route */}
-        <Link
-          href="/cost"
-          style={{
-            background: 'transparent',
-            border: '1px solid transparent',
-            borderRadius: 6,
-            color: 'rgba(232,232,232,0.45)',
-            fontSize: 12,
-            fontWeight: 500,
-            padding: '3px 12px',
-            transition: 'all 0.15s',
-            display: 'inline-flex',
-            alignItems: 'center',
-            textDecoration: 'none',
-          }}
-        >
-          💰 Cost
-        </Link>
       </div>
 
       {/* Main content */}
@@ -113,6 +94,7 @@ export default function Home() {
         {view === 'chat' && <ChatPanel />}
         {view === 'scheduler' && <SchedulerPanel />}
         {view === 'approvals' && <ApprovalsPanel />}
+        {view === 'cost' && <CostDashboard />}
       </div>
     </div>
   )
