@@ -53,6 +53,7 @@ function parseToolEntry(
 
 // ─── Grouping: flatten TranscriptEntry[] → render blocks ─────────────────────
 
+type MetaBlock = { kind: 'meta'; entry: TranscriptEntry }
 type UserBlock = { kind: 'user'; entry: TranscriptEntry }
 type AssistantBlock = {
   kind: 'assistant-turn'
@@ -62,7 +63,7 @@ type AssistantBlock = {
   timestampMs: number | null
   thinkingDurationMs?: number
 }
-type RenderBlock = UserBlock | AssistantBlock
+type RenderBlock = MetaBlock | UserBlock | AssistantBlock
 
 // InProgressTurn is the mutable accumulator — separate from AssistantBlock
 // so TypeScript can track it cleanly without closure-narrowing ambiguity.
@@ -102,7 +103,11 @@ function groupEntriesToBlocks(entries: TranscriptEntry[]): RenderBlock[] {
   }
 
   for (const entry of entries) {
-    if (entry.kind === 'meta') continue
+    if (entry.kind === 'meta') {
+      commitTurn()
+      blocks.push({ kind: 'meta', entry })
+      continue
+    }
 
     if (entry.kind === 'user') {
       commitTurn()
@@ -308,6 +313,18 @@ const ThinkingSection = memo(function ThinkingSection({
   )
 })
 
+// ─── MetaMessageCard ─────────────────────────────────────────────────────────
+
+const MetaMessageCard = memo(function MetaMessageCard({ entry }: { entry: TranscriptEntry }) {
+  return (
+    <div className="flex justify-center">
+      <p className="rounded-full bg-surface px-4 py-1.5 font-mono text-[11px] text-secondary/60">
+        {entry.text}
+      </p>
+    </div>
+  )
+})
+
 // ─── UserMessageCard ──────────────────────────────────────────────────────────
 
 const UserMessageCard = memo(function UserMessageCard({ entry }: { entry: TranscriptEntry }) {
@@ -506,6 +523,9 @@ const MessageList = memo(function MessageList({
       ) : (
         <div className="flex flex-col gap-5 pb-2">
           {blocks.map((block, i) => {
+            if (block.kind === 'meta') {
+              return <MetaMessageCard key={block.entry.entryId} entry={block.entry} />
+            }
             if (block.kind === 'user') {
               return <UserMessageCard key={block.entry.entryId} entry={block.entry} />
             }
@@ -613,7 +633,7 @@ const MessageComposer = memo(function MessageComposer({
         </button>
       </div>
       <p className="mt-1.5 text-right font-mono text-[10px] text-secondary/30">
-        Enter to send · Shift+Enter for newline
+        Enter to send · Shift+Enter for newline · /reset for new session
       </p>
     </div>
   )

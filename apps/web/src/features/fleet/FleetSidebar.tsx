@@ -1,13 +1,15 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, Search, Trash2 } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useViewStore } from '@/stores/view'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
+import { CreateBooModal } from './CreateBooModal'
+import { deleteAgentOperation } from './deleteAgentOperation'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
 // ─── Agent avatar ──────────────────────────────────────────────────────────────
@@ -99,37 +101,54 @@ function AgentRow({
   agent,
   selected,
   onSelect,
+  onDelete,
 }: {
   agent: AgentState
   selected: boolean
   onSelect: () => void
+  onDelete: () => void
 }) {
   return (
-    <motion.button
+    <motion.div
       layout
-      type="button"
       data-testid={`fleet-agent-row-${agent.id}`}
-      onClick={onSelect}
       className={[
-        'group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left',
-        'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+        'group flex w-full items-center gap-3 rounded-lg px-3 py-2.5',
+        'transition-colors duration-150',
         selected ? 'bg-white/6 shadow-sm' : 'hover:bg-white/4',
       ].join(' ')}
     >
-      <AgentAvatar agent={agent} selected={selected} />
-
-      <div className="min-w-0 flex-1">
-        <p
-          className="truncate text-[13px] font-medium leading-tight text-text"
-          style={{ fontFamily: 'var(--font-body)' }}
-        >
-          {agent.name}
-        </p>
-        <div className="mt-1.5">
-          <StatusBadge status={agent.status} />
+      <button
+        type="button"
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        <AgentAvatar agent={agent} selected={selected} />
+        <div className="min-w-0 flex-1">
+          <p
+            className="truncate text-[13px] font-medium leading-tight text-text"
+            style={{ fontFamily: 'var(--font-body)' }}
+          >
+            {agent.name}
+          </p>
+          <div className="mt-1.5">
+            <StatusBadge status={agent.status} />
+          </div>
         </div>
-      </div>
-    </motion.button>
+      </button>
+
+      <button
+        type="button"
+        aria-label={`Delete ${agent.name}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          onDelete()
+        }}
+        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive group-hover:opacity-100"
+      >
+        <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+      </button>
+    </motion.div>
   )
 }
 
@@ -139,11 +158,36 @@ export function FleetSidebar() {
   const agents = useFleetStore((s) => s.agents)
   const selectedAgentId = useFleetStore((s) => s.selectedAgentId)
   const selectAgent = useFleetStore((s) => s.selectAgent)
+  const hydrateAgents = useFleetStore((s) => s.hydrateAgents)
 
   const connectionStatus = useConnectionStore((s) => s.status)
+  const client = useConnectionStore((s) => s.client)
 
   const [query, setQuery] = useState('')
   const [personalityOpen, setPersonalityOpen] = useState(true)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+
+  const handleBooCreated = useCallback(async () => {
+    if (!client) return
+    try {
+      const result = await client.agents.list()
+      const mainKey = result.mainKey?.trim() || 'main'
+      hydrateAgents(
+        result.agents.map((a) => ({
+          id: a.id,
+          name: a.identity?.name ?? a.name ?? a.id,
+          status: 'idle' as const,
+          sessionKey: `agent:${a.id}:${mainKey}`,
+          model: null,
+          createdAt: null,
+          streamingText: null,
+          runId: null,
+        })),
+      )
+    } catch {
+      // hydration failure is non-fatal — fleet will catch up on next event
+    }
+  }, [client, hydrateAgents])
 
   // Delayed empty state — only show after 1s to avoid flash during hydration
   const [showEmpty, setShowEmpty] = useState(false)
@@ -230,6 +274,15 @@ export function FleetSidebar() {
                   agent={agent}
                   selected={agent.id === selectedAgentId}
                   onSelect={() => selectAgent(agent.id)}
+                  onDelete={() => {
+                    if (!client) return
+                    if (!window.confirm(`Delete ${agent.name}? This cannot be undone.`)) return
+                    deleteAgentOperation(agent.id, agent.sessionKey, client).catch((err) => {
+                      alert(
+                        `Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                      )
+                    })
+                  }}
                 />
               ))}
             </motion.div>
@@ -269,17 +322,25 @@ export function FleetSidebar() {
       )}
 
       {/* Create Boo */}
-      <div className="border-t border-white/8 p-3">
-        <button
-          type="button"
-          data-testid="fleet-create-boo"
-          disabled
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-white/12 px-3 py-2 text-[12px] font-medium text-secondary/60 transition-colors hover:border-accent/30 hover:text-accent/60 disabled:cursor-not-allowed"
-        >
-          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-          Create Boo
-        </button>
-      </div>
+      {client && (
+        <div className="border-t border-white/8 p-3">
+          <button
+            type="button"
+            data-testid="fleet-create-boo"
+            onClick={() => setShowCreateModal(true)}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-white/12 px-3 py-2 text-[12px] font-medium text-secondary/60 transition-colors hover:border-accent/30 hover:text-accent/60"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+            Create Boo
+          </button>
+        </div>
+      )}
+
+      <CreateBooModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={() => void handleBooCreated()}
+      />
     </div>
   )
 }

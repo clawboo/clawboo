@@ -38,6 +38,9 @@ interface FleetStore {
 
   /** Apply an AgentStatusPatch (from the events pipeline) to a single agent. */
   patchAgent: (id: string, patch: AgentStatusPatch) => void
+
+  /** Remove an agent from the fleet (after gateway deletion). */
+  removeAgent: (agentId: string) => void
 }
 
 export const useFleetStore = create<FleetStore>((set) => ({
@@ -69,5 +72,11 @@ export const useFleetStore = create<FleetStore>((set) => ({
           ...(patch.streamText !== undefined ? { streamingText: patch.streamText } : {}),
         }
       }),
+    })),
+
+  removeAgent: (agentId) =>
+    set((state) => ({
+      agents: state.agents.filter((a) => a.id !== agentId),
+      selectedAgentId: state.selectedAgentId === agentId ? null : state.selectedAgentId,
     })),
 }))

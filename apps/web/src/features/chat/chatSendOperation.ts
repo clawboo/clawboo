@@ -61,6 +61,55 @@ export async function sendChatMessage({
   const trimmed = message.trim()
   if (!trimmed) return
 
+  // ── Handle slash commands ──────────────────────────────────────────────────
+  if (trimmed === '/reset' || trimmed === '/new') {
+    try {
+      const result = await client.call<{ key: string; agentId: string }>('sessions.create', {
+        agentId,
+      })
+      const newSessionKey = result?.key
+
+      if (newSessionKey) {
+        useChatStore.getState().clearTranscript(sessionKey)
+
+        useFleetStore.setState((state) => ({
+          agents: state.agents.map((a) =>
+            a.id === agentId
+              ? { ...a, sessionKey: newSessionKey, streamingText: null, runId: null }
+              : a,
+          ),
+        }))
+
+        const resetEntry = makeEntry(
+          {
+            kind: 'meta',
+            role: 'system',
+            text: 'Session reset — starting fresh.',
+            sessionKey: newSessionKey,
+          },
+          crypto.randomUUID(),
+          Date.now(),
+        )
+        useChatStore.getState().appendTranscript(newSessionKey, [resetEntry])
+      }
+    } catch {
+      // sessions.create may not exist on this Gateway version — clear locally
+      useChatStore.getState().clearTranscript(sessionKey)
+      const noteEntry = makeEntry(
+        {
+          kind: 'meta',
+          role: 'system',
+          text: 'Conversation cleared. (Note: Gateway session was not reset — your Gateway may not support sessions.create.)',
+          sessionKey,
+        },
+        crypto.randomUUID(),
+        Date.now(),
+      )
+      useChatStore.getState().appendTranscript(sessionKey, [noteEntry])
+    }
+    return
+  }
+
   const ts = now()
   const idempotencyKey = generateId()
 
