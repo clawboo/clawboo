@@ -33,7 +33,8 @@
   "scripts": {
     "build": "tsup",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@clawboo/logger": "workspace:*",
