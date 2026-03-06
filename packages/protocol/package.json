@@ -32,7 +32,8 @@
   "scripts": {
     "build": "tsup",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",
