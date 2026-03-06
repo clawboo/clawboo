@@ -3,6 +3,7 @@ import { DM_Sans } from 'next/font/google'
 import { GeistMono } from 'geist/font/mono'
 import { FleetSidebar } from '@/features/fleet/FleetSidebar'
 import { GatewayBootstrap } from '@/features/connection/GatewayBootstrap'
+import { ToastContainer } from '@/features/ui/ToastContainer'
 import { Providers } from './providers'
 import './globals.css'
 
@@ -34,6 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <Providers>
+          <ToastContainer />
           {/* Gateway connection overlay — mounts once for the whole app */}
           <GatewayBootstrap />
           <div className="flex h-screen overflow-hidden bg-background text-foreground">

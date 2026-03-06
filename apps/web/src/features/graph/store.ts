@@ -49,6 +49,10 @@ interface GraphStore {
 
   /** Clear saved positions and bump layoutKey → forces fresh ELK auto-layout. */
   resetLayout: () => void
+
+  /** Bump to trigger agent file re-fetch in useGraphData. */
+  refreshKey: number
+  triggerRefresh: () => void
 }
 
 // ─── Store instance ───────────────────────────────────────────────────────────
@@ -106,4 +110,7 @@ export const useGraphStore = create<GraphStore>((set) => ({
       hasRunLayout: false,
       layoutKey: state.layoutKey + 1,
     })),
+
+  refreshKey: 0,
+  triggerRefresh: () => set((state) => ({ refreshKey: state.refreshKey + 1 })),
 }))

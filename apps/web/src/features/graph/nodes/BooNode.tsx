@@ -1,7 +1,7 @@
 'use client'
 
 import { memo } from 'react'
-import { Handle, Position } from '@xyflow/react'
+import { Handle, Position, useConnection } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { motion } from 'framer-motion'
 import { BooAvatar } from '@clawboo/ui'
@@ -33,13 +33,25 @@ const STATUS_LABEL: Record<string, string> = {
   sleeping: 'sleeping',
 }
 
-// ─── Handle style ─────────────────────────────────────────────────────────────
+// ─── Handle styles ────────────────────────────────────────────────────────────
 
-const handleStyle = {
+const handleHidden = {
   background: 'transparent',
   border: '1.5px solid rgba(255,255,255,0.22)',
   width: 8,
   height: 8,
+  opacity: 0,
+  transition: 'opacity 0.15s',
+}
+
+const handleVisible = {
+  background: 'rgba(233,69,96,0.5)',
+  border: '1px solid rgba(233,69,96,0.3)',
+  width: 12,
+  height: 12,
+  borderRadius: '50%',
+  opacity: 1,
+  transition: 'opacity 0.15s',
 }
 
 // ─── BooNode dimensions ───────────────────────────────────────────────────────
@@ -57,6 +69,8 @@ export const BooNode = memo(function BooNode({
 }: NodeProps<Node<BooNodeData, 'boo'>>) {
   const { agentId, name, status } = data
   const glow = STATUS_GLOW[status] ?? null
+  const connection = useConnection()
+  const isConnecting = connection.inProgress
   const pendingApprovals = useApprovalsStore((s) => s.pendingApprovals)
   const hasPendingApproval = Array.from(pendingApprovals.values()).some(
     (a) => a.agentId === agentId,
@@ -78,6 +92,7 @@ export const BooNode = memo(function BooNode({
     // overflow: visible lets the name + status label render below
     // without inflating the React Flow measured size.
     <div
+      className="group"
       style={{
         width: BOO_W,
         height: BOO_H,
@@ -188,12 +203,28 @@ export const BooNode = memo(function BooNode({
       </div>
 
       {/* ── Handles ──────────────────────────────────────────────────────── */}
-      {/* Top: center of ghost head */}
-      <Handle type="target" position={Position.Top} style={handleStyle} />
-      {/* Bottom: between ghost bumps */}
-      <Handle type="source" position={Position.Bottom} style={handleStyle} />
-      {/* Right: ghost body mid-height */}
-      <Handle type="source" id="right" position={Position.Right} style={handleStyle} />
+      {/* Top: center of ghost head — target for incoming connections */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        className={isConnecting ? '' : 'opacity-0 group-hover:opacity-100'}
+        style={isConnecting ? handleVisible : handleHidden}
+      />
+      {/* Bottom: between ghost bumps — source for outgoing connections */}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className={isConnecting ? '' : 'opacity-0 group-hover:opacity-100'}
+        style={isConnecting ? handleVisible : handleHidden}
+      />
+      {/* Right: ghost body mid-height — source for skill/resource edges */}
+      <Handle
+        type="source"
+        id="right"
+        position={Position.Right}
+        className={isConnecting ? '' : 'opacity-0 group-hover:opacity-100'}
+        style={isConnecting ? handleVisible : handleHidden}
+      />
     </div>
   )
 })

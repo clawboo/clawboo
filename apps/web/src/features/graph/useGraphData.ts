@@ -21,7 +21,7 @@ import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData, ResourceNodeData
 export function useGraphData(): void {
   const agents = useFleetStore((s) => s.agents)
   const client = useConnectionStore((s) => s.client)
-  const { setAgentFiles, setLoadingFiles, setFilesError, agentFiles } = useGraphStore()
+  const { setAgentFiles, setLoadingFiles, setFilesError, agentFiles, refreshKey } = useGraphStore()
 
   // Stable string keys for dependency comparison
   const agentStructureKey = agents.map((a) => `${a.id}:${a.name}`).join('|')
@@ -66,7 +66,7 @@ export function useGraphData(): void {
     return () => {
       cancelled = true
     }
-  }, [client, agentStructureKey]) // intentional: string key covers structural changes
+  }, [client, agentStructureKey, refreshKey]) // intentional: string key covers structural changes; refreshKey for skill install
 
   // ── 2. Structural rebuild ────────────────────────────────────────────────────
   const { rawNodes, rawEdges } = useMemo(
