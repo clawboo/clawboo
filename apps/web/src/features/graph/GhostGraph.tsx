@@ -2,17 +2,25 @@
 
 import '@xyflow/react/dist/style.css'
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
   BackgroundVariant,
+  ConnectionLineType,
   useNodesInitialized,
   useReactFlow,
 } from '@xyflow/react'
-import type { NodeMouseHandler, EdgeMouseHandler, OnNodeDrag, Node } from '@xyflow/react'
+import type {
+  NodeMouseHandler,
+  EdgeMouseHandler,
+  OnNodeDrag,
+  Node,
+  Connection,
+  IsValidConnection,
+} from '@xyflow/react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
@@ -21,7 +29,19 @@ import { computeElkLayout } from './useGraphLayout'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
 import { useFleetStore } from '@/stores/fleet'
+import { useViewStore } from '@/stores/view'
+import { useConnectionStore } from '@/stores/connection'
+import { useToastStore } from '@/stores/toast'
+import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
+import { GraphContextMenu } from './GraphContextMenu'
 import type { BooNodeData, GraphEdge } from './types'
+
+interface ContextMenuState {
+  x: number
+  y: number
+  agentId: string
+  agentName: string
+}
 
 // ─── GhostGraph ───────────────────────────────────────────────────────────────
 //
@@ -41,6 +61,8 @@ export function GhostGraph() {
     setHasRunLayout,
     updateNodePosition,
   } = useGraphStore()
+
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
   const nodesInitialized = useNodesInitialized()
   const { fitView } = useReactFlow()
@@ -109,8 +131,77 @@ export function GhostGraph() {
     }
   }, [])
 
+  const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
+    event.preventDefault()
+    if (node.type !== 'boo') return
+    const data = node.data as BooNodeData
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      agentId: data.agentId,
+      agentName: data.name,
+    })
+  }, [])
+
+  const onConnect = useCallback(
+    async (connection: Connection) => {
+      const sourceNode = nodes.find((n) => n.id === connection.source)
+      const targetNode = nodes.find((n) => n.id === connection.target)
+      if (!sourceNode || !targetNode) return
+      if (sourceNode.type !== 'boo' || targetNode.type !== 'boo') return
+
+      const sourceAgentId = sourceNode.data.agentId as string
+      const sourceAgentName = sourceNode.data.name as string
+      const targetAgentName = targetNode.data.name as string
+
+      const client = useConnectionStore.getState().client
+      if (!client) return
+
+      try {
+        const currentAgentsMd = await client.agents.files
+          .read(sourceAgentId, 'AGENTS.md')
+          .catch(() => '# AGENTS\n')
+
+        if (currentAgentsMd.includes('@' + targetAgentName)) {
+          useToastStore.getState().addToast({
+            message: `${targetAgentName} already in routing`,
+            type: 'info',
+          })
+          return
+        }
+
+        const newAgentsMd =
+          currentAgentsMd.trimEnd() + '\n- Route to @' + targetAgentName + ' for delegated tasks.\n'
+        // TODO: wrap in mutationQueue.enqueue() after Step 11
+        await client.agents.files.set(sourceAgentId, 'AGENTS.md', newAgentsMd)
+
+        useGraphStore.getState().triggerRefresh()
+        useToastStore.getState().addToast({
+          message: `Routing added: ${sourceAgentName} \u2192 ${targetAgentName}`,
+          type: 'success',
+        })
+      } catch (_err) {
+        useToastStore.getState().addToast({
+          message: 'Failed to save routing',
+          type: 'error',
+        })
+      }
+    },
+    [nodes],
+  )
+
+  const isValidConnection: IsValidConnection = useCallback(
+    (connection) => {
+      const source = nodes.find((n) => n.id === connection.source)
+      const target = nodes.find((n) => n.id === connection.target)
+      return source?.type === 'boo' && target?.type === 'boo' && source.id !== target.id
+    },
+    [nodes],
+  )
+
   const onPaneClick = useCallback(() => {
     setSelectedEdgeId(null)
+    setContextMenu(null)
   }, [setSelectedEdgeId])
 
   // ── Derive selected edge for explain panel ───────────────────────────────────
@@ -126,7 +217,13 @@ export function GhostGraph() {
         onNodeDragStop={onNodeDragStop}
         onEdgeClick={onEdgeClick}
         onNodeClick={onNodeClick}
+        onNodeContextMenu={onNodeContextMenu}
         onPaneClick={onPaneClick}
+        onConnect={onConnect}
+        isValidConnection={isValidConnection}
+        connectOnClick={false}
+        connectionLineStyle={{ stroke: '#E94560', strokeWidth: 2, strokeDasharray: '6 4' }}
+        connectionLineType={ConnectionLineType.SmoothStep}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
@@ -163,6 +260,37 @@ export function GhostGraph() {
           maskColor="rgba(10,14,26,0.75)"
         />
       </ReactFlow>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <GraphContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          agentId={contextMenu.agentId}
+          agentName={contextMenu.agentName}
+          onClose={() => setContextMenu(null)}
+          onChat={() => {
+            useFleetStore.getState().selectAgent(contextMenu.agentId)
+            useViewStore.getState().setView('chat')
+            setContextMenu(null)
+          }}
+          onEditPersonality={() => {
+            useFleetStore.getState().selectAgent(contextMenu.agentId)
+            setContextMenu(null)
+          }}
+          onDelete={() => {
+            const client = useConnectionStore.getState().client
+            if (!client) return
+            const agent = useFleetStore.getState().agents.find((a) => a.id === contextMenu.agentId)
+            try {
+              void deleteAgentOperation(contextMenu.agentId, agent?.sessionKey ?? null, client)
+            } catch {
+              // handled inside deleteAgentOperation
+            }
+            setContextMenu(null)
+          }}
+        />
+      )}
 
       {/* Edge explain panel */}
       <AnimatePresence>
