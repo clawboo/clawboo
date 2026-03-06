@@ -8,11 +8,18 @@ import { useFleetStore } from '@/stores/fleet'
 import { useSchedulerStore, type CronJob } from '@/stores/scheduler'
 import type { GatewayClient } from '@clawboo/gateway-client'
 import { CronJobRow } from './CronJobRow'
-import { CreateJobForm, mapGatewayJobToCronJob, gatewayListCronJobs } from './CreateJobForm'
+import { CronTimeline } from './CronTimeline'
+import {
+  CreateJobForm,
+  mapGatewayJobToCronJob,
+  gatewayListCronJobs,
+  gatewayCreateCronJob,
+} from './CreateJobForm'
 import type {
   GatewayCronJobSummary,
   GatewayCronRunResult,
   GatewayCronRemoveResult,
+  GatewayCronSchedule,
 } from './cronUtils'
 
 // ─── Gateway action helpers ────────────────────────────────────────────────────
@@ -178,9 +185,15 @@ export function SchedulerPanel() {
       const mapped: CronJob[] = result.jobs.map((raw: GatewayCronJobSummary) =>
         mapGatewayJobToCronJob(raw, agents),
       )
+      // Preserve locally-disabled jobs that were removed from gateway but kept in store
+      const currentJobs = useSchedulerStore.getState().jobs
+      const disabledJobs = currentJobs.filter(
+        (j) => !j.active && !mapped.some((m) => m.id === j.id),
+      )
+      const merged = [...mapped, ...disabledJobs]
       // Sort by updatedAtMs descending
-      mapped.sort((a, b) => b.updatedAtMs - a.updatedAtMs)
-      setJobs(mapped)
+      merged.sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+      setJobs(merged)
     } catch (err) {
       if (!mountedRef.current) return
       setLoadError(err instanceof Error ? err.message : 'Failed to load scheduled jobs.')
@@ -204,26 +217,45 @@ export function SchedulerPanel() {
       if (!job) return
 
       if (job.active) {
-        // Disabling: remove the job from the gateway
-        toggleJob(id) // optimistic
+        // Disabling: remove from gateway but keep in local list as inactive
+        toggleJob(id) // optimistic — sets active: false
         try {
           const result = await gatewayRemoveJob(client, id)
           if (!result.ok) {
             toggleJob(id) // revert
-            return
           }
-          removeJob(id)
         } catch {
           toggleJob(id) // revert
         }
       } else {
-        // Cannot re-enable a removed job — inform via alert
-        alert(
-          'This job was removed from the scheduler. To re-enable it, create a new schedule with the same settings.',
-        )
+        // Re-enabling: re-create the job on the gateway via cron.add
+        toggleJob(id) // optimistic — sets active: true
+        try {
+          const schedule: GatewayCronSchedule =
+            job.schedule.kind === 'every'
+              ? { kind: 'every', everyMs: job.schedule.everyMs!, anchorMs: job.schedule.anchorMs }
+              : job.schedule.kind === 'cron'
+                ? { kind: 'cron', expr: job.schedule.expr!, tz: job.schedule.tz }
+                : { kind: 'at', at: job.schedule.at! }
+
+          await gatewayCreateCronJob(client, {
+            name: job.name,
+            agentId: job.agentId,
+            enabled: true,
+            schedule,
+            sessionTarget: 'main',
+            wakeMode: 'now',
+            payload: { kind: 'agentTurn', message: job.task },
+          })
+
+          // Refresh list to get the new gateway-assigned ID
+          await loadJobs()
+        } catch {
+          toggleJob(id) // revert
+        }
       }
     },
-    [client, jobs, toggleJob, removeJob],
+    [client, jobs, toggleJob, loadJobs],
   )
 
   const handleDelete = useCallback(
@@ -411,6 +443,9 @@ export function SchedulerPanel() {
 
           {jobs.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 12px 6px' }}>
+                <CronTimeline jobs={jobs} />
+              </div>
               <TableHeader />
               <GroupedJobList
                 jobs={jobs}

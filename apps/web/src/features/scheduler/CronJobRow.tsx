@@ -210,13 +210,13 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
 
       {/* Next run column */}
       <div>
-        <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)', marginBottom: 2 }}>Next run</p>
+        <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)', marginBottom: 2 }}>Next</p>
         <RelativeTime timestampMs={job.nextExecution} />
       </div>
 
       {/* Last run column */}
       <div>
-        <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)', marginBottom: 2 }}>Last run</p>
+        <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)', marginBottom: 2 }}>Last</p>
         <LastRunCell lastExecution={job.lastExecution} lastStatus={job.lastStatus} />
       </div>
 

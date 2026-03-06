@@ -23,7 +23,7 @@ type ScheduleMode = 'preset' | 'every-custom' | 'cron-expr'
 // Typed wrappers around client.call() using the real cron API method names
 // Gateway cron API methods: cron.add, cron.list, cron.run, cron.remove.
 
-async function gatewayCreateCronJob(
+export async function gatewayCreateCronJob(
   client: GatewayClient,
   input: GatewayCronCreateInput,
 ): Promise<GatewayCronJobSummary> {
