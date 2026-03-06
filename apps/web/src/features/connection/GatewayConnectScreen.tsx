@@ -105,13 +105,15 @@ export function GatewayConnectScreen({
 
       // Connect via the same-origin proxy (/api/gateway/ws) rather than
       // directly to the Gateway URL — upholds Architecture Invariant #2.
-      // The browser includes the token so device auth can sign it correctly.
-      // The proxy passes the frame through when auth.token is present.
+      // disableDeviceAuth: the proxy handles Ed25519 device signing server-side
+      // using a persistent keypair stored at ~/.openclaw/clawboo/proxy-device-identity.json.
+      // This works in any browser context (incognito, preview, fresh installs).
       await client.connect(resolveProxyGatewayUrl(), {
         clientName: 'openclaw-control-ui',
-        clientVersion: '0.0.0',
+        clientVersion: '0.1.0',
         token: trimmedToken || undefined,
         authScopeKey: trimmedUrl,
+        disableDeviceAuth: true,
       })
 
       setStatus('connected')

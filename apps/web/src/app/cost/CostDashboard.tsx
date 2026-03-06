@@ -17,27 +17,353 @@ import { useCostStore } from '@/stores/cost'
 import { useConnectionStore } from '@/stores/connection'
 import type { CostSummaryResponse } from '@/app/api/cost-records/summary/route'
 
+// ─── Ollama check types ─────────────────────────────────────────────────────────
+
+interface OllamaCheckResponse {
+  running: boolean
+  models: string[]
+}
+
+type FrugalPanel = { kind: 'setup' } | { kind: 'picker'; models: string[] } | null
+
+// ─── Ollama setup panel ─────────────────────────────────────────────────────────
+
+function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry: () => void }) {
+  const [checking, setChecking] = useState(false)
+
+  const handleRetry = useCallback(async () => {
+    setChecking(true)
+    await onRetry()
+    setChecking(false)
+  }, [onRetry])
+
+  const copyToClipboard = useCallback((text: string) => {
+    void navigator.clipboard.writeText(text)
+  }, [])
+
+  const steps = [
+    {
+      label: 'Install Ollama',
+      macOS: 'brew install ollama',
+      linux: 'curl -fsSL https://ollama.com/install.sh | sh',
+    },
+    { label: 'Pull a model', cmd: 'ollama pull llama3.2' },
+    { label: 'Start Ollama', cmd: 'ollama serve' },
+  ]
+
+  return (
+    <div
+      style={{
+        background: '#111827',
+        border: '1px solid rgba(251,191,36,0.3)',
+        borderRadius: 12,
+        padding: '20px 24px',
+        marginBottom: 20,
+      }}
+    >
+      <div style={{ fontSize: 15, fontWeight: 700, color: '#FBBF24', marginBottom: 4 }}>
+        Ollama not detected
+      </div>
+      <div style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)', marginBottom: 16 }}>
+        Frugal mode requires Ollama running locally. Follow these steps:
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {steps.map((step, i) => (
+          <div key={i}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#E8E8E8', marginBottom: 6 }}>
+              {i + 1}. {step.label}
+            </div>
+            {'cmd' in step && step.cmd ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <code
+                  style={{
+                    flex: 1,
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 6,
+                    padding: '6px 10px',
+                    fontSize: 12,
+                    color: '#34D399',
+                    fontFamily: 'var(--font-geist-mono, monospace)',
+                  }}
+                >
+                  {step.cmd}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(step.cmd!)}
+                  title="Copy"
+                  style={{
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 6,
+                    padding: '6px 8px',
+                    cursor: 'pointer',
+                    color: 'rgba(232,232,232,0.6)',
+                    fontSize: 11,
+                    flexShrink: 0,
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[
+                  { os: 'macOS', cmd: step.macOS! },
+                  { os: 'Linux', cmd: step.linux! },
+                ].map(({ os, cmd }) => (
+                  <div key={os} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: 'rgba(232,232,232,0.4)',
+                        width: 48,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {os}
+                    </span>
+                    <code
+                      style={{
+                        flex: 1,
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        borderRadius: 6,
+                        padding: '6px 10px',
+                        fontSize: 12,
+                        color: '#34D399',
+                        fontFamily: 'var(--font-geist-mono, monospace)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {cmd}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(cmd)}
+                      title="Copy"
+                      style={{
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: 6,
+                        padding: '6px 8px',
+                        cursor: 'pointer',
+                        color: 'rgba(232,232,232,0.6)',
+                        fontSize: 11,
+                        flexShrink: 0,
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+        <button
+          type="button"
+          onClick={() => void handleRetry()}
+          disabled={checking}
+          style={{
+            background: '#FBBF24',
+            color: '#0A0E1A',
+            border: 'none',
+            borderRadius: 8,
+            padding: '8px 16px',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: checking ? 'default' : 'pointer',
+            opacity: checking ? 0.6 : 1,
+          }}
+        >
+          {checking ? 'Checking...' : 'Check again'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          style={{
+            background: 'transparent',
+            color: 'rgba(232,232,232,0.5)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 8,
+            padding: '8px 16px',
+            fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Model picker panel ─────────────────────────────────────────────────────────
+
+function ModelPickerPanel({
+  models,
+  onSelect,
+  onCancel,
+}: {
+  models: string[]
+  onSelect: (model: string) => void
+  onCancel: () => void
+}) {
+  return (
+    <div
+      style={{
+        background: '#111827',
+        border: '1px solid rgba(52,211,153,0.3)',
+        borderRadius: 12,
+        padding: '20px 24px',
+        marginBottom: 20,
+      }}
+    >
+      <div style={{ fontSize: 15, fontWeight: 700, color: '#34D399', marginBottom: 4 }}>
+        Select a model
+      </div>
+      <div style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)', marginBottom: 14 }}>
+        llama3.2 not found. Pick an available model or pull llama3.2 first.
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+        {models.map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onSelect(m)}
+            style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 8,
+              padding: '6px 14px',
+              fontSize: 12,
+              color: '#E8E8E8',
+              cursor: 'pointer',
+              fontFamily: 'var(--font-geist-mono, monospace)',
+            }}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={onCancel}
+        style={{
+          background: 'transparent',
+          color: 'rgba(232,232,232,0.5)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 8,
+          padding: '8px 16px',
+          fontSize: 13,
+          cursor: 'pointer',
+        }}
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}
+
 // ─── Frugal mode toggle ────────────────────────────────────────────────────────
 
-function FrugalToggle() {
+function useFrugalToggle() {
   const frugalMode = useCostStore((s) => s.frugalMode)
   const toggleFrugalMode = useCostStore((s) => s.toggleFrugalMode)
   const client = useConnectionStore((s) => s.client)
+  const [panel, setPanel] = useState<FrugalPanel>(null)
+
+  const checkOllama = useCallback(async (): Promise<OllamaCheckResponse> => {
+    try {
+      const res = await fetch('/api/ollama-check')
+      return (await res.json()) as OllamaCheckResponse
+    } catch {
+      return { running: false, models: [] }
+    }
+  }, [])
+
+  const activateWithModel = useCallback(
+    async (model: string) => {
+      toggleFrugalMode()
+      setPanel(null)
+      if (!client) return
+      try {
+        await client.config.patch({ model: `ollama/${model}` })
+      } catch {
+        // Best-effort
+      }
+    },
+    [toggleFrugalMode, client],
+  )
 
   const handleToggle = useCallback(async () => {
-    toggleFrugalMode()
-    if (!client) return
-    try {
-      if (!frugalMode) {
-        await client.config.patch({ model: 'ollama/llama3.2' })
-      } else {
+    // Turning OFF
+    if (frugalMode) {
+      toggleFrugalMode()
+      setPanel(null)
+      if (!client) return
+      try {
         await client.config.patch({ model: null })
+      } catch {
+        // Best-effort
       }
-    } catch {
-      // Best-effort — config patch may not be supported
+      return
     }
-  }, [frugalMode, toggleFrugalMode, client])
 
+    // Turning ON — check Ollama first
+    const check = await checkOllama()
+
+    if (!check.running) {
+      setPanel({ kind: 'setup' })
+      return
+    }
+
+    const hasLlama = check.models.some((m) => m.startsWith('llama3.2'))
+    if (!hasLlama) {
+      if (check.models.length > 0) {
+        setPanel({ kind: 'picker', models: check.models })
+      } else {
+        setPanel({ kind: 'setup' })
+      }
+      return
+    }
+
+    // Happy path
+    await activateWithModel('llama3.2')
+  }, [frugalMode, toggleFrugalMode, client, checkOllama, activateWithModel])
+
+  const handleRetry = useCallback(async () => {
+    const check = await checkOllama()
+    if (!check.running) return
+
+    const hasLlama = check.models.some((m) => m.startsWith('llama3.2'))
+    if (hasLlama) {
+      await activateWithModel('llama3.2')
+    } else if (check.models.length > 0) {
+      setPanel({ kind: 'picker', models: check.models })
+    }
+  }, [checkOllama, activateWithModel])
+
+  return { frugalMode, panel, setPanel, handleToggle, handleRetry, activateWithModel }
+}
+
+function FrugalToggleButton({
+  frugalMode,
+  onToggle,
+}: {
+  frugalMode: boolean
+  onToggle: () => void
+}) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
       <div style={{ textAlign: 'right' }}>
@@ -50,9 +376,7 @@ function FrugalToggle() {
       </div>
       <button
         type="button"
-        onClick={() => {
-          void handleToggle()
-        }}
+        onClick={onToggle}
         aria-label={frugalMode ? 'Disable frugal mode' : 'Enable frugal mode'}
         aria-pressed={frugalMode}
         style={{
@@ -200,7 +524,8 @@ function CustomLineTooltip({ active, payload, label }: TooltipProps) {
 // ─── CostDashboard ────────────────────────────────────────────────────────────
 
 export function CostDashboard() {
-  const frugalMode = useCostStore((s) => s.frugalMode)
+  const { frugalMode, panel, setPanel, handleToggle, handleRetry, activateWithModel } =
+    useFrugalToggle()
   const [data, setData] = useState<CostSummaryResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -231,7 +556,7 @@ export function CostDashboard() {
   }, [])
 
   const barData = (data?.byAgent ?? []).slice(0, 12).map((a) => ({
-    name: a.agentName.length > 16 ? `${a.agentName.slice(0, 14)}…` : a.agentName,
+    name: a.agentName.length > 16 ? `${a.agentName.slice(0, 14)}...` : a.agentName,
     cost: Number(a.totalCost.toFixed(4)),
     tokens: a.totalTokens,
   }))
@@ -277,8 +602,20 @@ export function CostDashboard() {
             Token usage and spend across all Boos
           </p>
         </div>
-        <FrugalToggle />
+        <FrugalToggleButton frugalMode={frugalMode} onToggle={() => void handleToggle()} />
       </div>
+
+      {/* Ollama setup / model picker panels */}
+      {panel?.kind === 'setup' && (
+        <OllamaSetupPanel onCancel={() => setPanel(null)} onRetry={handleRetry} />
+      )}
+      {panel?.kind === 'picker' && (
+        <ModelPickerPanel
+          models={panel.models}
+          onSelect={(m) => void activateWithModel(m)}
+          onCancel={() => setPanel(null)}
+        />
+      )}
 
       {/* Frugal mode banner */}
       {frugalMode && (
@@ -296,14 +633,14 @@ export function CostDashboard() {
             gap: 8,
           }}
         >
-          <span style={{ fontSize: 16 }}>⚠</span>
+          <span style={{ fontSize: 16 }}>!</span>
           Frugal mode active — routing basic tasks to local LLM (Ollama / LM Studio)
         </div>
       )}
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '60px 0', color: 'rgba(232,232,232,0.4)' }}>
-          Loading cost data…
+          Loading cost data...
         </div>
       )}
 

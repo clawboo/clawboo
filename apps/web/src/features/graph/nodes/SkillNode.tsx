@@ -6,6 +6,7 @@ import type { NodeProps, Node } from '@xyflow/react'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
+import { mutationQueue } from '@/lib/mutationQueue'
 import { useGraphStore } from '../store'
 import type { SkillNodeData, SkillCategory } from '../types'
 
@@ -33,7 +34,6 @@ const handleStyle = {
 
 // ─── Install skill for agent ──────────────────────────────────────────────────
 
-// TODO: wrap in mutationQueue.enqueue() after Step 11
 async function installSkillForAgent(skillName: string, agentId: string, agentName: string) {
   const client = useConnectionStore.getState().client
   if (!client) return
@@ -50,7 +50,9 @@ async function installSkillForAgent(skillName: string, agentId: string, agentNam
     }
 
     const newTools = currentTools.trimEnd() + '\n- ' + skillName + '\n'
-    await client.agents.files.set(agentId, 'TOOLS.md', newTools)
+    await mutationQueue.enqueue(agentId, () =>
+      client.agents.files.set(agentId, 'TOOLS.md', newTools),
+    )
 
     useGraphStore.getState().triggerRefresh()
 

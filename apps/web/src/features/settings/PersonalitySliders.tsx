@@ -5,6 +5,7 @@ import { Loader2, FileText } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { Slider } from '@/components/ui/slider'
+import { mutationQueue } from '@/lib/mutationQueue'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -103,12 +104,12 @@ const DIMENSIONS: Dimension[] = [
   },
 ]
 
-// ─── SOUL.md round-trip ───────────────────────────────────────────────────────
-// Values are stored in a hidden HTML comment so they survive read→write round trips.
-// Format: <!-- clawboo:personality verbosity=50 humor=50 caution=50 speed_cost=50 formality=50 -->
+// ─── SOUL.md generation ──────────────────────────────────────────────────────
+// SOUL.md is written to the Gateway so the agent's behavior reflects the slider
+// values. However, slider values are persisted in SQLite (not read back from
+// SOUL.md) because the Gateway does not reliably persist agents.files.set writes.
 
 const SOUL_FILE = 'SOUL.md'
-const META_RE = /<!--\s*clawboo:personality\s+([^>]+?)-->/
 
 const DEFAULT_VALUES: Values = {
   verbosity: 50,
@@ -120,21 +121,10 @@ const DEFAULT_VALUES: Values = {
 
 const SLIDER_KEYS = Object.keys(DEFAULT_VALUES) as SliderKey[]
 
-function parseValues(content: string): Values {
-  const match = META_RE.exec(content)
-  if (!match || !match[1]) return { ...DEFAULT_VALUES }
-
-  const result: Values = { ...DEFAULT_VALUES }
-  for (const pair of match[1].trim().split(/\s+/)) {
-    const eqIdx = pair.indexOf('=')
-    if (eqIdx < 0) continue
-    const k = pair.slice(0, eqIdx)
-    const v = parseInt(pair.slice(eqIdx + 1), 10)
-    if (k in result && !isNaN(v)) {
-      result[k as SliderKey] = Math.max(0, Math.min(100, v))
-    }
-  }
-  return result
+function isValues(obj: unknown): obj is Values {
+  if (!obj || typeof obj !== 'object') return false
+  const rec = obj as Record<string, unknown>
+  return SLIDER_KEYS.every((k) => typeof rec[k] === 'number')
 }
 
 function buildSoul(values: Values): string {
@@ -161,79 +151,125 @@ export function PersonalitySliders() {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   /**
    * dirtyRef tracks slider values that have been changed by the user but not yet
-   * confirmed by the Gateway. It is set in handleChange and cleared after a
-   * confirmed save (or on unmount flush-on-unmount).
+   * persisted. It is set in handleChange and cleared after a confirmed save.
    */
   const dirtyRef = useRef<Values | null>(null)
 
-  // Load SOUL.md when selected agent changes.
-  // The cleanup flushes any dirty (unsaved) state to the Gateway BEFORE unmounting,
-  // so values are preserved even if the user switches agents before releasing the slider.
+  // Load personality values from SQLite on mount.
+  // SQLite is the source of truth for slider values — not SOUL.md.
   useEffect(() => {
-    if (!client || !selectedAgentId) return
-    // NOTE: no clearTimeout here — the cleanup return below handles cancellation
-    //       and immediately fires the pending save before the component unmounts.
-
+    if (!selectedAgentId) return
     setLoading(true)
     setError(null)
     setValues({ ...DEFAULT_VALUES })
 
-    client.agents.files
-      .read(selectedAgentId, SOUL_FILE)
-      .then((content) => setValues(parseValues(content)))
-      .catch(() => {
-        // File doesn't exist yet — defaults are already set
+    fetch(`/api/personality?agentId=${encodeURIComponent(selectedAgentId)}`)
+      .then((res) => res.json())
+      .then((data: { values: Values | null }) => {
+        if (data.values && isValues(data.values)) {
+          console.log('[Personality] Loaded from SQLite for:', selectedAgentId, data.values)
+          setValues(data.values)
+        } else {
+          console.log('[Personality] No SQLite values for:', selectedAgentId, '— using defaults')
+        }
+      })
+      .catch((err) => {
+        console.warn('[Personality] Failed to load from SQLite:', err)
+        // Defaults are already set — non-fatal
       })
       .finally(() => setLoading(false))
 
     return () => {
       // Flush any pending save for THIS agent before unmounting.
-      // key={selectedAgentId} in FleetSidebar guarantees the component unmounts on every
-      // agent switch, so the stale closure values here are always the LEAVING agent's.
       if (savedTimer.current) {
         clearTimeout(savedTimer.current)
         savedTimer.current = null
       }
       const dirty = dirtyRef.current
-      if (dirty) {
+      if (dirty && client) {
         dirtyRef.current = null
-        void client.agents.files.set(selectedAgentId, SOUL_FILE, buildSoul(dirty)).catch(() => {}) // best-effort; silent on switch
+        // Best-effort save to both SQLite and SOUL.md on agent switch
+        void fetch('/api/personality', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId: selectedAgentId, values: dirty }),
+        }).catch(() => {})
+        void mutationQueue
+          .enqueue(selectedAgentId, () =>
+            client.agents.files.set(selectedAgentId, SOUL_FILE, buildSoul(dirty)),
+          )
+          .catch(() => {})
       }
     }
   }, [client, selectedAgentId])
 
-  // handleChange: updates local state + marks dirty (no Gateway call).
-  // The live description text re-renders from `values` state.
+  // handleChange: updates local state + marks dirty (no save call).
   const handleChange = useCallback((key: SliderKey, value: number) => {
     setValues((prev) => {
       const next = { ...prev, [key]: value }
-      dirtyRef.current = next // mark as dirty so flush-on-unmount picks it up
+      dirtyRef.current = next
       return next
     })
   }, [])
 
-  // handleCommit: fires on pointer-up and keyboard commit (onValueCommit from Radix).
-  // Saves immediately to the Gateway — no debounce needed.
+  // handleCommit: fires on pointer-up / keyboard commit.
+  // Saves to BOTH SQLite (source of truth for sliders) and SOUL.md (agent behavior).
   const handleCommit = useCallback(
     (key: SliderKey, value: number) => {
       if (!client || !selectedAgentId) return
       const next = { ...values, [key]: value }
       setValues(next)
-      dirtyRef.current = null // about to save — mark clean optimistically
+      dirtyRef.current = null
 
       if (savedTimer.current) clearTimeout(savedTimer.current)
       setSaved(false)
       setSaving(true)
       setError(null)
 
-      client.agents.files
-        .set(selectedAgentId, SOUL_FILE, buildSoul(next))
-        .then(() => {
+      // 1. Save to SQLite — this is the persistent source of truth for slider values
+      const sqliteSave = fetch('/api/personality', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: selectedAgentId, values: next }),
+      })
+
+      // 2. Write SOUL.md to Gateway via mutation queue — best-effort, for actual agent behavior
+      const soulContent = buildSoul(next)
+      const soulSave = mutationQueue
+        .enqueue(selectedAgentId, () =>
+          client.agents.files.set(selectedAgentId, SOUL_FILE, soulContent),
+        )
+        .catch((err: unknown) => {
+          // Log but don't fail — SOUL.md write is best-effort
+          console.warn('[Personality] SOUL.md write failed (non-fatal):', err)
+        })
+
+      // Diagnostic logging — verify SOUL.md round-trip
+      void soulSave.then(() => {
+        console.log('[Personality] SOUL.md write completed — verifying...')
+        return client.agents.files
+          .read(selectedAgentId, SOUL_FILE)
+          .then((content) => {
+            console.log('[Personality] Verification read preview:', content.slice(0, 150))
+            console.log(
+              '[Personality] Has clawboo:personality comment:',
+              content.includes('clawboo:personality'),
+            )
+          })
+          .catch((err: unknown) => {
+            console.log('[Personality] Verification read failed:', err)
+          })
+      })
+
+      // Wait for SQLite save (the important one) — SOUL.md is best-effort
+      void sqliteSave
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
           setSaved(true)
           savedTimer.current = setTimeout(() => setSaved(false), 2000)
         })
         .catch((err: unknown) => {
-          dirtyRef.current = next // restore dirty so cleanup can retry
+          dirtyRef.current = next
           setError(err instanceof Error ? err.message : 'Save failed')
         })
         .finally(() => setSaving(false))
@@ -255,7 +291,7 @@ export function PersonalitySliders() {
     return (
       <div className="flex items-center gap-2 py-6 text-secondary/60">
         <Loader2 className="h-4 w-4 animate-spin" />
-        <span className="text-[12px]">Loading SOUL.md…</span>
+        <span className="text-[12px]">Loading personality…</span>
       </div>
     )
   }

@@ -163,9 +163,10 @@ export function GatewayBootstrap() {
         const autoClient = new GatewayClient()
         await autoClient.connect(resolveProxyGatewayUrl(), {
           clientName: 'openclaw-control-ui',
-          clientVersion: '0.0.0',
+          clientVersion: '0.1.0',
           token: data.gatewayToken?.trim() || undefined,
           authScopeKey: data.gatewayUrl.trim(),
+          disableDeviceAuth: true,
         })
 
         setStatus('connected')
