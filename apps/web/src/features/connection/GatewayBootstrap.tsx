@@ -83,6 +83,9 @@ export function GatewayBootstrap() {
   // Returning-user empty-fleet picker
   const [showTeamPicker, setShowTeamPicker] = useState(false)
 
+  // Fleet hydration error
+  const [fleetError, setFleetError] = useState<string | null>(null)
+
   // Auto-connecting spinner for returning users
   const [autoConnecting, setAutoConnecting] = useState(false)
 
@@ -93,6 +96,7 @@ export function GatewayBootstrap() {
 
   const hydrateFleet = useCallback(
     async (liveClient: GatewayClient): Promise<number> => {
+      setFleetError(null)
       try {
         const result = await liveClient.agents.list()
         const mainKey = result.mainKey?.trim() || 'main'
@@ -110,8 +114,8 @@ export function GatewayBootstrap() {
         )
         return result.agents.length
       } catch {
-        // Fleet will populate via presence/heartbeat events
-        return 0
+        setFleetError('Could not load your agent fleet. The Gateway may have restarted.')
+        return -1
       }
     },
     [hydrateAgents],
@@ -127,9 +131,8 @@ export function GatewayBootstrap() {
 
       setClient(newClient)
       const agentCount = await hydrateFleet(newClient)
-      if (agentCount === 0) {
-        setShowTeamPicker(true)
-      }
+      if (agentCount === 0) setShowTeamPicker(true)
+      // -1 means error — don't show TeamPicker (user may have agents we couldn't load)
       // Pre-populate approval history from SQLite (best-effort)
       preloadApprovalHistory()
     },
@@ -171,6 +174,7 @@ export function GatewayBootstrap() {
 
         const agentCount = await hydrateFleet(autoClient)
         if (agentCount === 0) setShowTeamPicker(true)
+        // -1 means error — don't show TeamPicker
 
         // Pre-populate approval history from SQLite (best-effort)
         preloadApprovalHistory()
@@ -260,6 +264,46 @@ export function GatewayBootstrap() {
             onDeployed={() => void handleTeamDeployed()}
             onSkip={handleSkipTeamPicker}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Fleet hydration error overlay */}
+      <AnimatePresence>
+        {isConnected && fleetError && (
+          <motion.div
+            key="fleet-error"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm"
+          >
+            <div className="w-full max-w-[360px] rounded-2xl border border-white/8 bg-surface p-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.6)]">
+              <p className="mb-4 text-[14px] font-medium text-destructive">{fleetError}</p>
+              <div className="flex justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFleetError(null)
+                    if (client) void hydrateFleet(client)
+                  }}
+                  className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white"
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFleetError(null)
+                    client?.disconnect()
+                    setStatus('disconnected')
+                  }}
+                  className="rounded-lg border border-white/10 px-4 py-2 text-[13px] text-secondary"
+                >
+                  Reconnect
+                </button>
+              </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
