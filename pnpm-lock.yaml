@@ -293,6 +293,9 @@ importers:
 
   packages/gateway-proxy:
     dependencies:
+      '@noble/ed25519':
+        specifier: ^2.1.0
+        version: 2.3.0
       ws:
         specifier: ^8.18.0
         version: 8.19.0

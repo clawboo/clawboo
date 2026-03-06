@@ -4,6 +4,12 @@ import { URL } from 'node:url'
 
 import { WebSocket, WebSocketServer } from 'ws'
 
+import {
+  loadOrCreateProxyDeviceIdentity,
+  signConnectParams,
+  type DeviceIdentity,
+} from './proxy-device-auth'
+
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 export interface UpstreamSettings {
@@ -72,7 +78,7 @@ function hasNonEmptyToken(params: unknown): boolean {
  * Check whether the connect params already contain a device signature
  * (browser-generated Ed25519 identity).
  */
-function hasDeviceSignature(params: unknown): boolean {
+function _hasDeviceSignature(params: unknown): boolean {
   if (!isObject(params)) return false
   const device = params['device']
   if (!isObject(device)) return false
@@ -135,6 +141,28 @@ export function createGatewayProxy(options: ProxyOptions): GatewayProxyHandle {
 
   const wss = new WebSocketServer({ noServer: true })
 
+  // Load proxy device identity eagerly (shared across all connections)
+  let proxyDeviceIdentity: DeviceIdentity | null = null
+  let proxyDeviceLoading: Promise<DeviceIdentity> | null = null
+  const getProxyDeviceIdentity = async (): Promise<DeviceIdentity> => {
+    if (proxyDeviceIdentity) return proxyDeviceIdentity
+    if (!proxyDeviceLoading) {
+      proxyDeviceLoading = loadOrCreateProxyDeviceIdentity()
+        .then((id) => {
+          proxyDeviceIdentity = id
+          log('proxy device identity loaded', { deviceId: id.deviceId })
+          return id
+        })
+        .catch((err) => {
+          logError('Failed to load proxy device identity', err)
+          throw err
+        })
+    }
+    return proxyDeviceLoading
+  }
+  // Start loading immediately
+  void getProxyDeviceIdentity()
+
   wss.on('connection', (browserWs: WebSocket) => {
     let upstreamWs: WebSocket | null = null
     let upstreamReady = false
@@ -142,6 +170,8 @@ export function createGatewayProxy(options: ProxyOptions): GatewayProxyHandle {
     let connectRequestId: string | null = null
     let connectResponseSent = false
     let closed = false
+    // Nonce received from Gateway's connect.challenge event
+    let connectNonce: string | null = null
     // Buffer for browser messages that arrive before upstream is ready
     const pendingBrowserMessages: string[] = []
     // Buffer for upstream messages that arrive before browser WS is open
@@ -174,30 +204,44 @@ export function createGatewayProxy(options: ProxyOptions): GatewayProxyHandle {
     const forwardToUpstream = (raw: string, parsed: Record<string, unknown>): void => {
       if (!upstreamWs || upstreamWs.readyState !== WebSocket.OPEN) return
 
-      // On connect frames: inject the server-side auth token if the browser
-      // didn't include one. The browser may send device identity (Ed25519
-      // signature) which is preserved as-is — device identity and auth token
-      // are independent; the gateway requires both.
+      // On connect frames: the proxy handles BOTH auth token injection and
+      // device identity signing server-side. This ensures browsers without
+      // registered device keys (preview, incognito) can connect successfully.
       if (parsed['type'] === 'req' && parsed['method'] === 'connect') {
-        const params = parsed['params']
-        const browserHasToken = hasNonEmptyToken(params)
-        if (browserHasToken) {
-          log('proxy: forwarding connect frame as-is (browser has auth token)', {
-            hasDevice: hasDeviceSignature(params),
-          })
-          upstreamWs.send(JSON.stringify(parsed))
-        } else {
-          log('proxy: injecting server-side auth token', {
-            hasDevice: hasDeviceSignature(params),
-            hasToken: upstreamToken.length > 0,
-          })
-          upstreamWs.send(
-            JSON.stringify({
-              ...parsed,
-              params: injectAuthToken(parsed['params'], upstreamToken),
-            }),
-          )
-        }
+        void (async () => {
+          try {
+            let params = isObject(parsed['params']) ? { ...parsed['params'] } : {}
+
+            // 1. Inject auth token if browser didn't provide one
+            if (!hasNonEmptyToken(params) && upstreamToken) {
+              params = injectAuthToken(params, upstreamToken) as Record<string, unknown>
+            }
+
+            // 2. Sign with proxy's device identity (replaces any browser device fields)
+            try {
+              const identity = await getProxyDeviceIdentity()
+              const { device } = await signConnectParams(identity, params, connectNonce)
+              params['device'] = device
+              log('proxy: signed connect frame with proxy device identity', {
+                deviceId: identity.deviceId,
+                hasToken: hasNonEmptyToken(params),
+                hasNonce: Boolean(connectNonce),
+              })
+            } catch (devErr) {
+              log('proxy: device signing failed, forwarding without device fields', {
+                error: String(devErr),
+              })
+              // Strip any browser device fields that won't be valid
+              delete params['device']
+            }
+
+            if (upstreamWs && upstreamWs.readyState === WebSocket.OPEN) {
+              upstreamWs.send(JSON.stringify({ ...parsed, params }))
+            }
+          } catch (err) {
+            logError('proxy: failed to process connect frame', err)
+          }
+        })()
         return
       }
 
@@ -279,6 +323,16 @@ export function createGatewayProxy(options: ProxyOptions): GatewayProxyHandle {
           const resId = typeof upParsed['id'] === 'string' ? upParsed['id'] : ''
           if (resId && connectRequestId && resId === connectRequestId) {
             connectResponseSent = true
+          }
+        }
+
+        // Capture nonce from connect.challenge events for device auth signing
+        if (upParsed?.['type'] === 'event' && upParsed['event'] === 'connect.challenge') {
+          const payload = upParsed['payload'] as Record<string, unknown> | undefined
+          const nonce = typeof payload?.['nonce'] === 'string' ? payload['nonce'] : null
+          if (nonce) {
+            connectNonce = nonce
+            log('proxy: captured connect.challenge nonce')
           }
         }
 

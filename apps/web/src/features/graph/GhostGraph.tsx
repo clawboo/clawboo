@@ -32,6 +32,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
+import { mutationQueue } from '@/lib/mutationQueue'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { GraphContextMenu } from './GraphContextMenu'
 import type { BooNodeData, GraphEdge } from './types'
@@ -202,8 +203,9 @@ export function GhostGraph() {
 
         const newAgentsMd =
           currentAgentsMd.trimEnd() + '\n- Route to @' + targetAgentName + ' for delegated tasks.\n'
-        // TODO: wrap in mutationQueue.enqueue() after Step 11
-        await client.agents.files.set(sourceAgentId, 'AGENTS.md', newAgentsMd)
+        await mutationQueue.enqueue(sourceAgentId, () =>
+          client.agents.files.set(sourceAgentId, 'AGENTS.md', newAgentsMd),
+        )
 
         // Update local agentFiles cache so the structural rebuild in useGraphData
         // naturally includes this edge. Do NOT call triggerRefresh() here — that

@@ -291,6 +291,7 @@ function ConnectStep({
       await client.connect(resolveProxyGatewayUrl(), {
         clientName: 'openclaw-control-ui',
         clientVersion: '0.1.0',
+        disableDeviceAuth: true,
       })
 
       onConnected(client, trimmedUrl)
