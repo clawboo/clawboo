@@ -157,12 +157,42 @@ export function GhostGraph() {
       const client = useConnectionStore.getState().client
       if (!client) return
 
+      // Check for existing edge before adding
+      const existingEdge = useGraphStore
+        .getState()
+        .edges.find(
+          (e) =>
+            e.source === connection.source &&
+            e.target === connection.target &&
+            e.type === 'dependency',
+        )
+      if (existingEdge) {
+        useToastStore.getState().addToast({
+          message: `${targetAgentName} already in routing`,
+          type: 'info',
+        })
+        return
+      }
+
+      // Optimistically add edge to graph immediately
+      const targetAgentId = (targetNode.data as BooNodeData).agentId
+      const optimisticEdge: GraphEdge = {
+        id: `dep-${sourceAgentId}-${targetAgentId}`,
+        type: 'dependency',
+        source: connection.source,
+        target: connection.target,
+        data: {},
+      }
+      const store = useGraphStore.getState()
+      store.setEdges([...store.edges, optimisticEdge])
+
       try {
         const currentAgentsMd = await client.agents.files
           .read(sourceAgentId, 'AGENTS.md')
           .catch(() => '# AGENTS\n')
 
         if (currentAgentsMd.includes('@' + targetAgentName)) {
+          // Already in file, edge is correct — just notify
           useToastStore.getState().addToast({
             message: `${targetAgentName} already in routing`,
             type: 'info',
@@ -175,12 +205,20 @@ export function GhostGraph() {
         // TODO: wrap in mutationQueue.enqueue() after Step 11
         await client.agents.files.set(sourceAgentId, 'AGENTS.md', newAgentsMd)
 
-        useGraphStore.getState().triggerRefresh()
+        // Update local agentFiles cache so the structural rebuild in useGraphData
+        // naturally includes this edge. Do NOT call triggerRefresh() here — that
+        // triggers a full async re-fetch which overwrites edges (including our
+        // optimistic one) before the Gateway has time to persist.
+        useGraphStore.getState().setAgentFiles(sourceAgentId, { agentsMd: newAgentsMd })
+
         useToastStore.getState().addToast({
           message: `Routing added: ${sourceAgentName} \u2192 ${targetAgentName}`,
           type: 'success',
         })
       } catch (_err) {
+        // Rollback optimistic edge on failure
+        const current = useGraphStore.getState()
+        current.setEdges(current.edges.filter((e) => e.id !== optimisticEdge.id))
         useToastStore.getState().addToast({
           message: 'Failed to save routing',
           type: 'error',

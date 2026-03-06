@@ -34,24 +34,24 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 // ─── Handle styles ────────────────────────────────────────────────────────────
+// NOTE: opacity is controlled via Tailwind classes, NOT inline style.
+// Inline `opacity: 0` would override `group-hover:opacity-100` since inline > class.
 
-const handleHidden = {
+const handleBase = {
   background: 'transparent',
   border: '1.5px solid rgba(255,255,255,0.22)',
   width: 8,
   height: 8,
-  opacity: 0,
-  transition: 'opacity 0.15s',
+  transition: 'opacity 0.15s, background 0.15s, width 0.15s, height 0.15s',
 }
 
-const handleVisible = {
+const handleConnecting = {
   background: 'rgba(233,69,96,0.5)',
   border: '1px solid rgba(233,69,96,0.3)',
   width: 12,
   height: 12,
   borderRadius: '50%',
-  opacity: 1,
-  transition: 'opacity 0.15s',
+  transition: 'opacity 0.15s, background 0.15s, width 0.15s, height 0.15s',
 }
 
 // ─── BooNode dimensions ───────────────────────────────────────────────────────
@@ -207,23 +207,23 @@ export const BooNode = memo(function BooNode({
       <Handle
         type="target"
         position={Position.Top}
-        className={isConnecting ? '' : 'opacity-0 group-hover:opacity-100'}
-        style={isConnecting ? handleVisible : handleHidden}
+        className={isConnecting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}
+        style={isConnecting ? handleConnecting : handleBase}
       />
       {/* Bottom: between ghost bumps — source for outgoing connections */}
       <Handle
         type="source"
         position={Position.Bottom}
-        className={isConnecting ? '' : 'opacity-0 group-hover:opacity-100'}
-        style={isConnecting ? handleVisible : handleHidden}
+        className={isConnecting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}
+        style={isConnecting ? handleConnecting : handleBase}
       />
       {/* Right: ghost body mid-height — source for skill/resource edges */}
       <Handle
         type="source"
         id="right"
         position={Position.Right}
-        className={isConnecting ? '' : 'opacity-0 group-hover:opacity-100'}
-        style={isConnecting ? handleVisible : handleHidden}
+        className={isConnecting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}
+        style={isConnecting ? handleConnecting : handleBase}
       />
     </div>
   )
