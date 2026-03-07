@@ -34,6 +34,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { mutationQueue } from '@/lib/mutationQueue'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
+import { useEditorStore } from '@/stores/editor'
 import { GraphContextMenu } from './GraphContextMenu'
 import type { BooNodeData, GraphEdge } from './types'
 
@@ -322,6 +323,10 @@ export function GhostGraph() {
           }}
           onEditPersonality={() => {
             useFleetStore.getState().selectAgent(contextMenu.agentId)
+            setContextMenu(null)
+          }}
+          onEditFiles={() => {
+            useEditorStore.getState().openEditor(contextMenu.agentId, contextMenu.agentName)
             setContextMenu(null)
           }}
           onDelete={() => {
