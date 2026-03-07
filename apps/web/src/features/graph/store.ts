@@ -53,6 +53,10 @@ interface GraphStore {
   /** Bump to trigger agent file re-fetch in useGraphData. */
   refreshKey: number
   triggerRefresh: () => void
+
+  /** When true, BooNode handles are always visible for easier edge drawing. */
+  connectMode: boolean
+  setConnectMode: (v: boolean) => void
 }
 
 // ─── Store instance ───────────────────────────────────────────────────────────
@@ -113,4 +117,7 @@ export const useGraphStore = create<GraphStore>((set) => ({
 
   refreshKey: 0,
   triggerRefresh: () => set((state) => ({ refreshKey: state.refreshKey + 1 })),
+
+  connectMode: false,
+  setConnectMode: (v) => set({ connectMode: v }),
 }))

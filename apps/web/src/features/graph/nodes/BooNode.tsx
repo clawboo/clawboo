@@ -6,6 +6,7 @@ import type { NodeProps, Node } from '@xyflow/react'
 import { motion } from 'framer-motion'
 import { BooAvatar } from '@clawboo/ui'
 import type { BooNodeData } from '../types'
+import { useGraphStore } from '../store'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 
@@ -83,6 +84,7 @@ export const BooNode = memo(function BooNode({
   const glow = STATUS_GLOW[status] ?? null
   const connection = useConnection()
   const isConnecting = connection.inProgress
+  const connectMode = useGraphStore((s) => s.connectMode)
   const pendingApprovals = useApprovalsStore((s) => s.pendingApprovals)
   const hasPendingApproval = Array.from(pendingApprovals.values()).some(
     (a) => a.agentId === agentId,
@@ -241,23 +243,29 @@ export const BooNode = memo(function BooNode({
       <Handle
         type="target"
         position={Position.Top}
-        className={isConnecting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}
-        style={isConnecting ? handleConnecting : handleBase}
+        className={
+          isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        }
+        style={isConnecting || connectMode ? handleConnecting : handleBase}
       />
       {/* Bottom: between ghost bumps — source for outgoing connections */}
       <Handle
         type="source"
         position={Position.Bottom}
-        className={isConnecting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}
-        style={isConnecting ? handleConnecting : handleBase}
+        className={
+          isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        }
+        style={isConnecting || connectMode ? handleConnecting : handleBase}
       />
       {/* Right: ghost body mid-height — source for skill/resource edges */}
       <Handle
         type="source"
         id="right"
         position={Position.Right}
-        className={isConnecting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}
-        style={isConnecting ? handleConnecting : handleBase}
+        className={
+          isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        }
+        style={isConnecting || connectMode ? handleConnecting : handleBase}
       />
     </div>
   )
