@@ -16,6 +16,8 @@ export interface AgentState {
   streamingText: string | null
   /** Current run ID (null when agent is idle) */
   runId: string | null
+  /** Epoch ms of last heartbeat/presence or status change (null = never seen) */
+  lastSeenAt: number | null
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -41,6 +43,9 @@ interface FleetStore {
 
   /** Remove an agent from the fleet (after gateway deletion). */
   removeAgent: (agentId: string) => void
+
+  /** Update the last-seen timestamp for an agent. */
+  updateLastSeen: (agentId: string, timestamp: number) => void
 }
 
 export const useFleetStore = create<FleetStore>((set) => ({
@@ -78,5 +83,10 @@ export const useFleetStore = create<FleetStore>((set) => ({
     set((state) => ({
       agents: state.agents.filter((a) => a.id !== agentId),
       selectedAgentId: state.selectedAgentId === agentId ? null : state.selectedAgentId,
+    })),
+
+  updateLastSeen: (agentId, timestamp) =>
+    set((state) => ({
+      agents: state.agents.map((a) => (a.id === agentId ? { ...a, lastSeenAt: timestamp } : a)),
     })),
 }))

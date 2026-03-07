@@ -9,6 +9,8 @@ interface ChatStore {
   transcripts: Map<string, TranscriptEntry[]>
   /** Live streaming text that hasn't been committed yet, keyed by sessionKey. */
   streamingText: Map<string, string>
+  /** Token usage from final chat events, keyed by runId. */
+  lastTokenUsage: Map<string, { inputTokens: number; outputTokens: number }>
 
   /** Append one or more entries to a session's transcript. */
   appendTranscript: (sessionKey: string, entries: TranscriptEntry[]) => void
@@ -18,11 +20,15 @@ interface ChatStore {
 
   /** Wipe all transcript + streaming state for a session. */
   clearTranscript: (sessionKey: string) => void
+
+  /** Store token usage for a completed run. */
+  setLastTokenUsage: (runId: string, inputTokens: number, outputTokens: number) => void
 }
 
 export const useChatStore = create<ChatStore>((set) => ({
   transcripts: new Map(),
   streamingText: new Map(),
+  lastTokenUsage: new Map(),
 
   appendTranscript: (sessionKey, entries) =>
     set((state) => {
@@ -55,5 +61,12 @@ export const useChatStore = create<ChatStore>((set) => ({
       nextTranscripts.delete(sessionKey)
       nextStreaming.delete(sessionKey)
       return { transcripts: nextTranscripts, streamingText: nextStreaming }
+    }),
+
+  setLastTokenUsage: (runId, inputTokens, outputTokens) =>
+    set((state) => {
+      const next = new Map(state.lastTokenUsage)
+      next.set(runId, { inputTokens, outputTokens })
+      return { lastTokenUsage: next }
     }),
 }))

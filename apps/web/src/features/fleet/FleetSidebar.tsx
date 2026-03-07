@@ -12,6 +12,17 @@ import { CreateBooModal } from './CreateBooModal'
 import { deleteAgentOperation } from './deleteAgentOperation'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatLastSeen(lastSeenAt: number | null): string | null {
+  if (!lastSeenAt) return null
+  const diff = Date.now() - lastSeenAt
+  if (diff < 60_000) return 'seen just now'
+  if (diff < 3_600_000) return `seen ${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `seen ${Math.floor(diff / 3_600_000)}h ago`
+  return `seen ${Math.floor(diff / 86_400_000)}d ago`
+}
+
 // ─── Agent avatar ──────────────────────────────────────────────────────────────
 // Wraps BooAvatar with a subtle selection ring.
 
@@ -131,8 +142,13 @@ function AgentRow({
           >
             {agent.name}
           </p>
-          <div className="mt-1.5">
+          <div className="mt-1.5 flex items-center gap-2">
             <StatusBadge status={agent.status} />
+            {agent.status !== 'running' && formatLastSeen(agent.lastSeenAt) && (
+              <span className="text-[10px] text-secondary/40">
+                {formatLastSeen(agent.lastSeenAt)}
+              </span>
+            )}
           </div>
         </div>
       </button>
@@ -167,6 +183,13 @@ export function FleetSidebar() {
   const [personalityOpen, setPersonalityOpen] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
 
+  // Tick counter to re-render "seen X ago" labels every 30s
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 30_000)
+    return () => clearInterval(id)
+  }, [])
+
   const handleBooCreated = useCallback(async () => {
     if (!client) return
     try {
@@ -182,6 +205,7 @@ export function FleetSidebar() {
           createdAt: null,
           streamingText: null,
           runId: null,
+          lastSeenAt: null,
         })),
       )
     } catch {
