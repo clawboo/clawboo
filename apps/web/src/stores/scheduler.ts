@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 // ─── CronJob ──────────────────────────────────────────────────────────────────
 // UI representation of a gateway cron job summary.
@@ -82,28 +83,36 @@ interface SchedulerStore {
   setLoadError: (error: string | null) => void
 }
 
-export const useSchedulerStore = create<SchedulerStore>((set) => ({
-  jobs: [],
-  isLoading: false,
-  loadError: null,
+export const useSchedulerStore = create<SchedulerStore>()(
+  persist(
+    (set) => ({
+      jobs: [],
+      isLoading: false,
+      loadError: null,
 
-  setJobs: (jobs) => set({ jobs }),
+      setJobs: (jobs) => set({ jobs }),
 
-  addJob: (job) => set((state) => ({ jobs: [job, ...state.jobs] })),
+      addJob: (job) => set((state) => ({ jobs: [job, ...state.jobs] })),
 
-  removeJob: (id) => set((state) => ({ jobs: state.jobs.filter((j) => j.id !== id) })),
+      removeJob: (id) => set((state) => ({ jobs: state.jobs.filter((j) => j.id !== id) })),
 
-  toggleJob: (id) =>
-    set((state) => ({
-      jobs: state.jobs.map((j) => (j.id === id ? { ...j, active: !j.active } : j)),
-    })),
+      toggleJob: (id) =>
+        set((state) => ({
+          jobs: state.jobs.map((j) => (j.id === id ? { ...j, active: !j.active } : j)),
+        })),
 
-  updateJob: (id, partial) =>
-    set((state) => ({
-      jobs: state.jobs.map((j) => (j.id === id ? { ...j, ...partial } : j)),
-    })),
+      updateJob: (id, partial) =>
+        set((state) => ({
+          jobs: state.jobs.map((j) => (j.id === id ? { ...j, ...partial } : j)),
+        })),
 
-  setLoading: (isLoading) => set({ isLoading }),
+      setLoading: (isLoading) => set({ isLoading }),
 
-  setLoadError: (loadError) => set({ loadError }),
-}))
+      setLoadError: (loadError) => set({ loadError }),
+    }),
+    {
+      name: 'clawboo-scheduler',
+      partialize: (state) => ({ jobs: state.jobs }),
+    },
+  ),
+)
