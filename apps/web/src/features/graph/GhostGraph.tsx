@@ -36,7 +36,8 @@ import { mutationQueue } from '@/lib/mutationQueue'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { useEditorStore } from '@/stores/editor'
 import { GraphContextMenu } from './GraphContextMenu'
-import type { BooNodeData, GraphEdge } from './types'
+import { installSkillForAgent } from './operations/installSkill'
+import type { BooNodeData, SkillNodeData, GraphEdge } from './types'
 
 interface ContextMenuState {
   x: number
@@ -156,6 +157,15 @@ export function GhostGraph() {
       const sourceNode = nodes.find((n) => n.id === connection.source)
       const targetNode = nodes.find((n) => n.id === connection.target)
       if (!sourceNode || !targetNode) return
+
+      // Skill-to-Boo: drag a SkillNode onto a BooNode to install
+      if (sourceNode.type === 'skill' && targetNode.type === 'boo') {
+        const skillData = sourceNode.data as SkillNodeData
+        const booData = targetNode.data as BooNodeData
+        void installSkillForAgent(skillData.name, booData.agentId, booData.name)
+        return
+      }
+
       if (sourceNode.type !== 'boo' || targetNode.type !== 'boo') return
 
       const sourceAgentId = sourceNode.data.agentId as string
@@ -241,6 +251,7 @@ export function GhostGraph() {
     (connection) => {
       const source = nodes.find((n) => n.id === connection.source)
       const target = nodes.find((n) => n.id === connection.target)
+      if (source?.type === 'skill' && target?.type === 'boo') return true
       return source?.type === 'boo' && target?.type === 'boo' && source.id !== target.id
     },
     [nodes],
