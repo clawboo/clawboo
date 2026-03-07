@@ -9,7 +9,6 @@ import {
   Controls,
   MiniMap,
   BackgroundVariant,
-  ConnectionLineType,
   useNodesInitialized,
   useReactFlow,
 } from '@xyflow/react'
@@ -22,12 +21,14 @@ import type {
   IsValidConnection,
 } from '@xyflow/react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { GitBranch } from 'lucide-react'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
 import { computeElkLayout } from './useGraphLayout'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
+import { ConnectionLine } from './edges/ConnectionLine'
 import { useFleetStore } from '@/stores/fleet'
 import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
@@ -37,6 +38,7 @@ import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { useEditorStore } from '@/stores/editor'
 import { GraphContextMenu } from './GraphContextMenu'
 import { installSkillForAgent } from './operations/installSkill'
+import { removeRouting } from './operations/removeRouting'
 import type { BooNodeData, SkillNodeData, GraphEdge } from './types'
 
 interface ContextMenuState {
@@ -63,6 +65,8 @@ export function GhostGraph() {
     setNodes,
     setHasRunLayout,
     updateNodePosition,
+    connectMode,
+    setConnectMode,
   } = useGraphStore()
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -262,11 +266,52 @@ export function GhostGraph() {
     setContextMenu(null)
   }, [setSelectedEdgeId])
 
+  const handleDeleteEdge = useCallback(
+    async (edgeId: string) => {
+      const edge = edges.find((e) => e.id === edgeId)
+      if (!edge || edge.type !== 'dependency') return
+
+      const sourceAgentId = edge.source.startsWith('boo-') ? edge.source.slice(4) : null
+      const targetAgentId = edge.target.startsWith('boo-') ? edge.target.slice(4) : null
+      if (!sourceAgentId || !targetAgentId) return
+
+      setSelectedEdgeId(null)
+      await removeRouting(edgeId, sourceAgentId, targetAgentId)
+    },
+    [edges, setSelectedEdgeId],
+  )
+
   // ── Derive selected edge for explain panel ───────────────────────────────────
   const selectedEdge = selectedEdgeId ? (edges.find((e) => e.id === selectedEdgeId) ?? null) : null
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {/* Connect mode toggle */}
+      <button
+        onClick={() => setConnectMode(!connectMode)}
+        style={{
+          position: 'absolute',
+          top: 12,
+          right: 12,
+          zIndex: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '6px 12px',
+          borderRadius: 8,
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: 'pointer',
+          border: connectMode ? '1px solid rgba(233,69,96,0.4)' : '1px solid rgba(255,255,255,0.1)',
+          background: connectMode ? 'rgba(233,69,96,0.2)' : '#111827',
+          color: connectMode ? '#E94560' : 'rgba(232,232,232,0.5)',
+          transition: 'all 0.15s',
+        }}
+      >
+        <GitBranch size={14} />
+        {connectMode ? 'Drawing Edges' : 'Connect'}
+      </button>
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -279,9 +324,8 @@ export function GhostGraph() {
         onPaneClick={onPaneClick}
         onConnect={onConnect}
         isValidConnection={isValidConnection}
-        connectOnClick={false}
-        connectionLineStyle={{ stroke: '#E94560', strokeWidth: 2, strokeDasharray: '6 4' }}
-        connectionLineType={ConnectionLineType.SmoothStep}
+        connectOnClick={true}
+        connectionLineComponent={ConnectionLine}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
@@ -357,7 +401,11 @@ export function GhostGraph() {
       {/* Edge explain panel */}
       <AnimatePresence>
         {selectedEdge && (
-          <EdgeExplainPanel edge={selectedEdge} onClose={() => setSelectedEdgeId(null)} />
+          <EdgeExplainPanel
+            edge={selectedEdge}
+            onClose={() => setSelectedEdgeId(null)}
+            onDelete={selectedEdge.type === 'dependency' ? handleDeleteEdge : null}
+          />
         )}
       </AnimatePresence>
     </div>
@@ -387,7 +435,15 @@ const EDGE_META = {
   },
 } as const
 
-function EdgeExplainPanel({ edge, onClose }: { edge: GraphEdge; onClose: () => void }) {
+function EdgeExplainPanel({
+  edge,
+  onClose,
+  onDelete,
+}: {
+  edge: GraphEdge
+  onClose: () => void
+  onDelete: ((edgeId: string) => void) | null
+}) {
   const agentFiles = useGraphStore((s) => s.agentFiles)
   const agents = useFleetStore((s) => s.agents)
 
@@ -480,6 +536,32 @@ function EdgeExplainPanel({ edge, onClose }: { edge: GraphEdge; onClose: () => v
         >
           {excerpt}
         </p>
+      )}
+      {onDelete && (
+        <button
+          onClick={() => onDelete(edge.id)}
+          style={{
+            marginTop: 10,
+            width: '100%',
+            padding: '7px 0',
+            border: '1px solid rgba(233,69,96,0.3)',
+            borderRadius: 6,
+            background: 'rgba(233,69,96,0.08)',
+            color: '#E94560',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'background 0.15s',
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.background = 'rgba(233,69,96,0.18)'
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.background = 'rgba(233,69,96,0.08)'
+          }}
+        >
+          Remove Connection
+        </button>
       )}
     </motion.div>
   )
