@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "tsx server/index.ts",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@clawboo/config": "workspace:*",
