@@ -5,6 +5,7 @@ import { ChatPanel } from '@/features/chat/ChatPanel'
 import { SchedulerPanel } from '@/features/scheduler/SchedulerPanel'
 import { ApprovalsPanel } from '@/features/approvals/ApprovalsPanel'
 import { CostDashboard } from '@/app/cost/CostDashboard'
+import { MarketplacePanel } from '@/features/marketplace/MarketplacePanel'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useViewStore } from '@/stores/view'
 import type { View } from '@/stores/view'
@@ -15,6 +16,7 @@ const TABS: { id: View; label: string }[] = [
   { id: 'scheduler', label: '⏰ Scheduler' },
   { id: 'approvals', label: '🔐 Approvals' },
   { id: 'cost', label: '💰 Cost' },
+  { id: 'marketplace', label: '🛒 Marketplace' },
 ]
 
 export default function Home() {
@@ -95,6 +97,7 @@ export default function Home() {
         {view === 'scheduler' && <SchedulerPanel />}
         {view === 'approvals' && <ApprovalsPanel />}
         {view === 'cost' && <CostDashboard />}
+        {view === 'marketplace' && <MarketplacePanel />}
       </div>
     </div>
   )
