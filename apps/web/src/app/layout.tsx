@@ -4,6 +4,7 @@ import { GeistMono } from 'geist/font/mono'
 import { FleetSidebar } from '@/features/fleet/FleetSidebar'
 import { GatewayBootstrap } from '@/features/connection/GatewayBootstrap'
 import { ToastContainer } from '@/features/ui/ToastContainer'
+import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
 import { Providers } from './providers'
 import './globals.css'
 
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <ToastContainer />
           {/* Gateway connection overlay — mounts once for the whole app */}
           <GatewayBootstrap />
+          <AgentFileEditorOverlay />
           <div className="flex h-screen overflow-hidden bg-background text-foreground">
             {/* Fleet sidebar */}
             <aside className="w-64 shrink-0 border-r border-border bg-surface">

@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronDown, ChevronRight, Plus, Search, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileEdit, Plus, Search, Trash2 } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -10,6 +10,7 @@ import { useViewStore } from '@/stores/view'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
 import { CreateBooModal } from './CreateBooModal'
 import { deleteAgentOperation } from './deleteAgentOperation'
+import { useEditorStore } from '@/stores/editor'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -313,6 +314,24 @@ export function FleetSidebar() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Edit files — shown when an agent is selected */}
+      {selectedAgentId && client && (
+        <div className="border-t border-white/8 px-4 py-2">
+          <button
+            type="button"
+            onClick={() => {
+              const agent = agents.find((a) => a.id === selectedAgentId)
+              if (agent) useEditorStore.getState().openEditor(agent.id, agent.name)
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium text-secondary/70 transition-colors hover:bg-white/4 hover:text-text"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            <FileEdit className="h-3.5 w-3.5" strokeWidth={2} />
+            Edit files
+          </button>
+        </div>
+      )}
 
       {/* Personality settings — shown when an agent is selected */}
       {selectedAgentId && (
