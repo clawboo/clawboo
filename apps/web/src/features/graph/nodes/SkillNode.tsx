@@ -3,11 +3,8 @@
 import { memo, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
-import { useConnectionStore } from '@/stores/connection'
-import { useToastStore } from '@/stores/toast'
-import { mutationQueue } from '@/lib/mutationQueue'
 import { AgentPickerDropdown } from '@/features/marketplace/AgentPickerDropdown'
-import { useGraphStore } from '../store'
+import { installSkillForAgent } from '../operations/installSkill'
 import type { SkillNodeData, SkillCategory } from '../types'
 
 // ─── Category → colour + icon ─────────────────────────────────────────────────
@@ -30,42 +27,6 @@ const handleStyle = {
   border: '1.5px solid rgba(255,255,255,0.2)',
   width: 7,
   height: 7,
-}
-
-// ─── Install skill for agent ──────────────────────────────────────────────────
-
-async function installSkillForAgent(skillName: string, agentId: string, agentName: string) {
-  const client = useConnectionStore.getState().client
-  if (!client) return
-
-  try {
-    const currentTools = await client.agents.files.read(agentId, 'TOOLS.md')
-
-    if (currentTools.includes(skillName)) {
-      useToastStore.getState().addToast({
-        message: `${skillName} already installed on ${agentName}`,
-        type: 'info',
-      })
-      return
-    }
-
-    const newTools = currentTools.trimEnd() + '\n- ' + skillName + '\n'
-    await mutationQueue.enqueue(agentId, () =>
-      client.agents.files.set(agentId, 'TOOLS.md', newTools),
-    )
-
-    useGraphStore.getState().triggerRefresh()
-
-    useToastStore.getState().addToast({
-      message: `Installed "${skillName}" on ${agentName}`,
-      type: 'success',
-    })
-  } catch (err) {
-    useToastStore.getState().addToast({
-      message: `Failed to install skill: ${err instanceof Error ? err.message : 'unknown'}`,
-      type: 'error',
-    })
-  }
 }
 
 // ─── SkillNode ────────────────────────────────────────────────────────────────
@@ -166,10 +127,17 @@ export const SkillNode = memo(function SkillNode({
         {name}
       </div>
 
-      {/* Left handle — vertically centered in circle (default 50% = HALF) */}
+      {/* Left handle — target for incoming edges from BooNodes */}
       <Handle
         type="target"
         position={Position.Left}
+        style={{ ...handleStyle, borderColor: `${color}55` }}
+      />
+      {/* Right handle — source for drag-to-install onto BooNodes */}
+      <Handle
+        type="source"
+        id="install"
+        position={Position.Right}
         style={{ ...handleStyle, borderColor: `${color}55` }}
       />
     </div>
