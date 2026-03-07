@@ -479,8 +479,17 @@ export class GatewayClient {
     delete: (id: string): Promise<void> => this.call<void>('agents.delete', { id }),
 
     files: {
-      read: (agentId: string, name: string): Promise<string> =>
-        this.call<string>('agents.files.read', { agentId, name }),
+      read: async (agentId: string, name: string): Promise<string> => {
+        const res = await this.call<{ file?: { content?: unknown; missing?: unknown } }>(
+          'agents.files.get',
+          { agentId, name },
+        )
+        const file = res?.file
+        if (file && typeof file === 'object' && typeof file.content === 'string') {
+          return file.content
+        }
+        return ''
+      },
 
       set: (agentId: string, name: string, content: string): Promise<void> =>
         this.call<void>('agents.files.set', { agentId, name, content }),

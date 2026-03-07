@@ -38,7 +38,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   type Body = { name?: string; positions: LayoutData['positions']; gatewayUrl: string }
-  const body = (await req.json()) as Body
+
+  let body: Body
+  try {
+    body = (await req.json()) as Body
+  } catch {
+    return NextResponse.json({ ok: false, error: 'invalid JSON' }, { status: 400 })
+  }
 
   const name = body.name ?? 'default'
   const { positions, gatewayUrl } = body
