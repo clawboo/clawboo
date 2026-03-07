@@ -71,6 +71,7 @@ export function GhostGraph() {
   // Track layout state in refs to avoid stale closure issues
   const layoutRanRef = useRef(false)
   const prevNodeLengthRef = useRef(0)
+  const elkGenerationRef = useRef(0)
 
   // Wire data fetching and persistence
   useGraphData()
@@ -91,7 +92,12 @@ export function GhostGraph() {
     if (layoutRanRef.current) return
     layoutRanRef.current = true
 
+    const generation = ++elkGenerationRef.current
+
     void computeElkLayout(nodes, edges, savedPositions).then((layoutedNodes) => {
+      // Skip stale results — a newer ELK computation has started
+      if (generation !== elkGenerationRef.current) return
+
       setNodes(layoutedNodes)
       setHasRunLayout(true)
       requestAnimationFrame(() => {
