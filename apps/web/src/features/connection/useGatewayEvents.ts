@@ -44,11 +44,13 @@ export function useGatewayEvents(client: GatewayClient | null): void {
         switch (intent.kind) {
           case 'updateAgentStatus':
             useFleetStore.getState().patchAgent(intent.agentId, intent.patch)
+            useFleetStore.getState().updateLastSeen(intent.agentId, Date.now())
             break
           case 'commitChat':
             // outputLines already handled by appendOutputLines above;
             // apply the final status patch (idle/error, runId cleared)
             useFleetStore.getState().patchAgent(intent.agentId, intent.patch)
+            useFleetStore.getState().updateLastSeen(intent.agentId, Date.now())
             break
           // approval intents: trust plane
           case 'approvalPending': {
@@ -146,6 +148,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
               createdAt: null,
               streamingText: null,
               runId: null,
+              lastSeenAt: null,
             })),
           )
         } catch {
@@ -153,8 +156,16 @@ export function useGatewayEvents(client: GatewayClient | null): void {
         }
       },
 
-      // Heartbeat refresh — no-op for Phase 2
-      refreshHeartbeatLatest: () => {},
+      // Heartbeat/presence confirmed agents are alive — update lastSeenAt for all running agents
+      refreshHeartbeatLatest: () => {
+        const now = Date.now()
+        const agents = useFleetStore.getState().agents
+        for (const agent of agents) {
+          if (agent.status === 'running') {
+            useFleetStore.getState().updateLastSeen(agent.id, now)
+          }
+        }
+      },
 
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (id) => clearTimeout(id),
@@ -200,6 +211,11 @@ export function useGatewayEvents(client: GatewayClient | null): void {
             ? message['model']
             : 'default'
       const runId = typeof p['runId'] === 'string' ? p['runId'] : null
+
+      // Store token usage in chat store so ChatPanel can display real counts
+      if (runId) {
+        useChatStore.getState().setLastTokenUsage(runId, inputTokens, outputTokens)
+      }
 
       void fetch('/api/cost-records', {
         method: 'POST',

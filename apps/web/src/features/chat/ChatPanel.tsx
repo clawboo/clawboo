@@ -19,6 +19,7 @@ import { BooAvatar } from '@clawboo/ui'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
+import { calculateCostUsd, formatCost } from '@/features/cost/costUtils'
 import { sendChatMessage } from './chatSendOperation'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -368,6 +369,13 @@ const AssistantTurnCard = memo(function AssistantTurnCard({
   const hasTools = block.tools.length > 0
   const hasText = Boolean(block.assistant?.text)
   const charCount = block.assistant?.text?.length ?? 0
+  const runId = block.assistant?.runId ?? null
+  const tokenUsage = useChatStore((s) => (runId ? (s.lastTokenUsage.get(runId) ?? null) : null))
+  const agent = useFleetStore((s) => s.agents.find((a) => a.id === agentId))
+  const costUsd =
+    tokenUsage && agent?.model
+      ? calculateCostUsd(agent.model, tokenUsage.inputTokens, tokenUsage.outputTokens)
+      : null
 
   return (
     <div className="flex flex-col gap-2">
@@ -416,10 +424,12 @@ const AssistantTurnCard = memo(function AssistantTurnCard({
       {/* Streaming text */}
       {streaming && !hasText && !hasThinking && <TypingIndicator />}
 
-      {/* Token count placeholder — will be wired to gateway metadata in Phase 3 */}
+      {/* Token usage (real from Gateway) or estimated from char count */}
       {!streaming && hasText && (
         <p className="font-mono text-[10px] text-secondary/40">
-          ~{charCount.toLocaleString()} chars
+          {tokenUsage
+            ? `${tokenUsage.inputTokens.toLocaleString()} in · ${tokenUsage.outputTokens.toLocaleString()} out${costUsd !== null ? ` · ${formatCost(costUsd)}` : ''}`
+            : `~${Math.ceil(charCount / 4).toLocaleString()} tokens`}
         </p>
       )}
     </div>

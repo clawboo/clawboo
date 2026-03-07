@@ -7,6 +7,18 @@ import { motion } from 'framer-motion'
 import { BooAvatar } from '@clawboo/ui'
 import type { BooNodeData } from '../types'
 import { useApprovalsStore } from '@/stores/approvals'
+import { useFleetStore } from '@/stores/fleet'
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatLastSeen(lastSeenAt: number | null): string | null {
+  if (!lastSeenAt) return null
+  const diff = Date.now() - lastSeenAt
+  if (diff < 60_000) return 'just now'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+  return `${Math.floor(diff / 86_400_000)}d ago`
+}
 
 // ─── Status → glow config ─────────────────────────────────────────────────────
 
@@ -75,6 +87,10 @@ export const BooNode = memo(function BooNode({
   const hasPendingApproval = Array.from(pendingApprovals.values()).some(
     (a) => a.agentId === agentId,
   )
+  const lastSeenAt = useFleetStore(
+    (s) => s.agents.find((a) => a.id === agentId)?.lastSeenAt ?? null,
+  )
+  const lastSeenLabel = status !== 'running' ? formatLastSeen(lastSeenAt) : null
 
   // Drop-shadow animation driven by status
   const dropShadow = glow
@@ -201,6 +217,24 @@ export const BooNode = memo(function BooNode({
           {STATUS_LABEL[status] ?? 'idle'}
         </span>
       </div>
+
+      {/* ── Last seen label ────────────────────────────────────────────── */}
+      {lastSeenLabel && (
+        <div
+          style={{
+            position: 'absolute',
+            top: BOO_H + 40,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            fontSize: 9,
+            color: 'rgba(232,232,232,0.25)',
+            whiteSpace: 'nowrap',
+            letterSpacing: '0.03em',
+          }}
+        >
+          {lastSeenLabel}
+        </div>
+      )}
 
       {/* ── Handles ──────────────────────────────────────────────────────── */}
       {/* Top: center of ghost head — target for incoming connections */}
