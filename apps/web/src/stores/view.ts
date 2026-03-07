@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type View = 'graph' | 'chat' | 'scheduler' | 'approvals' | 'cost'
+export type View = 'graph' | 'chat' | 'scheduler' | 'approvals' | 'cost' | 'marketplace'
 
 interface ViewStore {
   view: View

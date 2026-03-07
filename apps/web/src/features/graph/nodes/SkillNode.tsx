@@ -1,12 +1,12 @@
 'use client'
 
-import { memo, useState, useEffect, useRef } from 'react'
+import { memo, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
-import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { mutationQueue } from '@/lib/mutationQueue'
+import { AgentPickerDropdown } from '@/features/marketplace/AgentPickerDropdown'
 import { useGraphStore } from '../store'
 import type { SkillNodeData, SkillCategory } from '../types'
 
@@ -66,85 +66,6 @@ async function installSkillForAgent(skillName: string, agentId: string, agentNam
       type: 'error',
     })
   }
-}
-
-// ─── Agent picker dropdown ────────────────────────────────────────────────────
-
-function AgentPickerDropdown({ skillName, onClose }: { skillName: string; onClose: () => void }) {
-  const agents = useFleetStore((s) => s.agents)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleMouseDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as globalThis.Node)) {
-        onClose()
-      }
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleMouseDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [onClose])
-
-  return (
-    <div
-      ref={ref}
-      style={{
-        position: 'absolute',
-        top: CIRCLE + 4,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 50,
-        background: '#111827',
-        border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 8,
-        padding: '4px 0',
-        minWidth: 140,
-        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-      }}
-    >
-      {agents.length === 0 ? (
-        <div style={{ padding: '6px 12px', fontSize: 11, color: 'rgba(232,232,232,0.4)' }}>
-          No agents
-        </div>
-      ) : (
-        agents.map((agent) => (
-          <button
-            key={agent.id}
-            onClick={() => {
-              void installSkillForAgent(skillName, agent.id, agent.name)
-              onClose()
-            }}
-            style={{
-              display: 'block',
-              width: '100%',
-              padding: '6px 12px',
-              background: 'transparent',
-              border: 'none',
-              color: '#E8E8E8',
-              fontSize: 12,
-              cursor: 'pointer',
-              textAlign: 'left',
-              whiteSpace: 'nowrap',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-            }}
-          >
-            {agent.name}
-          </button>
-        ))
-      )}
-    </div>
-  )
 }
 
 // ─── SkillNode ────────────────────────────────────────────────────────────────
@@ -214,7 +135,15 @@ export const SkillNode = memo(function SkillNode({
       </button>
 
       {/* Agent picker dropdown */}
-      {showPicker && <AgentPickerDropdown skillName={name} onClose={() => setShowPicker(false)} />}
+      {showPicker && (
+        <AgentPickerDropdown
+          onSelect={(agentId, agentName) => {
+            void installSkillForAgent(name, agentId, agentName)
+          }}
+          onClose={() => setShowPicker(false)}
+          style={{ top: CIRCLE + 4, left: '50%', transform: 'translateX(-50%)' }}
+        />
+      )}
 
       {/* Name below circle */}
       <div
