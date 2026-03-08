@@ -18,9 +18,15 @@ import { BooAvatar } from '@clawboo/ui'
 import { AGENT_FILE_META, AGENT_FILE_PLACEHOLDERS } from '@clawboo/protocol'
 import type { AgentFileName } from '@clawboo/protocol'
 import { useConnectionStore } from '@/stores/connection'
+import { useEditorStore } from '@/stores/editor'
 import { useToastStore } from '@/stores/toast'
 import { useGraphStore } from '@/features/graph/store'
 import { mutationQueue } from '@/lib/mutationQueue'
+import {
+  stripPersonalityBlock,
+  mergeSoulWithPersonality,
+  isPersonalityValues,
+} from '@/lib/soulPersonality'
 import { clawbooEditorTheme } from './editorTheme'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -77,7 +83,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
 
     Promise.all(
       EDITOR_TABS.map((name) => client.agents.files.read(agentId, name).catch(() => '')),
-    ).then((results) => {
+    ).then(async (results) => {
       if (loadId !== loadIdRef.current) return // stale
 
       const next: FilesMap = {}
@@ -85,10 +91,69 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
         const content = results[i] ?? ''
         next[name] = { content, clean: content }
       })
+
+      // Always strip any stale personality block from SOUL.md and re-merge
+      // from SQLite (the source of truth for slider values). This handles two
+      // scenarios: (a) Gateway content has no personality block (never written),
+      // (b) Gateway has a stale personality block (old code overwrote the role
+      // description, or values are out of date).
+      const soulRaw = next['SOUL.md']?.content ?? ''
+      try {
+        const res = await fetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
+        const data = (await res.json()) as { values: unknown }
+        if (data.values && isPersonalityValues(data.values)) {
+          const base = stripPersonalityBlock(soulRaw)
+          const merged = mergeSoulWithPersonality(base, data.values)
+          next['SOUL.md'] = { content: merged, clean: merged }
+        }
+      } catch {
+        // Non-fatal — personality data not merged
+      }
+
       setFiles(next)
       setLoading(false)
     })
   }, [agentId, client])
+
+  // ─── Refresh SOUL.md when personality sliders save ─────────────────────────
+
+  const soulRefreshKey = useEditorStore((s) => s.soulRefreshKey)
+
+  useEffect(() => {
+    // Skip the initial render (key=0) — only react to increments
+    if (soulRefreshKey === 0 || loading) return
+
+    // Re-fetch personality from SQLite + re-merge into current SOUL.md
+    void (async () => {
+      try {
+        const res = await fetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
+        const data = (await res.json()) as { values: unknown }
+        if (data.values && isPersonalityValues(data.values)) {
+          const currentSoul = filesRef.current['SOUL.md']?.content ?? ''
+          const base = stripPersonalityBlock(currentSoul)
+          const merged = mergeSoulWithPersonality(base, data.values)
+
+          setFiles((prev) => ({
+            ...prev,
+            'SOUL.md': { content: merged, clean: merged },
+          }))
+
+          // Update CodeMirror if SOUL tab is active
+          const view = viewRef.current
+          if (view && activeTabRef.current === 'SOUL.md') {
+            const currentDoc = view.state.doc.toString()
+            if (currentDoc !== merged) {
+              view.dispatch({
+                changes: { from: 0, to: view.state.doc.length, insert: merged },
+              })
+            }
+          }
+        }
+      } catch {
+        // Non-fatal
+      }
+    })()
+  }, [soulRefreshKey, agentId, loading])
 
   // ─── Save handler ─────────────────────────────────────────────────────────
 

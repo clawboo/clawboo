@@ -6,112 +6,22 @@ import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { Slider } from '@/components/ui/slider'
 import { mutationQueue } from '@/lib/mutationQueue'
+import { useEditorStore } from '@/stores/editor'
+import {
+  type PersonalityKey,
+  type PersonalityValues,
+  getDimensions,
+  getDimensionText,
+  mergeSoulWithPersonality,
+  isPersonalityValues,
+  stripPersonalityBlock,
+} from '@/lib/soulPersonality'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type SliderKey = 'verbosity' | 'humor' | 'caution' | 'speed_cost' | 'formality'
-type Values = Record<SliderKey, number>
-
-interface Dimension {
-  key: SliderKey
-  label: string
-  leftLabel: string
-  rightLabel: string
-  sectionText: (v: number) => string
-}
-
-// ─── Personality dimension definitions ────────────────────────────────────────
-// Each dimension maps a 0–100 value to a descriptive SOUL.md section.
-
-const DIMENSIONS: Dimension[] = [
-  {
-    key: 'verbosity',
-    label: 'Verbosity',
-    leftLabel: 'Terse',
-    rightLabel: 'Verbose',
-    sectionText: (v) => {
-      if (v < 20)
-        return 'Respond with the absolute minimum — single sentences where possible. No preamble, no summaries.'
-      if (v < 40)
-        return 'Keep responses brief and focused. Provide enough detail to be actionable, nothing more.'
-      if (v < 60)
-        return 'Balance brevity with clarity. Explain reasoning when it aids understanding, but avoid padding.'
-      if (v < 80)
-        return 'Provide thorough explanations with relevant examples and context. Cover the important nuances.'
-      return 'Elaborate fully — explore edge cases, alternatives, and tradeoffs. Assume the reader wants depth.'
-    },
-  },
-  {
-    key: 'humor',
-    label: 'Humor',
-    leftLabel: 'Serious',
-    rightLabel: 'Witty',
-    sectionText: (v) => {
-      if (v < 20)
-        return 'Maintain a purely professional, no-nonsense tone. Focus on facts and substance.'
-      if (v < 40) return 'Stay mostly professional but remain warm and approachable.'
-      if (v < 60) return 'Be friendly and occasionally use light wit when it fits naturally.'
-      if (v < 80) return 'Bring a playful energy — wordplay, light jokes, and banter are welcome.'
-      return 'Lean into humor and creativity. Make it fun while still being genuinely helpful.'
-    },
-  },
-  {
-    key: 'caution',
-    label: 'Caution',
-    leftLabel: 'Bold',
-    rightLabel: 'Careful',
-    sectionText: (v) => {
-      if (v < 20)
-        return 'Act decisively with minimal caveats. Trust that the user knows what they want.'
-      if (v < 40) return 'Proceed confidently but note any significant gotchas upfront.'
-      if (v < 60)
-        return 'Balance action with appropriate warnings. Flag risks without over-qualifying.'
-      if (v < 80)
-        return 'Highlight risks clearly. Prefer safe, reversible approaches and ask when uncertain.'
-      return 'Treat every action as potentially consequential. Confirm before acting on anything irreversible.'
-    },
-  },
-  {
-    key: 'speed_cost',
-    label: 'Speed vs Cost',
-    leftLabel: 'Fast',
-    rightLabel: 'Economical',
-    sectionText: (v) => {
-      if (v < 20)
-        return 'Optimize for speed and capability. Use the most powerful model available without restraint.'
-      if (v < 40)
-        return "Lean toward speed. Use capable models and don't artificially constrain context."
-      if (v < 60)
-        return 'Balance speed and cost. Choose model and context proportionate to task complexity.'
-      if (v < 80) return 'Prefer lighter models where quality allows. Keep context windows lean.'
-      return 'Aggressively minimize costs. Use the smallest model that can handle the task.'
-    },
-  },
-  {
-    key: 'formality',
-    label: 'Formality',
-    leftLabel: 'Casual',
-    rightLabel: 'Formal',
-    sectionText: (v) => {
-      if (v < 20)
-        return "Communicate like you're chatting with a friend. Contractions, casual language, relaxed tone."
-      if (v < 40) return 'Keep it conversational and warm, but stay focused and professional.'
-      if (v < 60) return 'Friendly but professional. Clear and direct without being stiff.'
-      if (v < 80)
-        return 'Maintain a structured, professional tone. Complete sentences and proper grammar.'
-      return 'Communicate with formal precision. Structured prose, no contractions, careful word choice.'
-    },
-  },
-]
-
-// ─── SOUL.md generation ──────────────────────────────────────────────────────
-// SOUL.md is written to the Gateway so the agent's behavior reflects the slider
-// values. However, slider values are persisted in SQLite (not read back from
-// SOUL.md) because the Gateway does not reliably persist agents.files.set writes.
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 const SOUL_FILE = 'SOUL.md'
 
-const DEFAULT_VALUES: Values = {
+const DEFAULT_VALUES: PersonalityValues = {
   verbosity: 50,
   humor: 50,
   caution: 50,
@@ -119,29 +29,23 @@ const DEFAULT_VALUES: Values = {
   formality: 50,
 }
 
-const SLIDER_KEYS = Object.keys(DEFAULT_VALUES) as SliderKey[]
+const DIMENSIONS = getDimensions()
 
-function isValues(obj: unknown): obj is Values {
-  if (!obj || typeof obj !== 'object') return false
-  const rec = obj as Record<string, unknown>
-  return SLIDER_KEYS.every((k) => typeof rec[k] === 'number')
+const SLIDER_LABELS: Record<PersonalityKey, { left: string; right: string }> = {
+  verbosity: { left: 'Terse', right: 'Verbose' },
+  humor: { left: 'Serious', right: 'Witty' },
+  caution: { left: 'Bold', right: 'Careful' },
+  speed_cost: { left: 'Fast', right: 'Economical' },
+  formality: { left: 'Casual', right: 'Formal' },
 }
 
-function buildSoul(values: Values): string {
-  const meta = SLIDER_KEYS.map((k) => `${k}=${values[k]}`).join(' ')
-  const sections = DIMENSIONS.map((d) => `## ${d.label}\n${d.sectionText(values[d.key])}`).join(
-    '\n\n',
-  )
-  return `# SOUL\n\n<!-- clawboo:personality ${meta} -->\n\n${sections}\n`
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Component ───────────────────────────────────────────────────────────────
 
 export function PersonalitySliders() {
   const client = useConnectionStore((s) => s.client)
   const selectedAgentId = useFleetStore((s) => s.selectedAgentId)
 
-  const [values, setValues] = useState<Values>({ ...DEFAULT_VALUES })
+  const [values, setValues] = useState<PersonalityValues>({ ...DEFAULT_VALUES })
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -149,38 +53,41 @@ export function PersonalitySliders() {
   const [showPreview, setShowPreview] = useState(false)
 
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  /**
-   * dirtyRef tracks slider values that have been changed by the user but not yet
-   * persisted. It is set in handleChange and cleared after a confirmed save.
-   */
-  const dirtyRef = useRef<Values | null>(null)
+  const dirtyRef = useRef<PersonalityValues | null>(null)
+  /** Cache of the base SOUL.md content (role description, without personality block) */
+  const baseSoulRef = useRef<string>('')
 
-  // Load personality values from SQLite on mount.
-  // SQLite is the source of truth for slider values — not SOUL.md.
+  // Load personality values from SQLite + base SOUL.md content on mount.
   useEffect(() => {
     if (!selectedAgentId) return
     setLoading(true)
     setError(null)
     setValues({ ...DEFAULT_VALUES })
+    baseSoulRef.current = ''
 
-    fetch(`/api/personality?agentId=${encodeURIComponent(selectedAgentId)}`)
+    // Fetch both SQLite personality values and existing SOUL.md in parallel
+    const sqlitePromise = fetch(`/api/personality?agentId=${encodeURIComponent(selectedAgentId)}`)
       .then((res) => res.json())
-      .then((data: { values: Values | null }) => {
-        if (data.values && isValues(data.values)) {
-          console.log('[Personality] Loaded from SQLite for:', selectedAgentId, data.values)
+      .then((data: { values: PersonalityValues | null }) => {
+        if (data.values && isPersonalityValues(data.values)) {
           setValues(data.values)
-        } else {
-          console.log('[Personality] No SQLite values for:', selectedAgentId, '— using defaults')
         }
       })
-      .catch((err) => {
-        console.warn('[Personality] Failed to load from SQLite:', err)
-        // Defaults are already set — non-fatal
-      })
-      .finally(() => setLoading(false))
+      .catch(() => {})
+
+    const soulPromise = client
+      ? client.agents.files
+          .read(selectedAgentId, SOUL_FILE)
+          .then((content) => {
+            // Cache the base content (without any existing personality block)
+            baseSoulRef.current = stripPersonalityBlock(content)
+          })
+          .catch(() => {})
+      : Promise.resolve()
+
+    void Promise.all([sqlitePromise, soulPromise]).finally(() => setLoading(false))
 
     return () => {
-      // Flush any pending save for THIS agent before unmounting.
       if (savedTimer.current) {
         clearTimeout(savedTimer.current)
         savedTimer.current = null
@@ -194,9 +101,11 @@ export function PersonalitySliders() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agentId: selectedAgentId, values: dirty }),
         }).catch(() => {})
+        // Merge personality into existing SOUL.md (preserve role description)
+        const mergedContent = mergeSoulWithPersonality(baseSoulRef.current, dirty)
         void mutationQueue
           .enqueue(selectedAgentId, () =>
-            client.agents.files.set(selectedAgentId, SOUL_FILE, buildSoul(dirty)),
+            client.agents.files.set(selectedAgentId, SOUL_FILE, mergedContent),
           )
           .catch(() => {})
       }
@@ -204,7 +113,7 @@ export function PersonalitySliders() {
   }, [client, selectedAgentId])
 
   // handleChange: updates local state + marks dirty (no save call).
-  const handleChange = useCallback((key: SliderKey, value: number) => {
+  const handleChange = useCallback((key: PersonalityKey, value: number) => {
     setValues((prev) => {
       const next = { ...prev, [key]: value }
       dirtyRef.current = next
@@ -213,9 +122,9 @@ export function PersonalitySliders() {
   }, [])
 
   // handleCommit: fires on pointer-up / keyboard commit.
-  // Saves to BOTH SQLite (source of truth for sliders) and SOUL.md (agent behavior).
+  // Saves to BOTH SQLite and SOUL.md (merged with existing role description).
   const handleCommit = useCallback(
-    (key: SliderKey, value: number) => {
+    (key: PersonalityKey, value: number) => {
       if (!client || !selectedAgentId) return
       const next = { ...values, [key]: value }
       setValues(next)
@@ -226,40 +135,28 @@ export function PersonalitySliders() {
       setSaving(true)
       setError(null)
 
-      // 1. Save to SQLite — this is the persistent source of truth for slider values
+      // 1. Save to SQLite — persistent source of truth for slider values
       const sqliteSave = fetch('/api/personality', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentId: selectedAgentId, values: next }),
       })
 
-      // 2. Write SOUL.md to Gateway via mutation queue — best-effort, for actual agent behavior
-      const soulContent = buildSoul(next)
-      const soulSave = mutationQueue
-        .enqueue(selectedAgentId, () =>
-          client.agents.files.set(selectedAgentId, SOUL_FILE, soulContent),
-        )
-        .catch((err: unknown) => {
-          // Log but don't fail — SOUL.md write is best-effort
-          console.warn('[Personality] SOUL.md write failed (non-fatal):', err)
-        })
-
-      // Diagnostic logging — verify SOUL.md round-trip
-      void soulSave.then(() => {
-        console.log('[Personality] SOUL.md write completed — verifying...')
-        return client.agents.files
-          .read(selectedAgentId, SOUL_FILE)
-          .then((content) => {
-            console.log('[Personality] Verification read preview:', content.slice(0, 150))
-            console.log(
-              '[Personality] Has clawboo:personality comment:',
-              content.includes('clawboo:personality'),
-            )
-          })
-          .catch((err: unknown) => {
-            console.log('[Personality] Verification read failed:', err)
-          })
-      })
+      // 2. Read existing SOUL.md, merge personality sections, write back
+      //    This preserves the role description AND adds personality instructions.
+      void (async () => {
+        try {
+          // Read fresh base content (in case user edited SOUL.md via editor)
+          const existing = await client.agents.files.read(selectedAgentId, SOUL_FILE)
+          baseSoulRef.current = stripPersonalityBlock(existing)
+          const mergedContent = mergeSoulWithPersonality(baseSoulRef.current, next)
+          await mutationQueue.enqueue(selectedAgentId, () =>
+            client.agents.files.set(selectedAgentId, SOUL_FILE, mergedContent),
+          )
+        } catch (err: unknown) {
+          console.warn('[Personality] SOUL.md merge/write failed (non-fatal):', err)
+        }
+      })()
 
       // Wait for SQLite save (the important one) — SOUL.md is best-effort
       void sqliteSave
@@ -267,6 +164,8 @@ export function PersonalitySliders() {
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
           setSaved(true)
           savedTimer.current = setTimeout(() => setSaved(false), 2000)
+          // Signal the editor to refresh SOUL.md if it's open
+          useEditorStore.getState().triggerSoulRefresh()
         })
         .catch((err: unknown) => {
           dirtyRef.current = next
@@ -277,7 +176,7 @@ export function PersonalitySliders() {
     [client, selectedAgentId, values],
   )
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  // ─── Render ─────────────────────────────────────────────────────────────────
 
   if (!selectedAgentId) {
     return (
@@ -299,46 +198,45 @@ export function PersonalitySliders() {
   return (
     <div className="space-y-6">
       {/* Sliders */}
-      {DIMENSIONS.map((dim) => (
-        <div key={dim.key} className="space-y-2">
-          {/* Label + numeric value */}
-          <div className="flex items-center justify-between">
-            <span
-              className="text-[13px] font-semibold text-text"
-              style={{ fontFamily: 'var(--font-body)' }}
-            >
-              {dim.label}
-            </span>
-            <span
-              className="min-w-[2.5rem] text-right text-[11px] tabular-nums text-secondary"
-              style={{ fontFamily: 'var(--font-mono)' }}
-            >
-              {values[dim.key]}
-            </span>
+      {DIMENSIONS.map((dim) => {
+        const labels = SLIDER_LABELS[dim.key]
+        return (
+          <div key={dim.key} className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span
+                className="text-[13px] font-semibold text-text"
+                style={{ fontFamily: 'var(--font-body)' }}
+              >
+                {dim.label}
+              </span>
+              <span
+                className="min-w-[2.5rem] text-right text-[11px] tabular-nums text-secondary"
+                style={{ fontFamily: 'var(--font-mono)' }}
+              >
+                {values[dim.key]}
+              </span>
+            </div>
+
+            <Slider
+              value={[values[dim.key]]}
+              min={0}
+              max={100}
+              step={1}
+              onValueChange={(vals) => handleChange(dim.key, vals[0] ?? 50)}
+              onValueCommit={(vals) => handleCommit(dim.key, vals[0] ?? 50)}
+            />
+
+            <div className="flex justify-between">
+              <span className="text-[10px] text-secondary/50">{labels.left}</span>
+              <span className="text-[10px] text-secondary/50">{labels.right}</span>
+            </div>
+
+            <p className="text-[11px] leading-relaxed text-secondary/70">
+              {getDimensionText(dim.key, values[dim.key])}
+            </p>
           </div>
-
-          {/* shadcn/ui Slider — onValueChange for live description, onValueCommit to save */}
-          <Slider
-            value={[values[dim.key]]}
-            min={0}
-            max={100}
-            step={1}
-            onValueChange={(vals) => handleChange(dim.key, vals[0] ?? 50)}
-            onValueCommit={(vals) => handleCommit(dim.key, vals[0] ?? 50)}
-          />
-
-          {/* Min / max endpoint labels */}
-          <div className="flex justify-between">
-            <span className="text-[10px] text-secondary/50">{dim.leftLabel}</span>
-            <span className="text-[10px] text-secondary/50">{dim.rightLabel}</span>
-          </div>
-
-          {/* Live description — updates as the slider moves */}
-          <p className="text-[11px] leading-relaxed text-secondary/70">
-            {dim.sectionText(values[dim.key])}
-          </p>
-        </div>
-      ))}
+        )
+      })}
 
       {/* Footer: preview toggle + save status */}
       <div className="flex items-center justify-between border-t border-white/8 pt-3">
@@ -363,14 +261,14 @@ export function PersonalitySliders() {
         </div>
       </div>
 
-      {/* SOUL.md preview panel */}
+      {/* SOUL.md preview — shows merged content (role description + personality) */}
       {showPreview && (
         <div className="max-h-64 overflow-y-auto rounded-lg border border-white/8 bg-surface p-3">
           <pre
             className="whitespace-pre-wrap text-[10px] leading-relaxed text-secondary/70"
             style={{ fontFamily: 'var(--font-mono)' }}
           >
-            {buildSoul(values)}
+            {mergeSoulWithPersonality(baseSoulRef.current, values)}
           </pre>
         </div>
       )}
