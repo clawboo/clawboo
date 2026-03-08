@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 're
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
+import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 
 const DEFAULT_SOUL = `# SOUL\n\nYou are a helpful AI assistant. You approach tasks methodically, communicate clearly, and ask for clarification when needed.`
 
@@ -54,9 +55,8 @@ export function CreateBooModal({
     setError(null)
 
     try {
-      await client.call('agents.create', {
-        name: trimmedName,
-        workspace: 'default',
+      const workspaceDir = await resolveWorkspaceDir(client)
+      await createAgent(client, trimmedName, workspaceDir, {
         soul: role.trim() || DEFAULT_SOUL,
         identity: `# IDENTITY\n\nYou are ${trimmedName}.`,
         tools: '# TOOLS\n',
