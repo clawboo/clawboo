@@ -8,7 +8,7 @@ export async function deleteAgentOperation(
   client: GatewayClientLike,
 ): Promise<void> {
   // 1. Gateway delete
-  await client.call('agents.delete', { id: agentId })
+  await client.call('agents.delete', { agentId })
 
   // 2. Remove from fleet store
   useFleetStore.getState().removeAgent(agentId)

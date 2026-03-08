@@ -476,7 +476,7 @@ export class GatewayClient {
     create: (config: AgentCreateConfig): Promise<AgentCreateResult> =>
       this.call<AgentCreateResult>('agents.create', config),
 
-    delete: (id: string): Promise<void> => this.call<void>('agents.delete', { id }),
+    delete: (id: string): Promise<void> => this.call<void>('agents.delete', { agentId: id }),
 
     files: {
       read: async (agentId: string, name: string): Promise<string> => {
