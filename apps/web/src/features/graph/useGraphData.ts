@@ -120,10 +120,10 @@ function buildGraphElements(
   agents: AgentState[],
   agentFiles: Map<string, { toolsMd: string | null; agentsMd: string | null }>,
 ): { rawNodes: GraphNode[]; rawEdges: GraphEdge[] } {
-  const skillMap = new Map<string, SkillNodeData>()
-  const resourceMap = new Map<string, ResourceNodeData>()
   const depEdges: GraphEdge[] = []
+  const skillNodes: GraphNode[] = []
   const skillEdges: GraphEdge[] = []
+  const resourceNodes: GraphNode[] = []
   const resourceEdges: GraphEdge[] = []
 
   const agentNames = agents.map((a) => a.name)
@@ -146,33 +146,55 @@ function buildGraphElements(
   for (const agent of agents) {
     const files = agentFiles.get(agent.id)
 
-    // TOOLS.md → SkillNodes + ResourceNodes
+    // TOOLS.md → per-agent SkillNodes + ResourceNodes
     if (files?.toolsMd) {
       const { skills, resources } = parseToolsMd(files.toolsMd)
 
       for (const skill of skills) {
-        if (!skillMap.has(skill.id)) {
-          skillMap.set(skill.id, {
+        const nodeId = `skill-${agent.id}-${skill.id}`
+        skillNodes.push({
+          id: nodeId,
+          type: 'skill' as const,
+          data: {
             skillId: skill.id,
             name: skill.name,
             category: skill.category,
             description: skill.description,
-            agentIds: [],
-          })
-        }
-        skillMap.get(skill.id)!.agentIds.push(agent.id)
+            agentIds: [agent.id],
+          } satisfies SkillNodeData,
+          position: { x: 0, y: 0 },
+        })
+        skillEdges.push({
+          id: `skilledge-${agent.id}-${skill.id}`,
+          type: 'skill',
+          source: `boo-${agent.id}`,
+          sourceHandle: 'right',
+          target: nodeId,
+          data: {},
+        })
       }
 
       for (const resource of resources) {
-        if (!resourceMap.has(resource.id)) {
-          resourceMap.set(resource.id, {
+        const nodeId = `resource-${agent.id}-${resource.id}`
+        resourceNodes.push({
+          id: nodeId,
+          type: 'resource' as const,
+          data: {
             resourceId: resource.id,
             name: resource.name,
             serviceIcon: resource.serviceIcon,
-            agentIds: [],
-          })
-        }
-        resourceMap.get(resource.id)!.agentIds.push(agent.id)
+            agentIds: [agent.id],
+          } satisfies ResourceNodeData,
+          position: { x: 0, y: 0 },
+        })
+        resourceEdges.push({
+          id: `resourceedge-${agent.id}-${resource.id}`,
+          type: 'resource',
+          source: `boo-${agent.id}`,
+          sourceHandle: 'right',
+          target: nodeId,
+          data: {},
+        })
       }
     }
 
@@ -195,48 +217,6 @@ function buildGraphElements(
           data: {},
         })
       }
-    }
-  }
-
-  // SkillNodes + skill edges
-  const skillNodes: GraphNode[] = Array.from(skillMap.values()).map((skill) => ({
-    id: `skill-${skill.skillId}`,
-    type: 'skill' as const,
-    data: skill,
-    position: { x: 0, y: 0 },
-  }))
-
-  for (const skill of skillMap.values()) {
-    for (const agentId of skill.agentIds) {
-      skillEdges.push({
-        id: `skill-${agentId}-${skill.skillId}`,
-        type: 'skill',
-        source: `boo-${agentId}`,
-        sourceHandle: 'right',
-        target: `skill-${skill.skillId}`,
-        data: {},
-      })
-    }
-  }
-
-  // ResourceNodes + resource edges
-  const resourceNodes: GraphNode[] = Array.from(resourceMap.values()).map((resource) => ({
-    id: `resource-${resource.resourceId}`,
-    type: 'resource' as const,
-    data: resource,
-    position: { x: 0, y: 0 },
-  }))
-
-  for (const resource of resourceMap.values()) {
-    for (const agentId of resource.agentIds) {
-      resourceEdges.push({
-        id: `resource-${agentId}-${resource.resourceId}`,
-        type: 'resource',
-        source: `boo-${agentId}`,
-        sourceHandle: 'right',
-        target: `resource-${resource.resourceId}`,
-        data: {},
-      })
     }
   }
 
