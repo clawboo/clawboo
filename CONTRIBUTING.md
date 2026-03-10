@@ -19,6 +19,24 @@ pnpm install
 pnpm dev          # starts apps/web on :3000
 ```
 
+## Branching
+
+We use [GitHub Flow](https://docs.github.com/en/get-started/using-git/github-flow):
+
+1. Create a branch from `main` with a descriptive prefix:
+   - `feat/` — new feature
+   - `fix/` — bug fix
+   - `chore/` — tooling, CI, deps
+   - `docs/` — documentation
+   - `test/` — test additions
+   - `refactor/` — code restructuring
+
+2. Make your changes and push the branch.
+
+3. Open a pull request. The PR template will guide you through the checklist.
+
+4. CI must pass before merging. All PRs are squash-merged into `main`.
+
 ## Commands
 
 ```bash
@@ -102,7 +120,7 @@ Fix WebSocket reconnect race condition when the upstream closes unexpectedly.
 
 ## Release process (maintainers only)
 
-Releases are automated via the `release.yml` GitHub Actions workflow:
+Releases are automated via the `publish.yml` GitHub Actions workflow:
 
 1. When changesets land on `main`, the Changesets action opens (or updates) a **"Version Packages"** PR.
 2. That PR bumps `package.json` versions and updates `CHANGELOG.md` files for all affected packages.
