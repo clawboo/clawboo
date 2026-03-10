@@ -4,6 +4,7 @@
   <p><strong>Your AI agents, visible.</strong></p>
 
 [![npm version](https://img.shields.io/npm/v/clawboo?color=E94560&label=clawboo&style=flat-square)](https://www.npmjs.com/package/clawboo)
+[![CI](https://github.com/clawboo/clawboo/actions/workflows/ci.yml/badge.svg)](https://github.com/clawboo/clawboo/actions/workflows/ci.yml)
 [![GitHub Stars](https://img.shields.io/github/stars/clawboo/clawboo?style=flat-square&color=FBBF24)](https://github.com/clawboo/clawboo/stargazers)
 [![License: MIT](https://img.shields.io/badge/license-MIT-34D399?style=flat-square)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
