@@ -14,6 +14,7 @@ export interface BooNodeData extends Record<string, unknown> {
   status: AgentStatus
   model: string | null
   isStreaming: boolean
+  edgeCount?: number
 }
 
 export interface SkillNodeData extends Record<string, unknown> {

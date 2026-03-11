@@ -168,8 +168,9 @@ function buildGraphElements(
           id: `skilledge-${agent.id}-${skill.id}`,
           type: 'skill',
           source: `boo-${agent.id}`,
-          sourceHandle: 'right',
+          sourceHandle: 'center',
           target: nodeId,
+          targetHandle: 'center',
           data: {},
         })
       }
@@ -191,8 +192,9 @@ function buildGraphElements(
           id: `resourceedge-${agent.id}-${resource.id}`,
           type: 'resource',
           source: `boo-${agent.id}`,
-          sourceHandle: 'right',
+          sourceHandle: 'center',
           target: nodeId,
+          targetHandle: 'center',
           data: {},
         })
       }
@@ -213,15 +215,28 @@ function buildGraphElements(
           id: `dep-${agent.id}-${targetId}`,
           type: 'dependency',
           source: `boo-${agent.id}`,
+          sourceHandle: 'center',
           target: `boo-${targetId}`,
+          targetHandle: 'center-target',
           data: {},
         })
       }
     }
   }
 
+  // Compute edge counts per boo node for degree-aware sizing
+  const allEdges = [...depEdges, ...skillEdges, ...resourceEdges]
+  const edgeCounts = new Map<string, number>()
+  for (const edge of allEdges) {
+    edgeCounts.set(edge.source, (edgeCounts.get(edge.source) ?? 0) + 1)
+    edgeCounts.set(edge.target, (edgeCounts.get(edge.target) ?? 0) + 1)
+  }
+  for (const node of booNodes) {
+    ;(node.data as BooNodeData).edgeCount = edgeCounts.get(node.id) ?? 0
+  }
+
   return {
     rawNodes: [...booNodes, ...skillNodes, ...resourceNodes],
-    rawEdges: [...depEdges, ...skillEdges, ...resourceEdges],
+    rawEdges: allEdges,
   }
 }

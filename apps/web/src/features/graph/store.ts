@@ -57,6 +57,12 @@ interface GraphStore {
   /** When true, BooNode handles are always visible for easier edge drawing. */
   connectMode: boolean
   setConnectMode: (v: boolean) => void
+
+  /** Hover cascade — highlights hovered node's cluster, dims everything else. */
+  hoveredNodeId: string | null
+  highlightedNodeIds: Set<string> | null
+  highlightedEdgeIds: Set<string> | null
+  setHoveredNodeId: (id: string | null) => void
 }
 
 // ─── Store instance ───────────────────────────────────────────────────────────
@@ -120,4 +126,28 @@ export const useGraphStore = create<GraphStore>((set) => ({
 
   connectMode: false,
   setConnectMode: (v) => set({ connectMode: v }),
+
+  hoveredNodeId: null,
+  highlightedNodeIds: null,
+  highlightedEdgeIds: null,
+  setHoveredNodeId: (id) =>
+    set((state) => {
+      if (id === null) {
+        return { hoveredNodeId: null, highlightedNodeIds: null, highlightedEdgeIds: null }
+      }
+      const connectedNodes = new Set<string>([id])
+      const connectedEdges = new Set<string>()
+      for (const edge of state.edges) {
+        if (edge.source === id || edge.target === id) {
+          connectedNodes.add(edge.source)
+          connectedNodes.add(edge.target)
+          connectedEdges.add(edge.id)
+        }
+      }
+      return {
+        hoveredNodeId: id,
+        highlightedNodeIds: connectedNodes,
+        highlightedEdgeIds: connectedEdges,
+      }
+    }),
 }))
