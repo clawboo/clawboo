@@ -26,6 +26,7 @@ import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
 import { computeElkLayout } from './useGraphLayout'
+import { computeOrbitalPositions } from './computeOrbitalPositions'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
 import { ConnectionLine } from './edges/ConnectionLine'
@@ -84,9 +85,10 @@ export function GhostGraph() {
   useGraphData()
   const { savePositions } = useGraphPersistence()
 
-  // ── ELK auto-layout ──────────────────────────────────────────────────────────
-  // Runs once after ReactFlow measures node dimensions; re-runs when node count
-  // changes or when the user clicks "Re-layout" (layoutKey bump).
+  // ── Two-layer auto-layout ────────────────────────────────────────────────────
+  // Layer 1: ELK positions boo nodes using dependency edges only (async).
+  // Layer 2: Orbital positions skill/resource nodes around their parent boo (sync).
+  // Re-runs when node count changes or user clicks "Re-layout" (layoutKey bump).
   useEffect(() => {
     if (!nodesInitialized || nodes.length === 0) return
 
@@ -101,11 +103,24 @@ export function GhostGraph() {
 
     const generation = ++elkGenerationRef.current
 
-    void computeElkLayout(nodes, edges, savedPositions).then((layoutedNodes) => {
+    // Layer 1: Only boo nodes + dependency edges go through ELK
+    const booNodes = nodes.filter((n) => n.type === 'boo')
+    const nonBooNodes = nodes.filter((n) => n.type !== 'boo')
+    const depEdges = edges.filter((e) => e.type === 'dependency')
+
+    void computeElkLayout(booNodes, depEdges, savedPositions).then((layoutedBooNodes) => {
       // Skip stale results — a newer ELK computation has started
       if (generation !== elkGenerationRef.current) return
 
-      setNodes(layoutedNodes)
+      // Layer 2: Position skills/resources in orbital arcs around their parent boo
+      const orbitalNodes = computeOrbitalPositions(
+        layoutedBooNodes,
+        nonBooNodes,
+        edges, // full edges needed for parent-child mapping
+        savedPositions,
+      )
+
+      setNodes([...layoutedBooNodes, ...orbitalNodes])
       setHasRunLayout(true)
       requestAnimationFrame(() => {
         void fitView({ padding: 0.15, duration: 500 })
