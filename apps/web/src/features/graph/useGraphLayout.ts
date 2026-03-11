@@ -13,8 +13,11 @@ const elk = new ELK()
 const ELK_OPTIONS = {
   'elk.algorithm': 'layered',
   'elk.direction': 'DOWN',
-  'elk.spacing.nodeNode': '60',
-  'elk.layered.spacing.nodeNodeBetweenLayers': '110',
+  // Spacing accounts for orbital children (skills 130-160px, resources 180-220px from center).
+  // Same-layer (horizontal): 2×220 - boo_width(180) + margin ≈ 300
+  // Between-layers (vertical): 2×220 - boo_height(80) + margin ≈ 400
+  'elk.spacing.nodeNode': '300',
+  'elk.layered.spacing.nodeNodeBetweenLayers': '400',
   'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
   'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
   'elk.padding': '[top=40, left=40, bottom=40, right=40]',
@@ -24,14 +27,14 @@ const ELK_OPTIONS = {
 
 function defaultWidth(nodeType: string | undefined): number {
   if (nodeType === 'boo') return 180
-  if (nodeType === 'skill') return 140
+  if (nodeType === 'skill') return 100
   if (nodeType === 'resource') return 140
   return 160
 }
 
 function defaultHeight(nodeType: string | undefined): number {
   if (nodeType === 'boo') return 80
-  if (nodeType === 'skill') return 40
+  if (nodeType === 'skill') return 30
   if (nodeType === 'resource') return 64
   return 60
 }

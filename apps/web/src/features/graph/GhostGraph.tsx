@@ -26,6 +26,7 @@ import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
 import { computeElkLayout } from './useGraphLayout'
+import { computeOrbitalPositions } from './computeOrbitalPositions'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
 import { ConnectionLine } from './edges/ConnectionLine'
@@ -67,6 +68,7 @@ export function GhostGraph() {
     updateNodePosition,
     connectMode,
     setConnectMode,
+    setHoveredNodeId,
   } = useGraphStore()
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -83,9 +85,10 @@ export function GhostGraph() {
   useGraphData()
   const { savePositions } = useGraphPersistence()
 
-  // ── ELK auto-layout ──────────────────────────────────────────────────────────
-  // Runs once after ReactFlow measures node dimensions; re-runs when node count
-  // changes or when the user clicks "Re-layout" (layoutKey bump).
+  // ── Two-layer auto-layout ────────────────────────────────────────────────────
+  // Layer 1: ELK positions boo nodes using dependency edges only (async).
+  // Layer 2: Orbital positions skill/resource nodes around their parent boo (sync).
+  // Re-runs when node count changes or user clicks "Re-layout" (layoutKey bump).
   useEffect(() => {
     if (!nodesInitialized || nodes.length === 0) return
 
@@ -100,11 +103,24 @@ export function GhostGraph() {
 
     const generation = ++elkGenerationRef.current
 
-    void computeElkLayout(nodes, edges, savedPositions).then((layoutedNodes) => {
+    // Layer 1: Only boo nodes + dependency edges go through ELK
+    const booNodes = nodes.filter((n) => n.type === 'boo')
+    const nonBooNodes = nodes.filter((n) => n.type !== 'boo')
+    const depEdges = edges.filter((e) => e.type === 'dependency')
+
+    void computeElkLayout(booNodes, depEdges, savedPositions).then((layoutedBooNodes) => {
       // Skip stale results — a newer ELK computation has started
       if (generation !== elkGenerationRef.current) return
 
-      setNodes(layoutedNodes)
+      // Layer 2: Position skills/resources in orbital arcs around their parent boo
+      const orbitalNodes = computeOrbitalPositions(
+        layoutedBooNodes,
+        nonBooNodes,
+        edges, // full edges needed for parent-child mapping
+        savedPositions,
+      )
+
+      setNodes([...layoutedBooNodes, ...orbitalNodes])
       setHasRunLayout(true)
       requestAnimationFrame(() => {
         void fitView({ padding: 0.15, duration: 500 })
@@ -156,6 +172,18 @@ export function GhostGraph() {
     })
   }, [])
 
+  // ── Hover cascade handlers ────────────────────────────────────────────────
+  const onNodeMouseEnter: NodeMouseHandler<Node> = useCallback(
+    (_event, node) => {
+      setHoveredNodeId(node.id)
+    },
+    [setHoveredNodeId],
+  )
+
+  const onNodeMouseLeave: NodeMouseHandler<Node> = useCallback(() => {
+    setHoveredNodeId(null)
+  }, [setHoveredNodeId])
+
   const onConnect = useCallback(
     async (connection: Connection) => {
       const sourceNode = nodes.find((n) => n.id === connection.source)
@@ -202,7 +230,9 @@ export function GhostGraph() {
         id: `dep-${sourceAgentId}-${targetAgentId}`,
         type: 'dependency',
         source: connection.source,
+        sourceHandle: 'center',
         target: connection.target,
+        targetHandle: 'center-target',
         data: {},
       }
       const store = useGraphStore.getState()
@@ -264,7 +294,8 @@ export function GhostGraph() {
   const onPaneClick = useCallback(() => {
     setSelectedEdgeId(null)
     setContextMenu(null)
-  }, [setSelectedEdgeId])
+    setHoveredNodeId(null)
+  }, [setSelectedEdgeId, setHoveredNodeId])
 
   const handleDeleteEdge = useCallback(
     async (edgeId: string) => {
@@ -321,6 +352,8 @@ export function GhostGraph() {
         onEdgeClick={onEdgeClick}
         onNodeClick={onNodeClick}
         onNodeContextMenu={onNodeContextMenu}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
         onPaneClick={onPaneClick}
         onConnect={onConnect}
         isValidConnection={isValidConnection}
@@ -337,9 +370,9 @@ export function GhostGraph() {
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={22}
+          gap={32}
           size={1}
-          color="rgba(255,255,255,0.04)"
+          color="rgba(255,255,255,0.03)"
         />
         <Controls
           style={{
