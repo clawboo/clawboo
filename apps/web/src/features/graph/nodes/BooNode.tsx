@@ -67,12 +67,21 @@ const handleConnecting = {
   transition: 'opacity 0.15s, background 0.15s, width 0.15s, height 0.15s',
 }
 
-// ─── BooNode dimensions ───────────────────────────────────────────────────────
-// BooAvatar viewBox is 100×92 → aspect = 0.92
-// At BOO_W=60: BOO_H = round(60 × 0.92) = 55
-
-const BOO_W = 60
-const BOO_H = Math.round(BOO_W * 0.92) // 55
+// Invisible center handle style — used for edge path routing only
+const centerHandleStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: '50%',
+  left: '50%',
+  transform: 'translate(-50%, -50%)',
+  opacity: 0,
+  pointerEvents: 'none',
+  width: 1,
+  height: 1,
+  minWidth: 0,
+  minHeight: 0,
+  border: 'none',
+  background: 'transparent',
+}
 
 // ─── BooNode ──────────────────────────────────────────────────────────────────
 
@@ -94,6 +103,16 @@ export const BooNode = memo(function BooNode({
   )
   const lastSeenLabel = status !== 'running' ? formatLastSeen(lastSeenAt) : null
 
+  // Hover cascade — dim when another node is hovered
+  const isHighlighted = useGraphStore(
+    (s) => s.hoveredNodeId === null || (s.highlightedNodeIds?.has(`boo-${agentId}`) ?? false),
+  )
+
+  // Degree-aware sizing: +3px per connected edge, capped at +18px
+  const edgeCount = data.edgeCount ?? 0
+  const booW = Math.min(60 + edgeCount * 3, 78)
+  const booH = Math.round(booW * 0.92)
+
   // Drop-shadow animation driven by status
   const dropShadow = glow
     ? glow.pulse
@@ -106,28 +125,27 @@ export const BooNode = memo(function BooNode({
     : 'drop-shadow(0 0 0px rgba(0,0,0,0))'
 
   return (
-    // Node root: exactly BOO_W × BOO_H.
-    // overflow: visible lets the name + status label render below
-    // without inflating the React Flow measured size.
     <div
       className="group"
       style={{
-        width: BOO_W,
-        height: BOO_H,
+        width: booW,
+        height: booH,
         position: 'relative',
         overflow: 'visible',
         cursor: 'pointer',
+        opacity: isHighlighted ? 1 : 0.22,
+        transition: 'opacity 0.2s ease',
       }}
     >
       {/* ── BooAvatar + glow ──────────────────────────────────────────────── */}
       <motion.div
-        style={{ width: BOO_W, height: BOO_H, position: 'relative' }}
+        style={{ width: booW, height: booH, position: 'relative' }}
         animate={{ filter: dropShadow }}
         transition={
           glow?.pulse ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.4 }
         }
       >
-        <BooAvatar seed={agentId} size={BOO_W} />
+        <BooAvatar seed={agentId} size={booW} />
       </motion.div>
 
       {/* ── Approval alert ring (pulsing amber) ───────────────────────────── */}
@@ -163,7 +181,7 @@ export const BooNode = memo(function BooNode({
       <div
         style={{
           position: 'absolute',
-          top: BOO_H + 8,
+          top: booH + 8,
           left: '50%',
           transform: 'translateX(-50%)',
           fontSize: 12,
@@ -185,7 +203,7 @@ export const BooNode = memo(function BooNode({
       <div
         style={{
           position: 'absolute',
-          top: BOO_H + 26,
+          top: booH + 26,
           left: '50%',
           transform: 'translateX(-50%)',
           display: 'flex',
@@ -225,7 +243,7 @@ export const BooNode = memo(function BooNode({
         <div
           style={{
             position: 'absolute',
-            top: BOO_H + 40,
+            top: booH + 40,
             left: '50%',
             transform: 'translateX(-50%)',
             fontSize: 9,
@@ -238,8 +256,7 @@ export const BooNode = memo(function BooNode({
         </div>
       )}
 
-      {/* ── Handles ──────────────────────────────────────────────────────── */}
-      {/* Top: center of ghost head — target for incoming connections */}
+      {/* ── Interactive handles ─────────────────────────────────────────── */}
       <Handle
         type="target"
         position={Position.Top}
@@ -248,7 +265,6 @@ export const BooNode = memo(function BooNode({
         }
         style={isConnecting || connectMode ? handleConnecting : handleBase}
       />
-      {/* Bottom: between ghost bumps — source for outgoing connections */}
       <Handle
         type="source"
         position={Position.Bottom}
@@ -257,7 +273,6 @@ export const BooNode = memo(function BooNode({
         }
         style={isConnecting || connectMode ? handleConnecting : handleBase}
       />
-      {/* Right: ghost body mid-height — source for skill/resource edges */}
       <Handle
         type="source"
         id="right"
@@ -267,6 +282,10 @@ export const BooNode = memo(function BooNode({
         }
         style={isConnecting || connectMode ? handleConnecting : handleBase}
       />
+
+      {/* ── Center handles — invisible, for edge path routing only ──────── */}
+      <Handle id="center" type="source" position={Position.Top} style={centerHandleStyle} />
+      <Handle id="center-target" type="target" position={Position.Top} style={centerHandleStyle} />
     </div>
   )
 })

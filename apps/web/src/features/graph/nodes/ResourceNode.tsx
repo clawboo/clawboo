@@ -3,6 +3,7 @@
 import { memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
+import { useGraphStore } from '../store'
 import type { ResourceNodeData } from '../types'
 
 // ─── Handle style ─────────────────────────────────────────────────────────────
@@ -14,21 +15,44 @@ const handleStyle = {
   height: 7,
 }
 
+// Invisible center handle style — used for edge path routing only
+const centerHandleStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: '50%',
+  left: '50%',
+  transform: 'translate(-50%, -50%)',
+  opacity: 0,
+  pointerEvents: 'none',
+  width: 1,
+  height: 1,
+  minWidth: 0,
+  minHeight: 0,
+  border: 'none',
+  background: 'transparent',
+}
+
 // ─── ResourceNode — amber-tinted card with service icon ───────────────────────
 
 export const ResourceNode = memo(function ResourceNode({
+  id: nodeId,
   data,
 }: NodeProps<Node<ResourceNodeData, 'resource'>>) {
   const { name, serviceIcon } = data
 
+  // Hover cascade — dim when another node is hovered
+  const isHighlighted = useGraphStore(
+    (s) => s.hoveredNodeId === null || (s.highlightedNodeIds?.has(nodeId) ?? false),
+  )
+
   return (
-    // Node root: 64×70 card. Overflow visible for potential future labels.
     <div
       style={{
         width: 64,
         height: 70,
         position: 'relative',
         overflow: 'visible',
+        opacity: isHighlighted ? 1 : 0.22,
+        transition: 'opacity 0.2s ease',
       }}
     >
       <div
@@ -70,6 +94,9 @@ export const ResourceNode = memo(function ResourceNode({
 
       {/* Left handle — vertically centered (default 50% of 70px = 35px) */}
       <Handle type="target" position={Position.Left} style={handleStyle} />
+
+      {/* Center handle — invisible, for edge path routing only */}
+      <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />
     </div>
   )
 })

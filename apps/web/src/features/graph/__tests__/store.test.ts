@@ -17,6 +17,9 @@ describe('useGraphStore', () => {
       filesError: null,
       refreshKey: 0,
       connectMode: false,
+      hoveredNodeId: null,
+      highlightedNodeIds: null,
+      highlightedEdgeIds: null,
     })
   })
 
@@ -107,6 +110,53 @@ describe('useGraphStore', () => {
       useGraphStore.getState().updateNodePosition('n2', { x: 30, y: 40 })
       expect(useGraphStore.getState().savedPositions.n1).toEqual({ x: 10, y: 20 })
       expect(useGraphStore.getState().savedPositions.n2).toEqual({ x: 30, y: 40 })
+    })
+  })
+
+  describe('hover cascade', () => {
+    it('defaults to null', () => {
+      const s = useGraphStore.getState()
+      expect(s.hoveredNodeId).toBeNull()
+      expect(s.highlightedNodeIds).toBeNull()
+      expect(s.highlightedEdgeIds).toBeNull()
+    })
+
+    it('setHoveredNodeId(null) clears all hover state', () => {
+      useGraphStore.getState().setHoveredNodeId('boo-a1')
+      useGraphStore.getState().setHoveredNodeId(null)
+      const s = useGraphStore.getState()
+      expect(s.hoveredNodeId).toBeNull()
+      expect(s.highlightedNodeIds).toBeNull()
+      expect(s.highlightedEdgeIds).toBeNull()
+    })
+
+    it('populates connected sets from edges', () => {
+      useGraphStore.setState({
+        edges: [
+          { id: 'e1', source: 'boo-a1', target: 'skill-a1-bash', type: 'skill', data: {} },
+          { id: 'e2', source: 'boo-a1', target: 'boo-a2', type: 'dependency', data: {} },
+          { id: 'e3', source: 'boo-a2', target: 'skill-a2-web', type: 'skill', data: {} },
+        ],
+      })
+
+      useGraphStore.getState().setHoveredNodeId('boo-a1')
+      const s = useGraphStore.getState()
+
+      expect(s.hoveredNodeId).toBe('boo-a1')
+      expect(s.highlightedNodeIds).toEqual(new Set(['boo-a1', 'skill-a1-bash', 'boo-a2']))
+      expect(s.highlightedEdgeIds).toEqual(new Set(['e1', 'e2']))
+    })
+
+    it('hovering node with no edges highlights only itself', () => {
+      useGraphStore.setState({
+        edges: [{ id: 'e1', source: 'boo-a1', target: 'boo-a2', type: 'dependency', data: {} }],
+      })
+
+      useGraphStore.getState().setHoveredNodeId('boo-a3')
+      const s = useGraphStore.getState()
+
+      expect(s.highlightedNodeIds).toEqual(new Set(['boo-a3']))
+      expect(s.highlightedEdgeIds).toEqual(new Set())
     })
   })
 

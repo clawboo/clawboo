@@ -24,14 +24,14 @@ const ELK_OPTIONS = {
 
 function defaultWidth(nodeType: string | undefined): number {
   if (nodeType === 'boo') return 180
-  if (nodeType === 'skill') return 140
+  if (nodeType === 'skill') return 100
   if (nodeType === 'resource') return 140
   return 160
 }
 
 function defaultHeight(nodeType: string | undefined): number {
   if (nodeType === 'boo') return 80
-  if (nodeType === 'skill') return 40
+  if (nodeType === 'skill') return 30
   if (nodeType === 'resource') return 64
   return 60
 }

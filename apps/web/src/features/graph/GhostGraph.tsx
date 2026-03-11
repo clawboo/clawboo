@@ -67,6 +67,7 @@ export function GhostGraph() {
     updateNodePosition,
     connectMode,
     setConnectMode,
+    setHoveredNodeId,
   } = useGraphStore()
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -156,6 +157,18 @@ export function GhostGraph() {
     })
   }, [])
 
+  // ── Hover cascade handlers ────────────────────────────────────────────────
+  const onNodeMouseEnter: NodeMouseHandler<Node> = useCallback(
+    (_event, node) => {
+      setHoveredNodeId(node.id)
+    },
+    [setHoveredNodeId],
+  )
+
+  const onNodeMouseLeave: NodeMouseHandler<Node> = useCallback(() => {
+    setHoveredNodeId(null)
+  }, [setHoveredNodeId])
+
   const onConnect = useCallback(
     async (connection: Connection) => {
       const sourceNode = nodes.find((n) => n.id === connection.source)
@@ -202,7 +215,9 @@ export function GhostGraph() {
         id: `dep-${sourceAgentId}-${targetAgentId}`,
         type: 'dependency',
         source: connection.source,
+        sourceHandle: 'center',
         target: connection.target,
+        targetHandle: 'center-target',
         data: {},
       }
       const store = useGraphStore.getState()
@@ -264,7 +279,8 @@ export function GhostGraph() {
   const onPaneClick = useCallback(() => {
     setSelectedEdgeId(null)
     setContextMenu(null)
-  }, [setSelectedEdgeId])
+    setHoveredNodeId(null)
+  }, [setSelectedEdgeId, setHoveredNodeId])
 
   const handleDeleteEdge = useCallback(
     async (edgeId: string) => {
@@ -321,6 +337,8 @@ export function GhostGraph() {
         onEdgeClick={onEdgeClick}
         onNodeClick={onNodeClick}
         onNodeContextMenu={onNodeContextMenu}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
         onPaneClick={onPaneClick}
         onConnect={onConnect}
         isValidConnection={isValidConnection}
@@ -337,9 +355,9 @@ export function GhostGraph() {
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={22}
+          gap={32}
           size={1}
-          color="rgba(255,255,255,0.04)"
+          color="rgba(255,255,255,0.03)"
         />
         <Controls
           style={{
