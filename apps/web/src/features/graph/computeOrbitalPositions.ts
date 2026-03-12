@@ -13,7 +13,7 @@ function fnv1a(str: string): number {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const SKILL_RADIUS = { min: 130, max: 160 }
+const SKILL_RADIUS = { min: 100, max: 190 }
 const RESOURCE_RADIUS = { min: 180, max: 220 }
 const JITTER_RANGE = 12
 

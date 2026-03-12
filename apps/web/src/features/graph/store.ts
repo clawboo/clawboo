@@ -63,6 +63,10 @@ interface GraphStore {
   highlightedNodeIds: Set<string> | null
   highlightedEdgeIds: Set<string> | null
   setHoveredNodeId: (id: string | null) => void
+
+  /** Called by physics engine when a Boo node is dragged. Set by GhostGraph on mount. */
+  _physicsWakeCallback: (() => void) | null
+  setPhysicsWakeCallback: (cb: (() => void) | null) => void
 }
 
 // ─── Store instance ───────────────────────────────────────────────────────────
@@ -95,10 +99,18 @@ export const useGraphStore = create<GraphStore>((set) => ({
   setEdges: (edges) => set({ edges }),
   setHasRunLayout: (v) => set({ hasRunLayout: v }),
 
-  onNodesChange: (changes) =>
+  onNodesChange: (changes) => {
+    const cb = useGraphStore.getState()._physicsWakeCallback
+    const shouldWake =
+      cb &&
+      changes.some(
+        (c) => c.type === 'position' && c.id.startsWith('boo-') && 'position' in c && c.position,
+      )
     set((state) => ({
       nodes: applyNodeChanges(changes, state.nodes) as GraphNode[],
-    })),
+    }))
+    if (shouldWake && cb) cb()
+  },
 
   onEdgesChange: (changes) =>
     set((state) => ({
@@ -126,6 +138,9 @@ export const useGraphStore = create<GraphStore>((set) => ({
 
   connectMode: false,
   setConnectMode: (v) => set({ connectMode: v }),
+
+  _physicsWakeCallback: null,
+  setPhysicsWakeCallback: (cb) => set({ _physicsWakeCallback: cb }),
 
   hoveredNodeId: null,
   highlightedNodeIds: null,
