@@ -1,279 +1,233 @@
-// Procedural SVG avatar generator for Clawboo's Boo characters.
-// viewBox: 0 0 100 92
-// Every Boo has:
-//   - Ghost body: rounded blob dome + 3 soft wavy bottom bumps, solid color fill
-//   - Antennae: two curved organic lines (no ball tips)
-//   - Arms: round bumps on each side of the body
-//   - Eyes: 5 variants (0=classic, 1=surprised, 2=dot, 3=sleepy, 4=x) with mint pupils
-//   - Accessory: none | glasses | hat | bowtie | headphones | crown
-// All variation is deterministic from the seed hash.
+/**
+ * Clawboo Procedural Avatar Generator (V3 — OpenClaw-matched)
+ *
+ * Generates a unique ghost-lobster SVG avatar per agent seed.
+ * Uses FNV-1a hash + xorshift32 PRNG for deterministic output.
+ *
+ * ViewBox: 0 0 100 92 — matches BooNode (60x55) and FleetSidebar (36x33) sizing.
+ */
+
+// ─── Types ───────────────────────────────────────────────────────
 
 export type EyeShape = 0 | 1 | 2 | 3 | 4
 
-export type Accessory = 'none' | 'glasses' | 'hat' | 'bowtie' | 'headphones' | 'crown'
+export type Accessory = 'none' | 'glasses' | 'hat' | 'headphones' | 'crown'
 
 export interface BooAvatarParams {
-  /** Deterministic seed — typically the agent name or id */
   seed: string
-  /** Body tint color (hex). Derived from seed hash if omitted. */
   tint?: string
-  /** Eye variant 0–4 */
   eyeShape?: EyeShape
-  /** Accessory decoration */
   accessory?: Accessory
 }
 
-// ─── Hashing + PRNG ──────────────────────────────────────────────────────────
-
-/** FNV-1a 32-bit hash */
-function fnv1a(s: string): number {
-  let h = 0x811c9dc5
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i)
-    h = Math.imul(h, 0x01000193)
-    h >>>= 0
-  }
-  return h >>> 0
-}
-
-/** Xorshift32 PRNG seeded from hash */
-function seededRng(seed: number): () => number {
-  let s = seed >>> 0 || 1 // must be non-zero
-  return function next(): number {
-    s ^= s << 13
-    s ^= s >>> 17
-    s ^= s << 5
-    s = s >>> 0
-    return s / 4294967296
-  }
-}
-
-// ─── Color palette ────────────────────────────────────────────────────────────
+// ─── Constants ───────────────────────────────────────────────────
 
 const TINTS = [
-  '#E94560', // accent red
-  '#34D399', // mint green
+  '#ff4d4d', // OpenClaw red (default)
+  '#34D399', // mint
   '#FBBF24', // amber
   '#60A5FA', // blue
   '#A78BFA', // purple
   '#F472B6', // pink
   '#38BDF8', // sky
   '#FB923C', // orange
-  '#4ADE80', // lime
-  '#F87171', // rose
+  '#A3E635', // lime
+  '#FB7185', // rose
 ] as const
 
-function deriveColor(h: number): string {
-  return TINTS[Math.abs(h) % TINTS.length]!
+// ─── Hash & PRNG ─────────────────────────────────────────────────
+
+function fnv1a(str: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return h >>> 0
 }
 
-// ─── Ghost body path ──────────────────────────────────────────────────────────
-// Rounded blob dome with curved sides and 3 soft bottom bumps.
-// Body occupies roughly x=[12..88], y=[16..80] within the 100×92 viewBox.
-
-const GHOST_BODY = [
-  'M50,16',
-  'C30,16 12,28 12,46',
-  'C12,56 14,64 20,72',
-  'C26,80 34,72 42,70',
-  'C46,80 54,80 58,70',
-  'C64,72 74,80 80,72',
-  'C86,64 88,56 88,46',
-  'C88,28 70,16 50,16',
-  'Z',
-].join(' ')
-
-// ─── Eyes ─────────────────────────────────────────────────────────────────────
-
-function renderEyes(shape: EyeShape, _tint: string): string {
-  const lx = 38,
-    ly = 42,
-    rx = 62,
-    ry = 42
-
-  switch (shape) {
-    case 0: // Classic oval eyes with dark sclera + cyan/mint pupil + highlight
-      return (
-        `<ellipse cx="${lx}" cy="${ly}" rx="8" ry="9.5" fill="rgba(10,14,26,0.92)"/>` +
-        `<circle cx="${lx}" cy="${ly + 0.5}" r="3.2" fill="#34D399"/>` +
-        `<circle cx="${lx - 1.5}" cy="${ly - 2.5}" r="1.3" fill="rgba(255,255,255,0.55)"/>` +
-        `<ellipse cx="${rx}" cy="${ry}" rx="8" ry="9.5" fill="rgba(10,14,26,0.92)"/>` +
-        `<circle cx="${rx}" cy="${ry + 0.5}" r="3.2" fill="#34D399"/>` +
-        `<circle cx="${rx - 1.5}" cy="${ry - 2.5}" r="1.3" fill="rgba(255,255,255,0.55)"/>`
-      )
-
-    case 1: // Wide surprised eyes — bigger sclera, larger pupils
-      return (
-        `<ellipse cx="${lx}" cy="${ly}" rx="9.5" ry="10.5" fill="rgba(10,14,26,0.92)"/>` +
-        `<circle cx="${lx}" cy="${ly}" r="4.2" fill="#34D399"/>` +
-        `<circle cx="${lx - 2}" cy="${ly - 2.5}" r="1.8" fill="rgba(255,255,255,0.6)"/>` +
-        `<ellipse cx="${rx}" cy="${ry}" rx="9.5" ry="10.5" fill="rgba(10,14,26,0.92)"/>` +
-        `<circle cx="${rx}" cy="${ry}" r="4.2" fill="#34D399"/>` +
-        `<circle cx="${rx - 2}" cy="${ry - 2.5}" r="1.8" fill="rgba(255,255,255,0.6)"/>`
-      )
-
-    case 2: // Minimal round dot eyes
-      return (
-        `<circle cx="${lx}" cy="${ly}" r="6" fill="rgba(10,14,26,0.92)"/>` +
-        `<circle cx="${lx + 0.5}" cy="${ly + 0.5}" r="2.5" fill="#34D399"/>` +
-        `<circle cx="${rx}" cy="${ry}" r="6" fill="rgba(10,14,26,0.92)"/>` +
-        `<circle cx="${rx + 0.5}" cy="${ry + 0.5}" r="2.5" fill="#34D399"/>`
-      )
-
-    case 3: // Sleepy half-arc eyes (curved stroke + faint mint accent below)
-      return (
-        `<path d="M${lx - 8},${ly + 1} Q${lx},${ly - 6} ${lx + 8},${ly + 1}" fill="rgba(10,14,26,0.25)" stroke="rgba(10,14,26,0.85)" stroke-width="2.5" stroke-linecap="round"/>` +
-        `<circle cx="${lx}" cy="${ly + 3}" r="1.5" fill="#34D399" fill-opacity="0.5"/>` +
-        `<path d="M${rx - 8},${ry + 1} Q${rx},${ry - 6} ${rx + 8},${ry + 1}" fill="rgba(10,14,26,0.25)" stroke="rgba(10,14,26,0.85)" stroke-width="2.5" stroke-linecap="round"/>` +
-        `<circle cx="${rx}" cy="${ry + 3}" r="1.5" fill="#34D399" fill-opacity="0.5"/>`
-      )
-
-    case 4: // X eyes (dizzy) — dark ovals with mint X marks
-      return (
-        `<ellipse cx="${lx}" cy="${ly}" rx="8" ry="9" fill="rgba(10,14,26,0.88)"/>` +
-        `<line x1="${lx - 4}" y1="${ly - 4.5}" x2="${lx + 4}" y2="${ly + 4.5}" stroke="#34D399" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.85"/>` +
-        `<line x1="${lx + 4}" y1="${ly - 4.5}" x2="${lx - 4}" y2="${ly + 4.5}" stroke="#34D399" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.85"/>` +
-        `<ellipse cx="${rx}" cy="${ry}" rx="8" ry="9" fill="rgba(10,14,26,0.88)"/>` +
-        `<line x1="${rx - 4}" y1="${ry - 4.5}" x2="${rx + 4}" y2="${ry + 4.5}" stroke="#34D399" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.85"/>` +
-        `<line x1="${rx + 4}" y1="${ry - 4.5}" x2="${rx - 4}" y2="${ry + 4.5}" stroke="#34D399" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.85"/>`
-      )
-
-    default:
-      return renderEyes(0, _tint)
+function createRng(seed: number): () => number {
+  let s = seed || 1
+  return () => {
+    s ^= s << 13
+    s ^= s >> 17
+    s ^= s << 5
+    return (s >>> 0) / 0xffffffff
   }
 }
 
-// ─── Accessories ──────────────────────────────────────────────────────────────
+// ─── Color helpers ───────────────────────────────────────────────
 
-function renderAccessory(kind: Accessory, tint: string): string {
-  switch (kind) {
-    case 'none':
-      return ''
+function darkenHex(hex: string, factor: number): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  const dr = Math.round(r * factor)
+  const dg = Math.round(g * factor)
+  const db = Math.round(b * factor)
+  return `#${dr.toString(16).padStart(2, '0')}${dg.toString(16).padStart(2, '0')}${db.toString(16).padStart(2, '0')}`
+}
 
+// ─── Eye renderers ───────────────────────────────────────────────
+
+function renderEyes(
+  shape: EyeShape,
+  lx: number,
+  ly: number,
+  rx: number,
+  ry: number,
+  pupilColor: string,
+  pupilOffsetX: number,
+  pupilOffsetY: number,
+): string {
+  switch (shape) {
+    case 0: // OpenClaw-style: small dark circles with colored pupils
+      return (
+        `<circle cx="${lx}" cy="${ly}" r="5" fill="#050810"/>` +
+        `<circle cx="${lx + 1 + pupilOffsetX * 0.5}" cy="${ly - 1 + pupilOffsetY * 0.5}" r="2" fill="${pupilColor}"/>` +
+        `<circle cx="${rx}" cy="${ry}" r="5" fill="#050810"/>` +
+        `<circle cx="${rx + 1 + pupilOffsetX * 0.5}" cy="${ry - 1 + pupilOffsetY * 0.5}" r="2" fill="${pupilColor}"/>`
+      )
+    case 1: // Surprised (round, slightly larger)
+      return (
+        `<circle cx="${lx}" cy="${ly}" r="6" fill="#050810"/>` +
+        `<circle cx="${lx + pupilOffsetX * 0.5}" cy="${ly + pupilOffsetY * 0.5}" r="2.5" fill="${pupilColor}"/>` +
+        `<circle cx="${rx}" cy="${ry}" r="6" fill="#050810"/>` +
+        `<circle cx="${rx + pupilOffsetX * 0.5}" cy="${ry + pupilOffsetY * 0.5}" r="2.5" fill="${pupilColor}"/>`
+      )
+    case 2: // Dot (small beady)
+      return (
+        `<circle cx="${lx}" cy="${ly}" r="3.5" fill="#050810"/>` +
+        `<circle cx="${lx + pupilOffsetX * 0.3}" cy="${ly + pupilOffsetY * 0.3}" r="1.2" fill="${pupilColor}"/>` +
+        `<circle cx="${rx}" cy="${ry}" r="3.5" fill="#050810"/>` +
+        `<circle cx="${rx + pupilOffsetX * 0.3}" cy="${ry + pupilOffsetY * 0.3}" r="1.2" fill="${pupilColor}"/>`
+      )
+    case 3: // Sleepy arc
+      return (
+        `<path d="M${lx - 5},${ly + 1} Q${lx},${ly - 6} ${lx + 5},${ly + 1}" fill="none" stroke="#050810" stroke-width="2.5" stroke-linecap="round"/>` +
+        `<path d="M${rx - 5},${ry + 1} Q${rx},${ry - 6} ${rx + 5},${ry + 1}" fill="none" stroke="#050810" stroke-width="2.5" stroke-linecap="round"/>`
+      )
+    case 4: // X (dizzy)
+      return (
+        `<path d="M${lx - 3.5},${ly - 3.5} L${lx + 3.5},${ly + 3.5} M${lx + 3.5},${ly - 3.5} L${lx - 3.5},${ly + 3.5}" stroke="#050810" stroke-width="2.5" stroke-linecap="round"/>` +
+        `<path d="M${rx - 3.5},${ry - 3.5} L${rx + 3.5},${ry + 3.5} M${rx + 3.5},${ry - 3.5} L${rx - 3.5},${ry + 3.5}" stroke="#050810" stroke-width="2.5" stroke-linecap="round"/>`
+      )
+    default:
+      return renderEyes(0, lx, ly, rx, ry, pupilColor, pupilOffsetX, pupilOffsetY)
+  }
+}
+
+// ─── Accessory renderers ─────────────────────────────────────────
+
+function renderAccessory(acc: Accessory, tint: string): string {
+  switch (acc) {
     case 'glasses':
       return (
-        // Left lens
-        `<rect x="26" y="36" width="18" height="14" rx="5" fill="none" stroke="${tint}" stroke-width="1.8" stroke-opacity="0.85"/>` +
-        // Right lens
-        `<rect x="56" y="36" width="18" height="14" rx="5" fill="none" stroke="${tint}" stroke-width="1.8" stroke-opacity="0.85"/>` +
-        // Bridge
-        `<line x1="44" y1="43" x2="56" y2="43" stroke="${tint}" stroke-width="1.8" stroke-opacity="0.85"/>` +
-        // Left arm
-        `<line x1="26" y1="42" x2="18" y2="39" stroke="${tint}" stroke-width="1.8" stroke-linecap="round" stroke-opacity="0.85"/>` +
-        // Right arm
-        `<line x1="74" y1="42" x2="82" y2="39" stroke="${tint}" stroke-width="1.8" stroke-linecap="round" stroke-opacity="0.85"/>`
+        `<circle cx="38" cy="36" r="8" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.8"/>` +
+        `<circle cx="62" cy="36" r="8" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.8"/>` +
+        `<path d="M46,36 L54,36" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>`
       )
-
-    case 'hat':
+    case 'hat': {
+      const dark = darkenHex(tint, 0.6)
       return (
-        // Wide brim rests on ghost head top
-        `<rect x="18" y="13" width="64" height="6" rx="2" fill="${tint}" fill-opacity="0.9"/>` +
-        // Tall crown
-        `<rect x="33" y="1" width="34" height="14" rx="3" fill="${tint}" fill-opacity="0.85"/>` +
-        // Hat band
-        `<rect x="33" y="10" width="34" height="4" rx="0" fill="rgba(255,255,255,0.18)"/>`
+        `<rect x="30" y="6" width="40" height="8" rx="2" fill="${dark}"/>` +
+        `<rect x="38" y="-2" width="24" height="10" rx="3" fill="${dark}"/>`
       )
-
-    case 'bowtie':
-      return (
-        // Left wing
-        `<polygon points="39,60 50,65 39,70" fill="${tint}" fill-opacity="0.85"/>` +
-        // Right wing
-        `<polygon points="61,60 50,65 61,70" fill="${tint}" fill-opacity="0.85"/>` +
-        // Center knot
-        `<circle cx="50" cy="65" r="3.5" fill="${tint}" fill-opacity="0.95"/>`
-      )
-
+    }
     case 'headphones':
       return (
-        // Arc over head
-        `<path d="M20,42 C20,22 80,22 80,42" fill="none" stroke="${tint}" stroke-width="3" stroke-linecap="round" stroke-opacity="0.85"/>` +
-        // Left ear cup
-        `<rect x="14" y="40" width="12" height="16" rx="5" fill="${tint}" fill-opacity="0.85"/>` +
-        // Right ear cup
-        `<rect x="74" y="40" width="12" height="16" rx="5" fill="${tint}" fill-opacity="0.85"/>` +
-        // Left cup highlight
-        `<ellipse cx="20" cy="48" rx="3.5" ry="4" fill="rgba(255,255,255,0.22)"/>` +
-        // Right cup highlight
-        `<ellipse cx="80" cy="48" rx="3.5" ry="4" fill="rgba(255,255,255,0.22)"/>`
+        `<path d="M16,30 C16,16 84,16 84,30" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="3"/>` +
+        `<rect x="10" y="26" width="8" height="14" rx="4" fill="rgba(255,255,255,0.2)"/>` +
+        `<rect x="82" y="26" width="8" height="14" rx="4" fill="rgba(255,255,255,0.2)"/>`
       )
-
     case 'crown':
       return (
-        // Crown body with 3 points
-        `<path d="M26,19 L26,9 L38,16 L50,5 L62,16 L74,9 L74,19 Z" fill="${tint}" fill-opacity="0.9"/>` +
-        // Gem at left point
-        `<circle cx="26" cy="9" r="2.5" fill="rgba(255,255,255,0.85)"/>` +
-        // Gem at center point
-        `<circle cx="50" cy="5" r="2.5" fill="rgba(255,255,255,0.85)"/>` +
-        // Gem at right point
-        `<circle cx="74" cy="9" r="2.5" fill="rgba(255,255,255,0.85)"/>` +
-        // Crown band
-        `<rect x="26" y="17" width="48" height="3" fill="${tint}" fill-opacity="0.7"/>`
+        `<path d="M40,14 L40,10 L44,5 L47,10 L50,3 L53,10 L56,5 L60,10 L60,14 Z" fill="#FBBF24" fill-opacity="0.75"/>` +
+        `<circle cx="44" cy="5" r="1.2" fill="#FDE68A"/>` +
+        `<circle cx="50" cy="3" r="1.2" fill="#FDE68A"/>` +
+        `<circle cx="56" cy="5" r="1.2" fill="#FDE68A"/>`
       )
-
     default:
       return ''
   }
 }
 
-// ─── Main generator ───────────────────────────────────────────────────────────
+// ─── Main generator ──────────────────────────────────────────────
 
-/**
- * Generate a Boo avatar SVG string.
- * @returns Raw SVG markup, suitable for innerHTML or data: URL.
- */
 export function generateBooAvatar(params: BooAvatarParams): string {
   const { seed } = params
   const h = fnv1a(seed)
-  const rng = seededRng(h)
+  const rng = createRng(h)
 
-  const tint = params.tint ?? deriveColor(h)
-  const eyeShape: EyeShape = params.eyeShape ?? ((Math.abs(h) % 5) as EyeShape)
-  const acc: Accessory = params.accessory ?? 'none'
+  // Unique gradient IDs to prevent SVG collisions
+  const uid = (h >>> 0).toString(16).padStart(8, '0')
+  const gidBody = `boo-body-${uid}`
 
-  // Per-seed variation — makes each Boo subtly unique
-  const armR = (4.5 + rng() * 1.5).toFixed(1)
-  const antTipXL = (rng() * 4 - 2).toFixed(1)
-  const antTipYL = (rng() * 3 - 1.5).toFixed(1)
-  const antTipXR = (rng() * 4 - 2).toFixed(1)
-  const antTipYR = (rng() * 3 - 1.5).toFixed(1)
-  const highlightOpacity = (0.1 + rng() * 0.06).toFixed(3)
+  // Resolve tint (OpenClaw red as default)
+  const tint = params.tint ?? TINTS[Math.abs(h) % TINTS.length]
+  const tintDark = darkenHex(tint, 0.6)
 
-  // Unique gradient ID — prevents conflicts when multiple Boos are inlined in the same document
-  const gid = `boo-${(h >>> 0).toString(16).padStart(8, '0')}`
+  // Per-seed variations
+  const clawScale = (0.9 + rng() * 0.15).toFixed(2)
+  const antennaTipLX = (24 + rng() * 4).toFixed(1)
+  const antennaTipRX = (72 + rng() * 4).toFixed(1)
+  const antennaTipLY = (9 + rng() * 3).toFixed(1)
+  const antennaTipRY = (9 + rng() * 3).toFixed(1)
+  const pupilOffsetX = (rng() - 0.5) * 1.2
+  const pupilOffsetY = (rng() - 0.5) * 0.8
+  const bodyOpacity = (0.96 + rng() * 0.04).toFixed(2)
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 92" width="100" height="92" aria-hidden="true">
-  <defs>
-    <radialGradient id="${gid}" cx="38%" cy="28%" r="65%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="${highlightOpacity}"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <!-- Antennae (behind body) -->
-  <path d="M38,20 C36,12 ${30 + Number(antTipXL)},${5 + Number(antTipYL)} ${24 + Number(antTipXL)},3" fill="none" stroke="${tint}" stroke-width="1.8" stroke-linecap="round" stroke-opacity="0.6"/>
-  <path d="M62,20 C64,12 ${70 + Number(antTipXR)},${5 + Number(antTipYR)} ${76 + Number(antTipXR)},3" fill="none" stroke="${tint}" stroke-width="1.8" stroke-linecap="round" stroke-opacity="0.6"/>
-  <!-- Arm bumps (behind body) -->
-  <circle cx="10" cy="48" r="${armR}" fill="${tint}" fill-opacity="0.75"/>
-  <circle cx="90" cy="48" r="${armR}" fill="${tint}" fill-opacity="0.75"/>
-  <!-- Ghost body (solid fill) -->
-  <path d="${GHOST_BODY}" fill="${tint}" stroke="none"/>
-  <!-- Depth: highlight overlay -->
-  <path d="${GHOST_BODY}" fill="url(#${gid})" stroke="none"/>
-  <!-- Depth: body shine -->
-  <ellipse cx="36" cy="28" rx="10" ry="7" fill="rgba(255,255,255,0.07)" transform="rotate(-15,36,28)"/>
-  <!-- Depth: bottom shadow -->
-  <ellipse cx="50" cy="76" rx="18" ry="3.5" fill="rgba(0,0,0,0.06)"/>
-  <!-- Eyes -->
-  ${renderEyes(eyeShape, tint)}
-  <!-- Accessory -->
-  ${renderAccessory(acc, tint)}</svg>`
+  // Resolve eye shape
+  const eyeShape: EyeShape = params.eyeShape ?? ((Math.abs(h >> 8) % 5) as EyeShape)
+
+  // Resolve accessory
+  const accList: Accessory[] = ['none', 'glasses', 'hat', 'headphones', 'crown']
+  const accessory: Accessory = params.accessory ?? accList[Math.abs(h >> 16) % accList.length]
+
+  // Pupil color — cyan for OpenClaw red, white for all other tints
+  const pupilColor = tint === '#ff4d4d' ? '#00e5cc' : '#ffffff'
+
+  // ── Build SVG ──
+
+  const defs =
+    `<defs>` +
+    `<linearGradient id="${gidBody}" x1="0%" y1="0%" x2="100%" y2="100%">` +
+    `<stop offset="0%" stop-color="${tint}"/>` +
+    `<stop offset="100%" stop-color="${tintDark}"/>` +
+    `</linearGradient>` +
+    `</defs>`
+
+  // Antennae (OpenClaw-style: Q-curves, rendered ON TOP of body)
+  const antennae =
+    `<path d="M38,17 Q30,8 ${antennaTipLX},${antennaTipLY}" fill="none" stroke="${tint}" stroke-width="2.5" stroke-linecap="round"/>` +
+    `<path d="M62,17 Q70,8 ${antennaTipRX},${antennaTipRY}" fill="none" stroke="${tint}" stroke-width="2.5" stroke-linecap="round"/>`
+
+  // Ghost body — 3 bumps (OpenClaw-matched silhouette)
+  const bodyPath = `M50,12 C30,12 16,30 16,48 C16,58 18,66 22,72 C24,76 26,78 29,78 C32,78 33,75 35,73.5 C37,72 39,71.5 41,71.5 C43,71.5 45,72 46,73.5 C48,75 50,78 52,78 C55,78 56,75 58,73.5 C60,72 62,71.5 64,71.5 C66,71.5 67,72 68,73.5 C70,75 72,78 75,78 C78,78 80,74 82,66 C84,58 84,48 84,48 C84,30 70,12 50,12 Z`
+
+  const body = `<path d="${bodyPath}" fill="url(#${gidBody})" opacity="${bodyOpacity}"/>`
+
+  // Claws (OpenClaw pincer shape, tucked into body, scaled per seed)
+  const cs = parseFloat(clawScale)
+  const clawLX = (20 - (1 - cs) * 3).toFixed(1)
+  const clawRX = (80 + (1 - cs) * 3).toFixed(1)
+  const claws =
+    `<path d="M${clawLX},40 C${7 * cs},36 ${3 * cs},43 ${7 * cs},51 C${11 * cs},59 ${clawLX},55 ${Number(clawLX) + 4},47 C${Number(clawLX) + 6},42 ${Number(clawLX) + 4},40 ${clawLX},40Z" fill="url(#${gidBody})"/>` +
+    `<path d="M${clawRX},40 C${100 - 7 * cs},36 ${100 - 3 * cs},43 ${100 - 7 * cs},51 C${100 - 11 * cs},59 ${clawRX},55 ${Number(clawRX) - 4},47 C${Number(clawRX) - 6},42 ${Number(clawRX) - 4},40 ${clawRX},40Z" fill="url(#${gidBody})"/>`
+
+  // Eyes (positions: 38,36 and 62,36)
+  const eyes = renderEyes(eyeShape, 38, 36, 62, 36, pupilColor, pupilOffsetX, pupilOffsetY)
+
+  // Accessory
+  const acc = renderAccessory(accessory, tint)
+
+  // Render order: body → claws → antennae (on top) → eyes → accessory
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 92" width="100" height="92" aria-hidden="true">${defs}${body}${claws}${antennae}${eyes}${acc}</svg>`
 }
 
-/**
- * Convert a string to a data: URL for use in <img> src.
- */
-export function booAvatarToDataUrl(svg: string): string {
-  const encoded = encodeURIComponent(svg)
-  return `data:image/svg+xml,${encoded}`
+// ─── Data URL helper ─────────────────────────────────────────────
+
+export function booAvatarToDataUrl(params: BooAvatarParams): string {
+  const svg = generateBooAvatar(params)
+  return `data:image/svg+xml;base64,${btoa(svg)}`
 }

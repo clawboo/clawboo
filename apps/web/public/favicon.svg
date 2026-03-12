@@ -1,10 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <!-- Simplified Clawboo mascot for favicon use -->
-  <!-- Body (scaled to fit 32x32, centered) -->
-  <path d="M16,5 C10,5 4,9 4,15 C4,18 5,21 7,23 C9,26 11,23 14,23 C15,26 17,26 19,23 C21,23 23,26 25,23 C28,21 28,18 28,15 C28,9 22,5 16,5 Z" fill="#E94560" stroke="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-5 -2 110 110" width="32" height="32">
+  <defs>
+    <linearGradient id="clawboo-body" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff4d4d"/>
+      <stop offset="100%" stop-color="#991b1b"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Ghost body -->
+  <path d="M50,12
+           C30,12 16,30 16,48
+           C16,58 18,66 22,72
+           C24,76 26,78 29,78
+           C32,78 33,75 35,73.5
+           C37,72 39,71.5 41,71.5
+           C43,71.5 45,72 46,73.5
+           C48,75 50,78 52,78
+           C55,78 56,75 58,73.5
+           C60,72 62,71.5 64,71.5
+           C66,71.5 67,72 68,73.5
+           C70,75 72,78 75,78
+           C78,78 80,74 82,66
+           C84,58 84,48 84,48
+           C84,30 70,12 50,12 Z"
+        fill="url(#clawboo-body)"/>
+
+  <!-- Claws -->
+  <path d="M20,40 C7,36 3,43 7,51 C11,59 20,55 24,47 C26,42 24,40 20,40Z" fill="url(#clawboo-body)"/>
+  <path d="M80,40 C93,36 97,43 93,51 C89,59 80,55 76,47 C74,42 76,40 80,40Z" fill="url(#clawboo-body)"/>
+
+  <!-- Antennae -->
+  <path d="M38,17 Q30,8 26,10" fill="none" stroke="#ff4d4d" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M62,17 Q70,8 74,10" fill="none" stroke="#ff4d4d" stroke-width="2.5" stroke-linecap="round"/>
+
   <!-- Eyes -->
-  <ellipse cx="12" cy="14" rx="2.6" ry="3" fill="rgba(10,14,26,0.92)"/>
-  <circle cx="12" cy="14.2" r="1" fill="#34D399"/>
-  <ellipse cx="20" cy="14" rx="2.6" ry="3" fill="rgba(10,14,26,0.92)"/>
-  <circle cx="20" cy="14.2" r="1" fill="#34D399"/>
+  <circle cx="38" cy="36" r="5" fill="#050810"/>
+  <circle cx="39" cy="35" r="2" fill="#00e5cc"/>
+  <circle cx="62" cy="36" r="5" fill="#050810"/>
+  <circle cx="63" cy="35" r="2" fill="#00e5cc"/>
 </svg>
