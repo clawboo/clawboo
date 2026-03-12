@@ -40,6 +40,7 @@ import { useEditorStore } from '@/stores/editor'
 import { GraphContextMenu } from './GraphContextMenu'
 import { installSkillForAgent } from './operations/installSkill'
 import { removeRouting } from './operations/removeRouting'
+import { graphPhysics } from './graphPhysics'
 import type { BooNodeData, SkillNodeData, GraphEdge } from './types'
 
 interface ContextMenuState {
@@ -85,6 +86,15 @@ export function GhostGraph() {
   useGraphData()
   const { savePositions } = useGraphPersistence()
 
+  // Wire physics wake callback — when a boo node is dragged, wake the physics engine
+  useEffect(() => {
+    useGraphStore.getState().setPhysicsWakeCallback(() => graphPhysics.wake())
+    return () => {
+      useGraphStore.getState().setPhysicsWakeCallback(null)
+      graphPhysics.dispose()
+    }
+  }, [])
+
   // ── Two-layer auto-layout ────────────────────────────────────────────────────
   // Layer 1: ELK positions boo nodes using dependency edges only (async).
   // Layer 2: Orbital positions skill/resource nodes around their parent boo (sync).
@@ -122,6 +132,13 @@ export function GhostGraph() {
 
       setNodes([...layoutedBooNodes, ...orbitalNodes])
       setHasRunLayout(true)
+
+      // Initialize physics particles from layouted positions
+      requestAnimationFrame(() => {
+        const current = useGraphStore.getState()
+        graphPhysics.initialize(current.nodes, current.edges)
+      })
+
       requestAnimationFrame(() => {
         void fitView({ padding: 0.15, duration: 500 })
       })
@@ -137,11 +154,21 @@ export function GhostGraph() {
 
   // ── Interaction handlers ─────────────────────────────────────────────────────
 
+  const onNodeDragStart: OnNodeDrag<Node> = useCallback((_event, node) => {
+    if (node.type === 'skill' || node.type === 'resource' || node.type === 'boo') {
+      graphPhysics.pinNode(node.id)
+    }
+  }, [])
+
   const onNodeDragStop: OnNodeDrag<Node> = useCallback(
     (_event, node) => {
       updateNodePosition(node.id, node.position)
       const currentSaved = useGraphStore.getState().savedPositions
       savePositions({ ...currentSaved, [node.id]: node.position })
+
+      if (node.type === 'skill' || node.type === 'resource' || node.type === 'boo') {
+        graphPhysics.unpinNode(node.id)
+      }
     },
     [updateNodePosition, savePositions],
   )
@@ -348,6 +375,7 @@ export function GhostGraph() {
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onEdgeClick={onEdgeClick}
         onNodeClick={onNodeClick}

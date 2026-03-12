@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useGraphStore } from '../store'
+import type { GraphNode } from '../types'
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ describe('useGraphStore', () => {
       hoveredNodeId: null,
       highlightedNodeIds: null,
       highlightedEdgeIds: null,
+      _physicsWakeCallback: null,
     })
   })
 
@@ -157,6 +159,82 @@ describe('useGraphStore', () => {
 
       expect(s.highlightedNodeIds).toEqual(new Set(['boo-a3']))
       expect(s.highlightedEdgeIds).toEqual(new Set())
+    })
+  })
+
+  describe('physics wake callback', () => {
+    it('defaults to null', () => {
+      expect(useGraphStore.getState()._physicsWakeCallback).toBeNull()
+    })
+
+    it('can be set and cleared', () => {
+      const cb = vi.fn()
+      useGraphStore.getState().setPhysicsWakeCallback(cb)
+      expect(useGraphStore.getState()._physicsWakeCallback).toBe(cb)
+      useGraphStore.getState().setPhysicsWakeCallback(null)
+      expect(useGraphStore.getState()._physicsWakeCallback).toBeNull()
+    })
+
+    it('onNodesChange calls callback when boo position changes', () => {
+      const cb = vi.fn()
+      useGraphStore.setState({
+        _physicsWakeCallback: cb,
+        nodes: [
+          {
+            id: 'boo-a1',
+            type: 'boo',
+            position: { x: 0, y: 0 },
+            data: { agentId: 'a1', name: 'A1', status: 'idle', model: null, isStreaming: false },
+          },
+        ] as GraphNode[],
+      })
+      useGraphStore
+        .getState()
+        .onNodesChange([{ type: 'position', id: 'boo-a1', position: { x: 50, y: 50 } }])
+      expect(cb).toHaveBeenCalledTimes(1)
+    })
+
+    it('onNodesChange does NOT call callback for skill position changes', () => {
+      const cb = vi.fn()
+      useGraphStore.setState({
+        _physicsWakeCallback: cb,
+        nodes: [
+          {
+            id: 'skill-a1-bash',
+            type: 'skill',
+            position: { x: 100, y: 100 },
+            data: {
+              skillId: 'bash',
+              name: 'bash',
+              category: 'code',
+              description: null,
+              agentIds: ['a1'],
+            },
+          },
+        ] as GraphNode[],
+      })
+      useGraphStore
+        .getState()
+        .onNodesChange([{ type: 'position', id: 'skill-a1-bash', position: { x: 150, y: 150 } }])
+      expect(cb).not.toHaveBeenCalled()
+    })
+
+    it('onNodesChange does NOT call callback when no callback is set', () => {
+      useGraphStore.setState({
+        _physicsWakeCallback: null,
+        nodes: [
+          {
+            id: 'boo-a1',
+            type: 'boo',
+            position: { x: 0, y: 0 },
+            data: { agentId: 'a1', name: 'A1', status: 'idle', model: null, isStreaming: false },
+          },
+        ] as GraphNode[],
+      })
+      // Should not throw
+      useGraphStore
+        .getState()
+        .onNodesChange([{ type: 'position', id: 'boo-a1', position: { x: 50, y: 50 } }])
     })
   })
 
