@@ -1,29 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 92" width="100" height="92" aria-hidden="true">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 92" width="100" height="92">
   <defs>
-    <radialGradient id="boo-logo-hl" cx="38%" cy="28%" r="65%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.13"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
+    <!-- OpenClaw exact gradient: #ff4d4d → #991b1b, diagonal -->
+    <linearGradient id="clawboo-body" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff4d4d"/>
+      <stop offset="100%" stop-color="#991b1b"/>
+    </linearGradient>
   </defs>
-  <!-- Antennae -->
-  <path d="M38,20 C36,12 30,5 24,3" fill="none" stroke="#E94560" stroke-width="1.8" stroke-linecap="round" stroke-opacity="0.6"/>
-  <path d="M62,20 C64,12 70,5 76,3" fill="none" stroke="#E94560" stroke-width="1.8" stroke-linecap="round" stroke-opacity="0.6"/>
-  <!-- Arm bumps -->
-  <circle cx="10" cy="48" r="5.5" fill="#E94560" fill-opacity="0.75"/>
-  <circle cx="90" cy="48" r="5.5" fill="#E94560" fill-opacity="0.75"/>
+
   <!-- Ghost body -->
-  <path d="M50,16 C30,16 12,28 12,46 C12,56 14,64 20,72 C26,80 34,72 42,70 C46,80 54,80 58,70 C64,72 74,80 80,72 C86,64 88,56 88,46 C88,28 70,16 50,16 Z" fill="#E94560" stroke="none"/>
-  <!-- Highlight overlay -->
-  <path d="M50,16 C30,16 12,28 12,46 C12,56 14,64 20,72 C26,80 34,72 42,70 C46,80 54,80 58,70 C64,72 74,80 80,72 C86,64 88,56 88,46 C88,28 70,16 50,16 Z" fill="url(#boo-logo-hl)" stroke="none"/>
-  <!-- Body shine -->
-  <ellipse cx="36" cy="28" rx="10" ry="7" fill="rgba(255,255,255,0.07)" transform="rotate(-15,36,28)"/>
-  <!-- Bottom shadow -->
-  <ellipse cx="50" cy="76" rx="18" ry="3.5" fill="rgba(0,0,0,0.06)"/>
-  <!-- Eyes: dark ovals with mint/cyan pupils -->
-  <ellipse cx="38" cy="42" rx="8" ry="9.5" fill="rgba(10,14,26,0.92)"/>
-  <circle cx="38" cy="42.5" r="3.2" fill="#34D399"/>
-  <circle cx="36.5" cy="39.5" r="1.3" fill="rgba(255,255,255,0.55)"/>
-  <ellipse cx="62" cy="42" rx="8" ry="9.5" fill="rgba(10,14,26,0.92)"/>
-  <circle cx="62" cy="42.5" r="3.2" fill="#34D399"/>
-  <circle cx="60.5" cy="39.5" r="1.3" fill="rgba(255,255,255,0.55)"/>
+  <path d="M50,12
+           C30,12 16,30 16,48
+           C16,58 18,66 22,72
+           C24,76 26,78 29,78
+           C32,78 33,75 35,73.5
+           C37,72 39,71.5 41,71.5
+           C43,71.5 45,72 46,73.5
+           C48,75 50,78 52,78
+           C55,78 56,75 58,73.5
+           C60,72 62,71.5 64,71.5
+           C66,71.5 67,72 68,73.5
+           C70,75 72,78 75,78
+           C78,78 80,74 82,66
+           C84,58 84,48 84,48
+           C84,30 70,12 50,12 Z"
+        fill="url(#clawboo-body)"/>
+
+  <!-- Claws (OpenClaw shape, tucked 4px into body) -->
+  <path d="M20,40 C7,36 3,43 7,51 C11,59 20,55 24,47 C26,42 24,40 20,40Z" fill="url(#clawboo-body)"/>
+  <path d="M80,40 C93,36 97,43 93,51 C89,59 80,55 76,47 C74,42 76,40 80,40Z" fill="url(#clawboo-body)"/>
+
+  <!-- Antennae (OpenClaw-style: ON TOP of body, wider outward spread) -->
+  <path d="M38,17 Q30,8 26,10" fill="none" stroke="#ff4d4d" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M62,17 Q70,8 74,10" fill="none" stroke="#ff4d4d" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Eyes (OpenClaw-style: dark circles + cyan pupils) -->
+  <circle cx="38" cy="36" r="5" fill="#050810"/>
+  <circle cx="39" cy="35" r="2" fill="#00e5cc"/>
+  <circle cx="62" cy="36" r="5" fill="#050810"/>
+  <circle cx="63" cy="35" r="2" fill="#00e5cc"/>
 </svg>
