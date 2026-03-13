@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * apps/web/src/features/onboarding/OnboardingWizard.tsx
  *
@@ -13,7 +11,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowRight, Check, Eye, EyeOff, Loader2, X } from 'lucide-react'
-import Image from 'next/image'
 import {
   GatewayClient,
   formatGatewayError,
@@ -182,7 +179,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
             animate={{ y: [0, -14, 0] }}
             transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
           >
-            <Image src="/logo.svg" alt="Clawboo" width={84} height={77} priority />
+            <img src="/logo.svg" alt="Clawboo" width={84} height={77} />
           </motion.div>
         </div>
 

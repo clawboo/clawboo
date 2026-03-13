@@ -1,5 +1,3 @@
-'use client'
-
 import { useCallback } from 'react'
 import { useConnectionStore } from '@/stores/connection'
 import { useApprovalsStore } from '@/stores/approvals'

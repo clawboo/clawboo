@@ -3,9 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "tsx server/index.ts --dev",
-    "build": "next build",
-    "start": "tsx server/index.ts",
+    "dev": "concurrently -n api,ui -c blue,green \"pnpm dev:api\" \"pnpm dev:ui\"",
+    "dev:api": "tsx watch server/index.ts --dev",
+    "dev:ui": "vite",
+    "build": "vite build && tsup --config tsup.server.config.ts",
+    "build:ui": "vite build",
+    "build:server": "tsup --config tsup.server.config.ts",
+    "start": "CLAWBOO_UI_DIR=./dist/ui tsx server/index.ts",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -32,12 +36,12 @@
     "@tanstack/react-query": "^5.0.0",
     "@xyflow/react": "^12.10.1",
     "codemirror": "^6.0.2",
+    "cors": "^2.8.6",
     "drizzle-orm": "^0.38.0",
     "elkjs": "^0.9.3",
+    "express": "^5.2.1",
     "framer-motion": "^11.0.0",
-    "geist": "^1.3.0",
     "lucide-react": "^0.468.0",
-    "next": "latest",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^9.0.0",
@@ -48,11 +52,18 @@
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",
     "@tailwindcss/postcss": "^4.0.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "concurrently": "^9.2.1",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-tsconfig-paths": "^5.1.0"
   }
 }

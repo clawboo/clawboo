@@ -1,5 +1,3 @@
-'use client'
-
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronDown, ChevronRight, FileEdit, Plus, Search, Trash2 } from 'lucide-react'

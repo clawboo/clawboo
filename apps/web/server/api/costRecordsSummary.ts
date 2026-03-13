@@ -1,12 +1,7 @@
-import { NextResponse } from 'next/server'
-import path from 'node:path'
-import os from 'node:os'
+import type { Request, Response } from 'express'
 import { createDb, costRecords, agents } from '@clawboo/db'
 import { eq, gte, desc } from 'drizzle-orm'
-
-function getDbPath(): string {
-  return path.join(os.homedir(), '.openclaw', 'clawboo', 'clawboo.db')
-}
+import { getDbPath } from '../lib/db'
 
 function dayStart(daysAgo: number): number {
   const d = new Date()
@@ -15,12 +10,12 @@ function dayStart(daysAgo: number): number {
   return d.getTime()
 }
 
-export interface TimeSeries {
+interface TimeSeries {
   date: string
   cost: number
 }
 
-export interface AgentCostSummary {
+interface AgentCostSummary {
   agentId: string
   agentName: string
   totalCost: number
@@ -28,7 +23,7 @@ export interface AgentCostSummary {
   messageCount: number
 }
 
-export interface CostSummaryResponse {
+interface CostSummaryResponse {
   totalToday: number
   totalWeek: number
   totalMonth: number
@@ -38,7 +33,7 @@ export interface CostSummaryResponse {
 
 // ─── GET /api/cost-records/summary ───────────────────────────────────────────
 
-export async function GET(): Promise<NextResponse> {
+export async function costRecordsSummaryGET(_req: Request, res: Response): Promise<void> {
   try {
     const db = createDb(getDbPath())
     const monthStart = dayStart(30)
@@ -120,8 +115,8 @@ export async function GET(): Promise<NextResponse> {
       timeSeries,
     }
 
-    return NextResponse.json(response)
+    res.json(response)
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    res.status(500).json({ error: String(err) })
   }
 }

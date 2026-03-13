@@ -1,5 +1,3 @@
-'use client'
-
 import { AnimatePresence } from 'framer-motion'
 import { useEditorStore } from '@/stores/editor'
 import { AgentFileEditor } from './AgentFileEditor'

@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect } from 'react'
 import type { GatewayClient } from '@clawboo/gateway-client'
 import type { AgentStatusPatch } from '@clawboo/events'

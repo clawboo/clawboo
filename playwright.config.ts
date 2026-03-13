@@ -18,8 +18,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm --filter @clawboo/web dev',
-    url: 'http://127.0.0.1:3000',
+    command: 'pnpm --filter @clawboo/web build:ui && pnpm --filter @clawboo/web start',
+    url: 'http://127.0.0.1:3000/api/settings',
     reuseExistingServer: !process.env.CI,
+    timeout: 60_000,
   },
 })

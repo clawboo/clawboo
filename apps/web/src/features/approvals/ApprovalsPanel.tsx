@@ -1,5 +1,3 @@
-'use client'
-
 import { AnimatePresence, motion } from 'framer-motion'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'

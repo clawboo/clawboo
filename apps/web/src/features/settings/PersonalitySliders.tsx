@@ -1,5 +1,3 @@
-'use client'
-
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Loader2, FileText } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'

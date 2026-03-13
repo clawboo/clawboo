@@ -1,5 +1,3 @@
-'use client'
-
 import { create } from 'zustand'
 import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
 import type { NodeChange, EdgeChange } from '@xyflow/react'

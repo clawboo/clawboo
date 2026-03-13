@@ -1,5 +1,3 @@
-'use client'
-
 import { GhostGraphPanel } from '@/features/graph/GhostGraphPanel'
 import { ChatPanel } from '@/features/chat/ChatPanel'
 import { SchedulerPanel } from '@/features/scheduler/SchedulerPanel'

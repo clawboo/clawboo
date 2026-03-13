@@ -1,5 +1,3 @@
-'use client'
-
 import { getSmoothStepPath, getBezierPath } from '@xyflow/react'
 import type { ConnectionLineComponentProps } from '@xyflow/react'
 

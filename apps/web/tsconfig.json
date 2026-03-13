@@ -3,9 +3,8 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./src/*"]
-    },
-    "plugins": [{ "name": "next" }]
+    }
   },
-  "include": ["src/**/*", "server/**/*", "next-env.d.ts", ".next/types/**/*.ts"],
+  "include": ["src/**/*", "server/**/*"],
   "exclude": ["node_modules"]
 }

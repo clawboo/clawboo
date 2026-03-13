@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useMemo } from 'react'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'

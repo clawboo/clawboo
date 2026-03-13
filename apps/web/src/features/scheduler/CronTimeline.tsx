@@ -1,5 +1,3 @@
-'use client'
-
 import { useState, useEffect, useMemo } from 'react'
 import type { CronJob } from '@/stores/scheduler'
 import { formatRelativeTime } from './cronUtils'

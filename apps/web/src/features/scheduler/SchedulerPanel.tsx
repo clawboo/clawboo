@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { CalendarClock, RefreshCw, Loader2, AlertCircle } from 'lucide-react'

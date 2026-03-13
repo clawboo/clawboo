@@ -1,10 +1,14 @@
 import http from 'node:http'
+import path from 'node:path'
 
-import next from 'next'
+import express from 'express'
+import cors from 'cors'
 
 import { createAccessGate, createGatewayProxy } from '@clawboo/gateway-proxy'
 import { loadSettings } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
+
+import { apiRouter } from './api/index'
 
 // ── Loggers ─────────────────────────────────────────────────────────────────
 
@@ -18,7 +22,10 @@ const resolveHost = (): string => {
   return fromEnv || '0.0.0.0'
 }
 
-const resolvePort = (): number => {
+const resolvePort = (dev: boolean): number => {
+  // In dev mode, always use 3000 — the Vite proxy targets localhost:3000.
+  // Ignore the generic PORT env var which may be set by preview tools.
+  if (dev) return 3000
   const raw = process.env['PORT']?.trim() || '3000'
   const port = Number(raw)
   return Number.isFinite(port) && port > 0 ? port : 3000
@@ -35,14 +42,9 @@ const resolvePathname = (url: string | undefined): string => {
 async function main() {
   const dev = process.argv.includes('--dev')
   const hostname = resolveHost()
-  const port = resolvePort()
+  const port = resolvePort(dev)
 
   log.info({ dev, hostname, port }, 'Starting Clawboo server')
-
-  // ── Next.js ──────────────────────────────────────────────────────────────
-
-  const app = next({ dev, hostname, port })
-  const handle = app.getRequestHandler()
 
   // ── Access gate ───────────────────────────────────────────────────────────
 
@@ -66,29 +68,54 @@ async function main() {
     logError: (msg, err) => log.error({ err }, msg),
   })
 
-  // ── Prepare Next.js ───────────────────────────────────────────────────────
+  // ── Express app ───────────────────────────────────────────────────────────
 
-  await app.prepare()
-  const handleUpgrade = app.getUpgradeHandler()
+  const app = express()
 
-  // ── HTTP server ───────────────────────────────────────────────────────────
+  // CORS: only needed in dev (Vite on :5173 → Express on :3000)
+  if (dev) {
+    app.use(cors({ origin: true, credentials: true }))
+  }
 
-  const server = http.createServer((req, res) => {
+  // JSON body parser — must be before API routes
+  app.use(express.json({ limit: '2mb' }))
+
+  // Access gate middleware
+  app.use((req, res, next) => {
+    if (accessGate.handleHttp(req, res)) return
+    next()
+  })
+
+  // Per-request logging
+  app.use((req, res, next) => {
     const start = Date.now()
-    const url = req.url ?? '/'
-
-    // Per-request structured log on response finish.
-    // Skip high-frequency Next.js static asset requests to keep logs readable.
     res.on('finish', () => {
-      if (url.startsWith('/_next/static/') || url.startsWith('/_next/image')) return
+      const url = req.originalUrl ?? req.url
+      // Skip high-frequency static asset requests
+      if (url.startsWith('/assets/') || url.startsWith('/fonts/')) return
       const durationMs = Date.now() - start
       const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info'
       reqLog[level]({ method: req.method, url, status: res.statusCode, durationMs })
     })
-
-    if (accessGate.handleHttp(req, res)) return
-    void handle(req, res)
+    next()
   })
+
+  // API routes
+  app.use(apiRouter)
+
+  // Production: serve Vite build output as static SPA
+  if (!dev) {
+    const uiDir = path.resolve(process.env['CLAWBOO_UI_DIR'] || path.join(__dirname, 'ui'))
+    app.use(express.static(uiDir))
+    // SPA catch-all: non-API requests get index.html
+    app.get('/{*splat}', (_req, res) => {
+      res.sendFile(path.join(uiDir, 'index.html'))
+    })
+  }
+
+  // ── HTTP server (raw, for WS upgrade handling) ────────────────────────────
+
+  const server = http.createServer(app)
 
   // ── WebSocket upgrade routing ─────────────────────────────────────────────
 
@@ -97,8 +124,8 @@ async function main() {
       proxy.handleUpgrade(req, socket, head)
       return
     }
-    // Delegate all other WS upgrades (e.g. Next.js HMR in dev mode) to Next.js
-    handleUpgrade(req, socket, head)
+    // No other WS upgrades needed (Vite HMR runs on its own port)
+    socket.destroy()
   })
 
   // ── Listen ────────────────────────────────────────────────────────────────

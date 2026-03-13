@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * apps/web/src/features/onboarding/BooTip.tsx
  *
