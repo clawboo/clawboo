@@ -1,5 +1,3 @@
-'use client'
-
 import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'

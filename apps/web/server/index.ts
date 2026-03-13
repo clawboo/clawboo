@@ -22,7 +22,10 @@ const resolveHost = (): string => {
   return fromEnv || '0.0.0.0'
 }
 
-const resolvePort = (): number => {
+const resolvePort = (dev: boolean): number => {
+  // In dev mode, always use 3000 — the Vite proxy targets localhost:3000.
+  // Ignore the generic PORT env var which may be set by preview tools.
+  if (dev) return 3000
   const raw = process.env['PORT']?.trim() || '3000'
   const port = Number(raw)
   return Number.isFinite(port) && port > 0 ? port : 3000
@@ -39,7 +42,7 @@ const resolvePathname = (url: string | undefined): string => {
 async function main() {
   const dev = process.argv.includes('--dev')
   const hostname = resolveHost()
-  const port = resolvePort()
+  const port = resolvePort(dev)
 
   log.info({ dev, hostname, port }, 'Starting Clawboo server')
 

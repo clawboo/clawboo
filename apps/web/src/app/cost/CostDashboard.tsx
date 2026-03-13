@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useState, useCallback } from 'react'
 import {
   BarChart,
@@ -15,7 +13,23 @@ import {
 import { formatCost, formatTokens } from '@/features/cost/costUtils'
 import { useCostStore } from '@/stores/cost'
 import { useConnectionStore } from '@/stores/connection'
-import type { CostSummaryResponse } from '@/app/api/cost-records/summary/route'
+// ─── API response types ─────────────────────────────────────────────────────────
+
+interface AgentCostSummary {
+  agentId: string
+  agentName: string
+  totalCost: number
+  totalTokens: number
+  messageCount: number
+}
+
+interface CostSummaryResponse {
+  totalToday: number
+  totalWeek: number
+  totalMonth: number
+  byAgent: AgentCostSummary[]
+  timeSeries: { date: string; cost: number }[]
+}
 
 // ─── Ollama check types ─────────────────────────────────────────────────────────
 

@@ -1,5 +1,3 @@
-'use client'
-
 import { ReactFlowProvider } from '@xyflow/react'
 import { GhostGraph } from './GhostGraph'
 import { useGraphStore } from './store'
