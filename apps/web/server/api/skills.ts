@@ -1,18 +1,12 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
-import path from 'node:path'
-import os from 'node:os'
+import type { Request, Response } from 'express'
 import { createDb, skills } from '@clawboo/db'
 import { eq, desc } from 'drizzle-orm'
-
-function getDbPath(): string {
-  return path.join(os.homedir(), '.openclaw', 'clawboo', 'clawboo.db')
-}
+import { getDbPath } from '../lib/db'
 
 // ─── GET /api/skills?agentId=<optional> ─────────────────────────────────────
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
-  const agentId = req.nextUrl.searchParams.get('agentId')
+export function skillsGET(req: Request, res: Response): void {
+  const agentId = req.query['agentId'] as string | undefined
 
   try {
     const db = createDb(getDbPath())
@@ -28,12 +22,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           return false
         }
       })
-      return NextResponse.json({ ok: true, skills: filtered })
+      res.json({ ok: true, skills: filtered })
+      return
     }
 
-    return NextResponse.json({ ok: true, skills: rows })
+    res.json({ ok: true, skills: rows })
   } catch (err) {
-    return NextResponse.json({ ok: false, error: String(err), skills: [] }, { status: 500 })
+    res.status(500).json({ ok: false, error: String(err), skills: [] })
   }
 }
 
@@ -50,21 +45,18 @@ interface PostBody {
   author?: string | null
 }
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
-  let body: PostBody
-  try {
-    body = (await req.json()) as PostBody
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 })
+export function skillsPOST(req: Request, res: Response): void {
+  const body = req.body as PostBody | undefined
+  if (!body || typeof body !== 'object') {
+    res.status(400).json({ ok: false, error: 'Invalid JSON body' })
+    return
   }
 
   const { id, name, source, category, trustScore, agentId, version, author } = body
 
   if (!id || !name || !source || !agentId) {
-    return NextResponse.json(
-      { ok: false, error: 'id, name, source, and agentId are required' },
-      { status: 400 },
-    )
+    res.status(400).json({ ok: false, error: 'id, name, source, and agentId are required' })
+    return
   }
 
   const now = Date.now()
@@ -100,7 +92,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .run()
 
       const updated = db.select().from(skills).where(eq(skills.id, id)).get()
-      return NextResponse.json({ ok: true, skill: updated })
+      res.json({ ok: true, skill: updated })
+      return
     }
 
     // Insert new skill row
@@ -122,23 +115,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .returning()
       .all()
 
-    return NextResponse.json({ ok: true, skill: rows[0] ?? null })
+    res.json({ ok: true, skill: rows[0] ?? null })
   } catch (err) {
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
+    res.status(500).json({ ok: false, error: String(err) })
   }
 }
 
 // ─── DELETE /api/skills?id=<skillId>&agentId=<agentId> ──────────────────────
 
-export async function DELETE(req: NextRequest): Promise<NextResponse> {
-  const skillId = req.nextUrl.searchParams.get('id')
-  const agentId = req.nextUrl.searchParams.get('agentId')
+export function skillsDELETE(req: Request, res: Response): void {
+  const skillId = req.query['id'] as string | undefined
+  const agentId = req.query['agentId'] as string | undefined
 
   if (!skillId || !agentId) {
-    return NextResponse.json(
-      { ok: false, error: 'id and agentId query params are required' },
-      { status: 400 },
-    )
+    res.status(400).json({ ok: false, error: 'id and agentId query params are required' })
+    return
   }
 
   try {
@@ -147,7 +138,8 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     const existing = db.select().from(skills).where(eq(skills.id, skillId)).get()
 
     if (!existing) {
-      return NextResponse.json({ ok: true, deleted: false, reason: 'skill not found' })
+      res.json({ ok: true, deleted: false, reason: 'skill not found' })
+      return
     }
 
     let meta: Record<string, unknown> = {}
@@ -164,7 +156,8 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 
     if (filtered.length === 0) {
       db.delete(skills).where(eq(skills.id, skillId)).run()
-      return NextResponse.json({ ok: true, deleted: true, removedRow: true })
+      res.json({ ok: true, deleted: true, removedRow: true })
+      return
     }
 
     meta.agentIds = filtered
@@ -173,8 +166,8 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
       .where(eq(skills.id, skillId))
       .run()
 
-    return NextResponse.json({ ok: true, deleted: true, removedRow: false })
+    res.json({ ok: true, deleted: true, removedRow: false })
   } catch (err) {
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
+    res.status(500).json({ ok: false, error: String(err) })
   }
 }

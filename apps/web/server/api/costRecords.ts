@@ -1,14 +1,8 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
-import path from 'node:path'
-import os from 'node:os'
+import type { Request, Response } from 'express'
 import { createDb, costRecords, agents } from '@clawboo/db'
 import { eq, gte, and, desc } from 'drizzle-orm'
-import { calculateCostUsd } from '@/features/cost/costUtils'
-
-function getDbPath(): string {
-  return path.join(os.homedir(), '.openclaw', 'clawboo', 'clawboo.db')
-}
+import { getDbPath } from '../lib/db'
+import { calculateCostUsd } from '../lib/costUtils'
 
 function periodStart(period: string): number {
   const now = new Date()
@@ -34,9 +28,9 @@ function periodStart(period: string): number {
 
 // ─── GET /api/cost-records?period=today|week|month&agentId=xxx ────────────────
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
-  const period = req.nextUrl.searchParams.get('period') ?? ''
-  const agentId = req.nextUrl.searchParams.get('agentId') ?? ''
+export async function costRecordsGET(req: Request, res: Response): Promise<void> {
+  const period = (req.query['period'] as string | undefined) ?? ''
+  const agentId = (req.query['agentId'] as string | undefined) ?? ''
 
   try {
     const db = createDb(getDbPath())
@@ -53,9 +47,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .orderBy(desc(costRecords.createdAt))
       .limit(500)
 
-    return NextResponse.json({ records: rows })
+    res.json({ records: rows })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    res.status(500).json({ error: String(err) })
   }
 }
 
@@ -70,20 +64,17 @@ type PostBody = {
   runId?: string | null
 }
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
-  let body: PostBody
-  try {
-    body = (await req.json()) as PostBody
-  } catch {
-    return NextResponse.json({ error: 'invalid JSON' }, { status: 400 })
+export async function costRecordsPOST(req: Request, res: Response): Promise<void> {
+  const body = req.body as PostBody | undefined
+  if (!body || typeof body !== 'object') {
+    res.status(400).json({ error: 'invalid JSON' })
+    return
   }
 
   const { agentId, model, inputTokens, outputTokens, runId } = body
   if (!agentId || !model || inputTokens == null || outputTokens == null) {
-    return NextResponse.json(
-      { error: 'agentId, model, inputTokens, outputTokens required' },
-      { status: 400 },
-    )
+    res.status(400).json({ error: 'agentId, model, inputTokens, outputTokens required' })
+    return
   }
 
   const costUsd = calculateCostUsd(model, inputTokens, outputTokens)
@@ -118,8 +109,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       })
       .returning()
 
-    return NextResponse.json({ ok: true, record: inserted })
+    res.json({ ok: true, record: inserted })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    res.status(500).json({ error: String(err) })
   }
 }

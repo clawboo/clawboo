@@ -1,21 +1,17 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
-import path from 'node:path'
-import os from 'node:os'
-import { createDb } from '@clawboo/db'
-import { graphLayouts } from '@clawboo/db'
+import type { Request, Response } from 'express'
+import { createDb, graphLayouts } from '@clawboo/db'
 import { and, eq } from 'drizzle-orm'
-import type { LayoutData } from '@/features/graph/types'
+import { getDbPath } from '../lib/db'
 
-function getDbPath(): string {
-  return path.join(os.homedir(), '.openclaw', 'clawboo', 'clawboo.db')
+interface LayoutData {
+  positions: Record<string, { x: number; y: number }>
 }
 
 // ─── GET /api/graph-layout?name=default&url=<gatewayUrl> ─────────────────────
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
-  const name = req.nextUrl.searchParams.get('name') ?? 'default'
-  const gatewayUrl = req.nextUrl.searchParams.get('url') ?? ''
+export async function graphLayoutGET(req: Request, res: Response): Promise<void> {
+  const name = (req.query['name'] as string | undefined) ?? 'default'
+  const gatewayUrl = (req.query['url'] as string | undefined) ?? ''
 
   try {
     const db = createDb(getDbPath())
@@ -25,32 +21,35 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .where(and(eq(graphLayouts.name, name), eq(graphLayouts.gatewayUrl, gatewayUrl)))
       .limit(1)
 
-    if (rows.length === 0) return NextResponse.json({ positions: {} })
+    if (rows.length === 0) {
+      res.json({ positions: {} })
+      return
+    }
 
     const data = JSON.parse(rows[0]!.layoutData) as LayoutData
-    return NextResponse.json(data)
+    res.json(data)
   } catch {
-    return NextResponse.json({ positions: {} })
+    res.json({ positions: {} })
   }
 }
 
 // ─── POST /api/graph-layout ───────────────────────────────────────────────────
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+export async function graphLayoutPOST(req: Request, res: Response): Promise<void> {
   type Body = { name?: string; positions: LayoutData['positions']; gatewayUrl: string }
 
-  let body: Body
-  try {
-    body = (await req.json()) as Body
-  } catch {
-    return NextResponse.json({ ok: false, error: 'invalid JSON' }, { status: 400 })
+  const body = req.body as Body | undefined
+  if (!body || typeof body !== 'object') {
+    res.status(400).json({ ok: false, error: 'invalid JSON' })
+    return
   }
 
   const name = body.name ?? 'default'
   const { positions, gatewayUrl } = body
 
   if (!gatewayUrl) {
-    return NextResponse.json({ ok: false, error: 'gatewayUrl required' }, { status: 400 })
+    res.status(400).json({ ok: false, error: 'gatewayUrl required' })
+    return
   }
 
   try {
@@ -66,8 +65,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         set: { layoutData, updatedAt: now },
       })
 
-    return NextResponse.json({ ok: true })
+    res.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
+    res.status(500).json({ ok: false, error: String(err) })
   }
 }

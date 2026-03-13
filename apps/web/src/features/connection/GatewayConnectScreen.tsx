@@ -1,9 +1,6 @@
-'use client'
-
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
-import Image from 'next/image'
 import {
   GatewayClient,
   formatGatewayError,
@@ -161,7 +158,7 @@ export function GatewayConnectScreen({
         {/* ── Logo / header ── */}
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/12 ring-1 ring-accent/20">
-            <Image src="/logo.svg" alt="Clawboo" width={32} height={30} />
+            <img src="/logo.svg" alt="Clawboo" width={32} height={30} />
           </div>
           <div>
             <h1

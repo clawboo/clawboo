@@ -1,5 +1,3 @@
-'use client'
-
 import { useCallback, useEffect, useRef } from 'react'
 import { useGraphStore } from './store'
 import { useConnectionStore } from '@/stores/connection'

@@ -1,5 +1,3 @@
-'use client'
-
 import { useState, useCallback } from 'react'
 import { Loader2, Plus } from 'lucide-react'
 import type { GatewayClient } from '@clawboo/gateway-client'

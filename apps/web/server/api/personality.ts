@@ -1,21 +1,16 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
-import path from 'node:path'
-import os from 'node:os'
+import type { Request, Response } from 'express'
 import { createDb, agents } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
-
-function getDbPath(): string {
-  return path.join(os.homedir(), '.openclaw', 'clawboo', 'clawboo.db')
-}
+import { getDbPath } from '../lib/db'
 
 // ─── GET /api/personality?agentId=xxx ────────────────────────────────────────
 // Returns the stored personality slider values for an agent, or null if none saved.
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
-  const agentId = req.nextUrl.searchParams.get('agentId')
+export function personalityGET(req: Request, res: Response): void {
+  const agentId = req.query['agentId'] as string | undefined
   if (!agentId) {
-    return NextResponse.json({ error: 'agentId required' }, { status: 400 })
+    res.status(400).json({ error: 'agentId required' })
+    return
   }
 
   try {
@@ -27,12 +22,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .get() as { personalityConfig: string | null } | undefined
 
     if (!row || !row.personalityConfig) {
-      return NextResponse.json({ values: null })
+      res.json({ values: null })
+      return
     }
 
-    return NextResponse.json({ values: JSON.parse(row.personalityConfig) })
+    res.json({ values: JSON.parse(row.personalityConfig) })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    res.status(500).json({ error: String(err) })
   }
 }
 
@@ -45,17 +41,17 @@ type PostBody = {
   values: Record<string, number>
 }
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
-  let body: PostBody
-  try {
-    body = (await req.json()) as PostBody
-  } catch {
-    return NextResponse.json({ error: 'invalid JSON' }, { status: 400 })
+export function personalityPOST(req: Request, res: Response): void {
+  const body = req.body as PostBody | undefined
+  if (!body || typeof body !== 'object') {
+    res.status(400).json({ error: 'invalid JSON' })
+    return
   }
 
   const { agentId, values } = body
   if (!agentId || !values) {
-    return NextResponse.json({ error: 'agentId and values required' }, { status: 400 })
+    res.status(400).json({ error: 'agentId and values required' })
+    return
   }
 
   const now = Date.now()
@@ -81,8 +77,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       })
       .run()
 
-    return NextResponse.json({ ok: true })
+    res.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    res.status(500).json({ error: String(err) })
   }
 }

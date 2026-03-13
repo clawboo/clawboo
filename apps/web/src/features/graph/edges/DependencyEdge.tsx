@@ -1,5 +1,3 @@
-'use client'
-
 import { memo } from 'react'
 import { BaseEdge, getSmoothStepPath } from '@xyflow/react'
 import type { EdgeProps } from '@xyflow/react'
