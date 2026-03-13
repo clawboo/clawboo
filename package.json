@@ -8,6 +8,7 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "e2e": "playwright test",
+    "assemble": "pnpm build && bash scripts/assemble-cli.sh",
     "format": "prettier --write .",
     "prepare": "husky"
   },

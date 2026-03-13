@@ -105,10 +105,10 @@ async function main() {
 
   // Production: serve Vite build output as static SPA
   if (!dev) {
-    const uiDir = path.join(__dirname, '..', 'dist', 'ui')
+    const uiDir = process.env['CLAWBOO_UI_DIR'] || path.join(__dirname, 'ui')
     app.use(express.static(uiDir))
     // SPA catch-all: non-API requests get index.html
-    app.get('*', (_req, res) => {
+    app.get('/{*splat}', (_req, res) => {
       res.sendFile(path.join(uiDir, 'index.html'))
     })
   }

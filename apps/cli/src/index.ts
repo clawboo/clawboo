@@ -8,7 +8,7 @@ import chalk from 'chalk'
 import * as p from '@clack/prompts'
 import ora from 'ora'
 import { createConnection } from 'net'
-import { exec, spawn } from 'child_process'
+import { exec, fork, spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 
@@ -794,53 +794,79 @@ async function run(): Promise<void> {
 
   let dashboardRunning = await probePort('localhost', 3000, 1_500)
   if (!dashboardRunning) {
-    // Try to find and start the Clawboo web server
+    // Strategy 1: Bundled mode — server.js sits next to this CLI entry
+    const bundledServerPath = path.join(__dirname, 'server.js')
+
+    // Strategy 2: Dev mode — find monorepo root and use tsx
     const monorepoRoot = findMonorepoRoot()
-    if (monorepoRoot) {
-      const serverPath = path.join(monorepoRoot, 'apps/web/server/index.ts')
-      if (fs.existsSync(serverPath)) {
-        const startSpinner = ora({
-          text: 'Starting Clawboo dashboard...',
-          color: 'cyan',
-        }).start()
+    const devServerPath = monorepoRoot ? path.join(monorepoRoot, 'apps/web/server/index.ts') : null
 
-        const child = spawn('npx', ['tsx', serverPath], {
-          cwd: monorepoRoot,
-          env: { ...process.env, NODE_ENV: 'production' },
-          detached: true,
-          stdio: 'ignore',
-        })
-        child.unref()
+    if (fs.existsSync(bundledServerPath)) {
+      // ── Bundled mode: fork the pre-compiled server.js ──────────────────
+      const startSpinner = ora({
+        text: 'Starting Clawboo dashboard...',
+        color: 'cyan',
+      }).start()
 
-        // Poll for up to 15 seconds
-        const maxAttempts = 30
-        for (let i = 0; i < maxAttempts; i++) {
-          await new Promise((r) => setTimeout(r, 500))
-          dashboardRunning = await probePort('localhost', 3000, 1_000)
-          if (dashboardRunning) break
-        }
+      const child = fork(bundledServerPath, [], {
+        cwd: __dirname,
+        env: { ...process.env, NODE_ENV: 'production' },
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.unref()
 
-        if (dashboardRunning) {
-          startSpinner.succeed(chalk.green('Dashboard started'))
-        } else {
-          startSpinner.fail(
-            chalk.yellow('Dashboard is taking too long to start. Try: ') +
-              chalk.white(`cd ${monorepoRoot} && pnpm dev`),
-          )
-          process.exit(0)
-        }
+      // Poll for up to 15 seconds
+      const maxAttempts = 30
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        dashboardRunning = await probePort('localhost', 3000, 1_000)
+        if (dashboardRunning) break
+      }
+
+      if (dashboardRunning) {
+        startSpinner.succeed(chalk.green('Dashboard started'))
       } else {
-        p.log.warn(
-          chalk.yellow('Could not find server entry point. Start the dashboard manually: ') +
-            chalk.white(`cd ${monorepoRoot} && pnpm dev`),
+        startSpinner.fail(chalk.yellow('Dashboard is taking too long to start.'))
+        process.exit(0)
+      }
+    } else if (devServerPath && fs.existsSync(devServerPath)) {
+      // ── Dev mode: spawn tsx on the TypeScript source ────────────────────
+      const startSpinner = ora({
+        text: 'Starting Clawboo dashboard (dev mode)...',
+        color: 'cyan',
+      }).start()
+
+      const child = spawn('npx', ['tsx', devServerPath], {
+        cwd: monorepoRoot!,
+        env: { ...process.env, NODE_ENV: 'production' },
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.unref()
+
+      const maxAttempts = 30
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        dashboardRunning = await probePort('localhost', 3000, 1_000)
+        if (dashboardRunning) break
+      }
+
+      if (dashboardRunning) {
+        startSpinner.succeed(chalk.green('Dashboard started'))
+      } else {
+        startSpinner.fail(
+          chalk.yellow('Dashboard is taking too long to start. Try: ') +
+            chalk.white(`cd ${monorepoRoot!} && pnpm dev`),
         )
         process.exit(0)
       }
     } else {
+      // ── No server found ────────────────────────────────────────────────
       console.log()
       p.log.warn(
-        chalk.yellow('Could not find the Clawboo project. Start the dashboard manually: ') +
-          chalk.white('cd <your-clawboo-dir> && pnpm dev'),
+        chalk.yellow('Could not find the Clawboo server. ') +
+          chalk.white('Install with: npm install -g clawboo'),
       )
       process.exit(0)
     }
