@@ -6,6 +6,8 @@
     "dev": "tsx server/index.ts --dev",
     "build": "next build",
     "start": "tsx server/index.ts",
+    "dev:vite": "vite",
+    "build:vite": "vite build",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -51,8 +53,11 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-tsconfig-paths": "^5.1.0"
   }
 }
