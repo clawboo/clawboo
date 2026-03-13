@@ -8,7 +8,7 @@ export default defineConfig({
   workers: 1,
   reporter: 'html',
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: 'http://127.0.0.1:3000',
     trace: 'on-first-retry',
   },
   projects: [
@@ -18,7 +18,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm --filter @clawboo/web dev',
+    command: 'pnpm --filter @clawboo/web build:ui && pnpm --filter @clawboo/web start',
     url: 'http://127.0.0.1:3000/api/settings',
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
