@@ -1,6 +1,7 @@
 import { ReactFlowProvider } from '@xyflow/react'
 import { GhostGraph } from './GhostGraph'
 import { useGraphStore } from './store'
+import { useTeamStore } from '@/stores/team'
 
 // ─── GhostGraphPanel ──────────────────────────────────────────────────────────
 //
@@ -9,6 +10,9 @@ import { useGraphStore } from './store'
 
 export function GhostGraphPanel() {
   const { isLoadingFiles, filesError, nodes, resetLayout, hasRunLayout } = useGraphStore()
+  const selectedTeam = useTeamStore((s) =>
+    s.selectedTeamId ? (s.teams.find((t) => t.id === s.selectedTeamId) ?? null) : null,
+  )
 
   const booCount = nodes.filter((n) => n.type === 'boo').length
   const skillCount = nodes.filter((n) => n.type === 'skill').length
@@ -38,7 +42,7 @@ export function GhostGraphPanel() {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(232,232,232,0.5)' }}>
-            Ghost Graph
+            {selectedTeam ? `${selectedTeam.name} — Ghost Graph` : 'Ghost Graph'}
           </span>
           {booCount > 0 && (
             <span

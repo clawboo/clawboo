@@ -168,12 +168,15 @@ function AgentRow({
 
 // ─── Nav items ───────────────────────────────────────────────────────────────
 
-const NAV_ITEMS: { id: NavView; label: string; emoji: string }[] = [
+const PRIMARY_NAV: { id: NavView; label: string; emoji: string }[] = [
   { id: 'graph', label: 'Ghost Graph', emoji: '👻' },
+  { id: 'marketplace', label: 'Marketplace', emoji: '🛒' },
+]
+
+const SECONDARY_NAV: { id: NavView; label: string; emoji: string }[] = [
   { id: 'approvals', label: 'Approvals', emoji: '🔐' },
   { id: 'scheduler', label: 'Scheduler', emoji: '⏰' },
   { id: 'cost', label: 'Cost', emoji: '💰' },
-  { id: 'marketplace', label: 'Marketplace', emoji: '🛒' },
 ]
 
 // ─── AgentListColumn ─────────────────────────────────────────────────────────
@@ -244,6 +247,10 @@ export function AgentListColumn() {
       try {
         const result = await client.agents.list()
         const mainKey = result.mainKey?.trim() || 'main'
+        // Build a lookup of existing teamId assignments so we don't wipe them
+        const existingTeamIds = new Map(
+          useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
+        )
         const mapped = result.agents.map((a) => ({
           id: a.id,
           name: a.identity?.name ?? a.name ?? a.id,
@@ -254,7 +261,10 @@ export function AgentListColumn() {
           streamingText: null,
           runId: null,
           lastSeenAt: null,
-          teamId: agentId && a.id === agentId && selectedTeamId ? selectedTeamId : null,
+          teamId:
+            agentId && a.id === agentId && selectedTeamId
+              ? selectedTeamId
+              : (existingTeamIds.get(a.id) ?? null),
         }))
         hydrateAgents(mapped)
         useBooZeroStore.getState().setBooZeroAgentId(identifyBooZero(mapped, result.defaultId))
@@ -299,8 +309,8 @@ export function AgentListColumn() {
         </label>
       </div>
 
-      {/* Agent list (scrollable) */}
-      <div className="flex-1 overflow-y-auto px-2 pb-2">
+      {/* Agent list — fixed at 40% of column height, scrollable */}
+      <div className="shrink-0 overflow-y-auto px-2 pb-2" style={{ height: '40%' }}>
         <AnimatePresence initial={false}>
           {filtered.length === 0 ? (
             <motion.div
@@ -354,7 +364,7 @@ export function AgentListColumn() {
 
       {/* Create Boo */}
       {client && (
-        <div className="border-t border-white/8 p-2">
+        <div className="px-2">
           <button
             type="button"
             data-testid="fleet-create-boo"
@@ -367,9 +377,38 @@ export function AgentListColumn() {
         </div>
       )}
 
-      {/* Nav buttons (fixed at bottom) */}
-      <div className="border-t border-white/8 p-2 flex flex-col gap-0.5">
-        {NAV_ITEMS.map((item) => {
+      {/* Divider between Create Boo and nav */}
+      <div className="mx-3 my-2 border-t border-white/6" />
+
+      {/* Primary nav — Ghost Graph & Marketplace */}
+      <div className="px-2 flex flex-col gap-0.5">
+        {PRIMARY_NAV.map((item) => {
+          const isActive = viewMode.type === 'nav' && viewMode.view === item.id
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => useViewStore.getState().navigateTo(item.id)}
+              className={[
+                'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] font-semibold transition-all duration-150',
+                isActive
+                  ? 'bg-accent/12 text-accent'
+                  : 'text-secondary/50 hover:bg-white/4 hover:text-secondary/80',
+              ].join(' ')}
+            >
+              <span className="text-[14px]">{item.emoji}</span>
+              <span>{item.label}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Divider */}
+      <div className="mx-3 my-1.5 border-t border-white/6" />
+
+      {/* Secondary nav — Approvals, Scheduler, Cost */}
+      <div className="px-2 pb-3 flex flex-col gap-0.5">
+        {SECONDARY_NAV.map((item) => {
           const isActive = viewMode.type === 'nav' && viewMode.view === item.id
           const badge = item.id === 'approvals' ? pendingApprovals.size : 0
           return (
@@ -377,50 +416,17 @@ export function AgentListColumn() {
               key={item.id}
               type="button"
               onClick={() => useViewStore.getState().navigateTo(item.id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                width: '100%',
-                borderRadius: 6,
-                padding: '5px 10px',
-                fontSize: 12,
-                fontWeight: 500,
-                border: 'none',
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-                background: isActive ? 'rgba(233,69,96,0.12)' : 'transparent',
-                color: isActive ? '#E94560' : 'rgba(232,232,232,0.45)',
-              }}
-              onMouseOver={(e) => {
-                if (!isActive) {
-                  ;(e.currentTarget as HTMLButtonElement).style.background =
-                    'rgba(255,255,255,0.04)'
-                  ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.7)'
-                }
-              }}
-              onMouseOut={(e) => {
-                if (!isActive) {
-                  ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-                  ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.45)'
-                }
-              }}
+              className={[
+                'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150',
+                isActive
+                  ? 'bg-accent/12 text-accent'
+                  : 'text-secondary/40 hover:bg-white/4 hover:text-secondary/70',
+              ].join(' ')}
             >
-              <span>{item.emoji}</span>
+              <span className="text-[12px]">{item.emoji}</span>
               <span>{item.label}</span>
               {badge > 0 && (
-                <span
-                  style={{
-                    marginLeft: 'auto',
-                    background: '#FBBF24',
-                    color: '#0A0E1A',
-                    fontSize: 9,
-                    fontWeight: 700,
-                    borderRadius: 10,
-                    padding: '1px 5px',
-                    lineHeight: 1.5,
-                  }}
-                >
+                <span className="ml-auto rounded-full bg-amber px-1.5 py-px text-[9px] font-bold leading-snug text-background">
                   {badge}
                 </span>
               )}

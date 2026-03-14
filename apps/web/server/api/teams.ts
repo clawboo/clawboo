@@ -5,7 +5,7 @@ import { eq, sql } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
 
 // ─── GET /api/teams ──────────────────────────────────────────────────────────
-// Returns all teams with an agentCount for each.
+// Returns all teams with an agentCount for each, plus agent→team assignments.
 
 export function teamsGET(_req: Request, res: Response): void {
   try {
@@ -25,7 +25,14 @@ export function teamsGET(_req: Request, res: Response): void {
       .from(teams)
       .all()
 
-    res.json({ teams: rows })
+    // Return agent→team assignments so the client can patch fleet store after hydration
+    const assignments = db
+      .select({ agentId: agents.id, teamId: agents.teamId })
+      .from(agents)
+      .all()
+      .filter((a) => a.teamId !== null) as { agentId: string; teamId: string }[]
+
+    res.json({ teams: rows, assignments })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -185,7 +192,7 @@ export function teamAgentPOST(req: Request, res: Response): void {
     return
   }
 
-  const body = req.body as { agentId?: string } | undefined
+  const body = req.body as { agentId?: string; agentName?: string } | undefined
   if (!body || typeof body !== 'object' || !body.agentId) {
     res.status(400).json({ error: 'agentId is required' })
     return
@@ -193,8 +200,24 @@ export function teamAgentPOST(req: Request, res: Response): void {
 
   try {
     const db = createDb(getDbPath())
+    const now = Date.now()
 
-    db.update(agents).set({ teamId }).where(eq(agents.id, body.agentId)).run()
+    // Upsert: create the agent row if it doesn't exist, then set teamId
+    db.insert(agents)
+      .values({
+        id: body.agentId,
+        name: body.agentName || body.agentId,
+        gatewayId: body.agentId,
+        status: 'idle',
+        teamId,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: agents.id,
+        set: { teamId, updatedAt: now },
+      })
+      .run()
 
     res.json({ ok: true })
   } catch (err) {

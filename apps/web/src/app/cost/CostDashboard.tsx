@@ -614,6 +614,9 @@ export function CostDashboard() {
           </h1>
           <p style={{ fontSize: 12, color: 'rgba(232,232,232,0.45)', margin: '4px 0 0' }}>
             Token usage and spend across all Boos
+            <span style={{ marginLeft: 8, fontSize: 10, color: 'rgba(232,232,232,0.25)' }}>
+              Viewing all teams
+            </span>
           </p>
         </div>
         <FrugalToggleButton frugalMode={frugalMode} onToggle={() => void handleToggle()} />

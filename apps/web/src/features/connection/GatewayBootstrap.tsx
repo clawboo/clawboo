@@ -46,7 +46,7 @@ function markOnboarded(): void {
   }
 }
 
-/** Awaitable: hydrate teams from SQLite on connect. */
+/** Awaitable: hydrate teams from SQLite on connect + patch agent teamIds. */
 async function hydrateTeams(): Promise<void> {
   try {
     const r = await fetch('/api/teams')
@@ -59,6 +59,7 @@ async function hydrateTeams(): Promise<void> {
         templateId: string | null
         agentCount: number
       }[]
+      assignments?: { agentId: string; teamId: string }[]
     }
     if (data.teams?.length) {
       useTeamStore.getState().hydrateTeams(data.teams)
@@ -66,57 +67,89 @@ async function hydrateTeams(): Promise<void> {
         useTeamStore.getState().selectTeam(data.teams[0].id)
       }
     }
+
+    // Patch fleet store with team assignments from SQLite
+    if (data.assignments?.length) {
+      const assignmentMap = new Map(data.assignments.map((a) => [a.agentId, a.teamId]))
+      useFleetStore.setState((s) => ({
+        agents: s.agents.map((a) => ({
+          ...a,
+          teamId: assignmentMap.get(a.id) ?? a.teamId,
+        })),
+      }))
+    }
   } catch {
     // hydration failure is non-fatal
   }
 }
 
-/** Auto-migrate: if teams is empty but agents exist, create a Default team and assign all. */
+/**
+ * Auto-migrate teamless agents.
+ * Case A: No teams exist → create "Default" team and assign all agents.
+ * Case B: Teams exist but some agents have no team → assign them to the first team.
+ */
 async function autoMigrateTeamlessAgents(): Promise<void> {
-  const teams = useTeamStore.getState().teams
+  const storeTeams = useTeamStore.getState().teams
   const agents = useFleetStore.getState().agents
-  if (teams.length > 0 || agents.length === 0) return
+  if (agents.length === 0) return
 
-  try {
-    // Create default team
-    const res = await fetch('/api/teams', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Default', icon: '👻', color: '#E94560' }),
-    })
-    if (!res.ok) return
-    const team = await res.json()
+  let targetTeamId: string
 
-    // Assign each agent
-    for (const agent of agents) {
-      try {
-        await fetch(`/api/teams/${team.id}/agents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agentId: agent.id }),
-        })
-      } catch {
-        // assignment failure is non-fatal
-      }
+  if (storeTeams.length === 0) {
+    // Case A: create a default team
+    try {
+      const res = await fetch('/api/teams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Default', icon: '👻', color: '#E94560' }),
+      })
+      if (!res.ok) return
+      const team = await res.json()
+      targetTeamId = team.id
+
+      useTeamStore.getState().addTeam({
+        id: team.id,
+        name: team.name,
+        icon: team.icon,
+        color: team.color,
+        templateId: null,
+        agentCount: 0,
+      })
+      useTeamStore.getState().selectTeam(team.id)
+    } catch {
+      return
     }
-
-    useTeamStore.getState().addTeam({
-      id: team.id,
-      name: team.name,
-      icon: team.icon,
-      color: team.color,
-      templateId: null,
-      agentCount: agents.length,
-    })
-    useTeamStore.getState().selectTeam(team.id)
-
-    // Patch fleet store with teamId
-    useFleetStore.setState((s) => ({
-      agents: s.agents.map((a) => ({ ...a, teamId: team.id })),
-    }))
-  } catch {
-    // migration failure is non-fatal — agents still visible in "All Agents"
+  } else {
+    targetTeamId = storeTeams[0].id
   }
+
+  // Find agents without a team assignment
+  const unassigned = agents.filter((a) => !a.teamId)
+  if (unassigned.length === 0) return
+
+  // Assign each unassigned agent to the target team (upserts SQLite row)
+  for (const agent of unassigned) {
+    try {
+      await fetch(`/api/teams/${targetTeamId}/agents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: agent.id, agentName: agent.name }),
+      })
+    } catch {
+      // assignment failure is non-fatal
+    }
+  }
+
+  // Patch fleet store with teamId for all unassigned agents
+  const unassignedIds = new Set(unassigned.map((a) => a.id))
+  useFleetStore.setState((s) => ({
+    agents: s.agents.map((a) => (unassignedIds.has(a.id) ? { ...a, teamId: targetTeamId } : a)),
+  }))
+
+  // Update team agent count in team store
+  useTeamStore.getState().updateTeam(targetTeamId, {
+    agentCount: agents.filter((a) => a.teamId === targetTeamId || unassignedIds.has(a.id)).length,
+  })
 }
 
 /** Fire-and-forget: pre-populate approval history from SQLite on connect. */

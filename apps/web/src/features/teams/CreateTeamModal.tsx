@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, CheckCircle2, X } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
@@ -47,14 +47,32 @@ interface CreateTeamModalProps {
   isOpen: boolean
   onClose: () => void
   onCreated: () => void
+  /** When provided, skip the "pick" step and go directly to "customize" with this profile. */
+  initialProfile?: TeamProfile | null
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function CreateTeamModal({ isOpen, onClose, onCreated }: CreateTeamModalProps) {
+export function CreateTeamModal({
+  isOpen,
+  onClose,
+  onCreated,
+  initialProfile,
+}: CreateTeamModalProps) {
   const client = useConnectionStore((s) => s.client)
 
   const [step, setStep] = useState<Step>('pick')
+
+  // Jump to customize step when opened with a pre-filled profile
+  useEffect(() => {
+    if (isOpen && initialProfile) {
+      setSelectedProfile(initialProfile)
+      setTeamName(initialProfile.name)
+      setTeamIcon(initialProfile.emoji)
+      setTeamColor(initialProfile.color)
+      setStep('customize')
+    }
+  }, [isOpen, initialProfile])
   const [selectedProfile, setSelectedProfile] = useState<TeamProfile | null>(null)
 
   // Customize fields
