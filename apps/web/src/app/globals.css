@@ -59,3 +59,37 @@ body {
 * {
   border-color: rgb(255 255 255 / 0.08);
 }
+
+/* Scrollbars — blend with dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* React Flow controls — blend with dark theme */
+.react-flow__controls-button {
+  background: #111827 !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+  fill: rgba(255, 255, 255, 0.45) !important;
+}
+.react-flow__controls-button:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  fill: rgba(255, 255, 255, 0.7) !important;
+}
+.react-flow__controls-button:last-child {
+  border-bottom: none !important;
+}
+.react-flow__controls-button svg {
+  fill: inherit !important;
+}

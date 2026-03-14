@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
+import { useTeamStore } from '@/stores/team'
 import { useGraphStore } from './store'
 import { parseToolsMd } from './parsers/parseToolsMd'
 import { parseAgentsMd } from './parsers/parseAgentsMd'
@@ -19,15 +20,34 @@ import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData, ResourceNodeData
 export function useGraphData(): void {
   const agents = useFleetStore((s) => s.agents)
   const client = useConnectionStore((s) => s.client)
+  const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
   const { setAgentFiles, setLoadingFiles, setFilesError, agentFiles, refreshKey } = useGraphStore()
 
+  // Filter agents by selected team (null = show all)
+  const filteredAgents = useMemo(
+    () => (selectedTeamId ? agents.filter((a) => a.teamId === selectedTeamId) : agents),
+    [agents, selectedTeamId],
+  )
+
+  // ── 0. Reset layout on team switch ──────────────────────────────────────────
+  const prevTeamIdRef = useRef(selectedTeamId)
+  useEffect(() => {
+    if (prevTeamIdRef.current === selectedTeamId) return
+    prevTeamIdRef.current = selectedTeamId
+    const store = useGraphStore.getState()
+    store.resetLayout()
+    store.setNodes([])
+    store.setEdges([])
+    useGraphStore.setState({ agentFiles: new Map() })
+  }, [selectedTeamId])
+
   // Stable string keys for dependency comparison
-  const agentStructureKey = agents.map((a) => `${a.id}:${a.name}`).join('|')
-  const agentStatusKey = agents.map((a) => `${a.id}:${a.status}`).join('|')
+  const agentStructureKey = filteredAgents.map((a) => `${a.id}:${a.name}`).join('|')
+  const agentStatusKey = filteredAgents.map((a) => `${a.id}:${a.status}`).join('|')
 
   // Stable agent ID array (recomputed only when structure changes)
   const agentIds = useMemo(
-    () => agents.map((a) => a.id),
+    () => filteredAgents.map((a) => a.id),
     [agentStructureKey], // intentionally using string key, not full agents array
   )
 
@@ -68,7 +88,7 @@ export function useGraphData(): void {
 
   // ── 2. Structural rebuild ────────────────────────────────────────────────────
   const { rawNodes, rawEdges } = useMemo(
-    () => buildGraphElements(agents, agentFiles),
+    () => buildGraphElements(filteredAgents, agentFiles),
     [agentStructureKey, agentFiles], // intentional: string key for agents
   )
 
@@ -91,7 +111,7 @@ export function useGraphData(): void {
     const store = useGraphStore.getState()
     if (store.nodes.length === 0) return
 
-    const agentMap = new Map(agents.map((a) => [a.id, a]))
+    const agentMap = new Map(filteredAgents.map((a) => [a.id, a]))
 
     const patched = store.nodes.map((node) => {
       if (node.type !== 'boo') return node
@@ -114,7 +134,7 @@ export function useGraphData(): void {
 
 // ─── Build graph elements (pure function) ────────────────────────────────────
 
-function buildGraphElements(
+export function buildGraphElements(
   agents: AgentState[],
   agentFiles: Map<string, { toolsMd: string | null; agentsMd: string | null }>,
 ): { rawNodes: GraphNode[]; rawEdges: GraphEdge[] } {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Play, Trash2, Loader2 } from 'lucide-react'
-import { BooAvatar } from '@clawboo/ui'
+import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import type { CronJob } from '@/stores/scheduler'
 import { formatRelativeTime, formatScheduleHuman } from './cronUtils'
 
@@ -147,7 +147,7 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
             background: '#0A0E1A',
           }}
         >
-          <BooAvatar seed={job.agentId} size={28} />
+          <AgentBooAvatar agentId={job.agentId} size={28} />
         </span>
         <div style={{ minWidth: 0 }}>
           <p

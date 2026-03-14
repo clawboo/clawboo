@@ -13,27 +13,32 @@ const elk = new ELK()
 const ELK_OPTIONS = {
   'elk.algorithm': 'layered',
   'elk.direction': 'RIGHT',
-  // Spacing accounts for orbital children (skills 130-160px, resources 180-220px from center).
-  // Same-layer (vertical): 2×220 - boo_height(80) + margin ≈ 400
-  // Between-layers (horizontal): 2×220 - boo_width(180) + margin ≈ 300
-  'elk.spacing.nodeNode': '400',
-  'elk.layered.spacing.nodeNodeBetweenLayers': '300',
+  // Spacing accounts for orbital children (skills 100-190px, resources 180-220px from center).
+  // Same-layer (vertical): 2×220 + margin ≈ 550 (generous to avoid orbital overlap)
+  // Between-layers (horizontal): 2×220 - boo_width(180) + margin ≈ 450
+  'elk.spacing.nodeNode': '550',
+  'elk.layered.spacing.nodeNodeBetweenLayers': '450',
   'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
   'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
   'elk.padding': '[top=40, left=40, bottom=40, right=40]',
 }
 
+// ─── Boo envelope dimensions ─────────────────────────────────────────────────
+// Boo nodes in ELK use inflated "envelope" dimensions that account for orbital
+// children (skills at 100-190px from center, resources at 180-220px).
+// This ensures ELK spaces boos far enough apart to avoid orbital overlap.
+// Always used for boo nodes, regardless of ReactFlow's measured DOM size.
+const BOO_ENVELOPE = 460 // 2 × max_orbital_radius(220) + margin(20)
+
 // ─── Default node dimensions (used before ReactFlow measures them) ────────────
 
 function defaultWidth(nodeType: string | undefined): number {
-  if (nodeType === 'boo') return 180
   if (nodeType === 'skill') return 100
   if (nodeType === 'resource') return 140
   return 160
 }
 
 function defaultHeight(nodeType: string | undefined): number {
-  if (nodeType === 'boo') return 80
   if (nodeType === 'skill') return 30
   if (nodeType === 'resource') return 64
   return 60
@@ -60,8 +65,11 @@ export async function computeElkLayout(
     layoutOptions: ELK_OPTIONS,
     children: nodes.map((node) => ({
       id: node.id,
-      width: node.measured?.width ?? defaultWidth(node.type),
-      height: node.measured?.height ?? defaultHeight(node.type),
+      // Boo nodes always use the inflated envelope (not measured DOM size)
+      // so ELK accounts for orbital children when spacing nodes.
+      width: node.type === 'boo' ? BOO_ENVELOPE : (node.measured?.width ?? defaultWidth(node.type)),
+      height:
+        node.type === 'boo' ? BOO_ENVELOPE : (node.measured?.height ?? defaultHeight(node.type)),
     })),
     edges: edges.map((edge) => ({
       id: edge.id,

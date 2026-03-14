@@ -18,6 +18,8 @@ export interface AgentState {
   runId: string | null
   /** Epoch ms of last heartbeat/presence or status change (null = never seen) */
   lastSeenAt: number | null
+  /** Team this agent belongs to (null = unassigned) */
+  teamId: string | null
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────

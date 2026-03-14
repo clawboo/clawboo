@@ -1,0 +1,1 @@
+export { AgentDetailView } from './AgentDetailView'

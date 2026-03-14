@@ -13,7 +13,7 @@ import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronRight, Clock, SendHorizontal, Wrench } from 'lucide-react'
 import type { TranscriptEntry } from '@clawboo/protocol'
-import { BooAvatar } from '@clawboo/ui'
+import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
@@ -380,7 +380,7 @@ const AssistantTurnCard = memo(function AssistantTurnCard({
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <BooAvatar seed={agentId} size={22} />
+          <AgentBooAvatar agentId={agentId} size={22} />
           <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary/70">
             {agentName}
           </span>
@@ -449,7 +449,7 @@ const StreamingCard = memo(function StreamingCard({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <BooAvatar seed={agentId} size={22} />
+        <AgentBooAvatar agentId={agentId} size={22} />
         <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary/70">
           {agentName}
         </span>
@@ -649,13 +649,21 @@ const MessageComposer = memo(function MessageComposer({
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
 
-export function ChatPanel() {
-  const selectedAgentId = useFleetStore((s) => s.selectedAgentId)
+export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
+  const storeAgentId = useFleetStore((s) => s.selectedAgentId)
+  const resolvedAgentId = propAgentId ?? storeAgentId
   const agents = useFleetStore((s) => s.agents)
   const connectionStatus = useConnectionStore((s) => s.status)
   const client = useConnectionStore((s) => s.client)
 
-  const agent = agents.find((a) => a.id === selectedAgentId) ?? null
+  // Sync fleet store selection when agentId is provided as prop
+  useEffect(() => {
+    if (propAgentId && propAgentId !== useFleetStore.getState().selectedAgentId) {
+      useFleetStore.getState().selectAgent(propAgentId)
+    }
+  }, [propAgentId])
+
+  const agent = agents.find((a) => a.id === resolvedAgentId) ?? null
 
   const sessionKey = agent?.sessionKey ?? null
   const transcripts = useChatStore((s) => s.transcripts)
@@ -713,7 +721,7 @@ export function ChatPanel() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
         <div className="flex items-center gap-2.5">
-          <BooAvatar seed={agent.id} size={30} />
+          <AgentBooAvatar agentId={agent.id} size={30} />
           <h2
             className="text-[14px] font-semibold text-text"
             style={{ fontFamily: 'var(--font-body)' }}

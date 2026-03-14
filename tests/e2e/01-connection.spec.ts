@@ -36,7 +36,7 @@ test.describe('Gateway Connection', () => {
     await connectToMockGateway(page, request, gateway.url)
 
     // After connecting, the fleet sidebar should be visible with agents
-    const sidebar = page.locator('[data-testid="fleet-sidebar"]')
+    const sidebar = page.locator('[data-testid="agent-list-column"]')
     await expect(sidebar).toBeVisible()
     await expect(sidebar.getByText('Test Boo')).toBeVisible()
     await expect(sidebar.getByText('Research Boo')).toBeVisible()

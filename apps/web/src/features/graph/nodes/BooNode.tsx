@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { Handle, Position, useConnection } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { motion } from 'framer-motion'
-import { BooAvatar } from '@clawboo/ui'
+import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import type { BooNodeData } from '../types'
 import { useGraphStore } from '../store'
 import { useFloatingMotion } from '../useFloatingMotion'
@@ -147,7 +147,7 @@ export const BooNode = memo(function BooNode({
             glow?.pulse ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.4 }
           }
         >
-          <BooAvatar seed={agentId} size={booW} />
+          <AgentBooAvatar agentId={agentId} size={booW} />
         </motion.div>
 
         {/* ── Approval alert ring (pulsing amber) ───────────────────────────── */}

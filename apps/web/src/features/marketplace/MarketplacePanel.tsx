@@ -11,6 +11,16 @@ import { SKILL_CATALOG, searchCatalog } from './catalog'
 import type { CatalogSkill } from './catalog'
 import { AgentPickerDropdown } from './AgentPickerDropdown'
 import type { SkillCategory } from '@/features/graph/types'
+import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
+import type { TeamProfile } from '@/features/teams/types'
+
+import marketingRaw from '@/features/teams/profiles/marketing.json'
+import devRaw from '@/features/teams/profiles/dev.json'
+import researchRaw from '@/features/teams/profiles/research.json'
+import youtubeRaw from '@/features/teams/profiles/youtube.json'
+import studentRaw from '@/features/teams/profiles/student.json'
+
+const TEAM_PROFILES: TeamProfile[] = [marketingRaw, devRaw, researchRaw, youtubeRaw, studentRaw]
 
 // ─── Category colours (matches SkillNode.tsx) ────────────────────────────────
 
@@ -270,6 +280,103 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
   )
 }
 
+// ─── TeamTemplateCard ─────────────────────────────────────────────────────────
+
+function TeamTemplateCard({
+  profile,
+  onDeploy,
+}: {
+  profile: TeamProfile
+  onDeploy: (profile: TeamProfile) => void
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18 }}
+      style={{
+        background: '#111827',
+        border: `1px solid ${profile.color}25`,
+        borderRadius: 10,
+        padding: '14px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        transition: 'border-color 0.15s',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = `${profile.color}45`
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = `${profile.color}25`
+      }}
+    >
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 8,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: `${profile.color}20`,
+            fontSize: 16,
+            flexShrink: 0,
+          }}
+        >
+          {profile.emoji}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#E8E8E8' }}>{profile.name}</div>
+          <div style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)' }}>
+            {profile.agents.length} agent{profile.agents.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+        <button
+          onClick={() => onDeploy(profile)}
+          style={{
+            background: `${profile.color}20`,
+            border: `1px solid ${profile.color}40`,
+            color: profile.color,
+            fontSize: 11,
+            fontWeight: 600,
+            padding: '4px 12px',
+            borderRadius: 6,
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            whiteSpace: 'nowrap',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = `${profile.color}35`
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = `${profile.color}20`
+          }}
+        >
+          Deploy
+        </button>
+      </div>
+
+      {/* Description */}
+      <div
+        style={{
+          fontSize: 12,
+          color: 'rgba(232,232,232,0.5)',
+          lineHeight: 1.5,
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+        }}
+      >
+        {profile.description}
+      </div>
+    </motion.div>
+  )
+}
+
 // ─── MarketplacePanel ────────────────────────────────────────────────────────
 
 export function MarketplacePanel() {
@@ -279,6 +386,11 @@ export function MarketplacePanel() {
   const setCategoryFilter = useMarketplaceStore((s) => s.setCategoryFilter)
   const sortBy = useMarketplaceStore((s) => s.sortBy)
   const setSortBy = useMarketplaceStore((s) => s.setSortBy)
+
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [prefilledProfile, setPrefilledProfile] = useState<TeamProfile | null>(null)
+
+  const showTeamTemplates = !searchQuery && categoryFilter === 'all'
 
   const filteredSkills = useMemo(() => {
     let results: CatalogSkill[] = searchQuery ? searchCatalog(searchQuery) : [...SKILL_CATALOG]
@@ -435,6 +547,57 @@ export function MarketplacePanel() {
           padding: 12,
         }}
       >
+        {/* Team Templates section */}
+        {showTeamTemplates && (
+          <div style={{ marginBottom: 16 }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'rgba(232,232,232,0.45)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                marginBottom: 8,
+              }}
+            >
+              Team Templates
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                gap: 10,
+                marginBottom: 16,
+              }}
+            >
+              {TEAM_PROFILES.map((profile) => (
+                <TeamTemplateCard
+                  key={profile.id}
+                  profile={profile}
+                  onDeploy={(p) => {
+                    setPrefilledProfile(p)
+                    setShowCreateModal(true)
+                  }}
+                />
+              ))}
+            </div>
+            <div style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', marginBottom: 4 }} />
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'rgba(232,232,232,0.45)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                marginTop: 12,
+                marginBottom: 8,
+              }}
+            >
+              Individual Skills
+            </div>
+          </div>
+        )}
+
         {filteredSkills.length === 0 ? (
           <div
             style={{
@@ -476,6 +639,19 @@ export function MarketplacePanel() {
           </div>
         )}
       </div>
+
+      <CreateTeamModal
+        isOpen={showCreateModal}
+        onClose={() => {
+          setShowCreateModal(false)
+          setPrefilledProfile(null)
+        }}
+        onCreated={() => {
+          setShowCreateModal(false)
+          setPrefilledProfile(null)
+        }}
+        initialProfile={prefilledProfile}
+      />
     </div>
   )
 }

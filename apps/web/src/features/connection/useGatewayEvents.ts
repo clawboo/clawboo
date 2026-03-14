@@ -136,6 +136,10 @@ export function useGatewayEvents(client: GatewayClient | null): void {
         try {
           const result = await cl.agents.list()
           const mainKey = result.mainKey?.trim() || 'main'
+          // Preserve existing teamId assignments — Gateway doesn't know about teams
+          const existingTeamIds = new Map(
+            useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
+          )
           useFleetStore.getState().hydrateAgents(
             result.agents.map((a) => ({
               id: a.id,
@@ -147,6 +151,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
               streamingText: null,
               runId: null,
               lastSeenAt: null,
+              teamId: existingTeamIds.get(a.id) ?? null,
             })),
           )
         } catch {

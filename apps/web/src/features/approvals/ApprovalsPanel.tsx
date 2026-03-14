@@ -1,6 +1,8 @@
+import { useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
+import { useTeamStore } from '@/stores/team'
 import { useApprovalActions } from './useApprovalActions'
 import type { ApprovalRequest } from '@/stores/approvals'
 
@@ -196,9 +198,22 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
 
 export function ApprovalsPanel() {
   const pendingApprovals = useApprovalsStore((s) => s.pendingApprovals)
-  const approvals = Array.from(pendingApprovals.values()).sort(
-    (a, b) => a.createdAtMs - b.createdAtMs,
-  )
+  const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
+  const agents = useFleetStore((s) => s.agents)
+
+  // Build set of agent IDs for the selected team (null = show all)
+  const teamAgentIds = useMemo(() => {
+    if (selectedTeamId === null) return null
+    return new Set(agents.filter((a) => a.teamId === selectedTeamId).map((a) => a.id))
+  }, [agents, selectedTeamId])
+
+  const approvals = Array.from(pendingApprovals.values())
+    .filter((a) => {
+      if (teamAgentIds === null) return true
+      if (!a.agentId) return true
+      return teamAgentIds.has(a.agentId)
+    })
+    .sort((a, b) => a.createdAtMs - b.createdAtMs)
 
   return (
     <div
