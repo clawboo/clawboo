@@ -7,6 +7,7 @@ export {
   graphLayouts,
   settings,
   skills,
+  teams,
   teamProfiles,
 } from './schema'
 
@@ -25,6 +26,8 @@ export type {
   DbSettingInsert,
   DbSkill,
   DbSkillInsert,
+  DbTeam,
+  DbTeamInsert,
   DbTeamProfile,
   DbTeamProfileInsert,
 } from './schema'

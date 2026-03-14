@@ -33,18 +33,32 @@ export function createDb(dbPath: string): ClawbooDb {
   // drizzle-kit generate produces the canonical migration history;
   // this block ensures a fresh DB is usable without running drizzle-kit.
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS teams (
+      id             TEXT    PRIMARY KEY,
+      name           TEXT    NOT NULL,
+      icon           TEXT    NOT NULL,
+      color          TEXT    NOT NULL,
+      template_id    TEXT,
+      is_archived    INTEGER NOT NULL DEFAULT 0,
+      created_at     INTEGER NOT NULL,
+      updated_at     INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_teams_name ON teams (name);
+
     CREATE TABLE IF NOT EXISTS agents (
       id             TEXT    PRIMARY KEY,
       name           TEXT    NOT NULL,
       gateway_id     TEXT    NOT NULL,
       avatar_seed    TEXT,
       personality_config TEXT,
+      team_id        TEXT    REFERENCES teams(id),
       status         TEXT    NOT NULL DEFAULT 'idle',
       created_at     INTEGER NOT NULL,
       updated_at     INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_agents_gateway_id ON agents (gateway_id);
     CREATE INDEX IF NOT EXISTS idx_agents_status      ON agents (status);
+    CREATE INDEX IF NOT EXISTS idx_agents_team_id     ON agents (team_id);
 
     CREATE TABLE IF NOT EXISTS cost_records (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,6 +140,19 @@ export function createDb(dbPath: string): ClawbooDb {
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_ts
       ON chat_messages (session_key, timestamp_ms);
   `)
+
+  // Existing-DB migrations: add columns that CREATE TABLE IF NOT EXISTS won't add.
+  // SQLite errors on duplicate column — catch silences it for already-migrated DBs.
+  try {
+    sqlite.exec('ALTER TABLE agents ADD COLUMN team_id TEXT REFERENCES teams(id)')
+  } catch {
+    /* column already exists */
+  }
+  try {
+    sqlite.exec('ALTER TABLE teams ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0')
+  } catch {
+    /* column already exists */
+  }
 
   return drizzle(sqlite, { schema })
 }

@@ -593,16 +593,50 @@ function DeployStep({
     const deploy = async () => {
       const tools = buildToolsMd(profile.skills)
       try {
+        // Create the team first
+        let teamId: string | null = null
+        try {
+          const teamRes = await fetch('/api/teams', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: profile.name,
+              icon: profile.emoji,
+              color: profile.color,
+              templateId: profile.id,
+            }),
+          })
+          if (teamRes.ok) {
+            const { team } = (await teamRes.json()) as { team: { id: string } }
+            teamId = team.id
+          }
+        } catch {
+          // team creation failure is non-fatal — agents will be teamless
+        }
+
         const workspaceDir = await resolveWorkspaceDir(client)
         for (let i = 0; i < profile.agents.length; i++) {
           const agent = profile.agents[i]!
           setCurrentName(agent.name)
-          await createAgent(client, agent.name, workspaceDir, {
+          const agentId = await createAgent(client, agent.name, workspaceDir, {
             soul: agent.soulTemplate,
             identity: agent.identityTemplate,
             tools,
           })
           setProgress(i + 1)
+
+          // Assign agent to team (best-effort)
+          if (teamId) {
+            try {
+              await fetch(`/api/teams/${teamId}/agents`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agentId }),
+              })
+            } catch {
+              // assignment failure is non-fatal
+            }
+          }
         }
         // brief pause to let "All Boos deployed!" read
         await new Promise<void>((r) => setTimeout(r, 700))

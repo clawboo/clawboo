@@ -91,6 +91,30 @@ describe('generateBooAvatar', () => {
   })
 })
 
+describe('isBooZero tint reservation', () => {
+  it('isBooZero=true forces OpenClaw red tint (#ff4d4d)', () => {
+    const svg = generateBooAvatar({ seed: 'boo-zero-test', isBooZero: true })
+    // OpenClaw red should appear in the gradient stop
+    expect(svg).toContain('#ff4d4d')
+  })
+
+  it('isBooZero=false never produces OpenClaw red for any seed', () => {
+    // Test 50 random seeds — none should get the reserved red tint
+    for (let i = 0; i < 50; i++) {
+      const svg = generateBooAvatar({ seed: `non-zero-agent-${i}`, isBooZero: false })
+      // The gradient stop should NOT contain the reserved red
+      expect(svg).not.toContain('stop-color="#ff4d4d"')
+    }
+  })
+
+  it('explicit tint overrides isBooZero', () => {
+    const svg = generateBooAvatar({ seed: 'override-test', isBooZero: true, tint: '#34D399' })
+    // Explicit tint should win over isBooZero
+    expect(svg).toContain('#34D399')
+    expect(svg).not.toContain('stop-color="#ff4d4d"')
+  })
+})
+
 describe('booAvatarToDataUrl', () => {
   it('converts seed to a base64 data URL', () => {
     const url = booAvatarToDataUrl({ seed: 'data-url-test' })
