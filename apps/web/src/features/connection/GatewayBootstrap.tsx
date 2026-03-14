@@ -109,6 +109,7 @@ export function GatewayBootstrap() {
             streamingText: null,
             runId: null,
             lastSeenAt: null,
+            teamId: null,
           })),
         )
         return result.agents.length

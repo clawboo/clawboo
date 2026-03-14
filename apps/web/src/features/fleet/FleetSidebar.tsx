@@ -205,6 +205,7 @@ export function FleetSidebar() {
           streamingText: null,
           runId: null,
           lastSeenAt: null,
+          teamId: null,
         })),
       )
     } catch {

@@ -147,6 +147,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
               streamingText: null,
               runId: null,
               lastSeenAt: null,
+              teamId: null,
             })),
           )
         } catch {

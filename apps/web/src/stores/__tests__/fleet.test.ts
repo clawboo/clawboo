@@ -15,6 +15,7 @@ function makeAgent(overrides: Partial<AgentState> = {}): AgentState {
     streamingText: null,
     runId: null,
     lastSeenAt: null,
+    teamId: null,
     ...overrides,
   }
 }

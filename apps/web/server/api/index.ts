@@ -9,6 +9,14 @@ import { graphLayoutGET, graphLayoutPOST } from './graphLayout'
 import { ollamaCheckGET } from './ollamaCheck'
 import { personalityGET, personalityPOST } from './personality'
 import { skillsGET, skillsPOST, skillsDELETE } from './skills'
+import {
+  teamsGET,
+  teamsPOST,
+  teamsPATCH,
+  teamsDELETE,
+  teamAgentPOST,
+  teamAgentDELETE,
+} from './teams'
 
 const router: RouterType = Router()
 
@@ -45,5 +53,13 @@ router.post('/api/personality', personalityPOST)
 router.get('/api/skills', skillsGET)
 router.post('/api/skills', skillsPOST)
 router.delete('/api/skills', skillsDELETE)
+
+// Teams
+router.get('/api/teams', teamsGET)
+router.post('/api/teams', teamsPOST)
+router.patch('/api/teams/:id', teamsPATCH)
+router.delete('/api/teams/:id', teamsDELETE)
+router.post('/api/teams/:id/agents', teamAgentPOST)
+router.delete('/api/teams/:id/agents/:agentId', teamAgentDELETE)
 
 export { router as apiRouter }
