@@ -336,7 +336,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
         top: 0,
         right: 0,
         bottom: 0,
-        left: 256,
+        left: 268,
         zIndex: 40,
         background: '#0d1117',
         display: 'flex',

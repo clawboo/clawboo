@@ -30,6 +30,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useApprovalsStore } from '@/stores/approvals'
 import { TeamPicker } from '@/features/teams/TeamPicker'
+import { useTeamStore } from '@/stores/team'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,33 @@ function markOnboarded(): void {
   if (typeof window !== 'undefined') {
     localStorage.setItem(ONBOARDED_KEY, '1')
   }
+}
+
+/** Fire-and-forget: hydrate teams from SQLite on connect. */
+function hydrateTeams(): void {
+  fetch('/api/teams')
+    .then((r) => r.json())
+    .then(
+      (data: {
+        teams?: {
+          id: string
+          name: string
+          icon: string
+          color: string
+          templateId: string | null
+          agentCount: number
+        }[]
+      }) => {
+        if (data.teams?.length) {
+          useTeamStore.getState().hydrateTeams(data.teams)
+          // Auto-select first team if none selected
+          if (!useTeamStore.getState().selectedTeamId) {
+            useTeamStore.getState().selectTeam(data.teams[0].id)
+          }
+        }
+      },
+    )
+    .catch(() => {})
 }
 
 /** Fire-and-forget: pre-populate approval history from SQLite on connect. */
@@ -133,7 +161,8 @@ export function GatewayBootstrap() {
       const agentCount = await hydrateFleet(newClient)
       if (agentCount === 0) setShowTeamPicker(true)
       // -1 means error — don't show TeamPicker (user may have agents we couldn't load)
-      // Pre-populate approval history from SQLite (best-effort)
+      // Pre-populate teams + approval history from SQLite (best-effort)
+      hydrateTeams()
       preloadApprovalHistory()
     },
     [setClient, hydrateFleet],
@@ -177,7 +206,8 @@ export function GatewayBootstrap() {
         if (agentCount === 0) setShowTeamPicker(true)
         // -1 means error — don't show TeamPicker
 
-        // Pre-populate approval history from SQLite (best-effort)
+        // Pre-populate teams + approval history from SQLite (best-effort)
+        hydrateTeams()
         preloadApprovalHistory()
       } catch {
         // Auto-connect failed — GatewayConnectScreen renders as fallback
@@ -205,8 +235,9 @@ export function GatewayBootstrap() {
       setGatewayUrl(url)
       setClient(newClient)
 
-      // Hydrate fleet (agents were just created by the wizard)
+      // Hydrate fleet + teams (agents were just created by the wizard)
       await hydrateFleet(newClient)
+      hydrateTeams()
 
       // Show the "Click a Boo" tip after the wizard exits
       setShowBooTip(true)

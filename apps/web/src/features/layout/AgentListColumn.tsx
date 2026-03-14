@@ -1,17 +1,17 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronDown, ChevronRight, FileEdit, Plus, Search, Trash2 } from 'lucide-react'
+import { Plus, Search, Trash2 } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
+import { useTeamStore } from '@/stores/team'
 import { useConnectionStore } from '@/stores/connection'
-import { useViewStore } from '@/stores/view'
-import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
-import { CreateBooModal } from './CreateBooModal'
-import { deleteAgentOperation } from './deleteAgentOperation'
-import { useEditorStore } from '@/stores/editor'
+import { useViewStore, type NavView } from '@/stores/view'
+import { useApprovalsStore } from '@/stores/approvals'
+import { CreateBooModal } from '@/features/fleet/CreateBooModal'
+import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatLastSeen(lastSeenAt: number | null): string | null {
   if (!lastSeenAt) return null
@@ -22,8 +22,7 @@ function formatLastSeen(lastSeenAt: number | null): string | null {
   return `seen ${Math.floor(diff / 86_400_000)}d ago`
 }
 
-// ─── Agent avatar ──────────────────────────────────────────────────────────────
-// Wraps BooAvatar with a subtle selection ring.
+// ─── Agent avatar ────────────────────────────────────────────────────────────
 
 function AgentAvatar({ agent, selected }: { agent: AgentState; selected: boolean }) {
   return (
@@ -39,12 +38,12 @@ function AgentAvatar({ agent, selected }: { agent: AgentState; selected: boolean
         background: '#0A0E1A',
       }}
     >
-      <BooAvatar seed={agent.id} size={36} />
+      <BooAvatar seed={agent.id} size={32} />
     </span>
   )
 }
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
+// ─── Status badge ────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<
   AgentStatus,
@@ -88,7 +87,6 @@ function StatusBadge({ status }: { status: AgentStatus }) {
         transition={{ duration: 0.15, ease: 'easeOut' }}
         className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide ${cfg.badge}`}
       >
-        {/* pulsing dot */}
         <span className="relative flex h-1.5 w-1.5">
           {cfg.pulse && (
             <motion.span
@@ -105,7 +103,7 @@ function StatusBadge({ status }: { status: AgentStatus }) {
   )
 }
 
-// ─── Agent row ────────────────────────────────────────────────────────────────
+// ─── Agent row ───────────────────────────────────────────────────────────────
 
 function AgentRow({
   agent,
@@ -123,7 +121,7 @@ function AgentRow({
       layout
       data-testid={`fleet-agent-row-${agent.id}`}
       className={[
-        'group flex w-full items-center gap-3 rounded-lg px-3 py-2.5',
+        'group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2',
         'transition-colors duration-150',
         selected ? 'bg-white/6 shadow-sm' : 'hover:bg-white/4',
       ].join(' ')}
@@ -131,20 +129,20 @@ function AgentRow({
       <button
         type="button"
         onClick={onSelect}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         <AgentAvatar agent={agent} selected={selected} />
         <div className="min-w-0 flex-1">
           <p
-            className="truncate text-[13px] font-medium leading-tight text-text"
+            className="truncate text-[12px] font-medium leading-tight text-text"
             style={{ fontFamily: 'var(--font-body)' }}
           >
             {agent.name}
           </p>
-          <div className="mt-1.5 flex items-center gap-2">
+          <div className="mt-1 flex items-center gap-2">
             <StatusBadge status={agent.status} />
             {agent.status !== 'running' && formatLastSeen(agent.lastSeenAt) && (
-              <span className="text-[10px] text-secondary/40">
+              <span className="text-[9px] text-secondary/40">
                 {formatLastSeen(agent.lastSeenAt)}
               </span>
             )}
@@ -161,33 +159,83 @@ function AgentRow({
         }}
         className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive group-hover:opacity-100"
       >
-        <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+        <Trash2 className="h-3 w-3" strokeWidth={2} />
       </button>
     </motion.div>
   )
 }
 
-// ─── Fleet sidebar ────────────────────────────────────────────────────────────
+// ─── Nav items ───────────────────────────────────────────────────────────────
 
-export function FleetSidebar() {
+const NAV_ITEMS: { id: NavView; label: string; emoji: string }[] = [
+  { id: 'graph', label: 'Ghost Graph', emoji: '👻' },
+  { id: 'approvals', label: 'Approvals', emoji: '🔐' },
+  { id: 'scheduler', label: 'Scheduler', emoji: '⏰' },
+  { id: 'cost', label: 'Cost', emoji: '💰' },
+  { id: 'marketplace', label: 'Marketplace', emoji: '🛒' },
+]
+
+// ─── AgentListColumn ─────────────────────────────────────────────────────────
+
+export function AgentListColumn() {
   const agents = useFleetStore((s) => s.agents)
   const selectedAgentId = useFleetStore((s) => s.selectedAgentId)
   const selectAgent = useFleetStore((s) => s.selectAgent)
   const hydrateAgents = useFleetStore((s) => s.hydrateAgents)
 
+  const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
+  const selectedTeam = useTeamStore((s) =>
+    s.selectedTeamId ? (s.teams.find((t) => t.id === s.selectedTeamId) ?? null) : null,
+  )
+
   const connectionStatus = useConnectionStore((s) => s.status)
   const client = useConnectionStore((s) => s.client)
 
+  const viewMode = useViewStore((s) => s.viewMode)
+  const pendingApprovals = useApprovalsStore((s) => s.pendingApprovals)
+
   const [query, setQuery] = useState('')
-  const [personalityOpen, setPersonalityOpen] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
 
-  // Tick counter to re-render "seen X ago" labels every 30s
+  // Tick counter for "seen X ago" labels
   const [, setTick] = useState(0)
   useEffect(() => {
     const id = setInterval(() => setTick((n) => n + 1), 30_000)
     return () => clearInterval(id)
   }, [])
+
+  // Delayed empty state
+  const [showEmpty, setShowEmpty] = useState(false)
+  const isEmptyConnected = agents.length === 0 && connectionStatus === 'connected' && !query
+  useEffect(() => {
+    if (!isEmptyConnected) {
+      setShowEmpty(false)
+      return
+    }
+    const timer = setTimeout(() => setShowEmpty(true), 1000)
+    return () => clearTimeout(timer)
+  }, [isEmptyConnected])
+
+  // Filter agents by team + search query
+  const filtered = useMemo(() => {
+    let list = agents
+    if (selectedTeamId !== null) {
+      list = list.filter((a) => a.teamId === selectedTeamId)
+    }
+    const q = query.trim().toLowerCase()
+    if (q) {
+      list = list.filter((a) => a.name.toLowerCase().includes(q))
+    }
+    return list
+  }, [agents, selectedTeamId, query])
+
+  const handleSelectAgent = useCallback(
+    (agentId: string) => {
+      selectAgent(agentId)
+      useViewStore.getState().openAgent(agentId)
+    },
+    [selectAgent],
+  )
 
   const handleBooCreated = useCallback(async () => {
     if (!client) return
@@ -209,39 +257,25 @@ export function FleetSidebar() {
         })),
       )
     } catch {
-      // hydration failure is non-fatal — fleet will catch up on next event
+      // hydration failure is non-fatal
     }
   }, [client, hydrateAgents])
 
-  // Delayed empty state — only show after 1s to avoid flash during hydration
-  const [showEmpty, setShowEmpty] = useState(false)
-  const isEmptyConnected = agents.length === 0 && connectionStatus === 'connected' && !query
-  useEffect(() => {
-    if (!isEmptyConnected) {
-      setShowEmpty(false)
-      return
-    }
-    const timer = setTimeout(() => setShowEmpty(true), 1000)
-    return () => clearTimeout(timer)
-  }, [isEmptyConnected])
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return agents
-    return agents.filter((a) => a.name.toLowerCase().includes(q))
-  }, [agents, query])
-
   return (
-    <div className="flex h-full flex-col" data-testid="fleet-sidebar">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 pb-2 pt-4">
+    <div
+      className="flex h-full flex-col border-r border-border bg-surface"
+      style={{ width: 208, flexShrink: 0 }}
+      data-testid="agent-list-column"
+    >
+      {/* Team header */}
+      <div className="flex items-center justify-between px-3 pb-2 pt-4">
         <h2
           className="text-[11px] font-semibold uppercase tracking-widest text-secondary"
           style={{ fontFamily: 'var(--font-mono)' }}
         >
-          Fleet
-          {agents.length > 0 && (
-            <span className="ml-1.5 tabular-nums text-secondary/60">({agents.length})</span>
+          {selectedTeam ? selectedTeam.name : 'All Agents'}
+          {filtered.length > 0 && (
+            <span className="ml-1.5 tabular-nums text-secondary/60">({filtered.length})</span>
           )}
         </h2>
       </div>
@@ -261,7 +295,7 @@ export function FleetSidebar() {
         </label>
       </div>
 
-      {/* Agent list */}
+      {/* Agent list (scrollable) */}
       <div className="flex-1 overflow-y-auto px-2 pb-2">
         <AnimatePresence initial={false}>
           {filtered.length === 0 ? (
@@ -297,7 +331,7 @@ export function FleetSidebar() {
                   key={agent.id}
                   agent={agent}
                   selected={agent.id === selectedAgentId}
-                  onSelect={() => selectAgent(agent.id)}
+                  onSelect={() => handleSelectAgent(agent.id)}
                   onDelete={() => {
                     if (!client) return
                     if (!window.confirm(`Delete ${agent.name}? This cannot be undone.`)) return
@@ -314,69 +348,82 @@ export function FleetSidebar() {
         </AnimatePresence>
       </div>
 
-      {/* Edit files — shown when an agent is selected */}
-      {selectedAgentId && client && (
-        <div className="border-t border-white/8 px-4 py-2">
-          <button
-            type="button"
-            onClick={() => {
-              const agent = agents.find((a) => a.id === selectedAgentId)
-              if (agent) useEditorStore.getState().openEditor(agent.id, agent.name)
-            }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium text-secondary/70 transition-colors hover:bg-white/4 hover:text-text"
-            style={{ fontFamily: 'var(--font-mono)' }}
-          >
-            <FileEdit className="h-3.5 w-3.5" strokeWidth={2} />
-            Edit files
-          </button>
-        </div>
-      )}
-
-      {/* Personality settings — shown when an agent is selected */}
-      {selectedAgentId && (
-        <div className="border-t border-white/8">
-          {/* Collapsible header */}
-          <button
-            type="button"
-            onClick={() => setPersonalityOpen((o) => !o)}
-            className="flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors hover:bg-white/4"
-          >
-            <span
-              className="text-[10px] font-semibold uppercase tracking-widest text-secondary"
-              style={{ fontFamily: 'var(--font-mono)' }}
-            >
-              Personality
-            </span>
-            {personalityOpen ? (
-              <ChevronDown className="h-3.5 w-3.5 text-secondary/60" strokeWidth={2} />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 text-secondary/60" strokeWidth={2} />
-            )}
-          </button>
-
-          {/* Scrollable sliders panel */}
-          {personalityOpen && (
-            <div className="max-h-72 overflow-y-auto px-4 pb-3">
-              <PersonalitySliders key={selectedAgentId} />
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Create Boo */}
       {client && (
-        <div className="border-t border-white/8 p-3">
+        <div className="border-t border-white/8 p-2">
           <button
             type="button"
             data-testid="fleet-create-boo"
             onClick={() => setShowCreateModal(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-white/12 px-3 py-2 text-[12px] font-medium text-secondary/60 transition-colors hover:border-accent/30 hover:text-accent/60"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-white/12 px-2 py-1.5 text-[11px] font-medium text-secondary/60 transition-colors hover:border-accent/30 hover:text-accent/60"
           >
             <Plus className="h-3.5 w-3.5" strokeWidth={2} />
             Create Boo
           </button>
         </div>
       )}
+
+      {/* Nav buttons (fixed at bottom) */}
+      <div className="border-t border-white/8 p-2 flex flex-col gap-0.5">
+        {NAV_ITEMS.map((item) => {
+          const isActive = viewMode.type === 'nav' && viewMode.view === item.id
+          const badge = item.id === 'approvals' ? pendingApprovals.size : 0
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => useViewStore.getState().navigateTo(item.id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                borderRadius: 6,
+                padding: '5px 10px',
+                fontSize: 12,
+                fontWeight: 500,
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                background: isActive ? 'rgba(233,69,96,0.12)' : 'transparent',
+                color: isActive ? '#E94560' : 'rgba(232,232,232,0.45)',
+              }}
+              onMouseOver={(e) => {
+                if (!isActive) {
+                  ;(e.currentTarget as HTMLButtonElement).style.background =
+                    'rgba(255,255,255,0.04)'
+                  ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.7)'
+                }
+              }}
+              onMouseOut={(e) => {
+                if (!isActive) {
+                  ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                  ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.45)'
+                }
+              }}
+            >
+              <span>{item.emoji}</span>
+              <span>{item.label}</span>
+              {badge > 0 && (
+                <span
+                  style={{
+                    marginLeft: 'auto',
+                    background: '#FBBF24',
+                    color: '#0A0E1A',
+                    fontSize: 9,
+                    fontWeight: 700,
+                    borderRadius: 10,
+                    padding: '1px 5px',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {badge}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
 
       <CreateBooModal
         isOpen={showCreateModal}

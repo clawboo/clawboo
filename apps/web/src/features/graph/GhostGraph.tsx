@@ -432,7 +432,7 @@ export function GhostGraph() {
           onClose={() => setContextMenu(null)}
           onChat={() => {
             useFleetStore.getState().selectAgent(contextMenu.agentId)
-            useViewStore.getState().setView('chat')
+            useViewStore.getState().openAgent(contextMenu.agentId)
             setContextMenu(null)
           }}
           onEditPersonality={() => {

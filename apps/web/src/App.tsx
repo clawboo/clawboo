@@ -1,22 +1,23 @@
 import { Providers } from './app/providers'
 import { ToastContainer } from '@/features/ui/ToastContainer'
 import { GatewayBootstrap } from '@/features/connection/GatewayBootstrap'
-import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
-import { FleetSidebar } from '@/features/fleet/FleetSidebar'
-import Home from './app/page'
+import { TeamSidebar } from '@/features/layout/TeamSidebar'
+import { AgentListColumn } from '@/features/layout/AgentListColumn'
+import { ContentArea } from '@/features/layout/ContentArea'
 
 export function App() {
   return (
     <Providers>
       <ToastContainer />
       <GatewayBootstrap />
-      <AgentFileEditorOverlay />
       <div className="flex h-screen overflow-hidden bg-background text-foreground">
-        <aside className="w-64 shrink-0 border-r border-border bg-surface">
-          <FleetSidebar />
-        </aside>
+        {/* Col 1 — Team sidebar (60px) */}
+        <TeamSidebar />
+        {/* Col 2 — Agent list + nav (208px) */}
+        <AgentListColumn />
+        {/* Col 3+4 — Content area */}
         <main className="flex flex-1 flex-col overflow-hidden">
-          <Home />
+          <ContentArea />
         </main>
       </div>
     </Providers>

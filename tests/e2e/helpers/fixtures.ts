@@ -85,7 +85,7 @@ export async function connectToMockGateway(
   await page.goto('/')
 
   // Auto-connect fires on mount — wait for sidebar agents to appear
-  const sidebar = page.locator('[data-testid="fleet-sidebar"]')
+  const sidebar = page.locator('[data-testid="agent-list-column"]')
   await expect(sidebar).toBeVisible({ timeout: 15_000 })
   await expect(sidebar.getByText('Test Boo')).toBeVisible({ timeout: 10_000 })
 }
