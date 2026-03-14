@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronDown, ChevronRight, FileEdit, Plus, Search, Trash2 } from 'lucide-react'
-import { BooAvatar } from '@clawboo/ui'
+import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useViewStore } from '@/stores/view'
@@ -39,7 +39,7 @@ function AgentAvatar({ agent, selected }: { agent: AgentState; selected: boolean
         background: '#0A0E1A',
       }}
     >
-      <BooAvatar seed={agent.id} size={36} />
+      <AgentBooAvatar agentId={agent.id} size={36} />
     </span>
   )
 }

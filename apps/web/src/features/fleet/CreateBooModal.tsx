@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 're
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
+import { useTeamStore } from '@/stores/team'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 
 const DEFAULT_SOUL = `# SOUL\n\nYou are a helpful AI assistant. You approach tasks methodically, communicate clearly, and ask for clarification when needed.`
@@ -13,7 +14,7 @@ export function CreateBooModal({
 }: {
   isOpen: boolean
   onClose: () => void
-  onCreated: () => void
+  onCreated: (agentId?: string) => void
 }) {
   const [name, setName] = useState('')
   const [role, setRole] = useState('')
@@ -54,12 +55,27 @@ export function CreateBooModal({
 
     try {
       const workspaceDir = await resolveWorkspaceDir(client)
-      await createAgent(client, trimmedName, workspaceDir, {
+      const agentId = await createAgent(client, trimmedName, workspaceDir, {
         soul: role.trim() || DEFAULT_SOUL,
         identity: `# IDENTITY\n\nYou are ${trimmedName}.`,
         tools: '# TOOLS\n',
       })
-      onCreated()
+
+      // Assign to currently selected team (best-effort)
+      const selectedTeamId = useTeamStore.getState().selectedTeamId
+      if (selectedTeamId) {
+        try {
+          await fetch(`/api/teams/${selectedTeamId}/agents`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId }),
+          })
+        } catch {
+          // non-fatal — agent created but not assigned to team
+        }
+      }
+
+      onCreated(agentId)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create agent.')

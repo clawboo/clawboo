@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Plus, Search, Trash2 } from 'lucide-react'
-import { BooAvatar } from '@clawboo/ui'
+import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useConnectionStore } from '@/stores/connection'
@@ -9,6 +9,7 @@ import { useViewStore, type NavView } from '@/stores/view'
 import { useApprovalsStore } from '@/stores/approvals'
 import { CreateBooModal } from '@/features/fleet/CreateBooModal'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
+import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ function AgentAvatar({ agent, selected }: { agent: AgentState; selected: boolean
         background: '#0A0E1A',
       }}
     >
-      <BooAvatar seed={agent.id} size={32} />
+      <AgentBooAvatar agentId={agent.id} size={32} />
     </span>
   )
 }
@@ -237,13 +238,13 @@ export function AgentListColumn() {
     [selectAgent],
   )
 
-  const handleBooCreated = useCallback(async () => {
-    if (!client) return
-    try {
-      const result = await client.agents.list()
-      const mainKey = result.mainKey?.trim() || 'main'
-      hydrateAgents(
-        result.agents.map((a) => ({
+  const handleBooCreated = useCallback(
+    async (agentId?: string) => {
+      if (!client) return
+      try {
+        const result = await client.agents.list()
+        const mainKey = result.mainKey?.trim() || 'main'
+        const mapped = result.agents.map((a) => ({
           id: a.id,
           name: a.identity?.name ?? a.name ?? a.id,
           status: 'idle' as const,
@@ -253,13 +254,16 @@ export function AgentListColumn() {
           streamingText: null,
           runId: null,
           lastSeenAt: null,
-          teamId: null,
-        })),
-      )
-    } catch {
-      // hydration failure is non-fatal
-    }
-  }, [client, hydrateAgents])
+          teamId: agentId && a.id === agentId && selectedTeamId ? selectedTeamId : null,
+        }))
+        hydrateAgents(mapped)
+        useBooZeroStore.getState().setBooZeroAgentId(identifyBooZero(mapped, result.defaultId))
+      } catch {
+        // hydration failure is non-fatal
+      }
+    },
+    [client, hydrateAgents, selectedTeamId],
+  )
 
   return (
     <div
@@ -428,7 +432,7 @@ export function AgentListColumn() {
       <CreateBooModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        onCreated={() => void handleBooCreated()}
+        onCreated={(agentId) => void handleBooCreated(agentId)}
       />
     </div>
   )

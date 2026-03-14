@@ -10,11 +10,10 @@
  *     → Auto-connect attempt using saved settings.
  *     → On failure → GatewayConnectScreen (quick reconnect modal)
  *
- *   Connected, fleet is empty (returning user only)
- *     → TeamPicker (deploy a team without going through full onboarding)
- *
  *   After first-time onboarding completes
  *     → BooTip (floating "Click a Boo to start chatting" hint)
+ *
+ *   On connect: identifies Boo Zero, auto-migrates teamless agents.
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -29,8 +28,8 @@ import { useGatewayEvents } from './useGatewayEvents'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useApprovalsStore } from '@/stores/approvals'
-import { TeamPicker } from '@/features/teams/TeamPicker'
 import { useTeamStore } from '@/stores/team'
+import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -47,31 +46,77 @@ function markOnboarded(): void {
   }
 }
 
-/** Fire-and-forget: hydrate teams from SQLite on connect. */
-function hydrateTeams(): void {
-  fetch('/api/teams')
-    .then((r) => r.json())
-    .then(
-      (data: {
-        teams?: {
-          id: string
-          name: string
-          icon: string
-          color: string
-          templateId: string | null
-          agentCount: number
-        }[]
-      }) => {
-        if (data.teams?.length) {
-          useTeamStore.getState().hydrateTeams(data.teams)
-          // Auto-select first team if none selected
-          if (!useTeamStore.getState().selectedTeamId) {
-            useTeamStore.getState().selectTeam(data.teams[0].id)
-          }
-        }
-      },
-    )
-    .catch(() => {})
+/** Awaitable: hydrate teams from SQLite on connect. */
+async function hydrateTeams(): Promise<void> {
+  try {
+    const r = await fetch('/api/teams')
+    const data = (await r.json()) as {
+      teams?: {
+        id: string
+        name: string
+        icon: string
+        color: string
+        templateId: string | null
+        agentCount: number
+      }[]
+    }
+    if (data.teams?.length) {
+      useTeamStore.getState().hydrateTeams(data.teams)
+      if (!useTeamStore.getState().selectedTeamId) {
+        useTeamStore.getState().selectTeam(data.teams[0].id)
+      }
+    }
+  } catch {
+    // hydration failure is non-fatal
+  }
+}
+
+/** Auto-migrate: if teams is empty but agents exist, create a Default team and assign all. */
+async function autoMigrateTeamlessAgents(): Promise<void> {
+  const teams = useTeamStore.getState().teams
+  const agents = useFleetStore.getState().agents
+  if (teams.length > 0 || agents.length === 0) return
+
+  try {
+    // Create default team
+    const res = await fetch('/api/teams', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Default', icon: '👻', color: '#E94560' }),
+    })
+    if (!res.ok) return
+    const team = await res.json()
+
+    // Assign each agent
+    for (const agent of agents) {
+      try {
+        await fetch(`/api/teams/${team.id}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId: agent.id }),
+        })
+      } catch {
+        // assignment failure is non-fatal
+      }
+    }
+
+    useTeamStore.getState().addTeam({
+      id: team.id,
+      name: team.name,
+      icon: team.icon,
+      color: team.color,
+      templateId: null,
+      agentCount: agents.length,
+    })
+    useTeamStore.getState().selectTeam(team.id)
+
+    // Patch fleet store with teamId
+    useFleetStore.setState((s) => ({
+      agents: s.agents.map((a) => ({ ...a, teamId: team.id })),
+    }))
+  } catch {
+    // migration failure is non-fatal — agents still visible in "All Agents"
+  }
 }
 
 /** Fire-and-forget: pre-populate approval history from SQLite on connect. */
@@ -106,9 +151,6 @@ export function GatewayBootstrap() {
   // Post-onboarding Boo tip (only for first-time flow)
   const [showBooTip, setShowBooTip] = useState(false)
 
-  // Returning-user empty-fleet picker
-  const [showTeamPicker, setShowTeamPicker] = useState(false)
-
   // Fleet hydration error
   const [fleetError, setFleetError] = useState<string | null>(null)
 
@@ -126,20 +168,23 @@ export function GatewayBootstrap() {
       try {
         const result = await liveClient.agents.list()
         const mainKey = result.mainKey?.trim() || 'main'
-        hydrateAgents(
-          result.agents.map((a) => ({
-            id: a.id,
-            name: a.identity?.name ?? a.name ?? a.id,
-            status: 'idle' as const,
-            sessionKey: `agent:${a.id}:${mainKey}`,
-            model: null,
-            createdAt: null,
-            streamingText: null,
-            runId: null,
-            lastSeenAt: null,
-            teamId: null,
-          })),
-        )
+        const mapped = result.agents.map((a) => ({
+          id: a.id,
+          name: a.identity?.name ?? a.name ?? a.id,
+          status: 'idle' as const,
+          sessionKey: `agent:${a.id}:${mainKey}`,
+          model: null,
+          createdAt: null,
+          streamingText: null,
+          runId: null,
+          lastSeenAt: null,
+          teamId: null,
+        }))
+        hydrateAgents(mapped)
+
+        // Identify Boo Zero
+        useBooZeroStore.getState().setBooZeroAgentId(identifyBooZero(mapped, result.defaultId))
+
         return result.agents.length
       } catch {
         setFleetError('Could not load your agent fleet. The Gateway may have restarted.')
@@ -158,11 +203,9 @@ export function GatewayBootstrap() {
       if (prev && prev !== newClient) prev.disconnect()
 
       setClient(newClient)
-      const agentCount = await hydrateFleet(newClient)
-      if (agentCount === 0) setShowTeamPicker(true)
-      // -1 means error — don't show TeamPicker (user may have agents we couldn't load)
-      // Pre-populate teams + approval history from SQLite (best-effort)
-      hydrateTeams()
+      await hydrateFleet(newClient)
+      await hydrateTeams()
+      await autoMigrateTeamlessAgents()
       preloadApprovalHistory()
     },
     [setClient, hydrateFleet],
@@ -202,12 +245,9 @@ export function GatewayBootstrap() {
         setGatewayUrl(data.gatewayUrl.trim())
         setClient(autoClient)
 
-        const agentCount = await hydrateFleet(autoClient)
-        if (agentCount === 0) setShowTeamPicker(true)
-        // -1 means error — don't show TeamPicker
-
-        // Pre-populate teams + approval history from SQLite (best-effort)
-        hydrateTeams()
+        await hydrateFleet(autoClient)
+        await hydrateTeams()
+        await autoMigrateTeamlessAgents()
         preloadApprovalHistory()
       } catch {
         // Auto-connect failed — GatewayConnectScreen renders as fallback
@@ -237,24 +277,13 @@ export function GatewayBootstrap() {
 
       // Hydrate fleet + teams (agents were just created by the wizard)
       await hydrateFleet(newClient)
-      hydrateTeams()
+      await hydrateTeams()
 
       // Show the "Click a Boo" tip after the wizard exits
       setShowBooTip(true)
     },
     [setStatus, setGatewayUrl, setClient, hydrateFleet],
   )
-
-  // ── Returning-user team picker handlers ────────────────────────────────────
-
-  const handleTeamDeployed = useCallback(async () => {
-    setShowTeamPicker(false)
-    if (client) await hydrateFleet(client)
-  }, [client, hydrateFleet])
-
-  const handleSkipTeamPicker = useCallback(() => {
-    setShowTeamPicker(false)
-  }, [])
 
   const isConnected = status === 'connected'
 
@@ -286,16 +315,6 @@ export function GatewayBootstrap() {
         {/* Returning-user quick reconnect modal — only shown when auto-connect is not in progress */}
         {!isConnected && showWizard === false && !autoConnecting && (
           <GatewayConnectScreen key="reconnect" onConnected={handleConnected} />
-        )}
-
-        {/* Empty-fleet team picker (returning users only) */}
-        {isConnected && showTeamPicker && client && (
-          <TeamPicker
-            key="team-picker"
-            client={client}
-            onDeployed={() => void handleTeamDeployed()}
-            onSkip={handleSkipTeamPicker}
-          />
         )}
       </AnimatePresence>
 

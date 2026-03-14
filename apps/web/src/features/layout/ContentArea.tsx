@@ -7,9 +7,11 @@ import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay
 import { AgentDetailView } from '@/features/agent-detail'
 import { WelcomeState } from './WelcomeState'
 import { useViewStore } from '@/stores/view'
+import { useBooZeroStore } from '@/stores/booZero'
 
 export function ContentArea() {
   const viewMode = useViewStore((s) => s.viewMode)
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
 
   return (
     <div
@@ -25,6 +27,10 @@ export function ContentArea() {
 
       {viewMode.type === 'welcome' && <WelcomeState />}
       {viewMode.type === 'agent' && <AgentDetailView agentId={viewMode.agentId} />}
+      {viewMode.type === 'booZero' && booZeroAgentId && (
+        <AgentDetailView agentId={booZeroAgentId} />
+      )}
+      {viewMode.type === 'booZero' && !booZeroAgentId && <WelcomeState />}
       {viewMode.type === 'nav' && viewMode.view === 'graph' && <GhostGraphPanel />}
       {viewMode.type === 'nav' && viewMode.view === 'scheduler' && <SchedulerPanel />}
       {viewMode.type === 'nav' && viewMode.view === 'approvals' && <ApprovalsPanel />}

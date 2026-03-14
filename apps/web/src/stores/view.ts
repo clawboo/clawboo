@@ -10,6 +10,7 @@ export type ViewMode =
   | { type: 'agent'; agentId: string }
   | { type: 'nav'; view: NavView }
   | { type: 'welcome' }
+  | { type: 'booZero' }
 
 // ─── Store ───────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,9 @@ interface ViewStore {
 
   /** Open an agent's chat / detail view. */
   openAgent: (agentId: string) => void
+
+  /** Open the Boo Zero standalone view. */
+  openBooZero: () => void
 }
 
 export const useViewStore = create<ViewStore>((set) => ({
@@ -32,4 +36,6 @@ export const useViewStore = create<ViewStore>((set) => ({
   navigateTo: (view) => set({ viewMode: { type: 'nav', view } }),
 
   openAgent: (agentId) => set({ viewMode: { type: 'agent', agentId } }),
+
+  openBooZero: () => set({ viewMode: { type: 'booZero' } }),
 }))

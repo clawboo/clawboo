@@ -12,7 +12,7 @@ import { markdown } from '@codemirror/lang-markdown'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { closeBrackets } from '@codemirror/autocomplete'
 import { highlightSelectionMatches } from '@codemirror/search'
-import { BooAvatar } from '@clawboo/ui'
+import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { AGENT_FILE_META, AGENT_FILE_PLACEHOLDERS } from '@clawboo/protocol'
 import type { AgentFileName } from '@clawboo/protocol'
 import { useConnectionStore } from '@/stores/connection'
@@ -355,7 +355,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <BooAvatar seed={agentId} size={24} />
+          <AgentBooAvatar agentId={agentId} size={24} />
           <span
             style={{
               fontSize: 13,

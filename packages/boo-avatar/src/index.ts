@@ -18,6 +18,8 @@ export interface BooAvatarParams {
   tint?: string
   eyeShape?: EyeShape
   accessory?: Accessory
+  /** When true, forces OpenClaw Red tint (index 0). Other agents skip index 0. */
+  isBooZero?: boolean
 }
 
 // ─── Constants ───────────────────────────────────────────────────
@@ -163,8 +165,9 @@ export function generateBooAvatar(params: BooAvatarParams): string {
   const uid = (h >>> 0).toString(16).padStart(8, '0')
   const gidBody = `boo-body-${uid}`
 
-  // Resolve tint (OpenClaw red as default)
-  const tint = params.tint ?? TINTS[Math.abs(h) % TINTS.length]
+  // Resolve tint — Boo Zero always gets OpenClaw Red; others skip index 0
+  const tint =
+    params.tint ?? (params.isBooZero ? TINTS[0] : TINTS[1 + (Math.abs(h) % (TINTS.length - 1))])
   const tintDark = darkenHex(tint, 0.6)
 
   // Per-seed variations

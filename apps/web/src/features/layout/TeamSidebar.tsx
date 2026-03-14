@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { useTeamStore, type Team } from '@/stores/team'
+import { useViewStore } from '@/stores/view'
+import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
 
 // ─── MascotIcon ──────────────────────────────────────────────────────────────
 
@@ -94,6 +97,7 @@ export function TeamSidebar() {
   const teams = useTeamStore((s) => s.teams)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
   const selectTeam = useTeamStore((s) => s.selectTeam)
+  const [showCreateModal, setShowCreateModal] = useState(false)
 
   return (
     <div
@@ -111,8 +115,14 @@ export function TeamSidebar() {
         flexShrink: 0,
       }}
     >
-      {/* Mascot — selects "All Agents" */}
-      <MascotIcon selected={selectedTeamId === null} onClick={() => selectTeam(null)} />
+      {/* Mascot — opens Boo Zero view */}
+      <MascotIcon
+        selected={selectedTeamId === null}
+        onClick={() => {
+          selectTeam(null)
+          useViewStore.getState().openBooZero()
+        }}
+      />
 
       {/* Divider */}
       <div
@@ -144,15 +154,18 @@ export function TeamSidebar() {
             key={team.id}
             team={team}
             selected={team.id === selectedTeamId}
-            onClick={() => selectTeam(team.id)}
+            onClick={() => {
+              selectTeam(team.id)
+              useViewStore.getState().navigateTo('graph')
+            }}
           />
         ))}
       </div>
 
-      {/* Add team button (placeholder) */}
+      {/* Add team button */}
       <button
         title="Create team"
-        disabled
+        onClick={() => setShowCreateModal(true)}
         style={{
           width: 40,
           height: 40,
@@ -163,14 +176,28 @@ export function TeamSidebar() {
           border: '1px dashed rgba(255,255,255,0.12)',
           background: 'transparent',
           color: 'rgba(232,232,232,0.3)',
-          cursor: 'not-allowed',
+          cursor: 'pointer',
           padding: 0,
           flexShrink: 0,
           transition: 'all 0.15s',
         }}
+        onMouseOver={(e) => {
+          ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(233,69,96,0.4)'
+          ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(233,69,96,0.7)'
+        }}
+        onMouseOut={(e) => {
+          ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.12)'
+          ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.3)'
+        }}
       >
         <Plus size={16} strokeWidth={2} />
       </button>
+
+      <CreateTeamModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={() => setShowCreateModal(false)}
+      />
     </div>
   )
 }
