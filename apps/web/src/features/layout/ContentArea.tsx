@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { GhostGraphPanel } from '@/features/graph/GhostGraphPanel'
 import { SchedulerPanel } from '@/features/scheduler/SchedulerPanel'
 import { ApprovalsPanel } from '@/features/approvals/ApprovalsPanel'
@@ -8,9 +9,30 @@ import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay
 import { AgentDetailView } from '@/features/agent-detail'
 import { WelcomeState } from './WelcomeState'
 import { useViewStore } from '@/stores/view'
+import { useEditorStore } from '@/stores/editor'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
+import type { NavView } from '@/stores/view'
+
+// ─── View transition config ─────────────────────────────────────────────────
+
+const VIEW_TRANSITION = { duration: 0.15, ease: 'easeOut' as const }
+const VIEW_STYLE = {
+  display: 'flex' as const,
+  flex: 1,
+  flexDirection: 'column' as const,
+  overflow: 'hidden' as const,
+}
+
+// Nav view → component mapping
+const NAV_PANELS: Record<NavView, () => ReactNode> = {
+  graph: () => <GhostGraphPanel />,
+  scheduler: () => <SchedulerPanel />,
+  approvals: () => <ApprovalsPanel />,
+  cost: () => <CostDashboard />,
+  marketplace: () => <MarketplacePanel />,
+}
 
 export function ContentArea() {
   const viewMode = useViewStore((s) => s.viewMode)
@@ -51,6 +73,65 @@ export function ContentArea() {
     }
   }, [viewMode, booZeroAgentId, agents])
 
+  // ── Global keyboard shortcuts ──────────────────────────────────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if user is typing in an input/textarea/contenteditable
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if ((e.target as HTMLElement)?.isContentEditable) return
+      // Skip if inside a CodeMirror editor
+      if ((e.target as HTMLElement)?.closest?.('.cm-editor')) return
+
+      // Escape — deselect agent, go to welcome (only if no overlay is open)
+      if (e.key === 'Escape') {
+        if (useEditorStore.getState().isOpen) return
+        if (viewMode.type === 'agent' || viewMode.type === 'booZero') {
+          e.preventDefault()
+          useFleetStore.getState().selectAgent(null)
+          useViewStore.getState().setViewMode({ type: 'welcome' })
+        }
+        return
+      }
+
+      // Cmd/Ctrl+1-5 — quick nav to views
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+        const num = parseInt(e.key, 10)
+        if (num >= 1 && num <= 5) {
+          e.preventDefault()
+          const views: NavView[] = ['graph', 'marketplace', 'approvals', 'scheduler', 'cost']
+          useViewStore.getState().navigateTo(views[num - 1]!)
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [viewMode])
+
+  // ── Compute view key + content ─────────────────────────────────────────────
+  let viewKey: string
+  let viewContent: ReactNode
+
+  switch (viewMode.type) {
+    case 'welcome':
+      viewKey = 'welcome'
+      viewContent = <WelcomeState />
+      break
+    case 'agent':
+      viewKey = `agent-${viewMode.agentId}`
+      viewContent = <AgentDetailView agentId={viewMode.agentId} />
+      break
+    case 'booZero':
+      viewKey = 'booZero'
+      viewContent = booZeroAgentId ? <AgentDetailView agentId={booZeroAgentId} /> : <WelcomeState />
+      break
+    case 'nav':
+      viewKey = `nav-${viewMode.view}`
+      viewContent = NAV_PANELS[viewMode.view]()
+      break
+  }
+
   return (
     <div
       style={{
@@ -63,17 +144,18 @@ export function ContentArea() {
     >
       <AgentFileEditorOverlay />
 
-      {viewMode.type === 'welcome' && <WelcomeState />}
-      {viewMode.type === 'agent' && <AgentDetailView agentId={viewMode.agentId} />}
-      {viewMode.type === 'booZero' && booZeroAgentId && (
-        <AgentDetailView agentId={booZeroAgentId} />
-      )}
-      {viewMode.type === 'booZero' && !booZeroAgentId && <WelcomeState />}
-      {viewMode.type === 'nav' && viewMode.view === 'graph' && <GhostGraphPanel />}
-      {viewMode.type === 'nav' && viewMode.view === 'scheduler' && <SchedulerPanel />}
-      {viewMode.type === 'nav' && viewMode.view === 'approvals' && <ApprovalsPanel />}
-      {viewMode.type === 'nav' && viewMode.view === 'cost' && <CostDashboard />}
-      {viewMode.type === 'nav' && viewMode.view === 'marketplace' && <MarketplacePanel />}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={viewKey}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={VIEW_TRANSITION}
+          style={VIEW_STYLE}
+        >
+          {viewContent}
+        </motion.div>
+      </AnimatePresence>
     </div>
   )
 }

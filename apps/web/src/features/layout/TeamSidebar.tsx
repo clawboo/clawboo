@@ -260,6 +260,7 @@ export function TeamSidebar() {
 
   return (
     <div
+      data-testid="team-sidebar"
       style={{
         display: 'flex',
         flexDirection: 'column',
