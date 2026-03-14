@@ -108,6 +108,10 @@ export function GhostGraph() {
     if (layoutRanRef.current) return
     layoutRanRef.current = true
 
+    // Increment generation only when actually starting ELK computation.
+    // Previously this was at the TOP of the effect (before guard checks),
+    // which meant re-renders from triggerRefresh() would invalidate
+    // in-flight ELK even when node identity was unchanged.
     const generation = ++elkGenerationRef.current
 
     // Layer 1: Only boo nodes + dependency edges go through ELK

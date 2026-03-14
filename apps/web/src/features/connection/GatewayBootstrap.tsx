@@ -85,7 +85,9 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
       return
     }
   } else {
-    targetTeamId = storeTeams[0].id
+    const activeTeam = storeTeams.find((t) => !t.isArchived)
+    if (!activeTeam) return // no active teams to assign to
+    targetTeamId = activeTeam.id
   }
 
   // Exclude Boo Zero from team assignment — it should never belong to any team

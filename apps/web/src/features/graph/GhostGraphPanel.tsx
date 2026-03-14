@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { GhostGraph } from './GhostGraph'
 import { useGraphStore } from './store'
@@ -10,6 +11,21 @@ import { useTeamStore } from '@/stores/team'
 
 export function GhostGraphPanel() {
   const { isLoadingFiles, filesError, nodes, resetLayout, hasRunLayout } = useGraphStore()
+  const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
+
+  // Reset graph state when team changes. This effect runs in the PARENT
+  // (which does NOT remount on key change), so it reliably detects team switches
+  // even though GhostGraph/ReactFlowProvider are keyed and remount fresh.
+  const prevTeamIdRef = useRef(selectedTeamId)
+  useEffect(() => {
+    if (prevTeamIdRef.current === selectedTeamId) return
+    prevTeamIdRef.current = selectedTeamId
+    const store = useGraphStore.getState()
+    store.resetLayout()
+    store.setNodes([])
+    store.setEdges([])
+    useGraphStore.setState({ agentFiles: new Map() })
+  }, [selectedTeamId])
   const selectedTeam = useTeamStore((s) =>
     s.selectedTeamId ? (s.teams.find((t) => t.id === s.selectedTeamId) ?? null) : null,
   )
@@ -173,8 +189,11 @@ export function GhostGraphPanel() {
           </div>
         )}
 
-        {/* React Flow canvas — always rendered so hooks can initialise */}
-        <ReactFlowProvider>
+        {/* React Flow canvas — keyed by team so switching teams gives a fresh
+            React Flow context (internal node init tracking, ResizeObservers).
+            Without the key, stale internal state can prevent ELK layout from
+            firing after async agent creation on a newly created team. */}
+        <ReactFlowProvider key={selectedTeamId ?? 'all'}>
           <GhostGraph />
         </ReactFlowProvider>
       </div>

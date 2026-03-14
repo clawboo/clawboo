@@ -38,6 +38,7 @@ export function useGraphData(): void {
     store.resetLayout()
     store.setNodes([])
     store.setEdges([])
+    useGraphStore.setState({ agentFiles: new Map() })
   }, [selectedTeamId])
 
   // Stable string keys for dependency comparison

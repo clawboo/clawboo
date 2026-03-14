@@ -8,6 +8,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { hydrateTeams } from '@/lib/hydrateTeams'
+import { useGraphStore } from '@/features/graph/store'
 import type { TeamProfile } from './types'
 
 import marketingRaw from './profiles/marketing.json'
@@ -226,6 +227,7 @@ export function CreateTeamModal({
 
       // Re-hydrate teams from SQLite to patch fleet store with correct assignments
       await hydrateTeams()
+      useGraphStore.getState().triggerRefresh()
 
       setStep('complete')
       useToastStore.getState().addToast({

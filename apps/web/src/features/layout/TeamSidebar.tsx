@@ -9,6 +9,7 @@ import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
 import { TeamContextMenu } from '@/features/teams/TeamContextMenu'
 import { hydrateTeams } from '@/lib/hydrateTeams'
+import { useGraphStore } from '@/features/graph/store'
 
 // ─── MascotIcon ──────────────────────────────────────────────────────────────
 
@@ -116,6 +117,7 @@ export function TeamSidebar() {
   const handleTeamCreated = useCallback(async () => {
     setShowCreateModal(false)
     await hydrateTeams()
+    useGraphStore.getState().triggerRefresh()
     useViewStore.getState().navigateTo('graph')
   }, [])
 
