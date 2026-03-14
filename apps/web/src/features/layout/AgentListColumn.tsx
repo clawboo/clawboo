@@ -339,7 +339,7 @@ export function AgentListColumn() {
               )}
             </motion.div>
           ) : (
-            <motion.div key="list" className="flex flex-col gap-0.5">
+            <motion.div key="list" exit={{ opacity: 0 }} className="flex flex-col gap-0.5">
               {filtered.map((agent) => (
                 <AgentRow
                   key={agent.id}

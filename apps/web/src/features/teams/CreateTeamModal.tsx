@@ -7,6 +7,7 @@ import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
+import { hydrateTeams } from '@/lib/hydrateTeams'
 import type { TeamProfile } from './types'
 
 import marketingRaw from './profiles/marketing.json'
@@ -138,7 +139,9 @@ export function CreateTeamModal({
         }),
       })
       if (!res.ok) throw new Error('Failed to create team')
-      const team = await res.json()
+      const { team } = (await res.json()) as {
+        team: { id: string; name: string; icon: string; color: string; templateId: string | null }
+      }
 
       // Add to store + select
       useTeamStore.getState().addTeam({
@@ -147,6 +150,7 @@ export function CreateTeamModal({
         icon: team.icon,
         color: team.color,
         templateId: team.templateId ?? null,
+        isArchived: false,
         agentCount: 0,
       })
       useTeamStore.getState().selectTeam(team.id)
@@ -198,6 +202,10 @@ export function CreateTeamModal({
       try {
         const result = await client.agents.list()
         const mainKey = result.mainKey?.trim() || 'main'
+        // Preserve existing teamId assignments — Gateway doesn't know about teams
+        const existingTeamIds = new Map(
+          useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
+        )
         useFleetStore.getState().hydrateAgents(
           result.agents.map((a) => ({
             id: a.id,
@@ -209,12 +217,15 @@ export function CreateTeamModal({
             streamingText: null,
             runId: null,
             lastSeenAt: null,
-            teamId: null,
+            teamId: existingTeamIds.get(a.id) ?? null,
           })),
         )
       } catch {
         // hydration failure is non-fatal
       }
+
+      // Re-hydrate teams from SQLite to patch fleet store with correct assignments
+      await hydrateTeams()
 
       setStep('complete')
       useToastStore.getState().addToast({
@@ -228,9 +239,9 @@ export function CreateTeamModal({
       }, 800)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
-      if (step === 'deploy') setStep('customize')
+      setStep('customize')
     }
-  }, [client, teamName, teamIcon, teamColor, selectedProfile, reset, onClose, onCreated, step])
+  }, [client, teamName, teamIcon, teamColor, selectedProfile, reset, onClose, onCreated])
 
   if (!isOpen) return null
 
@@ -470,6 +481,20 @@ export function CreateTeamModal({
               <p className="text-[11px] text-secondary/50">
                 {progress.current}/{progress.total} agents
               </p>
+
+              {/* Safety-net error display (catch should reset to customize, but just in case) */}
+              {error && (
+                <div className="mt-4 flex w-full max-w-xs flex-col items-center gap-2">
+                  <p className="text-center text-[11px] text-destructive">{error}</p>
+                  <button
+                    type="button"
+                    onClick={() => setStep('customize')}
+                    className="rounded-lg border border-white/10 px-4 py-1.5 text-[12px] font-medium text-secondary transition-colors hover:text-text"
+                  >
+                    Back
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

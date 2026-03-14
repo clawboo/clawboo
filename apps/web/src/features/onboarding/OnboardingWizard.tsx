@@ -607,7 +607,7 @@ function DeployStep({
             }),
           })
           if (teamRes.ok) {
-            const team = await teamRes.json()
+            const { team } = (await teamRes.json()) as { team: { id: string } }
             teamId = team.id
           }
         } catch {

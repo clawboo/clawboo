@@ -81,7 +81,7 @@ export function GhostGraph() {
 
   // Wire data fetching and persistence
   useGraphData()
-  const { savePositions } = useGraphPersistence()
+  const { savePositions, isLoaded } = useGraphPersistence()
 
   // Wire physics wake callback — when a boo node is dragged, wake the physics engine
   useEffect(() => {
@@ -97,7 +97,7 @@ export function GhostGraph() {
   // Layer 2: Orbital positions skill/resource nodes around their parent boo (sync).
   // Re-runs when node count changes or user clicks "Re-layout" (layoutKey bump).
   useEffect(() => {
-    if (!nodesInitialized || nodes.length === 0) return
+    if (!nodesInitialized || nodes.length === 0 || !isLoaded) return
 
     // Reset when node count changes (new agents added) or layoutKey bumps
     if (nodes.length !== prevNodeLengthRef.current) {
@@ -140,8 +140,8 @@ export function GhostGraph() {
         void fitView({ padding: 0.15, duration: 500 })
       })
     })
-    // Intentionally scoped to these three deps; refs guard re-entry.
-  }, [nodesInitialized, nodes.length, layoutKey])
+    // isLoaded gates layout until saved positions are fetched from SQLite.
+  }, [nodesInitialized, nodes.length, layoutKey, isLoaded])
 
   // Reset layout refs when layoutKey bumps (user pressed "Re-layout")
   useEffect(() => {
@@ -339,8 +339,19 @@ export function GhostGraph() {
   // ── Derive selected edge for explain panel ───────────────────────────────────
   const selectedEdge = selectedEdgeId ? (edges.find((e) => e.id === selectedEdgeId) ?? null) : null
 
+  const hasRunLayout = useGraphStore((s) => s.hasRunLayout)
+
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        position: 'relative',
+        // Hide nodes until ELK has positioned them — prevents (0,0) pile-up flash on new teams
+        opacity: hasRunLayout ? 1 : 0,
+        transition: 'opacity 0.25s ease',
+      }}
+    >
       {/* Connect mode toggle */}
       <button
         onClick={() => setConnectMode(!connectMode)}

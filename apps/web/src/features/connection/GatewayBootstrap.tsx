@@ -30,6 +30,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useTeamStore } from '@/stores/team'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
+import { hydrateTeams } from '@/lib/hydrateTeams'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,43 +44,6 @@ function isFirstTimeUser(): boolean {
 function markOnboarded(): void {
   if (typeof window !== 'undefined') {
     localStorage.setItem(ONBOARDED_KEY, '1')
-  }
-}
-
-/** Awaitable: hydrate teams from SQLite on connect + patch agent teamIds. */
-async function hydrateTeams(): Promise<void> {
-  try {
-    const r = await fetch('/api/teams')
-    const data = (await r.json()) as {
-      teams?: {
-        id: string
-        name: string
-        icon: string
-        color: string
-        templateId: string | null
-        agentCount: number
-      }[]
-      assignments?: { agentId: string; teamId: string }[]
-    }
-    if (data.teams?.length) {
-      useTeamStore.getState().hydrateTeams(data.teams)
-      if (!useTeamStore.getState().selectedTeamId) {
-        useTeamStore.getState().selectTeam(data.teams[0].id)
-      }
-    }
-
-    // Patch fleet store with team assignments from SQLite
-    if (data.assignments?.length) {
-      const assignmentMap = new Map(data.assignments.map((a) => [a.agentId, a.teamId]))
-      useFleetStore.setState((s) => ({
-        agents: s.agents.map((a) => ({
-          ...a,
-          teamId: assignmentMap.get(a.id) ?? a.teamId,
-        })),
-      }))
-    }
-  } catch {
-    // hydration failure is non-fatal
   }
 }
 
@@ -113,6 +77,7 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
         icon: team.icon,
         color: team.color,
         templateId: null,
+        isArchived: false,
         agentCount: 0,
       })
       useTeamStore.getState().selectTeam(team.id)
@@ -123,8 +88,24 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
     targetTeamId = storeTeams[0].id
   }
 
-  // Find agents without a team assignment
-  const unassigned = agents.filter((a) => !a.teamId)
+  // Exclude Boo Zero from team assignment — it should never belong to any team
+  const booZeroId = useBooZeroStore.getState().booZeroAgentId
+
+  // Cleanup: if Boo Zero was previously assigned to a team, remove it
+  if (booZeroId) {
+    const booZero = agents.find((a) => a.id === booZeroId)
+    if (booZero?.teamId) {
+      await fetch(`/api/teams/${booZero.teamId}/agents/${booZeroId}`, { method: 'DELETE' }).catch(
+        () => {},
+      )
+      useFleetStore.setState((s) => ({
+        agents: s.agents.map((a) => (a.id === booZeroId ? { ...a, teamId: null } : a)),
+      }))
+    }
+  }
+
+  // Find agents without a team assignment (excluding Boo Zero)
+  const unassigned = agents.filter((a) => !a.teamId && a.id !== booZeroId)
   if (unassigned.length === 0) return
 
   // Assign each unassigned agent to the target team (upserts SQLite row)
@@ -201,6 +182,10 @@ export function GatewayBootstrap() {
       try {
         const result = await liveClient.agents.list()
         const mainKey = result.mainKey?.trim() || 'main'
+        // Preserve existing teamId assignments — Gateway doesn't know about teams
+        const existingTeamIds = new Map(
+          useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
+        )
         const mapped = result.agents.map((a) => ({
           id: a.id,
           name: a.identity?.name ?? a.name ?? a.id,
@@ -211,7 +196,7 @@ export function GatewayBootstrap() {
           streamingText: null,
           runId: null,
           lastSeenAt: null,
-          teamId: null,
+          teamId: existingTeamIds.get(a.id) ?? null,
         }))
         hydrateAgents(mapped)
 

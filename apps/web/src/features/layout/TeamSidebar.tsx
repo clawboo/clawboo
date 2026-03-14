@@ -1,8 +1,14 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { Plus } from 'lucide-react'
 import { useTeamStore, type Team } from '@/stores/team'
+import { useFleetStore } from '@/stores/fleet'
+import { useConnectionStore } from '@/stores/connection'
 import { useViewStore } from '@/stores/view'
+import { useToastStore } from '@/stores/toast'
+import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
+import { TeamContextMenu } from '@/features/teams/TeamContextMenu'
+import { hydrateTeams } from '@/lib/hydrateTeams'
 
 // ─── MascotIcon ──────────────────────────────────────────────────────────────
 
@@ -37,10 +43,12 @@ function TeamIcon({
   team,
   selected,
   onClick,
+  onContextMenu,
 }: {
   team: Team
   selected: boolean
   onClick: () => void
+  onContextMenu: (e: React.MouseEvent) => void
 }) {
   return (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -59,6 +67,7 @@ function TeamIcon({
       )}
       <button
         onClick={onClick}
+        onContextMenu={onContextMenu}
         title={team.name}
         style={{
           width: 40,
@@ -98,6 +107,154 @@ export function TeamSidebar() {
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
   const selectTeam = useTeamStore((s) => s.selectTeam)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    team: Team
+  } | null>(null)
+
+  const handleTeamCreated = useCallback(async () => {
+    setShowCreateModal(false)
+    await hydrateTeams()
+    useViewStore.getState().navigateTo('graph')
+  }, [])
+
+  const handleArchiveTeam = useCallback(async () => {
+    if (!contextMenu) return
+    const { team } = contextMenu
+    const wasArchived = team.isArchived
+    setContextMenu(null)
+
+    try {
+      await fetch(`/api/teams/${team.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isArchived: wasArchived ? 0 : 1 }),
+      })
+      if (wasArchived) {
+        useTeamStore.getState().unarchiveTeam(team.id)
+      } else {
+        useTeamStore.getState().archiveTeam(team.id)
+        // If archived team was selected, navigate away
+        if (useTeamStore.getState().selectedTeamId === null) {
+          useViewStore.getState().openBooZero()
+        }
+      }
+      useToastStore.getState().addToast({
+        type: 'success',
+        message: wasArchived ? `"${team.name}" unarchived` : `"${team.name}" archived`,
+      })
+    } catch {
+      useToastStore.getState().addToast({
+        type: 'error',
+        message: 'Failed to update team',
+      })
+    }
+  }, [contextMenu])
+
+  const handleDeleteTeam = useCallback(async () => {
+    if (!contextMenu) return
+    const { team } = contextMenu
+
+    if (
+      !window.confirm(
+        `Delete team "${team.name}"? Agents will be kept but unassigned from this team.`,
+      )
+    ) {
+      setContextMenu(null)
+      return
+    }
+
+    setContextMenu(null)
+
+    try {
+      await fetch(`/api/teams/${team.id}`, { method: 'DELETE' })
+      useTeamStore.getState().removeTeam(team.id)
+
+      // Orphan agents in fleet store
+      useFleetStore.setState((s) => ({
+        agents: s.agents.map((a) => (a.teamId === team.id ? { ...a, teamId: null } : a)),
+      }))
+
+      // If the deleted team was selected, go to Boo Zero
+      if (useTeamStore.getState().selectedTeamId === null) {
+        useViewStore.getState().openBooZero()
+      }
+
+      useToastStore.getState().addToast({
+        type: 'success',
+        message: `"${team.name}" deleted`,
+      })
+    } catch {
+      useToastStore.getState().addToast({
+        type: 'error',
+        message: 'Failed to delete team',
+      })
+    }
+  }, [contextMenu])
+
+  const handleDeleteTeamWithAgents = useCallback(async () => {
+    if (!contextMenu) return
+    const { team } = contextMenu
+    const client = useConnectionStore.getState().client
+
+    const teamAgents = useFleetStore.getState().agents.filter((a) => a.teamId === team.id)
+
+    const agentCountText = teamAgents.length === 1 ? '1 agent' : `${teamAgents.length} agents`
+    if (
+      !window.confirm(
+        `Delete team "${team.name}" and ${agentCountText}? This will permanently remove the agents from the Gateway.`,
+      )
+    ) {
+      setContextMenu(null)
+      return
+    }
+
+    setContextMenu(null)
+
+    let deletedCount = 0
+    try {
+      // Delete each agent from Gateway
+      if (client) {
+        for (const agent of teamAgents) {
+          try {
+            await deleteAgentOperation(agent.id, agent.sessionKey, client)
+            deletedCount++
+          } catch {
+            // Continue deleting remaining agents
+          }
+        }
+      }
+
+      // Delete the team from SQLite
+      await fetch(`/api/teams/${team.id}`, { method: 'DELETE' })
+      useTeamStore.getState().removeTeam(team.id)
+
+      // If the deleted team was selected, go to Boo Zero
+      if (useTeamStore.getState().selectedTeamId === null) {
+        useViewStore.getState().openBooZero()
+      }
+
+      if (deletedCount === teamAgents.length) {
+        useToastStore.getState().addToast({
+          type: 'success',
+          message: `"${team.name}" and ${agentCountText} deleted`,
+        })
+      } else {
+        useToastStore.getState().addToast({
+          type: 'error',
+          message: `"${team.name}" deleted but only ${deletedCount}/${teamAgents.length} agents removed`,
+        })
+      }
+    } catch {
+      useToastStore.getState().addToast({
+        type: 'error',
+        message: 'Failed to delete team',
+      })
+    }
+  }, [contextMenu])
+
+  const activeTeams = teams.filter((t) => !t.isArchived)
 
   return (
     <div
@@ -149,7 +306,7 @@ export function TeamSidebar() {
           paddingRight: 10,
         }}
       >
-        {teams.map((team) => (
+        {activeTeams.map((team) => (
           <TeamIcon
             key={team.id}
             team={team}
@@ -157,6 +314,10 @@ export function TeamSidebar() {
             onClick={() => {
               selectTeam(team.id)
               useViewStore.getState().navigateTo('graph')
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setContextMenu({ x: e.clientX, y: e.clientY, team })
             }}
           />
         ))}
@@ -193,10 +354,23 @@ export function TeamSidebar() {
         <Plus size={16} strokeWidth={2} />
       </button>
 
+      {contextMenu && (
+        <TeamContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          teamName={contextMenu.team.name}
+          isArchived={contextMenu.team.isArchived}
+          onClose={() => setContextMenu(null)}
+          onArchive={handleArchiveTeam}
+          onDelete={handleDeleteTeam}
+          onDeleteWithAgents={handleDeleteTeamWithAgents}
+        />
+      )}
+
       <CreateTeamModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        onCreated={() => setShowCreateModal(false)}
+        onCreated={handleTeamCreated}
       />
     </div>
   )

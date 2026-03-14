@@ -39,6 +39,7 @@ export function createDb(dbPath: string): ClawbooDb {
       icon           TEXT    NOT NULL,
       color          TEXT    NOT NULL,
       template_id    TEXT,
+      is_archived    INTEGER NOT NULL DEFAULT 0,
       created_at     INTEGER NOT NULL,
       updated_at     INTEGER NOT NULL
     );
@@ -144,6 +145,11 @@ export function createDb(dbPath: string): ClawbooDb {
   // SQLite errors on duplicate column — catch silences it for already-migrated DBs.
   try {
     sqlite.exec('ALTER TABLE agents ADD COLUMN team_id TEXT REFERENCES teams(id)')
+  } catch {
+    /* column already exists */
+  }
+  try {
+    sqlite.exec('ALTER TABLE teams ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0')
   } catch {
     /* column already exists */
   }

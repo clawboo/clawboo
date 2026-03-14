@@ -7,9 +7,10 @@ import { getDbPath } from '../lib/db'
 // ─── GET /api/teams ──────────────────────────────────────────────────────────
 // Returns all teams with an agentCount for each, plus agent→team assignments.
 
-export function teamsGET(_req: Request, res: Response): void {
+export function teamsGET(req: Request, res: Response): void {
   try {
     const db = createDb(getDbPath())
+    const includeArchived = req.query['includeArchived'] === 'true'
 
     const rows = db
       .select({
@@ -18,11 +19,13 @@ export function teamsGET(_req: Request, res: Response): void {
         icon: teams.icon,
         color: teams.color,
         templateId: teams.templateId,
+        isArchived: teams.isArchived,
         createdAt: teams.createdAt,
         updatedAt: teams.updatedAt,
-        agentCount: sql<number>`(SELECT COUNT(*) FROM agents WHERE agents.team_id = ${teams.id})`,
+        agentCount: sql<number>`(SELECT COUNT(*) FROM agents WHERE agents.team_id = teams.id)`,
       })
       .from(teams)
+      .where(includeArchived ? undefined : eq(teams.isArchived, 0))
       .all()
 
     // Return agent→team assignments so the client can patch fleet store after hydration
@@ -86,6 +89,7 @@ export function teamsPOST(req: Request, res: Response): void {
         icon,
         color,
         templateId: templateId ?? null,
+        isArchived: 0,
         agentCount: 0,
         createdAt: now,
         updatedAt: now,
@@ -97,12 +101,13 @@ export function teamsPOST(req: Request, res: Response): void {
 }
 
 // ─── PATCH /api/teams/:id ────────────────────────────────────────────────────
-// Body: partial { name?, icon?, color? }
+// Body: partial { name?, icon?, color?, isArchived? }
 
 interface PatchBody {
   name?: string
   icon?: string
   color?: string
+  isArchived?: number
 }
 
 export function teamsPATCH(req: Request, res: Response): void {
@@ -132,6 +137,7 @@ export function teamsPATCH(req: Request, res: Response): void {
     if (body.name !== undefined) patch['name'] = body.name
     if (body.icon !== undefined) patch['icon'] = body.icon
     if (body.color !== undefined) patch['color'] = body.color
+    if (body.isArchived !== undefined) patch['isArchived'] = body.isArchived ? 1 : 0
 
     db.update(teams).set(patch).where(eq(teams.id, teamId)).run()
 
@@ -142,9 +148,10 @@ export function teamsPATCH(req: Request, res: Response): void {
         icon: teams.icon,
         color: teams.color,
         templateId: teams.templateId,
+        isArchived: teams.isArchived,
         createdAt: teams.createdAt,
         updatedAt: teams.updatedAt,
-        agentCount: sql<number>`(SELECT COUNT(*) FROM agents WHERE agents.team_id = ${teams.id})`,
+        agentCount: sql<number>`(SELECT COUNT(*) FROM agents WHERE agents.team_id = teams.id)`,
       })
       .from(teams)
       .where(eq(teams.id, teamId))

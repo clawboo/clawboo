@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
@@ -28,6 +28,17 @@ export function useGraphData(): void {
     () => (selectedTeamId ? agents.filter((a) => a.teamId === selectedTeamId) : agents),
     [agents, selectedTeamId],
   )
+
+  // ── 0. Reset layout on team switch ──────────────────────────────────────────
+  const prevTeamIdRef = useRef(selectedTeamId)
+  useEffect(() => {
+    if (prevTeamIdRef.current === selectedTeamId) return
+    prevTeamIdRef.current = selectedTeamId
+    const store = useGraphStore.getState()
+    store.resetLayout()
+    store.setNodes([])
+    store.setEdges([])
+  }, [selectedTeamId])
 
   // Stable string keys for dependency comparison
   const agentStructureKey = filteredAgents.map((a) => `${a.id}:${a.name}`).join('|')
