@@ -34,7 +34,6 @@ import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { mutationQueue } from '@/lib/mutationQueue'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
-import { useEditorStore } from '@/stores/editor'
 import { GraphContextMenu } from './GraphContextMenu'
 import { installSkillForAgent } from './operations/installSkill'
 import { removeRouting } from './operations/removeRouting'
@@ -437,10 +436,12 @@ export function GhostGraph() {
           }}
           onEditPersonality={() => {
             useFleetStore.getState().selectAgent(contextMenu.agentId)
+            useViewStore.getState().openAgent(contextMenu.agentId)
             setContextMenu(null)
           }}
           onEditFiles={() => {
-            useEditorStore.getState().openEditor(contextMenu.agentId, contextMenu.agentName)
+            useFleetStore.getState().selectAgent(contextMenu.agentId)
+            useViewStore.getState().openAgent(contextMenu.agentId)
             setContextMenu(null)
           }}
           onDelete={() => {

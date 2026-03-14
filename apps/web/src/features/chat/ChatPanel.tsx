@@ -649,13 +649,21 @@ const MessageComposer = memo(function MessageComposer({
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
 
-export function ChatPanel() {
-  const selectedAgentId = useFleetStore((s) => s.selectedAgentId)
+export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
+  const storeAgentId = useFleetStore((s) => s.selectedAgentId)
+  const resolvedAgentId = propAgentId ?? storeAgentId
   const agents = useFleetStore((s) => s.agents)
   const connectionStatus = useConnectionStore((s) => s.status)
   const client = useConnectionStore((s) => s.client)
 
-  const agent = agents.find((a) => a.id === selectedAgentId) ?? null
+  // Sync fleet store selection when agentId is provided as prop
+  useEffect(() => {
+    if (propAgentId && propAgentId !== useFleetStore.getState().selectedAgentId) {
+      useFleetStore.getState().selectAgent(propAgentId)
+    }
+  }, [propAgentId])
+
+  const agent = agents.find((a) => a.id === resolvedAgentId) ?? null
 
   const sessionKey = agent?.sessionKey ?? null
   const transcripts = useChatStore((s) => s.transcripts)

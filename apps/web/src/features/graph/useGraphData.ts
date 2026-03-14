@@ -114,7 +114,7 @@ export function useGraphData(): void {
 
 // ─── Build graph elements (pure function) ────────────────────────────────────
 
-function buildGraphElements(
+export function buildGraphElements(
   agents: AgentState[],
   agentFiles: Map<string, { toolsMd: string | null; agentsMd: string | null }>,
 ): { rawNodes: GraphNode[]; rawEdges: GraphEdge[] } {

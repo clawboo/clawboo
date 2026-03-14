@@ -39,9 +39,10 @@ const SLIDER_LABELS: Record<PersonalityKey, { left: string; right: string }> = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function PersonalitySliders() {
+export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string } = {}) {
   const client = useConnectionStore((s) => s.client)
-  const selectedAgentId = useFleetStore((s) => s.selectedAgentId)
+  const storeAgentId = useFleetStore((s) => s.selectedAgentId)
+  const selectedAgentId = propAgentId ?? storeAgentId
 
   const [values, setValues] = useState<PersonalityValues>({ ...DEFAULT_VALUES })
   const [loading, setLoading] = useState(false)
