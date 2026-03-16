@@ -11,6 +11,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, Check, ChevronDown, Loader2, RotateCcw } from 'lucide-react'
 import { consumeSSE } from '@/lib/sseClient'
 import { useSystemStore } from '@/stores/system'
+import { StepIndicator } from '../StepIndicator'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,8 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
   return (
     <div className="w-full max-w-lg rounded-2xl border border-white/8 bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
       <div className="p-8">
+        <StepIndicator current="setup" />
+
         {/* ── Header ───────────────────────────────────────────── */}
         <div className="mb-1 flex items-center gap-2">
           <h2

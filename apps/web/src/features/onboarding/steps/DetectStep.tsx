@@ -11,6 +11,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Check, ExternalLink, Loader2, X } from 'lucide-react'
 import { useSystemStore } from '@/stores/system'
 import type { SystemInfo } from '@/stores/system'
+import { StepIndicator } from '../StepIndicator'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -150,6 +151,8 @@ export function DetectStep({
   return (
     <div className="w-full max-w-[420px] rounded-2xl border border-white/8 bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
       <div className="p-8">
+        <StepIndicator current="setup" />
+
         <h2
           className="text-[20px] font-bold text-text mb-1"
           style={{ fontFamily: 'var(--font-display)' }}

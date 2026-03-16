@@ -9,6 +9,7 @@
 import { useCallback, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { StepIndicator } from '../StepIndicator'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -131,6 +132,8 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
   return (
     <div className="w-full max-w-xl rounded-2xl border border-white/8 bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
       <div className="p-8">
+        <StepIndicator current="setup" />
+
         <h2
           className="text-[20px] font-bold text-text mb-1"
           style={{ fontFamily: 'var(--font-display)' }}

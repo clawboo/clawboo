@@ -12,6 +12,7 @@ import { ArrowLeft, Check, ChevronDown, Loader2, RotateCcw } from 'lucide-react'
 import { GatewayClient, resolveProxyGatewayUrl } from '@clawboo/gateway-client'
 import { consumeSSE } from '@/lib/sseClient'
 import { useSystemStore } from '@/stores/system'
+import { StepIndicator } from '../StepIndicator'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -142,6 +143,8 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
   return (
     <div className="w-full max-w-[420px] rounded-2xl border border-white/8 bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
       <div className="flex flex-col items-center p-8">
+        <StepIndicator current="setup" />
+
         {/* ── Pulsing mascot ────────────────────────────────── */}
         <div className="relative mb-6">
           {/* Glow */}
