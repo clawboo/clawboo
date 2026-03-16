@@ -20,6 +20,7 @@ import {
 import { BooAvatar } from '@clawboo/ui'
 import type { TeamProfile } from '@/features/teams/types'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
+import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 
 import marketingRaw from '@/features/teams/profiles/marketing.json'
 import devRaw from '@/features/teams/profiles/dev.json'
@@ -46,14 +47,27 @@ function buildToolsMd(skills: string[]): string {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type WizardStep = 'welcome' | 'connect' | 'team' | 'deploy' | 'done'
+type WizardStep =
+  | 'welcome'
+  | 'detect'
+  | 'install'
+  | 'configure'
+  | 'startGateway'
+  | 'connect'
+  | 'team'
+  | 'deploy'
+  | 'done'
 
 const STEP_INDEX: Record<WizardStep, number> = {
   welcome: 0,
-  connect: 1,
-  team: 2,
-  deploy: 3,
-  done: 4,
+  detect: 1,
+  install: 2,
+  configure: 3,
+  startGateway: 4,
+  connect: 5,
+  team: 6,
+  deploy: 7,
+  done: 8,
 }
 
 export type OnboardingWizardProps = {
@@ -66,10 +80,10 @@ const stepTransition = { type: 'spring', stiffness: 320, damping: 30 } as const
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
 
-type IndicatorId = 'connect' | 'team' | 'deploy'
+type IndicatorId = 'setup' | 'team' | 'deploy'
 
 const INDICATOR_STEPS: { id: IndicatorId; label: string }[] = [
-  { id: 'connect', label: 'Connect' },
+  { id: 'setup', label: 'Setup' },
   { id: 'team', label: 'Team' },
   { id: 'deploy', label: 'Deploy' },
 ]
@@ -304,7 +318,7 @@ function ConnectStep({
   return (
     <WizardCard>
       <div className="p-8">
-        <StepIndicator current="connect" />
+        <StepIndicator current="setup" />
 
         <h2
           className="text-[20px] font-bold text-text mb-1"
@@ -823,12 +837,63 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const [gatewayUrl, setGatewayUrl] = useState('')
   const [selectedProfile, setSelectedProfile] = useState<TeamProfile | null>(null)
 
+  // Gateway URL from ConfigureStep — used by StartGatewayStep completion handler
+  const [systemConnectUrl, setSystemConnectUrl] = useState('')
+
   const goTo = useCallback(
     (next: WizardStep) => {
       setPrevStep(step)
       setStep(next)
     },
     [step],
+  )
+
+  // ── DetectStep: everything is green — auto-connect via proxy ──────────────
+  const handleAllGood = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/settings')
+      if (!resp.ok) {
+        goTo('connect')
+        return
+      }
+      const data = (await resp.json()) as { gatewayUrl?: string }
+      if (!data.gatewayUrl?.trim()) {
+        goTo('connect')
+        return
+      }
+
+      const newClient = new GatewayClient()
+      await newClient.connect(resolveProxyGatewayUrl(), {
+        clientName: 'openclaw-control-ui',
+        clientVersion: '0.1.0',
+        disableDeviceAuth: true,
+      })
+      setClient(newClient)
+      setGatewayUrl(data.gatewayUrl.trim())
+      goTo('team')
+    } catch {
+      goTo('connect')
+    }
+  }, [goTo])
+
+  // ── ConfigureStep completed ───────────────────────────────────────────────
+  const handleConfigured = useCallback(
+    (data: { gatewayToken: string; gatewayUrl: string }) => {
+      setSystemConnectUrl(data.gatewayUrl)
+      goTo('startGateway')
+    },
+    [goTo],
+  )
+
+  // ── StartGatewayStep completed — client is live ───────────────────────────
+  const handleGatewayStarted = useCallback(
+    (newClient: GatewayClient) => {
+      setClient(newClient)
+      // Use the URL from configure step, or fall back to default
+      setGatewayUrl(systemConnectUrl || 'ws://localhost:18789')
+      goTo('team')
+    },
+    [goTo, systemConnectUrl],
   )
 
   const handleConnected = useCallback(
@@ -895,7 +960,72 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
             transition={stepTransition}
             className="absolute inset-0"
           >
-            <WelcomeStep onContinue={() => goTo('connect')} />
+            <WelcomeStep onContinue={() => goTo('detect')} />
+          </motion.div>
+        )}
+
+        {step === 'detect' && (
+          <motion.div
+            key="detect"
+            variants={directedVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={stepTransition}
+            className="w-full flex justify-center"
+          >
+            <DetectStep
+              onAllGood={() => void handleAllGood()}
+              onNeedInstall={() => goTo('install')}
+              onNeedConfigure={() => goTo('configure')}
+              onNeedGateway={() => goTo('startGateway')}
+              onAdvancedConnect={() => goTo('connect')}
+            />
+          </motion.div>
+        )}
+
+        {step === 'install' && (
+          <motion.div
+            key="install"
+            variants={directedVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={stepTransition}
+            className="w-full flex justify-center"
+          >
+            <InstallStep
+              onInstalled={(_version) => goTo('configure')}
+              onBack={() => goTo('detect')}
+            />
+          </motion.div>
+        )}
+
+        {step === 'configure' && (
+          <motion.div
+            key="configure"
+            variants={directedVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={stepTransition}
+            className="w-full flex justify-center"
+          >
+            <ConfigureStep onConfigured={handleConfigured} onBack={() => goTo('detect')} />
+          </motion.div>
+        )}
+
+        {step === 'startGateway' && (
+          <motion.div
+            key="startGateway"
+            variants={directedVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={stepTransition}
+            className="w-full flex justify-center"
+          >
+            <StartGatewayStep onStarted={handleGatewayStarted} onBack={() => goTo('configure')} />
           </motion.div>
         )}
 
