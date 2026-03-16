@@ -41,4 +41,18 @@ test.describe('Teams', () => {
     await agentList.locator('button:has-text("Ghost Graph")').click()
     await expect(page.locator('.react-flow')).toBeVisible({ timeout: 10_000 })
   })
+
+  test('system nav button opens maintenance panel', async ({ page, request, gateway }) => {
+    await connectToMockGateway(page, request, gateway.url)
+
+    const agentList = page.locator('[data-testid="agent-list-column"]')
+
+    // Click System nav button in secondary nav
+    await agentList.locator('button:has-text("System")').click()
+
+    // MaintenancePanel renders this subtitle
+    await expect(page.getByText('Manage your OpenClaw installation')).toBeVisible({
+      timeout: 10_000,
+    })
+  })
 })

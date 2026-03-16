@@ -82,6 +82,27 @@ export async function connectToMockGateway(
     localStorage.setItem('clawboo.onboarded', '1')
   })
 
+  // Intercept system status to prevent "Gateway Offline" overlay from blocking auto-connect.
+  // The real server probes port 18789, which won't match our mock gateway's random port.
+  await page.route('**/api/system/status', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        node: { version: process.version, major: 22, sufficient: true, path: '/usr/bin/node' },
+        openclaw: {
+          installed: true,
+          version: '0.3.0',
+          path: '/usr/bin/openclaw',
+          stateDir: '/tmp/.openclaw',
+          configExists: true,
+          envExists: true,
+        },
+        gateway: { running: true, port: 18789, pid: null, managedByClawboo: false, uptimeMs: null },
+      }),
+    })
+  })
+
   await page.goto('/')
 
   // Auto-connect fires on mount — wait for sidebar agents to appear
