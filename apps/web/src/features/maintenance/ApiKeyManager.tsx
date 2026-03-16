@@ -8,11 +8,11 @@ interface ProviderConfig {
   id: string
   label: string
   envVar: string
-  envFlag: 'hasAnthropicKey' | 'hasOpenAIKey' | 'hasGoogleKey'
+  envFlag: string
   placeholder: string
 }
 
-const PROVIDERS: ProviderConfig[] = [
+const PRIMARY_PROVIDERS: ProviderConfig[] = [
   {
     id: 'anthropic',
     label: 'Anthropic',
@@ -30,17 +30,93 @@ const PROVIDERS: ProviderConfig[] = [
   {
     id: 'google',
     label: 'Google',
-    envVar: 'GOOGLE_API_KEY',
+    envVar: 'GEMINI_API_KEY',
     envFlag: 'hasGoogleKey',
     placeholder: 'AIza...',
   },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    envVar: 'OPENROUTER_API_KEY',
+    envFlag: 'hasOpenRouterKey',
+    placeholder: 'sk-or-...',
+  },
+  {
+    id: 'xai',
+    label: 'xAI',
+    envVar: 'XAI_API_KEY',
+    envFlag: 'hasXaiKey',
+    placeholder: 'xai-...',
+  },
+  {
+    id: 'groq',
+    label: 'Groq',
+    envVar: 'GROQ_API_KEY',
+    envFlag: 'hasGroqKey',
+    placeholder: 'gsk_...',
+  },
+  {
+    id: 'mistral',
+    label: 'Mistral',
+    envVar: 'MISTRAL_API_KEY',
+    envFlag: 'hasMistralKey',
+    placeholder: 'M...',
+  },
 ]
 
-interface EnvFlags {
-  hasAnthropicKey: boolean
-  hasOpenAIKey: boolean
-  hasGoogleKey: boolean
-}
+const ADDITIONAL_PROVIDERS: ProviderConfig[] = [
+  {
+    id: 'moonshot',
+    label: 'Moonshot',
+    envVar: 'MOONSHOT_API_KEY',
+    envFlag: 'hasMoonshotKey',
+    placeholder: 'sk-...',
+  },
+  {
+    id: 'minimax',
+    label: 'MiniMax',
+    envVar: 'MINIMAX_API_KEY',
+    envFlag: 'hasMiniMaxKey',
+    placeholder: 'eyJh...',
+  },
+  {
+    id: 'together',
+    label: 'Together',
+    envVar: 'TOGETHER_API_KEY',
+    envFlag: 'hasTogetherKey',
+    placeholder: '',
+  },
+  {
+    id: 'nvidia',
+    label: 'NVIDIA',
+    envVar: 'NVIDIA_API_KEY',
+    envFlag: 'hasNvidiaKey',
+    placeholder: 'nvapi-...',
+  },
+  {
+    id: 'huggingface',
+    label: 'Hugging Face',
+    envVar: 'HF_TOKEN',
+    envFlag: 'hasHuggingFaceKey',
+    placeholder: 'hf_...',
+  },
+  {
+    id: 'cerebras',
+    label: 'Cerebras',
+    envVar: 'CEREBRAS_API_KEY',
+    envFlag: 'hasCerebrasKey',
+    placeholder: 'csk-...',
+  },
+  {
+    id: 'venice',
+    label: 'Venice',
+    envVar: 'VENICE_API_KEY',
+    envFlag: 'hasVeniceKey',
+    placeholder: 'vapi_...',
+  },
+]
+
+type EnvFlags = Record<string, boolean>
 
 // ─── Provider Row ────────────────────────────────────────────────────────────
 
@@ -258,7 +334,39 @@ export function ApiKeyManager() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {PROVIDERS.map((provider) => (
+      {PRIMARY_PROVIDERS.map((provider) => (
+        <ProviderRow
+          key={provider.id}
+          provider={provider}
+          hasKey={envFlags[provider.envFlag]}
+          onSaved={() => void fetchConfig()}
+        />
+      ))}
+
+      {/* Divider */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '14px 0 6px',
+        }}
+      >
+        <div style={{ flex: 1, borderTop: '1px solid rgba(255,255,255,0.06)' }} />
+        <span
+          style={{
+            fontSize: 10,
+            color: 'rgba(232,232,232,0.3)',
+            fontWeight: 500,
+            letterSpacing: '0.04em',
+          }}
+        >
+          Additional Providers
+        </span>
+        <div style={{ flex: 1, borderTop: '1px solid rgba(255,255,255,0.06)' }} />
+      </div>
+
+      {ADDITIONAL_PROVIDERS.map((provider) => (
         <ProviderRow
           key={provider.id}
           provider={provider}

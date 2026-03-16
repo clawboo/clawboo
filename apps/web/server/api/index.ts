@@ -16,6 +16,7 @@ import {
   gatewayControlPOST,
   openclawConfigGET,
   openclawConfigPATCH,
+  systemModelsGET,
 } from './system'
 import {
   teamsGET,
@@ -69,6 +70,7 @@ router.post('/api/system/configure-openclaw', configureOpenclawPOST)
 router.post('/api/system/gateway', gatewayControlPOST)
 router.get('/api/system/openclaw-config', openclawConfigGET)
 router.patch('/api/system/openclaw-config', openclawConfigPATCH)
+router.get('/api/system/models', systemModelsGET)
 
 // Teams
 router.get('/api/teams', teamsGET)

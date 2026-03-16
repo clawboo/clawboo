@@ -32,6 +32,7 @@ import { useTeamStore } from '@/stores/team'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { consumeSSE } from '@/lib/sseClient'
+import { fetchAgentModelMap } from '@/lib/agentModelMap'
 import type { SystemInfo } from '@/stores/system'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -196,12 +197,14 @@ export function GatewayBootstrap() {
         const existingTeamIds = new Map(
           useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
         )
+        // Load per-agent model overrides from openclaw.json
+        const agentModels = await fetchAgentModelMap()
         const mapped = result.agents.map((a) => ({
           id: a.id,
           name: a.identity?.name ?? a.name ?? a.id,
           status: 'idle' as const,
           sessionKey: `agent:${a.id}:${mainKey}`,
-          model: null,
+          model: agentModels.get(a.id) ?? null,
           createdAt: null,
           streamingText: null,
           runId: null,

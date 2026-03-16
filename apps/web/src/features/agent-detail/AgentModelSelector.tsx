@@ -1,16 +1,21 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { Check, ChevronDown, ChevronRight } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft } from 'lucide-react'
 import { findModelLabel } from '@/lib/modelCatalog'
 import { useModelCatalog } from '@/lib/useModelCatalog'
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-interface ModelSelectorProps {
-  currentModel: string | null
-  onModelChange: (model: string) => void
+interface AgentModelSelectorProps {
+  currentModel: string | null // null = "Use default"
+  defaultModel: string | null // global default for display
+  onModelChange: (model: string | null) => void // null = revert to default
 }
 
-export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProps) {
+export function AgentModelSelector({
+  currentModel,
+  defaultModel,
+  onModelChange,
+}: AgentModelSelectorProps) {
   const MODEL_GROUPS = useModelCatalog()
   const [open, setOpen] = useState(false)
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null)
@@ -41,7 +46,7 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
     }
   }, [open])
 
-  // Focus search when opening
+  // Reset state when opening
   useEffect(() => {
     if (open) {
       setSearch('')
@@ -52,7 +57,12 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
     }
   }, [open])
 
-  const handleSelect = useCallback(
+  const handleSelectDefault = useCallback(() => {
+    onModelChange(null)
+    setOpen(false)
+  }, [onModelChange])
+
+  const handleSelectModel = useCallback(
     (modelId: string) => {
       onModelChange(modelId)
       setOpen(false)
@@ -80,10 +90,14 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
     })).filter((group) => group.provider.toLowerCase().includes(q) || group.models.length > 0)
   }, [search, MODEL_GROUPS])
 
-  // Determine if current model is custom (not in catalog)
-  const isCustomModel = currentModel !== null && findModelLabel(currentModel) === null
+  const isUsingDefault = currentModel === null
+  const defaultLabel = defaultModel ? (findModelLabel(defaultModel) ?? defaultModel) : 'Not set'
+  const displayLabel = isUsingDefault
+    ? `Default (${defaultLabel})`
+    : (findModelLabel(currentModel) ?? currentModel)
 
-  const displayLabel = currentModel ? (findModelLabel(currentModel) ?? currentModel) : 'Not set'
+  // Determine if current model is custom (not in catalog and not default)
+  const isCustomModel = currentModel !== null && findModelLabel(currentModel) === null
 
   // Get active Level 2 group
   const activeGroup = hoveredProvider
@@ -99,48 +113,62 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 6,
-          height: 32,
-          padding: '0 12px',
-          fontSize: 12,
+          gap: 4,
+          height: 26,
+          padding: '0 8px',
+          fontSize: 11,
           fontWeight: 500,
-          borderRadius: 8,
-          border: '1px solid rgba(255,255,255,0.1)',
-          background: 'rgba(255,255,255,0.04)',
-          color: currentModel ? '#34D399' : 'rgba(232,232,232,0.45)',
+          borderRadius: 6,
+          border: '1px solid rgba(255,255,255,0.08)',
+          background: 'rgba(255,255,255,0.03)',
+          color: isUsingDefault ? 'rgba(232,232,232,0.45)' : '#34D399',
           cursor: 'pointer',
           transition: 'all 0.15s',
           fontFamily: 'var(--font-body)',
+          maxWidth: 200,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
         }}
       >
-        {displayLabel}
+        <span
+          style={{
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {displayLabel}
+        </span>
         <ChevronDown
           style={{
-            width: 12,
-            height: 12,
-            opacity: 0.5,
+            width: 10,
+            height: 10,
+            opacity: 0.4,
+            flexShrink: 0,
             transform: open ? 'rotate(180deg)' : 'none',
             transition: 'transform 0.15s',
           }}
         />
       </button>
 
-      {/* Cascading Dropdown */}
+      {/* Cascading Dropdown — Level 2 opens LEFT */}
       {open && (
         <div
           style={{
             position: 'absolute',
             top: '100%',
-            left: 0,
+            right: 0,
             marginTop: 4,
             zIndex: 50,
             display: 'flex',
+            flexDirection: 'row-reverse',
           }}
         >
           {/* Level 1: Provider list */}
           <div
             style={{
-              minWidth: 190,
+              minWidth: 175,
               maxHeight: 420,
               overflowY: 'auto',
               background: '#111827',
@@ -150,25 +178,65 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
               boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
             }}
           >
+            {/* Default option */}
+            <button
+              type="button"
+              onClick={handleSelectDefault}
+              onMouseEnter={() => {
+                setHoveredProvider(null)
+                setShowCustom(false)
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                width: '100%',
+                padding: '7px 12px',
+                fontSize: 12,
+                color: isUsingDefault ? '#34D399' : 'rgba(232,232,232,0.5)',
+                background: isUsingDefault ? 'rgba(52,211,153,0.08)' : 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+                borderBottom: '1px solid rgba(255,255,255,0.06)',
+              }}
+              onMouseOver={(e) => {
+                if (!isUsingDefault) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+              }}
+              onMouseOut={(e) => {
+                if (!isUsingDefault) e.currentTarget.style.background = 'transparent'
+              }}
+            >
+              <span style={{ flex: 1, fontSize: 11 }}>Default ({defaultLabel})</span>
+              {isUsingDefault && (
+                <Check style={{ width: 12, height: 12, color: '#34D399', flexShrink: 0 }} />
+              )}
+            </button>
+
             {/* Current custom model (pinned) */}
             {isCustomModel && (
               <>
                 <button
                   type="button"
-                  onClick={() => handleSelect(currentModel)}
+                  onClick={() => handleSelectModel(currentModel)}
+                  onMouseEnter={() => {
+                    setHoveredProvider(null)
+                    setShowCustom(false)
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
                     width: '100%',
-                    padding: '7px 12px',
-                    fontSize: 11,
+                    padding: '6px 12px',
+                    fontSize: 10,
                     color: '#34D399',
                     background: 'rgba(52,211,153,0.08)',
                     border: 'none',
                     cursor: 'pointer',
                     textAlign: 'left',
                     fontFamily: 'var(--font-geist-mono, monospace)',
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
                   }}
                 >
                   <span
@@ -181,9 +249,8 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                   >
                     {currentModel}
                   </span>
-                  <Check style={{ width: 13, height: 13, color: '#34D399', flexShrink: 0 }} />
+                  <Check style={{ width: 11, height: 11, color: '#34D399', flexShrink: 0 }} />
                 </button>
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', margin: '2px 0' }} />
               </>
             )}
 
@@ -197,7 +264,7 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                 placeholder="Search..."
                 style={{
                   width: '100%',
-                  padding: '5px 8px',
+                  padding: '4px 8px',
                   fontSize: 11,
                   color: '#E8E8E8',
                   background: 'rgba(255,255,255,0.04)',
@@ -228,8 +295,8 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                     alignItems: 'center',
                     gap: 6,
                     width: '100%',
-                    padding: '6px 12px',
-                    fontSize: 12,
+                    padding: '5px 12px',
+                    fontSize: 11,
                     color: hasSelectedModel
                       ? '#34D399'
                       : isActive
@@ -242,14 +309,12 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                     transition: 'background 0.1s',
                   }}
                 >
+                  <ChevronLeft style={{ width: 10, height: 10, opacity: 0.3, flexShrink: 0 }} />
                   <span style={{ flex: 1, fontWeight: hasSelectedModel ? 600 : 400 }}>
                     {group.provider}
                   </span>
                   {hasSelectedModel && (
-                    <Check style={{ width: 12, height: 12, color: '#34D399', flexShrink: 0 }} />
-                  )}
-                  {!hasSelectedModel && (
-                    <ChevronRight style={{ width: 11, height: 11, opacity: 0.3, flexShrink: 0 }} />
+                    <Check style={{ width: 11, height: 11, color: '#34D399', flexShrink: 0 }} />
                   )}
                 </button>
               )
@@ -272,8 +337,8 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                 alignItems: 'center',
                 gap: 6,
                 width: '100%',
-                padding: '6px 12px',
-                fontSize: 12,
+                padding: '5px 12px',
+                fontSize: 11,
                 color: showCustom ? '#E8E8E8' : 'rgba(232,232,232,0.5)',
                 background: showCustom ? 'rgba(255,255,255,0.06)' : 'transparent',
                 border: 'none',
@@ -282,24 +347,24 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                 fontStyle: 'italic',
               }}
             >
+              <ChevronLeft style={{ width: 10, height: 10, opacity: 0.3, flexShrink: 0 }} />
               <span style={{ flex: 1 }}>Custom model...</span>
-              <ChevronRight style={{ width: 11, height: 11, opacity: 0.3, flexShrink: 0 }} />
             </button>
           </div>
 
-          {/* Level 2: Model list or Custom input */}
+          {/* Level 2: Model list or Custom input — opens to the LEFT */}
           {(activeGroup || showCustom) && (
             <div
               style={{
-                minWidth: 230,
-                maxHeight: 380,
+                minWidth: 210,
+                maxHeight: 360,
                 overflowY: 'auto',
                 background: '#111827',
                 border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: 10,
                 padding: '6px 0',
                 boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                marginLeft: 4,
+                marginRight: 4,
               }}
             >
               {activeGroup && (
@@ -323,7 +388,7 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                       <button
                         key={model.id}
                         type="button"
-                        onClick={() => handleSelect(model.id)}
+                        onClick={() => handleSelectModel(model.id)}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -348,7 +413,7 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                       >
                         <span style={{ flex: 1 }}>{model.label}</span>
                         {isSelected && (
-                          <Check style={{ width: 14, height: 14, color: '#34D399' }} />
+                          <Check style={{ width: 13, height: 13, color: '#34D399' }} />
                         )}
                       </button>
                     )
@@ -383,7 +448,7 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                       autoFocus
                       style={{
                         flex: 1,
-                        padding: '6px 8px',
+                        padding: '5px 8px',
                         fontSize: 11,
                         color: '#E8E8E8',
                         background: 'rgba(255,255,255,0.04)',

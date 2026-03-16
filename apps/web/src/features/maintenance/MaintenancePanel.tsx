@@ -33,12 +33,7 @@ interface OpenClawConfig {
     agents?: { defaults?: { model?: { primary?: string } } }
     [key: string]: unknown
   }
-  env: {
-    hasAnthropicKey: boolean
-    hasOpenAIKey: boolean
-    hasGoogleKey: boolean
-    hasGatewayToken: boolean
-  }
+  env: Record<string, boolean>
   version: string | null
 }
 
