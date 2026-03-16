@@ -4,7 +4,7 @@ import { create } from 'zustand'
 // Discriminated union replacing the old flat View type.
 // 'chat' is gone — selecting an agent opens chat via { type: 'agent' }.
 
-export type NavView = 'graph' | 'approvals' | 'cost' | 'marketplace' | 'scheduler'
+export type NavView = 'graph' | 'approvals' | 'cost' | 'marketplace' | 'scheduler' | 'system'
 
 export type ViewMode =
   | { type: 'agent'; agentId: string }
@@ -18,7 +18,7 @@ interface ViewStore {
   viewMode: ViewMode
   setViewMode: (mode: ViewMode) => void
 
-  /** Navigate to a NavView (graph, approvals, cost, marketplace, scheduler). */
+  /** Navigate to a NavView (graph, approvals, cost, marketplace, scheduler, system). */
   navigateTo: (view: NavView) => void
 
   /** Open an agent's chat / detail view. */

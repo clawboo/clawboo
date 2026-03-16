@@ -5,6 +5,7 @@ import { SchedulerPanel } from '@/features/scheduler/SchedulerPanel'
 import { ApprovalsPanel } from '@/features/approvals/ApprovalsPanel'
 import { CostDashboard } from '@/app/cost/CostDashboard'
 import { MarketplacePanel } from '@/features/marketplace/MarketplacePanel'
+import { MaintenancePanel } from '@/features/maintenance'
 import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
 import { AgentDetailView } from '@/features/agent-detail'
 import { WelcomeState } from './WelcomeState'
@@ -32,6 +33,7 @@ const NAV_PANELS: Record<NavView, () => ReactNode> = {
   approvals: () => <ApprovalsPanel />,
   cost: () => <CostDashboard />,
   marketplace: () => <MarketplacePanel />,
+  system: () => <MaintenancePanel />,
 }
 
 export function ContentArea() {
@@ -94,12 +96,19 @@ export function ContentArea() {
         return
       }
 
-      // Cmd/Ctrl+1-5 — quick nav to views
+      // Cmd/Ctrl+1-6 — quick nav to views
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         const num = parseInt(e.key, 10)
-        if (num >= 1 && num <= 5) {
+        if (num >= 1 && num <= 6) {
           e.preventDefault()
-          const views: NavView[] = ['graph', 'marketplace', 'approvals', 'scheduler', 'cost']
+          const views: NavView[] = [
+            'graph',
+            'marketplace',
+            'approvals',
+            'scheduler',
+            'cost',
+            'system',
+          ]
           useViewStore.getState().navigateTo(views[num - 1]!)
         }
       }
