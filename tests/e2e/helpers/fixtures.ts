@@ -72,6 +72,20 @@ export async function connectToMockGateway(
   request: APIRequestContext,
   gatewayUrl: string,
 ) {
+  // Clean up stale teams from previous dev sessions so they don't
+  // filter out mock gateway agents via auto-select in hydrateTeams.
+  try {
+    const teamsResp = await request.get('http://127.0.0.1:3000/api/teams')
+    if (teamsResp.ok()) {
+      const data = (await teamsResp.json()) as { teams?: { id: string }[] }
+      for (const team of data.teams ?? []) {
+        await request.delete(`http://127.0.0.1:3000/api/teams/${team.id}`)
+      }
+    }
+  } catch {
+    /* best-effort cleanup */
+  }
+
   // Pre-save settings so auto-connect finds them
   await request.post('http://127.0.0.1:3000/api/settings', {
     data: { gatewayUrl, gatewayToken: '' },

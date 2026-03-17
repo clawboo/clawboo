@@ -26,8 +26,8 @@ test.describe('Teams', () => {
 
     const agentList = page.locator('[data-testid="agent-list-column"]')
 
-    // Default view is Ghost Graph
-    await expect(page.getByText('Ghost Graph', { exact: true })).toBeVisible({ timeout: 5_000 })
+    // Default view is Ghost Graph — scope to main content area to avoid nav button ambiguity
+    await expect(page.getByRole('main').getByText('Ghost Graph')).toBeVisible({ timeout: 5_000 })
 
     // Click Marketplace nav button
     await agentList.locator('button:has-text("Marketplace")').click()

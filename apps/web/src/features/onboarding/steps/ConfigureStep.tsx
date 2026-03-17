@@ -20,7 +20,22 @@ export type ConfigureStepProps = {
 
 // ─── Provider data ───────────────────────────────────────────────────────────
 
-type ProviderId = 'anthropic' | 'openai' | 'google' | 'ollama'
+type ProviderId =
+  | 'anthropic'
+  | 'openai'
+  | 'google'
+  | 'ollama'
+  | 'openrouter'
+  | 'xai'
+  | 'groq'
+  | 'mistral'
+  | 'moonshot'
+  | 'minimax'
+  | 'together'
+  | 'nvidia'
+  | 'huggingface'
+  | 'cerebras'
+  | 'venice'
 
 interface ProviderOption {
   id: ProviderId
@@ -34,7 +49,7 @@ interface ProviderOption {
   tintBg: string
 }
 
-const PROVIDERS: ProviderOption[] = [
+const PRIMARY_PROVIDERS: ProviderOption[] = [
   {
     id: 'anthropic',
     name: 'Anthropic',
@@ -81,6 +96,132 @@ const PROVIDERS: ProviderOption[] = [
   },
 ]
 
+const MORE_PROVIDERS: ProviderOption[] = [
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    icon: '🔀',
+    description: 'Access 200+ models via one API key',
+    placeholder: 'sk-or-...',
+    needsKey: true,
+    tint: 'text-violet-400',
+    tintBorder: 'border-violet-400/40',
+    tintBg: 'bg-violet-400/8',
+  },
+  {
+    id: 'xai',
+    name: 'xAI',
+    icon: '𝕏',
+    description: 'Grok models',
+    placeholder: 'xai-...',
+    needsKey: true,
+    tint: 'text-zinc-300',
+    tintBorder: 'border-zinc-300/40',
+    tintBg: 'bg-zinc-300/8',
+  },
+  {
+    id: 'groq',
+    name: 'Groq',
+    icon: '⚡',
+    description: 'Ultra-fast inference',
+    placeholder: 'gsk_...',
+    needsKey: true,
+    tint: 'text-orange-400',
+    tintBorder: 'border-orange-400/40',
+    tintBg: 'bg-orange-400/8',
+  },
+  {
+    id: 'mistral',
+    name: 'Mistral',
+    icon: '🌊',
+    description: 'Mistral Large and more',
+    placeholder: '',
+    needsKey: true,
+    tint: 'text-sky-400',
+    tintBorder: 'border-sky-400/40',
+    tintBg: 'bg-sky-400/8',
+  },
+  {
+    id: 'moonshot',
+    name: 'Moonshot',
+    icon: '🌙',
+    description: 'Kimi models',
+    placeholder: '',
+    needsKey: true,
+    tint: 'text-indigo-400',
+    tintBorder: 'border-indigo-400/40',
+    tintBg: 'bg-indigo-400/8',
+  },
+  {
+    id: 'minimax',
+    name: 'MiniMax',
+    icon: '🔲',
+    description: 'MiniMax M2.5 and more',
+    placeholder: '',
+    needsKey: true,
+    tint: 'text-cyan-400',
+    tintBorder: 'border-cyan-400/40',
+    tintBg: 'bg-cyan-400/8',
+  },
+  {
+    id: 'together',
+    name: 'Together',
+    icon: '🤝',
+    description: 'Open-source models hosted',
+    placeholder: '',
+    needsKey: true,
+    tint: 'text-teal-400',
+    tintBorder: 'border-teal-400/40',
+    tintBg: 'bg-teal-400/8',
+  },
+  {
+    id: 'nvidia',
+    name: 'NVIDIA',
+    icon: '🟩',
+    description: 'NVIDIA NIM endpoints',
+    placeholder: 'nvapi-...',
+    needsKey: true,
+    tint: 'text-lime-400',
+    tintBorder: 'border-lime-400/40',
+    tintBg: 'bg-lime-400/8',
+  },
+  {
+    id: 'huggingface',
+    name: 'Hugging Face',
+    icon: '🤗',
+    description: 'Open models via Inference API',
+    placeholder: 'hf_...',
+    needsKey: true,
+    tint: 'text-yellow-400',
+    tintBorder: 'border-yellow-400/40',
+    tintBg: 'bg-yellow-400/8',
+  },
+  {
+    id: 'cerebras',
+    name: 'Cerebras',
+    icon: '🧠',
+    description: 'Fast wafer-scale inference',
+    placeholder: '',
+    needsKey: true,
+    tint: 'text-rose-400',
+    tintBorder: 'border-rose-400/40',
+    tintBg: 'bg-rose-400/8',
+  },
+  {
+    id: 'venice',
+    name: 'Venice',
+    icon: '🏛️',
+    description: 'Privacy-focused AI',
+    placeholder: '',
+    needsKey: true,
+    tint: 'text-fuchsia-400',
+    tintBorder: 'border-fuchsia-400/40',
+    tintBg: 'bg-fuchsia-400/8',
+  },
+]
+
+const ALL_PROVIDERS: ProviderOption[] = [...PRIMARY_PROVIDERS, ...MORE_PROVIDERS]
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
@@ -90,7 +231,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const selected = PROVIDERS.find((p) => p.id === provider) ?? null
+  const selected = ALL_PROVIDERS.find((p) => p.id === provider) ?? null
   const canSubmit = provider !== null && (provider === 'ollama' || apiKey.trim().length > 0)
 
   const handleSubmit = useCallback(async () => {
@@ -144,9 +285,9 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
           Choose your AI model provider and enter your API key.
         </p>
 
-        {/* ── Provider cards ───────────────────────────────────── */}
-        <div className="mb-5 grid grid-cols-2 gap-3">
-          {PROVIDERS.map((p) => {
+        {/* ── Primary provider cards ─────────────────────────── */}
+        <div className="mb-4 grid grid-cols-2 gap-3">
+          {PRIMARY_PROVIDERS.map((p) => {
             const isSelected = provider === p.id
 
             return (
@@ -177,6 +318,45 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
                 </span>
                 <span className="text-[11px] leading-snug text-secondary/60 mt-0.5">
                   {p.description}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* ── More providers ──────────────────────────────────── */}
+        <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary/40">
+          More providers
+        </p>
+        <div className="mb-5 grid grid-cols-2 gap-2">
+          {MORE_PROVIDERS.map((p) => {
+            const isSelected = provider === p.id
+
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => {
+                  setProvider(p.id)
+                  setError(null)
+                  if (!p.needsKey) setApiKey('')
+                }}
+                disabled={submitting}
+                className={[
+                  'flex items-center gap-2 rounded-lg px-3 py-2 text-left transition',
+                  isSelected
+                    ? `${p.tintBorder} ${p.tintBg} ring-1 ring-white/30`
+                    : 'border border-white/6 bg-background/30 hover:border-white/12 hover:bg-background/60',
+                  submitting ? 'opacity-50 cursor-not-allowed' : '',
+                ].join(' ')}
+              >
+                <span className="text-[14px] shrink-0">{p.icon}</span>
+                <span
+                  className={['text-[12px] font-medium', isSelected ? p.tint : 'text-text/70'].join(
+                    ' ',
+                  )}
+                >
+                  {p.name}
                 </span>
               </button>
             )

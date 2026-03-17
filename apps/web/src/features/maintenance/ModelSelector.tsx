@@ -10,8 +10,10 @@ interface ModelSelectorProps {
   onModelChange: (model: string) => void
 }
 
+const LOCAL_PROVIDERS = new Set(['ollama', 'sglang', 'opencode', 'opencode-go'])
+
 export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProps) {
-  const MODEL_GROUPS = useModelCatalog()
+  const { groups: MODEL_GROUPS, configuredProviders } = useModelCatalog()
   const [open, setOpen] = useState(false)
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -85,10 +87,21 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
 
   const displayLabel = currentModel ? (findModelLabel(currentModel) ?? currentModel) : 'Not set'
 
+  // Check if a provider has API key configured
+  const isProviderConfigured = useCallback(
+    (provider: string) => {
+      if (configuredProviders.size === 0) return true // No data yet — don't grey out
+      if (LOCAL_PROVIDERS.has(provider.toLowerCase())) return true
+      return configuredProviders.has(provider.toLowerCase())
+    },
+    [configuredProviders],
+  )
+
   // Get active Level 2 group
   const activeGroup = hoveredProvider
     ? filteredGroups.find((g) => g.provider === hoveredProvider)
     : null
+  const activeGroupConfigured = activeGroup ? isProviderConfigured(activeGroup.provider) : true
 
   return (
     <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
@@ -214,6 +227,7 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
               const isActive = hoveredProvider === group.provider
               const hasSelectedModel =
                 currentModel !== null && group.models.some((m) => m.id === currentModel)
+              const hasKey = isProviderConfigured(group.provider)
               return (
                 <button
                   key={group.provider}
@@ -232,9 +246,11 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                     fontSize: 12,
                     color: hasSelectedModel
                       ? '#34D399'
-                      : isActive
-                        ? '#E8E8E8'
-                        : 'rgba(232,232,232,0.7)',
+                      : !hasKey
+                        ? 'rgba(232,232,232,0.25)'
+                        : isActive
+                          ? '#E8E8E8'
+                          : 'rgba(232,232,232,0.7)',
                     background: isActive ? 'rgba(255,255,255,0.06)' : 'transparent',
                     border: 'none',
                     cursor: 'pointer',
@@ -244,6 +260,13 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                 >
                   <span style={{ flex: 1, fontWeight: hasSelectedModel ? 600 : 400 }}>
                     {group.provider}
+                    {!hasKey && (
+                      <span
+                        style={{ fontSize: 9, fontStyle: 'italic', marginLeft: 6, opacity: 0.6 }}
+                      >
+                        No API key
+                      </span>
+                    )}
                   </span>
                   {hasSelectedModel && (
                     <Check style={{ width: 12, height: 12, color: '#34D399', flexShrink: 0 }} />
@@ -317,13 +340,25 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                   >
                     {activeGroup.provider}
                   </div>
+                  {!activeGroupConfigured && (
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: 'rgba(251,191,36,0.5)',
+                        padding: '2px 14px 6px',
+                        fontStyle: 'italic',
+                      }}
+                    >
+                      API key not configured
+                    </div>
+                  )}
                   {activeGroup.models.map((model) => {
                     const isSelected = currentModel === model.id
                     return (
                       <button
                         key={model.id}
                         type="button"
-                        onClick={() => handleSelect(model.id)}
+                        onClick={activeGroupConfigured ? () => handleSelect(model.id) : undefined}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -331,19 +366,25 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                           width: '100%',
                           padding: '6px 14px',
                           fontSize: 12,
-                          color: isSelected ? '#34D399' : '#E8E8E8',
+                          color: !activeGroupConfigured
+                            ? 'rgba(232,232,232,0.25)'
+                            : isSelected
+                              ? '#34D399'
+                              : '#E8E8E8',
                           background: isSelected ? 'rgba(52,211,153,0.08)' : 'transparent',
                           border: 'none',
-                          cursor: 'pointer',
+                          cursor: activeGroupConfigured ? 'pointer' : 'default',
                           textAlign: 'left',
                           transition: 'background 0.1s',
+                          opacity: activeGroupConfigured ? 1 : 0.4,
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected)
+                          if (activeGroupConfigured && !isSelected)
                             e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
                         }}
                         onMouseLeave={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = 'transparent'
+                          if (activeGroupConfigured && !isSelected)
+                            e.currentTarget.style.background = 'transparent'
                         }}
                       >
                         <span style={{ flex: 1 }}>{model.label}</span>

@@ -164,7 +164,29 @@ export function GatewayBootstrap() {
   const [showWizard, setShowWizard] = useState<boolean | null>(null)
 
   useEffect(() => {
-    setShowWizard(isFirstTimeUser())
+    // Fast path: localStorage says we're onboarded
+    if (!isFirstTimeUser()) {
+      setShowWizard(false)
+      return
+    }
+    // Slow path: localStorage missing — check if system is already configured
+    void (async () => {
+      try {
+        const resp = await fetch('/api/system/status')
+        if (resp.ok) {
+          const info = (await resp.json()) as SystemInfo
+          if (info.openclaw.installed && info.openclaw.configExists && info.openclaw.envExists) {
+            // System is fully configured — treat as returning user
+            markOnboarded()
+            setShowWizard(false)
+            return
+          }
+        }
+      } catch {
+        // Status check failed — fall through to wizard
+      }
+      setShowWizard(true)
+    })()
   }, [])
 
   // Post-onboarding Boo tip (only for first-time flow)

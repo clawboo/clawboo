@@ -4,8 +4,8 @@ test.describe('Ghost Graph', () => {
   test('Ghost Graph tab shows React Flow canvas', async ({ page, request, gateway }) => {
     await connectToMockGateway(page, request, gateway.url)
 
-    // The default view is Ghost Graph, so the toolbar title span should be visible
-    await expect(page.getByText('Ghost Graph', { exact: true })).toBeVisible({ timeout: 5_000 })
+    // The default view is Ghost Graph, so the toolbar title in the main content area should be visible
+    await expect(page.getByRole('main').getByText('Ghost Graph')).toBeVisible({ timeout: 5_000 })
 
     // React Flow renders a container with class .react-flow
     const reactFlow = page.locator('.react-flow')

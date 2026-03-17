@@ -3,7 +3,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync, spawn } from 'node:child_process'
-import { resolveStateDir, saveSettings } from '@clawboo/config'
+import { resolveStateDir, loadSettings, saveSettings } from '@clawboo/config'
 import {
   readGatewayPid,
   writeGatewayPid,
@@ -13,10 +13,40 @@ import {
   findProcessByPort,
 } from '../lib/processManager'
 import { getModelsFromCli } from '../lib/modelCache'
+import { MODEL_GROUPS as STATIC_MODEL_GROUPS } from '../../src/lib/modelCatalog'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_PORT = 18789
+
+/**
+ * Read GATEWAY_AUTH_TOKEN from the .env file and sync it to Clawboo settings
+ * if they differ. The .env file is the Gateway's source of truth — Clawboo
+ * settings must always reflect it to avoid token mismatch errors.
+ */
+function syncTokenFromEnv(): void {
+  try {
+    const stateDir = resolveStateDir()
+    const envPath = path.join(stateDir, '.env')
+    if (!fs.existsSync(envPath)) return
+    const content = fs.readFileSync(envPath, 'utf8')
+    let envToken = ''
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed.startsWith('GATEWAY_AUTH_TOKEN=')) {
+        envToken = trimmed.slice('GATEWAY_AUTH_TOKEN='.length).trim()
+        break
+      }
+    }
+    if (!envToken) return
+    const current = loadSettings()
+    if (current.gatewayToken !== envToken) {
+      saveSettings({ gatewayToken: envToken })
+    }
+  } catch {
+    // Best-effort sync — don't block gateway start
+  }
+}
 
 function sendEvent(res: Response, data: Record<string, unknown>): void {
   res.write(`data: ${JSON.stringify(data)}\n\n`)
@@ -266,6 +296,13 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
       removeGatewayPid()
     }
 
+    // Sync .env token → Clawboo settings whenever gateway is running.
+    // This prevents token mismatch after external config changes, E2E test
+    // cleanup, or manual .env edits.
+    if (running && envExists) {
+      syncTokenFromEnv()
+    }
+
     res.json({
       node: {
         version: nodeVersion,
@@ -410,6 +447,7 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
     // Write openclaw.json
     const openclawConfig = {
       gateway: {
+        mode: 'local',
         port,
         auth: { mode: 'token', token: '${GATEWAY_AUTH_TOKEN}' },
       },
@@ -531,7 +569,7 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
       message: `Starting gateway on port ${port}...`,
     })
 
-    const child = spawn(oc.path, ['gateway', '--port', String(port)], {
+    const child = spawn(oc.path, ['gateway', '--port', String(port), '--allow-unconfigured'], {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -569,6 +607,9 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
       attempts++
       const reachable = await probeGatewayPort(port)
       if (reachable) {
+        // Sync .env token → Clawboo settings so the proxy uses the correct token.
+        // The .env file is the Gateway's source of truth for auth tokens.
+        syncTokenFromEnv()
         sendEvent(res, { type: 'complete', success: true, pid: child.pid, port })
         res.end()
         return
@@ -819,8 +860,50 @@ export async function openclawConfigPATCH(req: Request, res: Response): Promise<
 export async function systemModelsGET(_req: Request, res: Response): Promise<void> {
   try {
     const groups = await getModelsFromCli()
-    res.json({ groups })
+
+    // Detect which providers have API keys configured
+    const stateDir = resolveStateDir()
+    const envPath = path.join(stateDir, '.env')
+    let envContent: string | null = null
+    try {
+      envContent = fs.readFileSync(envPath, 'utf8')
+    } catch {
+      // no .env
+    }
+    const envFlags = parseEnvFlags(envContent)
+    const authProviders = detectAuthProfileKeys(stateDir)
+
+    const configured: string[] = []
+    for (const [flag, providerName] of Object.entries(AUTH_PROFILE_PROVIDERS)) {
+      if (envFlags[flag] || authProviders.has(providerName)) {
+        configured.push(providerName)
+      }
+    }
+    // Local providers are always available
+    configured.push('ollama')
+
+    // Only include providers that are in our known API keys list + local
+    const knownProviders = new Set([...Object.values(AUTH_PROFILE_PROVIDERS), 'ollama'])
+
+    let resultGroups
+    if (groups) {
+      // Start with CLI groups, filtered to known providers
+      resultGroups = groups.filter((g) => knownProviders.has(g.provider.toLowerCase()))
+      // Supplement with static catalog entries for any known providers missing from CLI
+      const cliProviders = new Set(resultGroups.map((g) => g.provider.toLowerCase()))
+      for (const staticGroup of STATIC_MODEL_GROUPS) {
+        const key = staticGroup.provider.toLowerCase()
+        if (knownProviders.has(key) && !cliProviders.has(key)) {
+          resultGroups.push(staticGroup)
+        }
+      }
+    } else {
+      // CLI unavailable — use full static catalog filtered to known providers
+      resultGroups = STATIC_MODEL_GROUPS.filter((g) => knownProviders.has(g.provider.toLowerCase()))
+    }
+
+    res.json({ groups: resultGroups, configuredProviders: configured })
   } catch {
-    res.json({ groups: null })
+    res.json({ groups: null, configuredProviders: [] })
   }
 }
