@@ -215,7 +215,7 @@ export function WelcomeState() {
             maxWidth: 360,
           }}
         >
-          Multi-agent mission control for OpenClaw.
+          Deploy, orchestrate, and observe your AI agent fleet.
         </p>
 
         {/* System status hint when not connected */}

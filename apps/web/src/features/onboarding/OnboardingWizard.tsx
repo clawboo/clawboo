@@ -152,7 +152,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
             Your AI agents, visible.
           </p>
           <p className="text-[13px] text-secondary/45 mt-1 leading-relaxed">
-            Mission control for your OpenClaw agent fleet.
+            Deploy and orchestrate your OpenClaw agent teams.
             <br />
             Set up in under 90 seconds.
           </p>

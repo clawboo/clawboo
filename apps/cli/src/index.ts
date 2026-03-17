@@ -31,7 +31,7 @@ const LOGO = `
  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═════╝  ╚═════╝  ╚═════╝
 `
 
-const TAGLINE = '        multi-agent mission control for OpenClaw'
+const TAGLINE = '   Deploy, orchestrate, and observe your AI agent fleet'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -148,7 +148,7 @@ async function run(): Promise<void> {
     if (fs.existsSync(bundledServerPath)) {
       // ── Bundled mode: fork the pre-compiled server.js ──────────────────
       const startSpinner = ora({
-        text: 'Starting Clawboo dashboard...',
+        text: 'Starting Clawboo...',
         color: 'cyan',
       }).start()
 
@@ -177,7 +177,7 @@ async function run(): Promise<void> {
     } else if (devServerPath && fs.existsSync(devServerPath)) {
       // ── Dev mode: spawn tsx on the TypeScript source ────────────────────
       const startSpinner = ora({
-        text: 'Starting Clawboo dashboard (dev mode)...',
+        text: 'Starting Clawboo (dev mode)...',
         color: 'cyan',
       }).start()
 
@@ -218,9 +218,9 @@ async function run(): Promise<void> {
 
   // ── 4. Open browser ────────────────────────────────────────────────────────
 
-  const browserSpinner = ora({ text: 'Opening Clawboo dashboard...', color: 'cyan' }).start()
+  const browserSpinner = ora({ text: 'Opening Clawboo...', color: 'cyan' }).start()
   await openBrowser(DASHBOARD_URL)
-  browserSpinner.succeed(chalk.green('Dashboard opened at ') + chalk.cyan.underline(DASHBOARD_URL))
+  browserSpinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(DASHBOARD_URL))
 
   // ── 5. Success ─────────────────────────────────────────────────────────────
 
@@ -230,13 +230,15 @@ async function run(): Promise<void> {
       '\n\n' +
       chalk.white('  What to do next:') +
       '\n' +
-      chalk.gray('  •  Click a Boo in the sidebar to start chatting') +
+      chalk.gray('  •  Deploy a pre-built team or create your own') +
       '\n' +
-      chalk.gray('  •  Open Ghost Graph to see your agent network') +
+      chalk.gray('  •  Open Ghost Graph to see your agent topology') +
       '\n' +
-      chalk.gray('  •  Check Cost to track API usage') +
+      chalk.gray('  •  Browse the Marketplace for skills and team templates') +
+      '\n' +
+      chalk.gray('  •  Track costs and optimize with Frugal Toggle') +
       '\n\n' +
-      chalk.gray('  Dashboard: ') +
+      chalk.gray('  Clawboo:   ') +
       chalk.cyan.underline(DASHBOARD_URL) +
       '\n' +
       chalk.gray('  Docs:      ') +
@@ -248,7 +250,10 @@ async function run(): Promise<void> {
 
 const program = new Command()
 
-program.name('clawboo').description('Multi-agent mission control for OpenClaw').version(VERSION)
+program
+  .name('clawboo')
+  .description('The open-source platform for OpenClaw agent teams')
+  .version(VERSION)
 
 program.action(() => {
   run().catch((err: unknown) => {
