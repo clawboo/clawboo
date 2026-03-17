@@ -1,6 +1,6 @@
 {
   "name": "clawboo",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "Multi-agent mission control dashboard for OpenClaw — npx clawboo to get started",
   "license": "MIT",
   "repository": {
