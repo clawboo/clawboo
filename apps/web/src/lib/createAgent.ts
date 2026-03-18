@@ -53,6 +53,7 @@ export type AgentFiles = {
   soul?: string
   identity?: string
   tools?: string
+  agents?: string
 }
 
 /**
@@ -73,6 +74,7 @@ export async function createAgent(
   if (files?.soul) await client.agents.files.set(agentId, 'SOUL.md', files.soul)
   if (files?.identity) await client.agents.files.set(agentId, 'IDENTITY.md', files.identity)
   if (files?.tools) await client.agents.files.set(agentId, 'TOOLS.md', files.tools)
+  if (files?.agents) await client.agents.files.set(agentId, 'AGENTS.md', files.agents)
 
   return agentId
 }

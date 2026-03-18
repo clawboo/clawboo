@@ -1,4 +1,50 @@
-// ─── Team profile types ───────────────────────────────────────────────────────
+// ─── Template types (v2 — team marketplace) ──────────────────────────────────
+
+export type TemplateSource = 'clawboo' | 'agency-agents' | 'awesome-openclaw'
+
+export type TemplateCategory =
+  | 'engineering'
+  | 'marketing'
+  | 'sales'
+  | 'product'
+  | 'design'
+  | 'testing'
+  | 'content'
+  | 'support'
+  | 'education'
+  | 'ops'
+  | 'devops'
+  | 'research'
+  | 'game-dev'
+  | 'spatial'
+  | 'academic'
+  | 'paid-media'
+  | 'specialized'
+  | 'general'
+
+export interface AgentTemplate {
+  name: string
+  role: string
+  soulTemplate: string
+  identityTemplate: string
+  toolsTemplate: string
+  agentsTemplate?: string
+}
+
+export interface TeamTemplate {
+  id: string
+  name: string
+  emoji: string
+  color: string
+  description: string
+  category: TemplateCategory
+  source: TemplateSource
+  sourceUrl?: string
+  tags: string[]
+  agents: AgentTemplate[]
+}
+
+// ─── Team profile types (legacy — will be deprecated) ─────────────────────────
 
 export interface AgentProfile {
   /** Display name — used as the agent's name on creation */
