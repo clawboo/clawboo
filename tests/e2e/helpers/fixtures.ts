@@ -72,6 +72,20 @@ export async function connectToMockGateway(
   request: APIRequestContext,
   gatewayUrl: string,
 ) {
+  // Clean up stale teams from previous dev sessions so they don't
+  // filter out mock gateway agents via auto-select in hydrateTeams.
+  try {
+    const teamsResp = await request.get('http://127.0.0.1:3000/api/teams')
+    if (teamsResp.ok()) {
+      const data = (await teamsResp.json()) as { teams?: { id: string }[] }
+      for (const team of data.teams ?? []) {
+        await request.delete(`http://127.0.0.1:3000/api/teams/${team.id}`)
+      }
+    }
+  } catch {
+    /* best-effort cleanup */
+  }
+
   // Pre-save settings so auto-connect finds them
   await request.post('http://127.0.0.1:3000/api/settings', {
     data: { gatewayUrl, gatewayToken: '' },
@@ -80,6 +94,27 @@ export async function connectToMockGateway(
   // Mark as onboarded to skip the onboarding wizard
   await page.addInitScript(() => {
     localStorage.setItem('clawboo.onboarded', '1')
+  })
+
+  // Intercept system status to prevent "Gateway Offline" overlay from blocking auto-connect.
+  // The real server probes port 18789, which won't match our mock gateway's random port.
+  await page.route('**/api/system/status', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        node: { version: process.version, major: 22, sufficient: true, path: '/usr/bin/node' },
+        openclaw: {
+          installed: true,
+          version: '0.3.0',
+          path: '/usr/bin/openclaw',
+          stateDir: '/tmp/.openclaw',
+          configExists: true,
+          envExists: true,
+        },
+        gateway: { running: true, port: 18789, pid: null, managedByClawboo: false, uptimeMs: null },
+      }),
+    })
   })
 
   await page.goto('/')

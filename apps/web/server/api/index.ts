@@ -10,6 +10,15 @@ import { ollamaCheckGET } from './ollamaCheck'
 import { personalityGET, personalityPOST } from './personality'
 import { skillsGET, skillsPOST, skillsDELETE } from './skills'
 import {
+  systemStatusGET,
+  installOpenclawPOST,
+  configureOpenclawPOST,
+  gatewayControlPOST,
+  openclawConfigGET,
+  openclawConfigPATCH,
+  systemModelsGET,
+} from './system'
+import {
   teamsGET,
   teamsPOST,
   teamsPATCH,
@@ -53,6 +62,15 @@ router.post('/api/personality', personalityPOST)
 router.get('/api/skills', skillsGET)
 router.post('/api/skills', skillsPOST)
 router.delete('/api/skills', skillsDELETE)
+
+// System management
+router.get('/api/system/status', systemStatusGET)
+router.post('/api/system/install-openclaw', installOpenclawPOST)
+router.post('/api/system/configure-openclaw', configureOpenclawPOST)
+router.post('/api/system/gateway', gatewayControlPOST)
+router.get('/api/system/openclaw-config', openclawConfigGET)
+router.patch('/api/system/openclaw-config', openclawConfigPATCH)
+router.get('/api/system/models', systemModelsGET)
 
 // Teams
 router.get('/api/teams', teamsGET)

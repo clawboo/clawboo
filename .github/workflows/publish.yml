@@ -53,6 +53,8 @@ jobs:
 
       - run: pnpm build
 
+      - run: bash scripts/assemble-cli.sh
+
       - name: Create Release PR or Publish
         uses: changesets/action@v1
         with:

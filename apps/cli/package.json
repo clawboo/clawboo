@@ -1,7 +1,7 @@
 {
   "name": "clawboo",
-  "version": "0.1.0",
-  "description": "Multi-agent mission control dashboard for OpenClaw — npx clawboo to get started",
+  "version": "0.0.0",
+  "description": "The open-source platform for deploying and orchestrating OpenClaw agent teams",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -14,7 +14,7 @@
     "openclaw",
     "ai-agents",
     "multi-agent",
-    "dashboard",
+    "platform",
     "cli",
     "mission-control"
   ],

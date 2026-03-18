@@ -1,9 +1,148 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
+import { Loader2 } from 'lucide-react'
 import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
+import { consumeSSE } from '@/lib/sseClient'
+import type { SystemInfo } from '@/stores/system'
+
+// ─── System hint styles ──────────────────────────────────────────────────────
+
+const HINT_STYLE: React.CSSProperties = {
+  fontSize: 11,
+  color: 'rgba(232,232,232,0.35)',
+  marginTop: 8,
+  lineHeight: 1.5,
+}
+
+const AMBER = '#FBBF24'
+
+// ─── System Status Hint ──────────────────────────────────────────────────────
+
+function SystemHint({ isConnected }: { isConnected: boolean }) {
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
+  const [startingGw, setStartingGw] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
+  const sseRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    if (isConnected) return
+    let cancelled = false
+    fetch('/api/system/status')
+      .then((r) => r.json())
+      .then((data: SystemInfo) => {
+        if (!cancelled) setSystemInfo(data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [isConnected])
+
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => {
+      sseRef.current?.abort()
+    }
+  }, [])
+
+  if (isConnected || !systemInfo) return null
+
+  const handleStartGateway = () => {
+    setStartingGw(true)
+    setStartError(null)
+    sseRef.current?.abort()
+    sseRef.current = consumeSSE(
+      '/api/system/gateway',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start' }),
+      },
+      {
+        onProgress() {},
+        onOutput() {},
+        onComplete(event) {
+          if (event.success) {
+            window.location.reload()
+          } else {
+            setStartingGw(false)
+            setStartError('Gateway failed to start')
+          }
+        },
+        onError(event) {
+          setStartingGw(false)
+          setStartError((event.message as string) ?? 'Failed to start Gateway')
+        },
+      },
+    )
+  }
+
+  // OpenClaw not installed
+  if (!systemInfo.openclaw.installed) {
+    return (
+      <div style={HINT_STYLE}>
+        <span style={{ color: AMBER }}>OpenClaw is not installed.</span>{' '}
+        <a
+          href="https://docs.openclaw.ai/start/getting-started"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            color: AMBER,
+            textDecoration: 'underline',
+            textUnderlineOffset: 2,
+          }}
+        >
+          Install OpenClaw to get started
+        </a>
+      </div>
+    )
+  }
+
+  // Installed but gateway not running
+  if (!systemInfo.gateway.running) {
+    return (
+      <div style={HINT_STYLE}>
+        <span style={{ color: AMBER }}>Gateway is offline.</span>{' '}
+        <button
+          onClick={handleStartGateway}
+          disabled={startingGw}
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: AMBER,
+            background: 'none',
+            border: 'none',
+            cursor: startingGw ? 'default' : 'pointer',
+            padding: 0,
+            textDecoration: 'underline',
+            textUnderlineOffset: 2,
+            opacity: startingGw ? 0.6 : 1,
+          }}
+        >
+          {startingGw ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />
+              Starting...
+            </span>
+          ) : (
+            'Start Gateway'
+          )}
+        </button>
+        {startError && (
+          <div style={{ color: '#E94560', marginTop: 4, fontSize: 10 }}>{startError}</div>
+        )}
+      </div>
+    )
+  }
+
+  // Gateway running but not connected yet
+  return <div style={HINT_STYLE}>Gateway is running. Connecting...</div>
+}
+
+// ─── WelcomeState ────────────────────────────────────────────────────────────
 
 export function WelcomeState() {
   const teams = useTeamStore((s) => s.teams)
@@ -76,8 +215,11 @@ export function WelcomeState() {
             maxWidth: 360,
           }}
         >
-          Multi-agent mission control for OpenClaw.
+          Deploy, orchestrate, and observe your AI agent fleet.
         </p>
+
+        {/* System status hint when not connected */}
+        <SystemHint isConnected={isConnected} />
       </div>
 
       {/* Quick-start steps */}

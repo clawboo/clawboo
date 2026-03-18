@@ -177,6 +177,7 @@ const SECONDARY_NAV: { id: NavView; label: string; emoji: string }[] = [
   { id: 'approvals', label: 'Approvals', emoji: '🔐' },
   { id: 'scheduler', label: 'Scheduler', emoji: '⏰' },
   { id: 'cost', label: 'Cost', emoji: '💰' },
+  { id: 'system', label: 'System', emoji: '⚙️' },
 ]
 
 // ─── AgentListColumn ─────────────────────────────────────────────────────────
