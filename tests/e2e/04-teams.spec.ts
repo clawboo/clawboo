@@ -26,8 +26,8 @@ test.describe('Teams', () => {
 
     const agentList = page.locator('[data-testid="agent-list-column"]')
 
-    // Default view is Ghost Graph
-    await expect(page.getByText('Ghost Graph', { exact: true })).toBeVisible({ timeout: 5_000 })
+    // Default view is Ghost Graph — scope to main content area to avoid nav button ambiguity
+    await expect(page.getByRole('main').getByText('Ghost Graph')).toBeVisible({ timeout: 5_000 })
 
     // Click Marketplace nav button
     await agentList.locator('button:has-text("Marketplace")').click()
@@ -40,5 +40,19 @@ test.describe('Teams', () => {
     // Click back to Ghost Graph
     await agentList.locator('button:has-text("Ghost Graph")').click()
     await expect(page.locator('.react-flow')).toBeVisible({ timeout: 10_000 })
+  })
+
+  test('system nav button opens maintenance panel', async ({ page, request, gateway }) => {
+    await connectToMockGateway(page, request, gateway.url)
+
+    const agentList = page.locator('[data-testid="agent-list-column"]')
+
+    // Click System nav button in secondary nav
+    await agentList.locator('button:has-text("System")').click()
+
+    // MaintenancePanel renders this subtitle
+    await expect(page.getByText('Manage your OpenClaw installation')).toBeVisible({
+      timeout: 10_000,
+    })
   })
 })

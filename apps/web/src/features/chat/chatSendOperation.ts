@@ -130,6 +130,16 @@ export async function sendChatMessage({
     body: JSON.stringify({ sessionKey, gatewayUrl: gwUrl, entries: [userEntry] }),
   }).catch(() => {})
 
+  // ── Apply per-agent model if set ──────────────────────────────────────────
+  const agentModel = useFleetStore.getState().agents.find((a) => a.id === agentId)?.model
+  if (agentModel) {
+    try {
+      await client.call('sessions.patch', { key: sessionKey, model: agentModel })
+    } catch {
+      // Non-fatal: model may already be set or Gateway may not support sessions.patch
+    }
+  }
+
   // ── Gateway call ────────────────────────────────────────────────────────────
   try {
     await client.call('chat.send', {

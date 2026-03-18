@@ -48,6 +48,9 @@ interface FleetStore {
 
   /** Update the last-seen timestamp for an agent. */
   updateLastSeen: (agentId: string, timestamp: number) => void
+
+  /** Update the model override for an agent. Pass null to revert to default. */
+  updateAgentModel: (agentId: string, model: string | null) => void
 }
 
 export const useFleetStore = create<FleetStore>((set) => ({
@@ -90,5 +93,10 @@ export const useFleetStore = create<FleetStore>((set) => ({
   updateLastSeen: (agentId, timestamp) =>
     set((state) => ({
       agents: state.agents.map((a) => (a.id === agentId ? { ...a, lastSeenAt: timestamp } : a)),
+    })),
+
+  updateAgentModel: (agentId, model) =>
+    set((state) => ({
+      agents: state.agents.map((a) => (a.id === agentId ? { ...a, model } : a)),
     })),
 }))

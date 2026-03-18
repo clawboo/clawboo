@@ -17,7 +17,9 @@ import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
+import { useToastStore } from '@/stores/toast'
 import { calculateCostUsd, formatCost } from '@/features/cost/costUtils'
+import { AgentModelSelector } from '@/features/agent-detail/AgentModelSelector'
 import { sendChatMessage } from './chatSendOperation'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -696,6 +698,46 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
     client && connectionStatus === 'connected' && agent && sessionKey && !isRunning,
   )
 
+  // ── Default model (fetched once) ──────────────────────────────────────────
+  const [defaultModel, setDefaultModel] = useState<string | null>(null)
+  const addToast = useToastStore((s) => s.addToast)
+
+  useEffect(() => {
+    fetch('/api/system/openclaw-config')
+      .then((r) => r.json())
+      .then((data: { config?: { agents?: { defaults?: { model?: { primary?: string } } } } }) => {
+        setDefaultModel(data?.config?.agents?.defaults?.model?.primary ?? null)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleModelChange = useCallback(
+    async (model: string | null) => {
+      if (!agent) return
+      // Update fleet store immediately
+      useFleetStore.getState().updateAgentModel(agent.id, model)
+      // Persist to openclaw.json
+      try {
+        await fetch('/api/system/openclaw-config', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentModel: { agentId: agent.id, model } }),
+        })
+      } catch {
+        addToast({ message: 'Failed to save model preference', type: 'error' })
+      }
+      // Apply to active session immediately
+      if (client && sessionKey && model) {
+        try {
+          await client.call('sessions.patch', { key: sessionKey, model })
+        } catch {
+          // Non-fatal: model will be applied on next chat.send
+        }
+      }
+    },
+    [agent, client, sessionKey, addToast],
+  )
+
   const handleSend = useCallback(
     async (message: string) => {
       if (!client || !agent || !sessionKey) return
@@ -730,9 +772,16 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
           </h2>
           {!sessionKey && <span className="font-mono text-[10px] text-amber/60">No session</span>}
         </div>
-        <span className="font-mono text-[10px] text-secondary/40">
-          {connectionStatus === 'connected' ? 'Connected' : connectionStatus}
-        </span>
+        <div className="flex items-center gap-3">
+          <AgentModelSelector
+            currentModel={agent.model ?? null}
+            defaultModel={defaultModel}
+            onModelChange={handleModelChange}
+          />
+          <span className="font-mono text-[10px] text-secondary/40">
+            {connectionStatus === 'connected' ? 'Connected' : connectionStatus}
+          </span>
+        </div>
       </div>
 
       {/* Messages */}

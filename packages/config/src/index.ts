@@ -92,6 +92,47 @@ const readJsonFile = (filePath: string): Record<string, unknown> | null => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
+// ─── .env file reader ─────────────────────────────────────────────────────────
+
+/**
+ * Read a single variable from a .env file. Returns null if not found.
+ * This is needed because openclaw.json uses template tokens like
+ * `${GATEWAY_AUTH_TOKEN}` that reference .env values — the Gateway resolves
+ * them at runtime, but Clawboo needs the actual value.
+ */
+const readDotEnvVar = (envFilePath: string, varName: string): string | null => {
+  try {
+    if (!fs.existsSync(envFilePath)) return null
+    const content = fs.readFileSync(envFilePath, 'utf8')
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed.startsWith('#') || !trimmed.includes('=')) continue
+      const eqIdx = trimmed.indexOf('=')
+      const key = trimmed.slice(0, eqIdx).trim()
+      const val = trimmed.slice(eqIdx + 1).trim()
+      if (key === varName && val) return val
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * If a token is a template variable like `${GATEWAY_AUTH_TOKEN}`, resolve it
+ * from process.env first, then from the .env file in the state directory.
+ * Returns the resolved value, or empty string if unresolvable.
+ */
+const resolveTokenTemplate = (raw: string, stateDir: string, env: NodeJS.ProcessEnv): string => {
+  if (!raw.startsWith('${') || !raw.endsWith('}')) return raw
+  const varName = raw.slice(2, -1)
+  // Process env takes priority (explicit env var override)
+  const fromEnv = env[varName]?.trim()
+  if (fromEnv) return fromEnv
+  // Fall back to .env file
+  return readDotEnvVar(path.join(stateDir, '.env'), varName) || ''
+}
+
 // ─── OpenClaw config defaults ─────────────────────────────────────────────────
 
 const readOpenclawGatewayDefaults = (
@@ -107,7 +148,8 @@ const readOpenclawGatewayDefaults = (
     if (!gateway) return null
 
     const auth = isRecord(gateway['auth']) ? gateway['auth'] : null
-    const token = typeof auth?.['token'] === 'string' ? auth['token'].trim() : ''
+    const rawToken = typeof auth?.['token'] === 'string' ? auth['token'].trim() : ''
+    const token = resolveTokenTemplate(rawToken, stateDir, env)
     const port =
       typeof gateway['port'] === 'number' && Number.isFinite(gateway['port'])
         ? gateway['port']
@@ -131,13 +173,18 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): ClawbooSetti
   const gateway = isRecord(parsed?.['gateway']) ? parsed['gateway'] : null
 
   const url = typeof gateway?.['url'] === 'string' ? gateway['url'].trim() : ''
-  const token = typeof gateway?.['token'] === 'string' ? gateway['token'].trim() : ''
+  const rawToken = typeof gateway?.['token'] === 'string' ? gateway['token'].trim() : ''
   const studioAccessToken =
     typeof parsed?.['studioAccessToken'] === 'string'
       ? parsed['studioAccessToken'].trim()
       : undefined
 
-  // If no token, try openclaw.json defaults
+  // Resolve template tokens (e.g. "${GATEWAY_AUTH_TOKEN}") that may have
+  // leaked into settings.json from openclaw.json's template syntax.
+  const stateDir = resolveStateDir(env)
+  const token = resolveTokenTemplate(rawToken, stateDir, env)
+
+  // If no usable token, try openclaw.json defaults (which also resolves templates)
   if (!token) {
     const defaults = readOpenclawGatewayDefaults(env)
     if (defaults) {

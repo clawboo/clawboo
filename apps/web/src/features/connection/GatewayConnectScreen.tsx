@@ -298,6 +298,18 @@ export function GatewayConnectScreen({
             ws://localhost:18789
           </button>
         </p>
+        <p className="mt-3 text-center text-[11px] text-secondary/25">
+          {"Don't have OpenClaw? "}
+          <a
+            href="https://docs.openclaw.ai/start/getting-started"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent underline underline-offset-2"
+          >
+            Install it
+          </a>
+          {' or re-run setup from the dashboard.'}
+        </p>
       </motion.div>
     </motion.div>
   )
