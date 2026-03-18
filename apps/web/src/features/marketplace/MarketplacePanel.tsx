@@ -13,7 +13,7 @@ import { AgentPickerDropdown } from './AgentPickerDropdown'
 import type { SkillCategory } from '@/features/graph/types'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
 import type { TeamProfile, TeamTemplate } from '@/features/teams/types'
-import { STARTER_TEMPLATES } from './teamCatalog'
+import { TEAM_CATALOG } from './teamCatalog'
 
 type ProfileLike = TeamTemplate | TeamProfile
 
@@ -565,7 +565,7 @@ export function MarketplacePanel() {
                 marginBottom: 16,
               }}
             >
-              {STARTER_TEMPLATES.map((profile) => (
+              {TEAM_CATALOG.map((profile) => (
                 <TeamTemplateCard
                   key={profile.id}
                   profile={profile}
