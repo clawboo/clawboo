@@ -1,3 +1,15 @@
 import type { TeamTemplate } from '@/features/teams/types'
 
-export const builtinTemplates: TeamTemplate[] = []
+import { marketingTemplate } from './marketing'
+import { devTemplate } from './dev'
+import { researchTemplate } from './research'
+import { youtubeTemplate } from './youtube'
+import { studentTemplate } from './student'
+
+export const builtinTemplates: TeamTemplate[] = [
+  marketingTemplate,
+  devTemplate,
+  researchTemplate,
+  youtubeTemplate,
+  studentTemplate,
+]

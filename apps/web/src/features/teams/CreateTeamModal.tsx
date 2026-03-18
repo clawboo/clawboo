@@ -9,17 +9,12 @@ import { useToastStore } from '@/stores/toast'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { useGraphStore } from '@/features/graph/store'
-import type { TeamProfile } from './types'
-
-import marketingRaw from './profiles/marketing.json'
-import devRaw from './profiles/dev.json'
-import researchRaw from './profiles/research.json'
-import youtubeRaw from './profiles/youtube.json'
-import studentRaw from './profiles/student.json'
+import type { TeamProfile, TeamTemplate } from './types'
+import { STARTER_TEMPLATES } from '@/features/marketplace/teamCatalog'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const PROFILES: TeamProfile[] = [marketingRaw, devRaw, researchRaw, youtubeRaw, studentRaw]
+type ProfileLike = TeamTemplate | TeamProfile
 
 const PRESET_COLORS = [
   '#E94560',
@@ -50,7 +45,7 @@ interface CreateTeamModalProps {
   onClose: () => void
   onCreated: () => void
   /** When provided, skip the "pick" step and go directly to "customize" with this profile. */
-  initialProfile?: TeamProfile | null
+  initialProfile?: ProfileLike | null
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -75,7 +70,7 @@ export function CreateTeamModal({
       setStep('customize')
     }
   }, [isOpen, initialProfile])
-  const [selectedProfile, setSelectedProfile] = useState<TeamProfile | null>(null)
+  const [selectedProfile, setSelectedProfile] = useState<ProfileLike | null>(null)
 
   // Customize fields
   const [teamName, setTeamName] = useState('')
@@ -103,7 +98,7 @@ export function CreateTeamModal({
   }, [step, reset, onClose])
 
   // Step A → Step B
-  const handlePickProfile = useCallback((profile: TeamProfile) => {
+  const handlePickProfile = useCallback((profile: ProfileLike) => {
     setSelectedProfile(profile)
     setTeamName(profile.name)
     setTeamIcon(profile.emoji)
@@ -168,7 +163,11 @@ export function CreateTeamModal({
       // Template team → deploy agents
       setStep('deploy')
       const profile = selectedProfile
-      const tools = buildToolsMd(profile.skills)
+      const isNewFormat = 'toolsTemplate' in (profile.agents[0] ?? {})
+      const legacyTools =
+        !isNewFormat && 'skills' in profile
+          ? buildToolsMd((profile as TeamProfile).skills)
+          : '# TOOLS\n'
 
       const workspaceDir = await resolveWorkspaceDir(client)
       for (let i = 0; i < profile.agents.length; i++) {
@@ -178,7 +177,12 @@ export function CreateTeamModal({
         const agentId = await createAgent(client, agent.name, workspaceDir, {
           soul: agent.soulTemplate,
           identity: agent.identityTemplate,
-          tools,
+          tools: isNewFormat
+            ? (agent as TeamTemplate['agents'][number]).toolsTemplate
+            : legacyTools,
+          agents: isNewFormat
+            ? (agent as TeamTemplate['agents'][number]).agentsTemplate
+            : undefined,
         })
 
         // Assign agent to team (best-effort)
@@ -290,7 +294,7 @@ export function CreateTeamModal({
               </p>
 
               <div className="flex flex-col gap-2">
-                {PROFILES.map((profile) => (
+                {STARTER_TEMPLATES.map((profile) => (
                   <button
                     key={profile.id}
                     type="button"

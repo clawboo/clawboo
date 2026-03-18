@@ -12,15 +12,10 @@ import type { CatalogSkill } from './catalog'
 import { AgentPickerDropdown } from './AgentPickerDropdown'
 import type { SkillCategory } from '@/features/graph/types'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
-import type { TeamProfile } from '@/features/teams/types'
+import type { TeamProfile, TeamTemplate } from '@/features/teams/types'
+import { STARTER_TEMPLATES } from './teamCatalog'
 
-import marketingRaw from '@/features/teams/profiles/marketing.json'
-import devRaw from '@/features/teams/profiles/dev.json'
-import researchRaw from '@/features/teams/profiles/research.json'
-import youtubeRaw from '@/features/teams/profiles/youtube.json'
-import studentRaw from '@/features/teams/profiles/student.json'
-
-const TEAM_PROFILES: TeamProfile[] = [marketingRaw, devRaw, researchRaw, youtubeRaw, studentRaw]
+type ProfileLike = TeamTemplate | TeamProfile
 
 // ─── Category colours (matches SkillNode.tsx) ────────────────────────────────
 
@@ -286,8 +281,8 @@ function TeamTemplateCard({
   profile,
   onDeploy,
 }: {
-  profile: TeamProfile
-  onDeploy: (profile: TeamProfile) => void
+  profile: ProfileLike
+  onDeploy: (profile: ProfileLike) => void
 }) {
   return (
     <motion.div
@@ -388,7 +383,7 @@ export function MarketplacePanel() {
   const setSortBy = useMarketplaceStore((s) => s.setSortBy)
 
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [prefilledProfile, setPrefilledProfile] = useState<TeamProfile | null>(null)
+  const [prefilledProfile, setPrefilledProfile] = useState<ProfileLike | null>(null)
 
   const showTeamTemplates = !searchQuery && categoryFilter === 'all'
 
@@ -570,7 +565,7 @@ export function MarketplacePanel() {
                 marginBottom: 16,
               }}
             >
-              {TEAM_PROFILES.map((profile) => (
+              {STARTER_TEMPLATES.map((profile) => (
                 <TeamTemplateCard
                   key={profile.id}
                   profile={profile}

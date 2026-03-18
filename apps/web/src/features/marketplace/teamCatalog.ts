@@ -6,6 +6,9 @@ import { ALL_TEMPLATES } from './templates'
 
 export const TEAM_CATALOG: TeamTemplate[] = ALL_TEMPLATES
 
+/** Builtin templates shipped with Clawboo — used by OnboardingWizard. */
+export const STARTER_TEMPLATES: TeamTemplate[] = TEAM_CATALOG.filter((t) => t.source === 'clawboo')
+
 // ─── Lookups ────────────────────────────────────────────────────────────────
 
 export function searchTeamCatalog(query: string): TeamTemplate[] {
