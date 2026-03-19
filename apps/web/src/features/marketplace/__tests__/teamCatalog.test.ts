@@ -35,8 +35,8 @@ const ALL_CATEGORIES: TemplateCategory[] = [
 const ALL_SOURCES: TemplateSource[] = ['clawboo', 'agency-agents', 'awesome-openclaw']
 
 describe('TEAM_CATALOG', () => {
-  it('has 62 templates (5 builtin + 57 agency)', () => {
-    expect(TEAM_CATALOG.length).toBe(62)
+  it('has 81 templates (5 builtin + 57 agency + 19 openclaw)', () => {
+    expect(TEAM_CATALOG.length).toBe(81)
   })
 
   it('all IDs are unique', () => {
@@ -115,8 +115,8 @@ describe('getTeamTemplate', () => {
 })
 
 describe('getTemplatesByCategory', () => {
-  it('returns empty for unused category', () => {
-    expect(getTemplatesByCategory('devops')).toEqual([])
+  it('finds devops templates', () => {
+    expect(getTemplatesByCategory('devops').length).toBe(1)
   })
 
   it('finds templates by category', () => {
@@ -125,8 +125,8 @@ describe('getTemplatesByCategory', () => {
 })
 
 describe('getTemplatesBySource', () => {
-  it('returns empty for unused source', () => {
-    expect(getTemplatesBySource('awesome-openclaw')).toEqual([])
+  it('finds awesome-openclaw templates', () => {
+    expect(getTemplatesBySource('awesome-openclaw').length).toBe(19)
   })
 
   it('finds builtin templates', () => {

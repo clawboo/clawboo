@@ -1,3 +1,6 @@
 import type { TeamTemplate } from '@/features/teams/types'
 
-export const openclawTemplates: TeamTemplate[] = []
+import { composedTemplates } from './composed'
+import { multiAgentTemplates } from './multi-agent'
+
+export const openclawTemplates: TeamTemplate[] = [...multiAgentTemplates, ...composedTemplates]
