@@ -78,6 +78,20 @@ describe('TEAM_CATALOG', () => {
       }
     }
   })
+
+  it('has no duplicate team names', () => {
+    const names = TEAM_CATALOG.map((t) => t.name)
+    expect(new Set(names).size).toBe(names.length)
+  })
+
+  it('every template has description, tags, emoji, and color', () => {
+    for (const t of TEAM_CATALOG) {
+      expect(t.description.length).toBeGreaterThan(0)
+      expect(t.tags.length).toBeGreaterThan(0)
+      expect(t.emoji.length).toBeGreaterThan(0)
+      expect(t.color).toMatch(/^#[0-9A-Fa-f]{6}$/)
+    }
+  })
 })
 
 describe('STARTER_TEMPLATES', () => {
@@ -99,6 +113,13 @@ describe('searchTeamCatalog', () => {
   it('finds templates by tag', () => {
     const results = searchTeamCatalog('seo')
     expect(results.length).toBeGreaterThan(0)
+  })
+
+  it('returns results for common search terms', () => {
+    for (const term of ['marketing', 'dev', 'ai', 'web']) {
+      const results = searchTeamCatalog(term)
+      expect(results.length).toBeGreaterThan(0)
+    }
   })
 })
 

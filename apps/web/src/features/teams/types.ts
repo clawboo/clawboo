@@ -47,8 +47,9 @@ export interface TeamTemplate {
 /** Union of new TeamTemplate and legacy TeamProfile — used by CreateTeamModal and MarketplacePanel. */
 export type ProfileLike = TeamTemplate | TeamProfile
 
-// ─── Team profile types (legacy — will be deprecated) ─────────────────────────
+// ─── Team profile types (legacy) ──────────────────────────────────────────────
 
+/** @deprecated Use AgentTemplate instead. */
 export interface AgentProfile {
   /** Display name — used as the agent's name on creation */
   name: string
@@ -58,6 +59,7 @@ export interface AgentProfile {
   identityTemplate: string
 }
 
+/** @deprecated Use TeamTemplate instead. */
 export interface TeamProfile {
   /** Unique identifier used for routing and keys */
   id: string

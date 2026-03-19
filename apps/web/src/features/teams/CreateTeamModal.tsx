@@ -6,7 +6,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
-import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
+import { resolveWorkspaceDir, createAgent, buildToolsMd } from '@/lib/createAgent'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { useGraphStore } from '@/features/graph/store'
 import type { TeamProfile, TeamTemplate, ProfileLike } from './types'
@@ -22,11 +22,6 @@ const PRESET_COLORS = [
   '#38BDF8',
   '#FB923C',
 ] as const
-
-function buildToolsMd(skills: string[]): string {
-  if (!skills.length) return '# TOOLS\n'
-  return `# TOOLS\n\n## Skills\n${skills.map((s) => `- ${s}`).join('\n')}\n`
-}
 
 // ─── Steps ───────────────────────────────────────────────────────────────────
 

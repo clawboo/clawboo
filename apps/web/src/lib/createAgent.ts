@@ -34,6 +34,14 @@ function slugifyName(name: string): string {
   return slug || 'agent'
 }
 
+// ─── Shared helpers ─────────────────────────────────────────────────────────
+
+/** Build a simple TOOLS.md from a list of skill names (legacy TeamProfile format). */
+export function buildToolsMd(skills: string[]): string {
+  if (!skills.length) return '# TOOLS\n'
+  return `# TOOLS\n\n## Skills\n${skills.map((s) => `- ${s}`).join('\n')}\n`
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**

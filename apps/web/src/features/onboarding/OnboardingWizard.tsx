@@ -19,7 +19,7 @@ import {
 } from '@clawboo/gateway-client'
 import { BooAvatar } from '@clawboo/ui'
 import type { TeamProfile, TeamTemplate } from '@/features/teams/types'
-import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
+import { resolveWorkspaceDir, createAgent, buildToolsMd } from '@/lib/createAgent'
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
 import { STARTER_TEMPLATES } from '@/features/marketplace/teamCatalog'
@@ -29,13 +29,6 @@ import { STARTER_TEMPLATES } from '@/features/marketplace/teamCatalog'
 type ProfileLike = TeamTemplate | TeamProfile
 
 const PROFILES: ProfileLike[] = STARTER_TEMPLATES
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function buildToolsMd(skills: string[]): string {
-  if (!skills.length) return '# TOOLS\n'
-  return `# TOOLS\n\n## Skills\n${skills.map((s) => `- ${s}`).join('\n')}\n`
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
