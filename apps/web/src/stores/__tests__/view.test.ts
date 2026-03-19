@@ -36,6 +36,11 @@ describe('useViewStore', () => {
       useViewStore.getState().setViewMode({ type: 'booZero' })
       expect(useViewStore.getState().viewMode).toEqual({ type: 'booZero' })
     })
+
+    it('sets groupChat view', () => {
+      useViewStore.getState().setViewMode({ type: 'groupChat', teamId: 't1' })
+      expect(useViewStore.getState().viewMode).toEqual({ type: 'groupChat', teamId: 't1' })
+    })
   })
 
   // ── navigateTo ───────────────────────────────────────────────────────────
@@ -76,6 +81,21 @@ describe('useViewStore', () => {
     it('sets viewMode to booZero', () => {
       useViewStore.getState().openBooZero()
       expect(useViewStore.getState().viewMode).toEqual({ type: 'booZero' })
+    })
+  })
+
+  // ── openGroupChat ──────────────────────────────────────────────────────
+
+  describe('openGroupChat', () => {
+    it('sets viewMode to groupChat with teamId', () => {
+      useViewStore.getState().openGroupChat('team-42')
+      expect(useViewStore.getState().viewMode).toEqual({ type: 'groupChat', teamId: 'team-42' })
+    })
+
+    it('replaces previous view mode', () => {
+      useViewStore.getState().navigateTo('cost')
+      useViewStore.getState().openGroupChat('t1')
+      expect(useViewStore.getState().viewMode).toEqual({ type: 'groupChat', teamId: 't1' })
     })
   })
 })

@@ -139,6 +139,10 @@ export function ContentArea() {
       viewKey = `nav-${viewMode.view}`
       viewContent = NAV_PANELS[viewMode.view]()
       break
+    default:
+      viewKey = 'welcome'
+      viewContent = <WelcomeState />
+      break
   }
 
   return (

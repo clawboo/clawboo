@@ -39,6 +39,7 @@ export function createDb(dbPath: string): ClawbooDb {
       icon           TEXT    NOT NULL,
       color          TEXT    NOT NULL,
       template_id    TEXT,
+      leader_agent_id TEXT,
       is_archived    INTEGER NOT NULL DEFAULT 0,
       created_at     INTEGER NOT NULL,
       updated_at     INTEGER NOT NULL
@@ -150,6 +151,11 @@ export function createDb(dbPath: string): ClawbooDb {
   }
   try {
     sqlite.exec('ALTER TABLE teams ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0')
+  } catch {
+    /* column already exists */
+  }
+  try {
+    sqlite.exec('ALTER TABLE teams ADD COLUMN leader_agent_id TEXT')
   } catch {
     /* column already exists */
   }

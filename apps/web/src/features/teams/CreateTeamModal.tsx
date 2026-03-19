@@ -137,6 +137,7 @@ export function CreateTeamModal({
         icon: team.icon,
         color: team.color,
         templateId: team.templateId ?? null,
+        leaderAgentId: null,
         isArchived: false,
         agentCount: 0,
       })

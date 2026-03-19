@@ -36,6 +36,7 @@ export const teams = sqliteTable(
     icon: text('icon').notNull(),
     color: text('color').notNull(),
     templateId: text('template_id'),
+    leaderAgentId: text('leader_agent_id'),
     isArchived: integer('is_archived').notNull().default(0),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),

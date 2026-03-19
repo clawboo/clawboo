@@ -80,6 +80,7 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
         icon: team.icon,
         color: team.color,
         templateId: null,
+        leaderAgentId: null,
         isArchived: false,
         agentCount: 0,
       })
