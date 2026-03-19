@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, type CSSProperties } from 'react'
 import { Loader2 } from 'lucide-react'
 import { GatewayControls } from './GatewayControls'
 import { ModelSelector } from './ModelSelector'
@@ -81,6 +81,127 @@ function InfoRow({ label, value }: { label: string; value: string | null }) {
       >
         {value ?? '—'}
       </span>
+    </div>
+  )
+}
+
+// ─── Agent Coordination Toggle ───────────────────────────────────────────────
+
+const toggleTrack: CSSProperties = {
+  width: 36,
+  height: 20,
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,0.1)',
+  cursor: 'pointer',
+  position: 'relative',
+  transition: 'background 0.15s',
+  flexShrink: 0,
+}
+
+const toggleThumb: CSSProperties = {
+  width: 14,
+  height: 14,
+  borderRadius: 7,
+  background: '#E8E8E8',
+  position: 'absolute',
+  top: 2,
+  transition: 'left 0.15s',
+}
+
+function AgentCoordinationToggle() {
+  const client = useConnectionStore((s) => s.client)
+  const addToast = useToastStore((s) => s.addToast)
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [toggling, setToggling] = useState(false)
+
+  // Fetch current value from openclaw.json via HTTP
+  useEffect(() => {
+    fetch('/api/system/openclaw-config')
+      .then(
+        (r) =>
+          r.json() as Promise<{ config?: { tools?: { agentToAgent?: { enabled?: boolean } } } }>,
+      )
+      .then((data) => {
+        setEnabled(data?.config?.tools?.agentToAgent?.enabled === true)
+      })
+      .catch(() => {
+        // Can't read config — leave as null (hidden)
+      })
+  }, [])
+
+  const handleToggle = useCallback(async () => {
+    if (toggling) return
+    const next = !enabled
+    setToggling(true)
+    try {
+      const res = await fetch('/api/system/openclaw-config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentToAgent: { enabled: next } }),
+      })
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      setEnabled(next)
+      addToast({
+        message: next ? 'Agent coordination enabled' : 'Agent coordination disabled',
+        type: 'success',
+      })
+    } catch {
+      addToast({ message: 'Failed to update Gateway config', type: 'error' })
+    } finally {
+      setToggling(false)
+    }
+
+    // Best-effort Gateway hot reload (outside try/catch — config write already succeeded)
+    try {
+      if (client) await client.config.get()
+    } catch {
+      // Gateway may be disconnected — config still saved to disk, picked up on next turn
+    }
+  }, [client, enabled, toggling, addToast])
+
+  // Don't render if no client or config couldn't be read
+  if (!client || enabled === null) return null
+
+  return (
+    <div style={{ margin: '24px 0 28px' }}>
+      <SectionHeading>Agent Coordination</SectionHeading>
+      <div
+        style={{
+          marginTop: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <button
+          type="button"
+          onClick={handleToggle}
+          disabled={toggling}
+          aria-label="Toggle agent-to-agent coordination"
+          style={{
+            ...toggleTrack,
+            background: enabled ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.04)',
+          }}
+        >
+          <div style={{ ...toggleThumb, left: enabled ? 18 : 2 }} />
+        </button>
+        <span style={{ fontSize: 12, color: 'rgba(232,232,232,0.6)' }}>
+          {enabled
+            ? 'Agents can delegate tasks to each other'
+            : 'Agent-to-agent messaging disabled'}
+        </span>
+      </div>
+      <p
+        style={{
+          marginTop: 8,
+          fontSize: 11,
+          color: 'rgba(232,232,232,0.3)',
+          lineHeight: 1.5,
+        }}
+      >
+        When enabled, agents can use routing defined in AGENTS.md to send messages to other agents
+        via the Gateway&apos;s sessions_send tool.
+      </p>
     </div>
   )
 }
@@ -302,7 +423,12 @@ export function MaintenancePanel() {
 
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
 
-      {/* Section 4: System Info */}
+      {/* Section 4: Agent Coordination */}
+      <AgentCoordinationToggle />
+
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+
+      {/* Section 5: System Info */}
       <div style={{ margin: '24px 0 28px' }}>
         <SectionHeading>System</SectionHeading>
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>

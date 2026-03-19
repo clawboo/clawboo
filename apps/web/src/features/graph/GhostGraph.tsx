@@ -296,6 +296,15 @@ export function GhostGraph() {
           message: `Routing added: ${sourceAgentName} \u2192 ${targetAgentName}`,
           type: 'success',
         })
+
+        // Ensure agent-to-agent coordination is enabled in Gateway config (idempotent)
+        fetch('/api/system/openclaw-config', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentToAgent: { enabled: true } }),
+        }).catch(() => {
+          // non-fatal — user can enable manually in System panel
+        })
       } catch (_err) {
         // Rollback optimistic edge on failure
         const current = useGraphStore.getState()

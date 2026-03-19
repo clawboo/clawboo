@@ -456,6 +456,10 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
           model: { primary: resolvedModel },
         },
       },
+      tools: {
+        agentToAgent: { enabled: true },
+        sessions: { visibility: 'all' },
+      },
     }
     fs.writeFileSync(
       path.join(stateDir, 'openclaw.json'),
@@ -759,6 +763,26 @@ export async function openclawConfigPATCH(req: Request, res: Response): Promise<
           } else {
             list.push({ id: agentId, model: agentModel })
           }
+        }
+      }
+    }
+
+    // Agent-to-agent coordination toggle
+    const agentToAgent = body['agentToAgent']
+    if (agentToAgent && typeof agentToAgent === 'object' && !Array.isArray(agentToAgent)) {
+      if (!config['tools'] || typeof config['tools'] !== 'object') config['tools'] = {}
+      const tools = config['tools'] as Record<string, unknown>
+      const a2a = agentToAgent as Record<string, unknown>
+
+      if (typeof a2a['enabled'] === 'boolean') {
+        if (!tools['agentToAgent'] || typeof tools['agentToAgent'] !== 'object')
+          tools['agentToAgent'] = {}
+        ;(tools['agentToAgent'] as Record<string, unknown>)['enabled'] = a2a['enabled']
+
+        // Auto-set sessions visibility to 'all' when enabling
+        if (a2a['enabled'] === true) {
+          if (!tools['sessions'] || typeof tools['sessions'] !== 'object') tools['sessions'] = {}
+          ;(tools['sessions'] as Record<string, unknown>)['visibility'] = 'all'
         }
       }
     }

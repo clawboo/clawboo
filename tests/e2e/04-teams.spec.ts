@@ -31,7 +31,7 @@ test.describe('Teams', () => {
 
     // Click Marketplace nav button
     await agentList.locator('button:has-text("Marketplace")').click()
-    await expect(page.getByText('Skill Marketplace')).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByRole('main').getByText('Marketplace')).toBeVisible({ timeout: 5_000 })
 
     // Click Cost nav button
     await agentList.locator('button:has-text("Cost")').click()

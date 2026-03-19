@@ -1,5 +1,55 @@
-// ─── Team profile types ───────────────────────────────────────────────────────
+// ─── Template types (v2 — team marketplace) ──────────────────────────────────
 
+export type TemplateSource = 'clawboo' | 'agency-agents' | 'awesome-openclaw'
+
+export type TemplateCategory =
+  | 'engineering'
+  | 'marketing'
+  | 'sales'
+  | 'product'
+  | 'design'
+  | 'testing'
+  | 'content'
+  | 'support'
+  | 'education'
+  | 'ops'
+  | 'devops'
+  | 'research'
+  | 'game-dev'
+  | 'spatial'
+  | 'academic'
+  | 'paid-media'
+  | 'specialized'
+  | 'general'
+
+export interface AgentTemplate {
+  name: string
+  role: string
+  soulTemplate: string
+  identityTemplate: string
+  toolsTemplate: string
+  agentsTemplate?: string
+}
+
+export interface TeamTemplate {
+  id: string
+  name: string
+  emoji: string
+  color: string
+  description: string
+  category: TemplateCategory
+  source: TemplateSource
+  sourceUrl?: string
+  tags: string[]
+  agents: AgentTemplate[]
+}
+
+/** Union of new TeamTemplate and legacy TeamProfile — used by CreateTeamModal and MarketplacePanel. */
+export type ProfileLike = TeamTemplate | TeamProfile
+
+// ─── Team profile types (legacy) ──────────────────────────────────────────────
+
+/** @deprecated Use AgentTemplate instead. */
 export interface AgentProfile {
   /** Display name — used as the agent's name on creation */
   name: string
@@ -9,6 +59,7 @@ export interface AgentProfile {
   identityTemplate: string
 }
 
+/** @deprecated Use TeamTemplate instead. */
 export interface TeamProfile {
   /** Unique identifier used for routing and keys */
   id: string

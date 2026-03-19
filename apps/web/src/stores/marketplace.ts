@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { SkillCategory } from '@/features/graph/types'
+import type { TemplateCategory, TemplateSource } from '@/features/teams/types'
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,8 @@ export interface InstalledSkillRecord {
 
 // ─── Store ──────────────────────────────────────────────────────────────────────
 
+export type MarketplaceTab = 'teams' | 'skills'
+
 export type SortBy = 'name' | 'trust' | 'category'
 
 interface MarketplaceStore {
@@ -43,6 +46,18 @@ interface MarketplaceStore {
   /** Sort order for catalog listing */
   sortBy: SortBy
 
+  /** Active marketplace tab */
+  marketplaceTab: MarketplaceTab
+
+  /** Search query for team template filtering */
+  teamSearchQuery: string
+
+  /** Category filter for team templates */
+  teamCategoryFilter: TemplateCategory | 'all'
+
+  /** Source filter for team templates */
+  teamSourceFilter: TemplateSource | 'all'
+
   // ─── Actions ────────────────────────────────────────────────────────────────
 
   /** Replace full installed skills list and rebuild the per-agent Map. */
@@ -58,6 +73,10 @@ interface MarketplaceStore {
   setSearchQuery: (q: string) => void
   setCategoryFilter: (c: SkillCategory | 'all') => void
   setSortBy: (s: SortBy) => void
+  setMarketplaceTab: (tab: MarketplaceTab) => void
+  setTeamSearchQuery: (q: string) => void
+  setTeamCategoryFilter: (c: TemplateCategory | 'all') => void
+  setTeamSourceFilter: (s: TemplateSource | 'all') => void
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
@@ -87,6 +106,10 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   searchQuery: '',
   categoryFilter: 'all',
   sortBy: 'name',
+  marketplaceTab: 'teams',
+  teamSearchQuery: '',
+  teamCategoryFilter: 'all',
+  teamSourceFilter: 'all',
 
   hydrateInstalled: (records) =>
     set({ installedSkills: records, installedByAgent: buildByAgentIndex(records) }),
@@ -136,4 +159,8 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setCategoryFilter: (categoryFilter) => set({ categoryFilter }),
   setSortBy: (sortBy) => set({ sortBy }),
+  setMarketplaceTab: (marketplaceTab) => set({ marketplaceTab }),
+  setTeamSearchQuery: (teamSearchQuery) => set({ teamSearchQuery }),
+  setTeamCategoryFilter: (teamCategoryFilter) => set({ teamCategoryFilter }),
+  setTeamSourceFilter: (teamSourceFilter) => set({ teamSourceFilter }),
 }))
