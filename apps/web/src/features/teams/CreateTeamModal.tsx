@@ -162,6 +162,7 @@ export function CreateTeamModal({
           : '# TOOLS\n'
 
       const workspaceDir = await resolveWorkspaceDir(client)
+      let firstAgentId: string | null = null
       for (let i = 0; i < profile.agents.length; i++) {
         const agent = profile.agents[i]
         setProgress({ current: i, total: profile.agents.length, label: agent.name })
@@ -177,6 +178,8 @@ export function CreateTeamModal({
             : undefined,
         })
 
+        if (i === 0) firstAgentId = agentId
+
         // Assign agent to team (best-effort)
         try {
           await fetch(`/api/teams/${team.id}/agents`, {
@@ -186,6 +189,20 @@ export function CreateTeamModal({
           })
         } catch {
           // assignment failure is non-fatal
+        }
+      }
+
+      // Set first agent as team leader (best-effort)
+      if (firstAgentId && team.id) {
+        try {
+          await fetch(`/api/teams/${team.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ leaderAgentId: firstAgentId }),
+          })
+          useTeamStore.getState().updateTeam(team.id, { leaderAgentId: firstAgentId })
+        } catch {
+          // leader assignment is non-fatal
         }
       }
 

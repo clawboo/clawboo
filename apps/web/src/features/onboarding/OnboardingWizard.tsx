@@ -23,6 +23,7 @@ import { resolveWorkspaceDir, createAgent, buildToolsMd } from '@/lib/createAgen
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
 import { STARTER_TEMPLATES } from '@/features/marketplace/teamCatalog'
+import { useTeamStore } from '@/stores/team'
 
 // ─── Profiles ─────────────────────────────────────────────────────────────────
 
@@ -565,6 +566,7 @@ function DeployStep({
         }
 
         const workspaceDir = await resolveWorkspaceDir(client)
+        let firstAgentId: string | null = null
         for (let i = 0; i < profile.agents.length; i++) {
           const agent = profile.agents[i]!
           setCurrentName(agent.name)
@@ -578,6 +580,7 @@ function DeployStep({
               ? (agent as TeamTemplate['agents'][number]).agentsTemplate
               : undefined,
           })
+          if (i === 0) firstAgentId = agentId
           setProgress(i + 1)
 
           // Assign agent to team (best-effort)
@@ -591,6 +594,20 @@ function DeployStep({
             } catch {
               // assignment failure is non-fatal
             }
+          }
+        }
+
+        // Set first agent as team leader (best-effort)
+        if (firstAgentId && teamId) {
+          try {
+            await fetch(`/api/teams/${teamId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ leaderAgentId: firstAgentId }),
+            })
+            useTeamStore.getState().updateTeam(teamId, { leaderAgentId: firstAgentId })
+          } catch {
+            // leader assignment is non-fatal
           }
         }
 
