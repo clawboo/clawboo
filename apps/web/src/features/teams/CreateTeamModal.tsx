@@ -9,12 +9,8 @@ import { useToastStore } from '@/stores/toast'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { useGraphStore } from '@/features/graph/store'
-import type { TeamProfile, TeamTemplate } from './types'
+import type { TeamProfile, TeamTemplate, ProfileLike } from './types'
 import { STARTER_TEMPLATES } from '@/features/marketplace/teamCatalog'
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-type ProfileLike = TeamTemplate | TeamProfile
 
 const PRESET_COLORS = [
   '#E94560',

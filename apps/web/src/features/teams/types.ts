@@ -44,6 +44,9 @@ export interface TeamTemplate {
   agents: AgentTemplate[]
 }
 
+/** Union of new TeamTemplate and legacy TeamProfile — used by CreateTeamModal and MarketplacePanel. */
+export type ProfileLike = TeamTemplate | TeamProfile
+
 // ─── Team profile types (legacy — will be deprecated) ─────────────────────────
 
 export interface AgentProfile {

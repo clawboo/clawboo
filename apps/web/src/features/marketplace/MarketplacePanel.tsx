@@ -12,12 +12,13 @@ import type { CatalogSkill } from './catalog'
 import { AgentPickerDropdown } from './AgentPickerDropdown'
 import type { SkillCategory } from '@/features/graph/types'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
-import type { TeamProfile, TeamTemplate } from '@/features/teams/types'
-import { TEAM_CATALOG } from './teamCatalog'
+import type { TeamTemplate, ProfileLike } from '@/features/teams/types'
+import { TEAM_CATALOG, TEMPLATE_CATEGORIES, SOURCE_META, searchTeamCatalog } from './teamCatalog'
+import type { TemplateSource } from '@/features/teams/types'
+import { TeamTemplateCard } from './TeamTemplateCard'
+import { TeamTemplateDetail } from './TeamTemplateDetail'
 
-type ProfileLike = TeamTemplate | TeamProfile
-
-// ─── Category colours (matches SkillNode.tsx) ────────────────────────────────
+// ─── Skill category colours (matches SkillNode.tsx) ─────────────────────────
 
 const CATEGORY_META: Record<SkillCategory | 'all', { color: string; label: string }> = {
   all: { color: '#E8E8E8', label: 'All' },
@@ -275,106 +276,27 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
   )
 }
 
-// ─── TeamTemplateCard ─────────────────────────────────────────────────────────
+// ─── Source filter entries ───────────────────────────────────────────────────
 
-function TeamTemplateCard({
-  profile,
-  onDeploy,
-}: {
-  profile: ProfileLike
-  onDeploy: (profile: ProfileLike) => void
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.18 }}
-      style={{
-        background: '#111827',
-        border: `1px solid ${profile.color}25`,
-        borderRadius: 10,
-        padding: '14px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        transition: 'border-color 0.15s',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = `${profile.color}45`
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = `${profile.color}25`
-      }}
-    >
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: `${profile.color}20`,
-            fontSize: 16,
-            flexShrink: 0,
-          }}
-        >
-          {profile.emoji}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#E8E8E8' }}>{profile.name}</div>
-          <div style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)' }}>
-            {profile.agents.length} agent{profile.agents.length !== 1 ? 's' : ''}
-          </div>
-        </div>
-        <button
-          onClick={() => onDeploy(profile)}
-          style={{
-            background: `${profile.color}20`,
-            border: `1px solid ${profile.color}40`,
-            color: profile.color,
-            fontSize: 11,
-            fontWeight: 600,
-            padding: '4px 12px',
-            borderRadius: 6,
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            whiteSpace: 'nowrap',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = `${profile.color}35`
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = `${profile.color}20`
-          }}
-        >
-          Deploy
-        </button>
-      </div>
-
-      {/* Description */}
-      <div
-        style={{
-          fontSize: 12,
-          color: 'rgba(232,232,232,0.5)',
-          lineHeight: 1.5,
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-        }}
-      >
-        {profile.description}
-      </div>
-    </motion.div>
-  )
-}
+const SOURCE_ENTRIES: { key: TemplateSource | 'all'; label: string; color: string }[] = [
+  { key: 'all', label: 'All', color: '#E8E8E8' },
+  { key: 'clawboo', label: SOURCE_META.clawboo.label, color: SOURCE_META.clawboo.color },
+  {
+    key: 'agency-agents',
+    label: SOURCE_META['agency-agents'].label,
+    color: SOURCE_META['agency-agents'].color,
+  },
+  {
+    key: 'awesome-openclaw',
+    label: SOURCE_META['awesome-openclaw'].label,
+    color: SOURCE_META['awesome-openclaw'].color,
+  },
+]
 
 // ─── MarketplacePanel ────────────────────────────────────────────────────────
 
 export function MarketplacePanel() {
+  // Skill filter state
   const searchQuery = useMarketplaceStore((s) => s.searchQuery)
   const setSearchQuery = useMarketplaceStore((s) => s.setSearchQuery)
   const categoryFilter = useMarketplaceStore((s) => s.categoryFilter)
@@ -382,11 +304,40 @@ export function MarketplacePanel() {
   const sortBy = useMarketplaceStore((s) => s.sortBy)
   const setSortBy = useMarketplaceStore((s) => s.setSortBy)
 
+  // Tab + team filter state
+  const marketplaceTab = useMarketplaceStore((s) => s.marketplaceTab)
+  const setMarketplaceTab = useMarketplaceStore((s) => s.setMarketplaceTab)
+  const teamSearchQuery = useMarketplaceStore((s) => s.teamSearchQuery)
+  const setTeamSearchQuery = useMarketplaceStore((s) => s.setTeamSearchQuery)
+  const teamCategoryFilter = useMarketplaceStore((s) => s.teamCategoryFilter)
+  const setTeamCategoryFilter = useMarketplaceStore((s) => s.setTeamCategoryFilter)
+  const teamSourceFilter = useMarketplaceStore((s) => s.teamSourceFilter)
+  const setTeamSourceFilter = useMarketplaceStore((s) => s.setTeamSourceFilter)
+
+  // Modal state
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [prefilledProfile, setPrefilledProfile] = useState<ProfileLike | null>(null)
+  const [detailTemplate, setDetailTemplate] = useState<TeamTemplate | null>(null)
 
-  const showTeamTemplates = !searchQuery && categoryFilter === 'all'
+  // Filtered teams
+  const filteredTeams = useMemo(() => {
+    let results = teamSearchQuery ? searchTeamCatalog(teamSearchQuery) : [...TEAM_CATALOG]
+    if (teamCategoryFilter !== 'all') {
+      results = results.filter((t) => t.category === teamCategoryFilter)
+    }
+    if (teamSourceFilter !== 'all') {
+      results = results.filter((t) => t.source === teamSourceFilter)
+    }
+    return results
+  }, [teamSearchQuery, teamCategoryFilter, teamSourceFilter])
 
+  // Active template categories (only those with >=1 template)
+  const activeCategories = useMemo(() => {
+    const catSet = new Set(TEAM_CATALOG.map((t) => t.category))
+    return TEMPLATE_CATEGORIES.filter((c) => catSet.has(c.key))
+  }, [])
+
+  // Filtered skills
   const filteredSkills = useMemo(() => {
     let results: CatalogSkill[] = searchQuery ? searchCatalog(searchQuery) : [...SKILL_CATALOG]
 
@@ -410,6 +361,8 @@ export function MarketplacePanel() {
     return results
   }, [searchQuery, categoryFilter, sortBy])
 
+  const isTeamsTab = marketplaceTab === 'teams'
+
   return (
     <div
       style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#0A0E1A' }}
@@ -427,40 +380,72 @@ export function MarketplacePanel() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#E8E8E8' }}>Skill Marketplace</span>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 500,
-              color: '#A855F7',
-              background: 'rgba(168,85,247,0.1)',
-              borderRadius: 20,
-              padding: '1px 8px',
-            }}
-          >
-            {filteredSkills.length} skill{filteredSkills.length !== 1 ? 's' : ''}
-          </span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#E8E8E8' }}>Marketplace</span>
+
+          {/* Tab toggle */}
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button
+              onClick={() => setMarketplaceTab('teams')}
+              style={{
+                background: isTeamsTab ? 'rgba(52,211,153,0.15)' : 'transparent',
+                border: isTeamsTab
+                  ? '1px solid rgba(52,211,153,0.35)'
+                  : '1px solid rgba(255,255,255,0.06)',
+                color: isTeamsTab ? '#34D399' : 'rgba(232,232,232,0.45)',
+                borderRadius: 12,
+                padding: '2px 10px',
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Teams ({TEAM_CATALOG.length})
+            </button>
+            <button
+              onClick={() => setMarketplaceTab('skills')}
+              style={{
+                background: !isTeamsTab ? 'rgba(52,211,153,0.15)' : 'transparent',
+                border: !isTeamsTab
+                  ? '1px solid rgba(52,211,153,0.35)'
+                  : '1px solid rgba(255,255,255,0.06)',
+                color: !isTeamsTab ? '#34D399' : 'rgba(232,232,232,0.45)',
+                borderRadius: 12,
+                padding: '2px 10px',
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Skills ({SKILL_CATALOG.length})
+            </button>
+          </div>
         </div>
 
-        {/* Sort */}
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as 'name' | 'trust' | 'category')}
-          style={{
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 6,
-            color: 'rgba(232,232,232,0.6)',
-            fontSize: 11,
-            padding: '3px 8px',
-            cursor: 'pointer',
-            outline: 'none',
-          }}
-        >
-          <option value="name">Name A–Z</option>
-          <option value="trust">Trust Score</option>
-          <option value="category">Category</option>
-        </select>
+        {/* Sort (skills tab only) */}
+        {!isTeamsTab && (
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as 'name' | 'trust' | 'category')}
+            style={{
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 6,
+              color: 'rgba(232,232,232,0.6)',
+              fontSize: 11,
+              padding: '3px 8px',
+              cursor: 'pointer',
+              outline: 'none',
+            }}
+          >
+            <option value="name">Name A–Z</option>
+            <option value="trust">Trust Score</option>
+            <option value="category">Category</option>
+          </select>
+        )}
       </div>
 
       {/* Filter bar */}
@@ -474,50 +459,51 @@ export function MarketplacePanel() {
           borderBottom: '1px solid rgba(255,255,255,0.04)',
         }}
       >
-        {/* Search */}
-        <div style={{ position: 'relative' }}>
-          <Search
-            size={14}
-            style={{
-              position: 'absolute',
-              left: 10,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: 'rgba(232,232,232,0.3)',
-              pointerEvents: 'none',
-            }}
-          />
-          <input
-            type="text"
-            placeholder="Search skills…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '6px 10px 6px 32px',
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.06)',
-              borderRadius: 6,
-              color: '#E8E8E8',
-              fontSize: 12,
-              outline: 'none',
-            }}
-          />
-        </div>
-
-        {/* Category pills */}
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {(Object.keys(CATEGORY_META) as (SkillCategory | 'all')[]).map((key) => {
-            const isActive = categoryFilter === key
-            const { color, label } = CATEGORY_META[key]
-            return (
-              <button
-                key={key}
-                onClick={() => setCategoryFilter(key)}
+        {isTeamsTab ? (
+          <>
+            {/* Team search */}
+            <div style={{ position: 'relative' }}>
+              <Search
+                size={14}
                 style={{
-                  background: isActive ? `${color}20` : 'transparent',
-                  border: isActive ? `1px solid ${color}55` : '1px solid rgba(255,255,255,0.06)',
-                  color: isActive ? color : 'rgba(232,232,232,0.45)',
+                  position: 'absolute',
+                  left: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'rgba(232,232,232,0.3)',
+                  pointerEvents: 'none',
+                }}
+              />
+              <input
+                type="text"
+                placeholder="Search teams…"
+                value={teamSearchQuery}
+                onChange={(e) => setTeamSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '6px 10px 6px 32px',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: 6,
+                  color: '#E8E8E8',
+                  fontSize: 12,
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            {/* Team category pills */}
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setTeamCategoryFilter('all')}
+                style={{
+                  background:
+                    teamCategoryFilter === 'all' ? 'rgba(232,232,232,0.12)' : 'transparent',
+                  border:
+                    teamCategoryFilter === 'all'
+                      ? '1px solid rgba(232,232,232,0.3)'
+                      : '1px solid rgba(255,255,255,0.06)',
+                  color: teamCategoryFilter === 'all' ? '#E8E8E8' : 'rgba(232,232,232,0.45)',
                   borderRadius: 12,
                   padding: '3px 10px',
                   fontSize: 11,
@@ -527,11 +513,142 @@ export function MarketplacePanel() {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {label}
+                All
               </button>
-            )
-          })}
-        </div>
+              {activeCategories.map((cat) => {
+                const isActive = teamCategoryFilter === cat.key
+                return (
+                  <button
+                    key={cat.key}
+                    onClick={() => setTeamCategoryFilter(cat.key)}
+                    style={{
+                      background: isActive ? `${cat.color}20` : 'transparent',
+                      border: isActive
+                        ? `1px solid ${cat.color}55`
+                        : '1px solid rgba(255,255,255,0.06)',
+                      color: isActive ? cat.color : 'rgba(232,232,232,0.45)',
+                      borderRadius: 12,
+                      padding: '3px 10px',
+                      fontSize: 11,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {cat.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Team source pills */}
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {SOURCE_ENTRIES.map((src) => {
+                const isActive = teamSourceFilter === src.key
+                return (
+                  <button
+                    key={src.key}
+                    onClick={() => setTeamSourceFilter(src.key)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      background: isActive ? `${src.color}20` : 'transparent',
+                      border: isActive
+                        ? `1px solid ${src.color}55`
+                        : '1px solid rgba(255,255,255,0.06)',
+                      color: isActive ? src.color : 'rgba(232,232,232,0.45)',
+                      borderRadius: 12,
+                      padding: '3px 10px',
+                      fontSize: 11,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {src.key !== 'all' && (
+                      <div
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: src.color,
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    {src.label}
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Skill search */}
+            <div style={{ position: 'relative' }}>
+              <Search
+                size={14}
+                style={{
+                  position: 'absolute',
+                  left: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'rgba(232,232,232,0.3)',
+                  pointerEvents: 'none',
+                }}
+              />
+              <input
+                type="text"
+                placeholder="Search skills…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '6px 10px 6px 32px',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: 6,
+                  color: '#E8E8E8',
+                  fontSize: 12,
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            {/* Skill category pills */}
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {(Object.keys(CATEGORY_META) as (SkillCategory | 'all')[]).map((key) => {
+                const isActive = categoryFilter === key
+                const { color, label } = CATEGORY_META[key]
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setCategoryFilter(key)}
+                    style={{
+                      background: isActive ? `${color}20` : 'transparent',
+                      border: isActive
+                        ? `1px solid ${color}55`
+                        : '1px solid rgba(255,255,255,0.06)',
+                      color: isActive ? color : 'rgba(232,232,232,0.45)',
+                      borderRadius: 12,
+                      padding: '3px 10px',
+                      fontSize: 11,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Grid */}
@@ -542,30 +659,44 @@ export function MarketplacePanel() {
           padding: 12,
         }}
       >
-        {/* Team Templates section */}
-        {showTeamTemplates && (
-          <div style={{ marginBottom: 16 }}>
+        {isTeamsTab ? (
+          // Teams grid
+          filteredTeams.length === 0 ? (
             <div
               style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: 'rgba(232,232,232,0.45)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                marginBottom: 8,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingTop: 60,
+                gap: 8,
               }}
             >
-              Team Templates
+              <span style={{ fontSize: 28 }}>🔍</span>
+              <span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(232,232,232,0.38)' }}>
+                No teams match your search
+              </span>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: 'rgba(232,232,232,0.25)',
+                  textAlign: 'center',
+                  maxWidth: 280,
+                  lineHeight: 1.6,
+                }}
+              >
+                Try a different keyword or clear the filters.
+              </span>
             </div>
+          ) : (
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
                 gap: 10,
-                marginBottom: 16,
               }}
             >
-              {TEAM_CATALOG.map((profile) => (
+              {filteredTeams.map((profile) => (
                 <TeamTemplateCard
                   key={profile.id}
                   profile={profile}
@@ -573,27 +704,13 @@ export function MarketplacePanel() {
                     setPrefilledProfile(p)
                     setShowCreateModal(true)
                   }}
+                  onDetails={(t) => setDetailTemplate(t)}
                 />
               ))}
             </div>
-            <div style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', marginBottom: 4 }} />
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: 'rgba(232,232,232,0.45)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                marginTop: 12,
-                marginBottom: 8,
-              }}
-            >
-              Individual Skills
-            </div>
-          </div>
-        )}
-
-        {filteredSkills.length === 0 ? (
+          )
+        ) : // Skills grid
+        filteredSkills.length === 0 ? (
           <div
             style={{
               display: 'flex',
@@ -634,6 +751,19 @@ export function MarketplacePanel() {
           </div>
         )}
       </div>
+
+      {/* Detail modal */}
+      {detailTemplate && (
+        <TeamTemplateDetail
+          template={detailTemplate}
+          onClose={() => setDetailTemplate(null)}
+          onDeploy={(t) => {
+            setPrefilledProfile(t)
+            setShowCreateModal(true)
+            setDetailTemplate(null)
+          }}
+        />
+      )}
 
       <CreateTeamModal
         isOpen={showCreateModal}
