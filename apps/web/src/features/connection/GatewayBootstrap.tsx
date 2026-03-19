@@ -62,8 +62,13 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
 
   let targetTeamId: string
 
-  if (storeTeams.length === 0) {
-    // Case A: create a default team
+  const activeTeam = storeTeams.find((t) => !t.isArchived)
+
+  if (activeTeam) {
+    // Case B: active team exists — assign unassigned agents to it
+    targetTeamId = activeTeam.id
+  } else {
+    // Case A: no active teams (either empty or all archived) — create "Default" team
     try {
       const res = await fetch('/api/teams', {
         method: 'POST',
@@ -71,7 +76,9 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
         body: JSON.stringify({ name: 'Default', icon: '👻', color: '#E94560' }),
       })
       if (!res.ok) return
-      const team = await res.json()
+      const { team } = (await res.json()) as {
+        team: { id: string; name: string; icon: string; color: string }
+      }
       targetTeamId = team.id
 
       useTeamStore.getState().addTeam({
@@ -88,10 +95,6 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
     } catch {
       return
     }
-  } else {
-    const activeTeam = storeTeams.find((t) => !t.isArchived)
-    if (!activeTeam) return // no active teams to assign to
-    targetTeamId = activeTeam.id
   }
 
   // Exclude Boo Zero from team assignment — it should never belong to any team
