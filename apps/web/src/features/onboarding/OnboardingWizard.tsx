@@ -18,33 +18,17 @@ import {
   resolveProxyGatewayUrl,
 } from '@clawboo/gateway-client'
 import { BooAvatar } from '@clawboo/ui'
-import type { TeamProfile } from '@/features/teams/types'
-import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
+import type { TeamProfile, TeamTemplate } from '@/features/teams/types'
+import { resolveWorkspaceDir, createAgent, buildToolsMd } from '@/lib/createAgent'
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
-
-import marketingRaw from '@/features/teams/profiles/marketing.json'
-import devRaw from '@/features/teams/profiles/dev.json'
-import researchRaw from '@/features/teams/profiles/research.json'
-import youtubeRaw from '@/features/teams/profiles/youtube.json'
-import studentRaw from '@/features/teams/profiles/student.json'
+import { STARTER_TEMPLATES } from '@/features/marketplace/teamCatalog'
 
 // ─── Profiles ─────────────────────────────────────────────────────────────────
 
-const PROFILES: TeamProfile[] = [
-  marketingRaw as TeamProfile,
-  devRaw as TeamProfile,
-  researchRaw as TeamProfile,
-  youtubeRaw as TeamProfile,
-  studentRaw as TeamProfile,
-]
+type ProfileLike = TeamTemplate | TeamProfile
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function buildToolsMd(skills: string[]): string {
-  if (!skills.length) return '# TOOLS\n'
-  return `# TOOLS\n\n## Skills\n${skills.map((s) => `- ${s}`).join('\n')}\n`
-}
+const PROFILES: ProfileLike[] = STARTER_TEMPLATES
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -415,7 +399,7 @@ function TeamStep({
   onPickTeam,
   onSkip,
 }: {
-  onPickTeam: (profile: TeamProfile) => void
+  onPickTeam: (profile: ProfileLike) => void
   onSkip: () => void
 }) {
   return (
@@ -482,19 +466,24 @@ function TeamStep({
                 </span>
               </div>
 
-              {/* Skill tags */}
+              {/* Tags */}
               <div className="mt-auto flex flex-wrap gap-1">
-                {profile.skills.slice(0, 3).map((skill) => (
-                  <span
-                    key={skill}
-                    className="rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-mono text-[9px] text-secondary/60"
-                  >
-                    {skill}
-                  </span>
-                ))}
-                {profile.skills.length > 3 && (
+                {('tags' in profile ? profile.tags : (profile as TeamProfile).skills)
+                  .slice(0, 3)
+                  .map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-mono text-[9px] text-secondary/60"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                {('tags' in profile ? profile.tags : (profile as TeamProfile).skills).length >
+                  3 && (
                   <span className="rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-mono text-[9px] text-secondary/40">
-                    +{profile.skills.length - 3}
+                    +
+                    {('tags' in profile ? profile.tags : (profile as TeamProfile).skills).length -
+                      3}
                   </span>
                 )}
               </div>
@@ -534,7 +523,7 @@ function DeployStep({
   client,
   onComplete,
 }: {
-  profile: TeamProfile
+  profile: ProfileLike
   client: GatewayClient
   onComplete: () => void
 }) {
@@ -548,7 +537,11 @@ function DeployStep({
     fired.current = true
 
     const deploy = async () => {
-      const tools = buildToolsMd(profile.skills)
+      const isNewFormat = 'toolsTemplate' in (profile.agents[0] ?? {})
+      const legacyTools =
+        !isNewFormat && 'skills' in profile
+          ? buildToolsMd((profile as TeamProfile).skills)
+          : '# TOOLS\n'
       try {
         // Create the team first
         let teamId: string | null = null
@@ -578,7 +571,12 @@ function DeployStep({
           const agentId = await createAgent(client, agent.name, workspaceDir, {
             soul: agent.soulTemplate,
             identity: agent.identityTemplate,
-            tools,
+            tools: isNewFormat
+              ? (agent as TeamTemplate['agents'][number]).toolsTemplate
+              : legacyTools,
+            agents: isNewFormat
+              ? (agent as TeamTemplate['agents'][number]).agentsTemplate
+              : undefined,
           })
           setProgress(i + 1)
 
@@ -595,6 +593,25 @@ function DeployStep({
             }
           }
         }
+
+        // Auto-enable agent-to-agent coordination if any agent has routing
+        const hasRouting = profile.agents.some((a) => {
+          const agentsMd =
+            'agentsTemplate' in a ? (a as TeamTemplate['agents'][number]).agentsTemplate : undefined
+          return agentsMd && /@[\w"']/.test(agentsMd)
+        })
+        if (hasRouting) {
+          try {
+            await fetch('/api/system/openclaw-config', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ agentToAgent: { enabled: true } }),
+            })
+          } catch {
+            // config patch failure is non-fatal
+          }
+        }
+
         // brief pause to let "All Boos deployed!" read
         await new Promise<void>((r) => setTimeout(r, 700))
         onComplete()
@@ -719,7 +736,7 @@ function DoneStep({
   profile,
   onViewGraph,
 }: {
-  profile: TeamProfile | null
+  profile: ProfileLike | null
   onViewGraph: () => void
 }) {
   // Auto-advance so the user doesn't have to click
@@ -778,7 +795,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const [prevStep, setPrevStep] = useState<WizardStep>('welcome')
   const [client, setClient] = useState<GatewayClient | null>(null)
   const [gatewayUrl, setGatewayUrl] = useState('')
-  const [selectedProfile, setSelectedProfile] = useState<TeamProfile | null>(null)
+  const [selectedProfile, setSelectedProfile] = useState<ProfileLike | null>(null)
 
   // Gateway URL from ConfigureStep — used by StartGatewayStep completion handler
   const [systemConnectUrl, setSystemConnectUrl] = useState('')
@@ -849,7 +866,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   )
 
   const handlePickTeam = useCallback(
-    (profile: TeamProfile) => {
+    (profile: ProfileLike) => {
       setSelectedProfile(profile)
       goTo('deploy')
     },

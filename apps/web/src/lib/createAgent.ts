@@ -34,6 +34,14 @@ function slugifyName(name: string): string {
   return slug || 'agent'
 }
 
+// ─── Shared helpers ─────────────────────────────────────────────────────────
+
+/** Build a simple TOOLS.md from a list of skill names (legacy TeamProfile format). */
+export function buildToolsMd(skills: string[]): string {
+  if (!skills.length) return '# TOOLS\n'
+  return `# TOOLS\n\n## Skills\n${skills.map((s) => `- ${s}`).join('\n')}\n`
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
@@ -53,6 +61,7 @@ export type AgentFiles = {
   soul?: string
   identity?: string
   tools?: string
+  agents?: string
 }
 
 /**
@@ -73,6 +82,7 @@ export async function createAgent(
   if (files?.soul) await client.agents.files.set(agentId, 'SOUL.md', files.soul)
   if (files?.identity) await client.agents.files.set(agentId, 'IDENTITY.md', files.identity)
   if (files?.tools) await client.agents.files.set(agentId, 'TOOLS.md', files.tools)
+  if (files?.agents) await client.agents.files.set(agentId, 'AGENTS.md', files.agents)
 
   return agentId
 }
