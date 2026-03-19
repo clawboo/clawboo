@@ -593,6 +593,25 @@ function DeployStep({
             }
           }
         }
+
+        // Auto-enable agent-to-agent coordination if any agent has routing
+        const hasRouting = profile.agents.some((a) => {
+          const agentsMd =
+            'agentsTemplate' in a ? (a as TeamTemplate['agents'][number]).agentsTemplate : undefined
+          return agentsMd && /@[\w"']/.test(agentsMd)
+        })
+        if (hasRouting) {
+          try {
+            await fetch('/api/system/openclaw-config', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ agentToAgent: { enabled: true } }),
+            })
+          } catch {
+            // config patch failure is non-fatal
+          }
+        }
+
         // brief pause to let "All Boos deployed!" read
         await new Promise<void>((r) => setTimeout(r, 700))
         onComplete()

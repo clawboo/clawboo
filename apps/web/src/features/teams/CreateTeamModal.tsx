@@ -194,6 +194,24 @@ export function CreateTeamModal({
         label: 'Done!',
       })
 
+      // Auto-enable agent-to-agent coordination if any agent has routing
+      const hasRouting = profile.agents.some((a) => {
+        const agentsMd =
+          'agentsTemplate' in a ? (a as TeamTemplate['agents'][number]).agentsTemplate : undefined
+        return agentsMd && /@[\w"']/.test(agentsMd)
+      })
+      if (hasRouting) {
+        try {
+          await fetch('/api/system/openclaw-config', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentToAgent: { enabled: true } }),
+          })
+        } catch {
+          // config patch failure is non-fatal — user can enable manually in System panel
+        }
+      }
+
       // Re-hydrate fleet from gateway to pick up new agents
       try {
         const result = await client.agents.list()
