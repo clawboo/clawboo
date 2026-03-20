@@ -1,7 +1,10 @@
 import {
+  forwardRef,
   memo,
   useCallback,
   useEffect,
+  useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -45,6 +48,30 @@ export function parseToolEntry(
   const name = (nl === -1 ? rest : rest.slice(0, nl)).trim()
   const body = nl === -1 ? '' : rest.slice(nl + 1).trim()
   return { kind: isCall ? 'call' : 'result', name, body }
+}
+
+/**
+ * Inline @mention highlighting for group chat messages.
+ * Highlights @AgentName at message start using longest-prefix, case-insensitive match.
+ */
+function renderMentionInline(text: string, knownAgentNames: string[]): import('react').ReactNode {
+  if (!text.startsWith('@')) return text
+  const afterAt = text.slice(1)
+  const sorted = [...knownAgentNames].sort((a, b) => b.length - a.length)
+  for (const name of sorted) {
+    if (afterAt.toLowerCase().startsWith(name.toLowerCase())) {
+      const rest = afterAt.slice(name.length)
+      if (rest.length === 0 || /^\s/.test(rest)) {
+        return (
+          <>
+            <span className="font-semibold text-accent">@{name}</span>
+            {rest}
+          </>
+        )
+      }
+    }
+  }
+  return text
 }
 
 // ─── Grouping: flatten TranscriptEntry[] → render blocks ─────────────────────
@@ -330,9 +357,12 @@ export const MetaMessageCard = memo(function MetaMessageCard({
 export const UserMessageCard = memo(function UserMessageCard({
   entry,
   targetAgentName,
+  knownAgentNames,
 }: {
   entry: TranscriptEntry
   targetAgentName?: string
+  /** Known agent names for @mention highlighting in group chat. */
+  knownAgentNames?: string[]
 }) {
   return (
     <div className="flex justify-end">
@@ -348,9 +378,13 @@ export const UserMessageCard = memo(function UserMessageCard({
           )}
         </div>
         <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-            {entry.text}
-          </ReactMarkdown>
+          {knownAgentNames && entry.text.startsWith('@') ? (
+            renderMentionInline(entry.text, knownAgentNames)
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+              {entry.text}
+            </ReactMarkdown>
+          )}
         </div>
       </div>
     </div>
@@ -569,87 +603,305 @@ export const MessageList = memo(function MessageList({
 
 // ─── MessageComposer ──────────────────────────────────────────────────────────
 
-export const MessageComposer = memo(function MessageComposer({
-  onSend,
-  disabled,
-  placeholder,
-}: {
-  onSend: (message: string) => void
-  disabled: boolean
-  placeholder?: string
-}) {
-  const [draft, setDraft] = useState('')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const rafRef = useRef<number | null>(null)
+// ─── MessageComposer ─────────────────────────────────────────────────────────
 
-  // Auto-resize textarea
-  const resize = useCallback(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 180)}px`
-  }, [])
+export interface MessageComposerHandle {
+  /** Insert @AgentName at the start of the draft and focus the textarea. */
+  insertMention: (agentName: string) => void
+}
+
+export const MessageComposer = memo(
+  forwardRef<
+    MessageComposerHandle,
+    {
+      onSend: (message: string) => void
+      disabled: boolean
+      placeholder?: string
+      /** Team agents for @mention autocomplete. Only provided in group chat. */
+      mentionAgents?: { id: string; name: string }[]
+    }
+  >(function MessageComposer({ onSend, disabled, placeholder, mentionAgents }, ref) {
+    const [draft, setDraft] = useState('')
+    const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const rafRef = useRef<number | null>(null)
+
+    // ── Mention autocomplete state ─────────────────────────────────────────────
+    const [mentionOpen, setMentionOpen] = useState(false)
+    const [mentionQuery, setMentionQuery] = useState('')
+    const [mentionIndex, setMentionIndex] = useState(0)
+    const [mentionStartPos, setMentionStartPos] = useState<number | null>(null)
+
+    const filteredMentionAgents = useMemo(() => {
+      if (!mentionAgents || !mentionOpen) return []
+      if (!mentionQuery) return mentionAgents
+      const q = mentionQuery.toLowerCase()
+      return mentionAgents.filter((a) => a.name.toLowerCase().startsWith(q))
+    }, [mentionAgents, mentionOpen, mentionQuery])
+
+    // ── Imperative handle for AgentChips ────────────────────────────────────────
+    useImperativeHandle(
+      ref,
+      () => ({
+        insertMention: (agentName: string) => {
+          setDraft((prev) => `@${agentName} ${prev}`)
+          requestAnimationFrame(() => {
+            const pos = agentName.length + 2 // @name + space
+            textareaRef.current?.setSelectionRange(pos, pos)
+            textareaRef.current?.focus()
+          })
+        },
+      }),
+      [],
+    )
+
+    // ── Auto-resize textarea ────────────────────────────────────────────────────
+    const resize = useCallback(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 180)}px`
+    }, [])
+
+    useEffect(() => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null
+        resize()
+      })
+      return () => {
+        if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      }
+    }, [draft, resize])
+
+    // ── Send handler ────────────────────────────────────────────────────────────
+    const handleSend = useCallback(() => {
+      const text = draft.trim()
+      if (!text || disabled) return
+      setDraft('')
+      setMentionOpen(false)
+      onSend(text)
+    }, [draft, disabled, onSend])
+
+    // ── Mention selection ───────────────────────────────────────────────────────
+    const handleMentionSelect = useCallback(
+      (agentName: string) => {
+        if (mentionStartPos === null) return
+        const cursorPos = textareaRef.current?.selectionStart ?? draft.length
+        const before = draft.slice(0, mentionStartPos)
+        const after = draft.slice(cursorPos)
+        const newDraft = `${before}@${agentName} ${after}`
+        setDraft(newDraft)
+        setMentionOpen(false)
+        requestAnimationFrame(() => {
+          const pos = before.length + 1 + agentName.length + 1
+          textareaRef.current?.setSelectionRange(pos, pos)
+          textareaRef.current?.focus()
+        })
+      },
+      [draft, mentionStartPos],
+    )
+
+    // ── Change handler with mention detection ───────────────────────────────────
+    const handleChange = useCallback(
+      (e: ChangeEvent<HTMLTextAreaElement>) => {
+        const value = e.target.value
+        setDraft(value)
+
+        if (!mentionAgents) return
+
+        const cursorPos = e.target.selectionStart
+        const textUpToCursor = value.slice(0, cursorPos)
+
+        // Find the last @ before cursor that doesn't have whitespace after it
+        const lastAtIndex = textUpToCursor.lastIndexOf('@')
+        if (lastAtIndex >= 0) {
+          const textAfterAt = textUpToCursor.slice(lastAtIndex + 1)
+          // No whitespace between @ and cursor means we're in a mention query
+          // Allow spaces in query since agent names can have spaces (e.g. "Code Reviewer Boo")
+          // But close on empty @ followed by another @ or special chars
+          if (!/\n/.test(textAfterAt)) {
+            setMentionOpen(true)
+            setMentionQuery(textAfterAt)
+            setMentionStartPos(lastAtIndex)
+            setMentionIndex(0)
+            return
+          }
+        }
+        setMentionOpen(false)
+      },
+      [mentionAgents],
+    )
+
+    // ── Key handler with mention intercept ───────────────────────────────────────
+    const handleKeyDown = useCallback(
+      (e: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.nativeEvent.isComposing) return
+
+        // When mention dropdown is open, intercept navigation keys
+        if (mentionOpen && filteredMentionAgents.length > 0) {
+          if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setMentionIndex((i) => (i <= 0 ? filteredMentionAgents.length - 1 : i - 1))
+            return
+          }
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            setMentionIndex((i) => (i >= filteredMentionAgents.length - 1 ? 0 : i + 1))
+            return
+          }
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            handleMentionSelect(filteredMentionAgents[mentionIndex].name)
+            return
+          }
+          if (e.key === 'Tab') {
+            e.preventDefault()
+            handleMentionSelect(filteredMentionAgents[mentionIndex].name)
+            return
+          }
+        }
+
+        if (e.key === 'Escape' && mentionOpen) {
+          e.preventDefault()
+          setMentionOpen(false)
+          return
+        }
+
+        // Default: Enter to send
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault()
+          handleSend()
+        }
+      },
+      [handleSend, mentionOpen, filteredMentionAgents, mentionIndex, handleMentionSelect],
+    )
+
+    const sendDisabled = disabled || !draft.trim()
+
+    return (
+      <div className="border-t border-white/8 px-4 py-3">
+        <div className="relative flex items-end gap-2">
+          {/* Mention autocomplete dropdown (positioned above textarea) */}
+          {mentionOpen && filteredMentionAgents.length > 0 && (
+            <MentionDropdownInline
+              agents={filteredMentionAgents}
+              selectedIndex={mentionIndex}
+              onSelect={handleMentionSelect}
+              onClose={() => setMentionOpen(false)}
+            />
+          )}
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={draft}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder ?? 'Message…'}
+            disabled={disabled}
+            data-testid="chat-composer-input"
+            className="flex-1 resize-none overflow-hidden rounded-lg border border-white/10 bg-surface px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ fontFamily: 'var(--font-body)', minHeight: '38px' }}
+          />
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={sendDisabled}
+            data-testid="chat-send-button"
+            aria-label="Send message"
+            className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-muted disabled:text-secondary"
+          >
+            <SendHorizontal className="h-4 w-4" strokeWidth={2} />
+          </button>
+        </div>
+        <p className="mt-1.5 text-right font-mono text-[10px] text-secondary/30">
+          Enter to send · Shift+Enter for newline · /reset for new session
+        </p>
+      </div>
+    )
+  }),
+)
+
+// ─── Inline MentionDropdown (avoids circular import) ─────────────────────────
+// Lightweight inline version used by MessageComposer.
+// The full MentionDropdown.tsx is reusable elsewhere if needed.
+
+const MentionDropdownInline = memo(function MentionDropdownInline({
+  agents,
+  selectedIndex,
+  onSelect,
+  onClose,
+}: {
+  agents: { id: string; name: string }[]
+  selectedIndex: number
+  onSelect: (agentName: string) => void
+  onClose: () => void
+}) {
+  const selectedRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null
-      resize()
-    })
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
-    }
-  }, [draft, resize])
+    selectedRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [selectedIndex])
 
-  const handleSend = useCallback(() => {
-    const text = draft.trim()
-    if (!text || disabled) return
-    setDraft('')
-    onSend(text)
-  }, [draft, disabled, onSend])
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.nativeEvent.isComposing) return
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault()
-        handleSend()
+  // Click-outside: close on mousedown outside the dropdown
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (listRef.current && !listRef.current.contains(e.target as Node)) {
+        onClose()
       }
-    },
-    [handleSend],
-  )
-
-  const sendDisabled = disabled || !draft.trim()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
 
   return (
-    <div className="border-t border-white/8 px-4 py-3">
-      <div className="flex items-end gap-2">
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          value={draft}
-          onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder ?? 'Message…'}
-          disabled={disabled}
-          data-testid="chat-composer-input"
-          className="flex-1 resize-none overflow-hidden rounded-lg border border-white/10 bg-surface px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ fontFamily: 'var(--font-body)', minHeight: '38px' }}
-        />
+    <div
+      ref={listRef}
+      data-testid="mention-dropdown"
+      style={{
+        position: 'absolute',
+        bottom: '100%',
+        left: 0,
+        marginBottom: 4,
+        zIndex: 50,
+        background: '#111827',
+        border: '1px solid rgba(255,255,255,0.1)',
+        borderRadius: 8,
+        padding: '4px 0',
+        minWidth: 180,
+        maxHeight: 200,
+        overflowY: 'auto',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+      }}
+    >
+      {agents.map((agent, i) => (
         <button
+          key={agent.id}
+          ref={i === selectedIndex ? selectedRef : undefined}
           type="button"
-          onClick={handleSend}
-          disabled={sendDisabled}
-          data-testid="chat-send-button"
-          aria-label="Send message"
-          className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-muted disabled:text-secondary"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            onSelect(agent.name)
+          }}
+          className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors"
+          style={{
+            background: i === selectedIndex ? 'rgba(255,255,255,0.08)' : 'transparent',
+            fontSize: 12,
+            color: '#E8E8E8',
+          }}
+          onMouseEnter={(e) => {
+            if (i !== selectedIndex)
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)'
+          }}
+          onMouseLeave={(e) => {
+            if (i !== selectedIndex)
+              (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+          }}
         >
-          <SendHorizontal className="h-4 w-4" strokeWidth={2} />
+          <AgentBooAvatar agentId={agent.id} size={20} />
+          <span className="truncate">{agent.name}</span>
         </button>
-      </div>
-      <p className="mt-1.5 text-right font-mono text-[10px] text-secondary/30">
-        Enter to send · Shift+Enter for newline · /reset for new session
-      </p>
+      ))}
     </div>
   )
 })

@@ -14,6 +14,8 @@ export type SendChatParams = {
   agentId: string
   sessionKey: string
   message: string
+  /** Original message with @mention for display in transcript. Falls back to `message`. */
+  displayText?: string
   /** Injected for testing; defaults to `crypto.randomUUID`. */
   generateId?: () => string
   /** Injected for testing; defaults to `Date.now`. */
@@ -55,6 +57,7 @@ export async function sendChatMessage({
   agentId,
   sessionKey,
   message,
+  displayText,
   generateId = () => crypto.randomUUID(),
   now = () => Date.now(),
 }: SendChatParams): Promise<void> {
@@ -115,7 +118,7 @@ export async function sendChatMessage({
 
   // ── Optimistic user message ─────────────────────────────────────────────────
   const userEntry = makeEntry(
-    { kind: 'user', role: 'user', text: trimmed, sessionKey },
+    { kind: 'user', role: 'user', text: displayText?.trim() || trimmed, sessionKey },
     idempotencyKey,
     ts,
   )

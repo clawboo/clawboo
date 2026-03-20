@@ -1,6 +1,6 @@
 // GroupChatPanel — merged transcript from all team agents, sorted chronologically.
 
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -17,7 +17,9 @@ import {
   MetaMessageCard,
   MessageComposer,
   NEAR_BOTTOM_PX,
+  type MessageComposerHandle,
 } from '@/features/chat/chatComponents'
+import { AgentChips } from './AgentChips'
 
 // ─── GroupChatPanel ──────────────────────────────────────────────────────────
 
@@ -40,6 +42,14 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
     }
     return map
   }, [teamAgents])
+
+  // For @mention autocomplete and visual rendering
+  const mentionAgentList = useMemo(
+    () => teamAgents.map((a) => ({ id: a.id, name: a.name })),
+    [teamAgents],
+  )
+  const knownAgentNames = useMemo(() => teamAgents.map((a) => a.name), [teamAgents])
+  const composerRef = useRef<MessageComposerHandle>(null)
 
   // ── Merge all team transcripts ────────────────────────────────────────────
   const mergedEntries = useMemo(() => {
@@ -136,10 +146,16 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
         leaderAgentId,
         teamAgents,
         message,
+        displayText: message, // raw message including @mention for transcript display
       })
     },
     [client, teamId, leaderAgentId, teamAgents],
   )
+
+  // ── Chip tag handler ───────────────────────────────────────────────────────
+  const handleChipTag = useCallback((agentName: string) => {
+    composerRef.current?.insertMention(agentName)
+  }, [])
 
   const canSend = Boolean(
     client && connectionStatus === 'connected' && teamAgents.length > 0 && !anyRunning,
@@ -197,6 +213,7 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
                     key={block.entry.entryId}
                     entry={block.entry}
                     targetAgentName={targetAgent?.name}
+                    knownAgentNames={knownAgentNames}
                   />
                 )
               }
@@ -230,11 +247,16 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
         )}
       </div>
 
+      {/* Agent chips for quick tagging */}
+      {teamAgents.length > 0 && <AgentChips agents={mentionAgentList} onTag={handleChipTag} />}
+
       {/* Composer */}
       <MessageComposer
+        ref={composerRef as RefObject<MessageComposerHandle | null>}
         onSend={handleSend}
         disabled={!canSend}
         placeholder="Message team… (@name to target)"
+        mentionAgents={mentionAgentList}
       />
     </div>
   )
