@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import type { GatewayClient } from '@clawboo/gateway-client'
 import type { AgentStatusPatch } from '@clawboo/events'
 import { createEventHandler, createPatchQueue, processEvent } from '@clawboo/events'
-import type { TranscriptEntry } from '@clawboo/protocol'
+import { extractText, type TranscriptEntry } from '@clawboo/protocol'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
@@ -198,7 +198,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       processEvent(frame, handler)
     })
 
-    // ── Cost tracking: extract token usage from final chat events ────────────
+    // ── Token tracking: extract or estimate token usage from final chat events ─
     const unsubCost = client.onEvent((frame) => {
       if (frame.event !== 'chat') return
       const p = frame.payload as Record<string, unknown> | null
@@ -213,17 +213,42 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       const message = p['message'] as Record<string, unknown> | null | undefined
       if (!message) return
 
-      // Extract usage from message.usage or message.metadata.usage
+      // Try real usage from Gateway, fall back to estimation from response text
       const usage = (() => {
         const direct = message['usage'] as Record<string, unknown> | null | undefined
         if (direct) return direct
         const meta = message['metadata'] as Record<string, unknown> | null | undefined
         return (meta?.['usage'] as Record<string, unknown> | null | undefined) ?? null
       })()
-      if (!usage) return
 
-      const inputTokens = typeof usage['input_tokens'] === 'number' ? usage['input_tokens'] : 0
-      const outputTokens = typeof usage['output_tokens'] === 'number' ? usage['output_tokens'] : 0
+      let inputTokens = 0
+      let outputTokens = 0
+
+      if (usage) {
+        // Real token data from Gateway (when available)
+        inputTokens = typeof usage['input_tokens'] === 'number' ? usage['input_tokens'] : 0
+        outputTokens = typeof usage['output_tokens'] === 'number' ? usage['output_tokens'] : 0
+      } else {
+        // Estimate from response text — same formula as chat UI (~charCount/4)
+        const responseText = extractText(message) ?? ''
+        if (responseText.length > 0) {
+          outputTokens = Math.ceil(responseText.length / 4)
+        }
+
+        // Estimate input from the last user message in this agent's transcript
+        const teamKey = getTeamChatOverride(agentId)
+        const mainKey = useFleetStore.getState().agents.find((a) => a.id === agentId)?.sessionKey
+        const transcript = useChatStore.getState().transcripts.get(teamKey ?? mainKey ?? '')
+        if (transcript) {
+          for (let i = transcript.length - 1; i >= 0; i--) {
+            if (transcript[i]!.kind === 'user') {
+              inputTokens = Math.ceil(transcript[i]!.text.length / 4)
+              break
+            }
+          }
+        }
+      }
+
       if (inputTokens === 0 && outputTokens === 0) return
 
       const model =
@@ -231,7 +256,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
           ? p['model']
           : typeof message['model'] === 'string'
             ? message['model']
-            : 'default'
+            : 'unknown'
       const runId = typeof p['runId'] === 'string' ? p['runId'] : null
 
       // Store token usage in chat store so ChatPanel can display real counts
