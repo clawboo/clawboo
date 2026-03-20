@@ -213,7 +213,7 @@ function GroupChatRow({
           className="truncate text-[12px] font-medium leading-tight text-text"
           style={{ fontFamily: 'var(--font-body)' }}
         >
-          Team Chat
+          Group Chat
         </p>
         <p className="mt-0.5 text-[10px] text-secondary/40">Group conversation</p>
       </div>

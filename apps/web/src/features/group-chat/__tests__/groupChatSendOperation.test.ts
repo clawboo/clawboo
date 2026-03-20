@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { sendGroupChatMessage, resetWokenTeams } from '../groupChatSendOperation'
 import type { AgentState } from '@/stores/fleet'
 
@@ -51,52 +51,66 @@ const mockClient = { call: vi.fn() }
 
 describe('sendGroupChatMessage', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
     vi.clearAllMocks()
     resetWokenTeams()
     mockSendChatMessage.mockResolvedValue(undefined)
     mockClient.call.mockResolvedValue(undefined)
   })
 
-  // ── Routing tests ──────────────────────────────────────────────────────────
+  afterEach(() => {
+    vi.useRealTimers()
+  })
 
-  it('sends to leader agent when no @mention', async () => {
-    await sendGroupChatMessage({
+  // Helper: advance through the wakeup settle delay
+  async function flushWakeupDelay() {
+    await vi.advanceTimersByTimeAsync(5000)
+  }
+
+  // ── Routing tests (use team-scoped sessionKeys: agent:<id>:team:<teamId>) ──
+
+  it('sends to leader agent when no @mention using team sessionKey', async () => {
+    const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'hello team',
     })
+    await flushWakeupDelay()
+    await p
 
     expect(mockSendChatMessage).toHaveBeenCalledWith({
       client: mockClient,
       agentId: 'a1',
-      sessionKey: 'agent:a1:main',
+      sessionKey: 'agent:a1:team:team-1',
       message: 'hello team',
       displayText: undefined,
     })
   })
 
   it('sends to @mentioned agent with cleaned message', async () => {
-    await sendGroupChatMessage({
+    const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: '@Worker Boo do the thing',
     })
+    await flushWakeupDelay()
+    await p
 
     expect(mockSendChatMessage).toHaveBeenCalledWith({
       client: mockClient,
       agentId: 'a2',
-      sessionKey: 'agent:a2:main',
+      sessionKey: 'agent:a2:team:team-1',
       message: 'do the thing',
       displayText: undefined,
     })
   })
 
   it('passes displayText through to sendChatMessage', async () => {
-    await sendGroupChatMessage({
+    const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: 'a1',
@@ -104,29 +118,33 @@ describe('sendGroupChatMessage', () => {
       message: '@Worker Boo do the thing',
       displayText: '@Worker Boo do the thing',
     })
+    await flushWakeupDelay()
+    await p
 
     expect(mockSendChatMessage).toHaveBeenCalledWith({
       client: mockClient,
       agentId: 'a2',
-      sessionKey: 'agent:a2:main',
+      sessionKey: 'agent:a2:team:team-1',
       message: 'do the thing',
       displayText: '@Worker Boo do the thing',
     })
   })
 
   it('falls back to first agent when leader is null and no mention', async () => {
-    await sendGroupChatMessage({
+    const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: null,
       teamAgents: [leader, worker],
       message: 'general question',
     })
+    await flushWakeupDelay()
+    await p
 
     expect(mockSendChatMessage).toHaveBeenCalledWith({
       client: mockClient,
       agentId: 'a1',
-      sessionKey: 'agent:a1:main',
+      sessionKey: 'agent:a1:team:team-1',
       message: 'general question',
       displayText: undefined,
     })
@@ -144,12 +162,13 @@ describe('sendGroupChatMessage', () => {
     expect(mockSendChatMessage).not.toHaveBeenCalled()
   })
 
-  it('no-ops when target agent has no sessionKey', async () => {
+  it('no-ops when resolved target agent is not in team', async () => {
+    // leaderAgentId points to agent not in teamAgents, and no @mention, no fallback
     await sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
-      leaderAgentId: 'a4',
-      teamAgents: [silent],
+      leaderAgentId: 'nonexistent',
+      teamAgents: [], // empty team — no fallback
       message: 'hello',
     })
 
@@ -158,36 +177,41 @@ describe('sendGroupChatMessage', () => {
 
   // ── Auto-wake tests ────────────────────────────────────────────────────────
 
-  it('wakes all team agents on first group chat message', async () => {
-    await sendGroupChatMessage({
+  it('wakes all team agents on first group chat message using team sessionKeys', async () => {
+    const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker, coder],
       message: 'build the app',
     })
+    await flushWakeupDelay()
+    await p
 
-    // Should have called chat.send for the non-target agents (a2, a3)
+    // Should have called chat.send for the non-target agents (a2, a3) with team sessionKeys
     const wakeCalls = mockClient.call.mock.calls.filter(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (args: any[]) => args[0] === 'chat.send',
     )
     expect(wakeCalls).toHaveLength(2)
-    expect(wakeCalls[0][1].sessionKey).toBe('agent:a2:main')
-    expect(wakeCalls[1][1].sessionKey).toBe('agent:a3:main')
+    expect(wakeCalls[0][1].sessionKey).toBe('agent:a2:team:team-1')
+    expect(wakeCalls[1][1].sessionKey).toBe('agent:a3:team:team-1')
   })
 
   it('does not wake agents on subsequent messages to the same team', async () => {
-    await sendGroupChatMessage({
+    const p1 = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'first message',
     })
+    await flushWakeupDelay()
+    await p1
 
     mockClient.call.mockClear()
 
+    // Second message — no wakeup, no delay
     await sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
@@ -205,13 +229,15 @@ describe('sendGroupChatMessage', () => {
   })
 
   it('skips target agent in wakeup', async () => {
-    await sendGroupChatMessage({
+    const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker, coder],
       message: 'build the app',
     })
+    await flushWakeupDelay()
+    await p
 
     // a1 is the target (leader) — should NOT be in wakeup calls
     const wakeCalls = mockClient.call.mock.calls.filter(
@@ -220,38 +246,42 @@ describe('sendGroupChatMessage', () => {
     )
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const wakedSessionKeys = wakeCalls.map((args: any[]) => args[1].sessionKey)
-    expect(wakedSessionKeys).not.toContain('agent:a1:main')
-    expect(wakedSessionKeys).toContain('agent:a2:main')
-    expect(wakedSessionKeys).toContain('agent:a3:main')
+    expect(wakedSessionKeys).not.toContain('agent:a1:team:team-1')
+    expect(wakedSessionKeys).toContain('agent:a2:team:team-1')
+    expect(wakedSessionKeys).toContain('agent:a3:team:team-1')
   })
 
   it('handles wakeup failures gracefully', async () => {
     // First chat.send call rejects, second succeeds
     mockClient.call.mockRejectedValueOnce(new Error('connection lost')).mockResolvedValue(undefined)
 
-    await sendGroupChatMessage({
+    const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker, coder],
       message: 'build the app',
     })
+    await flushWakeupDelay()
+    await p
 
     // Actual message should still be sent despite wakeup failure
     expect(mockSendChatMessage).toHaveBeenCalledTimes(1)
   })
 
-  it('adds meta notification before wakeup', async () => {
-    await sendGroupChatMessage({
+  it('adds meta notification before wakeup using team sessionKey', async () => {
+    const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'hello',
     })
+    await flushWakeupDelay()
+    await p
 
     expect(mockAppendTranscript).toHaveBeenCalledWith(
-      'agent:a1:main',
+      'agent:a1:team:team-1',
       expect.arrayContaining([
         expect.objectContaining({
           kind: 'meta',
@@ -262,42 +292,52 @@ describe('sendGroupChatMessage', () => {
     )
   })
 
-  it('skips agents without sessionKey in wakeup', async () => {
-    await sendGroupChatMessage({
+  it('wakes agents even without fleet sessionKey (uses team sessionKey)', async () => {
+    // silent agent has sessionKey=null in fleet store, but team sessionKey is computed
+    const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker, silent],
       message: 'hello',
     })
+    await flushWakeupDelay()
+    await p
 
-    // Only worker (a2) should be woken — silent (a4) has no sessionKey
+    // Both worker (a2) AND silent (a4) should be woken — team keys don't depend on fleet sessionKey
     const wakeCalls = mockClient.call.mock.calls.filter(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (args: any[]) => args[0] === 'chat.send',
     )
-    expect(wakeCalls).toHaveLength(1)
-    expect(wakeCalls[0][1].sessionKey).toBe('agent:a2:main')
+    expect(wakeCalls).toHaveLength(2)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const wakedKeys = wakeCalls.map((args: any[]) => args[1].sessionKey)
+    expect(wakedKeys).toContain('agent:a2:team:team-1')
+    expect(wakedKeys).toContain('agent:a4:team:team-1')
   })
 
   it('wakes independently for different teams', async () => {
-    await sendGroupChatMessage({
+    const p1 = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'team-1 msg',
     })
+    await flushWakeupDelay()
+    await p1
 
     mockClient.call.mockClear()
 
-    await sendGroupChatMessage({
+    const p2 = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-2',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'team-2 msg',
     })
+    await flushWakeupDelay()
+    await p2
 
     // Second team should trigger its own wakeup
     const wakeCalls = mockClient.call.mock.calls.filter(
@@ -305,5 +345,6 @@ describe('sendGroupChatMessage', () => {
       (args: any[]) => args[0] === 'chat.send',
     )
     expect(wakeCalls).toHaveLength(1) // worker woken for team-2
+    expect(wakeCalls[0][1].sessionKey).toBe('agent:a2:team:team-2')
   })
 })

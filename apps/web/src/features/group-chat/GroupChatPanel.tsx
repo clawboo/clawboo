@@ -7,7 +7,7 @@ import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { resolveTeamLeader } from '@/lib/resolveTeamLeader'
-import { agentIdFromSessionKey } from '@/lib/sessionUtils'
+import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { sendGroupChatMessage } from './groupChatSendOperation'
 import {
   groupEntriesToBlocks,
@@ -51,12 +51,19 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
   const knownAgentNames = useMemo(() => teamAgents.map((a) => a.name), [teamAgents])
   const composerRef = useRef<MessageComposerHandle>(null)
 
-  // ── Merge all team transcripts ────────────────────────────────────────────
+  // Team-scoped sessionKeys for isolation from 1:1 agent chat
+  const teamSessionKeys = useMemo(
+    () => new Map(teamAgents.map((a) => [a.id, buildTeamSessionKey(a.id, teamId)])),
+    [teamAgents, teamId],
+  )
+
+  // ── Merge all team transcripts (using team-scoped sessionKeys) ────────────
   const mergedEntries = useMemo(() => {
     const all: TranscriptEntry[] = []
     for (const agent of teamAgents) {
-      if (!agent.sessionKey) continue
-      const entries = transcripts.get(agent.sessionKey)
+      const teamSk = teamSessionKeys.get(agent.id)
+      if (!teamSk) continue
+      const entries = transcripts.get(teamSk)
       if (entries) all.push(...entries)
     }
     all.sort((a, b) => {
@@ -65,27 +72,28 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
       return a.sequenceKey - b.sequenceKey
     })
     return all
-  }, [teamAgents, transcripts])
+  }, [teamAgents, teamSessionKeys, transcripts])
 
   const blocks = useMemo(() => groupEntriesToBlocks(mergedEntries), [mergedEntries])
 
-  // ── Load persisted history for all team agents ────────────────────────────
+  // ── Load persisted history for all team agents (team-scoped sessionKeys) ──
   useEffect(() => {
     for (const agent of teamAgents) {
-      if (!agent.sessionKey) continue
-      const existing = useChatStore.getState().transcripts.get(agent.sessionKey)
+      const teamSk = teamSessionKeys.get(agent.id)
+      if (!teamSk) continue
+      const existing = useChatStore.getState().transcripts.get(teamSk)
       if (existing && existing.length > 0) continue
 
-      fetch(`/api/chat-history?sessionKey=${encodeURIComponent(agent.sessionKey)}`)
+      fetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
         .then((r) => r.json())
         .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
           if (historical && historical.length > 0) {
-            useChatStore.getState().appendTranscript(agent.sessionKey!, historical)
+            useChatStore.getState().appendTranscript(teamSk, historical)
           }
         })
         .catch(() => {})
     }
-  }, [teamAgents])
+  }, [teamAgents, teamSessionKeys])
 
   // ── Auto-scroll ───────────────────────────────────────────────────────────
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -105,18 +113,19 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
     })
   }, [scrollToBottom])
 
-  // Collect all streaming texts for team agents
+  // Collect all streaming texts for team agents (using team-scoped sessionKeys)
   const activeStreams = useMemo(() => {
     const streams: { agentId: string; agentName: string; text: string }[] = []
     for (const agent of teamAgents) {
-      if (!agent.sessionKey) continue
-      const text = streamingTextMap.get(agent.sessionKey)
+      const teamSk = teamSessionKeys.get(agent.id)
+      if (!teamSk) continue
+      const text = streamingTextMap.get(teamSk)
       if (text != null) {
         streams.push({ agentId: agent.id, agentName: agent.name, text })
       }
     }
     return streams
-  }, [teamAgents, streamingTextMap])
+  }, [teamAgents, teamSessionKeys, streamingTextMap])
 
   const anyRunning = teamAgents.some((a) => a.status === 'running')
 
@@ -180,7 +189,7 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
             className="truncate text-[14px] font-semibold text-text"
             style={{ fontFamily: 'var(--font-body)' }}
           >
-            {team?.name ?? 'Team Chat'}
+            {team?.name ?? 'Group Chat'}
           </h2>
           <p className="text-[10px] text-secondary/50">
             {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''}

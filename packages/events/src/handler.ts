@@ -32,7 +32,7 @@ export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
     for (const intent of intents) {
       switch (intent.kind) {
         case 'queueLivePatch':
-          deps.queueLivePatch(intent.agentId, intent.patch)
+          deps.queueLivePatch(intent.agentId, intent.patch, intent.sessionKey)
           break
 
         case 'clearPendingLivePatch':
@@ -42,7 +42,7 @@ export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
         case 'commitChat': {
           deps.clearPendingLivePatch(intent.agentId)
           if (intent.outputLines.length > 0) {
-            deps.appendOutputLines(intent.agentId, intent.outputLines)
+            deps.appendOutputLines(intent.agentId, intent.outputLines, intent.sessionKey)
           }
           deps.dispatchIntent(intent)
           // Mark the current run as closed so stale lifecycle events are ignored

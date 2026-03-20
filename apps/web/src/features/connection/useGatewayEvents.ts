@@ -8,6 +8,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useApprovalsStore } from '@/stores/approvals'
 import { parseApprovalRequestPayload } from '@/features/approvals/useApprovalActions'
+import { getTeamChatOverride, clearTeamChatOverride } from '@/lib/sessionUtils'
 
 // ─── useGatewayEvents ─────────────────────────────────────────────────────────
 //
@@ -44,12 +45,21 @@ export function useGatewayEvents(client: GatewayClient | null): void {
             useFleetStore.getState().patchAgent(intent.agentId, intent.patch)
             useFleetStore.getState().updateLastSeen(intent.agentId, Date.now())
             break
-          case 'commitChat':
+          case 'commitChat': {
             // outputLines already handled by appendOutputLines above;
             // apply the final status patch (idle/error, runId cleared)
             useFleetStore.getState().patchAgent(intent.agentId, intent.patch)
             useFleetStore.getState().updateLastSeen(intent.agentId, Date.now())
+            // Clear team-scoped streaming text in the chat store + team override.
+            const teamKey = getTeamChatOverride(intent.agentId)
+            if (teamKey) {
+              useChatStore.getState().setStreamingText(teamKey, null)
+              clearTeamChatOverride(intent.agentId)
+            } else if (intent.sessionKey) {
+              useChatStore.getState().setStreamingText(intent.sessionKey, null)
+            }
             break
+          }
           // approval intents: trust plane
           case 'approvalPending': {
             const request = parseApprovalRequestPayload(intent.payload)
@@ -72,8 +82,14 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       },
 
       // Live patch queue (streaming — RAF-batched)
-      queueLivePatch: (agentId, patch) => {
+      queueLivePatch: (agentId, patch, sessionKey?) => {
         patchQueue.enqueue({ agentId, updates: patch })
+        // Sync streaming text to chat store — use team override if active,
+        // so GroupChatPanel reads streaming from the team sessionKey.
+        const resolvedKey = (agentId ? getTeamChatOverride(agentId) : undefined) ?? sessionKey
+        if (resolvedKey && patch.streamText !== undefined) {
+          useChatStore.getState().setStreamingText(resolvedKey, patch.streamText)
+        }
       },
 
       // Flush all pending patches for an agent immediately
@@ -82,16 +98,19 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       },
 
       // Append committed output lines to the chat transcript
-      appendOutputLines: (agentId, lines) => {
+      appendOutputLines: (agentId, lines, eventSessionKey?) => {
         if (lines.length === 0) return
         const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
-        const sessionKey = agent?.sessionKey
+        // Team chat override: the Gateway echoes events with the main sessionKey even
+        // when we sent to a team-scoped key. Redirect to the team session if active.
+        const teamOverride = agentId ? getTeamChatOverride(agentId) : undefined
+        const sessionKey = teamOverride ?? eventSessionKey ?? agent?.sessionKey
         if (!sessionKey) return
 
         const now = Date.now()
         const entries: TranscriptEntry[] = lines.map((text) => ({
           entryId: crypto.randomUUID(),
-          runId: agent.runId,
+          runId: agent?.runId ?? null,
           sessionKey,
           kind:
             text.startsWith('[[tool]]') || text.startsWith('[[tool-result]]')
