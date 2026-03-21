@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Loader2, FileText } from 'lucide-react'
+import { Loader2, FileText, PenLine, SlidersHorizontal } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { Slider } from '@/components/ui/slider'
@@ -11,6 +11,7 @@ import {
   getDimensions,
   getDimensionText,
   mergeSoulWithPersonality,
+  mergeSoulWithCustomPersonality,
   isPersonalityValues,
   stripPersonalityBlock,
 } from '@/lib/soulPersonality'
@@ -45,6 +46,8 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
   const selectedAgentId = propAgentId ?? storeAgentId
 
   const [values, setValues] = useState<PersonalityValues>({ ...DEFAULT_VALUES })
+  const [customMode, setCustomMode] = useState(false)
+  const [customText, setCustomText] = useState('')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -53,6 +56,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
 
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dirtyRef = useRef<PersonalityValues | null>(null)
+  const customTextDirtyRef = useRef(false)
   /** Cache of the base SOUL.md content (role description, without personality block) */
   const baseSoulRef = useRef<string>('')
 
@@ -62,14 +66,20 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
     setLoading(true)
     setError(null)
     setValues({ ...DEFAULT_VALUES })
+    setCustomMode(false)
+    setCustomText('')
     baseSoulRef.current = ''
 
     // Fetch both SQLite personality values and existing SOUL.md in parallel
     const sqlitePromise = fetch(`/api/personality?agentId=${encodeURIComponent(selectedAgentId)}`)
       .then((res) => res.json())
-      .then((data: { values: PersonalityValues | null }) => {
+      .then((data: { values: PersonalityValues | null; customText?: string | null }) => {
         if (data.values && isPersonalityValues(data.values)) {
           setValues(data.values)
+        }
+        if (data.customText && typeof data.customText === 'string') {
+          setCustomMode(true)
+          setCustomText(data.customText)
         }
       })
       .catch(() => {})
@@ -138,7 +148,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       const sqliteSave = fetch('/api/personality', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentId: selectedAgentId, values: next }),
+        body: JSON.stringify({ agentId: selectedAgentId, values: next, customText: null }),
       })
 
       // 2. Read existing SOUL.md, merge personality sections, write back
@@ -175,6 +185,93 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
     [client, selectedAgentId, values],
   )
 
+  // ─── Custom text save ────────────────────────────────────────────────────────
+
+  const saveCustomText = useCallback(
+    (text: string) => {
+      if (!client || !selectedAgentId) return
+      if (!text.trim()) return
+
+      customTextDirtyRef.current = false
+      if (savedTimer.current) clearTimeout(savedTimer.current)
+      setSaved(false)
+      setSaving(true)
+      setError(null)
+
+      // 1. Save to SQLite with custom text
+      const sqliteSave = fetch('/api/personality', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: selectedAgentId, values, customText: text }),
+      })
+
+      // 2. Merge custom text into SOUL.md
+      void (async () => {
+        try {
+          const existing = await client.agents.files.read(selectedAgentId, SOUL_FILE)
+          baseSoulRef.current = stripPersonalityBlock(existing)
+          const mergedContent = mergeSoulWithCustomPersonality(baseSoulRef.current, text)
+          await mutationQueue.enqueue(selectedAgentId, () =>
+            client.agents.files.set(selectedAgentId, SOUL_FILE, mergedContent),
+          )
+        } catch (err: unknown) {
+          console.warn('[Personality] Custom SOUL.md merge/write failed (non-fatal):', err)
+        }
+      })()
+
+      void sqliteSave
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          setSaved(true)
+          savedTimer.current = setTimeout(() => setSaved(false), 2000)
+          useEditorStore.getState().triggerSoulRefresh()
+        })
+        .catch((err: unknown) => {
+          customTextDirtyRef.current = true
+          setError(err instanceof Error ? err.message : 'Save failed')
+        })
+        .finally(() => setSaving(false))
+    },
+    [client, selectedAgentId, values],
+  )
+
+  // ─── Mode toggle ──────────────────────────────────────────────────────────────
+
+  const toggleMode = useCallback(() => {
+    if (!client || !selectedAgentId) return
+
+    if (customMode) {
+      // Switching back to sliders — clear custom text and restore slider personality
+      setCustomMode(false)
+      setCustomText('')
+      customTextDirtyRef.current = false
+
+      // Save cleared custom text + restore slider personality to SOUL.md
+      void fetch('/api/personality', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: selectedAgentId, values, customText: null }),
+      }).catch(() => {})
+
+      void (async () => {
+        try {
+          const existing = await client.agents.files.read(selectedAgentId, SOUL_FILE)
+          baseSoulRef.current = stripPersonalityBlock(existing)
+          const mergedContent = mergeSoulWithPersonality(baseSoulRef.current, values)
+          await mutationQueue.enqueue(selectedAgentId, () =>
+            client.agents.files.set(selectedAgentId, SOUL_FILE, mergedContent),
+          )
+          useEditorStore.getState().triggerSoulRefresh()
+        } catch {
+          // Best-effort
+        }
+      })()
+    } else {
+      // Switching to custom mode
+      setCustomMode(true)
+    }
+  }, [client, selectedAgentId, customMode, values])
+
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   if (!selectedAgentId) {
@@ -197,45 +294,154 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
   return (
     <div className="space-y-6">
       {/* Sliders */}
-      {DIMENSIONS.map((dim) => {
-        const labels = SLIDER_LABELS[dim.key]
-        return (
-          <div key={dim.key} className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span
-                className="text-[13px] font-semibold text-text"
-                style={{ fontFamily: 'var(--font-body)' }}
-              >
-                {dim.label}
-              </span>
-              <span
-                className="min-w-[2.5rem] text-right text-[11px] tabular-nums text-secondary"
-                style={{ fontFamily: 'var(--font-mono)' }}
-              >
-                {values[dim.key]}
-              </span>
+      <div
+        style={{
+          opacity: customMode ? 0.3 : 1,
+          pointerEvents: customMode ? 'none' : 'auto',
+          transition: 'opacity 0.2s',
+        }}
+      >
+        {DIMENSIONS.map((dim) => {
+          const labels = SLIDER_LABELS[dim.key]
+          return (
+            <div key={dim.key} className="mb-6 space-y-2">
+              <div className="flex items-center justify-between">
+                <span
+                  className="text-[13px] font-semibold text-text"
+                  style={{ fontFamily: 'var(--font-body)' }}
+                >
+                  {dim.label}
+                </span>
+                <span
+                  className="min-w-[2.5rem] text-right text-[11px] tabular-nums text-secondary"
+                  style={{ fontFamily: 'var(--font-mono)' }}
+                >
+                  {values[dim.key]}
+                </span>
+              </div>
+
+              <Slider
+                value={[values[dim.key]]}
+                min={0}
+                max={100}
+                step={1}
+                onValueChange={(vals) => handleChange(dim.key, vals[0] ?? 50)}
+                onValueCommit={(vals) => handleCommit(dim.key, vals[0] ?? 50)}
+              />
+
+              <div className="flex justify-between">
+                <span className="text-[10px] text-secondary/50">{labels.left}</span>
+                <span className="text-[10px] text-secondary/50">{labels.right}</span>
+              </div>
+
+              <p className="text-[11px] leading-relaxed text-secondary/70">
+                {getDimensionText(dim.key, values[dim.key])}
+              </p>
             </div>
+          )
+        })}
+      </div>
 
-            <Slider
-              value={[values[dim.key]]}
-              min={0}
-              max={100}
-              step={1}
-              onValueChange={(vals) => handleChange(dim.key, vals[0] ?? 50)}
-              onValueCommit={(vals) => handleCommit(dim.key, vals[0] ?? 50)}
-            />
+      {/* Custom text override toggle */}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 12 }}>
+        <button
+          type="button"
+          onClick={toggleMode}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 10px',
+            borderRadius: 6,
+            border: '1px solid rgba(255,255,255,0.08)',
+            background: customMode ? 'rgba(233,69,96,0.1)' : 'transparent',
+            color: customMode ? '#E94560' : 'rgba(232,232,232,0.5)',
+            fontSize: 11,
+            fontWeight: 500,
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            width: '100%',
+          }}
+        >
+          {customMode ? (
+            <>
+              <SlidersHorizontal style={{ width: 13, height: 13 }} strokeWidth={2} />
+              Switch to Sliders
+            </>
+          ) : (
+            <>
+              <PenLine style={{ width: 13, height: 13 }} strokeWidth={2} />
+              Use Custom Instructions
+            </>
+          )}
+        </button>
 
-            <div className="flex justify-between">
-              <span className="text-[10px] text-secondary/50">{labels.left}</span>
-              <span className="text-[10px] text-secondary/50">{labels.right}</span>
-            </div>
+        {customMode && (
+          <p
+            style={{
+              fontSize: 10,
+              color: 'rgba(232,232,232,0.35)',
+              lineHeight: 1.4,
+              marginTop: 6,
+              marginBottom: 8,
+            }}
+          >
+            Write free-form personality instructions. This overrides the slider-generated
+            personality in SOUL.md.
+          </p>
+        )}
+      </div>
 
-            <p className="text-[11px] leading-relaxed text-secondary/70">
-              {getDimensionText(dim.key, values[dim.key])}
-            </p>
-          </div>
-        )
-      })}
+      {/* Custom text textarea (when in custom mode) */}
+      {customMode && (
+        <div>
+          <textarea
+            value={customText}
+            onChange={(e) => {
+              setCustomText(e.target.value)
+              customTextDirtyRef.current = true
+            }}
+            onBlur={() => {
+              if (customTextDirtyRef.current && customText.trim()) {
+                saveCustomText(customText)
+              }
+            }}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+                e.preventDefault()
+                if (customText.trim()) {
+                  saveCustomText(customText)
+                }
+              }
+            }}
+            rows={8}
+            placeholder="e.g. Be concise and direct. Use technical language when discussing code. Never use emojis. Always explain trade-offs when making recommendations."
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: '#0A0E1A',
+              color: '#E8E8E8',
+              fontSize: 12,
+              fontFamily: 'var(--font-mono)',
+              lineHeight: 1.6,
+              resize: 'vertical',
+              outline: 'none',
+              minHeight: 120,
+            }}
+          />
+          <p
+            style={{
+              fontSize: 10,
+              color: 'rgba(232,232,232,0.25)',
+              marginTop: 4,
+            }}
+          >
+            Saves on blur or {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+S
+          </p>
+        </div>
+      )}
 
       {/* Footer: preview toggle + save status */}
       <div className="flex items-center justify-between border-t border-white/8 pt-3">
@@ -267,7 +473,9 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
             className="whitespace-pre-wrap text-[10px] leading-relaxed text-secondary/70"
             style={{ fontFamily: 'var(--font-mono)' }}
           >
-            {mergeSoulWithPersonality(baseSoulRef.current, values)}
+            {customMode && customText.trim()
+              ? mergeSoulWithCustomPersonality(baseSoulRef.current, customText)
+              : mergeSoulWithPersonality(baseSoulRef.current, values)}
           </pre>
         </div>
       )}

@@ -20,6 +20,7 @@ import {
 import { BooAvatar } from '@clawboo/ui'
 import type { TeamProfile, TeamTemplate } from '@/features/teams/types'
 import { resolveWorkspaceDir, createAgent, buildToolsMd } from '@/lib/createAgent'
+import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
 import { STARTER_TEMPLATES } from '@/features/marketplace/teamCatalog'
@@ -570,8 +571,18 @@ function DeployStep({
         for (let i = 0; i < profile.agents.length; i++) {
           const agent = profile.agents[i]!
           setCurrentName(agent.name)
+          const defaultPersonality: PersonalityValues = {
+            verbosity: 50,
+            humor: 50,
+            caution: 50,
+            speed_cost: 50,
+            formality: 50,
+          }
+          const baseSoul = agent.soulTemplate || '# SOUL\n'
+          const soulWithPersonality = mergeSoulWithPersonality(baseSoul, defaultPersonality)
+
           const agentId = await createAgent(client, agent.name, workspaceDir, {
-            soul: agent.soulTemplate,
+            soul: soulWithPersonality,
             identity: agent.identityTemplate,
             tools: isNewFormat
               ? (agent as TeamTemplate['agents'][number]).toolsTemplate
@@ -580,6 +591,14 @@ function DeployStep({
               ? (agent as TeamTemplate['agents'][number]).agentsTemplate
               : undefined,
           })
+
+          // Persist default personality to SQLite so sliders load correctly
+          void fetch('/api/personality', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId, values: defaultPersonality }),
+          }).catch(() => {})
+
           if (i === 0) firstAgentId = agentId
           setProgress(i + 1)
 

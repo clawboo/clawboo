@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AgentFileName } from '@clawboo/protocol'
+import { AGENT_FILE_NAMES, type AgentFileName } from '@clawboo/protocol'
 import { useConnectionStore } from '@/stores/connection'
 import { useEditorStore } from '@/stores/editor'
 import { useToastStore } from '@/stores/toast'
@@ -20,12 +20,19 @@ export interface FileState {
 
 export type FilesMap = Record<string, FileState>
 
-export const EDITOR_TABS = [
+/** The 4 core files that always appear as tabs (even when empty). */
+export const CORE_FILE_TABS = [
   'SOUL.md',
   'IDENTITY.md',
   'TOOLS.md',
   'AGENTS.md',
 ] as const satisfies readonly AgentFileName[]
+
+/** All 7 OpenClaw agent files. Extra files appear as tabs only when non-empty. */
+export const ALL_FILE_TABS: readonly AgentFileName[] = [...AGENT_FILE_NAMES]
+
+/** @deprecated Use CORE_FILE_TABS or ALL_FILE_TABS instead */
+export const EDITOR_TABS = CORE_FILE_TABS
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +42,8 @@ export interface UseAgentFilesReturn {
   saving: boolean
   isDirty: (tab: AgentFileName) => boolean
   anyDirty: boolean
+  /** Returns true if the file has non-empty content (loaded from Gateway). */
+  fileExists: (tab: AgentFileName) => boolean
   handleSave: (tab: AgentFileName) => Promise<void>
   saveAllDirty: () => Promise<void>
   updateFileContent: (tab: AgentFileName, content: string) => void
@@ -45,7 +54,7 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
 
   const [files, setFiles] = useState<FilesMap>(() => {
     const init: FilesMap = {}
-    for (const name of EDITOR_TABS) {
+    for (const name of ALL_FILE_TABS) {
       init[name] = { content: '', clean: '' }
     }
     return init
@@ -66,12 +75,12 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
     setLoading(true)
 
     Promise.all(
-      EDITOR_TABS.map((name) => client.agents.files.read(agentId, name).catch(() => '')),
+      ALL_FILE_TABS.map((name) => client.agents.files.read(agentId, name).catch(() => '')),
     ).then(async (results) => {
       if (loadId !== loadIdRef.current) return // stale
 
       const next: FilesMap = {}
-      EDITOR_TABS.forEach((name, i) => {
+      ALL_FILE_TABS.forEach((name, i) => {
         const content = results[i] ?? ''
         next[name] = { content, clean: content }
       })
@@ -166,7 +175,7 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
     if (!client) return
 
     const currentFiles = filesRef.current
-    const dirtyTabs = EDITOR_TABS.filter(
+    const dirtyTabs = ALL_FILE_TABS.filter(
       (name) => currentFiles[name] && currentFiles[name].content !== currentFiles[name].clean,
     )
     if (dirtyTabs.length === 0) return
@@ -207,10 +216,18 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
     [files],
   )
 
-  const anyDirty = EDITOR_TABS.some((tab) => {
+  const anyDirty = ALL_FILE_TABS.some((tab) => {
     const f = files[tab]
     return f ? f.content !== f.clean : false
   })
+
+  const fileExists = useCallback(
+    (tab: AgentFileName) => {
+      const f = files[tab]
+      return f ? f.clean.trim().length > 0 : false
+    },
+    [files],
+  )
 
   return {
     files,
@@ -218,6 +235,7 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
     saving,
     isDirty,
     anyDirty,
+    fileExists,
     handleSave,
     saveAllDirty,
     updateFileContent,
