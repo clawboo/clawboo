@@ -20,10 +20,12 @@ import {
 import { BooAvatar } from '@clawboo/ui'
 import type { TeamProfile, TeamTemplate } from '@/features/teams/types'
 import { resolveWorkspaceDir, createAgent, buildToolsMd } from '@/lib/createAgent'
+import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
 import { STARTER_TEMPLATES } from '@/features/marketplace/teamCatalog'
+import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 
 // ─── Profiles ─────────────────────────────────────────────────────────────────
@@ -545,6 +547,18 @@ function DeployStep({
           ? buildToolsMd((profile as TeamProfile).skills)
           : '# TOOLS\n'
       try {
+        // ── Dedup: auto-suffix if agent/team names collide with existing ones ──
+        const existingAgentNames = useFleetStore.getState().agents.map((a) => a.name)
+        const existingTeamNames = useTeamStore.getState().teams.map((t) => t.name)
+        const desiredAgentNames = profile.agents.map((a) => a.name)
+        const dedupPlan = computeDedupSuffix(
+          desiredAgentNames,
+          existingAgentNames,
+          profile.name,
+          existingTeamNames,
+        )
+        const finalTeamName = dedupPlan.teamName
+
         // Create the team first
         let teamId: string | null = null
         try {
@@ -552,7 +566,7 @@ function DeployStep({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              name: profile.name,
+              name: finalTeamName,
               icon: profile.emoji,
               color: profile.color,
               templateId: profile.id,
@@ -570,7 +584,8 @@ function DeployStep({
         let firstAgentId: string | null = null
         for (let i = 0; i < profile.agents.length; i++) {
           const agent = profile.agents[i]!
-          setCurrentName(agent.name)
+          const finalAgentName = dedupPlan.agentNameMap.get(agent.name) ?? agent.name
+          setCurrentName(finalAgentName)
           const defaultPersonality: PersonalityValues = {
             verbosity: 50,
             humor: 50,
@@ -578,17 +593,21 @@ function DeployStep({
             speed_cost: 50,
             formality: 50,
           }
-          const baseSoul = agent.soulTemplate || '# SOUL\n'
+          const baseSoul =
+            rewriteTemplateName(agent.soulTemplate, agent.name, finalAgentName) || '# SOUL\n'
           const soulWithPersonality = mergeSoulWithPersonality(baseSoul, defaultPersonality)
 
-          const agentId = await createAgent(client, agent.name, workspaceDir, {
+          const agentId = await createAgent(client, finalAgentName, workspaceDir, {
             soul: soulWithPersonality,
-            identity: agent.identityTemplate,
+            identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
             tools: isNewFormat
               ? (agent as TeamTemplate['agents'][number]).toolsTemplate
               : legacyTools,
             agents: isNewFormat
-              ? (agent as TeamTemplate['agents'][number]).agentsTemplate
+              ? rewriteAgentsMd(
+                  (agent as TeamTemplate['agents'][number]).agentsTemplate,
+                  dedupPlan.agentNameMap,
+                )
               : undefined,
           })
 

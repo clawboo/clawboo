@@ -7,6 +7,7 @@ import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 import { resolveWorkspaceDir, createAgent, buildToolsMd } from '@/lib/createAgent'
+import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { useGraphStore } from '@/features/graph/store'
@@ -166,12 +167,24 @@ export function CreateTeamModal({
     setError(null)
 
     try {
+      // ── Dedup: auto-suffix if agent/team names collide with existing ones ──
+      const existingAgentNames = useFleetStore.getState().agents.map((a) => a.name)
+      const existingTeamNames = useTeamStore.getState().teams.map((t) => t.name)
+      const desiredAgentNames = selectedProfile ? selectedProfile.agents.map((a) => a.name) : []
+      const dedupPlan = computeDedupSuffix(
+        desiredAgentNames,
+        existingAgentNames,
+        name,
+        existingTeamNames,
+      )
+      const finalTeamName = dedupPlan.teamName
+
       // Create the team via API
       const res = await fetch('/api/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name,
+          name: finalTeamName,
           icon: teamIcon,
           color: teamColor,
           templateId: selectedProfile?.id ?? null,
@@ -197,7 +210,9 @@ export function CreateTeamModal({
 
       if (!selectedProfile) {
         // Empty team — done
-        useToastStore.getState().addToast({ type: 'success', message: `Team "${name}" created` })
+        useToastStore
+          .getState()
+          .addToast({ type: 'success', message: `Team "${finalTeamName}" created` })
         reset()
         onClose()
         onCreated()
@@ -217,7 +232,8 @@ export function CreateTeamModal({
       let firstAgentId: string | null = null
       for (let i = 0; i < profile.agents.length; i++) {
         const agent = profile.agents[i]
-        setProgress({ current: i, total: profile.agents.length, label: agent.name })
+        const finalAgentName = dedupPlan.agentNameMap.get(agent.name) ?? agent.name
+        setProgress({ current: i, total: profile.agents.length, label: finalAgentName })
 
         const defaultPersonality: PersonalityValues = {
           verbosity: 50,
@@ -226,17 +242,21 @@ export function CreateTeamModal({
           speed_cost: 50,
           formality: 50,
         }
-        const baseSoul = agent.soulTemplate || '# SOUL\n'
+        const baseSoul =
+          rewriteTemplateName(agent.soulTemplate, agent.name, finalAgentName) || '# SOUL\n'
         const soulWithPersonality = mergeSoulWithPersonality(baseSoul, defaultPersonality)
 
-        const agentId = await createAgent(client, agent.name, workspaceDir, {
+        const agentId = await createAgent(client, finalAgentName, workspaceDir, {
           soul: soulWithPersonality,
-          identity: agent.identityTemplate,
+          identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
           tools: isNewFormat
             ? (agent as TeamTemplate['agents'][number]).toolsTemplate
             : legacyTools,
           agents: isNewFormat
-            ? (agent as TeamTemplate['agents'][number]).agentsTemplate
+            ? rewriteAgentsMd(
+                (agent as TeamTemplate['agents'][number]).agentsTemplate,
+                dedupPlan.agentNameMap,
+              )
             : undefined,
         })
 
