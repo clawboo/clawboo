@@ -289,10 +289,10 @@ export function AgentListColumn() {
       try {
         const result = await client.agents.list()
         const mainKey = result.mainKey?.trim() || 'main'
-        // Build a lookup of existing teamId assignments so we don't wipe them
-        const existingTeamIds = new Map(
-          useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
-        )
+        // Build lookups of existing assignments so we don't wipe them
+        const existing = useFleetStore.getState().agents
+        const existingTeamIds = new Map(existing.map((a) => [a.id, a.teamId]))
+        const existingExecConfigs = new Map(existing.map((a) => [a.id, a.execConfig]))
         const mapped = result.agents.map((a) => ({
           id: a.id,
           name: a.identity?.name ?? a.name ?? a.id,
@@ -307,6 +307,7 @@ export function AgentListColumn() {
             agentId && a.id === agentId && selectedTeamId
               ? selectedTeamId
               : (existingTeamIds.get(a.id) ?? null),
+          execConfig: existingExecConfigs.get(a.id) ?? null,
         }))
         hydrateAgents(mapped)
         useBooZeroStore.getState().setBooZeroAgentId(identifyBooZero(mapped, result.defaultId))

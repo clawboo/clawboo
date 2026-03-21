@@ -8,7 +8,10 @@ export function decideTrustEvent(event: ClassifiedEvent): EventIntent[] {
     return [{ kind: 'ignore', reason: 'approval event missing agentId' }]
   }
 
-  if (event.raw.event === 'exec.approval.pending') {
+  if (
+    event.raw.event === 'exec.approval.pending' ||
+    event.raw.event === 'exec.approval.requested'
+  ) {
     return [{ kind: 'approvalPending', plane: 'trust', agentId, payload: event.payload }]
   }
 

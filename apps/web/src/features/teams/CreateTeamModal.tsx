@@ -234,10 +234,10 @@ export function CreateTeamModal({
       try {
         const result = await client.agents.list()
         const mainKey = result.mainKey?.trim() || 'main'
-        // Preserve existing teamId assignments — Gateway doesn't know about teams
-        const existingTeamIds = new Map(
-          useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
-        )
+        // Preserve existing teamId + execConfig assignments — Gateway doesn't know about these
+        const existing = useFleetStore.getState().agents
+        const existingTeamIds = new Map(existing.map((a) => [a.id, a.teamId]))
+        const existingExecConfigs = new Map(existing.map((a) => [a.id, a.execConfig]))
         useFleetStore.getState().hydrateAgents(
           result.agents.map((a) => ({
             id: a.id,
@@ -250,6 +250,7 @@ export function CreateTeamModal({
             runId: null,
             lastSeenAt: null,
             teamId: existingTeamIds.get(a.id) ?? null,
+            execConfig: existingExecConfigs.get(a.id) ?? null,
           })),
         )
       } catch {

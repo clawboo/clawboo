@@ -44,11 +44,17 @@ export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
           if (intent.outputLines.length > 0) {
             deps.appendOutputLines(intent.agentId, intent.outputLines, intent.sessionKey)
           }
+          // Capture runId BEFORE dispatch — dispatchIntent may clear it
+          const preCommitRunId = deps.getAgentRunId(intent.agentId)
           deps.dispatchIntent(intent)
-          // Mark the current run as closed so stale lifecycle events are ignored
-          const commitRunId = deps.getAgentRunId(intent.agentId)
-          if (commitRunId) {
-            closedRuns.set(commitRunId, Date.now() + CLOSED_RUN_TTL_MS)
+          // Mark the run as closed ONLY if dispatchIntent actually cleared the runId.
+          // When an exec approval is pending, dispatchIntent skips the status patch,
+          // keeping the runId alive — we must NOT mark it as closed or we'll
+          // incorrectly drop subsequent events for the same run (lifecycle end,
+          // second chat final after the approval resolves).
+          const postCommitRunId = deps.getAgentRunId(intent.agentId)
+          if (preCommitRunId && !postCommitRunId) {
+            closedRuns.set(preCommitRunId, Date.now() + CLOSED_RUN_TTL_MS)
           }
           break
         }
@@ -65,12 +71,15 @@ export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
               break
             }
           }
+          const preStatusRunId = deps.getAgentRunId(intent.agentId)
           deps.dispatchIntent(intent)
-          // Mark run as closed on terminal status
+          // Mark run as closed on terminal status, but only if the runId was
+          // actually cleared by dispatchIntent (same guard as commitChat — pending
+          // approvals may block the status change, keeping the run alive).
           if (intent.patch.runId === null && intent.patch.status !== 'running') {
-            const agentRunId = deps.getAgentRunId(intent.agentId)
-            if (agentRunId) {
-              closedRuns.set(agentRunId, Date.now() + CLOSED_RUN_TTL_MS)
+            const postStatusRunId = deps.getAgentRunId(intent.agentId)
+            if (preStatusRunId && !postStatusRunId) {
+              closedRuns.set(preStatusRunId, Date.now() + CLOSED_RUN_TTL_MS)
             }
           }
           break

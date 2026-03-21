@@ -28,6 +28,7 @@ import { useGatewayEvents } from './useGatewayEvents'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useApprovalsStore } from '@/stores/approvals'
+import { fetchExecConfigMap } from '@/lib/execConfigMap'
 import { useTeamStore } from '@/stores/team'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { hydrateTeams } from '@/lib/hydrateTeams'
@@ -223,8 +224,11 @@ export function GatewayBootstrap() {
         const existingTeamIds = new Map(
           useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
         )
-        // Load per-agent model overrides from openclaw.json
-        const agentModels = await fetchAgentModelMap()
+        // Load per-agent model overrides + exec configs in parallel
+        const [agentModels, execConfigs] = await Promise.all([
+          fetchAgentModelMap(),
+          fetchExecConfigMap(),
+        ])
         const mapped = result.agents.map((a) => ({
           id: a.id,
           name: a.identity?.name ?? a.name ?? a.id,
@@ -236,6 +240,7 @@ export function GatewayBootstrap() {
           runId: null,
           lastSeenAt: null,
           teamId: existingTeamIds.get(a.id) ?? null,
+          execConfig: execConfigs.get(a.id) ?? null,
         }))
         hydrateAgents(mapped)
 

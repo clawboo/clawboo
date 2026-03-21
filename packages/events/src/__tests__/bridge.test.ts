@@ -102,6 +102,40 @@ describe('classifyEvent', () => {
     }
     expect(classifyEvent(frame).agentId).toBe('approval-agent')
   })
+
+  it('extracts agentId from nested request in approval payload', () => {
+    const frame: EventFrame = {
+      type: 'event',
+      event: 'exec.approval.requested',
+      payload: {
+        id: 'req-1',
+        request: {
+          command: 'echo test',
+          agentId: 'nested-agent',
+          sessionKey: 'agent:nested-agent:main',
+        },
+        createdAtMs: 1000,
+        expiresAtMs: 2000,
+      },
+    }
+    expect(classifyEvent(frame).kind).toBe('approval')
+    expect(classifyEvent(frame).agentId).toBe('nested-agent')
+  })
+
+  it('prefers top-level agentId over nested in approval payload', () => {
+    const frame: EventFrame = {
+      type: 'event',
+      event: 'exec.approval.requested',
+      payload: {
+        agentId: 'top-level',
+        id: 'req-2',
+        request: { command: 'echo test', agentId: 'nested-agent' },
+        createdAtMs: 1000,
+        expiresAtMs: 2000,
+      },
+    }
+    expect(classifyEvent(frame).agentId).toBe('top-level')
+  })
 })
 
 describe('parseChatPayload', () => {

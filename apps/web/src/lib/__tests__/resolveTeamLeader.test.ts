@@ -14,6 +14,7 @@ function makeAgent(overrides: Partial<AgentState> = {}): AgentState {
     runId: null,
     lastSeenAt: null,
     teamId: 't1',
+    execConfig: null,
     ...overrides,
   }
 }

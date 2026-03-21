@@ -9,6 +9,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useApprovalsStore } from '@/stores/approvals'
 import { parseApprovalRequestPayload } from '@/features/approvals/useApprovalActions'
 import { getTeamChatOverride, clearTeamChatOverride } from '@/lib/sessionUtils'
+import { clearAllWakeRecords } from '@/lib/wakeTracker'
 
 // ─── useGatewayEvents ─────────────────────────────────────────────────────────
 //
@@ -41,11 +42,37 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       // Intent dispatcher — handles terminal intents that need Zustand writes
       dispatchIntent: (intent) => {
         switch (intent.kind) {
-          case 'updateAgentStatus':
+          case 'updateAgentStatus': {
+            // Don't mark agent idle while an exec approval is pending — the agent
+            // run is still alive, blocked on the approval decision. The Gateway
+            // sends a chat final event when the LLM response stream ends, but the
+            // tool execution (and therefore the full run) continues after approval.
+            const pendingApprovals = useApprovalsStore.getState().pendingApprovals
+            const hasPending = Array.from(pendingApprovals.values()).some(
+              (a) => a.agentId === intent.agentId,
+            )
+            if (hasPending && intent.patch.status !== 'running') {
+              // Keep the agent as 'running' — the approval resolution will
+              // eventually produce a real final event that sets it idle.
+              useFleetStore.getState().updateLastSeen(intent.agentId, Date.now())
+              break
+            }
             useFleetStore.getState().patchAgent(intent.agentId, intent.patch)
             useFleetStore.getState().updateLastSeen(intent.agentId, Date.now())
             break
+          }
           case 'commitChat': {
+            // Don't commit the chat final (idle/error) while an exec approval is
+            // pending — the run is still alive waiting for the approval decision.
+            const commitPending = useApprovalsStore.getState().pendingApprovals
+            const commitHasPending = Array.from(commitPending.values()).some(
+              (a) => a.agentId === intent.agentId,
+            )
+            if (commitHasPending) {
+              // Still append output lines, but skip the status patch.
+              useFleetStore.getState().updateLastSeen(intent.agentId, Date.now())
+              break
+            }
             // outputLines already handled by appendOutputLines above;
             // apply the final status patch (idle/error, runId cleared)
             useFleetStore.getState().patchAgent(intent.agentId, intent.patch)
@@ -155,10 +182,10 @@ export function useGatewayEvents(client: GatewayClient | null): void {
         try {
           const result = await cl.agents.list()
           const mainKey = result.mainKey?.trim() || 'main'
-          // Preserve existing teamId assignments — Gateway doesn't know about teams
-          const existingTeamIds = new Map(
-            useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
-          )
+          // Preserve existing teamId + execConfig assignments — Gateway doesn't know about these
+          const existing = useFleetStore.getState().agents
+          const existingTeamIds = new Map(existing.map((a) => [a.id, a.teamId]))
+          const existingExecConfigs = new Map(existing.map((a) => [a.id, a.execConfig]))
           useFleetStore.getState().hydrateAgents(
             result.agents.map((a) => ({
               id: a.id,
@@ -171,6 +198,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
               runId: null,
               lastSeenAt: null,
               teamId: existingTeamIds.get(a.id) ?? null,
+              execConfig: existingExecConfigs.get(a.id) ?? null,
             })),
           )
         } catch {
@@ -278,6 +306,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       unsubCost()
       patchQueue.dispose()
       handler.dispose()
+      clearAllWakeRecords()
     }
   }, [client])
 }

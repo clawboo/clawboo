@@ -59,6 +59,7 @@ export const agents = sqliteTable(
     gatewayId: text('gateway_id').notNull(),
     avatarSeed: text('avatar_seed'),
     personalityConfig: text('personality_config'), // JSON: slider values
+    execConfig: text('exec_config'), // JSON: { execAsk, execSecurity }
     teamId: text('team_id').references(() => teams.id),
     status: text('status').notNull().default('idle'),
     createdAt: integer('created_at').notNull(),

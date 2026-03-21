@@ -159,6 +159,11 @@ export function createDb(dbPath: string): ClawbooDb {
   } catch {
     /* column already exists */
   }
+  try {
+    sqlite.exec('ALTER TABLE agents ADD COLUMN exec_config TEXT')
+  } catch {
+    /* column already exists */
+  }
 
   return drizzle(sqlite, { schema })
 }

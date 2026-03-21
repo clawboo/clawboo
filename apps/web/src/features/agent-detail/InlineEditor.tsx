@@ -17,6 +17,7 @@ import type { AgentFileName } from '@clawboo/protocol'
 import { clawbooEditorTheme } from '@/features/editor/editorTheme'
 import { useAgentFiles, EDITOR_TABS } from '@/features/editor/useAgentFiles'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
+import { ExecSettings } from '@/features/settings/ExecSettings'
 
 // ─── Tab types ───────────────────────────────────────────────────────────────
 
@@ -278,6 +279,8 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
         {activeTab === 'personality' && (
           <div style={{ height: '100%', overflowY: 'auto', padding: '12px 16px' }}>
             <PersonalitySliders agentId={agentId} />
+            <div style={{ margin: '16px 0', borderTop: '1px solid rgba(255,255,255,0.06)' }} />
+            <ExecSettings agentId={agentId} />
           </div>
         )}
 

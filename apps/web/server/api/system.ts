@@ -669,10 +669,24 @@ export function openclawConfigGET(_req: Request, res: Response): void {
       }
     }
 
+    // Extract exec config for easy client consumption
+    const tools =
+      config && typeof config === 'object' ? (config as Record<string, unknown>)['tools'] : null
+    const execSection =
+      tools && typeof tools === 'object' && !Array.isArray(tools)
+        ? (tools as Record<string, unknown>)['exec']
+        : null
+    const execConfig =
+      execSection && typeof execSection === 'object' && !Array.isArray(execSection)
+        ? (execSection as Record<string, unknown>)
+        : null
+
     res.json({
       config,
       env,
       version: oc.version,
+      execAsk: execConfig?.['ask'] ?? null,
+      execSecurity: execConfig?.['security'] ?? null,
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -765,6 +779,18 @@ export async function openclawConfigPATCH(req: Request, res: Response): Promise<
           }
         }
       }
+    }
+
+    // Exec config (tools.exec.ask, tools.exec.security)
+    const exec = body['exec']
+    if (exec && typeof exec === 'object' && !Array.isArray(exec)) {
+      if (!config['tools'] || typeof config['tools'] !== 'object') config['tools'] = {}
+      const tools = config['tools'] as Record<string, unknown>
+      if (!tools['exec'] || typeof tools['exec'] !== 'object') tools['exec'] = {}
+      const execCfg = tools['exec'] as Record<string, unknown>
+      const e = exec as Record<string, unknown>
+      if (typeof e['ask'] === 'string') execCfg['ask'] = e['ask']
+      if (typeof e['security'] === 'string') execCfg['security'] = e['security']
     }
 
     // Agent-to-agent coordination toggle

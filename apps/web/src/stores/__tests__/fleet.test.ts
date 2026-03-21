@@ -16,6 +16,7 @@ function makeAgent(overrides: Partial<AgentState> = {}): AgentState {
     runId: null,
     lastSeenAt: null,
     teamId: null,
+    execConfig: null,
     ...overrides,
   }
 }
@@ -133,6 +134,27 @@ describe('useFleetStore', () => {
       useFleetStore.getState().selectAgent('a1')
       useFleetStore.getState().removeAgent('a2')
       expect(useFleetStore.getState().selectedAgentId).toBe('a1')
+    })
+  })
+
+  describe('updateExecConfig', () => {
+    it('sets execConfig for the correct agent', () => {
+      useFleetStore.getState().hydrateAgents(twoAgents())
+      useFleetStore.getState().updateExecConfig('a1', { execAsk: 'always' })
+      expect(useFleetStore.getState().agents[0].execConfig).toEqual({ execAsk: 'always' })
+    })
+
+    it('does not affect other agents', () => {
+      useFleetStore.getState().hydrateAgents(twoAgents())
+      useFleetStore.getState().updateExecConfig('a1', { execAsk: 'always' })
+      expect(useFleetStore.getState().agents[1].execConfig).toBeNull()
+    })
+
+    it('clears execConfig with null', () => {
+      useFleetStore.getState().hydrateAgents(twoAgents())
+      useFleetStore.getState().updateExecConfig('a1', { execAsk: 'always' })
+      useFleetStore.getState().updateExecConfig('a1', null)
+      expect(useFleetStore.getState().agents[0].execConfig).toBeNull()
     })
   })
 
