@@ -8,6 +8,7 @@ import { useToastStore } from '@/stores/toast'
 import { AgentModelSelector } from '@/features/agent-detail/AgentModelSelector'
 import { sendChatMessage } from './chatSendOperation'
 import { groupEntriesToBlocks, MessageList, MessageComposer } from './chatComponents'
+import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
 
@@ -152,6 +153,9 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
         agentName={agent.name}
         isRunning={isRunning}
       />
+
+      {/* Inline approval cards for this agent */}
+      <InlineApprovalTray agentId={agent.id} />
 
       {/* Composer */}
       <MessageComposer

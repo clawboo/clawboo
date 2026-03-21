@@ -20,6 +20,7 @@ import {
   type MessageComposerHandle,
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
+import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 
 // ─── GroupChatPanel ──────────────────────────────────────────────────────────
 
@@ -258,6 +259,9 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
 
       {/* Agent chips for quick tagging */}
       {teamAgents.length > 0 && <AgentChips agents={mentionAgentList} onTag={handleChipTag} />}
+
+      {/* Inline approval cards for team agents */}
+      <InlineApprovalTray teamId={teamId} />
 
       {/* Composer */}
       <MessageComposer

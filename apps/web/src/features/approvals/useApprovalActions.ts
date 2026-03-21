@@ -4,7 +4,9 @@ import { useApprovalsStore } from '@/stores/approvals'
 import type { ApprovalDecision, ApprovalRequest } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 import type { DbApprovalHistory } from '@clawboo/db'
+import { GatewayResponseError } from '@clawboo/gateway-client'
 import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@/lib/execSettingsForGateway'
+import { getTeamChatOverride, setTeamChatOverride } from '@/lib/sessionUtils'
 
 // ─── Parsers ─────────────────────────────────────────────────────────────────
 
@@ -133,7 +135,11 @@ export function useApprovalActions() {
         //   trigger another approval loop, then restore settings after the agent finishes.
         if (agentId && (decision === 'allow-once' || decision === 'allow-always')) {
           const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
-          const sessionKey = agent?.sessionKey
+          // Resolve the correct sessionKey: if the approval originated from group chat,
+          // the teamChatOverride is still active (commitChat preserves it while approvals
+          // are pending). Use the team session so the followup response goes to group chat.
+          const teamOverrideKey = getTeamChatOverride(agentId)
+          const sessionKey = teamOverrideKey ?? agent?.sessionKey
           const activeRunId = agent?.runId ?? null
 
           // 1. Wait for the original agent run to finish (returns "approval pending" tool result)
@@ -174,6 +180,13 @@ export function useApprovalActions() {
                 await upsertExecApprovalPolicy(client, agentId, 'off')
               }
               // For allow-always: command is already on the allowlist — no changes needed.
+
+              // Re-set team chat override before the followup send so the Gateway's
+              // response events (which arrive with the main sessionKey) are redirected
+              // to the team chat transcript. Same pattern as sendGroupChatMessage.
+              if (teamOverrideKey) {
+                setTeamChatOverride(agentId, teamOverrideKey)
+              }
 
               // Send followup telling the agent to re-run the command.
               // The agent will execute it, get the real output, and share the results.
@@ -230,6 +243,16 @@ export function useApprovalActions() {
           }
         }
       } catch (err) {
+        // Gateway returns "unknown approval id" when the approval has already expired
+        // (timeout is Gateway-side, ~120s). Silently remove the card instead of
+        // showing a confusing error — matches OpenClaw Studio's behavior.
+        if (
+          err instanceof GatewayResponseError &&
+          /unknown.*approval.*id|expired/i.test(err.message)
+        ) {
+          removePending(id)
+          return
+        }
         const message = err instanceof Error ? err.message : 'Failed to resolve exec approval.'
         setResolving(id, false, message)
       }

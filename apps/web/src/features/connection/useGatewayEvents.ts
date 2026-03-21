@@ -6,7 +6,7 @@ import { extractText, type TranscriptEntry } from '@clawboo/protocol'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
-import { useApprovalsStore } from '@/stores/approvals'
+import { useApprovalsStore, type ApprovalRequest } from '@/stores/approvals'
 import { parseApprovalRequestPayload } from '@/features/approvals/useApprovalActions'
 import { getTeamChatOverride, clearTeamChatOverride } from '@/lib/sessionUtils'
 import { clearAllWakeRecords } from '@/lib/wakeTracker'
@@ -301,9 +301,61 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       })
     })
 
+    // ── Periodic expiry cleanup for pending approvals ──────────────────────
+    // The Gateway does NOT emit exec.approval.resolved when an approval times
+    // out — it resolves internally with null. Without this sweep, expired
+    // approval cards would linger in the store indefinitely.
+    //
+    // Strategy: snapshot pending approvals BEFORE removing, find expired ones,
+    // inject system messages into chat, then call removeExpired to clean store.
+    const expiryTimer = setInterval(() => {
+      const pending = useApprovalsStore.getState().pendingApprovals
+      if (pending.size === 0) return
+
+      const now = Date.now()
+      const expired: ApprovalRequest[] = []
+      for (const approval of pending.values()) {
+        if (now > approval.expiresAtMs) {
+          expired.push(approval)
+        }
+      }
+      if (expired.length === 0) return
+
+      // Inject a system message into each expired approval's chat transcript
+      // so the user knows it timed out and needs to resend the command.
+      for (const approval of expired) {
+        const agentId = approval.agentId
+        if (!agentId) continue
+
+        const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
+        const teamOverride = getTeamChatOverride(agentId)
+        const sessionKey = teamOverride ?? agent?.sessionKey
+        if (!sessionKey) continue
+
+        const entry: TranscriptEntry = {
+          entryId: crypto.randomUUID(),
+          runId: null,
+          sessionKey,
+          kind: 'meta',
+          role: 'system',
+          text: `Exec approval for \`${approval.command}\` timed out. Ask the agent to run the command again if needed.`,
+          source: 'local-send',
+          timestampMs: now,
+          sequenceKey: now,
+          confirmed: true,
+          fingerprint: crypto.randomUUID(),
+        }
+        useChatStore.getState().appendTranscript(sessionKey, [entry])
+      }
+
+      // Now remove expired approvals from the store (cards disappear)
+      useApprovalsStore.getState().removeExpired()
+    }, 5_000)
+
     return () => {
       unsub()
       unsubCost()
+      clearInterval(expiryTimer)
       patchQueue.dispose()
       handler.dispose()
       clearAllWakeRecords()
