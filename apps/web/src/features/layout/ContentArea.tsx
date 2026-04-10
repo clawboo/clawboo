@@ -8,6 +8,7 @@ import { MarketplacePanel } from '@/features/marketplace/MarketplacePanel'
 import { MaintenancePanel } from '@/features/maintenance'
 import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
 import { AgentDetailView } from '@/features/agent-detail'
+import { GroupChatView } from '@/features/group-chat/GroupChatView'
 import { WelcomeState } from './WelcomeState'
 import { useViewStore } from '@/stores/view'
 import { useEditorStore } from '@/stores/editor'
@@ -75,6 +76,15 @@ export function ContentArea() {
     }
   }, [viewMode, booZeroAgentId, agents])
 
+  // Edge case: team deleted while viewing its group chat → navigate to welcome
+  useEffect(() => {
+    if (viewMode.type === 'groupChat') {
+      if (!teams.some((t) => t.id === viewMode.teamId)) {
+        useViewStore.getState().setViewMode({ type: 'welcome' })
+      }
+    }
+  }, [viewMode, teams])
+
   // ── Global keyboard shortcuts ──────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -88,7 +98,11 @@ export function ContentArea() {
       // Escape — deselect agent, go to welcome (only if no overlay is open)
       if (e.key === 'Escape') {
         if (useEditorStore.getState().isOpen) return
-        if (viewMode.type === 'agent' || viewMode.type === 'booZero') {
+        if (
+          viewMode.type === 'agent' ||
+          viewMode.type === 'booZero' ||
+          viewMode.type === 'groupChat'
+        ) {
           e.preventDefault()
           useFleetStore.getState().selectAgent(null)
           useViewStore.getState().setViewMode({ type: 'welcome' })
@@ -135,9 +149,17 @@ export function ContentArea() {
       viewKey = 'booZero'
       viewContent = booZeroAgentId ? <AgentDetailView agentId={booZeroAgentId} /> : <WelcomeState />
       break
+    case 'groupChat':
+      viewKey = `group-chat-${viewMode.teamId}`
+      viewContent = <GroupChatView teamId={viewMode.teamId} />
+      break
     case 'nav':
       viewKey = `nav-${viewMode.view}`
       viewContent = NAV_PANELS[viewMode.view]()
+      break
+    default:
+      viewKey = 'welcome'
+      viewContent = <WelcomeState />
       break
   }
 

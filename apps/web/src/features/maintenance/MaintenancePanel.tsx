@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, type CSSProperties } from 'react'
-import { Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2 } from 'lucide-react'
 import { GatewayControls } from './GatewayControls'
 import { ModelSelector } from './ModelSelector'
 import { ApiKeyManager } from './ApiKeyManager'
@@ -201,6 +201,153 @@ function AgentCoordinationToggle() {
       >
         When enabled, agents can use routing defined in AGENTS.md to send messages to other agents
         via the Gateway&apos;s sessions_send tool.
+      </p>
+    </div>
+  )
+}
+
+// ─── Command Approval Default ────────────────────────────────────────────────
+
+const EXEC_ASK_OPTIONS = [
+  { value: 'off', label: 'Run Freely', description: 'Agents execute commands without asking' },
+  {
+    value: 'on-miss',
+    label: 'Ask for Unknown',
+    description: 'Agents ask approval for commands not in allowlist',
+  },
+  { value: 'always', label: 'Always Ask', description: 'Agents ask approval for every command' },
+]
+
+function CommandApprovalDefault() {
+  const client = useConnectionStore((s) => s.client)
+  const addToast = useToastStore((s) => s.addToast)
+  const [execAsk, setExecAsk] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  // Fetch current value from openclaw.json
+  useEffect(() => {
+    fetch('/api/system/openclaw-config')
+      .then((r) => r.json() as Promise<{ config?: { tools?: { exec?: { ask?: string } } } }>)
+      .then((data) => {
+        const ask = data?.config?.tools?.exec?.ask
+        setExecAsk(typeof ask === 'string' ? ask : 'off')
+      })
+      .catch(() => {
+        // Can't read config — leave as null (hidden)
+      })
+  }, [])
+
+  const handleChange = useCallback(
+    async (value: string) => {
+      setSaving(true)
+      const prev = execAsk
+      setExecAsk(value)
+      try {
+        const res = await fetch('/api/system/openclaw-config', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ exec: { ask: value } }),
+        })
+        if (!res.ok) throw new Error(`Server returned ${res.status}`)
+        addToast({
+          message: `Default command approval set to "${EXEC_ASK_OPTIONS.find((o) => o.value === value)?.label ?? value}"`,
+          type: 'success',
+        })
+      } catch {
+        setExecAsk(prev)
+        addToast({ message: 'Failed to update Gateway config', type: 'error' })
+      } finally {
+        setSaving(false)
+      }
+
+      // Best-effort Gateway hot reload
+      try {
+        if (client) await client.config.get()
+      } catch {
+        // Gateway may be disconnected — config still saved to disk
+      }
+    },
+    [client, execAsk, addToast],
+  )
+
+  if (!client || execAsk === null) return null
+
+  const selected = EXEC_ASK_OPTIONS.find((o) => o.value === execAsk) ?? EXEC_ASK_OPTIONS[0]
+
+  return (
+    <div style={{ margin: '24px 0 28px' }}>
+      <SectionHeading>Command Approval</SectionHeading>
+      <div
+        style={{
+          marginTop: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <span style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)' }}>Default:</span>
+        <div style={{ position: 'relative', flex: 1, maxWidth: 220 }}>
+          <select
+            value={execAsk}
+            disabled={saving}
+            onChange={(e) => void handleChange(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '7px 32px 7px 10px',
+              borderRadius: 6,
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: '#0A0E1A',
+              color: '#E8E8E8',
+              fontSize: 12,
+              fontWeight: 500,
+              fontFamily: 'inherit',
+              cursor: saving ? 'default' : 'pointer',
+              appearance: 'none',
+              outline: 'none',
+              opacity: saving ? 0.6 : 1,
+            }}
+          >
+            {EXEC_ASK_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            style={{
+              position: 'absolute',
+              right: 10,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 14,
+              height: 14,
+              color: 'rgba(232,232,232,0.4)',
+              pointerEvents: 'none',
+            }}
+            strokeWidth={2}
+          />
+        </div>
+      </div>
+      <p
+        style={{
+          marginTop: 6,
+          fontSize: 10,
+          color: 'rgba(232,232,232,0.3)',
+          lineHeight: 1.4,
+        }}
+      >
+        {selected.description}
+      </p>
+      <p
+        style={{
+          marginTop: 8,
+          fontSize: 11,
+          color: 'rgba(232,232,232,0.3)',
+          lineHeight: 1.5,
+        }}
+      >
+        Default for all agents — individual agents can override this in their settings (Personality
+        tab → Execution Permissions).
       </p>
     </div>
   )
@@ -428,7 +575,12 @@ export function MaintenancePanel() {
 
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
 
-      {/* Section 5: System Info */}
+      {/* Section 5: Command Approval */}
+      <CommandApprovalDefault />
+
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+
+      {/* Section 6: System Info */}
       <div style={{ margin: '24px 0 28px' }}>
         <SectionHeading>System</SectionHeading>
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>

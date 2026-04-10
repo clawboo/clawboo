@@ -277,21 +277,60 @@ export function ApprovalsPanel() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 height: '100%',
-                gap: 8,
-                paddingTop: 60,
+                gap: 10,
+                paddingTop: 48,
+                paddingLeft: 24,
+                paddingRight: 24,
               }}
             >
               <span style={{ fontSize: 28 }}>✅</span>
               <span
                 style={{
                   fontSize: 13,
-                  color: 'rgba(232,232,232,0.38)',
+                  fontWeight: 600,
+                  color: 'rgba(232,232,232,0.45)',
                   textAlign: 'center',
-                  lineHeight: 1.5,
                 }}
               >
                 No pending approvals
               </span>
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 11,
+                  color: 'rgba(232,232,232,0.3)',
+                  textAlign: 'center',
+                  lineHeight: 1.7,
+                  maxWidth: 280,
+                }}
+              >
+                <p style={{ margin: '0 0 8px' }}>To see approvals here:</p>
+                <ol
+                  style={{
+                    margin: 0,
+                    paddingLeft: 18,
+                    textAlign: 'left',
+                  }}
+                >
+                  <li style={{ marginBottom: 4 }}>
+                    Open an agent → Personality tab →{' '}
+                    <strong style={{ color: 'rgba(232,232,232,0.45)' }}>
+                      Execution Permissions
+                    </strong>
+                  </li>
+                  <li style={{ marginBottom: 4 }}>
+                    Set &quot;Command Execution&quot; to{' '}
+                    <strong style={{ color: 'rgba(232,232,232,0.45)' }}>Always Ask</strong> or{' '}
+                    <strong style={{ color: 'rgba(232,232,232,0.45)' }}>Ask for Unknown</strong>
+                  </li>
+                  <li>
+                    Ask the agent to run a command (e.g., &quot;List files in this directory&quot;)
+                  </li>
+                </ol>
+                <p style={{ margin: '10px 0 0', fontSize: 10, color: 'rgba(232,232,232,0.22)' }}>
+                  The agent will pause and ask for your approval before executing.
+                </p>
+              </div>
             </motion.div>
           ) : (
             approvals.map((approval) => <ApprovalCard key={approval.id} approval={approval} />)

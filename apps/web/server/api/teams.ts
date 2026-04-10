@@ -19,6 +19,7 @@ export function teamsGET(req: Request, res: Response): void {
         icon: teams.icon,
         color: teams.color,
         templateId: teams.templateId,
+        leaderAgentId: teams.leaderAgentId,
         isArchived: teams.isArchived,
         createdAt: teams.createdAt,
         updatedAt: teams.updatedAt,
@@ -49,6 +50,7 @@ interface CreateBody {
   icon: string
   color: string
   templateId?: string
+  leaderAgentId?: string
 }
 
 export function teamsPOST(req: Request, res: Response): void {
@@ -58,7 +60,7 @@ export function teamsPOST(req: Request, res: Response): void {
     return
   }
 
-  const { name, icon, color, templateId } = body
+  const { name, icon, color, templateId, leaderAgentId } = body
   if (!name || !icon || !color) {
     res.status(400).json({ error: 'name, icon, and color are required' })
     return
@@ -77,6 +79,7 @@ export function teamsPOST(req: Request, res: Response): void {
         icon,
         color,
         templateId: templateId ?? null,
+        leaderAgentId: leaderAgentId ?? null,
         createdAt: now,
         updatedAt: now,
       })
@@ -89,6 +92,7 @@ export function teamsPOST(req: Request, res: Response): void {
         icon,
         color,
         templateId: templateId ?? null,
+        leaderAgentId: leaderAgentId ?? null,
         isArchived: 0,
         agentCount: 0,
         createdAt: now,
@@ -108,6 +112,7 @@ interface PatchBody {
   icon?: string
   color?: string
   isArchived?: number
+  leaderAgentId?: string | null
 }
 
 export function teamsPATCH(req: Request, res: Response): void {
@@ -138,6 +143,7 @@ export function teamsPATCH(req: Request, res: Response): void {
     if (body.icon !== undefined) patch['icon'] = body.icon
     if (body.color !== undefined) patch['color'] = body.color
     if (body.isArchived !== undefined) patch['isArchived'] = body.isArchived ? 1 : 0
+    if (body.leaderAgentId !== undefined) patch['leaderAgentId'] = body.leaderAgentId
 
     db.update(teams).set(patch).where(eq(teams.id, teamId)).run()
 
@@ -148,6 +154,7 @@ export function teamsPATCH(req: Request, res: Response): void {
         icon: teams.icon,
         color: teams.color,
         templateId: teams.templateId,
+        leaderAgentId: teams.leaderAgentId,
         isArchived: teams.isArchived,
         createdAt: teams.createdAt,
         updatedAt: teams.updatedAt,

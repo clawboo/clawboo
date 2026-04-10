@@ -4,6 +4,9 @@ import { useApprovalsStore } from '@/stores/approvals'
 import type { ApprovalDecision, ApprovalRequest } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 import type { DbApprovalHistory } from '@clawboo/db'
+import { GatewayResponseError } from '@clawboo/gateway-client'
+import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@/lib/execSettingsForGateway'
+import { getTeamChatOverride, setTeamChatOverride } from '@/lib/sessionUtils'
 
 // ─── Parsers ─────────────────────────────────────────────────────────────────
 
@@ -114,7 +117,142 @@ export function useApprovalActions() {
         }
 
         removePending(id)
+
+        // After an allow decision, the Gateway runs the approved command asynchronously
+        // and tries to send a followup via its internal `agent` method with deliver:true.
+        // In webchat-only setups (no Slack/Discord/Telegram configured), this fails with
+        // "Channel is required (no configured channels detected)" because deliver:true
+        // requires a messaging channel. The error is silently swallowed (.catch(() => {})),
+        // but the followup agent run never starts — the agent stays idle and the command
+        // output is permanently lost (never injected into the session).
+        //
+        // Workaround: wait for the initial run to end + command to execute, then check
+        // if the Gateway's followup succeeded (agent is running). If not, tell the agent
+        // to re-run the command itself so it can capture the output directly.
+        //
+        // For allow-always: the command pattern is on the allowlist, so re-running works.
+        // For allow-once: we temporarily disable exec approval so the re-run doesn't
+        //   trigger another approval loop, then restore settings after the agent finishes.
+        if (agentId && (decision === 'allow-once' || decision === 'allow-always')) {
+          const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
+          // Resolve the correct sessionKey: if the approval originated from group chat,
+          // the teamChatOverride is still active (commitChat preserves it while approvals
+          // are pending). Use the team session so the followup response goes to group chat.
+          const teamOverrideKey = getTeamChatOverride(agentId)
+          const sessionKey = teamOverrideKey ?? agent?.sessionKey
+          const activeRunId = agent?.runId ?? null
+
+          // 1. Wait for the original agent run to finish (returns "approval pending" tool result)
+          if (activeRunId) {
+            try {
+              await client.call('agent.wait', { runId: activeRunId, timeoutMs: 30_000 })
+            } catch {
+              // Timeout or disconnect — continue with followup logic
+            }
+          }
+
+          // 2. Wait for the Gateway's async exec process to complete.
+          //    The Gateway runs the command, captures output, then tries sendExecApprovalFollowup.
+          //    Give it time to finish before checking if the agent responded.
+          await new Promise((resolve) => setTimeout(resolve, 5_000))
+
+          // 3. Check if the Gateway's followup succeeded (agent started a new run)
+          const agentAfter = useFleetStore.getState().agents.find((a) => a.id === agentId)
+          const agentIsResponding = agentAfter?.status === 'running'
+
+          if (!agentIsResponding && sessionKey) {
+            // Gateway followup failed — the exec output is lost.
+            // Tell the agent to re-run the command so it can capture the output itself.
+            const cmd = approval?.command ?? 'the requested command'
+            const originalExecAsk = agent?.execConfig?.execAsk ?? 'always'
+
+            try {
+              // For allow-once: temporarily disable exec approval so the re-run
+              // doesn't trigger another approval loop. Both session-level and
+              // file-level policies must be updated — the Gateway checks both.
+              if (decision === 'allow-once') {
+                await client.call('sessions.patch', {
+                  key: sessionKey,
+                  execHost: 'gateway',
+                  execSecurity: 'full',
+                  execAsk: 'off',
+                })
+                await upsertExecApprovalPolicy(client, agentId, 'off')
+              }
+              // For allow-always: command is already on the allowlist — no changes needed.
+
+              // Re-set team chat override before the followup send so the Gateway's
+              // response events (which arrive with the main sessionKey) are redirected
+              // to the team chat transcript. Same pattern as sendGroupChatMessage.
+              if (teamOverrideKey) {
+                setTeamChatOverride(agentId, teamOverrideKey)
+              }
+
+              // Send followup telling the agent to re-run the command.
+              // The agent will execute it, get the real output, and share the results.
+              await client.call('chat.send', {
+                sessionKey,
+                message: [
+                  `Your command \`${cmd}\` was approved.`,
+                  'The system executed it but the output was not captured due to a technical limitation.',
+                  `Please run this exact command now and share the output with me: \`${cmd}\``,
+                ].join(' '),
+                deliver: false,
+                idempotencyKey: crypto.randomUUID(),
+              })
+
+              // For allow-once: wait for the re-run to complete, then restore settings
+              if (decision === 'allow-once') {
+                for (let i = 0; i < 60; i++) {
+                  await new Promise((r) => setTimeout(r, 1_000))
+                  const a = useFleetStore.getState().agents.find((x) => x.id === agentId)
+                  if (!a || a.status === 'idle' || a.status === 'error') break
+                }
+                // Restore exec approval settings
+                try {
+                  await client.call('sessions.patch', {
+                    key: sessionKey,
+                    ...resolveExecPatchParams(originalExecAsk),
+                  })
+                  await upsertExecApprovalPolicy(client, agentId, originalExecAsk)
+                } catch {
+                  // Best-effort restore — settings page will re-apply on next send
+                }
+              }
+            } catch {
+              // Non-fatal — best-effort restore on error
+              if (decision === 'allow-once') {
+                try {
+                  await client.call('sessions.patch', {
+                    key: sessionKey,
+                    ...resolveExecPatchParams(originalExecAsk),
+                  })
+                  await upsertExecApprovalPolicy(client, agentId, originalExecAsk)
+                } catch {
+                  // Settings page will re-apply on next send
+                }
+              }
+            }
+          }
+
+          // 4. Best-effort history refresh to catch any events we missed
+          try {
+            await client.sessions.list(agentId)
+          } catch {
+            // Non-fatal — transcript is built from events
+          }
+        }
       } catch (err) {
+        // Gateway returns "unknown approval id" when the approval has already expired
+        // (timeout is Gateway-side, ~120s). Silently remove the card instead of
+        // showing a confusing error — matches OpenClaw Studio's behavior.
+        if (
+          err instanceof GatewayResponseError &&
+          /unknown.*approval.*id|expired/i.test(err.message)
+        ) {
+          removePending(id)
+          return
+        }
         const message = err instanceof Error ? err.message : 'Failed to resolve exec approval.'
         setResolving(id, false, message)
       }

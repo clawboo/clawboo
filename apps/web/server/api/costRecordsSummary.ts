@@ -13,21 +13,27 @@ function dayStart(daysAgo: number): number {
 interface TimeSeries {
   date: string
   cost: number
+  tokens: number
 }
 
-interface AgentCostSummary {
+interface AgentTokenSummary {
   agentId: string
   agentName: string
   totalCost: number
   totalTokens: number
+  inputTokens: number
+  outputTokens: number
   messageCount: number
 }
 
-interface CostSummaryResponse {
+interface TokenSummaryResponse {
   totalToday: number
   totalWeek: number
   totalMonth: number
-  byAgent: AgentCostSummary[]
+  tokensToday: number
+  tokensWeek: number
+  tokensMonth: number
+  byAgent: AgentTokenSummary[]
   timeSeries: TimeSeries[]
 }
 
@@ -61,28 +67,44 @@ export async function costRecordsSummaryGET(_req: Request, res: Response): Promi
     let totalToday = 0
     let totalWeek = 0
     let totalMonth = 0
+    let tokensToday = 0
+    let tokensWeek = 0
+    let tokensMonth = 0
 
-    const agentMap = new Map<string, AgentCostSummary>()
-    const dayMap = new Map<string, number>()
+    const agentMap = new Map<string, AgentTokenSummary>()
+    const dayMap = new Map<string, { cost: number; tokens: number }>()
 
     for (const row of rows) {
       const ts = row.createdAt
+      const rowTokens = row.inputTokens + row.outputTokens
+
       totalMonth += row.costUsd
-      if (ts >= weekStart) totalWeek += row.costUsd
-      if (ts >= todayStart) totalToday += row.costUsd
+      tokensMonth += rowTokens
+      if (ts >= weekStart) {
+        totalWeek += row.costUsd
+        tokensWeek += rowTokens
+      }
+      if (ts >= todayStart) {
+        totalToday += row.costUsd
+        tokensToday += rowTokens
+      }
 
       // Per-agent accumulation
       const existing = agentMap.get(row.agentId)
       if (existing) {
         existing.totalCost += row.costUsd
-        existing.totalTokens += row.inputTokens + row.outputTokens
+        existing.totalTokens += rowTokens
+        existing.inputTokens += row.inputTokens
+        existing.outputTokens += row.outputTokens
         existing.messageCount++
       } else {
         agentMap.set(row.agentId, {
           agentId: row.agentId,
           agentName: row.agentName ?? row.agentId,
           totalCost: row.costUsd,
-          totalTokens: row.inputTokens + row.outputTokens,
+          totalTokens: rowTokens,
+          inputTokens: row.inputTokens,
+          outputTokens: row.outputTokens,
           messageCount: 1,
         })
       }
@@ -92,7 +114,10 @@ export async function costRecordsSummaryGET(_req: Request, res: Response): Promi
         month: 'short',
         day: 'numeric',
       })
-      dayMap.set(dateKey, (dayMap.get(dateKey) ?? 0) + row.costUsd)
+      const dayEntry = dayMap.get(dateKey) ?? { cost: 0, tokens: 0 }
+      dayEntry.cost += row.costUsd
+      dayEntry.tokens += rowTokens
+      dayMap.set(dateKey, dayEntry)
     }
 
     // Build 30-day time series, filling zeros for empty days
@@ -102,15 +127,19 @@ export async function costRecordsSummaryGET(_req: Request, res: Response): Promi
       d.setDate(d.getDate() - i)
       d.setHours(0, 0, 0, 0)
       const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      timeSeries.push({ date: label, cost: dayMap.get(label) ?? 0 })
+      const entry = dayMap.get(label)
+      timeSeries.push({ date: label, cost: entry?.cost ?? 0, tokens: entry?.tokens ?? 0 })
     }
 
-    const byAgent = Array.from(agentMap.values()).sort((a, b) => b.totalCost - a.totalCost)
+    const byAgent = Array.from(agentMap.values()).sort((a, b) => b.totalTokens - a.totalTokens)
 
-    const response: CostSummaryResponse = {
+    const response: TokenSummaryResponse = {
       totalToday,
       totalWeek,
       totalMonth,
+      tokensToday,
+      tokensWeek,
+      tokensMonth,
       byAgent,
       timeSeries,
     }

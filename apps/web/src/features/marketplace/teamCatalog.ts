@@ -9,6 +9,31 @@ export const TEAM_CATALOG: TeamTemplate[] = ALL_TEMPLATES
 /** Builtin templates shipped with Clawboo — used by OnboardingWizard. */
 export const STARTER_TEMPLATES: TeamTemplate[] = TEAM_CATALOG.filter((t) => t.source === 'clawboo')
 
+// ─── Browsable catalog (sorted: agency-agents > awesome-openclaw > clawboo) ─
+
+const SOURCE_PRIORITY: Record<TemplateSource, number> = {
+  'agency-agents': 0,
+  'awesome-openclaw': 1,
+  clawboo: 2,
+}
+
+/** All templates sorted by source priority — agency-agents first, clawboo last. */
+export const BROWSABLE_TEAM_CATALOG: TeamTemplate[] = [...TEAM_CATALOG].sort(
+  (a, b) => (SOURCE_PRIORITY[a.source] ?? 9) - (SOURCE_PRIORITY[b.source] ?? 9),
+)
+
+/** Search the sorted browsable catalog by name, description, or tags. */
+export function searchBrowsableCatalog(query: string): TeamTemplate[] {
+  const q = query.toLowerCase().trim()
+  if (!q) return BROWSABLE_TEAM_CATALOG
+  return BROWSABLE_TEAM_CATALOG.filter(
+    (t) =>
+      t.name.toLowerCase().includes(q) ||
+      t.description.toLowerCase().includes(q) ||
+      t.tags.some((tag) => tag.toLowerCase().includes(q)),
+  )
+}
+
 // ─── Lookups ────────────────────────────────────────────────────────────────
 
 export function searchTeamCatalog(query: string): TeamTemplate[] {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Save } from 'lucide-react'
 import {
   EditorView,
@@ -15,28 +15,58 @@ import { highlightSelectionMatches } from '@codemirror/search'
 import { AGENT_FILE_META, AGENT_FILE_PLACEHOLDERS } from '@clawboo/protocol'
 import type { AgentFileName } from '@clawboo/protocol'
 import { clawbooEditorTheme } from '@/features/editor/editorTheme'
-import { useAgentFiles, EDITOR_TABS } from '@/features/editor/useAgentFiles'
+import { useAgentFiles, CORE_FILE_TABS, ALL_FILE_TABS } from '@/features/editor/useAgentFiles'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
+import { ExecSettings } from '@/features/settings/ExecSettings'
 
 // ─── Tab types ───────────────────────────────────────────────────────────────
 
-type FileTab = (typeof EDITOR_TABS)[number]
-type EditorTab = 'personality' | FileTab
-const ALL_TABS: EditorTab[] = ['personality', ...EDITOR_TABS]
+type EditorTab = 'personality' | 'permissions' | AgentFileName
 
-const TAB_LABELS: Record<EditorTab, string> = {
-  personality: 'Personality',
+const FILE_TAB_LABELS: Record<AgentFileName, string> = {
   'SOUL.md': 'SOUL',
   'IDENTITY.md': 'IDENTITY',
   'TOOLS.md': 'TOOLS',
   'AGENTS.md': 'AGENTS',
+  'USER.md': 'USER',
+  'HEARTBEAT.md': 'HEARTBEAT',
+  'MEMORY.md': 'MEMORY',
+}
+
+function getTabLabel(tab: EditorTab): string {
+  if (tab === 'personality') return 'Personality'
+  if (tab === 'permissions') return 'Permissions'
+  return FILE_TAB_LABELS[tab] ?? tab.replace('.md', '')
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function InlineEditor({ agentId, agentName }: { agentId: string; agentName: string }) {
-  const { files, loading, saving, isDirty, anyDirty, handleSave, saveAllDirty, updateFileContent } =
-    useAgentFiles(agentId)
+  const {
+    files,
+    loading,
+    saving,
+    isDirty,
+    anyDirty,
+    fileExists,
+    handleSave,
+    saveAllDirty,
+    updateFileContent,
+  } = useAgentFiles(agentId)
+
+  // Build dynamic tab list: core file tabs always shown + extras only when non-empty
+  const visibleFileTabs = useMemo(() => {
+    const coreTabs: AgentFileName[] = [...CORE_FILE_TABS]
+    const extras = ALL_FILE_TABS.filter(
+      (tab) => !(CORE_FILE_TABS as readonly string[]).includes(tab) && fileExists(tab),
+    )
+    return [...coreTabs, ...extras]
+  }, [fileExists])
+
+  const allTabs: EditorTab[] = useMemo(
+    () => ['personality', 'permissions', ...visibleFileTabs],
+    [visibleFileTabs],
+  )
 
   const [activeTab, setActiveTab] = useState<EditorTab>('personality')
 
@@ -85,7 +115,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
             key: 'Mod-s',
             run: () => {
               const tab = activeTabRef.current
-              if (tab !== 'personality') {
+              if (tab !== 'personality' && tab !== 'permissions') {
                 void handleSaveRef.current(tab)
               }
               return true
@@ -97,7 +127,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             const tab = activeTabRef.current
-            if (tab !== 'personality') {
+            if (tab !== 'personality' && tab !== 'permissions') {
               updateFileContent(tab, update.state.doc.toString())
             }
           }
@@ -120,7 +150,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
     const view = viewRef.current
     if (!view || loading) return
 
-    if (activeTab === 'personality') return
+    if (activeTab === 'personality' || activeTab === 'permissions') return
 
     const fileState = filesRef.current[activeTab]
     if (!fileState) return
@@ -133,13 +163,15 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
     }
 
     view.dispatch({
-      effects: placeholderComp.current.reconfigure(placeholder(AGENT_FILE_PLACEHOLDERS[activeTab])),
+      effects: placeholderComp.current.reconfigure(
+        placeholder(AGENT_FILE_PLACEHOLDERS[activeTab as AgentFileName]),
+      ),
     })
   }, [activeTab, loading])
 
   // ─── Active file tab data ─────────────────────────────────────────────────
 
-  const isFileTab = activeTab !== 'personality'
+  const isFileTab = activeTab !== 'personality' && activeTab !== 'permissions'
   const isFileDirty = isFileTab && isDirty(activeTab as AgentFileName)
 
   const onSaveClick = useCallback(() => {
@@ -172,9 +204,10 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
           flexShrink: 0,
         }}
       >
-        {ALL_TABS.map((tab) => {
+        {allTabs.map((tab) => {
           const isActive = tab === activeTab
-          const dirty = tab !== 'personality' && isDirty(tab as AgentFileName)
+          const dirty =
+            tab !== 'personality' && tab !== 'permissions' && isDirty(tab as AgentFileName)
           return (
             <button
               key={tab}
@@ -202,7 +235,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
                 if (!isActive) e.currentTarget.style.color = 'rgba(232,232,232,0.45)'
               }}
             >
-              {TAB_LABELS[tab]}
+              {getTabLabel(tab)}
               {dirty && (
                 <span
                   style={{
@@ -281,12 +314,19 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
           </div>
         )}
 
+        {/* Permissions tab */}
+        {activeTab === 'permissions' && (
+          <div style={{ height: '100%', overflowY: 'auto', padding: '12px 16px' }}>
+            <ExecSettings agentId={agentId} />
+          </div>
+        )}
+
         {/* CodeMirror container — hidden (not destroyed) when personality tab active */}
         <div
           ref={editorContainerRef}
           style={{
             height: '100%',
-            display: activeTab === 'personality' ? 'none' : 'block',
+            display: activeTab === 'personality' || activeTab === 'permissions' ? 'none' : 'block',
           }}
         />
       </div>
@@ -309,7 +349,9 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
         <span>
           {activeTab === 'personality'
             ? `${agentName} · Personality`
-            : AGENT_FILE_META[activeTab as AgentFileName].hint}
+            : activeTab === 'permissions'
+              ? `${agentName} · Permissions`
+              : AGENT_FILE_META[activeTab as AgentFileName].hint}
         </span>
         <span>
           {anyDirty ? 'Unsaved' : 'Saved'}

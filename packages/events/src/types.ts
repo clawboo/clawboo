@@ -68,13 +68,20 @@ export type EventPlane = 'work' | 'agent' | 'trust'
 
 export type EventIntent =
   // Work plane — streaming (RAF-batched)
-  | { kind: 'queueLivePatch'; plane: 'work'; agentId: string; patch: AgentStatusPatch }
+  | {
+      kind: 'queueLivePatch'
+      plane: 'work'
+      agentId: string
+      sessionKey?: string
+      patch: AgentStatusPatch
+    }
   | { kind: 'clearPendingLivePatch'; plane: 'work'; agentId: string }
   // Work plane — terminal (immediate)
   | {
       kind: 'commitChat'
       plane: 'work'
       agentId: string
+      sessionKey?: string
       patch: AgentStatusPatch
       outputLines: string[]
     }
@@ -107,9 +114,9 @@ export type EventHandlerDeps = {
 
   // Dispatchers (to Zustand stores — injected from apps/web)
   dispatchIntent: (intent: EventIntent) => void
-  queueLivePatch: (agentId: string, patch: AgentStatusPatch) => void
+  queueLivePatch: (agentId: string, patch: AgentStatusPatch, sessionKey?: string) => void
   clearPendingLivePatch: (agentId: string) => void
-  appendOutputLines: (agentId: string, lines: string[]) => void
+  appendOutputLines: (agentId: string, lines: string[], sessionKey?: string) => void
   requestHistoryRefresh: (agentId: string, reason: string) => Promise<void>
   loadSummarySnapshot: () => Promise<void>
   refreshHeartbeatLatest: () => void

@@ -11,24 +11,20 @@ const elk = new ELK()
 // ─── ELK layout options ───────────────────────────────────────────────────────
 
 const ELK_OPTIONS = {
-  'elk.algorithm': 'layered',
-  'elk.direction': 'RIGHT',
-  // Spacing accounts for orbital children (skills 100-190px, resources 180-220px from center).
-  // Same-layer (vertical): 2×220 + margin ≈ 550 (generous to avoid orbital overlap)
-  // Between-layers (horizontal): 2×220 - boo_width(180) + margin ≈ 450
-  'elk.spacing.nodeNode': '550',
-  'elk.layered.spacing.nodeNodeBetweenLayers': '450',
-  'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
-  'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
-  'elk.padding': '[top=40, left=40, bottom=40, right=40]',
+  // Stress layout: produces compact, balanced, organic placements.
+  // Unlike 'layered' (which creates rigid vertical/horizontal chains),
+  // stress minimization distributes nodes evenly in 2D space.
+  'elk.algorithm': 'stress',
+  'elk.stress.desiredEdgeLength': '300',
+  'elk.spacing.nodeNode': '80',
+  'elk.padding': '[top=20, left=20, bottom=20, right=20]',
 }
 
 // ─── Boo envelope dimensions ─────────────────────────────────────────────────
-// Boo nodes in ELK use inflated "envelope" dimensions that account for orbital
-// children (skills at 100-190px from center, resources at 180-220px).
-// This ensures ELK spaces boos far enough apart to avoid orbital overlap.
-// Always used for boo nodes, regardless of ReactFlow's measured DOM size.
-const BOO_ENVELOPE = 460 // 2 × max_orbital_radius(220) + margin(20)
+// Compact envelope: just enough for the Boo + inner skill ring.
+// Orbital children may slightly overlap between adjacent Boos — that's
+// acceptable and creates a natural, dense constellation look.
+const BOO_ENVELOPE = 260
 
 // ─── Default node dimensions (used before ReactFlow measures them) ────────────
 
