@@ -20,6 +20,8 @@ export interface AgentState {
   lastSeenAt: number | null
   /** Team this agent belongs to (null = unassigned) */
   teamId: string | null
+  /** Per-agent execution permission config (null = use Gateway default) */
+  execConfig: { execAsk: string } | null
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -51,6 +53,9 @@ interface FleetStore {
 
   /** Update the model override for an agent. Pass null to revert to default. */
   updateAgentModel: (agentId: string, model: string | null) => void
+
+  /** Update execution permission config for an agent. */
+  updateExecConfig: (agentId: string, config: { execAsk: string } | null) => void
 }
 
 export const useFleetStore = create<FleetStore>((set) => ({
@@ -98,5 +103,10 @@ export const useFleetStore = create<FleetStore>((set) => ({
   updateAgentModel: (agentId, model) =>
     set((state) => ({
       agents: state.agents.map((a) => (a.id === agentId ? { ...a, model } : a)),
+    })),
+
+  updateExecConfig: (agentId, config) =>
+    set((state) => ({
+      agents: state.agents.map((a) => (a.id === agentId ? { ...a, execConfig: config } : a)),
     })),
 }))

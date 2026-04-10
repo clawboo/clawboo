@@ -12,6 +12,7 @@ function makeTeam(overrides: Partial<Team> = {}): Team {
     color: '#E94560',
     templateId: null,
     agentCount: 0,
+    leaderAgentId: null,
     isArchived: false,
     ...overrides,
   }
@@ -77,6 +78,35 @@ describe('useTeamStore', () => {
       const teams = useTeamStore.getState().teams
       expect(teams).toHaveLength(2)
       expect(teams[1]!.id).toBe('t2')
+    })
+
+    it('includes leaderAgentId when provided', () => {
+      useTeamStore.getState().addTeam(makeTeam({ id: 't2', leaderAgentId: 'agent-x' }))
+      expect(useTeamStore.getState().teams[0]!.leaderAgentId).toBe('agent-x')
+    })
+  })
+
+  // ── setTeamLeader ──────────────────────────────────────────────────────
+
+  describe('setTeamLeader', () => {
+    it('sets leaderAgentId on the target team', () => {
+      useTeamStore.setState({ teams: [makeTeam({ id: 't1' })] })
+      useTeamStore.getState().setTeamLeader('t1', 'agent-1')
+      expect(useTeamStore.getState().teams[0]!.leaderAgentId).toBe('agent-1')
+    })
+
+    it('clears leaderAgentId with null', () => {
+      useTeamStore.setState({ teams: [makeTeam({ id: 't1', leaderAgentId: 'agent-1' })] })
+      useTeamStore.getState().setTeamLeader('t1', null)
+      expect(useTeamStore.getState().teams[0]!.leaderAgentId).toBeNull()
+    })
+
+    it('does not modify other teams', () => {
+      useTeamStore.setState({
+        teams: [makeTeam({ id: 't1' }), makeTeam({ id: 't2', leaderAgentId: 'agent-2' })],
+      })
+      useTeamStore.getState().setTeamLeader('t1', 'agent-1')
+      expect(useTeamStore.getState().teams[1]!.leaderAgentId).toBe('agent-2')
     })
   })
 

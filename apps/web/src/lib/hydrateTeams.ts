@@ -15,6 +15,7 @@ export async function hydrateTeams(): Promise<void> {
         icon: string
         color: string
         templateId: string | null
+        leaderAgentId: string | null
         isArchived: number
         agentCount: number
       }[]

@@ -36,6 +36,7 @@ export const teams = sqliteTable(
     icon: text('icon').notNull(),
     color: text('color').notNull(),
     templateId: text('template_id'),
+    leaderAgentId: text('leader_agent_id'),
     isArchived: integer('is_archived').notNull().default(0),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
@@ -58,6 +59,7 @@ export const agents = sqliteTable(
     gatewayId: text('gateway_id').notNull(),
     avatarSeed: text('avatar_seed'),
     personalityConfig: text('personality_config'), // JSON: slider values
+    execConfig: text('exec_config'), // JSON: { execAsk, execSecurity }
     teamId: text('team_id').references(() => teams.id),
     status: text('status').notNull().default('idle'),
     createdAt: integer('created_at').notNull(),

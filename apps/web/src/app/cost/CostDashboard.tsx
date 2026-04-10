@@ -1,7 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   Tooltip,
@@ -10,28 +8,38 @@ import {
   Line,
   CartesianGrid,
 } from 'recharts'
-import { formatCost, formatTokens } from '@/features/cost/costUtils'
+import { ChevronDown, ChevronRight } from 'lucide-react'
+import { formatTokens } from '@/features/cost/costUtils'
 import { useCostStore } from '@/stores/cost'
 import { useConnectionStore } from '@/stores/connection'
-// ─── API response types ─────────────────────────────────────────────────────────
+import { useFleetStore } from '@/stores/fleet'
+import { useTeamStore } from '@/stores/team'
+import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 
-interface AgentCostSummary {
+// ─── API response types ─────────────────────────────────────────────────────
+
+interface AgentTokenSummary {
   agentId: string
   agentName: string
   totalCost: number
   totalTokens: number
+  inputTokens: number
+  outputTokens: number
   messageCount: number
 }
 
-interface CostSummaryResponse {
+interface TokenSummaryResponse {
   totalToday: number
   totalWeek: number
   totalMonth: number
-  byAgent: AgentCostSummary[]
-  timeSeries: { date: string; cost: number }[]
+  tokensToday: number
+  tokensWeek: number
+  tokensMonth: number
+  byAgent: AgentTokenSummary[]
+  timeSeries: { date: string; cost: number; tokens: number }[]
 }
 
-// ─── Ollama check types ─────────────────────────────────────────────────────────
+// ─── Ollama check types ─────────────────────────────────────────────────────
 
 interface OllamaCheckResponse {
   running: boolean
@@ -40,7 +48,7 @@ interface OllamaCheckResponse {
 
 type FrugalPanel = { kind: 'setup' } | { kind: 'picker'; models: string[] } | null
 
-// ─── Ollama setup panel ─────────────────────────────────────────────────────────
+// ─── Ollama setup panel ─────────────────────────────────────────────────────
 
 function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry: () => void }) {
   const [checking, setChecking] = useState(false)
@@ -81,7 +89,6 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
       <div style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)', marginBottom: 16 }}>
         Frugal mode requires Ollama running locally. Follow these steps:
       </div>
-
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {steps.map((step, i) => (
           <div key={i}>
@@ -149,9 +156,6 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
                         fontSize: 12,
                         color: '#34D399',
                         fontFamily: 'var(--font-geist-mono, monospace)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
                       }}
                     >
                       {cmd}
@@ -180,8 +184,7 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
           </div>
         ))}
       </div>
-
-      <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+      <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
         <button
           type="button"
           onClick={() => void handleRetry()}
@@ -194,7 +197,7 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
             padding: '8px 16px',
             fontSize: 13,
             fontWeight: 600,
-            cursor: checking ? 'default' : 'pointer',
+            cursor: checking ? 'wait' : 'pointer',
             opacity: checking ? 0.6 : 1,
           }}
         >
@@ -220,7 +223,7 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
   )
 }
 
-// ─── Model picker panel ─────────────────────────────────────────────────────────
+// ─── Model picker panel ─────────────────────────────────────────────────────
 
 function ModelPickerPanel({
   models,
@@ -247,7 +250,6 @@ function ModelPickerPanel({
       <div style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)', marginBottom: 14 }}>
         llama3.2 not found. Pick an available model or pull llama3.2 first.
       </div>
-
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
         {models.map((m) => (
           <button
@@ -269,7 +271,6 @@ function ModelPickerPanel({
           </button>
         ))}
       </div>
-
       <button
         type="button"
         onClick={onCancel}
@@ -289,7 +290,7 @@ function ModelPickerPanel({
   )
 }
 
-// ─── Frugal mode toggle ────────────────────────────────────────────────────────
+// ─── Frugal mode toggle ─────────────────────────────────────────────────────
 
 function useFrugalToggle() {
   const frugalMode = useCostStore((s) => s.frugalMode)
@@ -321,7 +322,6 @@ function useFrugalToggle() {
   )
 
   const handleToggle = useCallback(async () => {
-    // Turning OFF
     if (frugalMode) {
       toggleFrugalMode()
       setPanel(null)
@@ -333,15 +333,11 @@ function useFrugalToggle() {
       }
       return
     }
-
-    // Turning ON — check Ollama first
     const check = await checkOllama()
-
     if (!check.running) {
       setPanel({ kind: 'setup' })
       return
     }
-
     const hasLlama = check.models.some((m) => m.startsWith('llama3.2'))
     if (!hasLlama) {
       if (check.models.length > 0) {
@@ -351,15 +347,12 @@ function useFrugalToggle() {
       }
       return
     }
-
-    // Happy path
     await activateWithModel('llama3.2')
   }, [frugalMode, toggleFrugalMode, client, checkOllama, activateWithModel])
 
   const handleRetry = useCallback(async () => {
     const check = await checkOllama()
     if (!check.running) return
-
     const hasLlama = check.models.some((m) => m.startsWith('llama3.2'))
     if (hasLlama) {
       await activateWithModel('llama3.2')
@@ -422,22 +415,16 @@ function FrugalToggleButton({
   )
 }
 
-// ─── Summary card ──────────────────────────────────────────────────────────────
+// ─── Summary card (token-first design) ──────────────────────────────────────
 
-interface SummaryCardProps {
-  label: string
-  cost: number
-  tokens?: number
+function tokenColor(tokens: number): string {
+  if (tokens < 10_000) return '#34D399' // mint
+  if (tokens < 100_000) return '#FBBF24' // amber
+  return '#E94560' // accent
 }
 
-function costColor(usd: number): string {
-  if (usd < 0.5) return '#34D399' // mint — low
-  if (usd < 5) return '#FBBF24' // amber — medium
-  return '#E94560' // accent — high
-}
-
-function SummaryCard({ label, cost, tokens }: SummaryCardProps) {
-  const color = costColor(cost)
+function SummaryCard({ label, tokens }: { label: string; tokens: number }) {
+  const color = tokenColor(tokens)
   return (
     <div
       style={{
@@ -462,19 +449,154 @@ function SummaryCard({ label, cost, tokens }: SummaryCardProps) {
       >
         {label}
       </div>
-      <div style={{ fontSize: 28, fontWeight: 700, color, lineHeight: 1, marginBottom: 6 }}>
-        {formatCost(cost)}
+      <div style={{ fontSize: 26, fontWeight: 700, color, lineHeight: 1, marginBottom: 4 }}>
+        {formatTokens(tokens)}
       </div>
-      {tokens !== undefined && (
-        <div style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)' }}>
-          {formatTokens(tokens)} tokens
+      <div style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)' }}>tokens</div>
+    </div>
+  )
+}
+
+// ─── Team breakdown section ─────────────────────────────────────────────────
+
+interface TeamGroup {
+  teamId: string | null
+  teamName: string
+  teamIcon: string
+  teamColor: string
+  totalTokens: number
+  agents: AgentTokenSummary[]
+}
+
+function TeamSection({ group }: { group: TeamGroup }) {
+  const [open, setOpen] = useState(true)
+  const teamTotal = group.totalTokens
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {/* Team header */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          width: '100%',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          padding: '8px 4px',
+          color: '#E8E8E8',
+        }}
+      >
+        {open ? (
+          <ChevronDown size={14} style={{ color: 'rgba(232,232,232,0.4)', flexShrink: 0 }} />
+        ) : (
+          <ChevronRight size={14} style={{ color: 'rgba(232,232,232,0.4)', flexShrink: 0 }} />
+        )}
+        <span
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            background: `${group.teamColor}22`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 13,
+            flexShrink: 0,
+          }}
+        >
+          {group.teamIcon}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 600, flex: 1, textAlign: 'left' }}>
+          {group.teamName}
+        </span>
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: tokenColor(group.totalTokens),
+            fontFamily: 'var(--font-geist-mono, monospace)',
+          }}
+        >
+          {formatTokens(group.totalTokens)}
+        </span>
+      </button>
+
+      {/* Agent rows */}
+      {open && (
+        <div style={{ paddingLeft: 28, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {group.agents.map((agent) => (
+            <div key={agent.agentId} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <AgentBooAvatar agentId={agent.agentId} size={20} />
+              <span
+                style={{
+                  fontSize: 12,
+                  color: 'rgba(232,232,232,0.7)',
+                  width: 120,
+                  flexShrink: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {agent.agentName}
+              </span>
+              {/* Token bar */}
+              <div
+                style={{
+                  flex: 1,
+                  height: 8,
+                  borderRadius: 4,
+                  background: 'rgba(255,255,255,0.04)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width:
+                      agent.totalTokens > 0 && teamTotal > 0
+                        ? `${(agent.totalTokens / teamTotal) * 100}%`
+                        : '0%',
+                    height: '100%',
+                    borderRadius: 4,
+                    background: '#34D399',
+                    transition: 'width 0.3s ease',
+                  }}
+                />
+              </div>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: 'rgba(232,232,232,0.5)',
+                  fontFamily: 'var(--font-geist-mono, monospace)',
+                  width: 90,
+                  textAlign: 'right',
+                  flexShrink: 0,
+                }}
+                title={`In: ${formatTokens(agent.inputTokens)} / Out: ${formatTokens(agent.outputTokens)}`}
+              >
+                {agent.inputTokens > 0 ? (
+                  <>
+                    {formatTokens(agent.inputTokens)}
+                    <span style={{ color: 'rgba(232,232,232,0.25)' }}> / </span>
+                    {formatTokens(agent.outputTokens)}
+                  </>
+                ) : (
+                  formatTokens(agent.totalTokens)
+                )}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-// ─── Custom Recharts tooltips ──────────────────────────────────────────────────
+// ─── Custom Recharts tooltips ───────────────────────────────────────────────
 
 interface TooltipPayloadItem {
   value: number
@@ -488,34 +610,7 @@ interface TooltipProps {
   label?: string
 }
 
-function CustomBarTooltip({ active, payload, label }: TooltipProps) {
-  if (!active || !payload?.length) return null
-  const item = payload[0]!
-  const tokens =
-    typeof item.payload['tokens'] === 'number' ? (item.payload['tokens'] as number) : undefined
-  return (
-    <div
-      style={{
-        background: '#111827',
-        border: '1px solid #E94560',
-        borderRadius: 8,
-        padding: '8px 12px',
-        fontSize: 12,
-        color: '#E8E8E8',
-      }}
-    >
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
-      <div>{formatCost(item.value)}</div>
-      {tokens !== undefined && (
-        <div style={{ color: 'rgba(232,232,232,0.55)', marginTop: 2 }}>
-          {formatTokens(tokens)} tokens
-        </div>
-      )}
-    </div>
-  )
-}
-
-function CustomLineTooltip({ active, payload, label }: TooltipProps) {
+function TokenLineTooltip({ active, payload, label }: TooltipProps) {
   if (!active || !payload?.length) return null
   const item = payload[0]!
   return (
@@ -530,19 +625,22 @@ function CustomLineTooltip({ active, payload, label }: TooltipProps) {
       }}
     >
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
-      <div style={{ color: '#34D399' }}>{formatCost(item.value)}</div>
+      <div style={{ color: '#34D399' }}>{formatTokens(item.value)} tokens</div>
     </div>
   )
 }
 
-// ─── CostDashboard ────────────────────────────────────────────────────────────
+// ─── TokensDashboard (was CostDashboard) ────────────────────────────────────
 
 export function CostDashboard() {
   const { frugalMode, panel, setPanel, handleToggle, handleRetry, activateWithModel } =
     useFrugalToggle()
-  const [data, setData] = useState<CostSummaryResponse | null>(null)
+  const [data, setData] = useState<TokenSummaryResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const fleetAgents = useFleetStore((s) => s.agents)
+  const teams = useTeamStore((s) => s.teams)
 
   useEffect(() => {
     let cancelled = false
@@ -550,7 +648,7 @@ export function CostDashboard() {
     setError(null)
 
     fetch('/api/cost-records/summary')
-      .then((res) => res.json() as Promise<CostSummaryResponse>)
+      .then((res) => res.json() as Promise<TokenSummaryResponse>)
       .then((json) => {
         if (!cancelled) {
           setData(json)
@@ -559,7 +657,7 @@ export function CostDashboard() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load cost data')
+          setError(err instanceof Error ? err.message : 'Failed to load token data')
           setLoading(false)
         }
       })
@@ -569,15 +667,67 @@ export function CostDashboard() {
     }
   }, [])
 
-  const barData = (data?.byAgent ?? []).slice(0, 12).map((a) => ({
-    name: a.agentName.length > 16 ? `${a.agentName.slice(0, 14)}...` : a.agentName,
-    cost: Number(a.totalCost.toFixed(4)),
-    tokens: a.totalTokens,
-  }))
+  // Group ALL fleet agents by team, merging in token data from API where available.
+  // This ensures every agent shows up (even with 0 tokens), keeping the dashboard
+  // synced with the actual fleet — not just agents that have cost records.
+  const teamGroups: TeamGroup[] = useMemo(() => {
+    const teamMap = new Map(teams.map((t) => [t.id, t]))
+
+    // Build lookup: agentId → token data from API (if any)
+    const tokenDataMap = new Map((data?.byAgent ?? []).map((a) => [a.agentId, a]))
+
+    // Start from ALL fleet agents — not just ones with cost records
+    const groups = new Map<string, TeamGroup>()
+    const NO_TEAM_KEY = '__no_team__'
+
+    for (const agent of fleetAgents) {
+      const teamId = agent.teamId
+      const key = teamId ?? NO_TEAM_KEY
+
+      let group = groups.get(key)
+      if (!group) {
+        const team = teamId ? teamMap.get(teamId) : null
+        group = {
+          teamId,
+          teamName: team?.name ?? 'Unassigned',
+          teamIcon: team?.icon ?? '👻',
+          teamColor: team?.color ?? '#666',
+          totalTokens: 0,
+          agents: [],
+        }
+        groups.set(key, group)
+      }
+
+      // Merge API token data or default to zeros
+      const tokenData = tokenDataMap.get(agent.id)
+      const agentSummary: AgentTokenSummary = tokenData ?? {
+        agentId: agent.id,
+        agentName: agent.name,
+        totalCost: 0,
+        totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        messageCount: 0,
+      }
+
+      group.totalTokens += agentSummary.totalTokens
+      group.agents.push(agentSummary)
+    }
+
+    // Sort agents within each team by tokens desc
+    for (const group of groups.values()) {
+      group.agents.sort((a, b) => b.totalTokens - a.totalTokens)
+    }
+
+    // Sort teams by total tokens descending, "Unassigned" last
+    return Array.from(groups.values()).sort((a, b) => {
+      if (a.teamId === null) return 1
+      if (b.teamId === null) return -1
+      return b.totalTokens - a.totalTokens
+    })
+  }, [data, fleetAgents, teams])
 
   const lineData = data?.timeSeries ?? []
-
-  const totalTokens = data?.byAgent.reduce((sum, a) => sum + a.totalTokens, 0) ?? 0
 
   return (
     <div
@@ -610,19 +760,16 @@ export function CostDashboard() {
               fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
             }}
           >
-            Cost Tracking
+            Tokens Used
           </h1>
           <p style={{ fontSize: 12, color: 'rgba(232,232,232,0.45)', margin: '4px 0 0' }}>
-            Token usage and spend across all Boos
-            <span style={{ marginLeft: 8, fontSize: 10, color: 'rgba(232,232,232,0.25)' }}>
-              Viewing all teams
-            </span>
+            Token usage by team and agent
           </p>
         </div>
         <FrugalToggleButton frugalMode={frugalMode} onToggle={() => void handleToggle()} />
       </div>
 
-      {/* Ollama setup / model picker panels */}
+      {/* Ollama panels */}
       {panel?.kind === 'setup' && (
         <OllamaSetupPanel onCancel={() => setPanel(null)} onRetry={handleRetry} />
       )}
@@ -651,13 +798,13 @@ export function CostDashboard() {
           }}
         >
           <span style={{ fontSize: 16 }}>!</span>
-          Frugal mode active — routing basic tasks to local LLM (Ollama / LM Studio)
+          Frugal mode active — routing basic tasks to local LLM
         </div>
       )}
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '60px 0', color: 'rgba(232,232,232,0.4)' }}>
-          Loading cost data...
+          Loading token data...
         </div>
       )}
 
@@ -678,14 +825,14 @@ export function CostDashboard() {
 
       {!loading && !error && data && (
         <>
-          {/* Summary cards */}
+          {/* Summary cards — tokens as primary, cost as secondary */}
           <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
-            <SummaryCard label="Today" cost={data.totalToday} tokens={totalTokens} />
-            <SummaryCard label="This Week" cost={data.totalWeek} />
-            <SummaryCard label="This Month" cost={data.totalMonth} />
+            <SummaryCard label="Today" tokens={data.tokensToday} />
+            <SummaryCard label="This Week" tokens={data.tokensWeek} />
+            <SummaryCard label="This Month" tokens={data.tokensMonth} />
           </div>
 
-          {/* Cost by Agent — horizontal bar chart */}
+          {/* Team Breakdown */}
           <div
             style={{
               background: '#111827',
@@ -700,16 +847,16 @@ export function CostDashboard() {
                 fontSize: 13,
                 fontWeight: 600,
                 color: 'rgba(232,232,232,0.65)',
-                margin: '0 0 16px',
+                margin: '0 0 12px',
                 fontFamily: 'var(--font-geist-mono, monospace)',
                 textTransform: 'uppercase',
                 letterSpacing: '0.08em',
               }}
             >
-              Cost by Agent
+              Tokens by Team
             </h2>
 
-            {barData.length === 0 ? (
+            {teamGroups.length === 0 ? (
               <div
                 style={{
                   textAlign: 'center',
@@ -718,41 +865,14 @@ export function CostDashboard() {
                   fontSize: 13,
                 }}
               >
-                No cost records yet. Start chatting with your Boos to track spend.
+                No token records yet. Start chatting with your Boos to track usage.
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={Math.max(160, barData.length * 44)}>
-                <BarChart
-                  layout="vertical"
-                  data={barData}
-                  margin={{ top: 0, right: 24, left: 0, bottom: 0 }}
-                >
-                  <XAxis
-                    type="number"
-                    tickFormatter={(v: number) => formatCost(v)}
-                    tick={{ fill: 'rgba(232,232,232,0.4)', fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    width={110}
-                    tick={{ fill: 'rgba(232,232,232,0.7)', fontSize: 12 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    content={<CustomBarTooltip />}
-                    cursor={{ fill: 'rgba(255,255,255,0.04)' }}
-                  />
-                  <Bar dataKey="cost" fill="#E94560" radius={[0, 4, 4, 0]} maxBarSize={24} />
-                </BarChart>
-              </ResponsiveContainer>
+              teamGroups.map((group) => <TeamSection key={group.teamId ?? 'none'} group={group} />)
             )}
           </div>
 
-          {/* Cost over time — line chart */}
+          {/* Token Trend — 30 day line chart */}
           <div
             style={{
               background: '#111827',
@@ -772,7 +892,7 @@ export function CostDashboard() {
                 letterSpacing: '0.08em',
               }}
             >
-              Cost Over Time — Last 30 Days
+              Token Usage — Last 30 Days
             </h2>
 
             <ResponsiveContainer width="100%" height={200}>
@@ -786,16 +906,16 @@ export function CostDashboard() {
                   interval="preserveStartEnd"
                 />
                 <YAxis
-                  tickFormatter={(v: number) => formatCost(v)}
+                  tickFormatter={(v: number) => formatTokens(v)}
                   tick={{ fill: 'rgba(232,232,232,0.4)', fontSize: 10 }}
                   axisLine={false}
                   tickLine={false}
                   width={55}
                 />
-                <Tooltip content={<CustomLineTooltip />} />
+                <Tooltip content={<TokenLineTooltip />} />
                 <Line
                   type="monotone"
-                  dataKey="cost"
+                  dataKey="tokens"
                   stroke="#34D399"
                   strokeWidth={2}
                   dot={false}

@@ -8,6 +8,7 @@ import { useViewStore } from '@/stores/view'
 
 export function App() {
   const isBooZero = useViewStore((s) => s.viewMode.type === 'booZero')
+  const columnCollapsed = useViewStore((s) => s.columnCollapsed)
 
   return (
     <Providers>
@@ -16,8 +17,8 @@ export function App() {
       <div className="flex h-screen overflow-hidden bg-background text-foreground">
         {/* Col 1 — Team sidebar (60px) */}
         <TeamSidebar />
-        {/* Col 2 — Agent list + nav (208px) — hidden in Boo Zero view */}
-        {!isBooZero && <AgentListColumn />}
+        {/* Col 2 — Agent list + nav (208px) — hidden in Boo Zero view or when collapsed */}
+        {!isBooZero && !columnCollapsed && <AgentListColumn />}
         {/* Col 3+4 — Content area */}
         <main className="flex flex-1 flex-col overflow-hidden">
           <ContentArea />

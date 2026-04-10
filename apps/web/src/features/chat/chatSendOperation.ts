@@ -5,6 +5,8 @@ import type { TranscriptEntry } from '@clawboo/protocol'
 import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
+import { useToastStore } from '@/stores/toast'
+import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@/lib/execSettingsForGateway'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,6 +16,8 @@ export type SendChatParams = {
   agentId: string
   sessionKey: string
   message: string
+  /** Original message with @mention for display in transcript. Falls back to `message`. */
+  displayText?: string
   /** Injected for testing; defaults to `crypto.randomUUID`. */
   generateId?: () => string
   /** Injected for testing; defaults to `Date.now`. */
@@ -55,6 +59,7 @@ export async function sendChatMessage({
   agentId,
   sessionKey,
   message,
+  displayText,
   generateId = () => crypto.randomUUID(),
   now = () => Date.now(),
 }: SendChatParams): Promise<void> {
@@ -115,7 +120,7 @@ export async function sendChatMessage({
 
   // ── Optimistic user message ─────────────────────────────────────────────────
   const userEntry = makeEntry(
-    { kind: 'user', role: 'user', text: trimmed, sessionKey },
+    { kind: 'user', role: 'user', text: displayText?.trim() || trimmed, sessionKey },
     idempotencyKey,
     ts,
   )
@@ -130,13 +135,36 @@ export async function sendChatMessage({
     body: JSON.stringify({ sessionKey, gatewayUrl: gwUrl, entries: [userEntry] }),
   }).catch(() => {})
 
-  // ── Apply per-agent model if set ──────────────────────────────────────────
-  const agentModel = useFleetStore.getState().agents.find((a) => a.id === agentId)?.model
-  if (agentModel) {
+  // ── Apply per-agent model + exec settings if set ─────────────────────────
+  const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
+  if (agent?.model) {
     try {
-      await client.call('sessions.patch', { key: sessionKey, model: agentModel })
+      await client.call('sessions.patch', { key: sessionKey, model: agent.model })
     } catch {
       // Non-fatal: model may already be set or Gateway may not support sessions.patch
+    }
+  }
+  if (agent?.execConfig) {
+    // 1. Write per-agent approval policy (best-effort — enables approval events)
+    try {
+      await upsertExecApprovalPolicy(client, agentId, agent.execConfig.execAsk)
+    } catch {
+      // Non-fatal — policy may already be set from ExecSettings
+    }
+
+    // 2. Patch the live session with exec settings
+    try {
+      const execParams = resolveExecPatchParams(agent.execConfig.execAsk)
+      await client.call('sessions.patch', {
+        key: sessionKey,
+        ...execParams,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      useToastStore.getState().addToast({
+        message: `Failed to apply execution permissions: ${msg}`,
+        type: 'error',
+      })
     }
   }
 

@@ -27,7 +27,7 @@ export function decideWorkChatEvent(
       runId,
       lastActivityAt: event.timestamp,
     }
-    return [{ kind: 'queueLivePatch', plane: 'work', agentId, patch }]
+    return [{ kind: 'queueLivePatch', plane: 'work', agentId, sessionKey: event.sessionKey, patch }]
   }
 
   if (state === 'final') {
@@ -48,7 +48,14 @@ export function decideWorkChatEvent(
 
     const intents: EventIntent[] = [
       { kind: 'clearPendingLivePatch', plane: 'work', agentId },
-      { kind: 'commitChat', plane: 'work', agentId, patch, outputLines },
+      {
+        kind: 'commitChat',
+        plane: 'work',
+        agentId,
+        sessionKey: event.sessionKey,
+        patch,
+        outputLines,
+      },
     ]
     // Request history refresh if no thinking trace was present in the final message
     if (!thinkingTrace) {
@@ -72,7 +79,14 @@ export function decideWorkChatEvent(
     }
     return [
       { kind: 'clearPendingLivePatch', plane: 'work', agentId },
-      { kind: 'commitChat', plane: 'work', agentId, patch, outputLines: [] },
+      {
+        kind: 'commitChat',
+        plane: 'work',
+        agentId,
+        sessionKey: event.sessionKey,
+        patch,
+        outputLines: [],
+      },
     ]
   }
 
@@ -86,7 +100,14 @@ export function decideWorkChatEvent(
     }
     return [
       { kind: 'clearPendingLivePatch', plane: 'work', agentId },
-      { kind: 'commitChat', plane: 'work', agentId, patch, outputLines: [] },
+      {
+        kind: 'commitChat',
+        plane: 'work',
+        agentId,
+        sessionKey: event.sessionKey,
+        patch,
+        outputLines: [],
+      },
     ]
   }
 
@@ -151,7 +172,7 @@ export function decideWorkAgentEvent(
     const thinkingTrace = typeof data?.['text'] === 'string' ? data['text'] : ''
     if (!thinkingTrace) return [{ kind: 'ignore', reason: 'reasoning stream with no text' }]
     const patch: AgentStatusPatch = { thinkingTrace, runId, lastActivityAt: event.timestamp }
-    return [{ kind: 'queueLivePatch', plane: 'work', agentId, patch }]
+    return [{ kind: 'queueLivePatch', plane: 'work', agentId, sessionKey: event.sessionKey, patch }]
   }
 
   // Assistant stream
@@ -159,7 +180,7 @@ export function decideWorkAgentEvent(
     const streamText = typeof data?.['text'] === 'string' ? data['text'] : ''
     if (!streamText) return [{ kind: 'ignore', reason: 'assistant stream with no text' }]
     const patch: AgentStatusPatch = { streamText, runId, lastActivityAt: event.timestamp }
-    return [{ kind: 'queueLivePatch', plane: 'work', agentId, patch }]
+    return [{ kind: 'queueLivePatch', plane: 'work', agentId, sessionKey: event.sessionKey, patch }]
   }
 
   // Tool stream — output lines are handled by the handler via appendOutputLines

@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { Plus } from 'lucide-react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 import { useTeamStore, type Team } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -13,10 +13,19 @@ import { useGraphStore } from '@/features/graph/store'
 
 // ─── MascotIcon ──────────────────────────────────────────────────────────────
 
-function MascotIcon({ selected, onClick }: { selected: boolean; onClick: () => void }) {
+function MascotIcon({
+  selected,
+  onClick,
+  onContextMenu,
+}: {
+  selected: boolean
+  onClick: () => void
+  onContextMenu: (e: React.MouseEvent) => void
+}) {
   return (
     <button
       onClick={onClick}
+      onContextMenu={onContextMenu}
       title="All Agents"
       style={{
         width: 40,
@@ -256,6 +265,31 @@ export function TeamSidebar() {
     }
   }, [contextMenu])
 
+  // ── Mascot right-click menu ─────────────────────────────────────────────────
+  const [mascotMenu, setMascotMenu] = useState<{ x: number; y: number } | null>(null)
+  const mascotMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!mascotMenu) return
+    const handleMouseDown = (e: MouseEvent) => {
+      if (mascotMenuRef.current && !mascotMenuRef.current.contains(e.target as Node)) {
+        setMascotMenu(null)
+      }
+    }
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMascotMenu(null)
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [mascotMenu])
+
+  const isBooZero = useViewStore((s) => s.viewMode.type === 'booZero')
+  const columnCollapsed = useViewStore((s) => s.columnCollapsed)
+
   const activeTeams = teams.filter((t) => !t.isArchived)
 
   return (
@@ -275,12 +309,16 @@ export function TeamSidebar() {
         flexShrink: 0,
       }}
     >
-      {/* Mascot — opens Boo Zero view */}
+      {/* Mascot — left click: Boo Zero view; right click: show all agents */}
       <MascotIcon
         selected={selectedTeamId === null}
         onClick={() => {
           selectTeam(null)
           useViewStore.getState().openBooZero()
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          setMascotMenu({ x: e.clientX, y: e.clientY })
         }}
       />
 
@@ -356,6 +394,102 @@ export function TeamSidebar() {
       >
         <Plus size={16} strokeWidth={2} />
       </button>
+
+      {/* Column 2 collapse/expand toggle — always visible */}
+      <button
+        title={columnCollapsed || isBooZero ? 'Expand sidebar' : 'Collapse sidebar'}
+        onClick={() => {
+          // If in Boo Zero view, exit to graph with column visible
+          if (isBooZero) {
+            useViewStore.getState().navigateTo('graph')
+            if (useViewStore.getState().columnCollapsed) {
+              useViewStore.getState().toggleColumnCollapsed()
+            }
+          } else {
+            useViewStore.getState().toggleColumnCollapsed()
+          }
+        }}
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 12,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: 'none',
+          background: 'transparent',
+          color: 'rgba(232,232,232,0.3)',
+          cursor: 'pointer',
+          padding: 0,
+          flexShrink: 0,
+          transition: 'all 0.15s',
+        }}
+        onMouseOver={(e) => {
+          ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.7)'
+        }}
+        onMouseOut={(e) => {
+          ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.3)'
+        }}
+      >
+        {columnCollapsed || isBooZero ? (
+          <PanelLeftOpen size={16} strokeWidth={2} />
+        ) : (
+          <PanelLeftClose size={16} strokeWidth={2} />
+        )}
+      </button>
+
+      {/* Mascot right-click context menu */}
+      {mascotMenu && (
+        <div
+          ref={mascotMenuRef}
+          style={{
+            position: 'fixed',
+            left: mascotMenu.x,
+            top: mascotMenu.y,
+            zIndex: 60,
+            background: '#111827',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 8,
+            padding: '4px 0',
+            minWidth: 160,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              selectTeam(null)
+              useViewStore.getState().navigateTo('graph')
+              // Ensure column is visible
+              if (useViewStore.getState().columnCollapsed) {
+                useViewStore.getState().toggleColumnCollapsed()
+              }
+              setMascotMenu(null)
+            }}
+            style={{
+              display: 'block',
+              width: '100%',
+              padding: '8px 14px',
+              background: 'transparent',
+              border: 'none',
+              color: '#E8E8E8',
+              fontSize: 12,
+              textAlign: 'left',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'background 0.1s',
+            }}
+            onMouseOver={(e) => {
+              ;(e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)'
+            }}
+            onMouseOut={(e) => {
+              ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+            }}
+          >
+            Show all agents
+          </button>
+        </div>
+      )}
 
       {contextMenu && (
         <TeamContextMenu

@@ -24,6 +24,7 @@ interface ApprovalsStore {
   approvalHistory: DbApprovalHistory[]
   addPending: (request: ApprovalRequest) => void
   removePending: (id: string) => void
+  removeExpired: () => void
   setResolving: (id: string, resolving: boolean, error: string | null) => void
   prependHistory: (record: DbApprovalHistory) => void
   hydrateHistory: (records: DbApprovalHistory[]) => void
@@ -46,6 +47,21 @@ export const useApprovalsStore = create<ApprovalsStore>((set) => ({
       const next = new Map(state.pendingApprovals)
       next.delete(id)
       return { pendingApprovals: next }
+    }),
+
+  removeExpired: () =>
+    set((state) => {
+      const now = Date.now()
+      let changed = false
+      const next = new Map<string, ApprovalRequest>()
+      for (const [id, approval] of state.pendingApprovals) {
+        if (now > approval.expiresAtMs) {
+          changed = true
+        } else {
+          next.set(id, approval)
+        }
+      }
+      return changed ? { pendingApprovals: next } : state
     }),
 
   setResolving: (id, resolving, error) =>

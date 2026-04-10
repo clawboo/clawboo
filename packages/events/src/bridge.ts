@@ -51,9 +51,19 @@ export function classifyEvent(frame: EventFrame): ClassifiedEvent {
     }
 
     case 'exec.approval.pending':
+    case 'exec.approval.requested':
     case 'exec.approval.resolved': {
       const payload = frame.payload as Record<string, unknown> | null
-      const agentId = typeof payload?.['agentId'] === 'string' ? payload['agentId'] : undefined
+      // agentId may be at top level OR nested inside payload.request
+      const topAgentId = typeof payload?.['agentId'] === 'string' ? payload['agentId'] : undefined
+      const request = payload?.['request']
+      const nestedAgentId =
+        request && typeof request === 'object' && !Array.isArray(request)
+          ? typeof (request as Record<string, unknown>)['agentId'] === 'string'
+            ? ((request as Record<string, unknown>)['agentId'] as string)
+            : undefined
+          : undefined
+      const agentId = topAgentId ?? nestedAgentId
       return { ...base, kind: 'approval', agentId }
     }
 

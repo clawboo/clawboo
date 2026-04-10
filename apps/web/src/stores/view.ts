@@ -11,6 +11,7 @@ export type ViewMode =
   | { type: 'nav'; view: NavView }
   | { type: 'welcome' }
   | { type: 'booZero' }
+  | { type: 'groupChat'; teamId: string }
 
 // ─── Store ───────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,13 @@ interface ViewStore {
 
   /** Open the Boo Zero standalone view. */
   openBooZero: () => void
+
+  /** Open the team group chat view. */
+  openGroupChat: (teamId: string) => void
+
+  /** Whether Column 2 (AgentListColumn) is collapsed. */
+  columnCollapsed: boolean
+  toggleColumnCollapsed: () => void
 }
 
 export const useViewStore = create<ViewStore>((set) => ({
@@ -38,4 +46,9 @@ export const useViewStore = create<ViewStore>((set) => ({
   openAgent: (agentId) => set({ viewMode: { type: 'agent', agentId } }),
 
   openBooZero: () => set({ viewMode: { type: 'booZero' } }),
+
+  openGroupChat: (teamId) => set({ viewMode: { type: 'groupChat', teamId } }),
+
+  columnCollapsed: false,
+  toggleColumnCollapsed: () => set((s) => ({ columnCollapsed: !s.columnCollapsed })),
 }))

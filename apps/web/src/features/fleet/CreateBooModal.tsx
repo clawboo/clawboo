@@ -4,8 +4,17 @@ import { Loader2 } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
+import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 
 const DEFAULT_SOUL = `# SOUL\n\nYou are a helpful AI assistant. You approach tasks methodically, communicate clearly, and ask for clarification when needed.`
+
+const DEFAULT_PERSONALITY: PersonalityValues = {
+  verbosity: 50,
+  humor: 50,
+  caution: 50,
+  speed_cost: 50,
+  formality: 50,
+}
 
 export function CreateBooModal({
   isOpen,
@@ -55,11 +64,21 @@ export function CreateBooModal({
 
     try {
       const workspaceDir = await resolveWorkspaceDir(client)
+      const baseSoul = role.trim() || DEFAULT_SOUL
+      const soulWithPersonality = mergeSoulWithPersonality(baseSoul, DEFAULT_PERSONALITY)
+
       const agentId = await createAgent(client, trimmedName, workspaceDir, {
-        soul: role.trim() || DEFAULT_SOUL,
+        soul: soulWithPersonality,
         identity: `# IDENTITY\n\nYou are ${trimmedName}.`,
         tools: '# TOOLS\n',
       })
+
+      // Persist default personality to SQLite so sliders load correctly
+      void fetch('/api/personality', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId, values: DEFAULT_PERSONALITY }),
+      }).catch(() => {})
 
       // Assign to currently selected team (best-effort)
       const selectedTeamId = useTeamStore.getState().selectedTeamId

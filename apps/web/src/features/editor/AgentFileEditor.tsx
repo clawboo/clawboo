@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Save, X } from 'lucide-react'
 import {
   EditorView,
@@ -13,7 +13,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { closeBrackets } from '@codemirror/autocomplete'
 import { highlightSelectionMatches } from '@codemirror/search'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
-import { AGENT_FILE_META, AGENT_FILE_PLACEHOLDERS } from '@clawboo/protocol'
+import { AGENT_FILE_META, AGENT_FILE_PLACEHOLDERS, AGENT_FILE_NAMES } from '@clawboo/protocol'
 import type { AgentFileName } from '@clawboo/protocol'
 import { useConnectionStore } from '@/stores/connection'
 import { useEditorStore } from '@/stores/editor'
@@ -29,7 +29,8 @@ import { clawbooEditorTheme } from './editorTheme'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const EDITOR_TABS: AgentFileName[] = ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md']
+const ALL_FILE_TABS: readonly AgentFileName[] = [...AGENT_FILE_NAMES]
+const CORE_FILE_TABS: readonly AgentFileName[] = ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md']
 
 interface FileState {
   content: string
@@ -52,11 +53,19 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
   const [activeTab, setActiveTab] = useState<AgentFileName>('SOUL.md')
   const [files, setFiles] = useState<FilesMap>(() => {
     const init: FilesMap = {}
-    for (const name of EDITOR_TABS) {
+    for (const name of ALL_FILE_TABS) {
       init[name] = { content: '', clean: '' }
     }
     return init
   })
+
+  // Dynamic visible tabs: core 4 always + extra files only when non-empty
+  const visibleTabs = useMemo(() => {
+    const extras = ALL_FILE_TABS.filter(
+      (tab) => !(CORE_FILE_TABS as readonly string[]).includes(tab) && files[tab]?.clean.trim(),
+    )
+    return [...CORE_FILE_TABS, ...extras]
+  }, [files])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -80,12 +89,12 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
     setLoading(true)
 
     Promise.all(
-      EDITOR_TABS.map((name) => client.agents.files.read(agentId, name).catch(() => '')),
+      ALL_FILE_TABS.map((name) => client.agents.files.read(agentId, name).catch(() => '')),
     ).then(async (results) => {
       if (loadId !== loadIdRef.current) return // stale
 
       const next: FilesMap = {}
-      EDITOR_TABS.forEach((name, i) => {
+      ALL_FILE_TABS.forEach((name, i) => {
         const content = results[i] ?? ''
         next[name] = { content, clean: content }
       })
@@ -195,7 +204,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
     if (!client) return
 
     const currentFiles = filesRef.current
-    const dirtyTabs = EDITOR_TABS.filter(
+    const dirtyTabs = ALL_FILE_TABS.filter(
       (name) => currentFiles[name] && currentFiles[name].content !== currentFiles[name].clean,
     )
     if (dirtyTabs.length === 0) return
@@ -325,7 +334,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
     return f ? f.content !== f.clean : false
   }
 
-  const anyDirty = EDITOR_TABS.some(isDirty)
+  const anyDirty = ALL_FILE_TABS.some(isDirty)
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -449,7 +458,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
           background: '#111827',
         }}
       >
-        {EDITOR_TABS.map((tab) => {
+        {visibleTabs.map((tab) => {
           const isActive = tab === activeTab
           const dirty = isDirty(tab)
           return (

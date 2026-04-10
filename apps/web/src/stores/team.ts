@@ -9,6 +9,7 @@ export interface Team {
   color: string
   templateId: string | null
   agentCount: number
+  leaderAgentId: string | null
   isArchived: boolean
 }
 
@@ -29,6 +30,9 @@ interface TeamStore {
 
   /** Remove a team by id. */
   removeTeam: (id: string) => void
+
+  /** Set or clear the leader agent for a team. */
+  setTeamLeader: (teamId: string, agentId: string | null) => void
 
   /** Patch a team's fields. */
   updateTeam: (id: string, patch: Partial<Team>) => void
@@ -51,6 +55,11 @@ export const useTeamStore = create<TeamStore>((set) => ({
   addTeam: (team) =>
     set((state) => ({
       teams: [...state.teams, team],
+    })),
+
+  setTeamLeader: (teamId, agentId) =>
+    set((state) => ({
+      teams: state.teams.map((t) => (t.id === teamId ? { ...t, leaderAgentId: agentId } : t)),
     })),
 
   removeTeam: (id) =>

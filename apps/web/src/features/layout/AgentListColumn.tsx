@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Plus, Search, Trash2 } from 'lucide-react'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
-import { useTeamStore } from '@/stores/team'
+import { useTeamStore, type Team } from '@/stores/team'
 import { useConnectionStore } from '@/stores/connection'
 import { useViewStore, type NavView } from '@/stores/view'
 import { useApprovalsStore } from '@/stores/approvals'
@@ -176,9 +176,50 @@ const PRIMARY_NAV: { id: NavView; label: string; emoji: string }[] = [
 const SECONDARY_NAV: { id: NavView; label: string; emoji: string }[] = [
   { id: 'approvals', label: 'Approvals', emoji: '🔐' },
   { id: 'scheduler', label: 'Scheduler', emoji: '⏰' },
-  { id: 'cost', label: 'Cost', emoji: '💰' },
+  { id: 'cost', label: 'Tokens Used', emoji: '📊' },
   { id: 'system', label: 'System', emoji: '⚙️' },
 ]
+
+// ─── Group chat row ─────────────────────────────────────────────────────────
+
+function GroupChatRow({
+  team,
+  isActive,
+  onClick,
+}: {
+  team: Team
+  isActive: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="group-chat-row"
+      onClick={onClick}
+      className={[
+        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2',
+        'transition-colors duration-150',
+        isActive ? 'bg-white/6 shadow-sm' : 'hover:bg-white/4',
+      ].join(' ')}
+    >
+      <span
+        className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-lg text-[15px]"
+        style={{ background: `${team.color}22` }}
+      >
+        {team.icon}
+      </span>
+      <div className="min-w-0 flex-1 text-left">
+        <p
+          className="truncate text-[12px] font-medium leading-tight text-text"
+          style={{ fontFamily: 'var(--font-body)' }}
+        >
+          Group Chat
+        </p>
+        <p className="mt-0.5 text-[10px] text-secondary/40">Group conversation</p>
+      </div>
+    </button>
+  )
+}
 
 // ─── AgentListColumn ─────────────────────────────────────────────────────────
 
@@ -248,10 +289,10 @@ export function AgentListColumn() {
       try {
         const result = await client.agents.list()
         const mainKey = result.mainKey?.trim() || 'main'
-        // Build a lookup of existing teamId assignments so we don't wipe them
-        const existingTeamIds = new Map(
-          useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
-        )
+        // Build lookups of existing assignments so we don't wipe them
+        const existing = useFleetStore.getState().agents
+        const existingTeamIds = new Map(existing.map((a) => [a.id, a.teamId]))
+        const existingExecConfigs = new Map(existing.map((a) => [a.id, a.execConfig]))
         const mapped = result.agents.map((a) => ({
           id: a.id,
           name: a.identity?.name ?? a.name ?? a.id,
@@ -266,6 +307,7 @@ export function AgentListColumn() {
             agentId && a.id === agentId && selectedTeamId
               ? selectedTeamId
               : (existingTeamIds.get(a.id) ?? null),
+          execConfig: existingExecConfigs.get(a.id) ?? null,
         }))
         hydrateAgents(mapped)
         useBooZeroStore.getState().setBooZeroAgentId(identifyBooZero(mapped, result.defaultId))
@@ -312,6 +354,16 @@ export function AgentListColumn() {
 
       {/* Agent list — fixed at 40% of column height, scrollable */}
       <div className="shrink-0 overflow-y-auto px-2 pb-2" style={{ height: '40%' }}>
+        {selectedTeam && filtered.length > 0 && (
+          <>
+            <GroupChatRow
+              team={selectedTeam}
+              isActive={viewMode.type === 'groupChat' && viewMode.teamId === selectedTeam.id}
+              onClick={() => useViewStore.getState().openGroupChat(selectedTeam.id)}
+            />
+            <div className="mx-2.5 my-1 border-t border-white/6" />
+          </>
+        )}
         <AnimatePresence initial={false}>
           {filtered.length === 0 ? (
             <motion.div

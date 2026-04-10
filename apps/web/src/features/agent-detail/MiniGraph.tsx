@@ -25,6 +25,10 @@ import { edgeTypes } from '@/features/graph/edges/edgeTypes'
 import { ConnectionLine } from '@/features/graph/edges/ConnectionLine'
 import { computeOrbitalPositions } from '@/features/graph/computeOrbitalPositions'
 import { installSkillForAgent } from '@/features/graph/operations/installSkill'
+import { useFleetStore } from '@/stores/fleet'
+import { useConnectionStore } from '@/stores/connection'
+import { useToastStore } from '@/stores/toast'
+import { AgentModelSelector } from './AgentModelSelector'
 import { useMiniGraphData } from './useMiniGraphData'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData } from '@/features/graph/types'
 
@@ -576,14 +580,76 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
   )
 }
 
-// ─── MiniGraph (outer — provides ReactFlowProvider) ──────────────────────────
+// ─── MiniGraph (outer — provides ReactFlowProvider + model selector overlay) ─
 
 export function MiniGraph({ agentId }: { agentId: string }) {
+  const agent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
+  const client = useConnectionStore((s) => s.client)
+  const addToast = useToastStore((s) => s.addToast)
+
+  // ── Default model (fetched once) ──────────────────────────────────────────
+  const [defaultModel, setDefaultModel] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch('/api/system/openclaw-config')
+      .then((r) => r.json())
+      .then((data: { config?: { agents?: { defaults?: { model?: { primary?: string } } } } }) => {
+        setDefaultModel(data?.config?.agents?.defaults?.model?.primary ?? null)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleModelChange = useCallback(
+    async (model: string | null) => {
+      if (!agent) return
+      // Update fleet store immediately
+      useFleetStore.getState().updateAgentModel(agent.id, model)
+      // Persist to openclaw.json
+      try {
+        await fetch('/api/system/openclaw-config', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentModel: { agentId: agent.id, model } }),
+        })
+      } catch {
+        addToast({ message: 'Failed to save model preference', type: 'error' })
+      }
+      // Apply to active session immediately
+      const sessionKey = agent.sessionKey ?? null
+      if (client && sessionKey && model) {
+        try {
+          await client.call('sessions.patch', { key: sessionKey, model })
+        } catch {
+          // Non-fatal: model will be applied on next chat.send
+        }
+      }
+    },
+    [agent, client, addToast],
+  )
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <ReactFlowProvider>
         <MiniGraphInner agentId={agentId} />
       </ReactFlowProvider>
+
+      {/* Model selector — floating overlay, top-right */}
+      {agent && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            zIndex: 10,
+          }}
+        >
+          <AgentModelSelector
+            currentModel={agent.model ?? null}
+            defaultModel={defaultModel}
+            onModelChange={handleModelChange}
+          />
+        </div>
+      )}
     </div>
   )
 }

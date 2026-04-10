@@ -78,6 +78,7 @@ export function GhostGraph() {
   const layoutRanRef = useRef(false)
   const prevNodeLengthRef = useRef(0)
   const elkGenerationRef = useRef(0)
+  const prevLayoutKeyRef = useRef(layoutKey)
 
   // Wire data fetching and persistence
   useGraphData()
@@ -97,9 +98,18 @@ export function GhostGraph() {
   // Layer 2: Orbital positions skill/resource nodes around their parent boo (sync).
   // Re-runs when node count changes or user clicks "Re-layout" (layoutKey bump).
   useEffect(() => {
+    // Reset when layoutKey bumps (user pressed "Re-layout").
+    // Must happen INSIDE this effect (not a separate one) to ensure the reset
+    // is processed before the guard check — React runs effects in definition order.
+    if (layoutKey !== prevLayoutKeyRef.current) {
+      prevLayoutKeyRef.current = layoutKey
+      layoutRanRef.current = false
+      prevNodeLengthRef.current = 0
+    }
+
     if (!nodesInitialized || nodes.length === 0 || !isLoaded) return
 
-    // Reset when node count changes (new agents added) or layoutKey bumps
+    // Reset when node count changes (new agents added)
     if (nodes.length !== prevNodeLengthRef.current) {
       prevNodeLengthRef.current = nodes.length
       layoutRanRef.current = false
@@ -109,9 +119,6 @@ export function GhostGraph() {
     layoutRanRef.current = true
 
     // Increment generation only when actually starting ELK computation.
-    // Previously this was at the TOP of the effect (before guard checks),
-    // which meant re-renders from triggerRefresh() would invalidate
-    // in-flight ELK even when node identity was unchanged.
     const generation = ++elkGenerationRef.current
 
     // Layer 1: Only boo nodes + dependency edges go through ELK
@@ -146,12 +153,6 @@ export function GhostGraph() {
     })
     // isLoaded gates layout until saved positions are fetched from SQLite.
   }, [nodesInitialized, nodes.length, layoutKey, isLoaded])
-
-  // Reset layout refs when layoutKey bumps (user pressed "Re-layout")
-  useEffect(() => {
-    layoutRanRef.current = false
-    prevNodeLengthRef.current = 0
-  }, [layoutKey])
 
   // ── Interaction handlers ─────────────────────────────────────────────────────
 

@@ -15,6 +15,13 @@
       "when": 1773460143362,
       "tag": "0001_careful_captain_flint",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1773945997901,
+      "tag": "0002_material_jackpot",
+      "breakpoints": true
     }
   ]
 }

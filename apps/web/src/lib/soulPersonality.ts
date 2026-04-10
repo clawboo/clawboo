@@ -101,6 +101,7 @@ const DIMENSIONS: Dimension[] = [
 // ─── Marker ──────────────────────────────────────────────────────────────────
 
 const PERSONALITY_MARKER = '<!-- clawboo:personality'
+const PERSONALITY_CUSTOM_MARKER = '<!-- clawboo:personality-custom'
 
 // ─── Public helpers ──────────────────────────────────────────────────────────
 
@@ -108,17 +109,26 @@ const PERSONALITY_MARKER = '<!-- clawboo:personality'
  * Check whether SOUL.md content already contains a personality block.
  */
 export function hasPersonalityBlock(content: string): boolean {
-  return content.includes(PERSONALITY_MARKER)
+  return content.includes(PERSONALITY_MARKER) || content.includes(PERSONALITY_CUSTOM_MARKER)
 }
 
 /**
  * Strip any existing personality block from SOUL.md content.
- * The block starts at the `<!-- clawboo:personality` comment
- * (and any preceding `---` separator) and extends to the end of the file.
+ * Handles both slider-generated (`<!-- clawboo:personality ...`) and
+ * custom text (`<!-- clawboo:personality-custom`) markers.
+ * The block starts at the marker comment (and any preceding `---` separator)
+ * and extends to the end of the file.
  */
 export function stripPersonalityBlock(content: string): string {
-  const idx = content.indexOf(PERSONALITY_MARKER)
-  if (idx === -1) return content
+  // Find the earliest marker (custom or slider)
+  const sliderIdx = content.indexOf(PERSONALITY_MARKER)
+  const customIdx = content.indexOf(PERSONALITY_CUSTOM_MARKER)
+
+  let idx: number
+  if (sliderIdx === -1 && customIdx === -1) return content
+  if (sliderIdx === -1) idx = customIdx
+  else if (customIdx === -1) idx = sliderIdx
+  else idx = Math.min(sliderIdx, customIdx)
 
   let stripFrom = idx
   const before = content.slice(0, idx)
@@ -159,6 +169,32 @@ export function mergeSoulWithPersonality(
   }
 
   return `${base}\n\n---\n\n${personalityBlock}\n`
+}
+
+/**
+ * Build a custom (free-text) personality block for SOUL.md.
+ */
+export function buildCustomPersonalityBlock(text: string): string {
+  return `${PERSONALITY_CUSTOM_MARKER} -->\n\n${text.trim()}`
+}
+
+/**
+ * Merge custom personality text into SOUL.md content.
+ * Preserves the existing role description, strips any old personality block,
+ * and appends the custom text below a `---` separator.
+ */
+export function mergeSoulWithCustomPersonality(
+  existingContent: string,
+  customText: string,
+): string {
+  const base = stripPersonalityBlock(existingContent)
+  const customBlock = buildCustomPersonalityBlock(customText)
+
+  if (!base.trim()) {
+    return `# SOUL\n\n${customBlock}\n`
+  }
+
+  return `${base}\n\n---\n\n${customBlock}\n`
 }
 
 /**

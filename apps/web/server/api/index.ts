@@ -7,6 +7,7 @@ import { costRecordsGET, costRecordsPOST } from './costRecords'
 import { costRecordsSummaryGET } from './costRecordsSummary'
 import { graphLayoutGET, graphLayoutPOST } from './graphLayout'
 import { ollamaCheckGET } from './ollamaCheck'
+import { execSettingsGET, execSettingsAllGET, execSettingsPOST } from './execSettings'
 import { personalityGET, personalityPOST } from './personality'
 import { skillsGET, skillsPOST, skillsDELETE } from './skills'
 import {
@@ -53,6 +54,11 @@ router.post('/api/graph-layout', graphLayoutPOST)
 
 // Ollama check
 router.get('/api/ollama-check', ollamaCheckGET)
+
+// Exec settings — /all must come before the shorter prefix
+router.get('/api/exec-settings/all', execSettingsAllGET)
+router.get('/api/exec-settings', execSettingsGET)
+router.post('/api/exec-settings', execSettingsPOST)
 
 // Personality
 router.get('/api/personality', personalityGET)

@@ -194,6 +194,10 @@ export function FleetSidebar() {
     try {
       const result = await client.agents.list()
       const mainKey = result.mainKey?.trim() || 'main'
+      // Preserve existing execConfig from store
+      const existingExecConfigs = new Map(
+        useFleetStore.getState().agents.map((a) => [a.id, a.execConfig]),
+      )
       hydrateAgents(
         result.agents.map((a) => ({
           id: a.id,
@@ -206,6 +210,7 @@ export function FleetSidebar() {
           runId: null,
           lastSeenAt: null,
           teamId: null,
+          execConfig: existingExecConfigs.get(a.id) ?? null,
         })),
       )
     } catch {
