@@ -116,6 +116,24 @@ export function CreateTeamModal({
     [selectedProfile],
   )
 
+  /**
+   * True when the modal was opened via AgentCard's Deploy button — the prefilled
+   * profile is an adhoc single-agent TeamTemplate. Detected via shape, not a new
+   * prop, so existing team-deploy paths are untouched. Customize step swaps its
+   * title and button label to "Deploy agent"/"Create agent" in this mode; the
+   * deploy loop is unchanged (single-agent teams are just 1-agent teams).
+   */
+  const isSingleAgentMode = useMemo(
+    () =>
+      !!(
+        selectedProfile &&
+        'agentIds' in selectedProfile &&
+        Array.isArray(selectedProfile.agentIds) &&
+        selectedProfile.agentIds.length === 1
+      ),
+    [selectedProfile],
+  )
+
   const activeCategories = useMemo(() => {
     const catSet = new Set(BROWSABLE_TEAM_CATALOG.map((t) => t.category))
     return TEMPLATE_CATEGORIES.filter((c) => catSet.has(c.key))
@@ -602,18 +620,20 @@ export function CreateTeamModal({
             {step === 'customize' && (
               <div className="p-6">
                 <div className="mb-5 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setStep('pick')}
-                    className="rounded p-1 text-secondary/40 transition-colors hover:text-text"
-                  >
-                    <ArrowLeft className="h-4 w-4" strokeWidth={2} />
-                  </button>
+                  {!isSingleAgentMode && (
+                    <button
+                      type="button"
+                      onClick={() => setStep('pick')}
+                      className="rounded p-1 text-secondary/40 transition-colors hover:text-text"
+                    >
+                      <ArrowLeft className="h-4 w-4" strokeWidth={2} />
+                    </button>
+                  )}
                   <h2
                     className="text-lg font-bold text-text"
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
-                    Customize team
+                    {isSingleAgentMode ? 'Deploy agent' : 'Customize team'}
                   </h2>
                 </div>
 
@@ -683,9 +703,11 @@ export function CreateTeamModal({
                       {teamName || 'Untitled'}
                     </div>
                     <div className="text-[11px] text-secondary/60">
-                      {selectedProfile
-                        ? `${resolvedSelected.length} agents from template`
-                        : 'Empty team'}
+                      {isSingleAgentMode
+                        ? '1 agent'
+                        : selectedProfile
+                          ? `${resolvedSelected.length} agents from template`
+                          : 'Empty team'}
                     </div>
                   </div>
                 </div>
@@ -717,7 +739,11 @@ export function CreateTeamModal({
                   className="flex h-10 w-full items-center justify-center gap-2 rounded-lg text-[13px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{ backgroundColor: teamColor }}
                 >
-                  {selectedProfile ? 'Deploy team' : 'Create team'}
+                  {isSingleAgentMode
+                    ? 'Create agent'
+                    : selectedProfile
+                      ? 'Deploy team'
+                      : 'Create team'}
                 </button>
               </div>
             )}
