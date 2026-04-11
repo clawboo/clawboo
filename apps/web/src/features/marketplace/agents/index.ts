@@ -1,14 +1,21 @@
 // AUTO-GENERATED — do not edit manually.
 // Regenerate: pnpm ingest:marketplace
 
-import type { AgentCatalogEntry } from '@/features/teams/types'
-import type { AgentDomain, TemplateSource } from '@/features/teams/types'
+import type { AgentCatalogEntry, AgentDomain, TemplateSource } from '@/features/teams/types'
 import { AGENCY_AGENTS } from './agency'
+import { AWESOME_OPENCLAW_AGENTS } from './awesome-openclaw'
+import { CLAWBOO_AGENTS } from './clawboo'
 
 export { AGENCY_AGENTS } from './agency'
+export { AWESOME_OPENCLAW_AGENTS } from './awesome-openclaw'
+export { CLAWBOO_AGENTS } from './clawboo'
 
-/** All agents in the catalog. Sessions 2+ will append awesome-openclaw + clawboo entries. */
-export const AGENT_CATALOG: AgentCatalogEntry[] = [...AGENCY_AGENTS]
+/** All agents in the catalog — agency-agents + awesome-openclaw + clawboo builtins. */
+export const AGENT_CATALOG: AgentCatalogEntry[] = [
+  ...AGENCY_AGENTS,
+  ...AWESOME_OPENCLAW_AGENTS,
+  ...CLAWBOO_AGENTS,
+]
 
 /** Look up an agent by ID. */
 export function getAgent(id: string): AgentCatalogEntry | undefined {

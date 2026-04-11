@@ -1,9 +1,13 @@
 #!/usr/bin/env tsx
 /**
- * Verify that committed agent catalog files are up to date with the source repo.
+ * Verify that committed agent catalog files are up to date with the source repos.
  *
- * Regenerates all content in-memory and diffs against committed files.
+ * Regenerates all auto-generated content in-memory and diffs against committed files.
  * Exits 0 if all files match; exits 1 if any file is out of date.
+ *
+ * Covers both agency-agents and awesome-openclaw pipelines, plus the combined
+ * agents/index.ts shell. Does NOT check `clawboo/builtin.ts` or `clawboo/index.ts`
+ * because those are hand-written (extracted once from templates/builtin/*.ts).
  *
  * Usage: pnpm verify:ingest
  */
@@ -11,35 +15,53 @@
 import * as fs from 'node:fs/promises'
 import {
   AGENCY_AGENTS_SHA,
+  AWESOME_OPENCLAW_SHA,
   TARGET_DOMAINS,
   type AgencyDomain,
+  type AwesomeOpenclawAgent,
   type ProcessedAgent,
   fetchAgentTree,
   filterAgentFiles,
   fetchRawFile,
   pLimit,
   processAgentFile,
+  processUsecaseFile,
   renderDomainFile,
   renderAgencyIndex,
+  renderAwesomeOpenclawFile,
+  renderAwesomeOpenclawIndex,
+  fetchAwesomeOpenclawTree,
+  filterUsecaseFiles,
+  fetchAwesomeOpenclawRawFile,
   domainFilePath,
   agencyIndexPath,
   agentsIndexPath,
+  awesomeOpenclawFilePath,
+  awesomeOpenclawIndexPath,
 } from './lib/ingest-helpers.js'
 
 // ─── agents/index.ts renderer (duplicated from ingest script for shared use) ─
+// Must match scripts/ingest-marketplace-content.ts `renderAgentsIndex()` exactly.
 
 function renderAgentsIndex(): string {
   return `// AUTO-GENERATED — do not edit manually.
 // Regenerate: pnpm ingest:marketplace
 
-import type { AgentCatalogEntry } from '@/features/teams/types'
-import type { AgentDomain, TemplateSource } from '@/features/teams/types'
+import type { AgentCatalogEntry, AgentDomain, TemplateSource } from '@/features/teams/types'
 import { AGENCY_AGENTS } from './agency'
+import { AWESOME_OPENCLAW_AGENTS } from './awesome-openclaw'
+import { CLAWBOO_AGENTS } from './clawboo'
 
 export { AGENCY_AGENTS } from './agency'
+export { AWESOME_OPENCLAW_AGENTS } from './awesome-openclaw'
+export { CLAWBOO_AGENTS } from './clawboo'
 
-/** All agents in the catalog. Sessions 2+ will append awesome-openclaw + clawboo entries. */
-export const AGENT_CATALOG: AgentCatalogEntry[] = [...AGENCY_AGENTS]
+/** All agents in the catalog — agency-agents + awesome-openclaw + clawboo builtins. */
+export const AGENT_CATALOG: AgentCatalogEntry[] = [
+  ...AGENCY_AGENTS,
+  ...AWESOME_OPENCLAW_AGENTS,
+  ...CLAWBOO_AGENTS,
+]
 
 /** Look up an agent by ID. */
 export function getAgent(id: string): AgentCatalogEntry | undefined {
@@ -97,15 +119,16 @@ function shortDiff(expected: string, actual: string): string {
 
 async function main(): Promise<void> {
   console.log(`\n🔍 Clawboo marketplace verify-ingest (dry-run)`)
-  console.log(`   Commit: ${AGENCY_AGENTS_SHA}\n`)
+  console.log(`   Agency commit:  ${AGENCY_AGENTS_SHA}`)
+  console.log(`   Awesome commit: ${AWESOME_OPENCLAW_SHA}\n`)
 
-  // 1. Fetch tree + files
-  console.log('Fetching git tree...')
+  // ─── Agency pipeline ───────────────────────────────────────────────────────
+  console.log('Fetching agency git tree...')
   const tree = await fetchAgentTree()
   const agentFiles = filterAgentFiles(tree)
   console.log(`Found ${agentFiles.length} agent files\n`)
 
-  console.log('Fetching raw file content...')
+  console.log('Fetching agency raw file content...')
   const fileContents = new Map<string, string>()
   const fetchTasks = agentFiles.map((item) => async () => {
     process.stdout.write('.')
@@ -115,7 +138,6 @@ async function main(): Promise<void> {
   await pLimit(fetchTasks, 10)
   console.log(`\nFetched ${fileContents.size} files\n`)
 
-  // 2. Process
   const domainAgents = new Map<AgencyDomain, ProcessedAgent[]>()
   for (const domain of TARGET_DOMAINS) {
     domainAgents.set(domain, [])
@@ -128,7 +150,30 @@ async function main(): Promise<void> {
     agents.sort((a, b) => a.id.localeCompare(b.id))
   }
 
-  // 3. Compare generated vs committed
+  // ─── Awesome-openclaw pipeline ─────────────────────────────────────────────
+  console.log('Fetching awesome-openclaw git tree...')
+  const awesomeTree = await fetchAwesomeOpenclawTree()
+  const usecaseFiles = filterUsecaseFiles(awesomeTree)
+  console.log(`Found ${usecaseFiles.length} usecase files\n`)
+
+  console.log('Fetching awesome-openclaw raw content...')
+  const usecaseContents = new Map<string, string>()
+  const usecaseFetchTasks = usecaseFiles.map((item) => async () => {
+    process.stdout.write('.')
+    const content = await fetchAwesomeOpenclawRawFile(item.path)
+    usecaseContents.set(item.path, content)
+  })
+  await pLimit(usecaseFetchTasks, 10)
+  console.log(`\nFetched ${usecaseContents.size} files\n`)
+
+  const awesomeAgents: AwesomeOpenclawAgent[] = []
+  for (const [filePath, content] of usecaseContents) {
+    const entries = processUsecaseFile(filePath, content)
+    awesomeAgents.push(...entries)
+  }
+  awesomeAgents.sort((a, b) => a.id.localeCompare(b.id))
+
+  // ─── Compare generated vs committed ────────────────────────────────────────
   const filesToCheck: Array<{ label: string; path: string; expected: string }> = []
 
   for (const domain of TARGET_DOMAINS) {
@@ -143,6 +188,16 @@ async function main(): Promise<void> {
     label: 'agency/index.ts',
     path: agencyIndexPath(),
     expected: renderAgencyIndex(),
+  })
+  filesToCheck.push({
+    label: 'awesome-openclaw/usecases.ts',
+    path: awesomeOpenclawFilePath(),
+    expected: renderAwesomeOpenclawFile(awesomeAgents),
+  })
+  filesToCheck.push({
+    label: 'awesome-openclaw/index.ts',
+    path: awesomeOpenclawIndexPath(),
+    expected: renderAwesomeOpenclawIndex(),
   })
   filesToCheck.push({
     label: 'agents/index.ts',
@@ -174,7 +229,8 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  console.log(`\n✅ All ${filesToCheck.length} agent catalog files are up to date\n`)
+  console.log(`\n✅ All ${filesToCheck.length} agent catalog files are up to date`)
+  console.log(`   (clawboo/builtin.ts + clawboo/index.ts are hand-written — not verified)\n`)
 }
 
 main().catch((err) => {

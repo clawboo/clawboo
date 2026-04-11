@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url'
 export const AGENCY_AGENTS_SHA = '64eee9f8e04f69b04e78e150d771a443c64720be'
 export const AGENCY_AGENTS_REPO = 'msitarzewski/agency-agents'
 
+export const AWESOME_OPENCLAW_SHA = '659895e58e2105c6db8fbef39f446c8a786a480c'
+export const AWESOME_OPENCLAW_REPO = 'hesamsheikh/awesome-openclaw-usecases'
+
 /** 13 target domains from agency-agents (excludes examples/, finance/, integrations/, scripts/, strategy/) */
 export const TARGET_DOMAINS = [
   'academic',
@@ -514,6 +517,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const REPO_ROOT = path.resolve(__dirname, '../..')
 export const AGENTS_DIR = path.join(REPO_ROOT, 'apps/web/src/features/marketplace/agents')
 export const AGENCY_DIR = path.join(AGENTS_DIR, 'agency')
+export const AWESOME_OPENCLAW_DIR = path.join(AGENTS_DIR, 'awesome-openclaw')
+export const CLAWBOO_DIR = path.join(AGENTS_DIR, 'clawboo')
 
 export function domainFilePath(domain: AgencyDomain): string {
   return path.join(AGENCY_DIR, `${domain}.ts`)
@@ -525,4 +530,383 @@ export function agencyIndexPath(): string {
 
 export function agentsIndexPath(): string {
   return path.join(AGENTS_DIR, 'index.ts')
+}
+
+export function awesomeOpenclawFilePath(): string {
+  return path.join(AWESOME_OPENCLAW_DIR, 'usecases.ts')
+}
+
+export function awesomeOpenclawIndexPath(): string {
+  return path.join(AWESOME_OPENCLAW_DIR, 'index.ts')
+}
+
+// ─── Awesome OpenClaw ingestion ──────────────────────────────────────────────
+
+export interface AwesomeOpenclawAgent {
+  id: string
+  name: string
+  role: string
+  emoji: string
+  color: string
+  description: string
+  source: 'awesome-openclaw'
+  sourceUrl: string
+  domain: 'openclaw'
+  category: string
+  tags: string[]
+  skillIds: string[]
+  soulTemplate: string
+  identityTemplate: string
+  toolsTemplate: string
+}
+
+/** Fixed purple accent for all awesome-openclaw entries */
+const AWESOME_OPENCLAW_COLOR = '#A855F7'
+
+/** Category to emoji map for awesome-openclaw usecases */
+const AWESOME_CATEGORY_EMOJI: Record<string, string> = {
+  research: '🔬',
+  content: '✍️',
+  marketing: '📣',
+  engineering: '⚙️',
+  devops: '🛠️',
+  ops: '📋',
+  sales: '💼',
+  support: '🛟',
+  product: '🚀',
+  education: '📚',
+  general: '✨',
+}
+
+/** Fetch the full recursive git tree for awesome-openclaw at the pinned SHA */
+export async function fetchAwesomeOpenclawTree(): Promise<GitTreeItem[]> {
+  const url = `https://api.github.com/repos/${AWESOME_OPENCLAW_REPO}/git/trees/${AWESOME_OPENCLAW_SHA}?recursive=1`
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'clawboo-ingest-script',
+      Accept: 'application/vnd.github.v3+json',
+    },
+  })
+  if (!res.ok) {
+    throw new Error(`GitHub tree API returned ${res.status}: ${await res.text()}`)
+  }
+  const data = (await res.json()) as { tree: GitTreeItem[] }
+  return data.tree
+}
+
+/** Filter tree items to .md files under /usecases/ */
+export function filterUsecaseFiles(tree: GitTreeItem[]): GitTreeItem[] {
+  return tree.filter((item) => {
+    if (item.type !== 'blob') return false
+    if (!item.path.endsWith('.md')) return false
+    return item.path.startsWith('usecases/')
+  })
+}
+
+/** Fetch raw content of an awesome-openclaw file at the pinned SHA */
+export async function fetchAwesomeOpenclawRawFile(filePath: string): Promise<string> {
+  const url = `https://raw.githubusercontent.com/${AWESOME_OPENCLAW_REPO}/${AWESOME_OPENCLAW_SHA}/${filePath}`
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'clawboo-ingest-script' },
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to fetch ${filePath}: ${res.status}`)
+  }
+  return res.text()
+}
+
+/**
+ * Categorize a usecase by filename + content into one of our TemplateCategory values.
+ * Returns one of: research | content | marketing | engineering | devops | ops | sales |
+ * support | product | education | general.
+ */
+export function categorizeUsecase(filename: string, body: string): string {
+  const slug = filename.toLowerCase()
+  const text = body.toLowerCase()
+
+  if (/research|paper|arxiv|knowledge|brain|semantic|rag/.test(slug)) return 'research'
+  if (/content|factory|youtube|video|podcast|social|x-twitter|x-account|latex/.test(slug))
+    return 'content'
+  if (/market|brief|idea-validator|earnings|polymarket/.test(slug)) return 'marketing'
+  if (/game-dev|mini-app|pipeline/.test(slug)) return 'engineering'
+  if (/home-server|self-healing|n8n|workflow|dashboard/.test(slug)) return 'devops'
+  if (/project-management|state-management|task/.test(slug)) return 'ops'
+  if (/crm|sales|customer/.test(slug)) return 'sales'
+  if (/support|channel|customer-service|inbox|declutter/.test(slug)) return 'support'
+  if (/phone|notification|calendar|family|habit|health|personal|assistant|brief/.test(slug))
+    return 'general'
+  if (/meeting|notes|todoist|event/.test(slug)) return 'ops'
+
+  // Content fallback heuristics
+  if (text.includes('research agent') || text.includes('research team')) return 'research'
+  if (text.includes('writing agent') || text.includes('content')) return 'content'
+
+  return 'general'
+}
+
+interface UsecaseAgentMention {
+  name: string
+  role: string
+  roleSlug: string
+}
+
+/**
+ * Extract named agents from a usecase body using three parsing passes.
+ * Dedupes within the file by roleSlug (first-wins).
+ *
+ * Pass 1: ### Agent N: Name (Role) or ## Agent: Name
+ * Pass 2: ### Name Agent or #### Name Agent
+ * Pass 3: **Name Agent** bold inline mentions
+ */
+export function parseUsecaseAgents(body: string): UsecaseAgentMention[] {
+  const seen = new Set<string>()
+  const results: UsecaseAgentMention[] = []
+
+  const addMention = (rawName: string, rawRole: string): void => {
+    const name = rawName.trim()
+    const role = rawRole.trim()
+    if (!name || !role) return
+    const roleSlug = slugify(role)
+    if (!roleSlug || roleSlug.length < 2) return
+    if (seen.has(roleSlug)) return
+    seen.add(roleSlug)
+    results.push({ name, role, roleSlug })
+  }
+
+  // Pass 1: "### Agent N: Name (Role)" or "## Agent: Name"
+  const pass1 = /^#{2,4}\s*Agent(?:\s+\d+)?:\s*([^(\n]+?)(?:\s*\(([^)\n]+)\))?\s*$/gm
+  let match: RegExpExecArray | null
+  while ((match = pass1.exec(body)) !== null) {
+    const captureName = match[1].trim()
+    const captureRole = (match[2] ?? captureName).trim()
+    addMention(captureName, captureRole)
+  }
+
+  // Pass 2: "### Name Agent" / "#### Name Agent" — H3/H4 ending in "Agent"
+  const pass2 = /^#{3,4}\s+([A-Z][A-Za-z0-9 /&-]*?\s+Agent)\s*:?\s*$/gm
+  while ((match = pass2.exec(body)) !== null) {
+    const role = match[1].trim()
+    addMention(role, role)
+  }
+
+  // Pass 3: "**Name Agent**" bold inline mentions
+  const pass3 = /\*\*([A-Z][A-Za-z0-9 /&-]{1,40}?\s+Agent)\*\*/g
+  while ((match = pass3.exec(body)) !== null) {
+    const role = match[1].trim()
+    addMention(role, role)
+  }
+
+  // Pass 4: bulleted bold workflow phases — "- **Episode Research** — given..."
+  // These show up in `## What It Does` sections and act as role definitions for
+  // each step of a multi-phase workflow. Scoped to the `## What It Does` section
+  // only, to avoid noise from other bulleted bold phrases elsewhere in the file.
+  const whatItDoesSection = extractSection(body, /^##\s+What\s+It\s+Does/im)
+  if (whatItDoesSection) {
+    const pass4 = /^[ \t]*[-*][ \t]+\*\*([^*\n]{2,60}?)\*\*/gm
+    while ((match = pass4.exec(whatItDoesSection)) !== null) {
+      const rawPhrase = match[1]
+        .trim()
+        .replace(/[:—–.-]+$/, '')
+        .trim()
+      if (isValidPhasePhrase(rawPhrase)) {
+        addMention(rawPhrase, rawPhrase)
+      }
+    }
+  }
+
+  // Pass 5: "**Label:** content" style inline labels — "**Research:** scans..."
+  // Also scoped to `## What It Does` section for signal quality.
+  if (whatItDoesSection) {
+    const pass5 = /\*\*([A-Z][A-Za-z0-9 &-]{2,40}?):\*\*/g
+    while ((match = pass5.exec(whatItDoesSection)) !== null) {
+      const rawPhrase = match[1].trim()
+      if (isValidPhasePhrase(rawPhrase)) {
+        addMention(rawPhrase, rawPhrase)
+      }
+    }
+  }
+
+  return results
+}
+
+/** Extract the body of a markdown section (from heading to next H2 or EOF). */
+function extractSection(body: string, headingPattern: RegExp): string | null {
+  const lines = body.split('\n')
+  let startIdx = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (headingPattern.test(lines[i])) {
+      startIdx = i + 1
+      break
+    }
+  }
+  if (startIdx === -1) return null
+  let endIdx = lines.length
+  for (let i = startIdx; i < lines.length; i++) {
+    if (/^##\s/.test(lines[i])) {
+      endIdx = i
+      break
+    }
+  }
+  return lines.slice(startIdx, endIdx).join('\n')
+}
+
+/**
+ * Heuristic filter for a workflow-phase phrase.
+ * Looser than isValidRolePhrase() — these can start with a gerund or
+ * use sentence-case (e.g. "Self-healing", "Morning briefings"). Still
+ * filters out obvious noise.
+ */
+function isValidPhasePhrase(phrase: string): boolean {
+  if (!phrase) return false
+  if (!/^[A-Z]/.test(phrase)) return false
+  if (/[$0-9]/.test(phrase)) return false
+  if (/\./.test(phrase)) return false
+
+  const words = phrase.split(/\s+/)
+  if (words.length < 1 || words.length > 5) return false
+
+  const noiseStarts =
+    /^(Note|Tip|Warning|Example|Important|Key|Pain|Challenge|Origin|Problem|Based|Inspired|Related|The|Your|My|This|That|Why|How|What|When|Where|Who)\b/i
+  if (noiseStarts.test(phrase)) return false
+
+  // Reject extremely vague single-word phrases
+  if (words.length === 1) {
+    if (!/^[A-Z][a-z]+(?:ing|er|or|ist|ant|ent|tion|ment)$/.test(phrase)) return false
+  }
+
+  return true
+}
+
+/**
+ * Process a single usecase .md file into one or more AwesomeOpenclawAgent entries.
+ * Always emits at least one "operator" entry per usecase (guaranteed baseline),
+ * plus any named agents discovered by parseUsecaseAgents().
+ */
+export function processUsecaseFile(filePath: string, content: string): AwesomeOpenclawAgent[] {
+  const filename = filePath.replace(/^usecases\//, '').replace(/\.md$/, '')
+  const usecaseSlug = slugify(filename)
+  const usecaseTitle = titleCase(usecaseSlug)
+
+  const category = categorizeUsecase(filename, content)
+  const emoji = AWESOME_CATEGORY_EMOJI[category] ?? '✨'
+  const sourceUrl = `https://github.com/${AWESOME_OPENCLAW_REPO}/blob/${AWESOME_OPENCLAW_SHA}/${filePath}`
+  const skillIds = matchSkillIds(content)
+  const toolsTemplate = buildToolsTemplate(skillIds)
+  const description = extractDescription(content, usecaseTitle)
+
+  const mentions = parseUsecaseAgents(content)
+
+  const buildSoulTemplate = (role: string): string => {
+    const head = content.slice(0, 400).trimEnd()
+    return `# ${role}\n\n${head}\n\n<!-- TODO: review soul extraction -->`
+  }
+
+  const entries: AwesomeOpenclawAgent[] = []
+
+  // 1. Per-usecase operator (guaranteed baseline)
+  const operatorRole = `${usecaseTitle} Operator`
+  entries.push({
+    id: `awesome-${usecaseSlug}-operator`,
+    name: `${operatorRole} Boo`,
+    role: operatorRole,
+    emoji,
+    color: AWESOME_OPENCLAW_COLOR,
+    description,
+    source: 'awesome-openclaw',
+    sourceUrl,
+    domain: 'openclaw',
+    category,
+    tags: ['openclaw', usecaseSlug, 'operator'],
+    skillIds,
+    soulTemplate: buildSoulTemplate(operatorRole),
+    identityTemplate: content,
+    toolsTemplate,
+  })
+
+  // 2. Named agents extracted from the usecase body
+  for (const mention of mentions) {
+    const roleSlug = mention.roleSlug
+    if (roleSlug === 'operator') continue // avoid collision with operator id
+    const id = `awesome-${usecaseSlug}-${roleSlug}`
+    const displayRole = mention.role
+    entries.push({
+      id,
+      name: `${displayRole} Boo`,
+      role: displayRole,
+      emoji,
+      color: AWESOME_OPENCLAW_COLOR,
+      description,
+      source: 'awesome-openclaw',
+      sourceUrl,
+      domain: 'openclaw',
+      category,
+      tags: ['openclaw', usecaseSlug, ...roleSlug.split('-').filter((t) => t.length > 2)],
+      skillIds,
+      soulTemplate: buildSoulTemplate(displayRole),
+      identityTemplate: content,
+      toolsTemplate,
+    })
+  }
+
+  return entries
+}
+
+const AWESOME_FILE_HEADER = `// MIT License — content sourced from github.com/hesamsheikh/awesome-openclaw-usecases
+// Commit: ${AWESOME_OPENCLAW_SHA}
+// See THIRD_PARTY_NOTICES.md for full license text.
+//
+// AUTO-GENERATED — do not edit manually.
+// Regenerate: pnpm ingest:marketplace
+
+import type { AgentCatalogEntry } from '@/features/teams/types'`
+
+/**
+ * Render the awesome-openclaw/usecases.ts file containing all extracted agents.
+ * Input array is sorted by id for determinism.
+ */
+export function renderAwesomeOpenclawFile(agents: AwesomeOpenclawAgent[]): string {
+  const sorted = [...agents].sort((a, b) => a.id.localeCompare(b.id))
+
+  const entries = sorted.map((a) => {
+    return `  {
+    id: ${JSON.stringify(a.id)},
+    name: ${JSON.stringify(a.name)},
+    role: ${JSON.stringify(a.role)},
+    emoji: ${JSON.stringify(a.emoji)},
+    color: ${JSON.stringify(a.color)},
+    description: ${JSON.stringify(a.description)},
+    source: 'awesome-openclaw',
+    sourceUrl: ${JSON.stringify(a.sourceUrl)},
+    domain: 'openclaw',
+    category: ${JSON.stringify(a.category)},
+    tags: ${JSON.stringify(a.tags)},
+    skillIds: ${JSON.stringify(a.skillIds)},
+    soulTemplate: ${JSON.stringify(a.soulTemplate)},
+    identityTemplate: ${JSON.stringify(a.identityTemplate)},
+    toolsTemplate: ${JSON.stringify(a.toolsTemplate)},
+  }`
+  })
+
+  return `${AWESOME_FILE_HEADER}
+
+export const AWESOME_OPENCLAW_USECASES: AgentCatalogEntry[] = [
+${entries.join(',\n')}
+]
+`
+}
+
+/**
+ * Render the awesome-openclaw/index.ts file.
+ */
+export function renderAwesomeOpenclawIndex(): string {
+  return `// AUTO-GENERATED — do not edit manually.
+// Regenerate: pnpm ingest:marketplace
+
+import type { AgentCatalogEntry } from '@/features/teams/types'
+import { AWESOME_OPENCLAW_USECASES } from './usecases'
+
+export { AWESOME_OPENCLAW_USECASES } from './usecases'
+
+export const AWESOME_OPENCLAW_AGENTS: AgentCatalogEntry[] = [...AWESOME_OPENCLAW_USECASES]
+`
 }
