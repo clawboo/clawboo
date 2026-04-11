@@ -14,11 +14,11 @@ import type {
 } from '@/features/teams/types'
 
 import { SKILL_CATALOG } from '../../catalog'
-import { devTemplate } from '../../templates/builtin/dev'
-import { marketingTemplate } from '../../templates/builtin/marketing'
-import { researchTemplate } from '../../templates/builtin/research'
-import { studentTemplate } from '../../templates/builtin/student'
-import { youtubeTemplate } from '../../templates/builtin/youtube'
+import { devTemplate } from './sources/dev'
+import { marketingTemplate } from './sources/marketing'
+import { researchTemplate } from './sources/research'
+import { studentTemplate } from './sources/student'
+import { youtubeTemplate } from './sources/youtube'
 
 /** Set of valid catalog skill IDs — used to filter extracted skill bullets. */
 const VALID_SKILL_IDS = new Set(SKILL_CATALOG.map((s) => s.id))
@@ -127,5 +127,5 @@ const BUILTIN_TEMPLATES: TeamTemplate[] = [
 
 /** 15 first-class clawboo built-in agents (5 teams x 3 agents each). */
 export const CLAWBOO_BUILTIN_AGENTS: AgentCatalogEntry[] = BUILTIN_TEMPLATES.flatMap((team) =>
-  team.agents.map((agent) => fromInlineAgent(team, agent)),
+  (team.agents ?? []).map((agent) => fromInlineAgent(team, agent)),
 ).sort((a, b) => a.id.localeCompare(b.id))

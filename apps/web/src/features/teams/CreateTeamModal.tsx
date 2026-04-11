@@ -6,23 +6,18 @@ import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
-import { resolveWorkspaceDir, createAgent, buildToolsMd } from '@/lib/createAgent'
+import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { useGraphStore } from '@/features/graph/store'
-import type {
-  TeamProfile,
-  TeamTemplate,
-  ProfileLike,
-  TemplateSource,
-  TemplateCategory,
-} from './types'
+import type { TeamTemplate, ProfileLike, TemplateSource, TemplateCategory } from './types'
 import {
   BROWSABLE_TEAM_CATALOG,
   searchBrowsableCatalog,
   TEMPLATE_CATEGORIES,
   SOURCE_META,
+  resolveTeamAgents,
 } from '@/features/marketplace/teamCatalog'
 import { TeamTemplateDetail } from '@/features/marketplace/TeamTemplateDetail'
 
@@ -116,6 +111,11 @@ export function CreateTeamModal({
     return results
   }, [pickSearch, pickCategory, pickSource])
 
+  const resolvedSelected = useMemo(
+    () => (selectedProfile ? resolveTeamAgents(selectedProfile) : []),
+    [selectedProfile],
+  )
+
   const activeCategories = useMemo(() => {
     const catSet = new Set(BROWSABLE_TEAM_CATALOG.map((t) => t.category))
     return TEMPLATE_CATEGORIES.filter((c) => catSet.has(c.key))
@@ -167,10 +167,13 @@ export function CreateTeamModal({
     setError(null)
 
     try {
+      // Resolve the catalog agents up front — used for dedup, deploy, and counts.
+      const resolved = selectedProfile ? resolveTeamAgents(selectedProfile) : []
+
       // ── Dedup: auto-suffix if agent/team names collide with existing ones ──
       const existingAgentNames = useFleetStore.getState().agents.map((a) => a.name)
       const existingTeamNames = useTeamStore.getState().teams.map((t) => t.name)
-      const desiredAgentNames = selectedProfile ? selectedProfile.agents.map((a) => a.name) : []
+      const desiredAgentNames = resolved.map((a) => a.name)
       const dedupPlan = computeDedupSuffix(
         desiredAgentNames,
         existingAgentNames,
@@ -221,19 +224,13 @@ export function CreateTeamModal({
 
       // Template team → deploy agents
       setStep('deploy')
-      const profile = selectedProfile
-      const isNewFormat = 'toolsTemplate' in (profile.agents[0] ?? {})
-      const legacyTools =
-        !isNewFormat && 'skills' in profile
-          ? buildToolsMd((profile as TeamProfile).skills)
-          : '# TOOLS\n'
 
       const workspaceDir = await resolveWorkspaceDir(client)
       let firstAgentId: string | null = null
-      for (let i = 0; i < profile.agents.length; i++) {
-        const agent = profile.agents[i]
+      for (let i = 0; i < resolved.length; i++) {
+        const agent = resolved[i]
         const finalAgentName = dedupPlan.agentNameMap.get(agent.name) ?? agent.name
-        setProgress({ current: i, total: profile.agents.length, label: finalAgentName })
+        setProgress({ current: i, total: resolved.length, label: finalAgentName })
 
         const defaultPersonality: PersonalityValues = {
           verbosity: 50,
@@ -249,15 +246,8 @@ export function CreateTeamModal({
         const agentId = await createAgent(client, finalAgentName, workspaceDir, {
           soul: soulWithPersonality,
           identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
-          tools: isNewFormat
-            ? (agent as TeamTemplate['agents'][number]).toolsTemplate
-            : legacyTools,
-          agents: isNewFormat
-            ? rewriteAgentsMd(
-                (agent as TeamTemplate['agents'][number]).agentsTemplate,
-                dedupPlan.agentNameMap,
-              )
-            : undefined,
+          tools: agent.toolsTemplate,
+          agents: rewriteAgentsMd(agent.agentsTemplate, dedupPlan.agentNameMap),
         })
 
         // Persist default personality to SQLite so sliders load correctly
@@ -296,17 +286,13 @@ export function CreateTeamModal({
       }
 
       setProgress({
-        current: profile.agents.length,
-        total: profile.agents.length,
+        current: resolved.length,
+        total: resolved.length,
         label: 'Done!',
       })
 
       // Auto-enable agent-to-agent coordination if any agent has routing
-      const hasRouting = profile.agents.some((a) => {
-        const agentsMd =
-          'agentsTemplate' in a ? (a as TeamTemplate['agents'][number]).agentsTemplate : undefined
-        return agentsMd && /@[\w"']/.test(agentsMd)
-      })
+      const hasRouting = resolved.some((a) => a.agentsTemplate && /@[\w"']/.test(a.agentsTemplate))
       if (hasRouting) {
         try {
           await fetch('/api/system/openclaw-config', {
@@ -353,7 +339,7 @@ export function CreateTeamModal({
       setStep('complete')
       useToastStore.getState().addToast({
         type: 'success',
-        message: `Team "${name}" deployed with ${profile.agents.length} agents`,
+        message: `Team "${name}" deployed with ${resolved.length} agents`,
       })
       setTimeout(() => {
         reset()
@@ -541,6 +527,7 @@ export function CreateTeamModal({
                   )}
                   {filteredTemplates.map((profile) => {
                     const srcMeta = SOURCE_META[profile.source]
+                    const agentCount = resolveTeamAgents(profile).length
                     return (
                       <button
                         key={profile.id}
@@ -563,7 +550,7 @@ export function CreateTeamModal({
                               {profile.name}
                             </span>
                             <span className="text-[10px] text-secondary/40">
-                              {profile.agents.length} agents
+                              {agentCount} agents
                             </span>
                             <span
                               style={{
@@ -697,21 +684,21 @@ export function CreateTeamModal({
                     </div>
                     <div className="text-[11px] text-secondary/60">
                       {selectedProfile
-                        ? `${selectedProfile.agents.length} agents from template`
+                        ? `${resolvedSelected.length} agents from template`
                         : 'Empty team'}
                     </div>
                   </div>
                 </div>
 
                 {/* Template agent preview */}
-                {selectedProfile && (
+                {selectedProfile && resolvedSelected.length > 0 && (
                   <div className="mb-5">
                     <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-secondary">
                       Agents
                     </span>
                     <div className="flex flex-col gap-1.5">
-                      {selectedProfile.agents.map((agent) => (
-                        <div key={agent.name} className="flex items-center gap-2">
+                      {resolvedSelected.map((agent) => (
+                        <div key={agent.id} className="flex items-center gap-2">
                           <BooAvatar seed={agent.name} size={20} />
                           <span className="text-[12px] text-text/70">{agent.name}</span>
                         </div>

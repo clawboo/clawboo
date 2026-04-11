@@ -101,9 +101,10 @@ export interface TeamTemplate {
   tags: string[]
   /**
    * @deprecated Use `agentIds` referencing AGENT_CATALOG entries instead.
-   * Kept for backward compatibility until Session 3 migration.
+   * Kept for backward compatibility so hypothetical user-defined templates with
+   * inline agents still typecheck. All first-party teams now use `agentIds`.
    */
-  agents: AgentTemplate[]
+  agents?: AgentTemplate[]
   /**
    * Agent IDs from AGENT_CATALOG. Replaces inline `agents` array.
    * When present, consumers should resolve via `resolveTeamAgents(team)`.

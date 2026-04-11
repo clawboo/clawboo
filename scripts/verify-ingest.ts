@@ -5,9 +5,11 @@
  * Regenerates all auto-generated content in-memory and diffs against committed files.
  * Exits 0 if all files match; exits 1 if any file is out of date.
  *
- * Covers both agency-agents and awesome-openclaw pipelines, plus the combined
- * agents/index.ts shell. Does NOT check `clawboo/builtin.ts` or `clawboo/index.ts`
- * because those are hand-written (extracted once from templates/builtin/*.ts).
+ * Covers both agency-agents and awesome-openclaw pipelines, the combined
+ * agents/index.ts shell, and the three auto-generated team files
+ * (agency-workflows, awesome-openclaw, synthetic). Does NOT check
+ * `clawboo/builtin.ts`, `clawboo/index.ts`, `teams/clawboo-builtin.ts`, or
+ * `teams/index.ts` because those are hand-written.
  *
  * Usage: pnpm verify:ingest
  */
@@ -38,6 +40,18 @@ import {
   agentsIndexPath,
   awesomeOpenclawFilePath,
   awesomeOpenclawIndexPath,
+  WORKFLOW_TEAM_CONFIGS,
+  fetchAgencyExampleFile,
+  verifyWorkflowMap,
+  renderAgencyWorkflowsFile,
+  groupAwesomeByUsecase,
+  renderAwesomeOpenclawTeamsFile,
+  generateSyntheticTeams,
+  renderSyntheticTeamsFile,
+  workflowAgentIds,
+  agencyWorkflowsTeamPath,
+  awesomeOpenclawTeamsPath,
+  syntheticTeamsPath,
 } from './lib/ingest-helpers.js'
 
 // ─── agents/index.ts renderer (duplicated from ingest script for shared use) ─
@@ -205,6 +219,50 @@ async function main(): Promise<void> {
     expected: renderAgentsIndex(),
   })
 
+  // ─── Team file pipeline (deterministic regen) ──────────────────────────────
+  console.log('\nFetching agency workflow examples...')
+  const workflowBodies = new Map<string, string>()
+  const workflowFetchTasks = WORKFLOW_TEAM_CONFIGS.map((cfg) => async () => {
+    process.stdout.write('.')
+    try {
+      const body = await fetchAgencyExampleFile(cfg.filename)
+      workflowBodies.set(cfg.filename, body)
+    } catch (err) {
+      console.warn(`\n[workflow] failed to fetch ${cfg.filename}: ${(err as Error).message}`)
+    }
+  })
+  await pLimit(workflowFetchTasks, 5)
+  console.log(`\nFetched ${workflowBodies.size} workflow examples\n`)
+
+  // Build agent name lookup for routing.
+  const agentNameById = new Map<string, string>()
+  for (const agents of domainAgents.values()) {
+    for (const a of agents) agentNameById.set(a.id, a.name)
+  }
+  for (const a of awesomeAgents) agentNameById.set(a.id, a.name)
+
+  verifyWorkflowMap(WORKFLOW_TEAM_CONFIGS, workflowBodies, agentNameById)
+
+  const awesomeGroups = groupAwesomeByUsecase(awesomeAgents)
+  const excludeIds = workflowAgentIds()
+  const syntheticTeams = generateSyntheticTeams(domainAgents, excludeIds)
+
+  filesToCheck.push({
+    label: 'teams/agency-workflows.ts',
+    path: agencyWorkflowsTeamPath(),
+    expected: renderAgencyWorkflowsFile(WORKFLOW_TEAM_CONFIGS, workflowBodies, agentNameById),
+  })
+  filesToCheck.push({
+    label: 'teams/awesome-openclaw.ts',
+    path: awesomeOpenclawTeamsPath(),
+    expected: renderAwesomeOpenclawTeamsFile(awesomeGroups),
+  })
+  filesToCheck.push({
+    label: 'teams/synthetic.ts',
+    path: syntheticTeamsPath(),
+    expected: renderSyntheticTeamsFile(syntheticTeams),
+  })
+
   const failures: string[] = []
   for (const { label, path: filePath, expected } of filesToCheck) {
     let actual: string
@@ -229,8 +287,10 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  console.log(`\n✅ All ${filesToCheck.length} agent catalog files are up to date`)
-  console.log(`   (clawboo/builtin.ts + clawboo/index.ts are hand-written — not verified)\n`)
+  console.log(`\n✅ All ${filesToCheck.length} agent + team files are up to date`)
+  console.log(
+    `   (clawboo/builtin.ts, clawboo/index.ts, teams/clawboo-builtin.ts, teams/index.ts are hand-written — not verified)\n`,
+  )
 }
 
 main().catch((err) => {

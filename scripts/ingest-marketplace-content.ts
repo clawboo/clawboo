@@ -41,6 +41,19 @@ import {
   AGENTS_DIR,
   AGENCY_DIR,
   AWESOME_OPENCLAW_DIR,
+  TEAMS_DIR,
+  WORKFLOW_TEAM_CONFIGS,
+  fetchAgencyExampleFile,
+  workflowAgentIds,
+  verifyWorkflowMap,
+  renderAgencyWorkflowsFile,
+  groupAwesomeByUsecase,
+  renderAwesomeOpenclawTeamsFile,
+  generateSyntheticTeams,
+  renderSyntheticTeamsFile,
+  agencyWorkflowsTeamPath,
+  awesomeOpenclawTeamsPath,
+  syntheticTeamsPath,
 } from './lib/ingest-helpers.js'
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -166,9 +179,65 @@ async function main(): Promise<void> {
   await fs.writeFile(agentsIndexPath(), agentsIndex, 'utf8')
   console.log(`  Wrote ${path.relative(process.cwd(), agentsIndexPath())}`)
 
-  const grandTotal = total + awesomeAgents.length
+  // ─── Team file generation ──────────────────────────────────────────────────
+  console.log('\nBuilding teams...')
+  await fs.mkdir(TEAMS_DIR, { recursive: true })
+
+  // Build agent name lookup across all sources so routing can use display names.
+  const agentNameById = new Map<string, string>()
+  for (const agents of domainAgents.values()) {
+    for (const a of agents) agentNameById.set(a.id, a.name)
+  }
+  for (const a of awesomeAgents) agentNameById.set(a.id, a.name)
+
+  // 8. Fetch workflow example bodies + emit teams/agency-workflows.ts
+  console.log('Fetching agency workflow examples...')
+  const workflowBodies = new Map<string, string>()
+  const workflowFetchTasks = WORKFLOW_TEAM_CONFIGS.map((cfg) => async () => {
+    process.stdout.write('.')
+    try {
+      const body = await fetchAgencyExampleFile(cfg.filename)
+      workflowBodies.set(cfg.filename, body)
+    } catch (err) {
+      console.warn(`\n[workflow] failed to fetch ${cfg.filename}: ${(err as Error).message}`)
+    }
+  })
+  await pLimit(workflowFetchTasks, 5)
+  console.log(`\nFetched ${workflowBodies.size} workflow examples`)
+
+  verifyWorkflowMap(WORKFLOW_TEAM_CONFIGS, workflowBodies, agentNameById)
+
+  const agencyWorkflowsContent = renderAgencyWorkflowsFile(
+    WORKFLOW_TEAM_CONFIGS,
+    workflowBodies,
+    agentNameById,
+  )
+  await fs.writeFile(agencyWorkflowsTeamPath(), agencyWorkflowsContent, 'utf8')
   console.log(
-    `\n✅ Done — ${grandTotal} agents written (${total} agency + ${awesomeAgents.length} awesome-openclaw; clawboo builtin hand-written separately)\n`,
+    `  Wrote ${path.relative(process.cwd(), agencyWorkflowsTeamPath())} (${WORKFLOW_TEAM_CONFIGS.length} teams)`,
+  )
+
+  // 9. Group awesome-openclaw agents by usecase + emit teams/awesome-openclaw.ts
+  const awesomeGroups = groupAwesomeByUsecase(awesomeAgents)
+  const awesomeTeamsContent = renderAwesomeOpenclawTeamsFile(awesomeGroups)
+  await fs.writeFile(awesomeOpenclawTeamsPath(), awesomeTeamsContent, 'utf8')
+  console.log(
+    `  Wrote ${path.relative(process.cwd(), awesomeOpenclawTeamsPath())} (${awesomeGroups.size} teams)`,
+  )
+
+  // 10. Generate synthetic excellence teams from uncovered agency agents
+  const excludeIds = workflowAgentIds()
+  const syntheticTeams = generateSyntheticTeams(domainAgents, excludeIds)
+  const syntheticContent = renderSyntheticTeamsFile(syntheticTeams)
+  await fs.writeFile(syntheticTeamsPath(), syntheticContent, 'utf8')
+  console.log(
+    `  Wrote ${path.relative(process.cwd(), syntheticTeamsPath())} (${syntheticTeams.length} teams)`,
+  )
+
+  const grandTotal = total + awesomeAgents.length
+  const teamTotal = WORKFLOW_TEAM_CONFIGS.length + awesomeGroups.size + syntheticTeams.length
+  console.log(
+    `\n✅ Done — ${grandTotal} agents + ${teamTotal} teams written (${total} agency + ${awesomeAgents.length} awesome-openclaw; clawboo 15 agents + 5 teams hand-written separately)\n`,
   )
 }
 

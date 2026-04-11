@@ -540,6 +540,20 @@ export function awesomeOpenclawIndexPath(): string {
   return path.join(AWESOME_OPENCLAW_DIR, 'index.ts')
 }
 
+export const TEAMS_DIR = path.join(REPO_ROOT, 'apps/web/src/features/marketplace/teams')
+
+export function agencyWorkflowsTeamPath(): string {
+  return path.join(TEAMS_DIR, 'agency-workflows.ts')
+}
+
+export function awesomeOpenclawTeamsPath(): string {
+  return path.join(TEAMS_DIR, 'awesome-openclaw.ts')
+}
+
+export function syntheticTeamsPath(): string {
+  return path.join(TEAMS_DIR, 'synthetic.ts')
+}
+
 // ─── Awesome OpenClaw ingestion ──────────────────────────────────────────────
 
 export interface AwesomeOpenclawAgent {
@@ -908,5 +922,458 @@ import { AWESOME_OPENCLAW_USECASES } from './usecases'
 export { AWESOME_OPENCLAW_USECASES } from './usecases'
 
 export const AWESOME_OPENCLAW_AGENTS: AgentCatalogEntry[] = [...AWESOME_OPENCLAW_USECASES]
+`
+}
+
+// ─── Team file generation ────────────────────────────────────────────────────
+
+/**
+ * Hand-curated config for each agency workflow example.
+ * Each workflow maps filename → catalog agent IDs. First ID in agentIds is
+ * treated as the leader for hub-spoke routing generation.
+ */
+export interface WorkflowTeamConfig {
+  filename: string
+  id: string
+  name: string
+  emoji: string
+  color: string
+  category: string
+  description: string
+  tags: string[]
+  agentIds: string[]
+}
+
+export const WORKFLOW_TEAM_CONFIGS: WorkflowTeamConfig[] = [
+  {
+    filename: 'workflow-startup-mvp.md',
+    id: 'agency-workflow-startup-mvp',
+    name: 'Startup MVP Sprint',
+    emoji: '🚀',
+    color: '#6366F1',
+    category: 'product',
+    description:
+      'Coordinated squad that takes a SaaS idea from sprint plan to shipped MVP in four weeks.',
+    tags: ['workflow', 'mvp', 'startup', 'sprint', 'multi-agent'],
+    agentIds: [
+      'agency-product-sprint-prioritizer',
+      'agency-design-ux-researcher',
+      'agency-engineering-backend-architect',
+      'agency-engineering-frontend-developer',
+      'agency-engineering-rapid-prototyper',
+      'agency-marketing-growth-hacker',
+      'agency-testing-reality-checker',
+    ],
+  },
+  {
+    filename: 'workflow-with-memory.md',
+    id: 'agency-workflow-with-memory',
+    name: 'Startup MVP with Persistent Memory',
+    emoji: '🧠',
+    color: '#8B5CF6',
+    category: 'product',
+    description:
+      'Same startup MVP squad, but with agents that remember and recall context via an MCP memory server.',
+    tags: ['workflow', 'mvp', 'memory', 'mcp', 'multi-agent'],
+    agentIds: [
+      'agency-product-sprint-prioritizer',
+      'agency-design-ux-researcher',
+      'agency-engineering-backend-architect',
+      'agency-engineering-frontend-developer',
+      'agency-engineering-rapid-prototyper',
+      'agency-marketing-growth-hacker',
+      'agency-testing-reality-checker',
+    ],
+  },
+  {
+    filename: 'workflow-landing-page.md',
+    id: 'agency-workflow-landing-page',
+    name: 'Landing Page Sprint',
+    emoji: '📄',
+    color: '#EC4899',
+    category: 'marketing',
+    description:
+      'Ship a conversion-optimized landing page in one day with copy, design, build, and growth working together.',
+    tags: ['workflow', 'landing-page', 'conversion', 'sprint', 'multi-agent'],
+    agentIds: [
+      'agency-marketing-content-creator',
+      'agency-design-ui-designer',
+      'agency-engineering-frontend-developer',
+      'agency-marketing-growth-hacker',
+    ],
+  },
+  {
+    filename: 'workflow-book-chapter.md',
+    id: 'agency-workflow-book-chapter',
+    name: 'Book Chapter Development',
+    emoji: '📖',
+    color: '#F59E0B',
+    category: 'content',
+    description:
+      'Focused single-agent workflow that turns voice notes and fragments into a first-person chapter draft with editorial notes.',
+    tags: ['workflow', 'book', 'writing', 'long-form', 'single-agent'],
+    agentIds: ['agency-marketing-book-co-author'],
+  },
+  {
+    filename: 'nexus-spatial-discovery.md',
+    id: 'agency-workflow-nexus-spatial-discovery',
+    name: 'Nexus Spatial Discovery',
+    emoji: '🥽',
+    color: '#7C3AED',
+    category: 'spatial',
+    description:
+      'Eight-agent full-agency discovery exercise from opportunity identification through spatial interface design.',
+    tags: ['workflow', 'discovery', 'spatial', 'nexus', 'multi-agent'],
+    agentIds: [
+      'agency-product-trend-researcher',
+      'agency-engineering-backend-architect',
+      'agency-design-brand-guardian',
+      'agency-marketing-growth-hacker',
+      'agency-support-support-responder',
+      'agency-design-ux-researcher',
+      'agency-project-management-project-shepherd',
+      'agency-xr-interface-architect',
+    ],
+  },
+]
+
+/** Fetch a single agency workflow example .md file at the pinned SHA. */
+export async function fetchAgencyExampleFile(filename: string): Promise<string> {
+  return fetchRawFile(`examples/${filename}`)
+}
+
+/** Collect catalog agent IDs referenced by any workflow team. */
+export function workflowAgentIds(): Set<string> {
+  const out = new Set<string>()
+  for (const wf of WORKFLOW_TEAM_CONFIGS) {
+    for (const id of wf.agentIds) out.add(id)
+  }
+  return out
+}
+
+/**
+ * Verify that every mapped workflow agent ID appears in the source body (fuzzy).
+ * Warns on drift. Not fatal — `WORKFLOW_TEAM_CONFIGS` is the source of truth.
+ */
+export function verifyWorkflowMap(
+  configs: WorkflowTeamConfig[],
+  bodies: Map<string, string>,
+  agentNameById: Map<string, string>,
+): void {
+  for (const cfg of configs) {
+    const body = (bodies.get(cfg.filename) ?? '').toLowerCase()
+    if (!body) continue
+    for (const id of cfg.agentIds) {
+      const name = agentNameById.get(id)
+      if (!name) {
+        console.warn(`[workflow-map] ${cfg.filename}: agent ${id} not in catalog`)
+        continue
+      }
+      // Strip "Boo" suffix and try role words
+      const roleWords = name
+        .replace(/\s*Boo\s*$/i, '')
+        .split(/\s+/)
+        .filter((w) => w.length > 3)
+      const hit = roleWords.some((w) => body.includes(w.toLowerCase()))
+      if (!hit) {
+        console.warn(
+          `[workflow-map] ${cfg.filename}: mapped agent "${name}" not mentioned in workflow body`,
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Build hub-spoke routing for a team, keyed by agent ID.
+ * First agent = leader. All others route to the leader; leader lists all members.
+ */
+export function buildHubSpokeRouting(
+  agentIds: string[],
+  agentNameById: Map<string, string>,
+): Record<string, string> {
+  if (agentIds.length < 2) return {}
+  const routing: Record<string, string> = {}
+  const leaderId = agentIds[0]
+  const leaderName = agentNameById.get(leaderId)
+  if (!leaderName) return {}
+
+  const memberLines: string[] = []
+  for (let i = 1; i < agentIds.length; i++) {
+    const id = agentIds[i]
+    const name = agentNameById.get(id)
+    if (!name) continue
+    memberLines.push(`- @${name} — specialist contributor`)
+    routing[id] =
+      `# AGENTS\n\nWhen a task needs coordination or final synthesis, route to @${leaderName}.`
+  }
+
+  const leaderBody = [
+    '# AGENTS',
+    '',
+    'You coordinate this team. Route incoming work to the right specialist:',
+    '',
+    ...memberLines,
+    '',
+    'When members complete their work, synthesise the outputs before handing off.',
+  ].join('\n')
+  routing[leaderId] = leaderBody
+
+  return routing
+}
+
+/** Render a TeamTemplate object literal with agentIds + optional fields. */
+function renderTeamLiteral(team: {
+  id: string
+  name: string
+  emoji: string
+  color: string
+  description: string
+  category: string
+  source: string
+  sourceUrl?: string
+  tags: string[]
+  agentIds: string[]
+  routing?: Record<string, string>
+  workflowNarrative?: string
+  isSynthetic?: boolean
+}): string {
+  const lines: string[] = ['  {']
+  lines.push(`    id: ${JSON.stringify(team.id)},`)
+  lines.push(`    name: ${JSON.stringify(team.name)},`)
+  lines.push(`    emoji: ${JSON.stringify(team.emoji)},`)
+  lines.push(`    color: ${JSON.stringify(team.color)},`)
+  lines.push(`    description: ${JSON.stringify(team.description)},`)
+  lines.push(`    category: ${JSON.stringify(team.category)},`)
+  lines.push(`    source: ${JSON.stringify(team.source)},`)
+  if (team.sourceUrl) lines.push(`    sourceUrl: ${JSON.stringify(team.sourceUrl)},`)
+  lines.push(`    tags: ${JSON.stringify(team.tags)},`)
+  lines.push(`    agentIds: ${JSON.stringify(team.agentIds)},`)
+  if (team.routing && Object.keys(team.routing).length > 0) {
+    lines.push(`    routing: ${JSON.stringify(team.routing)},`)
+  }
+  if (team.workflowNarrative) {
+    lines.push(`    workflowNarrative: ${JSON.stringify(team.workflowNarrative)},`)
+  }
+  if (team.isSynthetic) {
+    lines.push('    isSynthetic: true,')
+  }
+  lines.push('  }')
+  return lines.join('\n')
+}
+
+const TEAMS_FILE_HEADER = `// AUTO-GENERATED — do not edit manually.
+// Regenerate: pnpm ingest:marketplace
+
+import type { TeamTemplate } from '@/features/teams/types'`
+
+/** Render teams/agency-workflows.ts — 5 workflow teams. */
+export function renderAgencyWorkflowsFile(
+  configs: WorkflowTeamConfig[],
+  workflowBodies: Map<string, string>,
+  agentNameById: Map<string, string>,
+): string {
+  const entries = configs.map((cfg) => {
+    const body = workflowBodies.get(cfg.filename) ?? ''
+    const sourceUrl = `https://github.com/${AGENCY_AGENTS_REPO}/blob/${AGENCY_AGENTS_SHA}/examples/${cfg.filename}`
+    const routing = buildHubSpokeRouting(cfg.agentIds, agentNameById)
+    return renderTeamLiteral({
+      id: cfg.id,
+      name: cfg.name,
+      emoji: cfg.emoji,
+      color: cfg.color,
+      description: cfg.description,
+      category: cfg.category,
+      source: 'agency-agents',
+      sourceUrl,
+      tags: cfg.tags,
+      agentIds: cfg.agentIds,
+      routing,
+      workflowNarrative: body,
+    })
+  })
+
+  return `${TEAMS_FILE_HEADER}
+
+export const AGENCY_WORKFLOW_TEAMS: TeamTemplate[] = [
+${entries.join(',\n')},
+]
+`
+}
+
+/**
+ * Group awesome-openclaw agents by usecase slug (tags[1]).
+ * Within each group, operator is placed first; others sorted by id.
+ */
+export function groupAwesomeByUsecase(
+  agents: AwesomeOpenclawAgent[],
+): Map<string, AwesomeOpenclawAgent[]> {
+  const groups = new Map<string, AwesomeOpenclawAgent[]>()
+  for (const agent of agents) {
+    const slug = agent.tags[1] ?? agent.id.replace(/^awesome-/, '').replace(/-[^-]+$/, '')
+    let list = groups.get(slug)
+    if (!list) {
+      list = []
+      groups.set(slug, list)
+    }
+    list.push(agent)
+  }
+  for (const [slug, list] of groups) {
+    list.sort((a, b) => {
+      const aOp = a.id.endsWith('-operator') ? 0 : 1
+      const bOp = b.id.endsWith('-operator') ? 0 : 1
+      if (aOp !== bOp) return aOp - bOp
+      return a.id.localeCompare(b.id)
+    })
+    groups.set(slug, list)
+  }
+  return new Map([...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])))
+}
+
+/** Render teams/awesome-openclaw.ts — one team per usecase (~42 teams). */
+export function renderAwesomeOpenclawTeamsFile(
+  groups: Map<string, AwesomeOpenclawAgent[]>,
+): string {
+  const entries: string[] = []
+  const agentNameById = new Map<string, string>()
+  for (const [, list] of groups) {
+    for (const agent of list) agentNameById.set(agent.id, agent.name)
+  }
+
+  for (const [slug, list] of groups) {
+    if (list.length === 0) continue
+    const leader = list[0]
+    const agentIds = list.map((a) => a.id)
+    const routing = buildHubSpokeRouting(agentIds, agentNameById)
+    const title = titleCase(slug)
+    entries.push(
+      renderTeamLiteral({
+        id: `awesome-${slug}`,
+        name: title,
+        emoji: leader.emoji,
+        color: leader.color,
+        description: leader.description,
+        category: leader.category,
+        source: 'awesome-openclaw',
+        sourceUrl: leader.sourceUrl,
+        tags: ['openclaw', slug, leader.category, 'usecase'],
+        agentIds,
+        routing,
+        workflowNarrative: leader.identityTemplate,
+      }),
+    )
+  }
+
+  return `${TEAMS_FILE_HEADER}
+
+export const AWESOME_OPENCLAW_TEAMS: TeamTemplate[] = [
+${entries.join(',\n')},
+]
+`
+}
+
+/** Target synthetic-team chunk size per domain (agents per excellence team). */
+const SYNTHETIC_CHUNK_SIZE: Record<AgencyDomain, number> = {
+  academic: 5,
+  design: 5,
+  engineering: 6,
+  'game-development': 7,
+  marketing: 6,
+  'paid-media': 7,
+  product: 5,
+  'project-management': 6,
+  sales: 5,
+  'spatial-computing': 5,
+  specialized: 6,
+  support: 6,
+  testing: 7,
+}
+
+export interface SyntheticTeamEntry {
+  id: string
+  name: string
+  emoji: string
+  color: string
+  description: string
+  category: string
+  tags: string[]
+  agentIds: string[]
+  routing: Record<string, string>
+  isSynthetic: true
+}
+
+/**
+ * Partition remaining (uncovered) agency agents into synthetic "Excellence Teams".
+ * Workflow-covered agents are excluded so every agent appears in ≥1 team.
+ */
+export function generateSyntheticTeams(
+  agencyAgentsByDomain: Map<AgencyDomain, ProcessedAgent[]>,
+  excludeIds: Set<string>,
+): SyntheticTeamEntry[] {
+  const teams: SyntheticTeamEntry[] = []
+
+  for (const domain of TARGET_DOMAINS) {
+    const agents = (agencyAgentsByDomain.get(domain) ?? []).filter((a) => !excludeIds.has(a.id))
+    if (agents.length === 0) continue
+    agents.sort((a, b) => a.id.localeCompare(b.id))
+
+    const chunkSize = SYNTHETIC_CHUNK_SIZE[domain]
+    const numChunks = Math.max(1, Math.ceil(agents.length / chunkSize))
+    const evenSize = Math.ceil(agents.length / numChunks)
+
+    const meta = DOMAIN_META[domain]
+    const domainTitle = titleCase(domain)
+
+    const agentNameById = new Map<string, string>()
+    for (const a of agents) agentNameById.set(a.id, a.name)
+
+    for (let i = 0; i < numChunks; i++) {
+      const chunk = agents.slice(i * evenSize, (i + 1) * evenSize)
+      if (chunk.length === 0) continue
+      const agentIds = chunk.map((a) => a.id)
+      const routing = buildHubSpokeRouting(agentIds, agentNameById)
+      const teamId = `${domain}-excellence-${i + 1}`
+
+      teams.push({
+        id: teamId,
+        name: `${domainTitle} Excellence Team ${i + 1}`,
+        emoji: meta.emoji,
+        color: meta.color,
+        description: `Excellence team covering ${chunk.length} ${domainTitle.toLowerCase()} specialists. Hub-and-spoke coordination led by ${chunk[0].name}.`,
+        category: meta.category,
+        tags: ['excellence', domain, 'synthetic', meta.category],
+        agentIds,
+        routing,
+        isSynthetic: true,
+      })
+    }
+  }
+
+  return teams
+}
+
+/** Render teams/synthetic.ts — ~29 Excellence Teams. */
+export function renderSyntheticTeamsFile(teams: SyntheticTeamEntry[]): string {
+  const entries = teams.map((team) =>
+    renderTeamLiteral({
+      id: team.id,
+      name: team.name,
+      emoji: team.emoji,
+      color: team.color,
+      description: team.description,
+      category: team.category,
+      source: 'agency-agents',
+      tags: team.tags,
+      agentIds: team.agentIds,
+      routing: team.routing,
+      isSynthetic: true,
+    }),
+  )
+
+  return `${TEAMS_FILE_HEADER}
+
+export const SYNTHETIC_EXCELLENCE_TEAMS: TeamTemplate[] = [
+${entries.join(',\n')},
+]
 `
 }
