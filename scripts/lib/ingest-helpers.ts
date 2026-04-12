@@ -298,31 +298,94 @@ export async function pLimit<T>(tasks: Array<() => Promise<T>>, concurrency: num
 
 // ─── Content extraction ───────────────────────────────────────────────────────
 
-const SOUL_HEADINGS = [
-  /^## Core Mission/i,
-  /^## Critical (?:Rules|Guardrails)/i,
-  /^## Communication Style/i,
-  /^## Key Responsibilities/i,
-  /^## Core Philosophy/i,
+/**
+ * Parsed YAML frontmatter block and the remaining markdown body.
+ *
+ * Source files (agency-agents + awesome-openclaw) use flat key-value YAML only —
+ * no nested objects, no lists, no anchors. The simple line parser below is
+ * sufficient for both sources.
+ */
+export interface Frontmatter {
+  data: Record<string, string>
+  body: string
+}
+
+/** Parse `---\n...key: value...\n---\n<body>` into { data, body }. */
+export function parseFrontmatter(content: string): Frontmatter {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
+  if (!match) return { data: {}, body: content }
+  const data: Record<string, string> = {}
+  const yamlLines = match[1].split('\n')
+  let currentKey: string | null = null
+  for (const line of yamlLines) {
+    const kv = line.match(/^(\w[\w-]*):\s*(.*)$/)
+    if (kv) {
+      currentKey = kv[1]
+      data[currentKey] = kv[2].trim().replace(/^["']|["']$/g, '')
+    } else if (currentKey && /^\s+\S/.test(line)) {
+      // Multi-line continuation (indented line under the last key)
+      data[currentKey] += ' ' + line.trim()
+    }
+  }
+  return { data, body: match[2] }
+}
+
+/**
+ * Keywords that identify soul-template-worthy section headings in agency files.
+ * Matched after stripping H2-H4 marker, leading emoji/punctuation, and possessive
+ * prefixes (`Your`/`The`/`My`). E.g. `## 🎯 Your Core Mission` → `core mission`.
+ */
+const SOUL_KEYWORDS = [
+  'core mission',
+  'critical rules',
+  'critical guardrails',
+  'communication style',
+  'key responsibilities',
+  'core philosophy',
+  'identity & memory',
+  'identity and memory',
+  'mission',
 ]
 
 /**
- * Extract soul template from markdown content.
- * Grabs up to 3 matching sections (heading + body until next ## heading).
- * Falls back to first 400 chars + TODO marker if no sections found.
+ * Strip H2–H4 marker, leading emoji/punctuation, and a single possessive
+ * prefix from a heading line, returning a lowercased, trimmed keyword string
+ * suitable for comparison against SOUL_KEYWORDS.
+ */
+function stripHeadingPrefix(line: string): string {
+  return line
+    .replace(/^#{2,4}\s+/, '')
+    .replace(/^[^\p{L}\p{N}]+/u, '') // strip leading emoji/punctuation
+    .replace(/^(?:your|the|my)\s+/i, '')
+    .toLowerCase()
+    .trim()
+}
+
+/** Returns true if this line is an H2-H4 heading matching one of SOUL_KEYWORDS. */
+function isSoulHeading(line: string): boolean {
+  if (!/^#{2,4}\s/.test(line)) return false
+  const stripped = stripHeadingPrefix(line)
+  return SOUL_KEYWORDS.some((kw) => stripped.startsWith(kw))
+}
+
+/**
+ * Extract soul template from an agency-agents markdown file.
+ * Strips YAML frontmatter first, then collects up to 3 sections whose headings
+ * match SOUL_KEYWORDS (tolerant of emoji + possessive prefixes). Falls back to
+ * first 400 chars of body + TODO marker if nothing matches.
  */
 export function extractSoul(content: string, agentId: string): string {
-  const lines = content.split('\n')
+  const { body } = parseFrontmatter(content)
+  const lines = body.split('\n')
   const sections: string[] = []
   let i = 0
 
   while (i < lines.length && sections.length < 3) {
     const line = lines[i]
-    const matchedHeading = SOUL_HEADINGS.some((re) => re.test(line))
-    if (matchedHeading) {
+    if (isSoulHeading(line)) {
       const sectionLines = [line]
       i++
-      while (i < lines.length && !lines[i].match(/^## /)) {
+      while (i < lines.length && !/^## /.test(lines[i])) {
         sectionLines.push(lines[i])
         i++
       }
@@ -337,12 +400,99 @@ export function extractSoul(content: string, agentId: string): string {
   }
 
   if (sections.length === 0) {
-    const fallback = content.slice(0, 400).trimEnd()
+    const fallback = body.slice(0, 400).trimEnd()
     console.warn(`[SOUL_FALLBACK] ${agentId}: no matching sections found, using first 400 chars`)
     return `${fallback}\n\n<!-- TODO: review soul extraction -->`
   }
 
   return sections.join('\n\n')
+}
+
+/**
+ * Extract a usable soul template from an awesome-openclaw usecase file.
+ *
+ * These files are prose explanations, not agent manifests — they describe what
+ * a use case does, not how an agent thinks. So we build a distilled purpose
+ * block from the intro paragraph + the first "What You Can Do" / "How It Works"
+ * / "What It Does" section, prefixed with the role title.
+ *
+ * No TODO marker is emitted — the fallback (first 600 chars of body) is
+ * designed to always produce coherent output.
+ */
+export function extractAwesomeSoul(role: string, content: string): string {
+  const { body } = parseFrontmatter(content)
+
+  // 1. First substantive paragraph after the H1 title (if any).
+  const paragraph = firstParagraphAfterH1(body)
+
+  // 2. The "What You Can Do" / "How It Works" / "What It Does" section, if any.
+  const whatSection = extractMarkdownSection(
+    body,
+    /^##\s+(?:What\s+You\s+Can\s+Do|How\s+It\s+Works|What\s+It\s+Does)/im,
+  )
+
+  const parts: string[] = [`# ${role}`]
+  if (paragraph) parts.push(paragraph)
+  if (whatSection) parts.push(`## What You Can Do\n\n${whatSection.trim()}`)
+
+  const assembled = parts.join('\n\n').trim()
+  if (assembled.length >= 100) return assembled
+
+  // Fallback: no headings matched and no intro paragraph — use raw body slice.
+  return body.slice(0, 600).trimEnd()
+}
+
+/**
+ * Return the first non-empty paragraph in `body` after any leading H1.
+ * A paragraph is a run of consecutive non-empty, non-heading, non-list lines.
+ */
+function firstParagraphAfterH1(body: string): string | null {
+  const lines = body.split('\n')
+  let i = 0
+  // Skip leading blank lines
+  while (i < lines.length && lines[i].trim() === '') i++
+  // Skip leading H1
+  if (i < lines.length && /^#\s/.test(lines[i])) i++
+  // Skip blank lines after H1
+  while (i < lines.length && lines[i].trim() === '') i++
+
+  const paragraphLines: string[] = []
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.trim() === '') break
+    if (/^#{1,6}\s/.test(line)) break
+    if (/^[-*]\s/.test(line)) break
+    paragraphLines.push(line)
+    i++
+  }
+
+  const paragraph = paragraphLines.join('\n').trim()
+  return paragraph.length > 0 ? paragraph : null
+}
+
+/**
+ * Extract the body of a markdown section (from heading to next H2 or EOF).
+ * Public variant used by the soul extractor; see the scoped variant inside
+ * parseUsecaseAgents for a local version.
+ */
+function extractMarkdownSection(body: string, headingPattern: RegExp): string | null {
+  const lines = body.split('\n')
+  let startIdx = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (headingPattern.test(lines[i])) {
+      startIdx = i + 1
+      break
+    }
+  }
+  if (startIdx === -1) return null
+  let endIdx = lines.length
+  for (let i = startIdx; i < lines.length; i++) {
+    if (/^##\s/.test(lines[i])) {
+      endIdx = i
+      break
+    }
+  }
+  return lines.slice(startIdx, endIdx).join('\n')
 }
 
 /**
@@ -377,15 +527,21 @@ export function buildToolsTemplate(skillIds: string[]): string {
 }
 
 /**
- * Extract a 1–2 sentence description from agent content.
- * Finds the first non-empty, non-heading line with > 40 chars.
+ * Extract a 1–2 sentence description from an agent file.
+ * Prefers the YAML frontmatter `description:` field when present (both agency
+ * and awesome-openclaw sources use YAML frontmatter). Falls back to the first
+ * substantive line from the body if there is no frontmatter description.
  */
 export function extractDescription(content: string, role: string): string {
-  const lines = content.split('\n')
+  const { data, body } = parseFrontmatter(content)
+  const fromFrontmatter = data['description']?.trim()
+  if (fromFrontmatter && fromFrontmatter.length > 0) {
+    return fromFrontmatter.length > 160 ? fromFrontmatter.slice(0, 157) + '...' : fromFrontmatter
+  }
+  const lines = body.split('\n')
   for (const line of lines) {
     const trimmed = line.trim()
     if (trimmed.length > 40 && !trimmed.startsWith('#') && !trimmed.startsWith('-')) {
-      // Truncate to ~160 chars for card display
       return trimmed.length > 160 ? trimmed.slice(0, 157) + '...' : trimmed
     }
   }
@@ -810,10 +966,7 @@ export function processUsecaseFile(filePath: string, content: string): AwesomeOp
 
   const mentions = parseUsecaseAgents(content)
 
-  const buildSoulTemplate = (role: string): string => {
-    const head = content.slice(0, 400).trimEnd()
-    return `# ${role}\n\n${head}\n\n<!-- TODO: review soul extraction -->`
-  }
+  const buildSoulTemplate = (role: string): string => extractAwesomeSoul(role, content)
 
   const entries: AwesomeOpenclawAgent[] = []
 

@@ -19,7 +19,7 @@ import type {
   IsValidConnection,
 } from '@xyflow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { GitBranch } from 'lucide-react'
+import { GitBranch, Pin } from 'lucide-react'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
@@ -28,6 +28,7 @@ import { computeOrbitalPositions } from './computeOrbitalPositions'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
 import { ConnectionLine } from './edges/ConnectionLine'
+import { TeamHaloLayer } from './TeamHaloLayer'
 import { useFleetStore } from '@/stores/fleet'
 import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
@@ -66,6 +67,8 @@ export function GhostGraph() {
     updateNodePosition,
     connectMode,
     setConnectMode,
+    showTeamHalos,
+    setShowTeamHalos,
     setHoveredNodeId,
   } = useGraphStore()
 
@@ -361,11 +364,46 @@ export function GhostGraph() {
         width: '100%',
         height: '100%',
         position: 'relative',
+        // Background moved here from <ReactFlow> so TeamHaloLayer can render
+        // between the wrapper bg and ReactFlow's transparent canvas.
+        background: '#0A0E1A',
         // Hide nodes until ELK has positioned them — prevents (0,0) pile-up flash on new teams
         opacity: hasRunLayout ? 1 : 0,
         transition: 'opacity 0.25s ease',
       }}
     >
+      {/* Team halos layer — behind ReactFlow, matches pane pan/zoom */}
+      {showTeamHalos && <TeamHaloLayer nodes={nodes} />}
+
+      {/* Team halos toggle */}
+      <button
+        onClick={() => setShowTeamHalos(!showTeamHalos)}
+        title="Toggle colored team hulls behind agents"
+        style={{
+          position: 'absolute',
+          top: 12,
+          right: 112,
+          zIndex: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '6px 12px',
+          borderRadius: 8,
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: 'pointer',
+          border: showTeamHalos
+            ? '1px solid rgba(52,211,153,0.4)'
+            : '1px solid rgba(255,255,255,0.1)',
+          background: showTeamHalos ? 'rgba(52,211,153,0.18)' : '#111827',
+          color: showTeamHalos ? '#34D399' : 'rgba(232,232,232,0.5)',
+          transition: 'all 0.15s',
+        }}
+      >
+        <Pin size={14} />
+        Team halos
+      </button>
+
       {/* Connect mode toggle */}
       <button
         onClick={() => setConnectMode(!connectMode)}
@@ -413,7 +451,7 @@ export function GhostGraph() {
         edgeTypes={edgeTypes}
         fitView
         proOptions={{ hideAttribution: true }}
-        style={{ background: '#0A0E1A' }}
+        style={{ background: 'transparent' }}
         minZoom={0.15}
         maxZoom={2.5}
         defaultEdgeOptions={{ animated: false }}

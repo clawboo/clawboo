@@ -56,6 +56,10 @@ interface GraphStore {
   connectMode: boolean
   setConnectMode: (v: boolean) => void
 
+  /** When true, colored convex-hull halos render behind team groupings. */
+  showTeamHalos: boolean
+  setShowTeamHalos: (v: boolean) => void
+
   /** Hover cascade — highlights hovered node's cluster, dims everything else. */
   hoveredNodeId: string | null
   highlightedNodeIds: Set<string> | null
@@ -136,6 +140,9 @@ export const useGraphStore = create<GraphStore>((set) => ({
 
   connectMode: false,
   setConnectMode: (v) => set({ connectMode: v }),
+
+  showTeamHalos: false,
+  setShowTeamHalos: (v) => set({ showTeamHalos: v }),
 
   _physicsWakeCallback: null,
   setPhysicsWakeCallback: (cb) => set({ _physicsWakeCallback: cb }),

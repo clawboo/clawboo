@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
+import type { Team } from '@/stores/team'
 import { useGraphStore } from './store'
 import { parseToolsMd } from './parsers/parseToolsMd'
 import { parseAgentsMd } from './parsers/parseAgentsMd'
@@ -21,12 +22,21 @@ export function useGraphData(): void {
   const agents = useFleetStore((s) => s.agents)
   const client = useConnectionStore((s) => s.client)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
+  const teams = useTeamStore((s) => s.teams)
   const { setAgentFiles, setLoadingFiles, setFilesError, agentFiles, refreshKey } = useGraphStore()
 
   // Filter agents by selected team (null = show all)
   const filteredAgents = useMemo(
     () => (selectedTeamId ? agents.filter((a) => a.teamId === selectedTeamId) : agents),
     [agents, selectedTeamId],
+  )
+
+  // Stable string key for team metadata — drives structural rebuild when a
+  // team is renamed/recolored mid-session so BooNodeData.teamName/Color/Emoji
+  // stay in sync without over-rebuilding on unrelated team store changes.
+  const teamsMetaKey = useMemo(
+    () => teams.map((t) => `${t.id}:${t.name}:${t.color}:${t.icon}`).join('|'),
+    [teams],
   )
 
   // ── 0. Reset layout on team switch ──────────────────────────────────────────
@@ -88,8 +98,8 @@ export function useGraphData(): void {
 
   // ── 2. Structural rebuild ────────────────────────────────────────────────────
   const { rawNodes, rawEdges } = useMemo(
-    () => buildGraphElements(filteredAgents, agentFiles),
-    [agentStructureKey, agentFiles], // intentional: string key for agents
+    () => buildGraphElements(filteredAgents, agentFiles, teams),
+    [agentStructureKey, agentFiles, teamsMetaKey], // intentional: string keys for agents + teams
   )
 
   useEffect(() => {
@@ -137,6 +147,7 @@ export function useGraphData(): void {
 export function buildGraphElements(
   agents: AgentState[],
   agentFiles: Map<string, { toolsMd: string | null; agentsMd: string | null }>,
+  teams: Team[] = [],
 ): { rawNodes: GraphNode[]; rawEdges: GraphEdge[] } {
   const depEdges: GraphEdge[] = []
   const skillNodes: GraphNode[] = []
@@ -146,20 +157,30 @@ export function buildGraphElements(
 
   const agentNames = agents.map((a) => a.name)
   const agentNameToId = new Map(agents.map((a) => [a.name.toLowerCase().trim(), a.id]))
+  const teamsById = new Map(teams.map((t) => [t.id, t]))
 
   // BooNodes — one per agent
-  const booNodes: GraphNode[] = agents.map((agent) => ({
-    id: `boo-${agent.id}`,
-    type: 'boo' as const,
-    data: {
-      agentId: agent.id,
-      name: agent.name,
-      status: agent.status ?? 'idle',
-      model: agent.model,
-      isStreaming: agent.status === 'running',
-    } satisfies BooNodeData,
-    position: { x: 0, y: 0 },
-  }))
+  const booNodes: GraphNode[] = agents.map((agent) => {
+    const team = agent.teamId ? teamsById.get(agent.teamId) : null
+    return {
+      id: `boo-${agent.id}`,
+      type: 'boo' as const,
+      data: {
+        agentId: agent.id,
+        name: agent.name,
+        status: agent.status ?? 'idle',
+        model: agent.model,
+        isStreaming: agent.status === 'running',
+        teamId: agent.teamId ?? null,
+        ...(team && {
+          teamName: team.name,
+          teamColor: team.color,
+          teamEmoji: team.icon,
+        }),
+      } satisfies BooNodeData,
+      position: { x: 0, y: 0 },
+    }
+  })
 
   for (const agent of agents) {
     const files = agentFiles.get(agent.id)

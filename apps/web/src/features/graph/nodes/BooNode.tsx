@@ -84,12 +84,22 @@ const centerHandleStyle: React.CSSProperties = {
 
 // ─── BooNode ──────────────────────────────────────────────────────────────────
 
+// Truncate team name for the badge so long names don't blow out the layout.
+function formatBadgeName(name: string | undefined, max = 12): string | null {
+  if (!name) return null
+  if (name.length <= max) return name
+  // Prefer the first word if it fits
+  const firstWord = name.split(/\s+/)[0]
+  if (firstWord.length <= max) return firstWord
+  return name.slice(0, max - 1) + '…'
+}
+
 export const BooNode = memo(function BooNode({
   data,
   selected,
   dragging,
 }: NodeProps<Node<BooNodeData, 'boo'>>) {
-  const { agentId, name, status } = data
+  const { agentId, name, status, teamId, teamName, teamColor, teamEmoji } = data
   const floatRef = useFloatingMotion(data.agentId, 'boo', dragging)
   const glow = STATUS_GLOW[status] ?? null
   const connection = useConnection()
@@ -139,6 +149,44 @@ export const BooNode = memo(function BooNode({
           transition: 'opacity 0.2s ease',
         }}
       >
+        {/* ── Team badge (top-left, always visible when in a team) ────────── */}
+        {teamId && (
+          <div
+            title={teamName ?? 'Team'}
+            aria-label={`Team: ${teamName ?? 'Unnamed team'}`}
+            style={{
+              position: 'absolute',
+              top: -10,
+              left: -12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 3,
+              padding: '2px 6px',
+              borderRadius: 10,
+              background: 'rgba(17,24,39,0.88)',
+              border: `1px solid ${teamColor ?? 'rgba(255,255,255,0.15)'}`,
+              color: '#E8E8E8',
+              fontSize: 9,
+              fontWeight: 600,
+              lineHeight: 1,
+              letterSpacing: '0.02em',
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+              zIndex: 2,
+              maxWidth: 96,
+              overflow: 'hidden',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.4)',
+            }}
+          >
+            {teamEmoji && <span style={{ fontSize: 10 }}>{teamEmoji}</span>}
+            {formatBadgeName(teamName) && (
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {formatBadgeName(teamName)}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* ── BooAvatar + glow ──────────────────────────────────────────────── */}
         <motion.div
           style={{ width: booW, height: booH, position: 'relative' }}

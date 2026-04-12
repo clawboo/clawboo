@@ -15,6 +15,10 @@ export interface BooNodeData extends Record<string, unknown> {
   model: string | null
   isStreaming: boolean
   edgeCount?: number
+  teamId: string | null
+  teamName?: string
+  teamColor?: string
+  teamEmoji?: string
 }
 
 export interface SkillNodeData extends Record<string, unknown> {

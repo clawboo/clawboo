@@ -18,6 +18,7 @@ describe('useGraphStore', () => {
       filesError: null,
       refreshKey: 0,
       connectMode: false,
+      showTeamHalos: false,
       hoveredNodeId: null,
       highlightedNodeIds: null,
       highlightedEdgeIds: null,
@@ -39,6 +40,23 @@ describe('useGraphStore', () => {
       useGraphStore.getState().setConnectMode(true)
       useGraphStore.getState().setConnectMode(false)
       expect(useGraphStore.getState().connectMode).toBe(false)
+    })
+  })
+
+  describe('showTeamHalos', () => {
+    it('defaults to false', () => {
+      expect(useGraphStore.getState().showTeamHalos).toBe(false)
+    })
+
+    it('setShowTeamHalos(true) enables', () => {
+      useGraphStore.getState().setShowTeamHalos(true)
+      expect(useGraphStore.getState().showTeamHalos).toBe(true)
+    })
+
+    it('setShowTeamHalos(false) disables', () => {
+      useGraphStore.getState().setShowTeamHalos(true)
+      useGraphStore.getState().setShowTeamHalos(false)
+      expect(useGraphStore.getState().showTeamHalos).toBe(false)
     })
   })
 
