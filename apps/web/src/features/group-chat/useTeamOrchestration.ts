@@ -6,8 +6,9 @@ import { useEffect, useRef } from 'react'
 import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { AgentState } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
-import { buildTeamSessionKey, setTeamChatOverride } from '@/lib/sessionUtils'
-import { buildTeamContextPreamble } from '@/lib/teamProtocol'
+import { buildTeamSessionKey, setTeamChatOverride, hasTeamChatOverride } from '@/lib/sessionUtils'
+import { buildTeamContextPreamble, buildTeamWakeMessage } from '@/lib/teamProtocol'
+import { isAgentAwake } from '@/lib/wakeTracker'
 import { detectDelegations, isRelayMessage } from './delegationDetector'
 import {
   buildRelayMessage,
@@ -91,8 +92,20 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
           )
 
           for (const delegation of delegations) {
-            void (async () => {
+            const sendDelegation = async (retryCount = 0) => {
               try {
+                // Guard: target agent may have been deleted during processing
+                const freshAgents = teamAgentsRef.current
+                if (!freshAgents.some((a) => a.id === delegation.targetAgentId)) return
+
+                // Guard: target is already processing a team message — retry once after 2s
+                if (hasTeamChatOverride(delegation.targetAgentId)) {
+                  if (retryCount < 1) {
+                    setTimeout(() => void sendDelegation(retryCount + 1), 2000)
+                  }
+                  return
+                }
+
                 const targetTeamSk = buildTeamSessionKey(delegation.targetAgentId, currentTeamId)
 
                 // Set override BEFORE sending so Gateway events get redirected
@@ -122,7 +135,8 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
               } catch {
                 // Non-fatal — delegation failure doesn't block other processing
               }
-            })()
+            }
+            void sendDelegation()
           }
 
           // ── Context relay ──────────────────────────────────────
@@ -154,7 +168,33 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             for (const targetId of targets) {
               void (async () => {
                 try {
+                  // Guard: target agent may have been deleted during processing
+                  const freshAgents = teamAgentsRef.current
+                  const targetAgent = freshAgents.find((a) => a.id === targetId)
+                  if (!targetAgent) return
+
                   const targetTeamSk = buildTeamSessionKey(targetId, currentTeamId)
+
+                  // Wake sleeping agent before relaying (best-effort)
+                  if (!isAgentAwake(targetId, currentTeamId)) {
+                    const teammates = freshAgents
+                      .filter((a) => a.id !== targetId)
+                      .map((a) => ({ name: a.name, role: a.name }))
+                    const wakeMsg = buildTeamWakeMessage({
+                      agentName: targetAgent.name,
+                      teamName: currentTeamId, // best-effort — teamName not available here
+                      teammates,
+                    })
+                    setTeamChatOverride(targetId, targetTeamSk)
+                    await currentClient.call('chat.send', {
+                      sessionKey: targetTeamSk,
+                      message: wakeMsg,
+                      deliver: false,
+                      idempotencyKey: crypto.randomUUID(),
+                    })
+                    await new Promise((r) => setTimeout(r, 5000))
+                  }
+
                   setTeamChatOverride(targetId, targetTeamSk)
 
                   await currentClient.call('chat.send', {
