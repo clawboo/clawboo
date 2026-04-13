@@ -87,7 +87,7 @@ test.describe('Group Chat', () => {
       timeout: 5_000,
     })
     await expect(
-      agentList.locator('[data-testid="group-chat-row"]').getByText('Team Chat'),
+      agentList.locator('[data-testid="group-chat-row"]').getByText('Group Chat'),
     ).toBeVisible()
   })
 

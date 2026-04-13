@@ -1,6 +1,6 @@
 // GroupChatPanel — merged transcript from all team agents, sorted chronologically.
 
-import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -22,6 +22,7 @@ import {
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
+import { Zap } from 'lucide-react'
 
 // ─── GroupChatPanel ──────────────────────────────────────────────────────────
 
@@ -36,13 +37,19 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
   const leaderAgentId = resolveTeamLeader(teamId, team?.leaderAgentId ?? null, agents)
 
+  // ── Orchestration toggle (persisted in localStorage) ──────────────────
+  const [orchestrationEnabled, setOrchestrationEnabled] = useState<boolean>(() => {
+    const stored = localStorage.getItem('clawboo:team-orchestration-enabled')
+    return stored !== null ? stored === 'true' : true
+  })
+
   // ── Team orchestration (delegation detection + context relay) ───────────
   useTeamOrchestration({
     teamId,
     teamAgents,
     leaderAgentId,
     client,
-    enabled: connectionStatus === 'connected',
+    enabled: connectionStatus === 'connected' && orchestrationEnabled,
   })
 
   // Agent lookup for resolving names from sessionKeys
@@ -207,6 +214,32 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
             {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''}
           </p>
         </div>
+        <button
+          type="button"
+          title="Team orchestration — auto-relay responses between agents"
+          onClick={() => {
+            setOrchestrationEnabled((prev) => {
+              const next = !prev
+              localStorage.setItem('clawboo:team-orchestration-enabled', String(next))
+              return next
+            })
+          }}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            color: orchestrationEnabled ? '#34D399' : 'rgba(232,232,232,0.3)',
+            transition: 'color 0.15s',
+            padding: 4,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 4,
+            flexShrink: 0,
+          }}
+        >
+          <Zap size={14} />
+        </button>
         <span
           className={`h-2 w-2 shrink-0 rounded-full ${connectionStatus === 'connected' ? 'bg-mint' : 'bg-secondary/40'}`}
         />

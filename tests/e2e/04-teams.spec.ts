@@ -16,9 +16,10 @@ test.describe('Teams', () => {
     const mascot = teamSidebar.locator('img[src="/logo.svg"]')
     await expect(mascot).toBeVisible({ timeout: 5_000 })
 
-    // Agents should appear in the agent list column (Col 2)
+    // Agents should appear in the agent list column (Col 2).
+    // Research Boo (a2) is always visible — assigned to auto-created "Default" team.
     const agentList = page.locator('[data-testid="agent-list-column"]')
-    await expect(agentList.getByText('Test Boo')).toBeVisible({ timeout: 5_000 })
+    await expect(agentList.getByText('Research Boo')).toBeVisible({ timeout: 5_000 })
   })
 
   test('clicking nav buttons switches views', async ({ page, request, gateway }) => {
@@ -33,9 +34,9 @@ test.describe('Teams', () => {
     await agentList.locator('button:has-text("Marketplace")').click()
     await expect(page.getByRole('main').getByText('Marketplace')).toBeVisible({ timeout: 5_000 })
 
-    // Click Cost nav button
-    await agentList.locator('button:has-text("Cost")').click()
-    await expect(page.getByText('Cost Tracking')).toBeVisible({ timeout: 5_000 })
+    // Click Tokens Used nav button
+    await agentList.locator('button:has-text("Tokens Used")').click()
+    await expect(page.getByText('Token usage by team and agent')).toBeVisible({ timeout: 5_000 })
 
     // Click back to Ghost Graph
     await agentList.locator('button:has-text("Ghost Graph")').click()

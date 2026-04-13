@@ -11,11 +11,14 @@ test.describe('Ghost Graph', () => {
     const reactFlow = page.locator('.react-flow')
     await expect(reactFlow).toBeVisible({ timeout: 10_000 })
 
-    // Click an agent to switch to chat, then click Ghost Graph nav button to return
-    const agentRow = page.locator('[data-testid="fleet-agent-row-a1"]')
+    // Click an agent to switch to chat, then click Ghost Graph nav button to return.
+    // Use Research Boo (a2) — always in the Default team, unlike Test Boo (a1, Boo Zero).
+    const agentRow = page.locator('[data-testid="fleet-agent-row-a2"]')
     await agentRow.click()
     // Wait for chat to render (heading visible means we switched away from graph)
-    await expect(page.getByRole('heading', { name: 'Test Boo' })).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByRole('heading', { name: 'Research Boo' })).toBeVisible({
+      timeout: 5_000,
+    })
 
     // Click Ghost Graph nav button in agent list column to switch back
     const sidebar = page.locator('[data-testid="agent-list-column"]')
