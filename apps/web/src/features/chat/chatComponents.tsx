@@ -74,6 +74,18 @@ function renderMentionInline(text: string, knownAgentNames: string[]): import('r
   return text
 }
 
+// ─── Relay message helpers ────────────────────────────────────────────────────
+
+/** Check if an assistant entry is a relay message (starts with [Team Update]). */
+function isTeamUpdateEntry(entry: TranscriptEntry | null): boolean {
+  return entry?.text?.startsWith('[Team Update]') ?? false
+}
+
+/** Strip the [Team Update] prefix and return the clean text. */
+function stripRelayPrefix(text: string): string {
+  return text.replace(/^\[Team Update\]\s*/, '')
+}
+
 // ─── Grouping: flatten TranscriptEntry[] → render blocks ─────────────────────
 
 export type MetaBlock = { kind: 'meta'; entry: TranscriptEntry }
@@ -126,6 +138,9 @@ export function groupEntriesToBlocks(entries: TranscriptEntry[]): RenderBlock[] 
   }
 
   for (const entry of entries) {
+    // Skip injected context preamble entries (should not appear in UI)
+    if (entry.text.startsWith('[Team Context')) continue
+
     if (entry.kind === 'meta') {
       commitTurn()
       blocks.push({ kind: 'meta', entry })
@@ -404,6 +419,7 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
   agentName: string
   streaming?: boolean
 }) {
+  const isRelay = isTeamUpdateEntry(block.assistant)
   const hasThinking = block.thinking.length > 0
   const hasTools = block.tools.length > 0
   const hasText = Boolean(block.assistant?.text)
@@ -417,7 +433,9 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
       : null
 
   return (
-    <div className="flex flex-col gap-2">
+    <div
+      className={`flex flex-col gap-2${isRelay ? ' border-l-2 border-emerald-500/40 pl-3 opacity-80' : ''}`}
+    >
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -425,6 +443,11 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
           <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary/70">
             {agentName}
           </span>
+          {isRelay && (
+            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-mono text-[9px] font-medium text-emerald-400">
+              Team Update
+            </span>
+          )}
         </div>
         {block.timestampMs && (
           <time className="font-mono text-[10px] text-secondary/50">
@@ -451,11 +474,11 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
         </div>
       )}
 
-      {/* Assistant text */}
+      {/* Assistant text — strip prefix for relay messages */}
       {hasText && (
         <div className="text-[13px] leading-relaxed text-text">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-            {block.assistant!.text}
+            {isRelay ? stripRelayPrefix(block.assistant!.text) : block.assistant!.text}
           </ReactMarkdown>
         </div>
       )}

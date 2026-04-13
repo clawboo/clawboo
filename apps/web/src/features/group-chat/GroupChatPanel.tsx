@@ -9,6 +9,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { resolveTeamLeader } from '@/lib/resolveTeamLeader'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { sendGroupChatMessage } from './groupChatSendOperation'
+import { useTeamOrchestration } from './useTeamOrchestration'
 import {
   groupEntriesToBlocks,
   UserMessageCard,
@@ -34,6 +35,15 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
 
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
   const leaderAgentId = resolveTeamLeader(teamId, team?.leaderAgentId ?? null, agents)
+
+  // ── Team orchestration (delegation detection + context relay) ───────────
+  useTeamOrchestration({
+    teamId,
+    teamAgents,
+    leaderAgentId,
+    client,
+    enabled: connectionStatus === 'connected',
+  })
 
   // Agent lookup for resolving names from sessionKeys
   const agentLookup = useMemo(() => {
@@ -153,13 +163,14 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
       await sendGroupChatMessage({
         client,
         teamId,
+        teamName: team?.name ?? 'Team',
         leaderAgentId,
         teamAgents,
         message,
         displayText: message, // raw message including @mention for transcript display
       })
     },
-    [client, teamId, leaderAgentId, teamAgents],
+    [client, teamId, team?.name, leaderAgentId, teamAgents],
   )
 
   // ── Chip tag handler ───────────────────────────────────────────────────────

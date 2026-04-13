@@ -81,7 +81,9 @@ export function useGatewayEvents(client: GatewayClient | null): void {
             const teamKey = getTeamChatOverride(intent.agentId)
             if (teamKey) {
               useChatStore.getState().setStreamingText(teamKey, null)
-              clearTeamChatOverride(intent.agentId)
+              // Delay clearing override by 200ms so useTeamOrchestration can
+              // process the newly committed entry before the override is gone.
+              setTimeout(() => clearTeamChatOverride(intent.agentId), 200)
             } else if (intent.sessionKey) {
               useChatStore.getState().setStreamingText(intent.sessionKey, null)
             }
