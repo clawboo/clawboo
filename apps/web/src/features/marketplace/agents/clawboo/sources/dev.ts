@@ -44,8 +44,10 @@ You are Code Reviewer Boo, the quality guardian of the Dev Team. You catch issue
 - code-search`,
       agentsTemplate: `# AGENTS
 
-When a review uncovers a bug that needs investigation, route to @Bug Fixer Boo for root cause analysis and fix.
-When a review reveals undocumented behaviour, coordinate with @Doc Writer Boo to update the docs.`,
+When a review uncovers a bug that needs investigation:
+  @Bug Fixer Boo, please investigate the root cause and fix it.
+When a review reveals undocumented behaviour:
+  @Doc Writer Boo, please update the docs to cover this behaviour.`,
     },
     {
       name: 'Bug Fixer Boo',
@@ -81,8 +83,10 @@ You are Bug Fixer Boo, the problem solver of the Dev Team. You turn error report
 - test-runner`,
       agentsTemplate: `# AGENTS
 
-When a fix is ready for review, route to @Code Reviewer Boo for a thorough code review.
-When a fix changes behaviour that users rely on, coordinate with @Doc Writer Boo to update documentation.`,
+When a fix is ready for review:
+  @Code Reviewer Boo, please review this fix thoroughly.
+When a fix changes behaviour that users rely on:
+  @Doc Writer Boo, please update the documentation to reflect this change.`,
     },
     {
       name: 'Doc Writer Boo',
@@ -117,8 +121,10 @@ You are Doc Writer Boo, the knowledge keeper of the Dev Team. You make sure noth
 - computer`,
       agentsTemplate: `# AGENTS
 
-When you need technical details about a code change, route to @Code Reviewer Boo for context on recent reviews.
-When documenting a bug fix, coordinate with @Bug Fixer Boo for the root cause analysis and fix details.`,
+When you need technical details about a code change:
+  @Code Reviewer Boo, please provide context on the recent reviews.
+When documenting a bug fix:
+  @Bug Fixer Boo, please share the root cause analysis and fix details.`,
     },
   ],
 }

@@ -27,11 +27,11 @@ export const CLAWBOO_BUILTIN_TEAMS: TeamTemplate[] = [
     ],
     routing: {
       'clawboo-dev-code-reviewer-boo':
-        '# AGENTS\n\nWhen a review uncovers a bug that needs investigation, route to @Bug Fixer Boo for root cause analysis and fix.\nWhen a review reveals undocumented behaviour, coordinate with @Doc Writer Boo to update the docs.',
+        '# AGENTS\n\nWhen a review uncovers a bug that needs investigation:\n  @Bug Fixer Boo, please investigate the root cause and fix it.\nWhen a review reveals undocumented behaviour:\n  @Doc Writer Boo, please update the docs to cover this behaviour.',
       'clawboo-dev-bug-fixer-boo':
-        '# AGENTS\n\nWhen a fix is ready for review, route to @Code Reviewer Boo for a thorough code review.\nWhen a fix changes behaviour that users rely on, coordinate with @Doc Writer Boo to update documentation.',
+        '# AGENTS\n\nWhen a fix is ready for review:\n  @Code Reviewer Boo, please review this fix thoroughly.\nWhen a fix changes behaviour that users rely on:\n  @Doc Writer Boo, please update the documentation to reflect this change.',
       'clawboo-dev-doc-writer-boo':
-        '# AGENTS\n\nWhen you need technical details about a code change, route to @Code Reviewer Boo for context on recent reviews.\nWhen documenting a bug fix, coordinate with @Bug Fixer Boo for the root cause analysis and fix details.',
+        '# AGENTS\n\nWhen you need technical details about a code change:\n  @Code Reviewer Boo, please provide context on the recent reviews.\nWhen documenting a bug fix:\n  @Bug Fixer Boo, please share the root cause analysis and fix details.',
     },
   },
   {
@@ -51,11 +51,11 @@ export const CLAWBOO_BUILTIN_TEAMS: TeamTemplate[] = [
     ],
     routing: {
       'clawboo-marketing-content-writer-boo':
-        '# AGENTS\n\nWhen content needs SEO optimization, route to @SEO Analyst Boo for keyword research and on-page guidance.\nWhen content is ready to distribute, coordinate with @Social Media Manager Boo for platform-specific adaptations.',
+        '# AGENTS\n\nWhen you need keyword research or SEO guidance for a piece:\n  @SEO Analyst Boo, please provide optimization recommendations.\nWhen content is ready for distribution:\n  @Social Media Manager Boo, please create platform-specific adaptations.',
       'clawboo-marketing-seo-analyst-boo':
-        '# AGENTS\n\nWhen new content is needed for a keyword opportunity, route to @Content Writer Boo with the keyword brief.\nWhen optimized content is ready to publish, coordinate with @Social Media Manager Boo for launch amplification.',
+        '# AGENTS\n\nWhen you have keyword recommendations or content briefs ready:\n  @Content Writer Boo, please draft the content based on these keywords.\nWhen optimising for social discovery:\n  @Social Media Manager Boo, please align keywords across platforms.',
       'clawboo-marketing-social-media-manager-boo':
-        '# AGENTS\n\nWhen you need long-form content to adapt, route to @Content Writer Boo with the platform requirements.\nWhen planning campaigns around trending keywords, coordinate with @SEO Analyst Boo for keyword insights.',
+        '# AGENTS\n\nWhen you need long-form content to repurpose into social posts:\n  @Content Writer Boo, please draft the content for repurposing.\nWhen you need keyword data or trending topic research:\n  @SEO Analyst Boo, please provide search insights and trending data.',
     },
   },
   {
@@ -75,11 +75,11 @@ export const CLAWBOO_BUILTIN_TEAMS: TeamTemplate[] = [
     ],
     routing: {
       'clawboo-research-paper-reader-boo':
-        '# AGENTS\n\nWhen a paper includes statistical results that need deeper analysis, route to @Data Analyst Boo for quantitative review.\nWhen a paper is fully processed and ready for a final brief, coordinate with @Summarizer Boo for the executive summary.',
+        '# AGENTS\n\nWhen you have extracted data or statistics that need deeper analysis:\n  @Data Analyst Boo, please review these numbers quantitatively.\nWhen reading notes are complete and ready for distillation:\n  @Summarizer Boo, please synthesize these notes into a summary.',
       'clawboo-research-data-analyst-boo':
-        "# AGENTS\n\nWhen you need context on a paper's methodology or findings, route to @Paper Reader Boo for literature analysis.\nWhen analysis is complete and needs to be distilled for stakeholders, coordinate with @Summarizer Boo for the final writeup.",
+        '# AGENTS\n\nWhen you need context on the source or methodology behind a dataset:\n  @Paper Reader Boo, please provide the original study details.\nWhen analysis is complete and ready for the final report:\n  @Summarizer Boo, please write the executive summary.',
       'clawboo-research-summarizer-boo':
-        '# AGENTS\n\nWhen you need the full context of a paper before summarizing, route to @Paper Reader Boo for detailed analysis.\nWhen you need quantitative findings interpreted, coordinate with @Data Analyst Boo for statistical context.',
+        '# AGENTS\n\nWhen you need deeper reading notes or source verification:\n  @Paper Reader Boo, please extract the details from the source.\nWhen you need data-backed claims or statistical validation:\n  @Data Analyst Boo, please provide quantitative support for these claims.',
     },
   },
   {
@@ -99,11 +99,11 @@ export const CLAWBOO_BUILTIN_TEAMS: TeamTemplate[] = [
     ],
     routing: {
       'clawboo-student-study-buddy-boo':
-        '# AGENTS\n\nWhen a student needs help structuring an essay or paper, route to @Essay Helper Boo for writing guidance.\nWhen a student wants to drill specific facts or concepts, coordinate with @Flashcard Maker Boo for spaced-repetition cards.',
+        "# AGENTS\n\nWhen a student needs help structuring an essay based on what they've studied:\n  @Essay Helper Boo, please help them outline and structure the essay.\nWhen study material needs to be converted into review cards:\n  @Flashcard Maker Boo, please create review cards from this material.",
       'clawboo-student-essay-helper-boo':
-        '# AGENTS\n\nWhen a student needs help understanding the source material before writing, route to @Study Buddy Boo for concept explanations.\nWhen an essay covers testable facts, coordinate with @Flashcard Maker Boo to build review cards.',
+        '# AGENTS\n\nWhen the student needs to understand a concept before writing about it:\n  @Study Buddy Boo, please explain this concept and provide context.\nWhen the essay requires memorisation of key terms or dates:\n  @Flashcard Maker Boo, please create review cards for these terms.',
       'clawboo-student-flashcard-maker-boo':
-        '# AGENTS\n\nWhen you need a concept explained before turning it into cards, route to @Study Buddy Boo for a plain-English breakdown.\nWhen source material comes from an essay or paper, coordinate with @Essay Helper Boo for the key terms list.',
+        '# AGENTS\n\nWhen you need a concept explained before creating cards for it:\n  @Study Buddy Boo, please provide a clear breakdown of this concept.\nWhen flashcards relate to essay topics:\n  @Essay Helper Boo, please share the key arguments and evidence to include.',
     },
   },
   {
@@ -123,11 +123,11 @@ export const CLAWBOO_BUILTIN_TEAMS: TeamTemplate[] = [
     ],
     routing: {
       'clawboo-youtube-script-writer-boo':
-        '# AGENTS\n\nWhen a script is finalized and needs a thumbnail concept, route to @Thumbnail Advisor Boo for visual direction.\nWhen a script is ready for publishing, coordinate with @SEO Optimizer Boo for the title, description, and tags.',
+        '# AGENTS\n\nWhen a script is drafted:\n  @Thumbnail Advisor Boo, please align the thumbnail visuals with the script content.\nWhen finalising a script:\n  @SEO Optimizer Boo, please provide keyword-optimised titles and description.',
       'clawboo-youtube-thumbnail-advisor-boo':
-        '# AGENTS\n\nWhen you need the hook or payoff from the video to design a thumbnail, route to @Script Writer Boo for the core story beats.\nWhen a thumbnail needs to match the target keyword, coordinate with @SEO Optimizer Boo for keyword placement.',
+        "# AGENTS\n\nWhen you need context on the video's content to align the thumbnail:\n  @Script Writer Boo, please share the script and key moments.\nWhen optimising thumbnail text for search:\n  @SEO Optimizer Boo, please provide high-performing keywords.",
       'clawboo-youtube-seo-optimizer-boo':
-        "# AGENTS\n\nWhen you need the video's core value prop for metadata, route to @Script Writer Boo for the one-sentence hook.\nWhen you need a thumbnail that matches the target keyword, coordinate with @Thumbnail Advisor Boo for visual alignment.",
+        '# AGENTS\n\nWhen you need the script content for keyword extraction:\n  @Script Writer Boo, please share the full script.\nWhen optimising click-through rate:\n  @Thumbnail Advisor Boo, please review thumbnail-title alignment.',
     },
   },
 ]

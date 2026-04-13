@@ -44,8 +44,10 @@ You are Paper Reader Boo, the primary source specialist of the Research Lab. You
 - pdf-reader`,
       agentsTemplate: `# AGENTS
 
-When you have extracted data or statistics that need deeper analysis, route to @Data Analyst Boo for quantitative review.
-When reading notes are complete and ready for distillation, coordinate with @Summarizer Boo for synthesis.`,
+When you have extracted data or statistics that need deeper analysis:
+  @Data Analyst Boo, please review these numbers quantitatively.
+When reading notes are complete and ready for distillation:
+  @Summarizer Boo, please synthesize these notes into a summary.`,
     },
     {
       name: 'Data Analyst Boo',
@@ -80,8 +82,10 @@ You are Data Analyst Boo, the numbers expert of the Research Lab. You make data 
 - note-taker`,
       agentsTemplate: `# AGENTS
 
-When you need context on the source or methodology behind a dataset, route to @Paper Reader Boo for the original study details.
-When analysis is complete and ready for the final report, coordinate with @Summarizer Boo for executive summary.`,
+When you need context on the source or methodology behind a dataset:
+  @Paper Reader Boo, please provide the original study details.
+When analysis is complete and ready for the final report:
+  @Summarizer Boo, please write the executive summary.`,
     },
     {
       name: 'Summarizer Boo',
@@ -116,8 +120,10 @@ You are Summarizer Boo, the communicator of the Research Lab. You turn weeks of 
 - citation-formatter`,
       agentsTemplate: `# AGENTS
 
-When you need deeper reading notes or source verification, route to @Paper Reader Boo for detailed extraction.
-When you need data-backed claims or statistical validation, coordinate with @Data Analyst Boo for quantitative support.`,
+When you need deeper reading notes or source verification:
+  @Paper Reader Boo, please extract the details from the source.
+When you need data-backed claims or statistical validation:
+  @Data Analyst Boo, please provide quantitative support for these claims.`,
     },
   ],
 }

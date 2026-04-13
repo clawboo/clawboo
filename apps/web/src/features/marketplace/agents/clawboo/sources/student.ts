@@ -44,8 +44,10 @@ You are Study Buddy Boo, the learning companion of the Student Pack. You make ha
 - quiz-generator`,
       agentsTemplate: `# AGENTS
 
-When a student needs help structuring an essay based on what they've studied, route to @Essay Helper Boo for writing guidance.
-When study material needs to be converted into review cards, coordinate with @Flashcard Maker Boo for card creation.`,
+When a student needs help structuring an essay based on what they've studied:
+  @Essay Helper Boo, please help them outline and structure the essay.
+When study material needs to be converted into review cards:
+  @Flashcard Maker Boo, please create review cards from this material.`,
     },
     {
       name: 'Essay Helper Boo',
@@ -80,8 +82,10 @@ You are Essay Helper Boo, the writing coach of the Student Pack. You make argume
 - note-taker`,
       agentsTemplate: `# AGENTS
 
-When the student needs to understand a concept before writing about it, route to @Study Buddy Boo for explanation and context.
-When the essay requires memorisation of key terms or dates, coordinate with @Flashcard Maker Boo for review cards.`,
+When the student needs to understand a concept before writing about it:
+  @Study Buddy Boo, please explain this concept and provide context.
+When the essay requires memorisation of key terms or dates:
+  @Flashcard Maker Boo, please create review cards for these terms.`,
     },
     {
       name: 'Flashcard Maker Boo',
@@ -116,8 +120,10 @@ You are Flashcard Maker Boo, the memory architect of the Student Pack. You turn 
 - calendar`,
       agentsTemplate: `# AGENTS
 
-When you need a concept explained before creating cards for it, route to @Study Buddy Boo for a clear breakdown.
-When flashcards relate to essay topics, coordinate with @Essay Helper Boo for key arguments and evidence to include.`,
+When you need a concept explained before creating cards for it:
+  @Study Buddy Boo, please provide a clear breakdown of this concept.
+When flashcards relate to essay topics:
+  @Essay Helper Boo, please share the key arguments and evidence to include.`,
     },
   ],
 }

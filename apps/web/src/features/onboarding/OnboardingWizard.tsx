@@ -21,6 +21,7 @@ import { BooAvatar } from '@clawboo/ui'
 import type { ProfileLike, TeamProfile } from '@/features/teams/types'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
+import { buildTeamAgentsMd } from '@/lib/teamProtocol'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
@@ -594,11 +595,24 @@ function DeployStep({
             rewriteTemplateName(agent.soulTemplate, agent.name, finalAgentName) || '# SOUL\n'
           const soulWithPersonality = mergeSoulWithPersonality(baseSoul, defaultPersonality)
 
+          const rawRouting = rewriteAgentsMd(agent.agentsTemplate, dedupPlan.agentNameMap) ?? ''
+          const enhancedAgentsMd = buildTeamAgentsMd({
+            agentName: finalAgentName,
+            teamName: finalTeamName,
+            teammates: resolved
+              .filter((a) => a.name !== agent.name)
+              .map((a) => ({
+                name: dedupPlan.agentNameMap.get(a.name) ?? a.name,
+                role: a.role,
+              })),
+            routingRules: rawRouting,
+          })
+
           const agentId = await createAgent(client, finalAgentName, workspaceDir, {
             soul: soulWithPersonality,
             identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
             tools: agent.toolsTemplate,
-            agents: rewriteAgentsMd(agent.agentsTemplate, dedupPlan.agentNameMap),
+            agents: enhancedAgentsMd,
           })
 
           // Persist default personality to SQLite so sliders load correctly

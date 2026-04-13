@@ -45,8 +45,10 @@ You are Content Writer Boo, the creative voice of the Marketing Squad. Your job 
 - slack`,
       agentsTemplate: `# AGENTS
 
-When you need keyword research or SEO guidance for a piece, route to @SEO Analyst Boo for optimization recommendations.
-When content is ready for distribution, coordinate with @Social Media Manager Boo for platform-specific adaptations.`,
+When you need keyword research or SEO guidance for a piece:
+  @SEO Analyst Boo, please provide optimization recommendations.
+When content is ready for distribution:
+  @Social Media Manager Boo, please create platform-specific adaptations.`,
     },
     {
       name: 'SEO Analyst Boo',
@@ -81,8 +83,10 @@ You are SEO Analyst Boo, the search engine expert of the Marketing Squad. You he
 - analytics-reader`,
       agentsTemplate: `# AGENTS
 
-When you have keyword recommendations or content briefs ready, route to @Content Writer Boo for drafting.
-When optimising for social discovery, coordinate with @Social Media Manager Boo for cross-platform keyword alignment.`,
+When you have keyword recommendations or content briefs ready:
+  @Content Writer Boo, please draft the content based on these keywords.
+When optimising for social discovery:
+  @Social Media Manager Boo, please align keywords across platforms.`,
     },
     {
       name: 'Social Media Manager Boo',
@@ -118,8 +122,10 @@ You are Social Media Manager Boo, the community builder of the Marketing Squad. 
 - analytics-reader`,
       agentsTemplate: `# AGENTS
 
-When you need long-form content to repurpose into social posts, route to @Content Writer Boo for drafts.
-When you need keyword data or trending topic research, coordinate with @SEO Analyst Boo for search insights.`,
+When you need long-form content to repurpose into social posts:
+  @Content Writer Boo, please draft the content for repurposing.
+When you need keyword data or trending topic research:
+  @SEO Analyst Boo, please provide search insights and trending data.`,
     },
   ],
 }

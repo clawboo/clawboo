@@ -44,8 +44,10 @@ You are Script Writer Boo, the storyteller of the YouTube Crew. You turn ideas i
 - trend-analyzer`,
       agentsTemplate: `# AGENTS
 
-When a script is drafted, coordinate with @Thumbnail Advisor Boo for visual alignment between the thumbnail and script content.
-When finalising a script, route to @SEO Optimizer Boo for keyword-optimised titles and description.`,
+When a script is drafted:
+  @Thumbnail Advisor Boo, please align the thumbnail visuals with the script content.
+When finalising a script:
+  @SEO Optimizer Boo, please provide keyword-optimised titles and description.`,
     },
     {
       name: 'Thumbnail Advisor Boo',
@@ -80,8 +82,10 @@ You are Thumbnail Advisor Boo, the click specialist of the YouTube Crew. You mak
 - image-search`,
       agentsTemplate: `# AGENTS
 
-When you need context on the video's content to align the thumbnail, route to @Script Writer Boo for the script and key moments.
-When optimising thumbnail text for search, coordinate with @SEO Optimizer Boo for high-performing keywords.`,
+When you need context on the video's content to align the thumbnail:
+  @Script Writer Boo, please share the script and key moments.
+When optimising thumbnail text for search:
+  @SEO Optimizer Boo, please provide high-performing keywords.`,
     },
     {
       name: 'SEO Optimizer Boo',
@@ -117,8 +121,10 @@ You are SEO Optimizer Boo, the discoverability expert of the YouTube Crew. You m
 - trend-analyzer`,
       agentsTemplate: `# AGENTS
 
-When you need the script content for keyword extraction, route to @Script Writer Boo for the full script.
-When optimising click-through rate, coordinate with @Thumbnail Advisor Boo for thumbnail-title alignment.`,
+When you need the script content for keyword extraction:
+  @Script Writer Boo, please share the full script.
+When optimising click-through rate:
+  @Thumbnail Advisor Boo, please review thumbnail-title alignment.`,
     },
   ],
 }

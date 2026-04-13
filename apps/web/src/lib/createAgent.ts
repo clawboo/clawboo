@@ -11,6 +11,7 @@
  */
 
 import type { GatewayClient } from '@clawboo/gateway-client'
+import { buildTeamAgentsMd } from './teamProtocol'
 
 // ─── Path utilities (no Node.js path module — runs in the browser) ──────────
 
@@ -85,4 +86,36 @@ export async function createAgent(
   if (files?.agents) await client.agents.files.set(agentId, 'AGENTS.md', files.agents)
 
   return agentId
+}
+
+/**
+ * Re-generate an agent's AGENTS.md by extracting routing rules from the
+ * current content and wrapping them with the team protocol via buildTeamAgentsMd().
+ * Useful for upgrading existing agents to the enhanced format.
+ */
+export async function refreshTeamAgentsMd(params: {
+  client: GatewayClient
+  agentId: string
+  agentName: string
+  teamName: string
+  teammates: Array<{ name: string; role: string }>
+}): Promise<void> {
+  const { client, agentId, agentName, teamName, teammates } = params
+  const content = await client.agents.files.read(agentId, 'AGENTS.md')
+  let routingRules = content ?? ''
+
+  // If enhanced format (has "### Routing Rules"), extract only the rules section
+  const headerIdx = routingRules.indexOf('### Routing Rules')
+  if (headerIdx !== -1) {
+    routingRules = routingRules.slice(headerIdx + '### Routing Rules'.length).trim()
+  }
+
+  const enhanced = buildTeamAgentsMd({
+    agentName,
+    teamName,
+    teammates,
+    routingRules,
+  })
+
+  await client.agents.files.set(agentId, 'AGENTS.md', enhanced)
 }

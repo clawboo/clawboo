@@ -8,6 +8,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
+import { buildTeamAgentsMd } from '@/lib/teamProtocol'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { useGraphStore } from '@/features/graph/store'
@@ -261,11 +262,24 @@ export function CreateTeamModal({
           rewriteTemplateName(agent.soulTemplate, agent.name, finalAgentName) || '# SOUL\n'
         const soulWithPersonality = mergeSoulWithPersonality(baseSoul, defaultPersonality)
 
+        const rawRouting = rewriteAgentsMd(agent.agentsTemplate, dedupPlan.agentNameMap) ?? ''
+        const enhancedAgentsMd = buildTeamAgentsMd({
+          agentName: finalAgentName,
+          teamName: finalTeamName,
+          teammates: resolved
+            .filter((a) => a.name !== agent.name)
+            .map((a) => ({
+              name: dedupPlan.agentNameMap.get(a.name) ?? a.name,
+              role: a.role,
+            })),
+          routingRules: rawRouting,
+        })
+
         const agentId = await createAgent(client, finalAgentName, workspaceDir, {
           soul: soulWithPersonality,
           identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
           tools: agent.toolsTemplate,
-          agents: rewriteAgentsMd(agent.agentsTemplate, dedupPlan.agentNameMap),
+          agents: enhancedAgentsMd,
         })
 
         // Persist default personality to SQLite so sliders load correctly
