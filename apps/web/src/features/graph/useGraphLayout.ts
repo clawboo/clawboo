@@ -11,13 +11,27 @@ const elk = new ELK()
 // ─── ELK layout options ───────────────────────────────────────────────────────
 
 const ELK_OPTIONS = {
-  // Stress layout: produces compact, balanced, organic placements.
-  // Unlike 'layered' (which creates rigid vertical/horizontal chains),
-  // stress minimization distributes nodes evenly in 2D space.
-  'elk.algorithm': 'stress',
-  'elk.stress.desiredEdgeLength': '300',
-  'elk.spacing.nodeNode': '80',
-  'elk.padding': '[top=20, left=20, bottom=20, right=20]',
+  // Layered top-down hierarchy. Replaces the previous `stress` algorithm,
+  // which produced organic 2D constellation placement and made the leader
+  // → teammate flow illegible. Layered assigns each Boo to a "level" based
+  // on its position in the dependency graph (no incoming edges = top of
+  // the tree, longest path = bottom) — the conventional flow-chart shape.
+  'elk.algorithm': 'layered',
+  'elk.direction': 'DOWN',
+  // Crossing minimization: fewer edge crossings = clearer hierarchy.
+  // LAYER_SWEEP is the default barycentric heuristic and is fast on
+  // small graphs (handful of Boos per team).
+  'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+  // Node placement: NETWORK_SIMPLEX produces balanced columns within each
+  // layer (avoids one teammate hugging the left while another floats on
+  // the right). LP-based, optimal for our team sizes.
+  'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+  // Spacing tuned so the BOO_ENVELOPE (260px, accounts for orbital
+  // children when expanded) clears between siblings AND between layers
+  // with room for the bezier-curve dependency edge + arrowhead.
+  'elk.spacing.nodeNode': '100',
+  'elk.layered.spacing.nodeNodeBetweenLayers': '140',
+  'elk.padding': '[top=40, left=40, bottom=40, right=40]',
 }
 
 // ─── Boo envelope dimensions ─────────────────────────────────────────────────

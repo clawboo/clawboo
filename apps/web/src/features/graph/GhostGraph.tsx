@@ -39,6 +39,7 @@ import { GraphContextMenu } from './GraphContextMenu'
 import { installSkillForAgent } from './operations/installSkill'
 import { removeRouting } from './operations/removeRouting'
 import { graphPhysics } from './graphPhysics'
+import { EdgeMarkers } from './edges/EdgeMarkers'
 import type { BooNodeData, SkillNodeData, GraphEdge } from './types'
 
 interface ContextMenuState {
@@ -431,6 +432,11 @@ export function GhostGraph() {
         transition: 'opacity 0.25s ease',
       }}
     >
+      {/* SVG marker definitions referenced by edges (e.g.
+          DependencyEdge's `markerEnd="url(#dependency-arrow)"`).
+          Mounted once — marker IDs are global to the document. */}
+      <EdgeMarkers />
+
       {/* Team halos layer — behind ReactFlow, matches pane pan/zoom */}
       {showTeamHalos && <TeamHaloLayer nodes={nodes} />}
 
@@ -536,7 +542,16 @@ export function GhostGraph() {
           }}
           nodeColor={(node) => {
             if (node.type === 'boo') return '#E94560'
-            if (node.type === 'skill') return '#34D399'
+            // Skill / resource nodes inherit visibility from their parent
+            // Boo via `data.isVisible` (set by the visibleNodes memo).
+            // When the parent is collapsed, return 'transparent' so the
+            // MiniMap matches what the user sees in the main canvas.
+            // The `?? true` default keeps MiniMap behaviour correct in
+            // contexts that don't set the flag (e.g. MiniGraph) — but
+            // this MiniMap is only on the Ghost Graph anyway.
+            const isVisible = (node.data as { isVisible?: boolean }).isVisible ?? true
+            if (node.type === 'skill') return isVisible ? '#34D399' : 'transparent'
+            if (node.type === 'resource') return isVisible ? '#FBBF24' : 'transparent'
             return '#FBBF24'
           }}
           maskColor="rgba(10,14,26,0.75)"
