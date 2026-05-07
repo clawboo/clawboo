@@ -2,6 +2,8 @@
 // Pure functions for message formatting, target resolution, and relay guards.
 // In-memory state tracks per-team cooldowns and chain depth to prevent loops.
 
+import { buildSelfDocumentingRelayHeader } from '@/lib/teamProtocol'
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface RelayConfig {
@@ -51,13 +53,12 @@ export function buildRelayMessage(params: {
   const { fromAgentName, responseText, taskContext, maxChars } = params
   const condensed = condenseSummary(responseText, maxChars)
 
-  let header = `[Team Update] @${fromAgentName} completed their work:`
-  if (taskContext) {
-    const ctx = taskContext.length > 80 ? taskContext.slice(0, 80) + '...' : taskContext
-    header += `\n(re: "${ctx}")`
-  }
+  // Self-documenting envelope — the header explicitly says "not a fresh user
+  // message" so agents don't accidentally respond to it as if the user just
+  // spoke. See `buildSelfDocumentingRelayHeader` for rationale.
+  const header = buildSelfDocumentingRelayHeader({ fromAgentName, taskContext })
 
-  return `${header}\n---\n${condensed}\n---\nContinue coordinating based on this update. Tag teammates with @name if further delegation is needed.`
+  return `${header}\n---\n${condensed}\n---`
 }
 
 export function determineRelayTargets(params: {

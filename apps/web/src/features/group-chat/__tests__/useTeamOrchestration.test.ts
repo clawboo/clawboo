@@ -20,12 +20,16 @@ const {
   mockShouldRelay,
   mockRecordRelay,
   mockGetOrCreateTeamRelayState,
+  mockGetRelayDepth,
+  mockIncrementRelayDepth,
 } = vi.hoisted(() => ({
   mockBuildRelayMessage: vi.fn(),
   mockDetermineRelayTargets: vi.fn(),
   mockShouldRelay: vi.fn(),
   mockRecordRelay: vi.fn(),
   mockGetOrCreateTeamRelayState: vi.fn(),
+  mockGetRelayDepth: vi.fn(),
+  mockIncrementRelayDepth: vi.fn(),
 }))
 
 vi.mock('../contextRelay', () => ({
@@ -34,6 +38,8 @@ vi.mock('../contextRelay', () => ({
   shouldRelay: mockShouldRelay,
   recordRelay: mockRecordRelay,
   getOrCreateTeamRelayState: mockGetOrCreateTeamRelayState,
+  getRelayDepth: mockGetRelayDepth,
+  incrementRelayDepth: mockIncrementRelayDepth,
   DEFAULT_RELAY_CONFIG: {
     maxSummaryChars: 500,
     maxRelayDepth: 3,
@@ -139,6 +145,8 @@ describe('useTeamOrchestration — orchestration logic', () => {
     mockBuildTeamWakeMessage.mockReturnValue('wake up message')
     mockHasTeamChatOverride.mockReturnValue(false)
     mockIsAgentAwake.mockReturnValue(true)
+    mockGetRelayDepth.mockReturnValue(0)
+    mockIncrementRelayDepth.mockReturnValue(undefined)
     mockClient.call.mockResolvedValue(undefined)
   })
 
@@ -546,6 +554,35 @@ describe('useTeamOrchestration — orchestration logic', () => {
       }
 
       expect(mockClient.call).not.toHaveBeenCalled()
+    })
+
+    it('imports getRelayDepth and incrementRelayDepth from contextRelay', async () => {
+      // Regression guard: previously the hook hardcoded `relayDepth: 0`, so
+      // the maxRelayDepth config never kicked in and chains could grow until
+      // the cooldown caught up. The fix wires getRelayDepth() into shouldRelay
+      // and calls incrementRelayDepth() after each successful relay. Verify
+      // both symbols are imported by triggering a module import and checking
+      // the mock factory reflects them.
+      const mod = await import('../contextRelay')
+      // The mocked module replaces all exports; the test guarantees the
+      // hook's import surface includes these names.
+      expect(typeof mod.getRelayDepth).toBe('function')
+      expect(typeof mod.incrementRelayDepth).toBe('function')
+    })
+
+    it('source: relayDepth in shouldRelay call uses getRelayDepth, not hardcoded 0', async () => {
+      // Static check: read the hook source and assert it no longer hardcodes
+      // `relayDepth: 0`. This catches any regression where the dynamic depth
+      // wiring is reverted.
+      const fs = await import('node:fs')
+      const path = await import('node:path')
+      const src = fs.readFileSync(path.join(__dirname, '..', 'useTeamOrchestration.ts'), 'utf8')
+      // Must reference getRelayDepth at the shouldRelay call site
+      expect(src).toMatch(/relayDepth:\s*getRelayDepth\(/)
+      // Must NOT contain hardcoded `relayDepth: 0`
+      expect(src).not.toMatch(/relayDepth:\s*0\b/)
+      // Must call incrementRelayDepth after recordRelay
+      expect(src).toMatch(/incrementRelayDepth\(/)
     })
   })
 

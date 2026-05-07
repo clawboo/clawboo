@@ -7,6 +7,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@/lib/execSettingsForGateway'
+import { nextSeq } from '@/lib/sequenceKey'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,7 +38,11 @@ function makeEntry(
     runId: null,
     source: 'local-send',
     timestampMs: ts,
-    sequenceKey: ts,
+    // Strictly-increasing tiebreaker for the merged-transcript sort.
+    // Using `ts` here would make sequenceKey === timestampMs, so the
+    // comparator could never break ties for entries that landed in the
+    // same millisecond. See lib/sequenceKey.ts.
+    sequenceKey: nextSeq(),
     confirmed: false,
     fingerprint: id,
     ...override,

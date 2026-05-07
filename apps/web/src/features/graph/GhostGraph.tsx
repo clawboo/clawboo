@@ -1,6 +1,6 @@
 import '@xyflow/react/dist/style.css'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -71,6 +71,10 @@ export function GhostGraph() {
     setShowTeamHalos,
     setHoveredNodeId,
   } = useGraphStore()
+
+  // Subscribed separately so the visibility memo only re-runs when the Set
+  // identity changes — not on every nodes/edges update from physics ticks.
+  const expandedBooNodeIds = useGraphStore((s) => s.expandedBooNodeIds)
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
@@ -185,10 +189,14 @@ export function GhostGraph() {
     [selectedEdgeId, setSelectedEdgeId],
   )
 
+  // Single-click on a Boo toggles its orbital children (skills + resources)
+  // visibility — peacock-feather expand / collapse. The previous left-click
+  // behaviour of "select agent in the sidebar" is now available from the
+  // right-click context menu (`Select in sidebar` item) and is also implicit
+  // when the user picks Chat / Edit personality / Edit files there.
   const onNodeClick: NodeMouseHandler<Node> = useCallback((_event, node) => {
     if (node.type === 'boo') {
-      const data = node.data as BooNodeData
-      useFleetStore.getState().selectAgent(data.agentId)
+      useGraphStore.getState().toggleBooNodeExpanded(node.id)
     }
   }, [])
 
@@ -358,6 +366,57 @@ export function GhostGraph() {
 
   const hasRunLayout = useGraphStore((s) => s.hasRunLayout)
 
+  // ── Derive visibility for skill/resource nodes + their edges ──────────────
+  // Boos and dependency edges are always visible. Skill / resource nodes are
+  // hidden by default and revealed only when the user clicks (and thus
+  // expands) their parent Boo.
+  //
+  // Two different visibility mechanisms:
+  //   • EDGES use React Flow's native `hidden: true` — fastest path, no
+  //     animation needed (the edge just disappears when its parent Boo
+  //     collapses).
+  //   • NODES use a `data.isVisible` flag we read inside SkillNode /
+  //     ResourceNode. We DON'T use React Flow's `hidden: true` for nodes
+  //     because that maps to `display: none`, which is non-animatable —
+  //     and we want the peacock-feather expand / collapse transition.
+  //     Hidden nodes stay mounted with `opacity: 0` + `scale: 0`, animated
+  //     by Framer Motion in the node component.
+  //
+  // Parent Boo IDs are derived from the existing source-of-truth (the
+  // node's `agentIds[0]` for skill/resource nodes; the edge's `source` for
+  // skill/resource edges) — no `buildGraphElements` change needed.
+  const visibleNodes = useMemo<typeof nodes>(() => {
+    if (nodes.length === 0) return nodes
+    return nodes.map((n) => {
+      if (n.type === 'boo') {
+        return (n.hidden ? { ...n, hidden: false } : n) as typeof n
+      }
+      if (n.type !== 'skill' && n.type !== 'resource') return n
+      const ownerAgentId = n.data.agentIds?.[0]
+      const parentBooId = ownerAgentId ? `boo-${ownerAgentId}` : null
+      const isVisible = !!parentBooId && expandedBooNodeIds.has(parentBooId)
+      if (n.data.isVisible === isVisible) return n
+      // Always keep skill/resource nodes mounted (`hidden` never set);
+      // visibility is animated inside the node component via `data.isVisible`.
+      // The cast keeps the discriminated union narrow per branch.
+      return { ...n, data: { ...n.data, isVisible } } as typeof n
+    })
+  }, [nodes, expandedBooNodeIds])
+
+  const visibleEdges = useMemo(() => {
+    if (edges.length === 0) return edges
+    return edges.map((e) => {
+      if (e.type === 'dependency') {
+        return e.hidden ? { ...e, hidden: false } : e
+      }
+      if (e.type !== 'skill' && e.type !== 'resource') return e
+      // Skill / resource edges always have the parent Boo as `source`.
+      const shouldBeHidden = !expandedBooNodeIds.has(e.source)
+      if (e.hidden === shouldBeHidden) return e
+      return { ...e, hidden: shouldBeHidden }
+    })
+  }, [edges, expandedBooNodeIds])
+
   return (
     <div
       style={{
@@ -431,8 +490,8 @@ export function GhostGraph() {
       </button>
 
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={visibleNodes}
+        edges={visibleEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeDragStart={onNodeDragStart}
@@ -505,6 +564,13 @@ export function GhostGraph() {
           onEditFiles={() => {
             useFleetStore.getState().selectAgent(contextMenu.agentId)
             useViewStore.getState().openAgent(contextMenu.agentId)
+            setContextMenu(null)
+          }}
+          onSelectInSidebar={() => {
+            // Highlight in fleet sidebar without opening the detail view
+            // (preserved from the previous left-click behaviour, which
+            // now toggles peacock expand instead).
+            useFleetStore.getState().selectAgent(contextMenu.agentId)
             setContextMenu(null)
           }}
           onDelete={() => {

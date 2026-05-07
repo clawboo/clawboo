@@ -10,6 +10,10 @@ interface GraphContextMenuProps {
   onChat: () => void
   onEditPersonality: () => void
   onEditFiles: () => void
+  // Highlight the agent in the sidebar without opening the agent detail
+  // view. Replaces the previous left-click behaviour, which now toggles
+  // the boo's orbital children visibility (peacock-feather expand).
+  onSelectInSidebar: () => void
   onDelete: () => void
 }
 
@@ -17,6 +21,7 @@ const items = [
   { label: 'Chat', emoji: '\uD83D\uDCAC', action: 'chat' },
   { label: 'Edit personality', emoji: '\u2699\uFE0F', action: 'editPersonality' },
   { label: 'Edit files', emoji: '\uD83D\uDCDD', action: 'editFiles' },
+  { label: 'Select in sidebar', emoji: '\uD83D\uDC41\uFE0F', action: 'selectInSidebar' },
   { label: 'Delete', emoji: '\uD83D\uDDD1', action: 'delete' },
 ] as const
 
@@ -27,6 +32,7 @@ export function GraphContextMenu({
   onChat,
   onEditPersonality,
   onEditFiles,
+  onSelectInSidebar,
   onDelete,
 }: GraphContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -52,6 +58,7 @@ export function GraphContextMenu({
     chat: onChat,
     editPersonality: onEditPersonality,
     editFiles: onEditFiles,
+    selectInSidebar: onSelectInSidebar,
     delete: onDelete,
   }
 

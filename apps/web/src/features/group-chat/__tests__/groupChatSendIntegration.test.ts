@@ -160,7 +160,7 @@ describe('sendGroupChatMessage — context preamble integration', () => {
     expect(sentMessage).toContain('Hello team')
   })
 
-  it('wake message uses buildTeamWakeMessage format with REAL agents text', async () => {
+  it('wake message is silent re-init (no @mentions, no introduction request)', async () => {
     // Agent a2 needs waking
     mockFindSleeping.mockReturnValue(['a2'])
     mockGetTranscripts.mockReturnValue(new Map())
@@ -183,10 +183,14 @@ describe('sendGroupChatMessage — context preamble integration', () => {
     )
     expect(wakeCalls.length).toBeGreaterThanOrEqual(1)
 
-    // Wake message should contain "REAL agents" text from buildTeamWakeMessage
+    // Wake message must NOT ask for introductions or list teammates as
+    // @mentions — that triggered the message-flooding cascade in production.
+    // The full team protocol lives in AGENTS.md, loaded on every interaction.
     const wakeMessage = wakeCalls[0][1].message as string
-    expect(wakeMessage).toContain('REAL agents')
+    expect(wakeMessage).toContain('resuming')
     expect(wakeMessage).toContain('Worker Boo')
+    expect(wakeMessage).not.toContain('@')
+    expect(wakeMessage).not.toMatch(/introduce yourself/i)
   })
 
   it('passes team name correctly to wake message', async () => {
@@ -215,7 +219,12 @@ describe('sendGroupChatMessage — context preamble integration', () => {
     }
   })
 
-  it('wake message includes teammate names', async () => {
+  it('wake message addresses the woken agent personally without listing teammates', async () => {
+    // Regression guard: the previous implementation listed teammates as
+    // @mentions, which agents naturally echoed in their introduction
+    // responses, triggering false delegation detection and a relay cascade
+    // (~40+ messages from a single user query). The fix replaced the
+    // teammate-listing intro prompt with a silent re-init message.
     mockFindSleeping.mockReturnValue(['a2'])
     mockGetTranscripts.mockReturnValue(new Map())
 
@@ -236,15 +245,103 @@ describe('sendGroupChatMessage — context preamble integration', () => {
     )
     expect(wakeCalls.length).toBeGreaterThanOrEqual(1)
 
-    // Worker Boo's wake message should mention their teammates
     const workerWakeCall = wakeCalls.find(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (args: any[]) => args[1].sessionKey === 'agent:a2:team:team-1',
     )
     expect(workerWakeCall).toBeDefined()
     const msg = workerWakeCall![1].message as string
-    // Should contain the other teammates' names
-    expect(msg).toContain('Leader Boo')
-    expect(msg).toContain('Coder Boo')
+    // Addresses the agent being woken
+    expect(msg).toContain('Worker Boo')
+    expect(msg).toContain('Dev Team')
+    // Does NOT list teammates as @mentions (regression guard)
+    expect(msg).not.toContain('Leader Boo')
+    expect(msg).not.toContain('Coder Boo')
+    expect(msg).not.toContain('@')
+  })
+
+  // ─── User-intro persistence regression ───────────────────────────────────
+  // Background: in production the user reported that they couldn't tell
+  // whether their self-introduction was reaching the agent. Two bugs:
+  //   (a) TeamOnboardingGate sent the wrong RPC param name (`path` instead
+  //       of `name`), so the SOUL.md write silently failed.
+  //   (b) Even when fixed, Gateway SOUL.md persistence is unreliable per
+  //       CLAUDE.md.
+  // Fix: SQLite is the source of truth for the user intro, and on every
+  // group-chat send we inject it into the team context preamble. These
+  // tests verify the preamble actually contains the intro text.
+
+  it('injects userIntroText into the preamble on the first message (no history)', async () => {
+    mockGetTranscripts.mockReturnValue(new Map())
+    mockFindSleeping.mockReturnValue([])
+
+    const p = sendGroupChatMessage({
+      client: mockClient,
+      teamId: 'team-1',
+      teamName: 'Dev Team',
+      leaderAgentId: 'a1',
+      teamAgents: [leader, worker],
+      message: 'hello team',
+      userIntroText: "I'm Sanju, I'm building Clawboo.",
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await p
+
+    expect(mockSendChatMessage).toHaveBeenCalledTimes(1)
+    const sent = mockSendChatMessage.mock.calls[0][0] as { message: string }
+    expect(sent.message).toContain('[About the User]')
+    expect(sent.message).toContain("I'm Sanju, I'm building Clawboo.")
+    expect(sent.message).toContain('[End About the User]')
+    // The original user message is preserved at the end
+    expect(sent.message.endsWith('hello team')).toBe(true)
+  })
+
+  it('injects userIntroText alongside the team context block when history exists', async () => {
+    const transcripts = new Map<string, TranscriptEntry[]>()
+    transcripts.set('agent:a2:team:team-1', [
+      makeEntry('agent:a2:team:team-1', {
+        text: 'previous response',
+        timestampMs: Date.now() - 60_000,
+      }),
+    ])
+    mockGetTranscripts.mockReturnValue(transcripts)
+    mockFindSleeping.mockReturnValue([])
+
+    const p = sendGroupChatMessage({
+      client: mockClient,
+      teamId: 'team-1',
+      teamName: 'Dev Team',
+      leaderAgentId: 'a1',
+      teamAgents: [leader, worker],
+      message: 'follow up',
+      userIntroText: 'My name is Sanju.',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await p
+
+    const sent = mockSendChatMessage.mock.calls[0][0] as { message: string }
+    expect(sent.message).toContain('[About the User]')
+    expect(sent.message).toContain('My name is Sanju.')
+    expect(sent.message).toContain('[Team Context')
+  })
+
+  it('omits [About the User] block when userIntroText is empty/missing', async () => {
+    mockGetTranscripts.mockReturnValue(new Map())
+    mockFindSleeping.mockReturnValue([])
+
+    const p = sendGroupChatMessage({
+      client: mockClient,
+      teamId: 'team-1',
+      teamName: 'Dev Team',
+      leaderAgentId: 'a1',
+      teamAgents: [leader, worker],
+      message: 'hi',
+      // no userIntroText
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await p
+
+    const sent = mockSendChatMessage.mock.calls[0][0] as { message: string }
+    expect(sent.message).not.toContain('[About the User]')
   })
 })

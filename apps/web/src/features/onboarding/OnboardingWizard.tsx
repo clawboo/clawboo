@@ -21,7 +21,7 @@ import { BooAvatar } from '@clawboo/ui'
 import type { ProfileLike, TeamProfile } from '@/features/teams/types'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
-import { buildTeamAgentsMd } from '@/lib/teamProtocol'
+import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
@@ -596,16 +596,24 @@ function DeployStep({
           const soulWithPersonality = mergeSoulWithPersonality(baseSoul, defaultPersonality)
 
           const rawRouting = rewriteAgentsMd(agent.agentsTemplate, dedupPlan.agentNameMap) ?? ''
+          const teammatesForProtocol = resolved
+            .filter((a) => a.name !== agent.name)
+            .map((a) => ({
+              name: dedupPlan.agentNameMap.get(a.name) ?? a.name,
+              role: a.role,
+            }))
           const enhancedAgentsMd = buildTeamAgentsMd({
             agentName: finalAgentName,
             teamName: finalTeamName,
-            teammates: resolved
-              .filter((a) => a.name !== agent.name)
-              .map((a) => ({
-                name: dedupPlan.agentNameMap.get(a.name) ?? a.name,
-                role: a.role,
-              })),
+            teammates: teammatesForProtocol,
             routingRules: rawRouting,
+          })
+          // CLAWBOO.md — workspace-resident operating reference. See
+          // `lib/teamProtocol.ts` (`buildClawbooHelpDoc`).
+          const clawbooHelpDoc = buildClawbooHelpDoc({
+            agentName: finalAgentName,
+            teamName: finalTeamName,
+            teammates: teammatesForProtocol,
           })
 
           const agentId = await createAgent(client, finalAgentName, workspaceDir, {
@@ -613,6 +621,7 @@ function DeployStep({
             identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
             tools: agent.toolsTemplate,
             agents: enhancedAgentsMd,
+            clawboo: clawbooHelpDoc,
           })
 
           // Persist default personality to SQLite so sliders load correctly

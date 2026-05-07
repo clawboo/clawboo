@@ -16,6 +16,8 @@ import {
   shouldRelay,
   recordRelay,
   getOrCreateTeamRelayState,
+  getRelayDepth,
+  incrementRelayDepth,
   DEFAULT_RELAY_CONFIG,
 } from './contextRelay'
 import { getMergedTeamEntries } from './groupChatSendOperation'
@@ -28,6 +30,12 @@ export interface UseTeamOrchestrationParams {
   leaderAgentId: string | null
   client: GatewayClientLike | null
   enabled?: boolean
+  /**
+   * User self-introduction captured during onboarding. Injected into the
+   * delegation preamble so the target agent knows who the user is, even when
+   * the delegation is routed agent-to-agent (without a fresh user message).
+   */
+  userIntroText?: string
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
@@ -45,6 +53,8 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
   clientRef.current = params.client
   const teamIdRef = useRef(teamId)
   teamIdRef.current = teamId
+  const userIntroTextRef = useRef(params.userIntroText)
+  userIntroTextRef.current = params.userIntroText
 
   // Tracking state (all refs — no re-renders)
   const lastCountsRef = useRef<Map<string, number>>(new Map())
@@ -111,12 +121,15 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
                 // Set override BEFORE sending so Gateway events get redirected
                 setTeamChatOverride(delegation.targetAgentId, targetTeamSk)
 
-                // Build context preamble from merged transcript
+                // Build context preamble from merged transcript — also injects
+                // the user intro so the target agent knows who the user is
+                // (delegations are agent-to-agent, no fresh user message).
                 const contextEntries = getMergedTeamEntries(currentTeamId, currentAgents)
                 const targetAgent = currentAgents.find((a) => a.id === delegation.targetAgentId)
                 const preamble = buildTeamContextPreamble({
                   entries: contextEntries,
                   targetAgentName: targetAgent?.name ?? '',
+                  userIntroText: userIntroTextRef.current,
                 })
 
                 const messageBody = preamble
@@ -147,7 +160,7 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             shouldRelay({
               responseText: text,
               config: DEFAULT_RELAY_CONFIG,
-              relayDepth: 0,
+              relayDepth: getRelayDepth(currentTeamId, sourceAgentId),
               lastRelayAt,
             })
           ) {
@@ -210,6 +223,7 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             }
 
             recordRelay(currentTeamId, sourceAgentId)
+            incrementRelayDepth(currentTeamId, sourceAgentId)
             // Clean up delegation source after relay is sent
             delegationSourceRef.current.delete(sourceAgentId)
           }

@@ -9,6 +9,7 @@ import { loadSettings } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 
 import { apiRouter } from './api/index'
+import { resolveApiPort, writeApiPortFile, removeApiPortFile } from './lib/portUtils'
 
 // ── Loggers ─────────────────────────────────────────────────────────────────
 
@@ -22,15 +23,6 @@ const resolveHost = (): string => {
   return fromEnv || '0.0.0.0'
 }
 
-const resolvePort = (dev: boolean): number => {
-  // In dev mode, always use 3000 — the Vite proxy targets localhost:3000.
-  // Ignore the generic PORT env var which may be set by preview tools.
-  if (dev) return 3000
-  const raw = process.env['PORT']?.trim() || '3000'
-  const port = Number(raw)
-  return Number.isFinite(port) && port > 0 ? port : 3000
-}
-
 const resolvePathname = (url: string | undefined): string => {
   const raw = typeof url === 'string' ? url : ''
   const idx = raw.indexOf('?')
@@ -42,7 +34,12 @@ const resolvePathname = (url: string | undefined): string => {
 async function main() {
   const dev = process.argv.includes('--dev')
   const hostname = resolveHost()
-  const port = resolvePort(dev)
+
+  // Pick the API port up front. In dev mode the orchestrator script picks
+  // a port first and exports it as `CLAWBOO_API_PORT` so the Vite proxy
+  // and this server agree without a race. In production / CLI / standalone
+  // boots we scan for a free port starting at DEFAULT_API_PORT (18790).
+  const port = await resolveApiPort({ dev })
 
   log.info({ dev, hostname, port }, 'Starting Clawboo server')
 
@@ -72,7 +69,7 @@ async function main() {
 
   const app = express()
 
-  // CORS: only needed in dev (Vite on :5173 → Express on :3000)
+  // CORS: only needed in dev (Vite on :5173 → Express on the dynamic API port)
   if (dev) {
     app.use(cors({ origin: true, credentials: true }))
   }
@@ -133,8 +130,31 @@ async function main() {
   server.listen(port, hostname, () => {
     const hostForBrowser = hostname === '0.0.0.0' ? 'localhost' : hostname
     const browserUrl = `http://${hostForBrowser}:${port}`
+
+    // Publish the chosen port for external tools (CLI, Vite proxy fallback,
+    // e2e helpers). Best-effort: if writing fails, downstream consumers can
+    // still discover the port via the CLAWBOO_API_PORT env var.
+    writeApiPortFile(port)
+
     log.info({ url: browserUrl }, `Clawboo ready — open in browser: ${browserUrl}`)
   })
+
+  // Best-effort cleanup of the runtime port file on graceful shutdown so
+  // stale entries don't mislead the CLI on the next launch. We don't rely
+  // on this for correctness (the file is just a hint — the CLI probes the
+  // port before opening the browser).
+  const cleanup = () => {
+    removeApiPortFile()
+  }
+  process.once('SIGINT', () => {
+    cleanup()
+    process.exit(0)
+  })
+  process.once('SIGTERM', () => {
+    cleanup()
+    process.exit(0)
+  })
+  process.once('exit', cleanup)
 }
 
 main().catch((err: unknown) => {

@@ -25,7 +25,10 @@ describe('buildRelayMessage', () => {
     expect(result).toContain('@Code Reviewer Boo')
     expect(result).toContain('Found 3 issues in auth module.')
     expect(result).toContain('---')
-    expect(result).toContain('Continue coordinating')
+    // Self-documenting envelope: explicit "not a fresh user message" hint
+    // so agents don't accidentally respond to it as a new user input.
+    expect(result).toContain('not a fresh user message')
+    expect(result).toContain('Continue your own work using this update as context')
   })
 
   it('truncates long responses to maxChars', () => {
@@ -35,10 +38,16 @@ describe('buildRelayMessage', () => {
       responseText: longText,
       maxChars: 100,
     })
-    // The condensed portion should not exceed 100 chars + "..."
+    // The condensed portion lives between the two `---` separator lines
+    // (header above, footer below). Its length should not exceed
+    // maxChars + "..." (the truncation suffix).
     const lines = result.split('\n')
-    const condensedLine = lines[2]! // between the two --- lines
-    expect(condensedLine.length).toBeLessThanOrEqual(103) // 100 + "..."
+    const firstDash = lines.indexOf('---')
+    const lastDash = lines.lastIndexOf('---')
+    expect(firstDash).toBeGreaterThan(0)
+    expect(lastDash).toBeGreaterThan(firstDash)
+    const condensedBody = lines.slice(firstDash + 1, lastDash).join('\n')
+    expect(condensedBody.length).toBeLessThanOrEqual(103) // 100 + "..."
   })
 
   it('includes task context when provided', () => {

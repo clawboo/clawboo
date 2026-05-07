@@ -10,6 +10,7 @@ import { useApprovalsStore, type ApprovalRequest } from '@/stores/approvals'
 import { parseApprovalRequestPayload } from '@/features/approvals/useApprovalActions'
 import { getTeamChatOverride, clearTeamChatOverride } from '@/lib/sessionUtils'
 import { clearAllWakeRecords } from '@/lib/wakeTracker'
+import { nextSeq } from '@/lib/sequenceKey'
 
 // ─── useGatewayEvents ─────────────────────────────────────────────────────────
 //
@@ -149,7 +150,10 @@ export function useGatewayEvents(client: GatewayClient | null): void {
           text,
           source: 'runtime-chat' as const,
           timestampMs: now,
-          sequenceKey: now,
+          // Each line in the batch gets a unique strictly-increasing
+          // sequenceKey so the merged-view sort can break ties even when
+          // every line shares `now`.
+          sequenceKey: nextSeq(),
           confirmed: true,
           fingerprint: crypto.randomUUID(),
         }))
@@ -343,7 +347,8 @@ export function useGatewayEvents(client: GatewayClient | null): void {
           text: `Exec approval for \`${approval.command}\` timed out. Ask the agent to run the command again if needed.`,
           source: 'local-send',
           timestampMs: now,
-          sequenceKey: now,
+          // Strictly-increasing tiebreaker (see lib/sequenceKey.ts).
+          sequenceKey: nextSeq(),
           confirmed: true,
           fingerprint: crypto.randomUUID(),
         }

@@ -11,11 +11,8 @@ import { useChatStore } from '@/stores/chat'
 import { sendChatMessage } from '@/features/chat/chatSendOperation'
 import { buildTeamSessionKey, setTeamChatOverride } from '@/lib/sessionUtils'
 import { findSleepingAgents, markAgentAwake, clearAllWakeRecords } from '@/lib/wakeTracker'
-import {
-  buildTeamWakeMessage,
-  buildTeamContextPreamble,
-  type TeamContextEntry,
-} from '@/lib/teamProtocol'
+import { buildTeamContextPreamble, type TeamContextEntry } from '@/lib/teamProtocol'
+import { nextSeq } from '@/lib/sequenceKey'
 import { parseMention } from './parseMention'
 
 // ─── Auto-wake tracking ──────────────────────────────────────────────────────
@@ -44,6 +41,13 @@ export interface GroupChatSendParams {
   message: string
   /** Original message with @mention for display in transcript. */
   displayText?: string
+  /**
+   * User self-introduction captured during onboarding. When present, it's
+   * injected into the team context preamble on every message so the agent
+   * always knows who they're talking to. Source of truth lives in SQLite
+   * (per-team settings: `team-onboarding:<teamId>.userIntroText`).
+   */
+  userIntroText?: string
 }
 
 // ─── Wakeup ──────────────────────────────────────────────────────────────────
@@ -97,7 +101,8 @@ async function wakeTeamAgents(
     runId: null,
     source: 'local-send',
     timestampMs: ts,
-    sequenceKey: ts,
+    // Strictly-increasing tiebreaker (see lib/sequenceKey.ts).
+    sequenceKey: nextSeq(),
     confirmed: true,
     fingerprint: crypto.randomUUID(),
     kind: 'meta',
@@ -116,15 +121,12 @@ async function wakeTeamAgents(
     // Set override so Gateway events (which use main sessionKey) get redirected
     setTeamChatOverride(agent.id, agentTeamSk)
 
-    // Build per-agent wake message with teammate context
-    const teammates = agents
-      .filter((a) => a.id !== agent.id)
-      .map((a) => ({ name: a.name, role: a.name }))
-    const wakeMessage = buildTeamWakeMessage({
-      agentName: agent.name,
-      teamName,
-      teammates,
-    })
+    // Silent re-initialization message — does NOT ask for introductions or list
+    // teammates as @mentions. The full team protocol (roster + anti-sub-agent
+    // instructions) lives in AGENTS.md, which is loaded on every interaction.
+    // Asking for introductions here would trigger the message-flooding cascade
+    // (intros contain @mentions → false delegations → relay → more intros).
+    const wakeMessage = `You are resuming a team collaboration session as ${agent.name} on team "${teamName}". Acknowledge silently — no introduction needed.`
 
     return client
       .call('chat.send', {
@@ -174,7 +176,16 @@ export function getMergedTeamEntries(teamId: string, teamAgents: AgentState[]): 
 // ─── Main operation ──────────────────────────────────────────────────────────
 
 export async function sendGroupChatMessage(params: GroupChatSendParams): Promise<void> {
-  const { client, teamId, teamName, leaderAgentId, teamAgents, message, displayText } = params
+  const {
+    client,
+    teamId,
+    teamName,
+    leaderAgentId,
+    teamAgents,
+    message,
+    displayText,
+    userIntroText,
+  } = params
 
   // Parse @mention to determine target agent
   const { targetAgentId: mentionedId, cleanedMessage } = parseMention(
@@ -220,10 +231,14 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
   }
 
   // ── Build context preamble for target agent ──────────────────────────────
+  // Always inject the user intro (if available) so the agent knows who
+  // they're talking to on every message — Gateway SOUL.md persistence is
+  // unreliable, so the preamble is the actual delivery mechanism.
   const contextEntries = getMergedTeamEntries(teamId, teamAgents)
   const preamble = buildTeamContextPreamble({
     entries: contextEntries,
     targetAgentName: target.name,
+    userIntroText,
   })
 
   const messageToSend = mentionedId ? cleanedMessage : message

@@ -8,7 +8,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
-import { buildTeamAgentsMd } from '@/lib/teamProtocol'
+import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { useGraphStore } from '@/features/graph/store'
@@ -263,16 +263,26 @@ export function CreateTeamModal({
         const soulWithPersonality = mergeSoulWithPersonality(baseSoul, defaultPersonality)
 
         const rawRouting = rewriteAgentsMd(agent.agentsTemplate, dedupPlan.agentNameMap) ?? ''
+        const teammatesForProtocol = resolved
+          .filter((a) => a.name !== agent.name)
+          .map((a) => ({
+            name: dedupPlan.agentNameMap.get(a.name) ?? a.name,
+            role: a.role,
+          }))
         const enhancedAgentsMd = buildTeamAgentsMd({
           agentName: finalAgentName,
           teamName: finalTeamName,
-          teammates: resolved
-            .filter((a) => a.name !== agent.name)
-            .map((a) => ({
-              name: dedupPlan.agentNameMap.get(a.name) ?? a.name,
-              role: a.role,
-            })),
+          teammates: teammatesForProtocol,
           routingRules: rawRouting,
+        })
+        // CLAWBOO.md sits at the agent's workspace root and provides the
+        // detailed operating reference (workspace isolation paths,
+        // [Team Update] semantics, orchestration loop, common pitfalls).
+        // Agents read it on demand via `cat ~/CLAWBOO.md`.
+        const clawbooHelpDoc = buildClawbooHelpDoc({
+          agentName: finalAgentName,
+          teamName: finalTeamName,
+          teammates: teammatesForProtocol,
         })
 
         const agentId = await createAgent(client, finalAgentName, workspaceDir, {
@@ -280,6 +290,7 @@ export function CreateTeamModal({
           identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
           tools: agent.toolsTemplate,
           agents: enhancedAgentsMd,
+          clawboo: clawbooHelpDoc,
         })
 
         // Persist default personality to SQLite so sliders load correctly

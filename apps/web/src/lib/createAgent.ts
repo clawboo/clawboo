@@ -11,7 +11,7 @@
  */
 
 import type { GatewayClient } from '@clawboo/gateway-client'
-import { buildTeamAgentsMd } from './teamProtocol'
+import { buildClawbooHelpDoc, buildTeamAgentsMd, type TeammateDef } from './teamProtocol'
 
 // ─── Path utilities (no Node.js path module — runs in the browser) ──────────
 
@@ -63,6 +63,13 @@ export type AgentFiles = {
   identity?: string
   tools?: string
   agents?: string
+  /**
+   * `CLAWBOO.md` — workspace-resident operating reference. Read by agents
+   * via `cat ~/CLAWBOO.md` when they need to look up the team protocol
+   * (workspace isolation, [Team Update] semantics, orchestration loop,
+   * etc.). See `buildClawbooHelpDoc` in `lib/teamProtocol.ts`.
+   */
+  clawboo?: string
 }
 
 /**
@@ -84,21 +91,33 @@ export async function createAgent(
   if (files?.identity) await client.agents.files.set(agentId, 'IDENTITY.md', files.identity)
   if (files?.tools) await client.agents.files.set(agentId, 'TOOLS.md', files.tools)
   if (files?.agents) await client.agents.files.set(agentId, 'AGENTS.md', files.agents)
+  if (files?.clawboo) await client.agents.files.set(agentId, 'CLAWBOO.md', files.clawboo)
 
   return agentId
 }
 
 /**
- * Re-generate an agent's AGENTS.md by extracting routing rules from the
- * current content and wrapping them with the team protocol via buildTeamAgentsMd().
- * Useful for upgrading existing agents to the enhanced format.
+ * Re-generate an agent's `AGENTS.md` AND `CLAWBOO.md` from scratch:
+ *
+ *   - `AGENTS.md`: extracts the routing rules from the current content and
+ *     re-wraps them with the latest team protocol (roster, workspace
+ *     warning, delegation syntax, anti-sub-agent guardrail, pointer to
+ *     `CLAWBOO.md`).
+ *   - `CLAWBOO.md`: regenerated unconditionally so agents pick up any
+ *     protocol updates the next time they `cat` it.
+ *
+ * Used by the "Refresh Protocol" UX in `TeamContextMenu` to upgrade existing
+ * agents whose `AGENTS.md` was written before a protocol revision.
+ *
+ * Kept under the `refreshTeamAgentsMd` name for backwards-compatibility with
+ * existing callers; the function now refreshes both files.
  */
 export async function refreshTeamAgentsMd(params: {
   client: GatewayClient
   agentId: string
   agentName: string
   teamName: string
-  teammates: Array<{ name: string; role: string }>
+  teammates: TeammateDef[]
 }): Promise<void> {
   const { client, agentId, agentName, teamName, teammates } = params
   const content = await client.agents.files.read(agentId, 'AGENTS.md')
@@ -117,5 +136,11 @@ export async function refreshTeamAgentsMd(params: {
     routingRules,
   })
 
+  // CLAWBOO.md is regenerated wholesale — there's no per-team customization
+  // in it (every team gets the same operating reference, just with the team's
+  // own teammate list inlined for path discoverability).
+  const clawboo = buildClawbooHelpDoc({ agentName, teamName, teammates })
+
   await client.agents.files.set(agentId, 'AGENTS.md', enhanced)
+  await client.agents.files.set(agentId, 'CLAWBOO.md', clawboo)
 }

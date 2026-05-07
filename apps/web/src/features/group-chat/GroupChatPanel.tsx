@@ -26,7 +26,21 @@ import { Zap } from 'lucide-react'
 
 // ─── GroupChatPanel ──────────────────────────────────────────────────────────
 
-export function GroupChatPanel({ teamId }: { teamId: string }) {
+export function GroupChatPanel({
+  teamId,
+  userIntroText,
+}: {
+  teamId: string
+  /**
+   * User self-introduction captured during onboarding. Passed in from
+   * `GroupChatView` (which owns the onboarding state) and forwarded to
+   * `sendGroupChatMessage` so it's injected into the context preamble on
+   * every message — Gateway SOUL.md persistence is unreliable, so the
+   * preamble is the actual delivery mechanism for ensuring the agent knows
+   * who they're talking to.
+   */
+  userIntroText?: string
+}) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
   const agents = useFleetStore((s) => s.agents)
   const client = useConnectionStore((s) => s.client)
@@ -50,6 +64,7 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
     leaderAgentId,
     client,
     enabled: connectionStatus === 'connected' && orchestrationEnabled,
+    userIntroText,
   })
 
   // Agent lookup for resolving names from sessionKeys
@@ -175,9 +190,10 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
         teamAgents,
         message,
         displayText: message, // raw message including @mention for transcript display
+        userIntroText,
       })
     },
-    [client, teamId, team?.name, leaderAgentId, teamAgents],
+    [client, teamId, team?.name, leaderAgentId, teamAgents, userIntroText],
   )
 
   // ── Chip tag handler ───────────────────────────────────────────────────────
