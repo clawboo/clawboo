@@ -6,6 +6,8 @@ import type { Team } from '@/stores/team'
 import { useGraphStore } from './store'
 import { parseToolsMd } from './parsers/parseToolsMd'
 import { parseAgentsMd } from './parsers/parseAgentsMd'
+import { computeSpanningTree } from './computeSpanningTree'
+import { resolveTeamLeader } from '@/lib/resolveTeamLeader'
 import type { AgentState } from '@/stores/fleet'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData, ResourceNodeData } from './types'
 
@@ -97,9 +99,20 @@ export function useGraphData(): void {
   }, [client, agentStructureKey, refreshKey]) // intentional: string key covers structural changes; refreshKey for skill install
 
   // ── 2. Structural rebuild ────────────────────────────────────────────────────
+  // Resolve the active team's leader → spanning-tree root for the dependency
+  // graph. When no team is selected (showing all agents), we pass null and
+  // `buildGraphElements` skips the spanning-tree filter (all edges treated
+  // as primary, fall back to the full graph view).
+  const resolvedLeaderAgentId = useMemo(() => {
+    if (!selectedTeamId) return null
+    const team = teams.find((t) => t.id === selectedTeamId)
+    if (!team) return null
+    return resolveTeamLeader(selectedTeamId, team.leaderAgentId, filteredAgents)
+  }, [selectedTeamId, teams, filteredAgents])
+
   const { rawNodes, rawEdges } = useMemo(
-    () => buildGraphElements(filteredAgents, agentFiles, teams),
-    [agentStructureKey, agentFiles, teamsMetaKey], // intentional: string keys for agents + teams
+    () => buildGraphElements(filteredAgents, agentFiles, teams, resolvedLeaderAgentId),
+    [agentStructureKey, agentFiles, teamsMetaKey, resolvedLeaderAgentId], // intentional: string keys
   )
 
   useEffect(() => {
@@ -148,6 +161,17 @@ export function buildGraphElements(
   agents: AgentState[],
   agentFiles: Map<string, { toolsMd: string | null; agentsMd: string | null }>,
   teams: Team[] = [],
+  /**
+   * The team leader's agent ID — used as the spanning-tree root over
+   * dependency edges. Each Boo gets ONE primary parent (the BFS edge that
+   * first reached it); all other dependency edges are tagged secondary
+   * and rendered hover-only.
+   *
+   * Pass `null` to skip the spanning-tree filter — every dependency edge
+   * is treated as primary. Used when no team is selected (showing all
+   * agents) or when the leader can't be resolved.
+   */
+  leaderAgentId: string | null = null,
 ): { rawNodes: GraphNode[]; rawEdges: GraphEdge[] } {
   const depEdges: GraphEdge[] = []
   const skillNodes: GraphNode[] = []
@@ -263,10 +287,67 @@ export function buildGraphElements(
     }
   }
 
-  // Compute edge counts per boo node for degree-aware sizing
+  // ── Spanning tree over dependency edges (org-chart filter) ──────────────
+  // BFS from the team leader to determine each Boo's "primary parent." All
+  // other dependency edges are tagged `isPrimary: false` so the renderer
+  // can hide them by default and reveal on hover. ELK only sees primary
+  // edges, which produces clean top-down rank structure.
+  //
+  // When `leaderAgentId` is null (no team selected) we skip the filter
+  // and treat every dependency edge as primary — fall back to full graph.
+  const rootNodeId = leaderAgentId ? `boo-${leaderAgentId}` : null
+  const treeResult = rootNodeId
+    ? computeSpanningTree(
+        depEdges.map((e) => ({ id: e.id, source: e.source, target: e.target })),
+        rootNodeId,
+      )
+    : {
+        primaryEdgeIds: new Set(depEdges.map((e) => e.id)),
+        parentMap: new Map<string, string>(),
+        reachableNodeIds: new Set<string>(),
+      }
+  const { primaryEdgeIds, parentMap } = treeResult
+
+  // For ELK to lay out the leader at the TOP under `layered DOWN`, every
+  // primary edge must flow parent → child (source = parent, target = child).
+  // The original AGENTS.md routing data may flow the other way (e.g. a
+  // teammate having "@LeaderName" routes points UP toward the leader). We
+  // rewrite source/target on primary edges where the BFS parent is the
+  // edge's TARGET in the original data — flipping them so ELK reads them
+  // as descending from leader. Secondary edges keep their original
+  // direction (their arrow shows actual delegation).
+  //
+  // IMPORTANT: BooNode's `'center'` is a source-type handle and
+  // `'center-target'` is a target-type handle (see `nodes/BooNode.tsx`).
+  // When we flip the edge, the handles must STAY CANONICAL — source side
+  // always uses `'center'`, target side always uses `'center-target'`.
+  // Swapping the handle names produces the inverse type mismatch and
+  // React Flow rejects the edge ("Couldn't create edge for source handle
+  // id: 'center-target'"), causing the edge to silently vanish.
+  for (const edge of depEdges) {
+    const isPrimary = primaryEdgeIds.has(edge.id)
+    edge.data = { ...edge.data, isPrimary }
+    if (!isPrimary) continue
+    if (parentMap.get(edge.target) === edge.source) continue
+    if (parentMap.get(edge.source) === edge.target) {
+      const oldSource = edge.source
+      edge.source = edge.target
+      edge.target = oldSource
+      // Keep handles canonical — don't swap them with source/target.
+      edge.sourceHandle = 'center'
+      edge.targetHandle = 'center-target'
+    }
+  }
+
+  // Compute edge counts per boo node for degree-aware sizing.
+  // Use ONLY primary dependency edges + skill/resource edges so degree
+  // counts reflect what the user actually sees at rest. (Hidden secondary
+  // dependency edges shouldn't inflate Boo size.)
+  const visibleDepEdges = depEdges.filter((e) => primaryEdgeIds.has(e.id))
   const allEdges = [...depEdges, ...skillEdges, ...resourceEdges]
+  const edgeCountSources: GraphEdge[] = [...visibleDepEdges, ...skillEdges, ...resourceEdges]
   const edgeCounts = new Map<string, number>()
-  for (const edge of allEdges) {
+  for (const edge of edgeCountSources) {
     edgeCounts.set(edge.source, (edgeCounts.get(edge.source) ?? 0) + 1)
     edgeCounts.set(edge.target, (edgeCounts.get(edge.target) ?? 0) + 1)
   }

@@ -129,12 +129,19 @@ export function GhostGraph() {
     // Increment generation only when actually starting ELK computation.
     const generation = ++elkGenerationRef.current
 
-    // Layer 1: Only boo nodes + dependency edges go through ELK
+    // Layer 1: Only boo nodes + PRIMARY dependency edges go through ELK.
+    // Secondary edges (every routing rule outside the spanning tree from
+    // the team leader) are intentionally withheld — feeding them to ELK
+    // would re-introduce the edge-tangle that obscured the leader →
+    // teammate flow. Secondary edges are still rendered, but only on
+    // hover, and they don't influence layout.
     const booNodes = nodes.filter((n) => n.type === 'boo')
     const nonBooNodes = nodes.filter((n) => n.type !== 'boo')
-    const depEdges = edges.filter((e) => e.type === 'dependency')
+    const primaryDepEdges = edges.filter(
+      (e) => e.type === 'dependency' && (e.data as { isPrimary?: boolean })?.isPrimary !== false,
+    )
 
-    void computeElkLayout(booNodes, depEdges, savedPositions).then((layoutedBooNodes) => {
+    void computeElkLayout(booNodes, primaryDepEdges, savedPositions).then((layoutedBooNodes) => {
       // Skip stale results — a newer ELK computation has started
       if (generation !== elkGenerationRef.current) return
 

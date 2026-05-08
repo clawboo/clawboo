@@ -20,10 +20,12 @@ import type { GraphNode, BooNodeData } from './types'
 const HALO_PADDING = 40
 const LABEL_OFFSET = 20 // lift label above topmost hull vertex
 
-// Default BooNode footprint (matches nodes/BooNode.tsx when edgeCount=0).
-// Degree-aware sizing tops out at 78×~72, so 70×65 is a safe center estimate.
-const DEFAULT_BOO_W = 70
-const DEFAULT_BOO_H = 65
+// Default BooNode footprint (matches the 220×120 card defined in
+// `nodes/BooNode.tsx` via BOO_CARD_WIDTH / BOO_CARD_HEIGHT). Used as a
+// fallback for hull inflation when React Flow hasn't measured a node
+// yet; once measured, `node.width` / `node.height` are preferred.
+const DEFAULT_BOO_W = 220
+const DEFAULT_BOO_H = 120
 
 interface Point {
   x: number

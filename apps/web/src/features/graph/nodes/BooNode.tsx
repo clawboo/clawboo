@@ -9,6 +9,34 @@ import { useFloatingMotion } from '../useFloatingMotion'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 
+// ─── BooNode — card-shaped agent surface ─────────────────────────────────────
+//
+// Replaces the previous circle-with-text layout. The card is 220×120 and is
+// composed of three horizontal sections separated by subtle dividers:
+//
+//   ┌────────────────────────────────────────────┐
+//   │ [avatar 36] Name                ● status   │  HEADER   (44px)
+//   ├────────────────────────────────────────────┤
+//   │                                            │
+//   │      <live preview placeholder>            │  MIDDLE   (52px)
+//   │                                            │
+//   ├────────────────────────────────────────────┤
+//   │ [team]  Dev Team           seen 2m ago     │  FOOTER   (24px)
+//   └────────────────────────────────────────────┘
+//
+// The MIDDLE band is reserved real estate for the future "live preview"
+// feature (e.g. a tiny browser thumbnail, terminal tail, or call timeline
+// streamed from the agent). For now it shows a subtle status hint.
+//
+// Card-shaped nodes pair well with the layered DOWN ELK layout — flat
+// rectangles tile cleanly into rows, edges enter the top and exit the
+// bottom in predictable lanes, no orbital re-flow needed.
+
+// ─── Card dimensions (kept in sync with computeElkLayout) ─────────────────────
+
+export const BOO_CARD_WIDTH = 220
+export const BOO_CARD_HEIGHT = 120
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatLastSeen(lastSeenAt: number | null): string | null {
@@ -20,15 +48,15 @@ function formatLastSeen(lastSeenAt: number | null): string | null {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
-// ─── Status → glow config ─────────────────────────────────────────────────────
+// ─── Status → glow / dot / label ──────────────────────────────────────────────
 
 type GlowConfig = { color: string; pulse: boolean }
 
 const STATUS_GLOW: Record<string, GlowConfig | null> = {
   idle: null,
-  running: { color: 'rgba(52,211,153,0.75)', pulse: true },
-  error: { color: 'rgba(249,115,22,0.65)', pulse: false },
-  sleeping: { color: 'rgba(96,115,140,0.35)', pulse: false },
+  running: { color: 'rgba(52,211,153,0.55)', pulse: true },
+  error: { color: 'rgba(249,115,22,0.55)', pulse: false },
+  sleeping: { color: 'rgba(96,115,140,0.30)', pulse: false },
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -46,10 +74,8 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 // ─── Handle styles ────────────────────────────────────────────────────────────
-// NOTE: opacity is controlled via Tailwind classes, NOT inline style.
-// Inline `opacity: 0` would override `group-hover:opacity-100` since inline > class.
 
-const handleBase = {
+const handleBase: React.CSSProperties = {
   background: 'transparent',
   border: '1.5px solid rgba(255,255,255,0.22)',
   width: 8,
@@ -57,7 +83,7 @@ const handleBase = {
   transition: 'opacity 0.15s, background 0.15s, width 0.15s, height 0.15s',
 }
 
-const handleConnecting = {
+const handleConnecting: React.CSSProperties = {
   background: 'rgba(233,69,96,0.5)',
   border: '1px solid rgba(233,69,96,0.3)',
   width: 12,
@@ -66,7 +92,6 @@ const handleConnecting = {
   transition: 'opacity 0.15s, background 0.15s, width 0.15s, height 0.15s',
 }
 
-// Invisible center handle style — used for edge path routing only
 const centerHandleStyle: React.CSSProperties = {
   position: 'absolute',
   top: '50%',
@@ -84,23 +109,13 @@ const centerHandleStyle: React.CSSProperties = {
 
 // ─── BooNode ──────────────────────────────────────────────────────────────────
 
-// Truncate team name for the badge so long names don't blow out the layout.
-function formatBadgeName(name: string | undefined, max = 12): string | null {
-  if (!name) return null
-  if (name.length <= max) return name
-  // Prefer the first word if it fits
-  const firstWord = name.split(/\s+/)[0]
-  if (firstWord.length <= max) return firstWord
-  return name.slice(0, max - 1) + '…'
-}
-
 export const BooNode = memo(function BooNode({
   data,
   selected,
   dragging,
 }: NodeProps<Node<BooNodeData, 'boo'>>) {
   const { agentId, name, status, teamId, teamName, teamColor, teamEmoji } = data
-  const floatRef = useFloatingMotion(data.agentId, 'boo', dragging)
+  const floatRef = useFloatingMotion(agentId, 'boo', dragging)
   const glow = STATUS_GLOW[status] ?? null
   const connection = useConnection()
   const isConnecting = connection.inProgress
@@ -119,192 +134,218 @@ export const BooNode = memo(function BooNode({
     (s) => s.hoveredNodeId === null || (s.highlightedNodeIds?.has(`boo-${agentId}`) ?? false),
   )
 
-  // Degree-aware sizing: +3px per connected edge, capped at +18px
-  const edgeCount = data.edgeCount ?? 0
-  const booW = Math.min(60 + edgeCount * 3, 78)
-  const booH = Math.round(booW * 0.92)
-
-  // Drop-shadow animation driven by status
-  const dropShadow = glow
+  // Box-shadow animation driven by status (glow-on-card-edge).
+  const boxShadow = glow
     ? glow.pulse
       ? [
-          `drop-shadow(0 0 0px ${glow.color})`,
-          `drop-shadow(0 0 16px ${glow.color})`,
-          `drop-shadow(0 0 0px ${glow.color})`,
+          `0 0 0 0 ${glow.color}, 0 4px 12px rgba(0,0,0,0.4)`,
+          `0 0 0 6px rgba(52,211,153,0), 0 4px 16px rgba(0,0,0,0.5)`,
+          `0 0 0 0 ${glow.color}, 0 4px 12px rgba(0,0,0,0.4)`,
         ]
-      : `drop-shadow(0 0 6px ${glow.color})`
-    : 'drop-shadow(0 0 0px rgba(0,0,0,0))'
+      : `0 0 0 1.5px ${glow.color}, 0 4px 12px rgba(0,0,0,0.4)`
+    : '0 4px 12px rgba(0,0,0,0.4)'
+
+  const cardStatusColor = STATUS_DOT[status] ?? STATUS_DOT.idle
 
   return (
     <div ref={floatRef}>
-      <div
+      <motion.div
         className="group"
+        animate={{ boxShadow }}
+        transition={
+          glow?.pulse ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.4 }
+        }
         style={{
-          width: booW,
-          height: booH,
+          width: BOO_CARD_WIDTH,
+          height: BOO_CARD_HEIGHT,
           position: 'relative',
-          overflow: 'visible',
           cursor: 'pointer',
+          borderRadius: 12,
+          background: '#111827',
+          border: selected ? '2px solid rgba(233,69,96,0.7)' : '1px solid rgba(255,255,255,0.08)',
           opacity: isHighlighted ? 1 : 0.22,
-          transition: 'opacity 0.2s ease',
+          transition: 'opacity 0.2s ease, border-color 0.15s ease',
+          overflow: 'hidden', // keep dividers crisp at the rounded corners
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
-        {/* ── Team badge (top-left, always visible when in a team) ────────── */}
-        {teamId && (
-          <div
-            title={teamName ?? 'Team'}
-            aria-label={`Team: ${teamName ?? 'Unnamed team'}`}
-            style={{
-              position: 'absolute',
-              top: -10,
-              left: -12,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 3,
-              padding: '2px 6px',
-              borderRadius: 10,
-              background: 'rgba(17,24,39,0.88)',
-              border: `1px solid ${teamColor ?? 'rgba(255,255,255,0.15)'}`,
-              color: '#E8E8E8',
-              fontSize: 9,
-              fontWeight: 600,
-              lineHeight: 1,
-              letterSpacing: '0.02em',
-              whiteSpace: 'nowrap',
-              pointerEvents: 'none',
-              zIndex: 2,
-              maxWidth: 96,
-              overflow: 'hidden',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.4)',
-            }}
-          >
-            {teamEmoji && <span style={{ fontSize: 10 }}>{teamEmoji}</span>}
-            {formatBadgeName(teamName) && (
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {formatBadgeName(teamName)}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* ── BooAvatar + glow ──────────────────────────────────────────────── */}
-        <motion.div
-          style={{ width: booW, height: booH, position: 'relative' }}
-          animate={{ filter: dropShadow }}
-          transition={
-            glow?.pulse ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.4 }
-          }
-        >
-          <AgentBooAvatar agentId={agentId} size={booW} />
-        </motion.div>
-
-        {/* ── Approval alert ring (pulsing amber) ───────────────────────────── */}
+        {/* ── Approval pulse (around the whole card) ──────────────────────── */}
         {hasPendingApproval && (
           <motion.div
-            animate={{ scale: [1, 1.15, 1], opacity: [0.8, 1, 0.8] }}
-            transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+            animate={{
+              opacity: [0.6, 1, 0.6],
+              boxShadow: [
+                '0 0 0 0 rgba(251,191,36,0.55)',
+                '0 0 0 4px rgba(251,191,36,0)',
+                '0 0 0 0 rgba(251,191,36,0.55)',
+              ],
+            }}
+            transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
             style={{
               position: 'absolute',
-              inset: -5,
-              borderRadius: 10,
-              border: '2.5px solid #FBBF24',
-              boxShadow: '0 0 12px rgba(251,191,36,0.55)',
+              inset: -2,
+              borderRadius: 14,
+              border: '2px solid #FBBF24',
               pointerEvents: 'none',
+              zIndex: 1,
             }}
           />
         )}
 
-        {/* ── Selection ring ────────────────────────────────────────────────── */}
-        {selected && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: -3,
-              borderRadius: 8,
-              border: '2px solid rgba(233,69,96,0.7)',
-              pointerEvents: 'none',
-            }}
-          />
-        )}
-
-        {/* ── Name label ───────────────────────────────────────────────────── */}
+        {/* ── HEADER: avatar + name + status dot ─────────────────────────── */}
         <div
           style={{
-            position: 'absolute',
-            top: booH + 8,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            fontSize: 12,
-            fontWeight: 600,
-            color: selected ? '#E94560' : '#E8E8E8',
-            fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
-            whiteSpace: 'nowrap',
-            maxWidth: 96,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            textAlign: 'center',
-            letterSpacing: '0.01em',
-          }}
-        >
-          {name}
-        </div>
-
-        {/* ── Status dot + label ────────────────────────────────────────────── */}
-        <div
-          style={{
-            position: 'absolute',
-            top: booH + 26,
-            left: '50%',
-            transform: 'translateX(-50%)',
             display: 'flex',
             alignItems: 'center',
-            gap: 4,
+            gap: 10,
+            padding: '10px 12px',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+            flexShrink: 0,
           }}
         >
+          <div style={{ flexShrink: 0, width: 36, height: 36, position: 'relative' }}>
+            <AgentBooAvatar agentId={agentId} size={36} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: selected ? '#E94560' : '#E8E8E8',
+                fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                letterSpacing: '0.01em',
+                lineHeight: 1.2,
+              }}
+              title={name}
+            >
+              {name}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: 'rgba(232,232,232,0.45)',
+                marginTop: 2,
+                letterSpacing: '0.04em',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {STATUS_LABEL[status] ?? 'idle'}
+              {lastSeenLabel ? ` · seen ${lastSeenLabel}` : ''}
+            </div>
+          </div>
           {status === 'running' ? (
             <motion.div
-              style={{ width: 5, height: 5, borderRadius: '50%', background: STATUS_DOT.running }}
-              animate={{ opacity: [1, 0.2, 1] }}
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: cardStatusColor,
+                flexShrink: 0,
+              }}
+              animate={{ opacity: [1, 0.25, 1] }}
               transition={{ duration: 1.1, repeat: Infinity }}
             />
           ) : (
             <div
               style={{
-                width: 5,
-                height: 5,
+                width: 8,
+                height: 8,
                 borderRadius: '50%',
-                background: STATUS_DOT[status] ?? STATUS_DOT.idle,
+                background: cardStatusColor,
+                flexShrink: 0,
               }}
             />
           )}
-          <span
-            style={{
-              fontSize: 10,
-              color: 'rgba(232,232,232,0.38)',
-              letterSpacing: '0.05em',
-            }}
-          >
-            {STATUS_LABEL[status] ?? 'idle'}
-          </span>
         </div>
 
-        {/* ── Last seen label ────────────────────────────────────────────── */}
-        {lastSeenLabel && (
-          <div
-            style={{
-              position: 'absolute',
-              top: booH + 40,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              fontSize: 9,
-              color: 'rgba(232,232,232,0.25)',
-              whiteSpace: 'nowrap',
-              letterSpacing: '0.03em',
-            }}
-          >
-            {lastSeenLabel}
-          </div>
-        )}
+        {/* ── MIDDLE: live-preview slot (placeholder) ────────────────────── */}
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '6px 12px',
+            color: 'rgba(232,232,232,0.32)',
+            fontSize: 11,
+            fontStyle: 'italic',
+            letterSpacing: '0.02em',
+            textAlign: 'center',
+            position: 'relative',
+            // Subtle "ready for content" gradient wash so the empty band
+            // doesn't look like a bug. Fades to nothing when live preview
+            // content lands here in a future iteration.
+            background:
+              'radial-gradient(circle at center, rgba(52,211,153,0.04) 0%, transparent 60%)',
+          }}
+        >
+          {/* Future home of: browser screenshot, terminal tail, video frame,
+              call timeline, etc. For now: a calm hint at status. */}
+          {status === 'running' ? (
+            <span style={{ color: 'rgba(52,211,153,0.55)', fontStyle: 'normal' }}>working…</span>
+          ) : status === 'error' ? (
+            <span style={{ color: 'rgba(249,115,22,0.65)', fontStyle: 'normal' }}>
+              encountered an error
+            </span>
+          ) : (
+            <span>ready</span>
+          )}
+        </div>
+
+        {/* ── FOOTER: team badge + last seen ─────────────────────────────── */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 6,
+            padding: '6px 12px',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+            fontSize: 10,
+            color: 'rgba(232,232,232,0.4)',
+            flexShrink: 0,
+          }}
+        >
+          {teamId ? (
+            <span
+              title={teamName ?? 'Team'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '2px 6px',
+                borderRadius: 8,
+                background: `${teamColor ?? '#34D399'}1A`,
+                border: `1px solid ${teamColor ?? 'rgba(255,255,255,0.15)'}`,
+                color: '#E8E8E8',
+                fontSize: 9,
+                fontWeight: 600,
+                letterSpacing: '0.03em',
+                whiteSpace: 'nowrap',
+                maxWidth: 110,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {teamEmoji && <span style={{ fontSize: 10 }}>{teamEmoji}</span>}
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {teamName ?? 'Team'}
+              </span>
+            </span>
+          ) : (
+            <span />
+          )}
+          {/* Right slot: future per-Boo metric (tokens, cost, calls). */}
+          <span style={{ whiteSpace: 'nowrap', letterSpacing: '0.04em' }}>
+            {/* Empty for now — placeholder so the footer is balanced. */}
+          </span>
+        </div>
 
         {/* ── Interactive handles ─────────────────────────────────────────── */}
         <Handle
@@ -341,7 +382,7 @@ export const BooNode = memo(function BooNode({
           position={Position.Top}
           style={centerHandleStyle}
         />
-      </div>
+      </motion.div>
     </div>
   )
 })

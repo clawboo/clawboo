@@ -35,10 +35,16 @@ const ELK_OPTIONS = {
 }
 
 // ─── Boo envelope dimensions ─────────────────────────────────────────────────
-// Compact envelope: just enough for the Boo + inner skill ring.
-// Orbital children may slightly overlap between adjacent Boos — that's
-// acceptable and creates a natural, dense constellation look.
-const BOO_ENVELOPE = 260
+// The Boo node is now a 220×120 card (see `nodes/BooNode.tsx`). The envelope
+// passed to ELK accounts for the card itself + the orbital children fan that
+// appears when a Boo is expanded (peacock-feather expand). Skills sit on an
+// inner ring at ~100–190px from the Boo's center, so we add ~200px of
+// padding around the card so siblings clear the orbital children.
+//
+// Width-side has a slightly tighter envelope than height because expanded
+// fans are quasi-circular but the card itself is wider than tall.
+const BOO_ENVELOPE_WIDTH = 280
+const BOO_ENVELOPE_HEIGHT = 280
 
 // ─── Default node dimensions (used before ReactFlow measures them) ────────────
 
@@ -76,10 +82,15 @@ export async function computeElkLayout(
     children: nodes.map((node) => ({
       id: node.id,
       // Boo nodes always use the inflated envelope (not measured DOM size)
-      // so ELK accounts for orbital children when spacing nodes.
-      width: node.type === 'boo' ? BOO_ENVELOPE : (node.measured?.width ?? defaultWidth(node.type)),
+      // so ELK accounts for orbital children + card body when spacing nodes.
+      width:
+        node.type === 'boo'
+          ? BOO_ENVELOPE_WIDTH
+          : (node.measured?.width ?? defaultWidth(node.type)),
       height:
-        node.type === 'boo' ? BOO_ENVELOPE : (node.measured?.height ?? defaultHeight(node.type)),
+        node.type === 'boo'
+          ? BOO_ENVELOPE_HEIGHT
+          : (node.measured?.height ?? defaultHeight(node.type)),
     })),
     edges: edges.map((edge) => ({
       id: edge.id,

@@ -91,7 +91,22 @@ export async function createAgent(
   if (files?.identity) await client.agents.files.set(agentId, 'IDENTITY.md', files.identity)
   if (files?.tools) await client.agents.files.set(agentId, 'TOOLS.md', files.tools)
   if (files?.agents) await client.agents.files.set(agentId, 'AGENTS.md', files.agents)
-  if (files?.clawboo) await client.agents.files.set(agentId, 'CLAWBOO.md', files.clawboo)
+  // CLAWBOO.md is best-effort: older OpenClaw Gateway versions reject any
+  // filename outside their built-in allowlist (SOUL/IDENTITY/TOOLS/AGENTS/
+  // USER/HEARTBEAT/MEMORY) with INVALID_REQUEST `unsupported file ...`. The
+  // workspace-resident reference is a "nice-to-have" delivery channel — the
+  // actual delivery of team protocol facts happens via the team-context
+  // preamble injected on every group-chat message (see CLAUDE.md → "Hybrid
+  // Agent Knowledge Delivery"). Catching the error here prevents one
+  // rejected file write from aborting the whole team-deploy loop.
+  if (files?.clawboo) {
+    try {
+      await client.agents.files.set(agentId, 'CLAWBOO.md', files.clawboo)
+    } catch {
+      // Gateway doesn't accept CLAWBOO.md — fall back silently. Preamble
+      // injection still delivers the operating reference at runtime.
+    }
+  }
 
   return agentId
 }
@@ -142,5 +157,11 @@ export async function refreshTeamAgentsMd(params: {
   const clawboo = buildClawbooHelpDoc({ agentName, teamName, teammates })
 
   await client.agents.files.set(agentId, 'AGENTS.md', enhanced)
-  await client.agents.files.set(agentId, 'CLAWBOO.md', clawboo)
+  // CLAWBOO.md is best-effort — see the comment in `createAgent` above.
+  // Gateways that reject the filename should not poison "Refresh Protocol".
+  try {
+    await client.agents.files.set(agentId, 'CLAWBOO.md', clawboo)
+  } catch {
+    // Silent fallback — preamble injection delivers the operating reference.
+  }
 }
