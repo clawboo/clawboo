@@ -572,11 +572,18 @@ export function CreateTeamModal({
                     const srcMeta = SOURCE_META[profile.source]
                     const agentCount = resolveTeamAgents(profile).length
                     return (
-                      <button
+                      <div
                         key={profile.id}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
                         onClick={() => handlePickProfile(profile)}
-                        className="flex items-center gap-3 rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2.5 text-left transition-colors hover:bg-white/[0.05]"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            handlePickProfile(profile)
+                          }
+                        }}
+                        className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2.5 text-left transition-colors hover:bg-white/[0.05] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/20"
                       >
                         <div
                           className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-base"
@@ -625,7 +632,7 @@ export function CreateTeamModal({
                         >
                           <Info style={{ width: 14, height: 14 }} strokeWidth={2} />
                         </button>
-                      </button>
+                      </div>
                     )
                   })}
                 </div>
