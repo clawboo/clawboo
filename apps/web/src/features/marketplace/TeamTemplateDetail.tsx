@@ -1,9 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
 import type { TeamTemplate } from '@/features/teams/types'
-import { SOURCE_META, TEMPLATE_CATEGORIES } from './teamCatalog'
+import { SOURCE_META, TEMPLATE_CATEGORIES, resolveTeamAgents } from './teamCatalog'
 
 // ─── Parsing helpers ────────────────────────────────────────────────────────────
 
@@ -40,6 +40,11 @@ interface TeamTemplateDetailProps {
 
 export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplateDetailProps) {
   const sourceMeta = SOURCE_META[template.source]
+  const resolved = useMemo(() => resolveTeamAgents(template), [template])
+  const [narrativeExpanded, setNarrativeExpanded] = useState(false)
+  const workflowNarrative = template.workflowNarrative ?? ''
+  const narrativePreview = workflowNarrative.slice(0, 300)
+  const hasMoreNarrative = workflowNarrative.length > 300
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -175,6 +180,57 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
             </div>
           )}
 
+          {/* Workflow narrative */}
+          {workflowNarrative && (
+            <div style={{ marginBottom: 16 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'rgba(232,232,232,0.55)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginBottom: 8,
+                }}
+              >
+                Workflow
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: 'rgba(232,232,232,0.6)',
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.04)',
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                }}
+              >
+                {narrativeExpanded || !hasMoreNarrative
+                  ? workflowNarrative
+                  : `${narrativePreview}…`}
+                {hasMoreNarrative && (
+                  <button
+                    onClick={() => setNarrativeExpanded((v) => !v)}
+                    style={{
+                      display: 'block',
+                      marginTop: 6,
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'rgba(52,211,153,0.75)',
+                      fontSize: 11,
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    {narrativeExpanded ? 'Show less' : 'Show more'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Agents section */}
           <div style={{ marginBottom: 16 }}>
             <div
@@ -187,10 +243,10 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                 marginBottom: 10,
               }}
             >
-              Agents ({template.agents.length})
+              Agents ({resolved.length})
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {template.agents.map((agent) => {
+              {resolved.map((agent) => {
                 const skills = parseSkillsFromToolsMd(agent.toolsTemplate)
                 const mentions = agent.agentsTemplate
                   ? parseMentionsFromAgentsMd(agent.agentsTemplate)
@@ -198,7 +254,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
 
                 return (
                   <div
-                    key={agent.name}
+                    key={agent.id}
                     style={{
                       background: 'rgba(255,255,255,0.02)',
                       border: '1px solid rgba(255,255,255,0.04)',

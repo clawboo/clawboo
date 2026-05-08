@@ -1,23 +1,30 @@
-import { test, expect } from './helpers/fixtures'
+import { test, expect, API_BASE } from './helpers/fixtures'
 
 /**
  * Custom connect helper for group chat tests.
  *
  * Creates a team and assigns Research Boo (a2) via API BEFORE navigating,
  * so auto-migration finds an existing team and doesn't interfere.
+ *
+ * `skipOnboarding` (default true) pre-marks the team's onboarding flags as
+ * complete so the gate doesn't intercept rendering of `GroupChatPanel`.
+ * Set to false to test the onboarding gate flow itself.
  */
 async function connectWithTeam(
   page: import('@playwright/test').Page,
   request: import('@playwright/test').APIRequestContext,
   gatewayUrl: string,
-) {
+  options: { skipOnboarding?: boolean } = {},
+): Promise<{ teamId: string }> {
+  const { skipOnboarding = true } = options
+
   // Clean up stale teams
   try {
-    const teamsResp = await request.get('http://127.0.0.1:3000/api/teams')
+    const teamsResp = await request.get(`${API_BASE}/api/teams`)
     if (teamsResp.ok()) {
       const data = (await teamsResp.json()) as { teams?: { id: string }[] }
       for (const team of data.teams ?? []) {
-        await request.delete(`http://127.0.0.1:3000/api/teams/${team.id}`)
+        await request.delete(`${API_BASE}/api/teams/${team.id}`)
       }
     }
   } catch {
@@ -25,16 +32,25 @@ async function connectWithTeam(
   }
 
   // Create team and assign agent via API BEFORE page load
-  const teamResp = await request.post('http://127.0.0.1:3000/api/teams', {
+  const teamResp = await request.post(`${API_BASE}/api/teams`, {
     data: { name: 'Test Team', icon: '🧪', color: '#34D399' },
   })
   const { team } = (await teamResp.json()) as { team: { id: string } }
-  await request.post(`http://127.0.0.1:3000/api/teams/${team.id}/agents`, {
+  await request.post(`${API_BASE}/api/teams/${team.id}/agents`, {
     data: { agentId: 'a2', agentName: 'Research Boo' },
   })
 
+  // Pre-mark onboarding complete (most tests don't exercise the gate directly).
+  // The TeamOnboardingGate would otherwise intercept GroupChatPanel rendering
+  // until the user clicks "Know Your Team" and submits a self-introduction.
+  if (skipOnboarding) {
+    await request.patch(`${API_BASE}/api/teams/${team.id}/onboarding`, {
+      data: { agentsIntroduced: true, userIntroduced: true },
+    })
+  }
+
   // Pre-save settings
-  await request.post('http://127.0.0.1:3000/api/settings', {
+  await request.post(`${API_BASE}/api/settings`, {
     data: { gatewayUrl, gatewayToken: '' },
   })
 
@@ -75,6 +91,8 @@ async function connectWithTeam(
   // Wait for agent to appear in filtered list
   const agentList = page.locator('[data-testid="agent-list-column"]')
   await expect(agentList.getByText('Research Boo')).toBeVisible({ timeout: 15_000 })
+
+  return { teamId: team.id }
 }
 
 test.describe('Group Chat', () => {
@@ -87,7 +105,7 @@ test.describe('Group Chat', () => {
       timeout: 5_000,
     })
     await expect(
-      agentList.locator('[data-testid="group-chat-row"]').getByText('Team Chat'),
+      agentList.locator('[data-testid="group-chat-row"]').getByText('Group Chat'),
     ).toBeVisible()
   })
 
@@ -124,5 +142,33 @@ test.describe('Group Chat', () => {
     await expect(agentList.locator('[data-testid="group-chat-row"]')).not.toBeVisible({
       timeout: 5_000,
     })
+  })
+
+  test('shows "Know Your Team" gate when onboarding incomplete', async ({
+    page,
+    request,
+    gateway,
+  }) => {
+    // Do NOT skip onboarding so the gate intercepts.
+    await connectWithTeam(page, request, gateway.url, { skipOnboarding: false })
+
+    // Click group chat row
+    const agentList = page.locator('[data-testid="agent-list-column"]')
+    const groupChatRow = agentList.locator('[data-testid="group-chat-row"]')
+    await expect(groupChatRow).toBeVisible({ timeout: 5_000 })
+    await groupChatRow.click()
+
+    // Onboarding gate is rendered in the left panel — verify the
+    // "Know Your Team" button is present, and that the GroupChatPanel
+    // composer is NOT mounted (it's behind the gate).
+    await expect(page.locator('[data-testid="know-your-team-button"]')).toBeVisible({
+      timeout: 5_000,
+    })
+    await expect(page.locator('[data-testid="group-chat-panel"]')).not.toBeVisible({
+      timeout: 1_000,
+    })
+
+    // Ghost Graph should still be visible alongside the gate (2-panel layout)
+    await expect(page.locator('.react-flow')).toBeVisible({ timeout: 10_000 })
   })
 })

@@ -8,6 +8,7 @@ interface TeamContextMenuProps {
   isArchived: boolean
   onClose: () => void
   onArchive: () => void
+  onRefreshProtocol: () => void
   onDelete: () => void
   onDeleteWithAgents: () => void
 }
@@ -19,6 +20,7 @@ export function TeamContextMenu({
   isArchived,
   onClose,
   onArchive,
+  onRefreshProtocol,
   onDelete,
   onDeleteWithAgents,
 }: TeamContextMenuProps) {
@@ -97,6 +99,32 @@ export function TeamContextMenu({
       >
         <span>{isArchived ? '📤' : '📦'}</span>
         <span>{isArchived ? 'Unarchive' : 'Archive'}</span>
+      </button>
+
+      <button
+        onClick={onRefreshProtocol}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          width: '100%',
+          padding: '8px 14px',
+          background: 'transparent',
+          border: 'none',
+          color: '#E8E8E8',
+          fontSize: 13,
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'transparent'
+        }}
+      >
+        <span>🔄</span>
+        <span>Refresh Protocol</span>
       </button>
 
       <button

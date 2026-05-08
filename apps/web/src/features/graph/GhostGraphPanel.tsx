@@ -198,10 +198,13 @@ export function GhostGraphPanel() {
         </ReactFlowProvider>
       </div>
 
-      {/* Global keyframes for spinner + edge marching-ants animation */}
+      {/* Global keyframes — spin used by loading spinners. The previous
+          `marchingAnts` keyframe was used by SkillEdge / ResourceEdge /
+          DependencyEdge for the flowing-dashes effect, but all three now
+          render as static or arrow-marked paths so the keyframe is no
+          longer referenced. */}
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes marchingAnts { to { stroke-dashoffset: -14; } }
       `}</style>
     </div>
   )

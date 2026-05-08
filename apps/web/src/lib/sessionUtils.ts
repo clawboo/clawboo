@@ -34,6 +34,11 @@ export function getTeamChatOverride(agentId: string): string | undefined {
   return teamChatOverrides.get(agentId)
 }
 
+/** Check if an agent currently has an active team chat override (is processing a team message). */
+export function hasTeamChatOverride(agentId: string): boolean {
+  return teamChatOverrides.has(agentId)
+}
+
 /** Clear all overrides — exposed for testing. */
 export function resetTeamChatOverrides(): void {
   teamChatOverrides.clear()

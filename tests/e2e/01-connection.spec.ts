@@ -62,10 +62,11 @@ test.describe('Gateway Connection', () => {
   test('can connect to mock gateway', async ({ page, request, gateway }) => {
     await connectToMockGateway(page, request, gateway.url)
 
-    // After connecting, the fleet sidebar should be visible with agents
+    // After connecting, the fleet sidebar should be visible with agents.
+    // Note: Test Boo (a1) is Boo Zero and excluded from auto-created "Default" team,
+    // so it may not appear in the team-filtered list. Check Research Boo (a2) which is always in the team.
     const sidebar = page.locator('[data-testid="agent-list-column"]')
     await expect(sidebar).toBeVisible()
-    await expect(sidebar.getByText('Test Boo')).toBeVisible()
-    await expect(sidebar.getByText('Research Boo')).toBeVisible()
+    await expect(sidebar.getByText('Research Boo')).toBeVisible({ timeout: 10_000 })
   })
 })

@@ -1,5 +1,12 @@
 import { defineConfig, devices } from '@playwright/test'
 
+// E2E tests pin the API port to a known value via CLAWBOO_API_PORT so they
+// can talk to it directly (no port discovery needed). 19999 is well outside
+// the regular auto-fallback window (18790-18809) so it never collides with
+// a developer's running `pnpm dev` instance.
+const API_PORT = parseInt(process.env.CLAWBOO_API_PORT ?? '19999', 10)
+const API_BASE = `http://127.0.0.1:${API_PORT}`
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
@@ -8,7 +15,7 @@ export default defineConfig({
   workers: 1,
   reporter: 'html',
   use: {
-    baseURL: 'http://127.0.0.1:3000',
+    baseURL: API_BASE,
     trace: 'on-first-retry',
   },
   projects: [
@@ -18,8 +25,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm --filter @clawboo/web build:ui && pnpm --filter @clawboo/web start',
-    url: 'http://127.0.0.1:3000/api/settings',
+    command: `CLAWBOO_API_PORT=${API_PORT} pnpm --filter @clawboo/web build:ui && CLAWBOO_API_PORT=${API_PORT} pnpm --filter @clawboo/web start`,
+    url: `${API_BASE}/api/settings`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },

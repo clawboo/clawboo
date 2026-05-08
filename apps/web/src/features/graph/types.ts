@@ -15,6 +15,10 @@ export interface BooNodeData extends Record<string, unknown> {
   model: string | null
   isStreaming: boolean
   edgeCount?: number
+  teamId: string | null
+  teamName?: string
+  teamColor?: string
+  teamEmoji?: string
 }
 
 export interface SkillNodeData extends Record<string, unknown> {
@@ -23,6 +27,16 @@ export interface SkillNodeData extends Record<string, unknown> {
   category: SkillCategory
   description: string | null
   agentIds: string[]
+  /**
+   * Set by `GhostGraph`'s visibleNodes memo from `expandedBooNodeIds`.
+   * Drives the peacock-feather expand / collapse animation inside the
+   * node component. Optional + defaulted by the consumer:
+   *   - undefined → treat as "always visible" (used by MiniGraph, which
+   *     doesn't toggle visibility)
+   *   - true → expanded (full opacity, full scale)
+   *   - false → collapsed (opacity 0, scale 0, behind the parent Boo)
+   */
+  isVisible?: boolean
 }
 
 export interface ResourceNodeData extends Record<string, unknown> {
@@ -30,6 +44,10 @@ export interface ResourceNodeData extends Record<string, unknown> {
   name: string
   serviceIcon: string
   agentIds: string[]
+  /**
+   * Same semantics as `SkillNodeData.isVisible`. See note above.
+   */
+  isVisible?: boolean
 }
 
 // ─── Typed ReactFlow nodes ────────────────────────────────────────────────────

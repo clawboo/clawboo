@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
+import { useMemo } from 'react'
 import type { TeamTemplate, ProfileLike } from '@/features/teams/types'
-import { SOURCE_META, TEMPLATE_CATEGORIES } from './teamCatalog'
+import { SOURCE_META, TEMPLATE_CATEGORIES, resolveTeamAgents } from './teamCatalog'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,8 @@ interface TeamTemplateCardProps {
 export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateCardProps) {
   const isTpl = isTeamTemplate(profile)
   const sourceMeta = isTpl ? SOURCE_META[profile.source] : null
+  const resolved = useMemo(() => resolveTeamAgents(profile), [profile])
+  const isSynthetic = isTpl && profile.isSynthetic === true
 
   return (
     <motion.div
@@ -67,14 +70,14 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#E8E8E8' }}>{profile.name}</div>
           <div style={{ fontSize: 10, color: 'rgba(232,232,232,0.45)' }}>
-            {profile.agents.length} agent{profile.agents.length !== 1 ? 's' : ''}
+            {resolved.length} agent{resolved.length !== 1 ? 's' : ''}
           </div>
         </div>
       </div>
 
-      {/* Source badge + category */}
+      {/* Source badge + category + synthetic pill */}
       {isTpl && sourceMeta && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span
             style={{
               fontSize: 9,
@@ -90,6 +93,23 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
           >
             {sourceMeta.label}
           </span>
+          {isSynthetic && (
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 600,
+                color: '#FBBF24',
+                background: 'rgba(251,191,36,0.12)',
+                border: '1px solid rgba(251,191,36,0.35)',
+                borderRadius: 4,
+                padding: '1px 6px',
+                whiteSpace: 'nowrap',
+                letterSpacing: '0.03em',
+              }}
+            >
+              Synthetic
+            </span>
+          )}
           <span style={{ fontSize: 10, color: 'rgba(232,232,232,0.35)' }}>
             {getCategoryLabel(profile.category)}
           </span>
@@ -121,7 +141,7 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
           whiteSpace: 'nowrap',
         }}
       >
-        {profile.agents.map((a) => ('role' in a ? a.role : a.name)).join(', ')}
+        {resolved.map((a) => a.role || a.name).join(', ')}
       </div>
 
       {/* Bottom row: tags + buttons */}

@@ -1,6 +1,6 @@
 // GroupChatPanel — merged transcript from all team agents, sorted chronologically.
 
-import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -9,6 +9,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { resolveTeamLeader } from '@/lib/resolveTeamLeader'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { sendGroupChatMessage } from './groupChatSendOperation'
+import { useTeamOrchestration } from './useTeamOrchestration'
 import {
   groupEntriesToBlocks,
   UserMessageCard,
@@ -21,10 +22,25 @@ import {
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
+import { Zap } from 'lucide-react'
 
 // ─── GroupChatPanel ──────────────────────────────────────────────────────────
 
-export function GroupChatPanel({ teamId }: { teamId: string }) {
+export function GroupChatPanel({
+  teamId,
+  userIntroText,
+}: {
+  teamId: string
+  /**
+   * User self-introduction captured during onboarding. Passed in from
+   * `GroupChatView` (which owns the onboarding state) and forwarded to
+   * `sendGroupChatMessage` so it's injected into the context preamble on
+   * every message — Gateway SOUL.md persistence is unreliable, so the
+   * preamble is the actual delivery mechanism for ensuring the agent knows
+   * who they're talking to.
+   */
+  userIntroText?: string
+}) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
   const agents = useFleetStore((s) => s.agents)
   const client = useConnectionStore((s) => s.client)
@@ -34,6 +50,22 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
 
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
   const leaderAgentId = resolveTeamLeader(teamId, team?.leaderAgentId ?? null, agents)
+
+  // ── Orchestration toggle (persisted in localStorage) ──────────────────
+  const [orchestrationEnabled, setOrchestrationEnabled] = useState<boolean>(() => {
+    const stored = localStorage.getItem('clawboo:team-orchestration-enabled')
+    return stored !== null ? stored === 'true' : true
+  })
+
+  // ── Team orchestration (delegation detection + context relay) ───────────
+  useTeamOrchestration({
+    teamId,
+    teamAgents,
+    leaderAgentId,
+    client,
+    enabled: connectionStatus === 'connected' && orchestrationEnabled,
+    userIntroText,
+  })
 
   // Agent lookup for resolving names from sessionKeys
   const agentLookup = useMemo(() => {
@@ -153,13 +185,15 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
       await sendGroupChatMessage({
         client,
         teamId,
+        teamName: team?.name ?? 'Team',
         leaderAgentId,
         teamAgents,
         message,
         displayText: message, // raw message including @mention for transcript display
+        userIntroText,
       })
     },
-    [client, teamId, leaderAgentId, teamAgents],
+    [client, teamId, team?.name, leaderAgentId, teamAgents, userIntroText],
   )
 
   // ── Chip tag handler ───────────────────────────────────────────────────────
@@ -196,6 +230,32 @@ export function GroupChatPanel({ teamId }: { teamId: string }) {
             {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''}
           </p>
         </div>
+        <button
+          type="button"
+          title="Team orchestration — auto-relay responses between agents"
+          onClick={() => {
+            setOrchestrationEnabled((prev) => {
+              const next = !prev
+              localStorage.setItem('clawboo:team-orchestration-enabled', String(next))
+              return next
+            })
+          }}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            color: orchestrationEnabled ? '#34D399' : 'rgba(232,232,232,0.3)',
+            transition: 'color 0.15s',
+            padding: 4,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 4,
+            flexShrink: 0,
+          }}
+        >
+          <Zap size={14} />
+        </button>
         <span
           className={`h-2 w-2 shrink-0 rounded-full ${connectionStatus === 'connected' ? 'bg-mint' : 'bg-secondary/40'}`}
         />

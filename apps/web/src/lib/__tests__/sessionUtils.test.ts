@@ -1,5 +1,12 @@
-import { describe, it, expect } from 'vitest'
-import { agentIdFromSessionKey, buildTeamSessionKey } from '../sessionUtils'
+import { describe, it, expect, beforeEach } from 'vitest'
+import {
+  agentIdFromSessionKey,
+  buildTeamSessionKey,
+  setTeamChatOverride,
+  clearTeamChatOverride,
+  hasTeamChatOverride,
+  resetTeamChatOverrides,
+} from '../sessionUtils'
 
 describe('agentIdFromSessionKey', () => {
   it('extracts agentId from standard sessionKey format', () => {
@@ -37,5 +44,34 @@ describe('buildTeamSessionKey', () => {
     expect(buildTeamSessionKey('abc-123-def', 'team-uuid-456')).toBe(
       'agent:abc-123-def:team:team-uuid-456',
     )
+  })
+})
+
+describe('hasTeamChatOverride', () => {
+  beforeEach(() => {
+    resetTeamChatOverrides()
+  })
+
+  it('returns false when no override is set', () => {
+    expect(hasTeamChatOverride('a1')).toBe(false)
+  })
+
+  it('returns true when override is set', () => {
+    setTeamChatOverride('a1', 'agent:a1:team:team-1')
+    expect(hasTeamChatOverride('a1')).toBe(true)
+  })
+
+  it('returns false after override is cleared', () => {
+    setTeamChatOverride('a1', 'agent:a1:team:team-1')
+    clearTeamChatOverride('a1')
+    expect(hasTeamChatOverride('a1')).toBe(false)
+  })
+
+  it('returns false after resetTeamChatOverrides', () => {
+    setTeamChatOverride('a1', 'agent:a1:team:team-1')
+    setTeamChatOverride('a2', 'agent:a2:team:team-1')
+    resetTeamChatOverrides()
+    expect(hasTeamChatOverride('a1')).toBe(false)
+    expect(hasTeamChatOverride('a2')).toBe(false)
   })
 })

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { SkillCategory } from '@/features/graph/types'
-import type { TemplateCategory, TemplateSource } from '@/features/teams/types'
+import type { AgentDomain, TemplateCategory, TemplateSource } from '@/features/teams/types'
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ export interface InstalledSkillRecord {
 
 // ─── Store ──────────────────────────────────────────────────────────────────────
 
-export type MarketplaceTab = 'teams' | 'skills'
+export type MarketplaceTab = 'skills' | 'agents' | 'teams'
 
 export type SortBy = 'name' | 'trust' | 'category'
 
@@ -58,6 +58,18 @@ interface MarketplaceStore {
   /** Source filter for team templates */
   teamSourceFilter: TemplateSource | 'all'
 
+  /** Search query for agent catalog filtering */
+  agentSearchQuery: string
+
+  /** Domain filter for agent catalog */
+  agentDomainFilter: AgentDomain | 'all'
+
+  /** Source filter for agent catalog */
+  agentSourceFilter: TemplateSource | 'all'
+
+  /** Category filter for agent catalog (reserved — not wired to UI yet) */
+  agentCategoryFilter: TemplateCategory | 'all'
+
   // ─── Actions ────────────────────────────────────────────────────────────────
 
   /** Replace full installed skills list and rebuild the per-agent Map. */
@@ -77,6 +89,10 @@ interface MarketplaceStore {
   setTeamSearchQuery: (q: string) => void
   setTeamCategoryFilter: (c: TemplateCategory | 'all') => void
   setTeamSourceFilter: (s: TemplateSource | 'all') => void
+  setAgentSearchQuery: (q: string) => void
+  setAgentDomainFilter: (d: AgentDomain | 'all') => void
+  setAgentSourceFilter: (s: TemplateSource | 'all') => void
+  setAgentCategoryFilter: (c: TemplateCategory | 'all') => void
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
@@ -106,10 +122,14 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   searchQuery: '',
   categoryFilter: 'all',
   sortBy: 'name',
-  marketplaceTab: 'teams',
+  marketplaceTab: 'agents',
   teamSearchQuery: '',
   teamCategoryFilter: 'all',
   teamSourceFilter: 'all',
+  agentSearchQuery: '',
+  agentDomainFilter: 'all',
+  agentSourceFilter: 'all',
+  agentCategoryFilter: 'all',
 
   hydrateInstalled: (records) =>
     set({ installedSkills: records, installedByAgent: buildByAgentIndex(records) }),
@@ -163,4 +183,8 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   setTeamSearchQuery: (teamSearchQuery) => set({ teamSearchQuery }),
   setTeamCategoryFilter: (teamCategoryFilter) => set({ teamCategoryFilter }),
   setTeamSourceFilter: (teamSourceFilter) => set({ teamSourceFilter }),
+  setAgentSearchQuery: (agentSearchQuery) => set({ agentSearchQuery }),
+  setAgentDomainFilter: (agentDomainFilter) => set({ agentDomainFilter }),
+  setAgentSourceFilter: (agentSourceFilter) => set({ agentSourceFilter }),
+  setAgentCategoryFilter: (agentCategoryFilter) => set({ agentCategoryFilter }),
 }))

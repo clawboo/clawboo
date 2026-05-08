@@ -11,6 +11,8 @@ import { useChatStore } from '@/stores/chat'
 import { sendChatMessage } from '@/features/chat/chatSendOperation'
 import { buildTeamSessionKey, setTeamChatOverride } from '@/lib/sessionUtils'
 import { findSleepingAgents, markAgentAwake, clearAllWakeRecords } from '@/lib/wakeTracker'
+import { buildTeamContextPreamble, type TeamContextEntry } from '@/lib/teamProtocol'
+import { nextSeq } from '@/lib/sequenceKey'
 import { parseMention } from './parseMention'
 
 // ─── Auto-wake tracking ──────────────────────────────────────────────────────
@@ -25,9 +27,6 @@ export function resetWakeState(): void {
   clearAllWakeRecords()
 }
 
-const WAKEUP_MESSAGE =
-  "Hey! You've just joined a team collaboration session. Please briefly introduce yourself — share your name and what you specialize in, in one friendly sentence."
-
 /** Delay after wakeup to let agents initialize before sending actual message. */
 const WAKEUP_SETTLE_MS = 5000
 
@@ -36,11 +35,19 @@ const WAKEUP_SETTLE_MS = 5000
 export interface GroupChatSendParams {
   client: GatewayClientLike
   teamId: string
+  teamName: string
   leaderAgentId: string | null
   teamAgents: AgentState[]
   message: string
   /** Original message with @mention for display in transcript. */
   displayText?: string
+  /**
+   * User self-introduction captured during onboarding. When present, it's
+   * injected into the team context preamble on every message so the agent
+   * always knows who they're talking to. Source of truth lives in SQLite
+   * (per-team settings: `team-onboarding:<teamId>.userIntroText`).
+   */
+  userIntroText?: string
 }
 
 // ─── Wakeup ──────────────────────────────────────────────────────────────────
@@ -83,6 +90,7 @@ async function wakeTeamAgents(
   agents: AgentState[],
   agentIdsToWake: string[],
   teamId: string,
+  teamName: string,
   targetTeamSessionKey: string,
 ): Promise<void> {
   // Append a meta notification to the target's team transcript so it appears
@@ -93,7 +101,8 @@ async function wakeTeamAgents(
     runId: null,
     source: 'local-send',
     timestampMs: ts,
-    sequenceKey: ts,
+    // Strictly-increasing tiebreaker (see lib/sequenceKey.ts).
+    sequenceKey: nextSeq(),
     confirmed: true,
     fingerprint: crypto.randomUUID(),
     kind: 'meta',
@@ -111,10 +120,18 @@ async function wakeTeamAgents(
     const agentTeamSk = buildTeamSessionKey(agent.id, teamId)
     // Set override so Gateway events (which use main sessionKey) get redirected
     setTeamChatOverride(agent.id, agentTeamSk)
+
+    // Silent re-initialization message — does NOT ask for introductions or list
+    // teammates as @mentions. The full team protocol (roster + anti-sub-agent
+    // instructions) lives in AGENTS.md, which is loaded on every interaction.
+    // Asking for introductions here would trigger the message-flooding cascade
+    // (intros contain @mentions → false delegations → relay → more intros).
+    const wakeMessage = `You are resuming a team collaboration session as ${agent.name} on team "${teamName}". Acknowledge silently — no introduction needed.`
+
     return client
       .call('chat.send', {
         sessionKey: agentTeamSk,
-        message: WAKEUP_MESSAGE,
+        message: wakeMessage,
         deliver: false,
         idempotencyKey: crypto.randomUUID(),
       })
@@ -127,10 +144,48 @@ async function wakeTeamAgents(
   await Promise.allSettled(wakeups)
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Read all team transcripts from the chat store and merge into
+ * TeamContextEntry[] for buildTeamContextPreamble.
+ */
+export function getMergedTeamEntries(teamId: string, teamAgents: AgentState[]): TeamContextEntry[] {
+  const transcripts = useChatStore.getState().transcripts
+  const entries: TeamContextEntry[] = []
+
+  for (const agent of teamAgents) {
+    const teamSk = buildTeamSessionKey(agent.id, teamId)
+    const transcript = transcripts.get(teamSk)
+    if (!transcript) continue
+    for (const e of transcript) {
+      entries.push({
+        agentName: agent.name,
+        text: e.text,
+        timestampMs: e.timestampMs ?? 0,
+        kind: e.kind,
+        role: e.role,
+      })
+    }
+  }
+
+  entries.sort((a, b) => a.timestampMs - b.timestampMs)
+  return entries
+}
+
 // ─── Main operation ──────────────────────────────────────────────────────────
 
 export async function sendGroupChatMessage(params: GroupChatSendParams): Promise<void> {
-  const { client, teamId, leaderAgentId, teamAgents, message, displayText } = params
+  const {
+    client,
+    teamId,
+    teamName,
+    leaderAgentId,
+    teamAgents,
+    message,
+    displayText,
+    userIntroText,
+  } = params
 
   // Parse @mention to determine target agent
   const { targetAgentId: mentionedId, cleanedMessage } = parseMention(
@@ -165,7 +220,7 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
         const needsWake = sleeping.filter((id) => !confirmed.has(id))
 
         if (needsWake.length > 0) {
-          await wakeTeamAgents(client, teamAgents, needsWake, teamId, targetTeamSk)
+          await wakeTeamAgents(client, teamAgents, needsWake, teamId, teamName, targetTeamSk)
           // Settle delay — let agents initialize before actual message
           await new Promise((r) => setTimeout(r, WAKEUP_SETTLE_MS))
         }
@@ -175,11 +230,25 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
     }
   }
 
+  // ── Build context preamble for target agent ──────────────────────────────
+  // Always inject the user intro (if available) so the agent knows who
+  // they're talking to on every message — Gateway SOUL.md persistence is
+  // unreliable, so the preamble is the actual delivery mechanism.
+  const contextEntries = getMergedTeamEntries(teamId, teamAgents)
+  const preamble = buildTeamContextPreamble({
+    entries: contextEntries,
+    targetAgentName: target.name,
+    userIntroText,
+  })
+
+  const messageToSend = mentionedId ? cleanedMessage : message
+  const messageWithContext = preamble ? `${preamble}\n\n${messageToSend}` : messageToSend
+
   await sendChatMessage({
     client,
     agentId: target.id,
     sessionKey: targetTeamSk,
-    message: mentionedId ? cleanedMessage : message,
+    message: messageWithContext,
     displayText,
   })
 }

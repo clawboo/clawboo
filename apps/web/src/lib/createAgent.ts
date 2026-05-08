@@ -11,6 +11,7 @@
  */
 
 import type { GatewayClient } from '@clawboo/gateway-client'
+import { buildClawbooHelpDoc, buildTeamAgentsMd, type TeammateDef } from './teamProtocol'
 
 // ─── Path utilities (no Node.js path module — runs in the browser) ──────────
 
@@ -62,6 +63,13 @@ export type AgentFiles = {
   identity?: string
   tools?: string
   agents?: string
+  /**
+   * `CLAWBOO.md` — workspace-resident operating reference. Read by agents
+   * via `cat ~/CLAWBOO.md` when they need to look up the team protocol
+   * (workspace isolation, [Team Update] semantics, orchestration loop,
+   * etc.). See `buildClawbooHelpDoc` in `lib/teamProtocol.ts`.
+   */
+  clawboo?: string
 }
 
 /**
@@ -83,6 +91,77 @@ export async function createAgent(
   if (files?.identity) await client.agents.files.set(agentId, 'IDENTITY.md', files.identity)
   if (files?.tools) await client.agents.files.set(agentId, 'TOOLS.md', files.tools)
   if (files?.agents) await client.agents.files.set(agentId, 'AGENTS.md', files.agents)
+  // CLAWBOO.md is best-effort: older OpenClaw Gateway versions reject any
+  // filename outside their built-in allowlist (SOUL/IDENTITY/TOOLS/AGENTS/
+  // USER/HEARTBEAT/MEMORY) with INVALID_REQUEST `unsupported file ...`. The
+  // workspace-resident reference is a "nice-to-have" delivery channel — the
+  // actual delivery of team protocol facts happens via the team-context
+  // preamble injected on every group-chat message (see CLAUDE.md → "Hybrid
+  // Agent Knowledge Delivery"). Catching the error here prevents one
+  // rejected file write from aborting the whole team-deploy loop.
+  if (files?.clawboo) {
+    try {
+      await client.agents.files.set(agentId, 'CLAWBOO.md', files.clawboo)
+    } catch {
+      // Gateway doesn't accept CLAWBOO.md — fall back silently. Preamble
+      // injection still delivers the operating reference at runtime.
+    }
+  }
 
   return agentId
+}
+
+/**
+ * Re-generate an agent's `AGENTS.md` AND `CLAWBOO.md` from scratch:
+ *
+ *   - `AGENTS.md`: extracts the routing rules from the current content and
+ *     re-wraps them with the latest team protocol (roster, workspace
+ *     warning, delegation syntax, anti-sub-agent guardrail, pointer to
+ *     `CLAWBOO.md`).
+ *   - `CLAWBOO.md`: regenerated unconditionally so agents pick up any
+ *     protocol updates the next time they `cat` it.
+ *
+ * Used by the "Refresh Protocol" UX in `TeamContextMenu` to upgrade existing
+ * agents whose `AGENTS.md` was written before a protocol revision.
+ *
+ * Kept under the `refreshTeamAgentsMd` name for backwards-compatibility with
+ * existing callers; the function now refreshes both files.
+ */
+export async function refreshTeamAgentsMd(params: {
+  client: GatewayClient
+  agentId: string
+  agentName: string
+  teamName: string
+  teammates: TeammateDef[]
+}): Promise<void> {
+  const { client, agentId, agentName, teamName, teammates } = params
+  const content = await client.agents.files.read(agentId, 'AGENTS.md')
+  let routingRules = content ?? ''
+
+  // If enhanced format (has "### Routing Rules"), extract only the rules section
+  const headerIdx = routingRules.indexOf('### Routing Rules')
+  if (headerIdx !== -1) {
+    routingRules = routingRules.slice(headerIdx + '### Routing Rules'.length).trim()
+  }
+
+  const enhanced = buildTeamAgentsMd({
+    agentName,
+    teamName,
+    teammates,
+    routingRules,
+  })
+
+  // CLAWBOO.md is regenerated wholesale — there's no per-team customization
+  // in it (every team gets the same operating reference, just with the team's
+  // own teammate list inlined for path discoverability).
+  const clawboo = buildClawbooHelpDoc({ agentName, teamName, teammates })
+
+  await client.agents.files.set(agentId, 'AGENTS.md', enhanced)
+  // CLAWBOO.md is best-effort — see the comment in `createAgent` above.
+  // Gateways that reject the filename should not poison "Refresh Protocol".
+  try {
+    await client.agents.files.set(agentId, 'CLAWBOO.md', clawboo)
+  } catch {
+    // Silent fallback — preamble injection delivers the operating reference.
+  }
 }

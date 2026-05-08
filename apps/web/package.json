@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n api,ui -c blue,green \"pnpm dev:api\" \"pnpm dev:ui\"",
+    "dev": "node scripts/dev-orchestrator.cjs",
     "dev:api": "tsx watch server/index.ts --dev",
     "dev:ui": "vite",
     "build": "vite build && tsup --config tsup.server.config.ts",

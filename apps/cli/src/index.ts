@@ -67,6 +67,70 @@ function probePort(host: string, port: number, timeoutMs = 2_000): Promise<boole
   })
 }
 
+// ─── Dashboard port discovery ─────────────────────────────────────────────────
+//
+// Mirrors `apps/web/server/lib/portUtils.ts` — kept in lockstep:
+// - DEFAULT_API_PORT 18790 (one above OpenClaw Gateway 18789)
+// - 20-port fallback window (18790-18809)
+// - Runtime port file at <state-dir>/clawboo/api-port.txt
+//
+// On every `npx clawboo` launch we figure out where the dashboard is or
+// will be, in this priority order:
+//   1. CLAWBOO_API_PORT / CLAWBOO_API_URL env var (explicit user override)
+//   2. Runtime port file (server already running, wrote its port there)
+//   3. Probe DEFAULT_API_PORT, then scan upward 19 more ports
+//   4. Fall back to DEFAULT_API_PORT (we'll start a server there)
+
+const DEFAULT_API_PORT = 18790
+const MAX_PORT_ATTEMPTS = 20
+
+function readPortEnv(name: string): number | null {
+  const raw = (process.env[name] ?? '').trim()
+  if (!raw) return null
+  const port = Number(raw)
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) return null
+  return port
+}
+
+function getRuntimePortFilePath(): string {
+  const stateDir =
+    (process.env.OPENCLAW_STATE_DIR ?? '').trim() ||
+    path.join(process.env.HOME ?? process.env.USERPROFILE ?? '', '.openclaw')
+  return path.join(stateDir, 'clawboo', 'api-port.txt')
+}
+
+function readRuntimePort(): number | null {
+  try {
+    const raw = fs.readFileSync(getRuntimePortFilePath(), 'utf8').trim()
+    const port = Number(raw)
+    if (!Number.isFinite(port) || port <= 0 || port > 65535) return null
+    return port
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Find an already-running dashboard. Returns the port if one responds, null
+ * otherwise. Tries: env var → runtime file → port-range scan from 18790.
+ */
+async function findRunningDashboard(): Promise<number | null> {
+  const explicit = readPortEnv('CLAWBOO_API_PORT')
+  if (explicit !== null) {
+    if (await probePort('localhost', explicit, 1_500)) return explicit
+    return null
+  }
+  const fromFile = readRuntimePort()
+  if (fromFile !== null && (await probePort('localhost', fromFile, 1_500))) return fromFile
+  // Scan the standard window — covers the case where the server was started
+  // by `pnpm dev` or another launcher and never wrote the runtime file.
+  for (let i = 0; i < MAX_PORT_ATTEMPTS; i++) {
+    const port = DEFAULT_API_PORT + i
+    if (await probePort('localhost', port, 500)) return port
+  }
+  return null
+}
+
 // ─── Monorepo discovery ────────────────────────────────────────────────────────
 
 /**
@@ -134,10 +198,12 @@ async function run(): Promise<void> {
 
   // ── 3. Start dashboard server ──────────────────────────────────────────────
 
-  const DASHBOARD_URL = 'http://localhost:3000'
-
-  let dashboardRunning = await probePort('localhost', 3000, 1_500)
-  if (!dashboardRunning) {
+  // Discover or start the dashboard. The server picks its own port via the
+  // shared port resolver (default 18790 with auto-fallback up to 18809), so
+  // the CLI doesn't hardcode anything — it queries `findRunningDashboard()`
+  // before AND after spawning to learn the actual port.
+  let dashboardPort = await findRunningDashboard()
+  if (dashboardPort === null) {
     // Strategy 1: Bundled mode — server.js sits next to this CLI entry
     const bundledServerPath = path.join(__dirname, 'server.js')
 
@@ -145,67 +211,13 @@ async function run(): Promise<void> {
     const monorepoRoot = findMonorepoRoot()
     const devServerPath = monorepoRoot ? path.join(monorepoRoot, 'apps/web/server/index.ts') : null
 
-    if (fs.existsSync(bundledServerPath)) {
-      // ── Bundled mode: fork the pre-compiled server.js ──────────────────
-      const startSpinner = ora({
-        text: 'Starting Clawboo...',
-        color: 'cyan',
-      }).start()
+    const launchedFrom: 'bundled' | 'dev' | null = fs.existsSync(bundledServerPath)
+      ? 'bundled'
+      : devServerPath && fs.existsSync(devServerPath)
+        ? 'dev'
+        : null
 
-      const child = fork(bundledServerPath, [], {
-        cwd: __dirname,
-        env: { ...process.env, NODE_ENV: 'production' },
-        detached: true,
-        stdio: 'ignore',
-      })
-      child.unref()
-
-      // Poll for up to 15 seconds
-      const maxAttempts = 30
-      for (let i = 0; i < maxAttempts; i++) {
-        await new Promise((r) => setTimeout(r, 500))
-        dashboardRunning = await probePort('localhost', 3000, 1_000)
-        if (dashboardRunning) break
-      }
-
-      if (dashboardRunning) {
-        startSpinner.succeed(chalk.green('Dashboard started'))
-      } else {
-        startSpinner.fail(chalk.yellow('Dashboard is taking too long to start.'))
-        process.exit(0)
-      }
-    } else if (devServerPath && fs.existsSync(devServerPath)) {
-      // ── Dev mode: spawn tsx on the TypeScript source ────────────────────
-      const startSpinner = ora({
-        text: 'Starting Clawboo (dev mode)...',
-        color: 'cyan',
-      }).start()
-
-      const child = spawn('npx', ['tsx', devServerPath], {
-        cwd: monorepoRoot!,
-        env: { ...process.env, NODE_ENV: 'production' },
-        detached: true,
-        stdio: 'ignore',
-      })
-      child.unref()
-
-      const maxAttempts = 30
-      for (let i = 0; i < maxAttempts; i++) {
-        await new Promise((r) => setTimeout(r, 500))
-        dashboardRunning = await probePort('localhost', 3000, 1_000)
-        if (dashboardRunning) break
-      }
-
-      if (dashboardRunning) {
-        startSpinner.succeed(chalk.green('Dashboard started'))
-      } else {
-        startSpinner.fail(
-          chalk.yellow('Dashboard is taking too long to start. Try: ') +
-            chalk.white(`cd ${monorepoRoot!} && pnpm dev`),
-        )
-        process.exit(0)
-      }
-    } else {
+    if (launchedFrom === null) {
       // ── No server found ────────────────────────────────────────────────
       console.log()
       p.log.warn(
@@ -214,13 +226,62 @@ async function run(): Promise<void> {
       )
       process.exit(0)
     }
+
+    const startSpinner = ora({
+      text: launchedFrom === 'bundled' ? 'Starting Clawboo...' : 'Starting Clawboo (dev mode)...',
+      color: 'cyan',
+    }).start()
+
+    if (launchedFrom === 'bundled') {
+      const child = fork(bundledServerPath, [], {
+        cwd: __dirname,
+        env: { ...process.env, NODE_ENV: 'production' },
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.unref()
+    } else {
+      const child = spawn('npx', ['tsx', devServerPath!], {
+        cwd: monorepoRoot!,
+        env: { ...process.env, NODE_ENV: 'production' },
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.unref()
+    }
+
+    // Poll for the dashboard via port discovery (env / runtime file / scan).
+    // Up to 15 seconds; the server typically binds in ~500ms.
+    const maxAttempts = 30
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, 500))
+      const found = await findRunningDashboard()
+      if (found !== null) {
+        dashboardPort = found
+        break
+      }
+    }
+
+    if (dashboardPort !== null) {
+      startSpinner.succeed(chalk.green('Dashboard started'))
+    } else {
+      const hint =
+        launchedFrom === 'dev'
+          ? chalk.yellow('Dashboard is taking too long to start. Try: ') +
+            chalk.white(`cd ${monorepoRoot!} && pnpm dev`)
+          : chalk.yellow('Dashboard is taking too long to start.')
+      startSpinner.fail(hint)
+      process.exit(0)
+    }
   }
+
+  const dashboardUrl = `http://localhost:${dashboardPort}`
 
   // ── 4. Open browser ────────────────────────────────────────────────────────
 
   const browserSpinner = ora({ text: 'Opening Clawboo...', color: 'cyan' }).start()
-  await openBrowser(DASHBOARD_URL)
-  browserSpinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(DASHBOARD_URL))
+  await openBrowser(dashboardUrl)
+  browserSpinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(dashboardUrl))
 
   // ── 5. Success ─────────────────────────────────────────────────────────────
 
@@ -239,7 +300,7 @@ async function run(): Promise<void> {
       chalk.gray('  •  Track costs and optimize with Frugal Toggle') +
       '\n\n' +
       chalk.gray('  Clawboo:   ') +
-      chalk.cyan.underline(DASHBOARD_URL) +
+      chalk.cyan.underline(dashboardUrl) +
       '\n' +
       chalk.gray('  Docs:      ') +
       chalk.cyan.underline('https://clawboo.dev/docs'),
