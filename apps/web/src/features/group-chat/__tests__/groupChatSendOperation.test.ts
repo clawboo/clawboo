@@ -20,6 +20,7 @@ vi.mock('@/stores/chat', () => ({
   useChatStore: {
     getState: () => ({
       appendTranscript: mockAppendTranscript,
+      transcripts: new Map(),
     }),
   },
 }))
@@ -89,6 +90,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'hello team',
@@ -109,6 +111,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: '@Worker Boo do the thing',
@@ -129,6 +132,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: '@Worker Boo do the thing',
@@ -150,6 +154,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: null,
       teamAgents: [leader, worker],
       message: 'general question',
@@ -170,6 +175,7 @@ describe('sendGroupChatMessage', () => {
     await sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: null,
       teamAgents: [],
       message: 'hello',
@@ -183,6 +189,7 @@ describe('sendGroupChatMessage', () => {
     await sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'nonexistent',
       teamAgents: [], // empty team — no fallback
       message: 'hello',
@@ -200,6 +207,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker, coder],
       message: 'build the app',
@@ -224,6 +232,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker, coder],
       message: 'build the app',
@@ -249,6 +258,7 @@ describe('sendGroupChatMessage', () => {
     await sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'instant message',
@@ -267,6 +277,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker, coder],
       message: 'hello',
@@ -288,6 +299,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'hello',
@@ -306,6 +318,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker, coder],
       message: 'build the app',
@@ -333,6 +346,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker, coder],
       message: 'build the app',
@@ -350,6 +364,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'hello',
@@ -376,6 +391,7 @@ describe('sendGroupChatMessage', () => {
     const p = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker, silent],
       message: 'hello',
@@ -402,6 +418,7 @@ describe('sendGroupChatMessage', () => {
     const p1 = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-1',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'team-1 msg',
@@ -417,6 +434,7 @@ describe('sendGroupChatMessage', () => {
     const p2 = sendGroupChatMessage({
       client: mockClient,
       teamId: 'team-2',
+      teamName: 'Test Team',
       leaderAgentId: 'a1',
       teamAgents: [leader, worker],
       message: 'team-2 msg',

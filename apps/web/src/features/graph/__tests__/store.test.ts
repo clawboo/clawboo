@@ -18,6 +18,8 @@ describe('useGraphStore', () => {
       filesError: null,
       refreshKey: 0,
       connectMode: false,
+      showTeamHalos: false,
+      expandedBooNodeIds: new Set(),
       hoveredNodeId: null,
       highlightedNodeIds: null,
       highlightedEdgeIds: null,
@@ -39,6 +41,23 @@ describe('useGraphStore', () => {
       useGraphStore.getState().setConnectMode(true)
       useGraphStore.getState().setConnectMode(false)
       expect(useGraphStore.getState().connectMode).toBe(false)
+    })
+  })
+
+  describe('showTeamHalos', () => {
+    it('defaults to false', () => {
+      expect(useGraphStore.getState().showTeamHalos).toBe(false)
+    })
+
+    it('setShowTeamHalos(true) enables', () => {
+      useGraphStore.getState().setShowTeamHalos(true)
+      expect(useGraphStore.getState().showTeamHalos).toBe(true)
+    })
+
+    it('setShowTeamHalos(false) disables', () => {
+      useGraphStore.getState().setShowTeamHalos(true)
+      useGraphStore.getState().setShowTeamHalos(false)
+      expect(useGraphStore.getState().showTeamHalos).toBe(false)
     })
   })
 
@@ -257,6 +276,54 @@ describe('useGraphStore', () => {
       useGraphStore.getState().setAgentFiles('a2', { toolsMd: 'A2 tools' })
       expect(useGraphStore.getState().agentFiles.get('a1')!.toolsMd).toBe('A1 tools')
       expect(useGraphStore.getState().agentFiles.get('a2')!.toolsMd).toBe('A2 tools')
+    })
+  })
+
+  // ── expandedBooNodeIds — Boo orbital children visibility toggle ─────────
+  // The Ghost Graph hides skill/resource nodes by default and reveals them
+  // only when their parent Boo is in this Set (single-click toggle). Lets
+  // the canvas at rest focus on team topology (Boos + dependency edges).
+  describe('expandedBooNodeIds', () => {
+    it('defaults to an empty Set', () => {
+      expect(useGraphStore.getState().expandedBooNodeIds.size).toBe(0)
+    })
+
+    it('toggleBooNodeExpanded adds an ID when absent', () => {
+      useGraphStore.getState().toggleBooNodeExpanded('boo-a1')
+      expect(useGraphStore.getState().expandedBooNodeIds.has('boo-a1')).toBe(true)
+    })
+
+    it('toggleBooNodeExpanded removes an ID when present', () => {
+      useGraphStore.getState().toggleBooNodeExpanded('boo-a1')
+      useGraphStore.getState().toggleBooNodeExpanded('boo-a1')
+      expect(useGraphStore.getState().expandedBooNodeIds.has('boo-a1')).toBe(false)
+    })
+
+    it('supports multiple Boos expanded simultaneously', () => {
+      useGraphStore.getState().toggleBooNodeExpanded('boo-a1')
+      useGraphStore.getState().toggleBooNodeExpanded('boo-a2')
+      useGraphStore.getState().toggleBooNodeExpanded('boo-a3')
+      const ids = useGraphStore.getState().expandedBooNodeIds
+      expect(ids.size).toBe(3)
+      expect(ids.has('boo-a1')).toBe(true)
+      expect(ids.has('boo-a2')).toBe(true)
+      expect(ids.has('boo-a3')).toBe(true)
+    })
+
+    it('setExpandedBooNodeIds replaces the entire Set', () => {
+      useGraphStore.getState().toggleBooNodeExpanded('boo-a1')
+      useGraphStore.getState().setExpandedBooNodeIds(new Set(['boo-x', 'boo-y']))
+      const ids = useGraphStore.getState().expandedBooNodeIds
+      expect(ids.has('boo-a1')).toBe(false)
+      expect(ids.has('boo-x')).toBe(true)
+      expect(ids.has('boo-y')).toBe(true)
+    })
+
+    it('collapseAllBooNodes empties the Set', () => {
+      useGraphStore.getState().toggleBooNodeExpanded('boo-a1')
+      useGraphStore.getState().toggleBooNodeExpanded('boo-a2')
+      useGraphStore.getState().collapseAllBooNodes()
+      expect(useGraphStore.getState().expandedBooNodeIds.size).toBe(0)
     })
   })
 })

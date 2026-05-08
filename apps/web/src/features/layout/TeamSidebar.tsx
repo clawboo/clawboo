@@ -8,6 +8,7 @@ import { useToastStore } from '@/stores/toast'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
 import { TeamContextMenu } from '@/features/teams/TeamContextMenu'
+import { refreshTeamAgentsMd } from '@/lib/createAgent'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { useGraphStore } from '@/features/graph/store'
 
@@ -265,6 +266,58 @@ export function TeamSidebar() {
     }
   }, [contextMenu])
 
+  const handleRefreshProtocol = useCallback(async () => {
+    if (!contextMenu) return
+    const { team } = contextMenu
+    const client = useConnectionStore.getState().client
+    if (!client) {
+      useToastStore.getState().addToast({ type: 'error', message: 'Not connected to Gateway' })
+      setContextMenu(null)
+      return
+    }
+
+    const teamAgents = useFleetStore.getState().agents.filter((a) => a.teamId === team.id)
+    if (teamAgents.length === 0) {
+      useToastStore.getState().addToast({ type: 'error', message: 'No agents in this team' })
+      setContextMenu(null)
+      return
+    }
+
+    setContextMenu(null)
+
+    useToastStore.getState().addToast({
+      type: 'success',
+      message: `Refreshing protocol for ${teamAgents.length} agent${teamAgents.length !== 1 ? 's' : ''}...`,
+    })
+
+    let successCount = 0
+    for (const agent of teamAgents) {
+      try {
+        const teammates = teamAgents
+          .filter((a) => a.id !== agent.id)
+          .map((a) => ({ name: a.name, role: a.name }))
+        await refreshTeamAgentsMd({
+          client,
+          agentId: agent.id,
+          agentName: agent.name,
+          teamName: team.name,
+          teammates,
+        })
+        successCount++
+      } catch {
+        // Best-effort — continue with remaining agents
+      }
+    }
+
+    useToastStore.getState().addToast({
+      type: successCount === teamAgents.length ? 'success' : 'error',
+      message:
+        successCount === teamAgents.length
+          ? `Protocol refreshed for ${successCount} agent${successCount !== 1 ? 's' : ''}`
+          : `Protocol refreshed for ${successCount}/${teamAgents.length} agents`,
+    })
+  }, [contextMenu])
+
   // ── Mascot right-click menu ─────────────────────────────────────────────────
   const [mascotMenu, setMascotMenu] = useState<{ x: number; y: number } | null>(null)
   const mascotMenuRef = useRef<HTMLDivElement>(null)
@@ -499,6 +552,7 @@ export function TeamSidebar() {
           isArchived={contextMenu.team.isArchived}
           onClose={() => setContextMenu(null)}
           onArchive={handleArchiveTeam}
+          onRefreshProtocol={handleRefreshProtocol}
           onDelete={handleDeleteTeam}
           onDeleteWithAgents={handleDeleteTeamWithAgents}
         />

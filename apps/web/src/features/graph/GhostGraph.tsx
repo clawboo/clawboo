@@ -1,6 +1,6 @@
 import '@xyflow/react/dist/style.css'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -19,7 +19,7 @@ import type {
   IsValidConnection,
 } from '@xyflow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { GitBranch } from 'lucide-react'
+import { GitBranch, Pin } from 'lucide-react'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
@@ -28,6 +28,7 @@ import { computeOrbitalPositions } from './computeOrbitalPositions'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
 import { ConnectionLine } from './edges/ConnectionLine'
+import { TeamHaloLayer } from './TeamHaloLayer'
 import { useFleetStore } from '@/stores/fleet'
 import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
@@ -38,6 +39,7 @@ import { GraphContextMenu } from './GraphContextMenu'
 import { installSkillForAgent } from './operations/installSkill'
 import { removeRouting } from './operations/removeRouting'
 import { graphPhysics } from './graphPhysics'
+import { EdgeMarkers } from './edges/EdgeMarkers'
 import type { BooNodeData, SkillNodeData, GraphEdge } from './types'
 
 interface ContextMenuState {
@@ -66,8 +68,14 @@ export function GhostGraph() {
     updateNodePosition,
     connectMode,
     setConnectMode,
+    showTeamHalos,
+    setShowTeamHalos,
     setHoveredNodeId,
   } = useGraphStore()
+
+  // Subscribed separately so the visibility memo only re-runs when the Set
+  // identity changes — not on every nodes/edges update from physics ticks.
+  const expandedBooNodeIds = useGraphStore((s) => s.expandedBooNodeIds)
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
@@ -121,12 +129,19 @@ export function GhostGraph() {
     // Increment generation only when actually starting ELK computation.
     const generation = ++elkGenerationRef.current
 
-    // Layer 1: Only boo nodes + dependency edges go through ELK
+    // Layer 1: Only boo nodes + PRIMARY dependency edges go through ELK.
+    // Secondary edges (every routing rule outside the spanning tree from
+    // the team leader) are intentionally withheld — feeding them to ELK
+    // would re-introduce the edge-tangle that obscured the leader →
+    // teammate flow. Secondary edges are still rendered, but only on
+    // hover, and they don't influence layout.
     const booNodes = nodes.filter((n) => n.type === 'boo')
     const nonBooNodes = nodes.filter((n) => n.type !== 'boo')
-    const depEdges = edges.filter((e) => e.type === 'dependency')
+    const primaryDepEdges = edges.filter(
+      (e) => e.type === 'dependency' && (e.data as { isPrimary?: boolean })?.isPrimary !== false,
+    )
 
-    void computeElkLayout(booNodes, depEdges, savedPositions).then((layoutedBooNodes) => {
+    void computeElkLayout(booNodes, primaryDepEdges, savedPositions).then((layoutedBooNodes) => {
       // Skip stale results — a newer ELK computation has started
       if (generation !== elkGenerationRef.current) return
 
@@ -182,10 +197,14 @@ export function GhostGraph() {
     [selectedEdgeId, setSelectedEdgeId],
   )
 
+  // Single-click on a Boo toggles its orbital children (skills + resources)
+  // visibility — peacock-feather expand / collapse. The previous left-click
+  // behaviour of "select agent in the sidebar" is now available from the
+  // right-click context menu (`Select in sidebar` item) and is also implicit
+  // when the user picks Chat / Edit personality / Edit files there.
   const onNodeClick: NodeMouseHandler<Node> = useCallback((_event, node) => {
     if (node.type === 'boo') {
-      const data = node.data as BooNodeData
-      useFleetStore.getState().selectAgent(data.agentId)
+      useGraphStore.getState().toggleBooNodeExpanded(node.id)
     }
   }, [])
 
@@ -355,17 +374,108 @@ export function GhostGraph() {
 
   const hasRunLayout = useGraphStore((s) => s.hasRunLayout)
 
+  // ── Derive visibility for skill/resource nodes + their edges ──────────────
+  // Boos and dependency edges are always visible. Skill / resource nodes are
+  // hidden by default and revealed only when the user clicks (and thus
+  // expands) their parent Boo.
+  //
+  // Two different visibility mechanisms:
+  //   • EDGES use React Flow's native `hidden: true` — fastest path, no
+  //     animation needed (the edge just disappears when its parent Boo
+  //     collapses).
+  //   • NODES use a `data.isVisible` flag we read inside SkillNode /
+  //     ResourceNode. We DON'T use React Flow's `hidden: true` for nodes
+  //     because that maps to `display: none`, which is non-animatable —
+  //     and we want the peacock-feather expand / collapse transition.
+  //     Hidden nodes stay mounted with `opacity: 0` + `scale: 0`, animated
+  //     by Framer Motion in the node component.
+  //
+  // Parent Boo IDs are derived from the existing source-of-truth (the
+  // node's `agentIds[0]` for skill/resource nodes; the edge's `source` for
+  // skill/resource edges) — no `buildGraphElements` change needed.
+  const visibleNodes = useMemo<typeof nodes>(() => {
+    if (nodes.length === 0) return nodes
+    return nodes.map((n) => {
+      if (n.type === 'boo') {
+        return (n.hidden ? { ...n, hidden: false } : n) as typeof n
+      }
+      if (n.type !== 'skill' && n.type !== 'resource') return n
+      const ownerAgentId = n.data.agentIds?.[0]
+      const parentBooId = ownerAgentId ? `boo-${ownerAgentId}` : null
+      const isVisible = !!parentBooId && expandedBooNodeIds.has(parentBooId)
+      if (n.data.isVisible === isVisible) return n
+      // Always keep skill/resource nodes mounted (`hidden` never set);
+      // visibility is animated inside the node component via `data.isVisible`.
+      // The cast keeps the discriminated union narrow per branch.
+      return { ...n, data: { ...n.data, isVisible } } as typeof n
+    })
+  }, [nodes, expandedBooNodeIds])
+
+  const visibleEdges = useMemo(() => {
+    if (edges.length === 0) return edges
+    return edges.map((e) => {
+      if (e.type === 'dependency') {
+        return e.hidden ? { ...e, hidden: false } : e
+      }
+      if (e.type !== 'skill' && e.type !== 'resource') return e
+      // Skill / resource edges always have the parent Boo as `source`.
+      const shouldBeHidden = !expandedBooNodeIds.has(e.source)
+      if (e.hidden === shouldBeHidden) return e
+      return { ...e, hidden: shouldBeHidden }
+    })
+  }, [edges, expandedBooNodeIds])
+
   return (
     <div
       style={{
         width: '100%',
         height: '100%',
         position: 'relative',
+        // Background moved here from <ReactFlow> so TeamHaloLayer can render
+        // between the wrapper bg and ReactFlow's transparent canvas.
+        background: '#0A0E1A',
         // Hide nodes until ELK has positioned them — prevents (0,0) pile-up flash on new teams
         opacity: hasRunLayout ? 1 : 0,
         transition: 'opacity 0.25s ease',
       }}
     >
+      {/* SVG marker definitions referenced by edges (e.g.
+          DependencyEdge's `markerEnd="url(#dependency-arrow)"`).
+          Mounted once — marker IDs are global to the document. */}
+      <EdgeMarkers />
+
+      {/* Team halos layer — behind ReactFlow, matches pane pan/zoom */}
+      {showTeamHalos && <TeamHaloLayer nodes={nodes} />}
+
+      {/* Team halos toggle */}
+      <button
+        onClick={() => setShowTeamHalos(!showTeamHalos)}
+        title="Toggle colored team hulls behind agents"
+        style={{
+          position: 'absolute',
+          top: 12,
+          right: 112,
+          zIndex: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '6px 12px',
+          borderRadius: 8,
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: 'pointer',
+          border: showTeamHalos
+            ? '1px solid rgba(52,211,153,0.4)'
+            : '1px solid rgba(255,255,255,0.1)',
+          background: showTeamHalos ? 'rgba(52,211,153,0.18)' : '#111827',
+          color: showTeamHalos ? '#34D399' : 'rgba(232,232,232,0.5)',
+          transition: 'all 0.15s',
+        }}
+      >
+        <Pin size={14} />
+        Team halos
+      </button>
+
       {/* Connect mode toggle */}
       <button
         onClick={() => setConnectMode(!connectMode)}
@@ -393,8 +503,8 @@ export function GhostGraph() {
       </button>
 
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={visibleNodes}
+        edges={visibleEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeDragStart={onNodeDragStart}
@@ -413,7 +523,7 @@ export function GhostGraph() {
         edgeTypes={edgeTypes}
         fitView
         proOptions={{ hideAttribution: true }}
-        style={{ background: '#0A0E1A' }}
+        style={{ background: 'transparent' }}
         minZoom={0.15}
         maxZoom={2.5}
         defaultEdgeOptions={{ animated: false }}
@@ -439,7 +549,16 @@ export function GhostGraph() {
           }}
           nodeColor={(node) => {
             if (node.type === 'boo') return '#E94560'
-            if (node.type === 'skill') return '#34D399'
+            // Skill / resource nodes inherit visibility from their parent
+            // Boo via `data.isVisible` (set by the visibleNodes memo).
+            // When the parent is collapsed, return 'transparent' so the
+            // MiniMap matches what the user sees in the main canvas.
+            // The `?? true` default keeps MiniMap behaviour correct in
+            // contexts that don't set the flag (e.g. MiniGraph) — but
+            // this MiniMap is only on the Ghost Graph anyway.
+            const isVisible = (node.data as { isVisible?: boolean }).isVisible ?? true
+            if (node.type === 'skill') return isVisible ? '#34D399' : 'transparent'
+            if (node.type === 'resource') return isVisible ? '#FBBF24' : 'transparent'
             return '#FBBF24'
           }}
           maskColor="rgba(10,14,26,0.75)"
@@ -467,6 +586,13 @@ export function GhostGraph() {
           onEditFiles={() => {
             useFleetStore.getState().selectAgent(contextMenu.agentId)
             useViewStore.getState().openAgent(contextMenu.agentId)
+            setContextMenu(null)
+          }}
+          onSelectInSidebar={() => {
+            // Highlight in fleet sidebar without opening the detail view
+            // (preserved from the previous left-click behaviour, which
+            // now toggles peacock expand instead).
+            useFleetStore.getState().selectAgent(contextMenu.agentId)
             setContextMenu(null)
           }}
           onDelete={() => {

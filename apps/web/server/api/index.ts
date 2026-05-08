@@ -27,6 +27,7 @@ import {
   teamAgentPOST,
   teamAgentDELETE,
 } from './teams'
+import { teamOnboardingGET, teamOnboardingPATCH } from './teamOnboarding'
 
 const router: RouterType = Router()
 
@@ -85,5 +86,9 @@ router.patch('/api/teams/:id', teamsPATCH)
 router.delete('/api/teams/:id', teamsDELETE)
 router.post('/api/teams/:id/agents', teamAgentPOST)
 router.delete('/api/teams/:id/agents/:agentId', teamAgentDELETE)
+
+// Team onboarding (per-team boolean flags for "Know Your Team" gate)
+router.get('/api/teams/:id/onboarding', teamOnboardingGET)
+router.patch('/api/teams/:id/onboarding', teamOnboardingPATCH)
 
 export { router as apiRouter }

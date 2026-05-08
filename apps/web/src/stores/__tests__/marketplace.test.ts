@@ -28,10 +28,14 @@ describe('useMarketplaceStore', () => {
       searchQuery: '',
       categoryFilter: 'all',
       sortBy: 'name',
-      marketplaceTab: 'teams',
+      marketplaceTab: 'agents',
       teamSearchQuery: '',
       teamCategoryFilter: 'all',
       teamSourceFilter: 'all',
+      agentSearchQuery: '',
+      agentDomainFilter: 'all',
+      agentSourceFilter: 'all',
+      agentCategoryFilter: 'all',
     })
   })
 
@@ -43,10 +47,14 @@ describe('useMarketplaceStore', () => {
     expect(state.searchQuery).toBe('')
     expect(state.categoryFilter).toBe('all')
     expect(state.sortBy).toBe('name')
-    expect(state.marketplaceTab).toBe('teams')
+    expect(state.marketplaceTab).toBe('agents')
     expect(state.teamSearchQuery).toBe('')
     expect(state.teamCategoryFilter).toBe('all')
     expect(state.teamSourceFilter).toBe('all')
+    expect(state.agentSearchQuery).toBe('')
+    expect(state.agentDomainFilter).toBe('all')
+    expect(state.agentSourceFilter).toBe('all')
+    expect(state.agentCategoryFilter).toBe('all')
   })
 
   // ── Tab ────────────────────────────────────────────────────────────────────
@@ -57,10 +65,15 @@ describe('useMarketplaceStore', () => {
       expect(useMarketplaceStore.getState().marketplaceTab).toBe('skills')
     })
 
-    it('switches back to teams tab', () => {
-      useMarketplaceStore.getState().setMarketplaceTab('skills')
+    it('switches to teams tab', () => {
       useMarketplaceStore.getState().setMarketplaceTab('teams')
       expect(useMarketplaceStore.getState().marketplaceTab).toBe('teams')
+    })
+
+    it('switches to agents tab', () => {
+      useMarketplaceStore.getState().setMarketplaceTab('skills')
+      useMarketplaceStore.getState().setMarketplaceTab('agents')
+      expect(useMarketplaceStore.getState().marketplaceTab).toBe('agents')
     })
   })
 
@@ -102,6 +115,60 @@ describe('useMarketplaceStore', () => {
       useMarketplaceStore.getState().setTeamSourceFilter('clawboo')
       useMarketplaceStore.getState().setTeamSourceFilter('all')
       expect(useMarketplaceStore.getState().teamSourceFilter).toBe('all')
+    })
+  })
+
+  // ── Agent filters ─────────────────────────────────────────────────────────
+
+  describe('setAgentSearchQuery', () => {
+    it('sets agent search query', () => {
+      useMarketplaceStore.getState().setAgentSearchQuery('backend')
+      expect(useMarketplaceStore.getState().agentSearchQuery).toBe('backend')
+    })
+
+    it('clears with empty string', () => {
+      useMarketplaceStore.getState().setAgentSearchQuery('foo')
+      useMarketplaceStore.getState().setAgentSearchQuery('')
+      expect(useMarketplaceStore.getState().agentSearchQuery).toBe('')
+    })
+  })
+
+  describe('setAgentDomainFilter', () => {
+    it('sets a domain filter', () => {
+      useMarketplaceStore.getState().setAgentDomainFilter('engineering')
+      expect(useMarketplaceStore.getState().agentDomainFilter).toBe('engineering')
+    })
+
+    it('resets to all', () => {
+      useMarketplaceStore.getState().setAgentDomainFilter('marketing')
+      useMarketplaceStore.getState().setAgentDomainFilter('all')
+      expect(useMarketplaceStore.getState().agentDomainFilter).toBe('all')
+    })
+  })
+
+  describe('setAgentSourceFilter', () => {
+    it('sets a source filter', () => {
+      useMarketplaceStore.getState().setAgentSourceFilter('agency-agents')
+      expect(useMarketplaceStore.getState().agentSourceFilter).toBe('agency-agents')
+    })
+
+    it('resets to all', () => {
+      useMarketplaceStore.getState().setAgentSourceFilter('clawboo')
+      useMarketplaceStore.getState().setAgentSourceFilter('all')
+      expect(useMarketplaceStore.getState().agentSourceFilter).toBe('all')
+    })
+  })
+
+  describe('setAgentCategoryFilter', () => {
+    it('sets a category filter', () => {
+      useMarketplaceStore.getState().setAgentCategoryFilter('engineering')
+      expect(useMarketplaceStore.getState().agentCategoryFilter).toBe('engineering')
+    })
+
+    it('resets to all', () => {
+      useMarketplaceStore.getState().setAgentCategoryFilter('marketing')
+      useMarketplaceStore.getState().setAgentCategoryFilter('all')
+      expect(useMarketplaceStore.getState().agentCategoryFilter).toBe('all')
     })
   })
 

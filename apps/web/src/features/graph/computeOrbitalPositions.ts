@@ -17,9 +17,12 @@ const SKILL_RADIUS = { min: 100, max: 190 }
 const RESOURCE_RADIUS = { min: 180, max: 220 }
 const JITTER_RANGE = 12
 
-// Half of ELK default envelope for boo nodes (180×80)
-const BOO_HALF_W = 90
-const BOO_HALF_H = 40
+// Half-sizes of the BooNode card (220×120). Used to centre the orbital
+// children fan around each parent Boo's centre rather than its top-left
+// corner. Stays in sync with the BOO_CARD_WIDTH / BOO_CARD_HEIGHT
+// constants in `nodes/BooNode.tsx`.
+const BOO_HALF_W = 110
+const BOO_HALF_H = 60
 
 // Node dimensions for centering orbital children
 const SKILL_SIZE = 38 // CIRCLE const in SkillNode.tsx

@@ -3,7 +3,12 @@ import { BaseEdge, getBezierPath } from '@xyflow/react'
 import type { EdgeProps } from '@xyflow/react'
 import { useGraphStore } from '../store'
 
-// ─── ResourceEdge — slow animated amber bezier curves: Boo → Resource ─────────
+// ─── ResourceEdge — solid static amber bezier: Boo → Resource ────────────────
+//
+// Like the skill edge, resource ownership is not a directional process — a
+// Boo "uses" a resource, the relationship is symmetric. Replaced the slow
+// marching-ants animation with a calm static stroke for the same reasons
+// (see SkillEdge.tsx for rationale).
 
 export const ResourceEdge = memo(function ResourceEdge({
   id,
@@ -34,10 +39,9 @@ export const ResourceEdge = memo(function ResourceEdge({
       id={id}
       path={edgePath}
       style={{
-        stroke: selected ? '#FBBF24' : 'rgba(251,191,36,0.30)',
+        stroke: selected ? '#FBBF24' : 'rgba(251,191,36,0.35)',
         strokeWidth: selected ? 2 : 1,
-        strokeDasharray: '8 6',
-        animation: 'marchingAnts 0.9s linear infinite',
+        // No strokeDasharray, no animation — solid static line.
         transition: 'stroke 0.15s, stroke-width 0.15s, opacity 0.2s ease',
         opacity: isHighlighted ? 1 : 0.12,
       }}

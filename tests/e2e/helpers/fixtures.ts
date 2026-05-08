@@ -1,7 +1,12 @@
 import { test as base, expect, type Page, type APIRequestContext } from '@playwright/test'
 import { startMockGateway, type MockGateway } from './mockGateway'
 
-const SETTINGS_URL = 'http://127.0.0.1:3000/api/settings'
+// Mirrors playwright.config.ts — keeps tests pinned to a known port so the
+// fixture's direct API calls don't have to rediscover where the server is.
+const API_PORT = parseInt(process.env.CLAWBOO_API_PORT ?? '19999', 10)
+export const API_BASE = `http://127.0.0.1:${API_PORT}`
+
+const SETTINGS_URL = `${API_BASE}/api/settings`
 
 // ─── Shared fixture: mock gateway per worker ────────────────────────────────
 // Worker-scoped so all tests in the same worker share a single gateway,
@@ -75,11 +80,11 @@ export async function connectToMockGateway(
   // Clean up stale teams from previous dev sessions so they don't
   // filter out mock gateway agents via auto-select in hydrateTeams.
   try {
-    const teamsResp = await request.get('http://127.0.0.1:3000/api/teams')
+    const teamsResp = await request.get(`${API_BASE}/api/teams`)
     if (teamsResp.ok()) {
       const data = (await teamsResp.json()) as { teams?: { id: string }[] }
       for (const team of data.teams ?? []) {
-        await request.delete(`http://127.0.0.1:3000/api/teams/${team.id}`)
+        await request.delete(`${API_BASE}/api/teams/${team.id}`)
       }
     }
   } catch {
@@ -87,7 +92,7 @@ export async function connectToMockGateway(
   }
 
   // Pre-save settings so auto-connect finds them
-  await request.post('http://127.0.0.1:3000/api/settings', {
+  await request.post(`${API_BASE}/api/settings`, {
     data: { gatewayUrl, gatewayToken: '' },
   })
 
@@ -122,5 +127,5 @@ export async function connectToMockGateway(
   // Auto-connect fires on mount — wait for sidebar agents to appear
   const sidebar = page.locator('[data-testid="agent-list-column"]')
   await expect(sidebar).toBeVisible({ timeout: 15_000 })
-  await expect(sidebar.getByText('Test Boo')).toBeVisible({ timeout: 10_000 })
+  await expect(sidebar.getByText('Research Boo')).toBeVisible({ timeout: 10_000 })
 }

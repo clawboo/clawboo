@@ -1,7 +1,9 @@
 import { memo } from 'react'
+import { motion } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { useGraphStore } from '../store'
+import { usePeacockTransition } from '../usePeacockTransition'
 import type { ResourceNodeData } from '../types'
 
 // ─── Handle style ─────────────────────────────────────────────────────────────
@@ -35,15 +37,23 @@ export const ResourceNode = memo(function ResourceNode({
   id: nodeId,
   data,
 }: NodeProps<Node<ResourceNodeData, 'resource'>>) {
-  const { name, serviceIcon } = data
+  const { name, serviceIcon, isVisible } = data
 
   // Hover cascade — dim when another node is hovered
   const isHighlighted = useGraphStore(
     (s) => s.hoveredNodeId === null || (s.highlightedNodeIds?.has(nodeId) ?? false),
   )
 
+  // Peacock-feather expand / collapse synchronised with the parent Boo's
+  // toggle. `usePeacockTransition` returns no-op props when `isVisible` is
+  // undefined (MiniGraph context) so the node renders normally there.
+  const peacock = usePeacockTransition(nodeId, isVisible)
+
   return (
-    <div
+    <motion.div
+      initial={peacock.initial}
+      animate={peacock.animate}
+      transition={peacock.transition}
       style={{
         width: 64,
         height: 70,
@@ -51,6 +61,8 @@ export const ResourceNode = memo(function ResourceNode({
         overflow: 'visible',
         opacity: isHighlighted ? 1 : 0.22,
         transition: 'opacity 0.2s ease',
+        transformOrigin: 'center center',
+        pointerEvents: peacock.pointerEvents,
       }}
     >
       <div
@@ -95,6 +107,6 @@ export const ResourceNode = memo(function ResourceNode({
 
       {/* Center handle — invisible, for edge path routing only */}
       <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />
-    </div>
+    </motion.div>
   )
 })

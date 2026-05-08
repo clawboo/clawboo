@@ -8,7 +8,7 @@
  * Calls onComplete(client, url) when the user is ready to see the Ghost Graph.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowRight, Check, Eye, EyeOff, Loader2, X } from 'lucide-react'
 import {
@@ -18,19 +18,18 @@ import {
   resolveProxyGatewayUrl,
 } from '@clawboo/gateway-client'
 import { BooAvatar } from '@clawboo/ui'
-import type { TeamProfile, TeamTemplate } from '@/features/teams/types'
-import { resolveWorkspaceDir, createAgent, buildToolsMd } from '@/lib/createAgent'
+import type { ProfileLike, TeamProfile } from '@/features/teams/types'
+import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
+import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
-import { STARTER_TEMPLATES } from '@/features/marketplace/teamCatalog'
+import { STARTER_TEMPLATES, resolveTeamAgents } from '@/features/marketplace/teamCatalog'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 
 // ─── Profiles ─────────────────────────────────────────────────────────────────
-
-type ProfileLike = TeamTemplate | TeamProfile
 
 const PROFILES: ProfileLike[] = STARTER_TEMPLATES
 
@@ -426,82 +425,85 @@ function TeamStep({
 
         {/* Profile grid */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {PROFILES.map((profile) => (
-            <button
-              key={profile.id}
-              type="button"
-              onClick={() => onPickTeam(profile)}
-              className="group flex flex-col text-left rounded-xl border border-white/8 bg-background/50 p-4 transition-all duration-150 hover:border-white/16 hover:bg-background/80 hover:shadow-lg active:scale-[0.99]"
-            >
-              {/* Header */}
-              <div className="mb-2.5 flex items-center gap-3">
-                <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[17px]"
-                  style={{
-                    background: `${profile.color}20`,
-                    border: `1px solid ${profile.color}30`,
-                  }}
-                >
-                  {profile.emoji}
-                </div>
-                <div>
-                  <div
-                    className="text-[14px] font-semibold text-text leading-tight"
-                    style={{ fontFamily: 'var(--font-display)' }}
-                  >
-                    {profile.name}
-                  </div>
-                  <div className="text-[11px] text-secondary">{profile.agents.length} Boos</div>
-                </div>
-              </div>
-
-              {/* Description */}
-              <p className="mb-3 text-[11.5px] leading-relaxed text-secondary/70">
-                {profile.description}
-              </p>
-
-              {/* Agent avatars */}
-              <div className="mb-3 flex gap-1.5 items-center">
-                {profile.agents.slice(0, 3).map((agent) => (
-                  <BooAvatar key={agent.name} seed={agent.name} size={20} />
-                ))}
-                <span className="ml-1 text-[10px] text-secondary/40 font-mono">
-                  {profile.agents.map((a) => a.name.split(' ')[0]).join(', ')}
-                </span>
-              </div>
-
-              {/* Tags */}
-              <div className="mt-auto flex flex-wrap gap-1">
-                {('tags' in profile ? profile.tags : (profile as TeamProfile).skills)
-                  .slice(0, 3)
-                  .map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-mono text-[9px] text-secondary/60"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                {('tags' in profile ? profile.tags : (profile as TeamProfile).skills).length >
-                  3 && (
-                  <span className="rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-mono text-[9px] text-secondary/40">
-                    +
-                    {('tags' in profile ? profile.tags : (profile as TeamProfile).skills).length -
-                      3}
-                  </span>
-                )}
-              </div>
-
-              {/* Hover deploy label */}
-              <div
-                className="mt-3 flex items-center gap-1 text-[11px] font-mono font-semibold opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                style={{ color: profile.color }}
+          {PROFILES.map((profile) => {
+            const agents = resolveTeamAgents(profile)
+            return (
+              <button
+                key={profile.id}
+                type="button"
+                onClick={() => onPickTeam(profile)}
+                className="group flex flex-col text-left rounded-xl border border-white/8 bg-background/50 p-4 transition-all duration-150 hover:border-white/16 hover:bg-background/80 hover:shadow-lg active:scale-[0.99]"
               >
-                Deploy this team
-                <ArrowRight className="h-3 w-3" strokeWidth={2.5} />
-              </div>
-            </button>
-          ))}
+                {/* Header */}
+                <div className="mb-2.5 flex items-center gap-3">
+                  <div
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[17px]"
+                    style={{
+                      background: `${profile.color}20`,
+                      border: `1px solid ${profile.color}30`,
+                    }}
+                  >
+                    {profile.emoji}
+                  </div>
+                  <div>
+                    <div
+                      className="text-[14px] font-semibold text-text leading-tight"
+                      style={{ fontFamily: 'var(--font-display)' }}
+                    >
+                      {profile.name}
+                    </div>
+                    <div className="text-[11px] text-secondary">{agents.length} Boos</div>
+                  </div>
+                </div>
+
+                {/* Description */}
+                <p className="mb-3 text-[11.5px] leading-relaxed text-secondary/70">
+                  {profile.description}
+                </p>
+
+                {/* Agent avatars */}
+                <div className="mb-3 flex gap-1.5 items-center">
+                  {agents.slice(0, 3).map((agent) => (
+                    <BooAvatar key={agent.id} seed={agent.name} size={20} />
+                  ))}
+                  <span className="ml-1 text-[10px] text-secondary/40 font-mono">
+                    {agents.map((a) => a.name.split(' ')[0]).join(', ')}
+                  </span>
+                </div>
+
+                {/* Tags */}
+                <div className="mt-auto flex flex-wrap gap-1">
+                  {('tags' in profile ? profile.tags : (profile as TeamProfile).skills)
+                    .slice(0, 3)
+                    .map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-mono text-[9px] text-secondary/60"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  {('tags' in profile ? profile.tags : (profile as TeamProfile).skills).length >
+                    3 && (
+                    <span className="rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-mono text-[9px] text-secondary/40">
+                      +
+                      {('tags' in profile ? profile.tags : (profile as TeamProfile).skills).length -
+                        3}
+                    </span>
+                  )}
+                </div>
+
+                {/* Hover deploy label */}
+                <div
+                  className="mt-3 flex items-center gap-1 text-[11px] font-mono font-semibold opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                  style={{ color: profile.color }}
+                >
+                  Deploy this team
+                  <ArrowRight className="h-3 w-3" strokeWidth={2.5} />
+                </div>
+              </button>
+            )
+          })}
         </div>
 
         {/* Skip */}
@@ -531,6 +533,7 @@ function DeployStep({
   client: GatewayClient
   onComplete: () => void
 }) {
+  const resolved = useMemo(() => resolveTeamAgents(profile), [profile])
   const [progress, setProgress] = useState(0)
   const [currentName, setCurrentName] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -541,16 +544,11 @@ function DeployStep({
     fired.current = true
 
     const deploy = async () => {
-      const isNewFormat = 'toolsTemplate' in (profile.agents[0] ?? {})
-      const legacyTools =
-        !isNewFormat && 'skills' in profile
-          ? buildToolsMd((profile as TeamProfile).skills)
-          : '# TOOLS\n'
       try {
         // ── Dedup: auto-suffix if agent/team names collide with existing ones ──
         const existingAgentNames = useFleetStore.getState().agents.map((a) => a.name)
         const existingTeamNames = useTeamStore.getState().teams.map((t) => t.name)
-        const desiredAgentNames = profile.agents.map((a) => a.name)
+        const desiredAgentNames = resolved.map((a) => a.name)
         const dedupPlan = computeDedupSuffix(
           desiredAgentNames,
           existingAgentNames,
@@ -582,8 +580,8 @@ function DeployStep({
 
         const workspaceDir = await resolveWorkspaceDir(client)
         let firstAgentId: string | null = null
-        for (let i = 0; i < profile.agents.length; i++) {
-          const agent = profile.agents[i]!
+        for (let i = 0; i < resolved.length; i++) {
+          const agent = resolved[i]!
           const finalAgentName = dedupPlan.agentNameMap.get(agent.name) ?? agent.name
           setCurrentName(finalAgentName)
           const defaultPersonality: PersonalityValues = {
@@ -597,18 +595,33 @@ function DeployStep({
             rewriteTemplateName(agent.soulTemplate, agent.name, finalAgentName) || '# SOUL\n'
           const soulWithPersonality = mergeSoulWithPersonality(baseSoul, defaultPersonality)
 
+          const rawRouting = rewriteAgentsMd(agent.agentsTemplate, dedupPlan.agentNameMap) ?? ''
+          const teammatesForProtocol = resolved
+            .filter((a) => a.name !== agent.name)
+            .map((a) => ({
+              name: dedupPlan.agentNameMap.get(a.name) ?? a.name,
+              role: a.role,
+            }))
+          const enhancedAgentsMd = buildTeamAgentsMd({
+            agentName: finalAgentName,
+            teamName: finalTeamName,
+            teammates: teammatesForProtocol,
+            routingRules: rawRouting,
+          })
+          // CLAWBOO.md — workspace-resident operating reference. See
+          // `lib/teamProtocol.ts` (`buildClawbooHelpDoc`).
+          const clawbooHelpDoc = buildClawbooHelpDoc({
+            agentName: finalAgentName,
+            teamName: finalTeamName,
+            teammates: teammatesForProtocol,
+          })
+
           const agentId = await createAgent(client, finalAgentName, workspaceDir, {
             soul: soulWithPersonality,
             identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
-            tools: isNewFormat
-              ? (agent as TeamTemplate['agents'][number]).toolsTemplate
-              : legacyTools,
-            agents: isNewFormat
-              ? rewriteAgentsMd(
-                  (agent as TeamTemplate['agents'][number]).agentsTemplate,
-                  dedupPlan.agentNameMap,
-                )
-              : undefined,
+            tools: agent.toolsTemplate,
+            agents: enhancedAgentsMd,
+            clawboo: clawbooHelpDoc,
           })
 
           // Persist default personality to SQLite so sliders load correctly
@@ -650,11 +663,9 @@ function DeployStep({
         }
 
         // Auto-enable agent-to-agent coordination if any agent has routing
-        const hasRouting = profile.agents.some((a) => {
-          const agentsMd =
-            'agentsTemplate' in a ? (a as TeamTemplate['agents'][number]).agentsTemplate : undefined
-          return agentsMd && /@[\w"']/.test(agentsMd)
-        })
+        const hasRouting = resolved.some(
+          (a) => a.agentsTemplate && /@[\w"']/.test(a.agentsTemplate),
+        )
         if (hasRouting) {
           try {
             await fetch('/api/system/openclaw-config', {
@@ -676,10 +687,10 @@ function DeployStep({
     }
 
     void deploy()
-  }, [profile, client, onComplete])
+  }, [profile, client, onComplete, resolved])
 
-  const pct = profile.agents.length > 0 ? (progress / profile.agents.length) * 100 : 0
-  const allDone = progress === profile.agents.length
+  const pct = resolved.length > 0 ? (progress / resolved.length) * 100 : 0
+  const allDone = progress === resolved.length
 
   return (
     <WizardCard>
@@ -691,9 +702,9 @@ function DeployStep({
         <div className="flex flex-col items-center gap-5 text-center">
           {/* Ghost row — one ghost per agent, lights up as deployed */}
           <div className="flex gap-3 items-end">
-            {profile.agents.map((agent, i) => (
+            {resolved.map((agent, i) => (
               <motion.div
-                key={agent.name}
+                key={agent.id}
                 animate={progress > i ? { scale: [1, 1.18, 1], opacity: 1 } : { opacity: 0.25 }}
                 transition={{ duration: 0.45, ease: 'easeOut' }}
                 className="flex flex-col items-center gap-1.5"
@@ -739,7 +750,7 @@ function DeployStep({
                   transition={{ duration: 0.2 }}
                   className="mt-1.5 text-[12px] text-secondary/70"
                 >
-                  {allDone ? `All ${profile.agents.length} Boos ready` : `Creating ${currentName}…`}
+                  {allDone ? `All ${resolved.length} Boos ready` : `Creating ${currentName}…`}
                 </motion.p>
               )}
               {error && (
@@ -766,7 +777,7 @@ function DeployStep({
 
           {/* Counter */}
           <p className="font-mono text-[10px] text-secondary/35">
-            {progress} / {profile.agents.length} Boos created
+            {progress} / {resolved.length} Boos created
           </p>
 
           {/* Error escape hatch */}
@@ -794,6 +805,8 @@ function DoneStep({
   profile: ProfileLike | null
   onViewGraph: () => void
 }) {
+  const agentCount = useMemo(() => (profile ? resolveTeamAgents(profile).length : 0), [profile])
+
   // Auto-advance so the user doesn't have to click
   useEffect(() => {
     const timer = setTimeout(onViewGraph, 1_600)
@@ -821,7 +834,7 @@ function DoneStep({
           </h2>
           <p className="mt-1.5 text-[13px] text-secondary/70">
             {profile
-              ? `${profile.agents.length} Boo${profile.agents.length !== 1 ? 's' : ''} deployed and waiting for instructions.`
+              ? `${agentCount} Boo${agentCount !== 1 ? 's' : ''} deployed and waiting for instructions.`
               : 'Your fleet is ready. Add Boos anytime from the sidebar.'}
           </p>
         </div>

@@ -56,6 +56,26 @@ interface GraphStore {
   connectMode: boolean
   setConnectMode: (v: boolean) => void
 
+  /** When true, colored convex-hull halos render behind team groupings. */
+  showTeamHalos: boolean
+  setShowTeamHalos: (v: boolean) => void
+
+  /**
+   * Set of Boo NODE IDs (e.g. `boo-<agentId>`) whose orbital children
+   * (skill + resource nodes) are currently expanded in the Ghost Graph.
+   * Default is empty — every Boo's orbital children are HIDDEN at rest,
+   * keeping the canvas focused on the team topology (boos + dependency
+   * edges + halos). Single-click on a Boo toggles its presence in this
+   * Set, triggering the peacock-feather expand / collapse animation.
+   *
+   * Only consumed by the main Ghost Graph; the per-agent MiniGraph keeps
+   * its skills always visible because it doesn't subscribe to this state.
+   */
+  expandedBooNodeIds: Set<string>
+  setExpandedBooNodeIds: (ids: Set<string>) => void
+  toggleBooNodeExpanded: (booNodeId: string) => void
+  collapseAllBooNodes: () => void
+
   /** Hover cascade — highlights hovered node's cluster, dims everything else. */
   hoveredNodeId: string | null
   highlightedNodeIds: Set<string> | null
@@ -136,6 +156,23 @@ export const useGraphStore = create<GraphStore>((set) => ({
 
   connectMode: false,
   setConnectMode: (v) => set({ connectMode: v }),
+
+  showTeamHalos: false,
+  setShowTeamHalos: (v) => set({ showTeamHalos: v }),
+
+  expandedBooNodeIds: new Set(),
+  setExpandedBooNodeIds: (ids) => set({ expandedBooNodeIds: new Set(ids) }),
+  toggleBooNodeExpanded: (booNodeId) =>
+    set((state) => {
+      const next = new Set(state.expandedBooNodeIds)
+      if (next.has(booNodeId)) {
+        next.delete(booNodeId)
+      } else {
+        next.add(booNodeId)
+      }
+      return { expandedBooNodeIds: next }
+    }),
+  collapseAllBooNodes: () => set({ expandedBooNodeIds: new Set() }),
 
   _physicsWakeCallback: null,
   setPhysicsWakeCallback: (cb) => set({ _physicsWakeCallback: cb }),

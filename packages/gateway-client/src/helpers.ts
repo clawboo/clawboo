@@ -71,7 +71,10 @@ export const isAuthError = (msg: string | null): boolean => {
 // ─── URL helpers ──────────────────────────────────────────────────────────────
 
 export const resolveProxyGatewayUrl = (): string => {
-  if (typeof window === 'undefined') return 'ws://localhost:3000/api/gateway/ws'
+  // Browser path: same-origin, so we never hardcode a port. The string below
+  // is only used in SSR / Node test contexts where `window` is undefined —
+  // 18790 mirrors the default in `apps/web/server/lib/portUtils.ts`.
+  if (typeof window === 'undefined') return 'ws://localhost:18790/api/gateway/ws'
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const host = window.location.host
   return `${protocol}://${host}/api/gateway/ws`
