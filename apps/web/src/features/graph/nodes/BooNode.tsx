@@ -210,6 +210,15 @@ export const BooNode = memo(function BooNode({
 
   const cardStatusColor = STATUS_DOT[status] ?? STATUS_DOT.idle
 
+  // Hover detection for the cascade dimming effect. We can't rely on
+  // ReactFlow's `onNodeMouseEnter` here because the React Flow node element
+  // has `pointer-events: none` (set in `globals.css` for `.react-flow__node-boo`)
+  // — so the node element never receives mouseenter. Hover is captured on the
+  // morph wrapper directly instead.
+  const setHoveredNodeId = useGraphStore((s) => s.setHoveredNodeId)
+  const handleMouseEnter = () => setHoveredNodeId(`boo-${agentId}`)
+  const handleMouseLeave = () => setHoveredNodeId(null)
+
   return (
     <div
       ref={floatRef}
@@ -219,14 +228,18 @@ export const BooNode = memo(function BooNode({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        // The empty area around the morph wrapper shouldn't intercept clicks
-        // meant for siblings or background. Only the rendered Boo shape (the
-        // inner motion.div) re-enables pointer events.
+        // The empty area around the morph wrapper shouldn't intercept clicks,
+        // hover, or drag events. Only the rendered Boo shape (the inner
+        // motion.div) re-enables pointer events. The CSS rule on
+        // `.react-flow__node-boo` in `globals.css` ensures even the React
+        // Flow wrapper element doesn't catch events from the empty area.
         pointerEvents: 'none',
       }}
     >
       <motion.div
         className="group"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         animate={{ boxShadow }}
         transition={
           glow?.pulse ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.4 }
@@ -350,8 +363,18 @@ export const BooNode = memo(function BooNode({
         {/* See useGraphData.ts:330–336 for the handle-canonical caveat:
             'center' is SOURCE-type, 'center-target' is TARGET-type — never
             swap them when flipping edge source/target during the parent→child
-            edge rewrite. */}
-        <Handle id="center" type="source" position={Position.Top} style={centerHandleStyle} />
+            edge rewrite.
+
+            Source uses `Position.Bottom`: in our layered DOWN org chart,
+            edges depart from the leader DOWNWARD to children below. With
+            `Position.Top` (the previous setup), React Flow's smooth-step
+            routed the edge UP from the source first, made an elbow ABOVE
+            the leader, then descended to the child — putting the
+            horizontal segment way above the leader Boo instead of between
+            leader and child where an org chart expects it. With Bottom +
+            Top the elbow lands at the midpoint between source and target,
+            the natural T-junction shape. */}
+        <Handle id="center" type="source" position={Position.Bottom} style={centerHandleStyle} />
         <Handle
           id="center-target"
           type="target"

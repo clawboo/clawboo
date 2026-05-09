@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { BaseEdge, getSmoothStepPath } from '@xyflow/react'
+import { BaseEdge, getBezierPath, getSmoothStepPath } from '@xyflow/react'
 import type { EdgeProps } from '@xyflow/react'
 import { useGraphStore } from '../store'
 
@@ -44,17 +44,37 @@ export const DependencyEdge = memo(function DependencyEdge({
   selected,
   data,
 }: EdgeProps) {
-  const [edgePath] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    borderRadius: 10,
-  })
-
   const isPrimary = (data as DependencyEdgeData | undefined)?.isPrimary !== false
+
+  // Primary edges (BFS spanning tree) use orthogonal smooth-step — the
+  // standard org-chart shape. Secondary collaboration edges use bezier
+  // curves so they (a) are visually distinct from the structural backbone,
+  // and (b) naturally fan AWAY from the leader-to-children row instead of
+  // stacking on top of each other (which produced the "messy bundle" effect
+  // when many secondary edges were revealed by hovering a teammate Boo in
+  // a wide row of siblings).
+  const [edgePath] = isPrimary
+    ? getSmoothStepPath({
+        sourceX,
+        sourceY,
+        targetX,
+        targetY,
+        sourcePosition,
+        targetPosition,
+        borderRadius: 10,
+      })
+    : getBezierPath({
+        sourceX,
+        sourceY,
+        targetX,
+        targetY,
+        sourcePosition,
+        targetPosition,
+        // Bumped curvature pulls secondary edges further off the primary
+        // hierarchy line, making them read as "lateral" rather than
+        // "structural".
+        curvature: 0.45,
+      })
 
   // Hover-aware visibility:
   //   - Primary: full opacity at rest; dimmed when ANOTHER node is hovered.
@@ -72,8 +92,10 @@ export const DependencyEdge = memo(function DependencyEdge({
     // cluster doesn't include this edge.
     opacity = hoveredNodeId === null || isConnectedToHovered ? 1 : 0.18
   } else {
-    // Secondary collaboration edge: hidden at rest, fade in on hover.
-    opacity = isConnectedToHovered ? 0.55 : 0
+    // Secondary collaboration edge: hidden at rest, fade in subtly on hover.
+    // Lower opacity (0.4 vs primary's 1.0) makes the hierarchy stay readable
+    // even with many secondary edges revealed simultaneously.
+    opacity = isConnectedToHovered ? 0.4 : 0
   }
 
   return (
