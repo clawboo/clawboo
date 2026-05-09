@@ -181,41 +181,129 @@ const SECONDARY_NAV: { id: NavView; label: string; emoji: string }[] = [
 ]
 
 // ─── Group chat row ─────────────────────────────────────────────────────────
+//
+// The button shows a "team photo" of overlapping Boo avatars instead of a
+// single team emoji + generic label. Each avatar is the same as what
+// renders in the Ghost Graph for that agent, so the team's identity reads
+// at a glance from the same visual fingerprints used elsewhere.
+//
+//   - "TEAM CHAT" caption sits ABOVE the photo so the row's purpose
+//     reads first; the photo is the supporting visual.
+//   - Up to MAX_VISIBLE_AVATARS Boos are shown; remaining ones collapse
+//     into a "+N" badge at the end of the stack.
+//   - The leader (when known) is placed FIRST so it sits at the front of
+//     the overlap stack.
+//   - Each avatar has a 2px ring in the surface color so adjacent
+//     overlapping avatars read as separate faces, not a blurred mass.
+//     The ring color is FIXED — it doesn't switch to the team accent on
+//     selection (a previous version did, but the colored rings around
+//     each Boo when active read as visually congested). Selection
+//     feedback comes from the row background lightening on its own.
+
+const GROUP_CHAT_AVATAR_SIZE = 30
+const GROUP_CHAT_STRIDE = 20 // 30 - 20 = 10px overlap between adjacent avatars
+const GROUP_CHAT_MAX_VISIBLE_AVATARS = 6
+
+function orderTeamAgentsForPhoto(team: Team, teamAgents: AgentState[]): AgentState[] {
+  if (!team.leaderAgentId) return teamAgents
+  const leaderIndex = teamAgents.findIndex((a) => a.id === team.leaderAgentId)
+  if (leaderIndex <= 0) return teamAgents
+  // Move leader to position 0; preserve relative order of the rest.
+  const reordered = [...teamAgents]
+  const [leader] = reordered.splice(leaderIndex, 1)
+  if (leader) reordered.unshift(leader)
+  return reordered
+}
 
 function GroupChatRow({
   team,
+  teamAgents,
   isActive,
   onClick,
 }: {
   team: Team
+  teamAgents: AgentState[]
   isActive: boolean
   onClick: () => void
 }) {
+  const ordered = orderTeamAgentsForPhoto(team, teamAgents)
+  const visible = ordered.slice(0, GROUP_CHAT_MAX_VISIBLE_AVATARS)
+  const overflow = Math.max(0, ordered.length - GROUP_CHAT_MAX_VISIBLE_AVATARS)
+  // Ring color is fixed in the surface color so it acts purely as a
+  // separator between overlapping avatars (visually invisible against the
+  // surface). It does NOT switch to the team accent on selection — the
+  // earlier version did and the user found the colored rings congested.
+  const ringColor = '#111827'
+
   return (
     <button
       type="button"
       data-testid="group-chat-row"
       onClick={onClick}
+      title={`${team.name} — Team Chat (${ordered.length} agent${ordered.length === 1 ? '' : 's'})`}
       className={[
-        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2',
+        'group flex w-full flex-col items-center gap-1.5 rounded-lg px-2.5 py-2.5',
         'transition-colors duration-150',
-        isActive ? 'bg-white/6 shadow-sm' : 'hover:bg-white/4',
+        isActive ? 'bg-white/8 shadow-sm' : 'hover:bg-white/4',
       ].join(' ')}
     >
+      {/* Caption sits ABOVE the photo so the row's purpose reads first. */}
       <span
-        className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-lg text-[15px]"
-        style={{ background: `${team.color}22` }}
+        className="text-[10px] font-semibold uppercase tracking-wider text-secondary/60"
+        style={{ fontFamily: 'var(--font-mono)' }}
       >
-        {team.icon}
+        Team Chat
       </span>
-      <div className="min-w-0 flex-1 text-left">
-        <p
-          className="truncate text-[12px] font-medium leading-tight text-text"
-          style={{ fontFamily: 'var(--font-body)' }}
-        >
-          Group Chat
-        </p>
-        <p className="mt-0.5 text-[10px] text-secondary/40">Group conversation</p>
+
+      {/* Team photo: overlapping Boo avatars centered horizontally. */}
+      <div className="flex items-center justify-center">
+        {visible.map((agent, i) => (
+          <div
+            key={agent.id}
+            title={agent.name}
+            style={{
+              marginLeft: i === 0 ? 0 : -(GROUP_CHAT_AVATAR_SIZE - GROUP_CHAT_STRIDE),
+              width: GROUP_CHAT_AVATAR_SIZE,
+              height: GROUP_CHAT_AVATAR_SIZE,
+              borderRadius: '50%',
+              border: `2px solid ${ringColor}`,
+              overflow: 'hidden',
+              flexShrink: 0,
+              // Earlier (leftmost) avatars sit ON TOP — the leader is at
+              // index 0, so they dominate the front of the team photo.
+              zIndex: visible.length - i,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.45)',
+              background: '#0A0E1A',
+            }}
+          >
+            <AgentBooAvatar agentId={agent.id} size={GROUP_CHAT_AVATAR_SIZE} />
+          </div>
+        ))}
+        {overflow > 0 && (
+          <div
+            title={`${overflow} more ${overflow === 1 ? 'agent' : 'agents'}`}
+            style={{
+              marginLeft: -(GROUP_CHAT_AVATAR_SIZE - GROUP_CHAT_STRIDE),
+              width: GROUP_CHAT_AVATAR_SIZE,
+              height: GROUP_CHAT_AVATAR_SIZE,
+              borderRadius: '50%',
+              border: `2px solid ${ringColor}`,
+              background: '#1f2937',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 10,
+              fontWeight: 700,
+              color: 'rgba(232,232,232,0.75)',
+              flexShrink: 0,
+              zIndex: 0,
+              fontFamily: 'var(--font-mono)',
+              letterSpacing: '0.02em',
+            }}
+          >
+            +{overflow}
+          </div>
+        )}
       </div>
     </button>
   )
@@ -358,6 +446,7 @@ export function AgentListColumn() {
           <>
             <GroupChatRow
               team={selectedTeam}
+              teamAgents={filtered}
               isActive={viewMode.type === 'groupChat' && viewMode.teamId === selectedTeam.id}
               onClick={() => useViewStore.getState().openGroupChat(selectedTeam.id)}
             />
