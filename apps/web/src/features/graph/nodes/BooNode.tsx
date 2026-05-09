@@ -252,11 +252,10 @@ export const BooNode = memo(function BooNode({
           pointerEvents: 'auto',
           borderRadius: showCard ? 12 : '50%',
           background: showCard ? '#111827' : 'transparent',
-          border: showCard
-            ? selected
-              ? '2px solid rgba(233,69,96,0.7)'
-              : '1px solid rgba(255,255,255,0.08)'
-            : 'none',
+          // Card always uses the same subtle outline regardless of selection
+          // state — the selection-thickening was visually inconsistent with
+          // the now-removed circle ring and didn't add information.
+          border: showCard ? '1px solid rgba(255,255,255,0.08)' : 'none',
           opacity: isHighlighted ? 1 : 0.22,
           transition: SHAPE_TRANSITION,
           // 'visible' (not 'hidden') so children rendering outside the
@@ -290,19 +289,9 @@ export const BooNode = memo(function BooNode({
           />
         )}
 
-        {/* ── Selection ring on circle (card uses border) ─────────────────── */}
-        {!showCard && selected && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: -3,
-              borderRadius: '50%',
-              border: '2px solid rgba(233,69,96,0.7)',
-              pointerEvents: 'none',
-              zIndex: 1,
-            }}
-          />
-        )}
+        {/* Selection ring removed — the previous red ring around a clicked
+            Boo had no functional purpose; the agent-detail navigation
+            happens through the right-click context menu / sidebar. */}
 
         {showCard ? (
           <CardContent
@@ -563,10 +552,11 @@ function CircleContent({
             fontWeight: 600,
             color: selected ? '#E94560' : '#E8E8E8',
             fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+            // No max-width / truncation: the name sits BELOW the avatar in
+            // circle mode and has the entire 340px envelope width to
+            // expand into. Long names extend symmetrically because the
+            // outer flex wrapper is centered.
             whiteSpace: 'nowrap',
-            maxWidth: 96,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
             letterSpacing: '0.01em',
             textAlign: 'center',
             pointerEvents: 'auto',
