@@ -20,12 +20,12 @@ import type { GraphNode, BooNodeData } from './types'
 const HALO_PADDING = 40
 const LABEL_OFFSET = 20 // lift label above topmost hull vertex
 
-// Default BooNode footprint (matches the 220×120 card defined in
-// `nodes/BooNode.tsx` via BOO_CARD_WIDTH / BOO_CARD_HEIGHT). Used as a
-// fallback for hull inflation when React Flow hasn't measured a node
-// yet; once measured, `node.width` / `node.height` are preferred.
-const DEFAULT_BOO_W = 220
-const DEFAULT_BOO_H = 120
+// Offset from each Boo's React Flow `node.position` (top-left of the
+// envelope) to its visual center. The Boo renders centered inside its
+// envelope (BOO_FOOTPRINT = 340 in `nodes/BooNode.tsx`), so the visual
+// center is at half the envelope size — same anchor used by
+// `computeOrbitalPositions.ts` and `graphPhysics.ts`.
+const BOO_CENTER_OFFSET = 170
 
 interface Point {
   x: number
@@ -165,11 +165,12 @@ export function rectToRoundedPath(x: number, y: number, w: number, h: number, r:
 }
 
 function nodeCenter(node: GraphNode): Point {
-  const w = (node.width as number | undefined) ?? DEFAULT_BOO_W
-  const h = (node.height as number | undefined) ?? DEFAULT_BOO_H
+  // The Boo's visual center is at envelope center, not at half its measured
+  // DOM size — `node.width` / `node.height` measure the inner shape (75–78px
+  // circle or 220×120 card) which sits centered inside the envelope.
   return {
-    x: node.position.x + w / 2,
-    y: node.position.y + h / 2,
+    x: node.position.x + BOO_CENTER_OFFSET,
+    y: node.position.y + BOO_CENTER_OFFSET,
   }
 }
 

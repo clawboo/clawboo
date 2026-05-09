@@ -35,16 +35,14 @@ const ELK_OPTIONS = {
 }
 
 // ─── Boo envelope dimensions ─────────────────────────────────────────────────
-// The Boo node is now a 220×120 card (see `nodes/BooNode.tsx`). The envelope
-// passed to ELK accounts for the card itself + the orbital children fan that
-// appears when a Boo is expanded (peacock-feather expand). Skills sit on an
-// inner ring at ~100–190px from the Boo's center, so we add ~200px of
-// padding around the card so siblings clear the orbital children.
-//
-// Width-side has a slightly tighter envelope than height because expanded
-// fans are quasi-circular but the card itself is wider than tall.
-const BOO_ENVELOPE_WIDTH = 280
-const BOO_ENVELOPE_HEIGHT = 280
+// The Boo renders centered inside this envelope (see BOO_FOOTPRINT in
+// `nodes/BooNode.tsx`) so the visible Boo shape (75–78px circle / 220×120
+// card) is anchored at envelope center — keeping ELK's sibling spacing math
+// honest about where edges actually converge. Sized to clear the card's
+// diagonal half-extent (~125px) plus the orbital children: skills on an
+// inner ring at 150–220px and resources on an outer ring at 230–285px.
+const BOO_ENVELOPE_WIDTH = 340
+const BOO_ENVELOPE_HEIGHT = 340
 
 // ─── Default node dimensions (used before ReactFlow measures them) ────────────
 

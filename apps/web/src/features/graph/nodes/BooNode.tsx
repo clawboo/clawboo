@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useRef, type MutableRefObject } from 'react'
 import { Handle, Position, useConnection } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { motion } from 'framer-motion'
@@ -8,36 +8,73 @@ import { useGraphStore } from '../store'
 import { useFloatingMotion } from '../useFloatingMotion'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
+import { BooLiveActivity } from './BooLiveActivity'
+import { createFlipState, useFlipMorph, type FlipState } from './useFlipMorph'
 
-// ─── BooNode — card-shaped agent surface ─────────────────────────────────────
+// ─── BooNode — dual-shape: idle = circle, active = card ──────────────────────
 //
-// Replaces the previous circle-with-text layout. The card is 220×120 and is
-// composed of three horizontal sections separated by subtle dividers:
+// Two visual modes share one component:
 //
-//   ┌────────────────────────────────────────────┐
-//   │ [avatar 36] Name                ● status   │  HEADER   (44px)
-//   ├────────────────────────────────────────────┤
-//   │                                            │
-//   │      <live preview placeholder>            │  MIDDLE   (52px)
-//   │                                            │
-//   ├────────────────────────────────────────────┤
-//   │ [team]  Dev Team           seen 2m ago     │  FOOTER   (24px)
-//   └────────────────────────────────────────────┘
+//   Idle   (status !== 'running')
+//          ┌────┐
+//          │ ◯  │   ← degree-aware circle (60–78px), avatar fills the disc
+//          └────┘
+//             Name           ← absolute below
+//             ● status       ← absolute below name
+//             seen 2m ago    ← absolute below status (only when not running)
 //
-// The MIDDLE band is reserved real estate for the future "live preview"
-// feature (e.g. a tiny browser thumbnail, terminal tail, or call timeline
-// streamed from the agent). For now it shows a subtle status hint.
+//   Active (status === 'running')
+//          ┌──────────────────────────────────┐
+//          │ [avatar] Name        ● running   │  HEADER  (44px)
+//          ├──────────────────────────────────┤
+//          │  [live activity feed — 2 lines]  │  MIDDLE  (52px)
+//          ├──────────────────────────────────┤
+//          │                                  │  FOOTER  (24px, reserved)
+//          └──────────────────────────────────┘
 //
-// Card-shaped nodes pair well with the layered DOWN ELK layout — flat
-// rectangles tile cleanly into rows, edges enter the top and exit the
-// bottom in predictable lanes, no orbital re-flow needed.
+// The wrapper's width / height / border-radius use a CSS transition for the
+// size-and-shape morph (~280ms cubic-bezier). Inside, the avatar / name /
+// status sub-elements use a manual FLIP technique (see `useFlipMorph.ts`)
+// to slide between their card-mode and circle-mode positions rather than
+// snap. Card-only chrome (header dividers, live activity feed) and
+// circle-only chrome (last-seen) conditionally render.
+//
+// **Why no FM `layout` / `layoutId`** (load-bearing): `ContentArea` wraps the
+// active view in `<AnimatePresence mode="wait">`. Framer Motion's layout
+// system tracks elements globally, so a `layoutId` set on a child of one
+// AnimatePresence panel can match a `layoutId` on a child of the next panel.
+// `BooNode` is mounted in BOTH `GhostGraphPanel` AND `MiniGraph`
+// (via the shared `nodeTypes`), so the same agent's `boo-${agentId}-…`
+// `layoutId`s exist in two render trees during the cross-fade — colliding
+// across the AnimatePresence boundary, jamming `mode="wait"`'s exit cycle,
+// and leaving the previous view (Ghost Graph) on screen so chat / agent
+// detail / group chat panels never mount. CSS transitions + manual FLIP are
+// scoped per element / per BooNode instance and don't interact with parent
+// route transitions, so they're the safe morph mechanism here.
+//
+// The card's middle band renders <BooLiveActivity> — the latest assistant
+// message, in-flight streaming text, or formatted tool call. The footer is
+// intentionally empty (team identity is conveyed by `TeamHaloLayer` and the
+// sidebar). Team badge has been removed from the BooNode entirely.
 
-// ─── Card dimensions (kept in sync with computeElkLayout) ─────────────────────
+// ─── Card dimensions (kept in sync with computeElkLayout) ────────────────────
 
 export const BOO_CARD_WIDTH = 220
 export const BOO_CARD_HEIGHT = 120
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Node footprint (matches ELK envelope in useGraphLayout.ts) ──────────────
+// The Boo renders centered inside this footprint so its visual center aligns
+// with the React Flow node's geometric center — which is what ELK plans for
+// when laying out edges and sibling spacing. Without this, the rendered shape
+// (75–78px circle or 220×120 card) sits at the top-left of the envelope and
+// edges visually converge offset from the Boo.
+//
+// Sized so the card's diagonal half-extent (~125px) plus the inner skill ring
+// (150–220px) fit clear inside, with sibling Boos staying spaced when both
+// expand orbital children.
+const BOO_FOOTPRINT = 340
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatLastSeen(lastSeenAt: number | null): string | null {
   if (!lastSeenAt) return null
@@ -48,7 +85,7 @@ function formatLastSeen(lastSeenAt: number | null): string | null {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
-// ─── Status → glow / dot / label ──────────────────────────────────────────────
+// ─── Status → glow / dot / label ─────────────────────────────────────────────
 
 type GlowConfig = { color: string; pulse: boolean }
 
@@ -73,7 +110,7 @@ const STATUS_LABEL: Record<string, string> = {
   sleeping: 'sleeping',
 }
 
-// ─── Handle styles ────────────────────────────────────────────────────────────
+// ─── Handle styles ───────────────────────────────────────────────────────────
 
 const handleBase: React.CSSProperties = {
   background: 'transparent',
@@ -107,15 +144,33 @@ const centerHandleStyle: React.CSSProperties = {
   background: 'transparent',
 }
 
-// ─── BooNode ──────────────────────────────────────────────────────────────────
+// CSS transition for the wrapper size + border-radius morph.
+const SHAPE_TRANSITION =
+  'width 0.28s cubic-bezier(0.4, 0, 0.2, 1), ' +
+  'height 0.28s cubic-bezier(0.4, 0, 0.2, 1), ' +
+  'border-radius 0.28s cubic-bezier(0.4, 0, 0.2, 1), ' +
+  'background 0.2s ease, ' +
+  'border-color 0.15s ease, ' +
+  'opacity 0.2s ease'
+
+// ─── BooNode ─────────────────────────────────────────────────────────────────
 
 export const BooNode = memo(function BooNode({
   data,
   selected,
   dragging,
 }: NodeProps<Node<BooNodeData, 'boo'>>) {
-  const { agentId, name, status, teamId, teamName, teamColor, teamEmoji } = data
+  const { agentId, name, status } = data
   const floatRef = useFloatingMotion(agentId, 'boo', dragging)
+  const showCard = status === 'running'
+
+  // FLIP state for the avatar / name / status sub-elements. Owned here at
+  // the BooNode level so the captured rects persist across the
+  // CardContent ↔ CircleContent unmount/remount on each shape morph.
+  const avatarFlip = useRef<FlipState>(createFlipState())
+  const nameFlip = useRef<FlipState>(createFlipState())
+  const statusFlip = useRef<FlipState>(createFlipState())
+
   const glow = STATUS_GLOW[status] ?? null
   const connection = useConnection()
   const isConnecting = connection.inProgress
@@ -127,14 +182,20 @@ export const BooNode = memo(function BooNode({
   const lastSeenAt = useFleetStore(
     (s) => s.agents.find((a) => a.id === agentId)?.lastSeenAt ?? null,
   )
-  const lastSeenLabel = status !== 'running' ? formatLastSeen(lastSeenAt) : null
+  const lastSeenLabel = !showCard ? formatLastSeen(lastSeenAt) : null
 
   // Hover cascade — dim when another node is hovered
   const isHighlighted = useGraphStore(
     (s) => s.hoveredNodeId === null || (s.highlightedNodeIds?.has(`boo-${agentId}`) ?? false),
   )
 
-  // Box-shadow animation driven by status (glow-on-card-edge).
+  // Degree-aware circle sizing (used only in idle shape)
+  const edgeCount = data.edgeCount ?? 0
+  const booW = Math.min(60 + edgeCount * 3, 78)
+  const booH = Math.round(booW * 0.92)
+
+  // Box-shadow animation driven by status (glow at the wrapper edge, works
+  // for both circular and rounded-rect shapes via border-radius inheritance).
   const boxShadow = glow
     ? glow.pulse
       ? [
@@ -143,12 +204,27 @@ export const BooNode = memo(function BooNode({
           `0 0 0 0 ${glow.color}, 0 4px 12px rgba(0,0,0,0.4)`,
         ]
       : `0 0 0 1.5px ${glow.color}, 0 4px 12px rgba(0,0,0,0.4)`
-    : '0 4px 12px rgba(0,0,0,0.4)'
+    : showCard
+      ? '0 4px 12px rgba(0,0,0,0.4)'
+      : '0 0 0 0 rgba(0,0,0,0)'
 
   const cardStatusColor = STATUS_DOT[status] ?? STATUS_DOT.idle
 
   return (
-    <div ref={floatRef}>
+    <div
+      ref={floatRef}
+      style={{
+        width: BOO_FOOTPRINT,
+        height: BOO_FOOTPRINT,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        // The empty area around the morph wrapper shouldn't intercept clicks
+        // meant for siblings or background. Only the rendered Boo shape (the
+        // inner motion.div) re-enables pointer events.
+        pointerEvents: 'none',
+      }}
+    >
       <motion.div
         className="group"
         animate={{ boxShadow }}
@@ -156,21 +232,29 @@ export const BooNode = memo(function BooNode({
           glow?.pulse ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.4 }
         }
         style={{
-          width: BOO_CARD_WIDTH,
-          height: BOO_CARD_HEIGHT,
+          width: showCard ? BOO_CARD_WIDTH : booW,
+          height: showCard ? BOO_CARD_HEIGHT : booH,
           position: 'relative',
           cursor: 'pointer',
-          borderRadius: 12,
-          background: '#111827',
-          border: selected ? '2px solid rgba(233,69,96,0.7)' : '1px solid rgba(255,255,255,0.08)',
+          pointerEvents: 'auto',
+          borderRadius: showCard ? 12 : '50%',
+          background: showCard ? '#111827' : 'transparent',
+          border: showCard
+            ? selected
+              ? '2px solid rgba(233,69,96,0.7)'
+              : '1px solid rgba(255,255,255,0.08)'
+            : 'none',
           opacity: isHighlighted ? 1 : 0.22,
-          transition: 'opacity 0.2s ease, border-color 0.15s ease',
-          overflow: 'hidden', // keep dividers crisp at the rounded corners
-          display: 'flex',
-          flexDirection: 'column',
+          transition: SHAPE_TRANSITION,
+          // 'visible' (not 'hidden') so children rendering outside the
+          // immediate bounding box (e.g. circle-shape's name + status that sit
+          // BELOW the avatar) aren't clipped at the rounded corner.
+          overflow: 'visible',
+          display: showCard ? 'flex' : 'block',
+          flexDirection: showCard ? 'column' : undefined,
         }}
       >
-        {/* ── Approval pulse (around the whole card) ──────────────────────── */}
+        {/* ── Approval pulse — adapts shape via borderRadius ──────────────── */}
         {hasPendingApproval && (
           <motion.div
             animate={{
@@ -185,7 +269,7 @@ export const BooNode = memo(function BooNode({
             style={{
               position: 'absolute',
               inset: -2,
-              borderRadius: 14,
+              borderRadius: showCard ? 14 : '50%',
               border: '2px solid #FBBF24',
               pointerEvents: 'none',
               zIndex: 1,
@@ -193,161 +277,49 @@ export const BooNode = memo(function BooNode({
           />
         )}
 
-        {/* ── HEADER: avatar + name + status dot ─────────────────────────── */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '10px 12px',
-            borderBottom: '1px solid rgba(255,255,255,0.06)',
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ flexShrink: 0, width: 36, height: 36, position: 'relative' }}>
-            <AgentBooAvatar agentId={agentId} size={36} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: selected ? '#E94560' : '#E8E8E8',
-                fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                letterSpacing: '0.01em',
-                lineHeight: 1.2,
-              }}
-              title={name}
-            >
-              {name}
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                color: 'rgba(232,232,232,0.45)',
-                marginTop: 2,
-                letterSpacing: '0.04em',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {STATUS_LABEL[status] ?? 'idle'}
-              {lastSeenLabel ? ` · seen ${lastSeenLabel}` : ''}
-            </div>
-          </div>
-          {status === 'running' ? (
-            <motion.div
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: cardStatusColor,
-                flexShrink: 0,
-              }}
-              animate={{ opacity: [1, 0.25, 1] }}
-              transition={{ duration: 1.1, repeat: Infinity }}
-            />
-          ) : (
-            <div
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: cardStatusColor,
-                flexShrink: 0,
-              }}
-            />
-          )}
-        </div>
+        {/* ── Selection ring on circle (card uses border) ─────────────────── */}
+        {!showCard && selected && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: -3,
+              borderRadius: '50%',
+              border: '2px solid rgba(233,69,96,0.7)',
+              pointerEvents: 'none',
+              zIndex: 1,
+            }}
+          />
+        )}
 
-        {/* ── MIDDLE: live-preview slot (placeholder) ────────────────────── */}
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '6px 12px',
-            color: 'rgba(232,232,232,0.32)',
-            fontSize: 11,
-            fontStyle: 'italic',
-            letterSpacing: '0.02em',
-            textAlign: 'center',
-            position: 'relative',
-            // Subtle "ready for content" gradient wash so the empty band
-            // doesn't look like a bug. Fades to nothing when live preview
-            // content lands here in a future iteration.
-            background:
-              'radial-gradient(circle at center, rgba(52,211,153,0.04) 0%, transparent 60%)',
-          }}
-        >
-          {/* Future home of: browser screenshot, terminal tail, video frame,
-              call timeline, etc. For now: a calm hint at status. */}
-          {status === 'running' ? (
-            <span style={{ color: 'rgba(52,211,153,0.55)', fontStyle: 'normal' }}>working…</span>
-          ) : status === 'error' ? (
-            <span style={{ color: 'rgba(249,115,22,0.65)', fontStyle: 'normal' }}>
-              encountered an error
-            </span>
-          ) : (
-            <span>ready</span>
-          )}
-        </div>
+        {showCard ? (
+          <CardContent
+            agentId={agentId}
+            name={name}
+            selected={selected}
+            status={status}
+            cardStatusColor={cardStatusColor}
+            lastSeenLabel={lastSeenLabel}
+            avatarFlip={avatarFlip}
+            nameFlip={nameFlip}
+            statusFlip={statusFlip}
+          />
+        ) : (
+          <CircleContent
+            agentId={agentId}
+            name={name}
+            selected={selected}
+            status={status}
+            booW={booW}
+            booH={booH}
+            cardStatusColor={cardStatusColor}
+            lastSeenLabel={lastSeenLabel}
+            avatarFlip={avatarFlip}
+            nameFlip={nameFlip}
+            statusFlip={statusFlip}
+          />
+        )}
 
-        {/* ── FOOTER: team badge + last seen ─────────────────────────────── */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 6,
-            padding: '6px 12px',
-            borderTop: '1px solid rgba(255,255,255,0.06)',
-            fontSize: 10,
-            color: 'rgba(232,232,232,0.4)',
-            flexShrink: 0,
-          }}
-        >
-          {teamId ? (
-            <span
-              title={teamName ?? 'Team'}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '2px 6px',
-                borderRadius: 8,
-                background: `${teamColor ?? '#34D399'}1A`,
-                border: `1px solid ${teamColor ?? 'rgba(255,255,255,0.15)'}`,
-                color: '#E8E8E8',
-                fontSize: 9,
-                fontWeight: 600,
-                letterSpacing: '0.03em',
-                whiteSpace: 'nowrap',
-                maxWidth: 110,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {teamEmoji && <span style={{ fontSize: 10 }}>{teamEmoji}</span>}
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {teamName ?? 'Team'}
-              </span>
-            </span>
-          ) : (
-            <span />
-          )}
-          {/* Right slot: future per-Boo metric (tokens, cost, calls). */}
-          <span style={{ whiteSpace: 'nowrap', letterSpacing: '0.04em' }}>
-            {/* Empty for now — placeholder so the footer is balanced. */}
-          </span>
-        </div>
-
-        {/* ── Interactive handles ─────────────────────────────────────────── */}
+        {/* ── Interactive handles (visible on hover / connect) ────────────── */}
         <Handle
           type="target"
           position={Position.Top}
@@ -375,6 +347,10 @@ export const BooNode = memo(function BooNode({
         />
 
         {/* ── Center handles — invisible, for edge path routing only ──────── */}
+        {/* See useGraphData.ts:330–336 for the handle-canonical caveat:
+            'center' is SOURCE-type, 'center-target' is TARGET-type — never
+            swap them when flipping edge source/target during the parent→child
+            edge rewrite. */}
         <Handle id="center" type="source" position={Position.Top} style={centerHandleStyle} />
         <Handle
           id="center-target"
@@ -386,3 +362,261 @@ export const BooNode = memo(function BooNode({
     </div>
   )
 })
+
+// ─── CardContent ─────────────────────────────────────────────────────────────
+
+interface ContentProps {
+  agentId: string
+  name: string
+  selected: boolean | undefined
+  status: BooNodeData['status']
+  cardStatusColor: string
+  lastSeenLabel: string | null
+  avatarFlip: MutableRefObject<FlipState>
+  nameFlip: MutableRefObject<FlipState>
+  statusFlip: MutableRefObject<FlipState>
+}
+
+function CardContent({
+  agentId,
+  name,
+  selected,
+  status,
+  cardStatusColor,
+  lastSeenLabel,
+  avatarFlip,
+  nameFlip,
+  statusFlip,
+}: ContentProps) {
+  const avatarRef = useFlipMorph<HTMLDivElement>(avatarFlip)
+  const nameRef = useFlipMorph<HTMLDivElement>(nameFlip)
+  const statusRef = useFlipMorph<HTMLDivElement>(statusFlip)
+
+  return (
+    <>
+      {/* HEADER */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 12px',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          flexShrink: 0,
+        }}
+      >
+        <div ref={avatarRef} style={{ flexShrink: 0, width: 36, height: 36, position: 'relative' }}>
+          <AgentBooAvatar agentId={agentId} size={36} />
+        </div>
+        <div ref={nameRef} style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: selected ? '#E94560' : '#E8E8E8',
+              fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              letterSpacing: '0.01em',
+              lineHeight: 1.2,
+            }}
+            title={name}
+          >
+            {name}
+          </div>
+          <div
+            style={{
+              fontSize: 10,
+              color: 'rgba(232,232,232,0.45)',
+              marginTop: 2,
+              letterSpacing: '0.04em',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {STATUS_LABEL[status] ?? 'idle'}
+            {lastSeenLabel ? ` · seen ${lastSeenLabel}` : ''}
+          </div>
+        </div>
+        <div ref={statusRef} style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+          {status === 'running' ? (
+            <motion.div
+              style={{ width: 8, height: 8, borderRadius: '50%', background: cardStatusColor }}
+              animate={{ opacity: [1, 0.25, 1] }}
+              transition={{ duration: 1.1, repeat: Infinity }}
+            />
+          ) : (
+            <div
+              style={{ width: 8, height: 8, borderRadius: '50%', background: cardStatusColor }}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* MIDDLE — live activity feed */}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-start',
+          padding: '6px 12px',
+          position: 'relative',
+          background:
+            'radial-gradient(circle at center, rgba(52,211,153,0.04) 0%, transparent 60%)',
+          overflow: 'hidden',
+        }}
+      >
+        <BooLiveActivity agentId={agentId} />
+      </div>
+
+      {/* FOOTER — reserved real estate (per-Boo metric slot, future) */}
+      <div
+        style={{
+          padding: '6px 12px',
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+          fontSize: 10,
+          color: 'rgba(232,232,232,0.4)',
+          flexShrink: 0,
+          minHeight: 24,
+        }}
+      />
+    </>
+  )
+}
+
+// ─── CircleContent ───────────────────────────────────────────────────────────
+
+interface CircleProps extends ContentProps {
+  booW: number
+  booH: number
+}
+
+function CircleContent({
+  agentId,
+  name,
+  selected,
+  status,
+  booW,
+  booH,
+  cardStatusColor,
+  lastSeenLabel,
+  avatarFlip,
+  nameFlip,
+  statusFlip,
+}: CircleProps) {
+  // FLIP refs go on the INNER divs of each tracked element so the outer
+  // positioning wrapper's `transform: translateX(-50%)` doesn't fight the
+  // FLIP-applied transform.
+  const avatarRef = useFlipMorph<HTMLDivElement>(avatarFlip)
+  const nameRef = useFlipMorph<HTMLDivElement>(nameFlip)
+  const statusRef = useFlipMorph<HTMLDivElement>(statusFlip)
+
+  return (
+    <>
+      <div ref={avatarRef} style={{ width: booW, height: booH, position: 'relative' }}>
+        <AgentBooAvatar agentId={agentId} size={booW} />
+      </div>
+
+      {/* Name — outer wrapper handles centering via flex (no transform that
+          would conflict with FLIP); inner div is the FLIP target. */}
+      <div
+        style={{
+          position: 'absolute',
+          top: booH + 8,
+          left: 0,
+          right: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          pointerEvents: 'none',
+        }}
+      >
+        <div
+          ref={nameRef}
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: selected ? '#E94560' : '#E8E8E8',
+            fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+            whiteSpace: 'nowrap',
+            maxWidth: 96,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            letterSpacing: '0.01em',
+            textAlign: 'center',
+            pointerEvents: 'auto',
+          }}
+        >
+          {name}
+        </div>
+      </div>
+
+      {/* Status pill — same flex-center pattern as name. */}
+      <div
+        style={{
+          position: 'absolute',
+          top: booH + 26,
+          left: 0,
+          right: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          pointerEvents: 'none',
+        }}
+      >
+        <div
+          ref={statusRef}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            pointerEvents: 'auto',
+          }}
+        >
+          {status === 'running' ? (
+            <motion.div
+              style={{ width: 5, height: 5, borderRadius: '50%', background: cardStatusColor }}
+              animate={{ opacity: [1, 0.2, 1] }}
+              transition={{ duration: 1.1, repeat: Infinity }}
+            />
+          ) : (
+            <div
+              style={{ width: 5, height: 5, borderRadius: '50%', background: cardStatusColor }}
+            />
+          )}
+          <span style={{ fontSize: 10, color: 'rgba(232,232,232,0.38)', letterSpacing: '0.05em' }}>
+            {STATUS_LABEL[status] ?? 'idle'}
+          </span>
+        </div>
+      </div>
+
+      {/* Last-seen — not FLIP-tracked, position-bound to circle shape only.
+          Outer wrapper handles centering, no transform conflict to worry about. */}
+      {lastSeenLabel && (
+        <div
+          style={{
+            position: 'absolute',
+            top: booH + 40,
+            left: 0,
+            right: 0,
+            display: 'flex',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 9,
+              color: 'rgba(232,232,232,0.25)',
+              whiteSpace: 'nowrap',
+              letterSpacing: '0.03em',
+            }}
+          >
+            {lastSeenLabel}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
