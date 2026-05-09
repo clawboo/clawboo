@@ -22,11 +22,19 @@ const ELK_OPTIONS = {
   // LAYER_SWEEP is the default barycentric heuristic and is fast on
   // small graphs (handful of Boos per team).
   'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
-  // Node placement: NETWORK_SIMPLEX produces balanced columns within each
-  // layer (avoids one teammate hugging the left while another floats on
-  // the right). LP-based, optimal for our team sizes.
-  'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-  // Spacing tuned so the BOO_ENVELOPE (260px, accounts for orbital
+  // Node placement: BRANDES_KOEPF with BALANCED alignment runs all four
+  // BK alignment passes (LEFT/RIGHT × UP/DOWN) and averages them, which
+  // gives the cleanest symmetric tree placement — parents sit at the
+  // visual midpoint of their children. NETWORK_SIMPLEX (the previous
+  // strategy) snaps nodes to integer columns based on LP flow, which
+  // produces beautifully balanced layouts when the children count is
+  // ODD (parent lands on the natural middle column) but visibly skews the
+  // parent to one side when the children count is EVEN (no middle column
+  // exists, so the parent rounds to the left or right one). BK + BALANCED
+  // averages out that rounding bias.
+  'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+  'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
+  // Spacing tuned so the BOO_ENVELOPE (340px, accounts for orbital
   // children when expanded) clears between siblings AND between layers
   // with room for the bezier-curve dependency edge + arrowhead.
   'elk.spacing.nodeNode': '100',
