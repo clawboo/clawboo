@@ -35,8 +35,16 @@ import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData } from '@/feature
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const BOO_CENTER = { x: 200, y: 100 }
-const BOO_HALF_W = 90
-const BOO_HALF_H = 40
+// Offset from each Boo's React Flow `node.position` (top-left of the
+// envelope) to its visual center. The Boo renders centered inside its
+// envelope (BOO_FOOTPRINT = 340 in `nodes/BooNode.tsx`), so the center is
+// at half the envelope size — same anchor used by `computeOrbitalPositions`,
+// the global `graphPhysics` singleton, and `TeamHaloLayer`. Without this,
+// the local physics engine would compute Boo center 80px left + 130px above
+// the actual visual center, slowly drifting orbital children off their
+// layout positions during drag interactions.
+const BOO_HALF_W = 170
+const BOO_HALF_H = 170
 
 // Physics constants (simplified from graphPhysics.ts — local per mini graph)
 const SPRING_STRENGTH = 0.035
@@ -380,9 +388,24 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
       return
     }
 
-    // Dedupe: only re-layout if nodes actually changed
+    // Dedupe: only re-layout if the node STRUCTURE changed (different IDs).
+    // For pure data changes (e.g. agent.status flipping idle ↔ running, which
+    // drives BooNode's dual-shape morph), keep existing positions and patch
+    // only the data field. Without this, the BooNode in MiniGraph would
+    // never see the new status and never morph from circle to card.
     const rawKey = rawNodes.map((n) => n.id).join('|')
-    if (rawKey === prevRawKeyRef.current && layoutDoneRef.current) return
+    if (rawKey === prevRawKeyRef.current && layoutDoneRef.current) {
+      const rawById = new Map(rawNodes.map((n) => [n.id, n]))
+      setNodes((existing) =>
+        existing.map((n) => {
+          const fresh = rawById.get(n.id)
+          if (!fresh) return n
+          // Keep position (from layout), update data (status / isStreaming / etc.)
+          return { ...n, data: fresh.data } as GraphNode
+        }),
+      )
+      return
+    }
     prevRawKeyRef.current = rawKey
 
     const booNodes = rawNodes.filter((n) => n.type === 'boo')

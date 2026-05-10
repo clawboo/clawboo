@@ -339,6 +339,41 @@ export function buildGraphElements(
     }
   }
 
+  // Group primary edges by source so each parent's outgoing edges can render
+  // a SHARED trunk + branches instead of N overlapping smooth-step paths.
+  // Without this, two parallel-looking horizontal lines appear (the
+  // "rope" effect) when many siblings share a parent — each edge draws its
+  // own vertical from the parent + horizontal at the elbow, and tiny
+  // sub-pixel rendering differences between paths show as a doubled line
+  // even when the math says they should overlap exactly. The trunk leader
+  // draws the shared trunk; followers skip the trunk and draw only their
+  // branch (vertical descent to their own child).
+  const primaryBySource = new Map<string, GraphEdge[]>()
+  for (const edge of depEdges) {
+    if (!primaryEdgeIds.has(edge.id)) continue
+    const list = primaryBySource.get(edge.source) ?? []
+    list.push(edge)
+    primaryBySource.set(edge.source, list)
+  }
+  for (const [, siblings] of primaryBySource) {
+    if (siblings.length <= 1) continue // single child — normal smooth-step is fine
+    // Sort by edge id so the leader is deterministic across renders.
+    siblings.sort((a, b) => a.id.localeCompare(b.id))
+    const siblingTargetIds = siblings.map((e) => e.target)
+    siblings[0]!.data = {
+      ...siblings[0]!.data,
+      isTrunkLeader: true,
+      siblingTargetIds,
+    }
+    for (let i = 1; i < siblings.length; i++) {
+      siblings[i]!.data = {
+        ...siblings[i]!.data,
+        isTrunkFollower: true,
+        siblingTargetIds,
+      }
+    }
+  }
+
   // Compute edge counts per boo node for degree-aware sizing.
   // Use ONLY primary dependency edges + skill/resource edges so degree
   // counts reflect what the user actually sees at rest. (Hidden secondary

@@ -37,12 +37,13 @@ const BOO_REPULSION_CONSTANT = 500
 const BOO_DAMPING = 0.8
 const BOO_MAX_VELOCITY = 3
 
-// BooNode is now a 220×120 card (see `nodes/BooNode.tsx`'s
-// BOO_CARD_WIDTH / BOO_CARD_HEIGHT exports). Half-sizes used to convert
-// React Flow's top-left position into a centre point for spring math
-// and Boo-Boo collision detection.
-const BOO_HALF_W = 110
-const BOO_HALF_H = 60
+// Offset from each Boo's React Flow `node.position` (top-left of the
+// envelope) to its visual center. The Boo renders centered inside its
+// envelope (BOO_FOOTPRINT = 340 in `nodes/BooNode.tsx`), so the center is
+// at half the envelope size — which is what spring math + Boo-Boo
+// collision detection treat as the Boo "anchor" point.
+const BOO_HALF_W = 170
+const BOO_HALF_H = 170
 
 // Node half-sizes for center computation
 const SKILL_HALF = 19 // 38 / 2

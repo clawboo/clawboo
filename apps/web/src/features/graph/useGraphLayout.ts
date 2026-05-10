@@ -22,11 +22,19 @@ const ELK_OPTIONS = {
   // LAYER_SWEEP is the default barycentric heuristic and is fast on
   // small graphs (handful of Boos per team).
   'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
-  // Node placement: NETWORK_SIMPLEX produces balanced columns within each
-  // layer (avoids one teammate hugging the left while another floats on
-  // the right). LP-based, optimal for our team sizes.
-  'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-  // Spacing tuned so the BOO_ENVELOPE (260px, accounts for orbital
+  // Node placement: BRANDES_KOEPF with BALANCED alignment runs all four
+  // BK alignment passes (LEFT/RIGHT × UP/DOWN) and averages them, which
+  // gives the cleanest symmetric tree placement — parents sit at the
+  // visual midpoint of their children. NETWORK_SIMPLEX (the previous
+  // strategy) snaps nodes to integer columns based on LP flow, which
+  // produces beautifully balanced layouts when the children count is
+  // ODD (parent lands on the natural middle column) but visibly skews the
+  // parent to one side when the children count is EVEN (no middle column
+  // exists, so the parent rounds to the left or right one). BK + BALANCED
+  // averages out that rounding bias.
+  'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+  'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
+  // Spacing tuned so the BOO_ENVELOPE (340px, accounts for orbital
   // children when expanded) clears between siblings AND between layers
   // with room for the bezier-curve dependency edge + arrowhead.
   'elk.spacing.nodeNode': '100',
@@ -35,16 +43,14 @@ const ELK_OPTIONS = {
 }
 
 // ─── Boo envelope dimensions ─────────────────────────────────────────────────
-// The Boo node is now a 220×120 card (see `nodes/BooNode.tsx`). The envelope
-// passed to ELK accounts for the card itself + the orbital children fan that
-// appears when a Boo is expanded (peacock-feather expand). Skills sit on an
-// inner ring at ~100–190px from the Boo's center, so we add ~200px of
-// padding around the card so siblings clear the orbital children.
-//
-// Width-side has a slightly tighter envelope than height because expanded
-// fans are quasi-circular but the card itself is wider than tall.
-const BOO_ENVELOPE_WIDTH = 280
-const BOO_ENVELOPE_HEIGHT = 280
+// The Boo renders centered inside this envelope (see BOO_FOOTPRINT in
+// `nodes/BooNode.tsx`) so the visible Boo shape (75–78px circle / 220×120
+// card) is anchored at envelope center — keeping ELK's sibling spacing math
+// honest about where edges actually converge. Sized to clear the card's
+// diagonal half-extent (~125px) plus the orbital children: skills on an
+// inner ring at 150–220px and resources on an outer ring at 230–285px.
+const BOO_ENVELOPE_WIDTH = 340
+const BOO_ENVELOPE_HEIGHT = 340
 
 // ─── Default node dimensions (used before ReactFlow measures them) ────────────
 

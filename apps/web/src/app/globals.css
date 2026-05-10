@@ -76,6 +76,22 @@ body {
   background: rgba(255, 255, 255, 0.22);
 }
 
+/* React Flow Boo nodes — restrict the hit area to the rendered Boo shape only.
+   The Boo is centered inside a 340×340 envelope so its visual position aligns
+   with where ELK plans edges. Without this rule, the empty area around the
+   visible Boo (up to ~265px wide of empty space when the Boo is in circle
+   mode) would still capture hover / click / drag events, making the Boo feel
+   like it's selecting from way too far. The `.group` selector matches the
+   morph wrapper inside BooNode, where the actual avatar / card is rendered.
+   `!important` is needed to override React Flow's default
+   `.react-flow__node { pointer-events: all }` which has equal specificity. */
+.react-flow__node-boo {
+  pointer-events: none !important;
+}
+.react-flow__node-boo .group {
+  pointer-events: auto !important;
+}
+
 /* React Flow controls — blend with dark theme */
 .react-flow__controls-button {
   background: #111827 !important;

@@ -13,16 +13,19 @@ function fnv1a(str: string): number {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const SKILL_RADIUS = { min: 100, max: 190 }
-const RESOURCE_RADIUS = { min: 180, max: 220 }
+// Inner skill ring sits clear of the 220×120 card's diagonal half-extent
+// (~125px) plus a 25px gap. Outer resource ring sits beyond the inner ring
+// with enough angular variance that the two rings don't visually merge.
+const SKILL_RADIUS = { min: 150, max: 220 }
+const RESOURCE_RADIUS = { min: 230, max: 285 }
 const JITTER_RANGE = 12
 
-// Half-sizes of the BooNode card (220×120). Used to centre the orbital
-// children fan around each parent Boo's centre rather than its top-left
-// corner. Stays in sync with the BOO_CARD_WIDTH / BOO_CARD_HEIGHT
-// constants in `nodes/BooNode.tsx`.
-const BOO_HALF_W = 110
-const BOO_HALF_H = 60
+// Offset from each Boo's React Flow `node.position` (top-left of the
+// envelope) to its visual center. The Boo renders centered inside its
+// envelope (BOO_FOOTPRINT = 340 in `nodes/BooNode.tsx`), so the center is
+// at half the envelope size in each dimension.
+const BOO_HALF_W = 170
+const BOO_HALF_H = 170
 
 // Node dimensions for centering orbital children
 const SKILL_SIZE = 38 // CIRCLE const in SkillNode.tsx
