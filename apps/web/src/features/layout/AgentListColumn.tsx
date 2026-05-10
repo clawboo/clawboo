@@ -182,27 +182,50 @@ const SECONDARY_NAV: { id: NavView; label: string; emoji: string }[] = [
 
 // ─── Group chat row ─────────────────────────────────────────────────────────
 //
-// The button shows a "team photo" of overlapping Boo avatars instead of a
-// single team emoji + generic label. Each avatar is the same as what
-// renders in the Ghost Graph for that agent, so the team's identity reads
-// at a glance from the same visual fingerprints used elsewhere.
+// Single-row horizontal button: avatar stack (the "team photo") on the
+// LEFT, "Group Chat" label + chevron on the RIGHT. Earlier vertical
+// designs (label-above-photo) read as a section heading because of the
+// stacked vertical layout — putting everything on one row of similar
+// height to the agent rows below makes it unambiguously a button while
+// still showing off the team identity through the live Boo avatars.
 //
-//   - "TEAM CHAT" caption sits ABOVE the photo so the row's purpose
-//     reads first; the photo is the supporting visual.
 //   - Up to MAX_VISIBLE_AVATARS Boos are shown; remaining ones collapse
 //     into a "+N" badge at the end of the stack.
 //   - The leader (when known) is placed FIRST so it sits at the front of
 //     the overlap stack.
 //   - Each avatar has a 2px ring in the surface color so adjacent
 //     overlapping avatars read as separate faces, not a blurred mass.
-//     The ring color is FIXED — it doesn't switch to the team accent on
-//     selection (a previous version did, but the colored rings around
-//     each Boo when active read as visually congested). Selection
-//     feedback comes from the row background lightening on its own.
+//     The ring color is FIXED — earlier versions switched it to the team
+//     accent on selection but the colored rings read as congested.
+//   - Right side: "Group Chat" label + a chevron-right icon. The
+//     chevron is the standard "navigate to" affordance so the button
+//     reads as interactive even when nothing is hovered.
+//   - Selection feedback is via the surface background only (lightens
+//     on hover, lightens further when active).
 
-const GROUP_CHAT_AVATAR_SIZE = 30
-const GROUP_CHAT_STRIDE = 20 // 30 - 20 = 10px overlap between adjacent avatars
-const GROUP_CHAT_MAX_VISIBLE_AVATARS = 6
+// Avatars are 28px so 4 of them + the "Group Chat" label + status badge
+// all fit on a single line within the 191px-wide column. (At 30px the
+// stack ate just enough horizontal space that "Group Chat" overflowed
+// its container by 1px and triggered the truncate ellipsis.) The right
+// side mirrors the agent row's layout — name on top, status badge below
+// — so the Group Chat row reads as a structural peer of the agent rows.
+//   - Team has 1–4 agents: show ALL of them (no "+N" badge needed)
+//   - Team has 5+ agents:  show 3 avatars + "+N" badge
+// This caps the avatar stack at 4 items wide regardless of team size.
+const GROUP_CHAT_AVATAR_SIZE = 28
+const GROUP_CHAT_STRIDE = 18 // 28 - 18 = 10px overlap between adjacent avatars
+const GROUP_CHAT_MAX_VISIBLE_NO_OVERFLOW = 4
+const GROUP_CHAT_MAX_VISIBLE_WITH_OVERFLOW = 3
+
+// The avatar-stack column has a FIXED width regardless of how many
+// avatars the team actually contributes — sized to hold the maximum
+// (4 items wide). Without this, smaller teams produced a narrower
+// stack which let the right-side "Group Chat / Idle" text shift left,
+// so the same label rendered at different X positions across teams.
+// A fixed-width left column keeps the label / status badge aligned
+// to the same column edge in every team size.
+const GROUP_CHAT_STACK_WIDTH =
+  GROUP_CHAT_AVATAR_SIZE + (GROUP_CHAT_MAX_VISIBLE_NO_OVERFLOW - 1) * GROUP_CHAT_STRIDE
 
 function orderTeamAgentsForPhoto(team: Team, teamAgents: AgentState[]): AgentState[] {
   if (!team.leaderAgentId) return teamAgents
@@ -213,6 +236,18 @@ function orderTeamAgentsForPhoto(team: Team, teamAgents: AgentState[]): AgentSta
   const [leader] = reordered.splice(leaderIndex, 1)
   if (leader) reordered.unshift(leader)
   return reordered
+}
+
+// Aggregate the team's overall status from its members. Mirrors the
+// status badge shown on individual agent rows so the Group Chat row
+// reads as a peer in the list. Priority: any running > any error >
+// any sleeping > idle.
+function aggregateTeamStatus(teamAgents: AgentState[]): AgentStatus {
+  if (teamAgents.length === 0) return 'idle'
+  if (teamAgents.some((a) => a.status === 'running')) return 'running'
+  if (teamAgents.some((a) => a.status === 'error')) return 'error'
+  if (teamAgents.some((a) => a.status === 'sleeping')) return 'sleeping'
+  return 'idle'
 }
 
 function GroupChatRow({
@@ -227,36 +262,39 @@ function GroupChatRow({
   onClick: () => void
 }) {
   const ordered = orderTeamAgentsForPhoto(team, teamAgents)
-  const visible = ordered.slice(0, GROUP_CHAT_MAX_VISIBLE_AVATARS)
-  const overflow = Math.max(0, ordered.length - GROUP_CHAT_MAX_VISIBLE_AVATARS)
+  // If the team is small enough to show every agent, do so. Otherwise
+  // cap at WITH_OVERFLOW so the "+N" badge fits alongside the label.
+  const willOverflow = ordered.length > GROUP_CHAT_MAX_VISIBLE_NO_OVERFLOW
+  const visibleCount = willOverflow ? GROUP_CHAT_MAX_VISIBLE_WITH_OVERFLOW : ordered.length
+  const visible = ordered.slice(0, visibleCount)
+  const overflow = Math.max(0, ordered.length - visibleCount)
   // Ring color is fixed in the surface color so it acts purely as a
   // separator between overlapping avatars (visually invisible against the
-  // surface). It does NOT switch to the team accent on selection — the
-  // earlier version did and the user found the colored rings congested.
+  // surface). It does NOT switch to the team accent on selection.
   const ringColor = '#111827'
+
+  const aggregateStatus = aggregateTeamStatus(ordered)
 
   return (
     <button
       type="button"
       data-testid="group-chat-row"
       onClick={onClick}
-      title={`${team.name} — Team Chat (${ordered.length} agent${ordered.length === 1 ? '' : 's'})`}
+      title={`${team.name} — Group Chat (${ordered.length} agent${ordered.length === 1 ? '' : 's'})`}
       className={[
-        'group flex w-full flex-col items-center gap-1.5 rounded-lg px-2.5 py-2.5',
+        // py-2 + the right-side label-on-top + status-below stack mirror
+        // the agent rows below exactly — same outer height (~56px) and
+        // same internal vertical rhythm.
+        'group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2',
         'transition-colors duration-150',
         isActive ? 'bg-white/8 shadow-sm' : 'hover:bg-white/4',
       ].join(' ')}
     >
-      {/* Caption sits ABOVE the photo so the row's purpose reads first. */}
-      <span
-        className="text-[10px] font-semibold uppercase tracking-wider text-secondary/60"
-        style={{ fontFamily: 'var(--font-mono)' }}
-      >
-        Team Chat
-      </span>
-
-      {/* Team photo: overlapping Boo avatars centered horizontally. */}
-      <div className="flex items-center justify-center">
+      {/* Team photo — overlapping Boo avatars on the left. The container
+          has a FIXED width (GROUP_CHAT_STACK_WIDTH) regardless of how
+          many avatars are visible, so the right-side label / status
+          column starts at the same X across every team size. */}
+      <div className="flex items-center" style={{ width: GROUP_CHAT_STACK_WIDTH, flexShrink: 0 }}>
         {visible.map((agent, i) => (
           <div
             key={agent.id}
@@ -272,7 +310,7 @@ function GroupChatRow({
               // Earlier (leftmost) avatars sit ON TOP — the leader is at
               // index 0, so they dominate the front of the team photo.
               zIndex: visible.length - i,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.45)',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.4)',
               background: '#0A0E1A',
             }}
           >
@@ -292,7 +330,7 @@ function GroupChatRow({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 10,
+              fontSize: 11,
               fontWeight: 700,
               color: 'rgba(232,232,232,0.75)',
               flexShrink: 0,
@@ -305,6 +343,27 @@ function GroupChatRow({
           </div>
         )}
       </div>
+
+      {/* Right side — "Group Chat" name on top, aggregate status badge
+          below. Vertically stacked the same way agent rows lay out
+          [name / status badge], so the Group Chat row reads as a
+          structural peer of the agents listed beneath it.
+          The label has a small NEGATIVE left margin so its first letter
+          sits slightly outside the badge's left edge — closer to where
+          the agent NAME visually anchors on the rows below. The status
+          badge is left untouched at the column's left edge so the
+          status indicator's absolute position is unchanged. */}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p
+          className="truncate text-[12px] font-medium leading-tight text-text"
+          style={{ fontFamily: 'var(--font-body)', marginLeft: -8 }}
+        >
+          Group Chat
+        </p>
+        <div className="flex items-center">
+          <StatusBadge status={aggregateStatus} />
+        </div>
+      </div>
     </button>
   )
 }
@@ -313,7 +372,6 @@ function GroupChatRow({
 
 export function AgentListColumn() {
   const agents = useFleetStore((s) => s.agents)
-  const selectedAgentId = useFleetStore((s) => s.selectedAgentId)
   const selectAgent = useFleetStore((s) => s.selectAgent)
   const hydrateAgents = useFleetStore((s) => s.hydrateAgents)
 
@@ -486,7 +544,14 @@ export function AgentListColumn() {
                 <AgentRow
                   key={agent.id}
                   agent={agent}
-                  selected={agent.id === selectedAgentId}
+                  // Highlight only when actually viewing this agent's
+                  // detail page. Reading from `viewMode` (instead of
+                  // `selectedAgentId`) ensures the row drops its
+                  // highlight as soon as the user navigates to Group
+                  // Chat / a nav view — the previously-selected agent
+                  // shouldn't keep looking active when something else
+                  // is on screen.
+                  selected={viewMode.type === 'agent' && viewMode.agentId === agent.id}
                   onSelect={() => handleSelectAgent(agent.id)}
                   onDelete={() => {
                     if (!client) return
