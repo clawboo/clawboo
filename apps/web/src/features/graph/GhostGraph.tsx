@@ -20,7 +20,7 @@ import type {
   MiniMapNodeProps,
 } from '@xyflow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { GitBranch, Pin } from 'lucide-react'
+import { GitBranch, Map, Pin, X } from 'lucide-react'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
@@ -48,6 +48,32 @@ interface ContextMenuState {
   y: number
   agentId: string
   agentName: string
+}
+
+// fitView() honours the bounding box of every node we pass in. By default it
+// fits the full graph — but our peacock-collapse model keeps skill / resource
+// nodes mounted at their orbital positions (150–220 px from each Boo) with
+// `opacity: 0; scale: 0`. fitView still sees them, so it zooms out far enough
+// for the invisible ring, and the actual visible Boos render at ~30 % of
+// their nominal size. We filter to the nodes the user can actually see —
+// every Boo (always rendered) plus any orbital child whose parent is
+// currently expanded — so the camera frames only what's on screen.
+//
+// We can't read `node.data.isVisible` directly because the raw store nodes
+// don't carry it; the flag is added downstream in the `visibleNodes` memo.
+// Instead we re-derive visibility from `expandedBooNodeIds` (the actual
+// source of truth — same path the memo uses).
+function pickFittableNodes(nodes: Node[], expandedBooIds: Set<string>): { id: string }[] {
+  return nodes
+    .filter((n) => {
+      if (n.type === 'boo') return true
+      if (n.type !== 'skill' && n.type !== 'resource') return true
+      const agentIds = (n.data as { agentIds?: string[] } | undefined)?.agentIds
+      const ownerAgentId = agentIds?.[0]
+      if (!ownerAgentId) return false
+      return expandedBooIds.has(`boo-${ownerAgentId}`)
+    })
+    .map((n) => ({ id: n.id }))
 }
 
 // Custom MiniMap node renderer.
@@ -144,6 +170,11 @@ export function GhostGraph() {
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
+  // Hide the MiniMap (bottom-right overview) by default to give Boos more
+  // visible canvas. A small floating toggle button takes its place; clicking
+  // it expands the MiniMap back when the user wants to navigate a large graph.
+  const [showMiniMap, setShowMiniMap] = useState(false)
+
   const nodesInitialized = useNodesInitialized()
   const { fitView } = useReactFlow()
 
@@ -208,7 +239,13 @@ export function GhostGraph() {
     }
     if (refitTimerRef.current) clearTimeout(refitTimerRef.current)
     refitTimerRef.current = setTimeout(() => {
-      void fitView({ padding: 0.08, duration: 250, maxZoom: 1.5 })
+      const state = useGraphStore.getState()
+      void fitView({
+        padding: 0.04,
+        duration: 250,
+        maxZoom: 1.5,
+        nodes: pickFittableNodes(state.nodes, state.expandedBooNodeIds),
+      })
     }, 180)
     return () => {
       if (refitTimerRef.current) clearTimeout(refitTimerRef.current)
@@ -264,33 +301,49 @@ export function GhostGraph() {
       (e) => e.type === 'dependency' && (e.data as { isPrimary?: boolean })?.isPrimary !== false,
     )
 
-    void computeElkLayout(booNodes, primaryDepEdges, savedPositions).then((layoutedBooNodes) => {
-      // Skip stale results — a newer ELK computation has started
-      if (generation !== elkGenerationRef.current) return
+    // Pass the canvas aspect so ELK's hierarchy-driven output can be stretched
+    // to claim the empty bands fitView would otherwise leave (see
+    // stretchToAspect in useGraphLayout.ts).
+    const canvasAspect =
+      containerSize.w > 0 && containerSize.h > 0 ? containerSize.w / containerSize.h : undefined
 
-      // Layer 2: Position skills/resources in orbital arcs around their parent boo
-      const orbitalNodes = computeOrbitalPositions(
-        layoutedBooNodes,
-        nonBooNodes,
-        edges, // full edges needed for parent-child mapping
-        savedPositions,
-      )
+    void computeElkLayout(booNodes, primaryDepEdges, savedPositions, canvasAspect).then(
+      (layoutedBooNodes) => {
+        // Skip stale results — a newer ELK computation has started
+        if (generation !== elkGenerationRef.current) return
 
-      setNodes([...layoutedBooNodes, ...orbitalNodes])
-      setHasRunLayout(true)
+        // Layer 2: Position skills/resources in orbital arcs around their parent boo
+        const orbitalNodes = computeOrbitalPositions(
+          layoutedBooNodes,
+          nonBooNodes,
+          edges, // full edges needed for parent-child mapping
+          savedPositions,
+        )
 
-      // Initialize physics particles from layouted positions
-      requestAnimationFrame(() => {
-        const current = useGraphStore.getState()
-        graphPhysics.initialize(current.nodes, current.edges)
-      })
+        setNodes([...layoutedBooNodes, ...orbitalNodes])
+        setHasRunLayout(true)
 
-      requestAnimationFrame(() => {
-        // Tight padding gives Boos visual prominence; maxZoom caps the fit so
-        // tiny graphs (1–2 Boos) don't blow up to fill the canvas.
-        void fitView({ padding: 0.08, duration: 500, maxZoom: 1.5 })
-      })
-    })
+        // Initialize physics particles from layouted positions
+        requestAnimationFrame(() => {
+          const current = useGraphStore.getState()
+          graphPhysics.initialize(current.nodes, current.edges)
+        })
+
+        requestAnimationFrame(() => {
+          // Tight padding gives Boos visual prominence; maxZoom caps the fit so
+          // tiny graphs (1–2 Boos) don't blow up to fill the canvas.
+          // `nodes` filter excludes the invisible-by-default orbital children —
+          // see pickFittableNodes() above for why this matters.
+          const state = useGraphStore.getState()
+          void fitView({
+            padding: 0.04,
+            duration: 500,
+            maxZoom: 1.5,
+            nodes: pickFittableNodes(state.nodes, state.expandedBooNodeIds),
+          })
+        })
+      },
+    )
     // isLoaded gates layout until saved positions are fetched from SQLite.
   }, [nodesInitialized, nodes.length, layoutKey, isLoaded])
 
@@ -626,6 +679,36 @@ export function GhostGraph() {
         {connectMode ? 'Drawing Edges' : 'Connect'}
       </button>
 
+      {/* MiniMap minimize/maximize toggle. Sits at the bottom-right corner —
+          where the MiniMap itself lives — so the relationship between the
+          control and what it controls reads at a glance. When the MiniMap is
+          shown, the toggle slides left of it and switches to an X icon. */}
+      <button
+        onClick={() => setShowMiniMap(!showMiniMap)}
+        title={showMiniMap ? 'Hide minimap' : 'Show minimap'}
+        aria-label={showMiniMap ? 'Hide minimap' : 'Show minimap'}
+        style={{
+          position: 'absolute',
+          bottom: 12,
+          right: showMiniMap ? minimapDims.w + 24 : 12,
+          zIndex: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 28,
+          height: 28,
+          padding: 0,
+          borderRadius: 8,
+          cursor: 'pointer',
+          border: '1px solid rgba(255,255,255,0.1)',
+          background: '#111827',
+          color: showMiniMap ? '#E94560' : 'rgba(232,232,232,0.5)',
+          transition: 'right 0.2s ease, color 0.15s, border-color 0.15s',
+        }}
+      >
+        {showMiniMap ? <X size={14} /> : <Map size={14} />}
+      </button>
+
       <ReactFlow
         nodes={visibleNodes}
         edges={visibleEdges}
@@ -665,31 +748,33 @@ export function GhostGraph() {
             borderRadius: 8,
           }}
         />
-        <MiniMap
-          style={{
-            background: '#111827',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 8,
-            width: minimapDims.w,
-            height: minimapDims.h,
-          }}
-          nodeColor={(node) => {
-            if (node.type === 'boo') return '#E94560'
-            // Skill / resource nodes inherit visibility from their parent
-            // Boo via `data.isVisible` (set by the visibleNodes memo).
-            // When the parent is collapsed, return 'transparent' so the
-            // MiniMap matches what the user sees in the main canvas.
-            // The `?? true` default keeps MiniMap behaviour correct in
-            // contexts that don't set the flag (e.g. MiniGraph) — but
-            // this MiniMap is only on the Ghost Graph anyway.
-            const isVisible = (node.data as { isVisible?: boolean }).isVisible ?? true
-            if (node.type === 'skill') return isVisible ? '#34D399' : 'transparent'
-            if (node.type === 'resource') return isVisible ? '#FBBF24' : 'transparent'
-            return '#FBBF24'
-          }}
-          nodeComponent={GhostGraphMiniMapNode}
-          maskColor="rgba(10,14,26,0.75)"
-        />
+        {showMiniMap && (
+          <MiniMap
+            style={{
+              background: '#111827',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 8,
+              width: minimapDims.w,
+              height: minimapDims.h,
+            }}
+            nodeColor={(node) => {
+              if (node.type === 'boo') return '#E94560'
+              // Skill / resource nodes inherit visibility from their parent
+              // Boo via `data.isVisible` (set by the visibleNodes memo).
+              // When the parent is collapsed, return 'transparent' so the
+              // MiniMap matches what the user sees in the main canvas.
+              // The `?? true` default keeps MiniMap behaviour correct in
+              // contexts that don't set the flag (e.g. MiniGraph) — but
+              // this MiniMap is only on the Ghost Graph anyway.
+              const isVisible = (node.data as { isVisible?: boolean }).isVisible ?? true
+              if (node.type === 'skill') return isVisible ? '#34D399' : 'transparent'
+              if (node.type === 'resource') return isVisible ? '#FBBF24' : 'transparent'
+              return '#FBBF24'
+            }}
+            nodeComponent={GhostGraphMiniMapNode}
+            maskColor="rgba(10,14,26,0.75)"
+          />
+        )}
       </ReactFlow>
 
       {/* Context menu */}

@@ -69,10 +69,12 @@ export const BOO_CARD_HEIGHT = 120
 // (75–78px circle or 220×120 card) sits at the top-left of the envelope and
 // edges visually converge offset from the Boo.
 //
-// Sized so the card's diagonal half-extent (~125px) plus the inner skill ring
-// (150–220px) fit clear inside, with sibling Boos staying spaced when both
-// expand orbital children.
-const BOO_FOOTPRINT = 340
+// Sized to fit the card (220×120, diagonal half ~125 px) plus an inner skill
+// ring at ~150 px from center. Outer skill rings (up to ~220 px) can briefly
+// overlap a sibling's gap region when BOTH neighbours are expanded — that's
+// an acceptable trade-off for the dramatic boost in idle Boo legibility:
+// scale on a 3-Boo group-chat row goes from ~0.49 to ~0.68 (~40 % bigger).
+const BOO_FOOTPRINT = 280
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
