@@ -1,4 +1,6 @@
-// GroupChatView — 2-panel resizable layout: GroupChatPanel + GhostGraphPanel.
+// GroupChatView — 2-row resizable layout: GhostGraphPanel on top, GroupChatPanel
+// on bottom. Stacked vertically (full width) so wide team graphs spread out
+// comfortably while the chat area below gets full-width message rendering.
 // Gates the GroupChatPanel behind the team onboarding flow ("Know Your Team"
 // button → agent introductions → user self-introduction → normal chat).
 
@@ -57,13 +59,13 @@ export function GroupChatView({ teamId }: { teamId: string }) {
   // normal chat (or vice versa).
   if (isLoading) {
     return (
-      <Group orientation="horizontal" id="group-chat-h" data-testid="group-chat-view">
-        <Panel defaultSize={50} minSize={25}>
-          <div className="flex h-full items-center justify-center bg-bg" />
-        </Panel>
-        <ResizeHandle direction="horizontal" />
-        <Panel defaultSize={50} minSize={25}>
+      <Group orientation="vertical" id="group-chat-v" data-testid="group-chat-view">
+        <Panel defaultSize={45} minSize={20}>
           <GhostGraphPanel />
+        </Panel>
+        <ResizeHandle direction="vertical" />
+        <Panel defaultSize={55} minSize={20}>
+          <div className="flex h-full items-center justify-center bg-bg" />
         </Panel>
       </Group>
     )
@@ -71,8 +73,12 @@ export function GroupChatView({ teamId }: { teamId: string }) {
 
   if (!onboardingComplete) {
     return (
-      <Group orientation="horizontal" id="group-chat-h" data-testid="group-chat-view">
-        <Panel defaultSize={50} minSize={25}>
+      <Group orientation="vertical" id="group-chat-v" data-testid="group-chat-view">
+        <Panel defaultSize={45} minSize={20}>
+          <GhostGraphPanel />
+        </Panel>
+        <ResizeHandle direction="vertical" />
+        <Panel defaultSize={55} minSize={20}>
           <TeamOnboardingGate
             teamId={teamId}
             team={team}
@@ -84,22 +90,18 @@ export function GroupChatView({ teamId }: { teamId: string }) {
             onMarkUserIntroduced={markUserIntroduced}
           />
         </Panel>
-        <ResizeHandle direction="horizontal" />
-        <Panel defaultSize={50} minSize={25}>
-          <GhostGraphPanel />
-        </Panel>
       </Group>
     )
   }
 
   return (
-    <Group orientation="horizontal" id="group-chat-h" data-testid="group-chat-view">
-      <Panel defaultSize={50} minSize={25}>
-        <GroupChatPanel teamId={teamId} userIntroText={userIntroText} />
-      </Panel>
-      <ResizeHandle direction="horizontal" />
-      <Panel defaultSize={50} minSize={25}>
+    <Group orientation="vertical" id="group-chat-v" data-testid="group-chat-view">
+      <Panel defaultSize={45} minSize={20}>
         <GhostGraphPanel />
+      </Panel>
+      <ResizeHandle direction="vertical" />
+      <Panel defaultSize={55} minSize={20}>
+        <GroupChatPanel teamId={teamId} userIntroText={userIntroText} />
       </Panel>
     </Group>
   )

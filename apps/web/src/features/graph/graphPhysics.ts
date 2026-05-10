@@ -39,11 +39,11 @@ const BOO_MAX_VELOCITY = 3
 
 // Offset from each Boo's React Flow `node.position` (top-left of the
 // envelope) to its visual center. The Boo renders centered inside its
-// envelope (BOO_FOOTPRINT = 340 in `nodes/BooNode.tsx`), so the center is
+// envelope (BOO_FOOTPRINT = 280 in `nodes/BooNode.tsx`), so the center is
 // at half the envelope size — which is what spring math + Boo-Boo
 // collision detection treat as the Boo "anchor" point.
-const BOO_HALF_W = 170
-const BOO_HALF_H = 170
+const BOO_HALF_W = 140
+const BOO_HALF_H = 140
 
 // Node half-sizes for center computation
 const SKILL_HALF = 19 // 38 / 2

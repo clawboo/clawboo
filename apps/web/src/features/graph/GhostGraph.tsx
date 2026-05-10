@@ -17,9 +17,10 @@ import type {
   Node,
   Connection,
   IsValidConnection,
+  MiniMapNodeProps,
 } from '@xyflow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { GitBranch, Pin } from 'lucide-react'
+import { GitBranch, Map, Pin, X } from 'lucide-react'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
@@ -49,6 +50,95 @@ interface ContextMenuState {
   agentName: string
 }
 
+// fitView() honours the bounding box of every node we pass in. By default it
+// fits the full graph — but our peacock-collapse model keeps skill / resource
+// nodes mounted at their orbital positions (150–220 px from each Boo) with
+// `opacity: 0; scale: 0`. fitView still sees them, so it zooms out far enough
+// for the invisible ring, and the actual visible Boos render at ~30 % of
+// their nominal size. We filter to the nodes the user can actually see —
+// every Boo (always rendered) plus any orbital child whose parent is
+// currently expanded — so the camera frames only what's on screen.
+//
+// We can't read `node.data.isVisible` directly because the raw store nodes
+// don't carry it; the flag is added downstream in the `visibleNodes` memo.
+// Instead we re-derive visibility from `expandedBooNodeIds` (the actual
+// source of truth — same path the memo uses).
+function pickFittableNodes(nodes: Node[], expandedBooIds: Set<string>): { id: string }[] {
+  return nodes
+    .filter((n) => {
+      if (n.type === 'boo') return true
+      if (n.type !== 'skill' && n.type !== 'resource') return true
+      const agentIds = (n.data as { agentIds?: string[] } | undefined)?.agentIds
+      const ownerAgentId = agentIds?.[0]
+      if (!ownerAgentId) return false
+      return expandedBooIds.has(`boo-${ownerAgentId}`)
+    })
+    .map((n) => ({ id: n.id }))
+}
+
+// Custom MiniMap node renderer.
+//
+// React Flow's default MiniMap draws each node at its actual rendered size.
+// Our BooNode is a 340×340 transparent footprint with the visible Boo
+// (~80px circle / 220×120 card) centered inside it — see BOO_FOOTPRINT in
+// nodes/BooNode.tsx. Rendering the full footprint in the MiniMap makes Boos
+// look enormously out of proportion vs. the actual visible shape on the
+// canvas. This component draws Boos as a smaller centered dot so the MiniMap
+// reflects what the user actually sees. Skill / resource nodes already
+// render at sensible visual sizes, so they're drawn at their measured size.
+function GhostGraphMiniMapNode({
+  id,
+  x,
+  y,
+  width,
+  height,
+  color,
+  borderRadius,
+  className,
+  shapeRendering,
+  strokeColor,
+  strokeWidth,
+  selected,
+}: MiniMapNodeProps) {
+  const fill = color ?? '#e2e2e2'
+  if (color === 'transparent') return null
+  const stroke = strokeColor ?? 'transparent'
+  const sw = strokeWidth ?? 0
+  if (id.startsWith('boo-')) {
+    // Visible Boo is roughly 80–120 px on canvas; pick 110 as a single
+    // representative size that reads well in MiniMap regardless of whether
+    // the source Boo is in idle-circle or active-card mode.
+    const visualSize = 110
+    return (
+      <circle
+        cx={x + width / 2}
+        cy={y + height / 2}
+        r={visualSize / 2}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={sw}
+        shapeRendering={shapeRendering}
+        className={className + (selected ? ' selected' : '')}
+      />
+    )
+  }
+  return (
+    <rect
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+      rx={borderRadius}
+      ry={borderRadius}
+      fill={fill}
+      stroke={stroke}
+      strokeWidth={sw}
+      shapeRendering={shapeRendering}
+      className={className + (selected ? ' selected' : '')}
+    />
+  )
+}
+
 // ─── GhostGraph ───────────────────────────────────────────────────────────────
 //
 // Must be rendered inside <ReactFlowProvider> (done by GhostGraphPanel).
@@ -64,6 +154,7 @@ export function GhostGraph() {
     selectedEdgeId,
     setSelectedEdgeId,
     setNodes,
+    hasRunLayout,
     setHasRunLayout,
     updateNodePosition,
     connectMode,
@@ -79,8 +170,19 @@ export function GhostGraph() {
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
+  // Hide the MiniMap (bottom-right overview) by default to give Boos more
+  // visible canvas. A small floating toggle button takes its place; clicking
+  // it expands the MiniMap back when the user wants to navigate a large graph.
+  const [showMiniMap, setShowMiniMap] = useState(false)
+
   const nodesInitialized = useNodesInitialized()
   const { fitView } = useReactFlow()
+
+  // Track the canvas wrapper size so we can (a) re-fit the graph when the
+  // panel is resized (e.g. user drags the divider in the new vertical group
+  // chat layout) and (b) size the MiniMap proportionally to the canvas.
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 800, h: 600 })
 
   // Track layout state in refs to avoid stale closure issues
   const layoutRanRef = useRef(false)
@@ -100,6 +202,64 @@ export function GhostGraph() {
       graphPhysics.dispose()
     }
   }, [])
+
+  // Observe the canvas wrapper so we can refit + resize the MiniMap when the
+  // surrounding panel changes shape (group chat divider drag, window resize,
+  // navigating into / out of group chat with its short-and-wide row layout).
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        if (width > 0 && height > 0) {
+          setContainerSize((prev) =>
+            Math.abs(prev.w - width) < 0.5 && Math.abs(prev.h - height) < 0.5
+              ? prev
+              : { w: width, h: height },
+          )
+        }
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Refit the view when the container size changes (debounced). Only fires
+  // after the initial layout has run, otherwise the layout effect already
+  // calls fitView once Boos land. Skipped on the very first dimensions read
+  // (matches the initial 800×600 default → no spurious refit on mount).
+  const refitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const initialFitDoneRef = useRef(false)
+  useEffect(() => {
+    if (!hasRunLayout) return
+    if (!initialFitDoneRef.current) {
+      initialFitDoneRef.current = true
+      return
+    }
+    if (refitTimerRef.current) clearTimeout(refitTimerRef.current)
+    refitTimerRef.current = setTimeout(() => {
+      const state = useGraphStore.getState()
+      void fitView({
+        padding: 0.04,
+        duration: 250,
+        maxZoom: 1.5,
+        nodes: pickFittableNodes(state.nodes, state.expandedBooNodeIds),
+      })
+    }, 180)
+    return () => {
+      if (refitTimerRef.current) clearTimeout(refitTimerRef.current)
+    }
+  }, [containerSize.w, containerSize.h, hasRunLayout, fitView])
+
+  // MiniMap stays small relative to the canvas — ~16% wide, ~22% tall, with
+  // sensible min/max so it neither becomes invisible on tiny panels nor
+  // dominates the canvas on large ones.
+  const minimapDims = useMemo(() => {
+    const w = Math.round(Math.max(110, Math.min(180, containerSize.w * 0.16)))
+    const h = Math.round(Math.max(72, Math.min(130, containerSize.h * 0.22)))
+    return { w, h }
+  }, [containerSize.w, containerSize.h])
 
   // ── Two-layer auto-layout ────────────────────────────────────────────────────
   // Layer 1: ELK positions boo nodes using dependency edges only (async).
@@ -141,31 +301,49 @@ export function GhostGraph() {
       (e) => e.type === 'dependency' && (e.data as { isPrimary?: boolean })?.isPrimary !== false,
     )
 
-    void computeElkLayout(booNodes, primaryDepEdges, savedPositions).then((layoutedBooNodes) => {
-      // Skip stale results — a newer ELK computation has started
-      if (generation !== elkGenerationRef.current) return
+    // Pass the canvas aspect so ELK's hierarchy-driven output can be stretched
+    // to claim the empty bands fitView would otherwise leave (see
+    // stretchToAspect in useGraphLayout.ts).
+    const canvasAspect =
+      containerSize.w > 0 && containerSize.h > 0 ? containerSize.w / containerSize.h : undefined
 
-      // Layer 2: Position skills/resources in orbital arcs around their parent boo
-      const orbitalNodes = computeOrbitalPositions(
-        layoutedBooNodes,
-        nonBooNodes,
-        edges, // full edges needed for parent-child mapping
-        savedPositions,
-      )
+    void computeElkLayout(booNodes, primaryDepEdges, savedPositions, canvasAspect).then(
+      (layoutedBooNodes) => {
+        // Skip stale results — a newer ELK computation has started
+        if (generation !== elkGenerationRef.current) return
 
-      setNodes([...layoutedBooNodes, ...orbitalNodes])
-      setHasRunLayout(true)
+        // Layer 2: Position skills/resources in orbital arcs around their parent boo
+        const orbitalNodes = computeOrbitalPositions(
+          layoutedBooNodes,
+          nonBooNodes,
+          edges, // full edges needed for parent-child mapping
+          savedPositions,
+        )
 
-      // Initialize physics particles from layouted positions
-      requestAnimationFrame(() => {
-        const current = useGraphStore.getState()
-        graphPhysics.initialize(current.nodes, current.edges)
-      })
+        setNodes([...layoutedBooNodes, ...orbitalNodes])
+        setHasRunLayout(true)
 
-      requestAnimationFrame(() => {
-        void fitView({ padding: 0.15, duration: 500 })
-      })
-    })
+        // Initialize physics particles from layouted positions
+        requestAnimationFrame(() => {
+          const current = useGraphStore.getState()
+          graphPhysics.initialize(current.nodes, current.edges)
+        })
+
+        requestAnimationFrame(() => {
+          // Tight padding gives Boos visual prominence; maxZoom caps the fit so
+          // tiny graphs (1–2 Boos) don't blow up to fill the canvas.
+          // `nodes` filter excludes the invisible-by-default orbital children —
+          // see pickFittableNodes() above for why this matters.
+          const state = useGraphStore.getState()
+          void fitView({
+            padding: 0.04,
+            duration: 500,
+            maxZoom: 1.5,
+            nodes: pickFittableNodes(state.nodes, state.expandedBooNodeIds),
+          })
+        })
+      },
+    )
     // isLoaded gates layout until saved positions are fetched from SQLite.
   }, [nodesInitialized, nodes.length, layoutKey, isLoaded])
 
@@ -372,8 +550,6 @@ export function GhostGraph() {
   // ── Derive selected edge for explain panel ───────────────────────────────────
   const selectedEdge = selectedEdgeId ? (edges.find((e) => e.id === selectedEdgeId) ?? null) : null
 
-  const hasRunLayout = useGraphStore((s) => s.hasRunLayout)
-
   // ── Derive visibility for skill/resource nodes + their edges ──────────────
   // Boos and dependency edges are always visible. Skill / resource nodes are
   // hidden by default and revealed only when the user clicks (and thus
@@ -427,6 +603,7 @@ export function GhostGraph() {
 
   return (
     <div
+      ref={wrapperRef}
       style={{
         width: '100%',
         height: '100%',
@@ -502,6 +679,36 @@ export function GhostGraph() {
         {connectMode ? 'Drawing Edges' : 'Connect'}
       </button>
 
+      {/* MiniMap minimize/maximize toggle. Sits at the bottom-right corner —
+          where the MiniMap itself lives — so the relationship between the
+          control and what it controls reads at a glance. When the MiniMap is
+          shown, the toggle slides left of it and switches to an X icon. */}
+      <button
+        onClick={() => setShowMiniMap(!showMiniMap)}
+        title={showMiniMap ? 'Hide minimap' : 'Show minimap'}
+        aria-label={showMiniMap ? 'Hide minimap' : 'Show minimap'}
+        style={{
+          position: 'absolute',
+          bottom: 12,
+          right: showMiniMap ? minimapDims.w + 24 : 12,
+          zIndex: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 28,
+          height: 28,
+          padding: 0,
+          borderRadius: 8,
+          cursor: 'pointer',
+          border: '1px solid rgba(255,255,255,0.1)',
+          background: '#111827',
+          color: showMiniMap ? '#E94560' : 'rgba(232,232,232,0.5)',
+          transition: 'right 0.2s ease, color 0.15s, border-color 0.15s',
+        }}
+      >
+        {showMiniMap ? <X size={14} /> : <Map size={14} />}
+      </button>
+
       <ReactFlow
         nodes={visibleNodes}
         edges={visibleEdges}
@@ -541,28 +748,33 @@ export function GhostGraph() {
             borderRadius: 8,
           }}
         />
-        <MiniMap
-          style={{
-            background: '#111827',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 8,
-          }}
-          nodeColor={(node) => {
-            if (node.type === 'boo') return '#E94560'
-            // Skill / resource nodes inherit visibility from their parent
-            // Boo via `data.isVisible` (set by the visibleNodes memo).
-            // When the parent is collapsed, return 'transparent' so the
-            // MiniMap matches what the user sees in the main canvas.
-            // The `?? true` default keeps MiniMap behaviour correct in
-            // contexts that don't set the flag (e.g. MiniGraph) — but
-            // this MiniMap is only on the Ghost Graph anyway.
-            const isVisible = (node.data as { isVisible?: boolean }).isVisible ?? true
-            if (node.type === 'skill') return isVisible ? '#34D399' : 'transparent'
-            if (node.type === 'resource') return isVisible ? '#FBBF24' : 'transparent'
-            return '#FBBF24'
-          }}
-          maskColor="rgba(10,14,26,0.75)"
-        />
+        {showMiniMap && (
+          <MiniMap
+            style={{
+              background: '#111827',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 8,
+              width: minimapDims.w,
+              height: minimapDims.h,
+            }}
+            nodeColor={(node) => {
+              if (node.type === 'boo') return '#E94560'
+              // Skill / resource nodes inherit visibility from their parent
+              // Boo via `data.isVisible` (set by the visibleNodes memo).
+              // When the parent is collapsed, return 'transparent' so the
+              // MiniMap matches what the user sees in the main canvas.
+              // The `?? true` default keeps MiniMap behaviour correct in
+              // contexts that don't set the flag (e.g. MiniGraph) — but
+              // this MiniMap is only on the Ghost Graph anyway.
+              const isVisible = (node.data as { isVisible?: boolean }).isVisible ?? true
+              if (node.type === 'skill') return isVisible ? '#34D399' : 'transparent'
+              if (node.type === 'resource') return isVisible ? '#FBBF24' : 'transparent'
+              return '#FBBF24'
+            }}
+            nodeComponent={GhostGraphMiniMapNode}
+            maskColor="rgba(10,14,26,0.75)"
+          />
+        )}
       </ReactFlow>
 
       {/* Context menu */}
