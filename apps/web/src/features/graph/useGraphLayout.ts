@@ -34,10 +34,17 @@ const ELK_OPTIONS = {
   // averages out that rounding bias.
   'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
   'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
-  // Spacing tuned so the BOO_ENVELOPE (340px, accounts for orbital
+  // Spacing tuned so the BOO_ENVELOPE (280px, accounts for orbital
   // children when expanded) clears between siblings AND between layers
   // with room for the bezier-curve dependency edge + arrowhead.
   'elk.spacing.nodeNode': '100',
+  // Inter-layer spacing scales with the natural width of the widest
+  // layer. For star-shaped teams (one operator + many siblings on layer 2)
+  // ELK produces a wide-and-short layout that leaves lots of vertical
+  // empty space when fit into a wider-than-tall canvas. Spreading layers
+  // farther apart vertically pushes the layout aspect closer to the
+  // canvas aspect, eliminating the top / bottom empty bands without
+  // changing the topology. Set per-layout in computeElkLayout.
   'elk.layered.spacing.nodeNodeBetweenLayers': '140',
   'elk.padding': '[top=40, left=40, bottom=40, right=40]',
 }
@@ -46,11 +53,14 @@ const ELK_OPTIONS = {
 // The Boo renders centered inside this envelope (see BOO_FOOTPRINT in
 // `nodes/BooNode.tsx`) so the visible Boo shape (75–78px circle / 220×120
 // card) is anchored at envelope center — keeping ELK's sibling spacing math
-// honest about where edges actually converge. Sized to clear the card's
-// diagonal half-extent (~125px) plus the orbital children: skills on an
-// inner ring at 150–220px and resources on an outer ring at 230–285px.
-const BOO_ENVELOPE_WIDTH = 340
-const BOO_ENVELOPE_HEIGHT = 340
+// honest about where edges actually converge.
+//
+// Tuned tighter than the orbital outer ring (220 px) so fitView can pack the
+// canvas without leaving large empty bands on either side. Adjacent siblings'
+// OUTER rings can briefly overlap in the gap region when BOTH parents are
+// expanded — that's the trade-off for the boost in idle Boo legibility.
+const BOO_ENVELOPE_WIDTH = 280
+const BOO_ENVELOPE_HEIGHT = 280
 
 // ─── Default node dimensions (used before ReactFlow measures them) ────────────
 
@@ -66,6 +76,75 @@ function defaultHeight(nodeType: string | undefined): number {
   return 60
 }
 
+// ─── Aspect-ratio post-processing ────────────────────────────────────────────
+// ELK lays out a hierarchy by topology, not by canvas geometry. For a
+// star-shaped team (1 operator + many siblings) the output is wide-and-short;
+// for a chain it's narrow-and-tall. Either shape leaves significant empty
+// space when fit into a canvas with a different aspect ratio (notably the
+// group-chat graph row, which is much wider than tall).
+//
+// `stretchToAspect` rescales node positions so the layout's bounding box
+// aspect matches the target. It only ever spreads nodes apart (never
+// crowds them closer than ELK's collision-aware output), so the topology
+// reads the same — we just claim the canvas's empty bands.
+function stretchToAspect(nodes: GraphNode[], targetAspect: number): GraphNode[] {
+  if (nodes.length < 2 || !Number.isFinite(targetAspect) || targetAspect <= 0) {
+    return nodes
+  }
+  // Compute bbox + position range from Boo positions (skill / resource nodes
+  // follow their parent Boo via computeOrbitalPositions — they shouldn't
+  // drive aspect).
+  const boos = nodes.filter((n) => n.type === 'boo')
+  if (boos.length < 2) return nodes
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity
+  for (const n of boos) {
+    if (n.position.x < minX) minX = n.position.x
+    if (n.position.x > maxX) maxX = n.position.x
+    if (n.position.y < minY) minY = n.position.y
+    if (n.position.y > maxY) maxY = n.position.y
+  }
+  // posRange = distance between leftmost and rightmost POSITIONS (top-left
+  // corners). bbox = posRange + node footprint. We have to scale positions
+  // (not bboxes) to hit a target bbox aspect — so the scale derivation
+  // accounts for the fixed node width / height that doesn't stretch.
+  const posRangeX = maxX - minX
+  const posRangeY = maxY - minY
+  const bboxW = posRangeX + BOO_ENVELOPE_WIDTH
+  const bboxH = posRangeY + BOO_ENVELOPE_HEIGHT
+  if (bboxW <= 0 || bboxH <= 0) return nodes
+  const layoutAspect = bboxW / bboxH
+
+  // Stretch only — never compress (compressing would risk overlapping
+  // sibling envelopes within the same layer).
+  let xScale = 1
+  let yScale = 1
+  if (layoutAspect < targetAspect && posRangeX > 0) {
+    // Want bboxW' = bboxH * targetAspect → posRangeX' = bboxW' - envelope
+    const targetPosRange = Math.max(0, bboxH * targetAspect - BOO_ENVELOPE_WIDTH)
+    xScale = targetPosRange / posRangeX
+  } else if (layoutAspect > targetAspect && posRangeY > 0) {
+    const targetPosRange = Math.max(0, bboxW / targetAspect - BOO_ENVELOPE_HEIGHT)
+    yScale = targetPosRange / posRangeY
+  }
+  if (xScale === 1 && yScale === 1) return nodes
+  // Pivot at the position-range center so the stretch is symmetric.
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+  return nodes.map((n) => {
+    if (n.type !== 'boo') return n
+    return {
+      ...n,
+      position: {
+        x: cx + (n.position.x - cx) * xScale,
+        y: cy + (n.position.y - cy) * yScale,
+      },
+    }
+  })
+}
+
 // ─── Main layout function ─────────────────────────────────────────────────────
 
 /**
@@ -73,11 +152,17 @@ function defaultHeight(nodeType: string | undefined): number {
  *
  * Nodes that already have a saved position (from a previous user drag or a
  * persisted layout) keep their position; only truly new nodes are placed by ELK.
+ *
+ * `targetAspect`, when provided, runs a post-ELK pass that stretches the
+ * layout's bounding box to match the target aspect ratio (typically the
+ * canvas aspect). This claims empty bands left by ELK's topology-driven
+ * placement when the canvas is much wider or taller than the natural layout.
  */
 export async function computeElkLayout(
   nodes: GraphNode[],
   edges: GraphEdge[],
   savedPositions: LayoutData['positions'],
+  targetAspect?: number,
 ): Promise<GraphNode[]> {
   if (nodes.length === 0) return nodes
 
@@ -113,7 +198,7 @@ export async function computeElkLayout(
     return nodes
   }
 
-  return nodes.map((node) => {
+  const elkResolved = nodes.map((node) => {
     // Prefer user-saved position over ELK result
     if (savedPositions[node.id]) {
       return { ...node, position: savedPositions[node.id]! }
@@ -124,4 +209,6 @@ export async function computeElkLayout(
     }
     return node
   })
+
+  return targetAspect !== undefined ? stretchToAspect(elkResolved, targetAspect) : elkResolved
 }
