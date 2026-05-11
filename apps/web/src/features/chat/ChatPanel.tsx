@@ -4,9 +4,12 @@ import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
+import { useBooZeroStore } from '@/stores/booZero'
+import { useTeamStore } from '@/stores/team'
 import { sendChatMessage } from './chatSendOperation'
 import { groupEntriesToBlocks, MessageList, MessageComposer } from './chatComponents'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
+import { parseTeamOrAgentMention } from '@/lib/parseTeamOrAgentMention'
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
 
@@ -57,12 +60,55 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
     client && connectionStatus === 'connected' && agent && sessionKey && !isRunning,
   )
 
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  const teams = useTeamStore((s) => s.teams)
+  const isBooZeroChat = Boolean(agent && booZeroAgentId && agent.id === booZeroAgentId)
+
   const handleSend = useCallback(
     async (message: string) => {
       if (!client || !agent || !sessionKey) return
+
+      // In Boo Zero's individual chat, parse `@TeamName` mentions and inject
+      // that team's brief into the message preamble so Boo Zero can reason
+      // about the team's specifics. Outside of Boo Zero's chat (regular
+      // agent 1:1), this code path is bypassed entirely.
+      if (isBooZeroChat) {
+        const teamCandidates = teams.map((t) => ({ id: t.id, name: t.name }))
+        const mention = parseTeamOrAgentMention(message, teamCandidates)
+        if (mention.kind === 'team' && mention.targetId) {
+          let briefBlock: string | null = null
+          try {
+            const res = await fetch(
+              `/api/boo-zero/team-briefs/${encodeURIComponent(mention.targetId)}`,
+            )
+            if (res.ok) {
+              const body = (await res.json()) as { content?: string | null }
+              if (typeof body.content === 'string' && body.content.length > 0) {
+                briefBlock = `[Team Brief: ${mention.matchedName}]\n${body.content.trim()}\n[End Team Brief]`
+              }
+            }
+          } catch {
+            // Best-effort — missing brief is silently OK.
+          }
+          // Keep the user-visible message (with the @TeamName prefix) as the
+          // display text; send Boo Zero the brief + the user's intent.
+          const sendBody = briefBlock
+            ? `${briefBlock}\n\n${mention.cleanedMessage}`
+            : mention.cleanedMessage
+          await sendChatMessage({
+            client,
+            agentId: agent.id,
+            sessionKey,
+            message: sendBody,
+            displayText: message,
+          })
+          return
+        }
+      }
+
       await sendChatMessage({ client, agentId: agent.id, sessionKey, message })
     },
-    [client, agent, sessionKey],
+    [client, agent, sessionKey, isBooZeroChat, teams],
   )
 
   // ── No agent selected ───────────────────────────────────────────────────────

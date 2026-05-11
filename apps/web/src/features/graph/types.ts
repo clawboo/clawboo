@@ -19,6 +19,13 @@ export interface BooNodeData extends Record<string, unknown> {
   teamName?: string
   teamColor?: string
   teamEmoji?: string
+  /**
+   * When `true`, this Boo is Clawboo's universal team leader (Boo Zero).
+   * Rendering adds a crown badge + "Universal Leader" label, and the node
+   * is excluded from `TeamHaloLayer` grouping (it sits above teams, not
+   * inside them).
+   */
+  isUniversalLeader?: boolean
 }
 
 export interface SkillNodeData extends Record<string, unknown> {

@@ -28,6 +28,13 @@ import {
   teamAgentDELETE,
 } from './teams'
 import { teamOnboardingGET, teamOnboardingPATCH } from './teamOnboarding'
+import {
+  teamBriefGET,
+  teamBriefPUT,
+  teamBriefDELETE,
+  globalBriefGET,
+  globalBriefPUT,
+} from './booZero'
 
 const router: RouterType = Router()
 
@@ -90,5 +97,14 @@ router.delete('/api/teams/:id/agents/:agentId', teamAgentDELETE)
 // Team onboarding (per-team boolean flags for "Know Your Team" gate)
 router.get('/api/teams/:id/onboarding', teamOnboardingGET)
 router.patch('/api/teams/:id/onboarding', teamOnboardingPATCH)
+
+// Boo Zero context — per-team briefs + global brief.
+// Per-team briefs are SQLite-backed and FK-cascade on team delete; the
+// global brief lives in the settings key/value table.
+router.get('/api/boo-zero/team-briefs/:teamId', teamBriefGET)
+router.put('/api/boo-zero/team-briefs/:teamId', teamBriefPUT)
+router.delete('/api/boo-zero/team-briefs/:teamId', teamBriefDELETE)
+router.get('/api/boo-zero/global-brief', globalBriefGET)
+router.put('/api/boo-zero/global-brief', globalBriefPUT)
 
 export { router as apiRouter }

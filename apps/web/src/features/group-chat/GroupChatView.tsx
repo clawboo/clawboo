@@ -16,6 +16,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
+import { useBooZeroStore } from '@/stores/booZero'
 import { buildTeamSessionKey } from '@/lib/sessionUtils'
 
 export function GroupChatView({ teamId }: { teamId: string }) {
@@ -23,6 +24,11 @@ export function GroupChatView({ teamId }: { teamId: string }) {
   const agents = useFleetStore((s) => s.agents)
   const client = useConnectionStore((s) => s.client)
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  const booZeroAgent = useMemo(
+    () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
+    [agents, booZeroAgentId],
+  )
 
   const {
     agentsIntroduced,
@@ -83,6 +89,7 @@ export function GroupChatView({ teamId }: { teamId: string }) {
             teamId={teamId}
             team={team}
             teamAgents={teamAgents}
+            booZeroAgent={booZeroAgent}
             client={client}
             agentsIntroduced={agentsIntroduced}
             userIntroduced={userIntroduced}

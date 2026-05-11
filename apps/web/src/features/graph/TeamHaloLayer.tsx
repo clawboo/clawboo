@@ -44,7 +44,10 @@ export interface TeamHaloGroup {
 
 /**
  * Groups graph nodes by `BooNodeData.teamId`. Skills/resources and teamless
- * Boos are excluded. Returns a Map keyed by teamId preserving insertion order.
+ * Boos are excluded. Boo Zero (the universal team leader) is ALSO excluded
+ * even if it ever appears with a teamId — the universal leader sits above
+ * teams in the org chart, not inside any team's hull. Returns a Map keyed
+ * by teamId preserving insertion order.
  */
 export function groupNodesByTeam(nodes: GraphNode[]): Map<string, TeamHaloGroup> {
   const groups = new Map<string, TeamHaloGroup>()
@@ -52,6 +55,7 @@ export function groupNodesByTeam(nodes: GraphNode[]): Map<string, TeamHaloGroup>
     if (node.type !== 'boo') continue
     const data = node.data as BooNodeData
     if (!data.teamId) continue
+    if (data.isUniversalLeader) continue
     const existing = groups.get(data.teamId)
     if (existing) {
       existing.nodes.push(node)

@@ -27,7 +27,19 @@ import { getMergedTeamEntries } from './groupChatSendOperation'
 export interface UseTeamOrchestrationParams {
   teamId: string | null
   teamAgents: AgentState[]
+  /**
+   * The team-internal lead (CTO, Team Lead, etc., detected via
+   * `detectGenuineLeader` at deploy time). May be null when the team has
+   * no genuine leader role. Only used as a relay-hub fallback when Boo
+   * Zero is unavailable.
+   */
   leaderAgentId: string | null
+  /**
+   * Boo Zero — the universal team leader. When present, Boo Zero is the
+   * relay hub: every teammate's response gets relayed to Boo Zero, and
+   * Boo Zero's own `<delegate>` blocks get routed to teammates.
+   */
+  booZeroAgent?: AgentState | null
   client: GatewayClientLike | null
   enabled?: boolean
   /**
@@ -49,6 +61,8 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
   teamAgentsRef.current = params.teamAgents
   const leaderAgentIdRef = useRef(params.leaderAgentId)
   leaderAgentIdRef.current = params.leaderAgentId
+  const booZeroAgentRef = useRef(params.booZeroAgent ?? null)
+  booZeroAgentRef.current = params.booZeroAgent ?? null
   const clientRef = useRef(params.client)
   clientRef.current = params.client
   const teamIdRef = useRef(teamId)
@@ -67,9 +81,21 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
     const processNewEntries = () => {
       const currentTeamId = teamIdRef.current
       const currentClient = clientRef.current
-      const currentAgents = teamAgentsRef.current
-      const currentLeader = leaderAgentIdRef.current
+      const currentTeamMembers = teamAgentsRef.current
+      const currentInternalLead = leaderAgentIdRef.current
+      const currentBooZero = booZeroAgentRef.current
+      // "Effective participants" = team members + Boo Zero. Boo Zero's
+      // assistant entries can contain `<delegate>` blocks too, so we have
+      // to scan its transcript for delegation patterns; and the delegation
+      // target may be any participant (including Boo Zero).
+      const currentAgents = currentBooZero
+        ? [...currentTeamMembers, currentBooZero]
+        : currentTeamMembers
       if (!currentTeamId || !currentClient || currentAgents.length === 0) return
+      // Relay hub: Boo Zero (when available) — every teammate's response is
+      // relayed to Boo Zero so the universal leader stays in the loop. Fall
+      // back to the team-internal lead when Boo Zero is unavailable.
+      const relayHubId = currentBooZero?.id ?? currentInternalLead
 
       const transcripts = useChatStore.getState().transcripts
       const lastCounts = lastCountsRef.current
@@ -104,9 +130,15 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
           for (const delegation of delegations) {
             const sendDelegation = async (retryCount = 0) => {
               try {
-                // Guard: target agent may have been deleted during processing
-                const freshAgents = teamAgentsRef.current
-                if (!freshAgents.some((a) => a.id === delegation.targetAgentId)) return
+                // Guard: target agent may have been deleted during processing.
+                // The target may be Boo Zero — check both team members AND
+                // Boo Zero (Boo Zero is teamless so not in `teamAgentsRef`).
+                const freshTeamMembers = teamAgentsRef.current
+                const freshBooZero = booZeroAgentRef.current
+                const freshParticipants = freshBooZero
+                  ? [...freshTeamMembers, freshBooZero]
+                  : freshTeamMembers
+                if (!freshParticipants.some((a) => a.id === delegation.targetAgentId)) return
 
                 // Guard: target is already processing a team message — retry once after 2s
                 if (hasTeamChatOverride(delegation.targetAgentId)) {
@@ -124,8 +156,14 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
                 // Build context preamble from merged transcript — also injects
                 // the user intro so the target agent knows who the user is
                 // (delegations are agent-to-agent, no fresh user message).
-                const contextEntries = getMergedTeamEntries(currentTeamId, currentAgents)
-                const targetAgent = currentAgents.find((a) => a.id === delegation.targetAgentId)
+                // Pass team members + Boo Zero as separate args so the merge
+                // includes Boo Zero's transcript without double-counting.
+                const contextEntries = getMergedTeamEntries(
+                  currentTeamId,
+                  freshTeamMembers,
+                  freshBooZero,
+                )
+                const targetAgent = freshParticipants.find((a) => a.id === delegation.targetAgentId)
                 const preamble = buildTeamContextPreamble({
                   entries: contextEntries,
                   targetAgentName: targetAgent?.name ?? '',
@@ -168,7 +206,7 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             const targets = determineRelayTargets({
               respondingAgentId: sourceAgentId,
               teamAgents: currentAgents.map((a) => ({ id: a.id, name: a.name })),
-              leaderAgentId: currentLeader,
+              leaderAgentId: relayHubId,
               delegationSourceId: delegationSource,
             })
 
@@ -181,16 +219,24 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             for (const targetId of targets) {
               void (async () => {
                 try {
-                  // Guard: target agent may have been deleted during processing
-                  const freshAgents = teamAgentsRef.current
-                  const targetAgent = freshAgents.find((a) => a.id === targetId)
+                  // Guard: target agent may have been deleted during processing.
+                  // Relay targets can include Boo Zero — check both team members
+                  // and (when present) Boo Zero before bailing out.
+                  const freshTeamMembers = teamAgentsRef.current
+                  const freshBooZero = booZeroAgentRef.current
+                  const targetAgent =
+                    freshTeamMembers.find((a) => a.id === targetId) ??
+                    (freshBooZero && freshBooZero.id === targetId ? freshBooZero : null)
                   if (!targetAgent) return
 
                   const targetTeamSk = buildTeamSessionKey(targetId, currentTeamId)
 
                   // Wake sleeping agent before relaying (best-effort)
                   if (!isAgentAwake(targetId, currentTeamId)) {
-                    const teammates = freshAgents
+                    const teammatesPool = freshBooZero
+                      ? [...freshTeamMembers, freshBooZero]
+                      : freshTeamMembers
+                    const teammates = teammatesPool
                       .filter((a) => a.id !== targetId)
                       .map((a) => ({ name: a.name, role: a.name }))
                     const wakeMsg = buildTeamWakeMessage({
@@ -231,9 +277,14 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
       }
     }
 
-    // Initialize lastCounts with current state to avoid processing historical entries
+    // Initialize lastCounts with current state to avoid processing historical
+    // entries. Include Boo Zero's team-scoped session so its older messages
+    // aren't re-scanned for delegations on mount.
     const transcripts = useChatStore.getState().transcripts
-    for (const agent of params.teamAgents) {
+    const seedAgents = params.booZeroAgent
+      ? [...params.teamAgents, params.booZeroAgent]
+      : params.teamAgents
+    for (const agent of seedAgents) {
       const teamSk = buildTeamSessionKey(agent.id, teamId)
       const entries = transcripts.get(teamSk)
       lastCountsRef.current.set(teamSk, entries?.length ?? 0)

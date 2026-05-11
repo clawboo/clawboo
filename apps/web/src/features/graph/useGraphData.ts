@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
+import { useBooZeroStore } from '@/stores/booZero'
 import type { Team } from '@/stores/team'
 import { useGraphStore } from './store'
 import { parseToolsMd } from './parsers/parseToolsMd'
 import { parseAgentsMd } from './parsers/parseAgentsMd'
 import { computeSpanningTree } from './computeSpanningTree'
-import { resolveTeamLeader } from '@/lib/resolveTeamLeader'
+import { resolveTeamInternalLead } from '@/lib/resolveTeamLeader'
 import type { AgentState } from '@/stores/fleet'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData, ResourceNodeData } from './types'
 
@@ -99,20 +100,35 @@ export function useGraphData(): void {
   }, [client, agentStructureKey, refreshKey]) // intentional: string key covers structural changes; refreshKey for skill install
 
   // ── 2. Structural rebuild ────────────────────────────────────────────────────
-  // Resolve the active team's leader → spanning-tree root for the dependency
-  // graph. When no team is selected (showing all agents), we pass null and
-  // `buildGraphElements` skips the spanning-tree filter (all edges treated
-  // as primary, fall back to the full graph view).
-  const resolvedLeaderAgentId = useMemo(() => {
+  // Resolve Boo Zero (universal team leader). When a team is selected AND Boo
+  // Zero is present, `buildGraphElements` synthesizes a Boo-Zero node + edges
+  // from Boo Zero → genuine internal lead (if any) → members, OR directly to
+  // members when there's no internal lead. Boo Zero becomes the spanning-tree
+  // root, replacing the old "first team member" fallback.
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  const booZeroAgent = useMemo(
+    () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
+    [agents, booZeroAgentId],
+  )
+
+  const teamInternalLeadId = useMemo(() => {
     if (!selectedTeamId) return null
     const team = teams.find((t) => t.id === selectedTeamId)
     if (!team) return null
-    return resolveTeamLeader(selectedTeamId, team.leaderAgentId, filteredAgents)
+    return resolveTeamInternalLead(selectedTeamId, team.leaderAgentId, filteredAgents)
   }, [selectedTeamId, teams, filteredAgents])
 
   const { rawNodes, rawEdges } = useMemo(
-    () => buildGraphElements(filteredAgents, agentFiles, teams, resolvedLeaderAgentId),
-    [agentStructureKey, agentFiles, teamsMetaKey, resolvedLeaderAgentId], // intentional: string keys
+    () =>
+      buildGraphElements(
+        filteredAgents,
+        agentFiles,
+        teams,
+        teamInternalLeadId,
+        booZeroAgent,
+        selectedTeamId,
+      ),
+    [agentStructureKey, agentFiles, teamsMetaKey, teamInternalLeadId, booZeroAgent, selectedTeamId], // intentional: string keys + scalars
   )
 
   useEffect(() => {
@@ -162,16 +178,30 @@ export function buildGraphElements(
   agentFiles: Map<string, { toolsMd: string | null; agentsMd: string | null }>,
   teams: Team[] = [],
   /**
-   * The team leader's agent ID — used as the spanning-tree root over
-   * dependency edges. Each Boo gets ONE primary parent (the BFS edge that
-   * first reached it); all other dependency edges are tagged secondary
-   * and rendered hover-only.
+   * The team-internal lead's agent ID (CTO, Team Lead, etc.) when a genuine
+   * leader role is detected. Boo Zero (when present) is the spanning-tree
+   * ROOT; the internal lead, if any, sits one layer below as the bridge
+   * between Boo Zero and the rest of the team.
    *
-   * Pass `null` to skip the spanning-tree filter — every dependency edge
-   * is treated as primary. Used when no team is selected (showing all
-   * agents) or when the leader can't be resolved.
+   * Pass `null` when no internal lead exists — Boo Zero connects directly
+   * to every team member.
    */
-  leaderAgentId: string | null = null,
+  teamInternalLeadId: string | null = null,
+  /**
+   * Boo Zero — the universal team leader. When present AND a team is
+   * selected, we synthesize a Boo-Zero `BooNode` (`isUniversalLeader: true`)
+   * plus synthetic dependency edges so the spanning tree roots from Boo Zero.
+   * When no team is selected (all-agents view), Boo Zero appears as a
+   * regular node (it has `teamId: null`); we just flip the `isUniversalLeader`
+   * flag on its existing `BooNodeData`.
+   */
+  booZeroAgent: AgentState | null = null,
+  /**
+   * The currently selected team id, or null for the all-agents view. We need
+   * this separately from `agents` because the synthetic-edge logic only fires
+   * when a team is being shown.
+   */
+  selectedTeamId: string | null = null,
 ): { rawNodes: GraphNode[]; rawEdges: GraphEdge[] } {
   const depEdges: GraphEdge[] = []
   const skillNodes: GraphNode[] = []
@@ -183,9 +213,20 @@ export function buildGraphElements(
   const agentNameToId = new Map(agents.map((a) => [a.name.toLowerCase().trim(), a.id]))
   const teamsById = new Map(teams.map((t) => [t.id, t]))
 
-  // BooNodes — one per agent
+  // BooNodes — one per agent. When a team is selected AND Boo Zero exists,
+  // we synthesize a Boo-Zero node here too even though Boo Zero is teamless
+  // (filtered out of `agents`). The synthetic Boo Zero gets
+  // `isUniversalLeader: true` so the renderer adds the crown badge and the
+  // halo layer excludes it from team grouping.
+  const agentsAlreadyContainsBooZero = booZeroAgent
+    ? agents.some((a) => a.id === booZeroAgent.id)
+    : false
+  const synthesizeBooZeroNode =
+    Boolean(booZeroAgent) && Boolean(selectedTeamId) && !agentsAlreadyContainsBooZero
+
   const booNodes: GraphNode[] = agents.map((agent) => {
     const team = agent.teamId ? teamsById.get(agent.teamId) : null
+    const isUniversalLeader = Boolean(booZeroAgent && agent.id === booZeroAgent.id)
     return {
       id: `boo-${agent.id}`,
       type: 'boo' as const,
@@ -201,10 +242,31 @@ export function buildGraphElements(
           teamColor: team.color,
           teamEmoji: team.icon,
         }),
+        ...(isUniversalLeader ? { isUniversalLeader: true } : {}),
       } satisfies BooNodeData,
       position: { x: 0, y: 0 },
     }
   })
+
+  if (synthesizeBooZeroNode && booZeroAgent) {
+    booNodes.push({
+      id: `boo-${booZeroAgent.id}`,
+      type: 'boo' as const,
+      data: {
+        agentId: booZeroAgent.id,
+        name: booZeroAgent.name,
+        status: booZeroAgent.status ?? 'idle',
+        model: booZeroAgent.model,
+        isStreaming: booZeroAgent.status === 'running',
+        // Boo Zero stays `teamId: null` even in a team-selected view — the
+        // `TeamHaloLayer` reads `data.teamId` for grouping and intentionally
+        // omits Boo Zero from any team hull.
+        teamId: null,
+        isUniversalLeader: true,
+      } satisfies BooNodeData,
+      position: { x: 0, y: 0 },
+    })
+  }
 
   for (const agent of agents) {
     const files = agentFiles.get(agent.id)
@@ -287,15 +349,75 @@ export function buildGraphElements(
     }
   }
 
-  // ── Spanning tree over dependency edges (org-chart filter) ──────────────
-  // BFS from the team leader to determine each Boo's "primary parent." All
-  // other dependency edges are tagged `isPrimary: false` so the renderer
-  // can hide them by default and reveal on hover. ELK only sees primary
-  // edges, which produces clean top-down rank structure.
+  // ── Synthetic Boo-Zero → team edges ─────────────────────────────────────
+  // The Plan agent's risk #2: no team agent's AGENTS.md mentions Boo Zero
+  // in a form the parser recognizes, so the undirected BFS in
+  // `computeSpanningTree` rooted at Boo Zero would return an empty tree
+  // (every team member becomes an orphan). We synthesize edges from Boo
+  // Zero to the team-internal lead (when present, lead → members cascade
+  // naturally through existing AGENTS.md routing) OR directly to every
+  // team member.
   //
-  // When `leaderAgentId` is null (no team selected) we skip the filter
-  // and treat every dependency edge as primary — fall back to full graph.
-  const rootNodeId = leaderAgentId ? `boo-${leaderAgentId}` : null
+  // Synthetic edges are tagged `isSynthetic: true` so consumers that scan
+  // AGENTS.md routing data (e.g. "Refresh Protocol") can skip them. They
+  // route through the same handle topology as regular dependency edges.
+  if (booZeroAgent && selectedTeamId) {
+    const teamMemberIds = agents.filter((a) => a.teamId === selectedTeamId).map((a) => a.id)
+    if (teamInternalLeadId && teamMemberIds.includes(teamInternalLeadId)) {
+      // Boo Zero → internal lead. Existing AGENTS.md edges among
+      // (lead, members) will fan out via the spanning tree.
+      depEdges.push({
+        id: `dep-syn-${booZeroAgent.id}-${teamInternalLeadId}`,
+        type: 'dependency',
+        source: `boo-${booZeroAgent.id}`,
+        sourceHandle: 'center',
+        target: `boo-${teamInternalLeadId}`,
+        targetHandle: 'center-target',
+        data: { isSynthetic: true },
+      })
+      // Also synthesize edges from the lead to each non-lead member so the
+      // spanning tree always reaches everyone even if AGENTS.md routing is
+      // sparse (defensive — many awesome-openclaw teams have hub-spoke
+      // routing already, but synthetic backstops every shape).
+      for (const memberId of teamMemberIds) {
+        if (memberId === teamInternalLeadId) continue
+        depEdges.push({
+          id: `dep-syn-${teamInternalLeadId}-${memberId}`,
+          type: 'dependency',
+          source: `boo-${teamInternalLeadId}`,
+          sourceHandle: 'center',
+          target: `boo-${memberId}`,
+          targetHandle: 'center-target',
+          data: { isSynthetic: true },
+        })
+      }
+    } else {
+      // No internal lead → Boo Zero connects to every team member directly.
+      for (const memberId of teamMemberIds) {
+        depEdges.push({
+          id: `dep-syn-${booZeroAgent.id}-${memberId}`,
+          type: 'dependency',
+          source: `boo-${booZeroAgent.id}`,
+          sourceHandle: 'center',
+          target: `boo-${memberId}`,
+          targetHandle: 'center-target',
+          data: { isSynthetic: true },
+        })
+      }
+    }
+  }
+
+  // ── Spanning tree over dependency edges (org-chart filter) ──────────────
+  // BFS from the spanning-tree root. When Boo Zero is present in a
+  // team-selected view, Boo Zero is the root. Otherwise we fall back to
+  // the team-internal lead. When neither exists (all-agents view), we skip
+  // the filter and treat every dependency edge as primary.
+  const rootNodeId =
+    booZeroAgent && selectedTeamId
+      ? `boo-${booZeroAgent.id}`
+      : teamInternalLeadId
+        ? `boo-${teamInternalLeadId}`
+        : null
   const treeResult = rootNodeId
     ? computeSpanningTree(
         depEdges.map((e) => ({ id: e.id, source: e.source, target: e.target })),

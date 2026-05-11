@@ -6,7 +6,8 @@ import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
-import { resolveTeamLeader } from '@/lib/resolveTeamLeader'
+import { resolveTeamInternalLead } from '@/lib/resolveTeamLeader'
+import { useBooZeroStore } from '@/stores/booZero'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { sendGroupChatMessage } from './groupChatSendOperation'
 import { useTeamOrchestration } from './useTeamOrchestration'
@@ -49,7 +50,16 @@ export function GroupChatPanel({
   const streamingTextMap = useChatStore((s) => s.streamingText)
 
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
-  const leaderAgentId = resolveTeamLeader(teamId, team?.leaderAgentId ?? null, agents)
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  const booZeroAgent = useMemo(
+    () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
+    [agents, booZeroAgentId],
+  )
+  // Team-internal lead (CTO, Team Lead, etc., detected via
+  // `detectGenuineLeader` at deploy time). Surfaced separately for relay
+  // routing under Boo Zero — `sendGroupChatMessage` and `useTeamOrchestration`
+  // each prefer `booZeroAgent` over this when present.
+  const teamInternalLeadId = resolveTeamInternalLead(teamId, team?.leaderAgentId ?? null, agents)
 
   // ── Orchestration toggle (persisted in localStorage) ──────────────────
   const [orchestrationEnabled, setOrchestrationEnabled] = useState<boolean>(() => {
@@ -61,39 +71,54 @@ export function GroupChatPanel({
   useTeamOrchestration({
     teamId,
     teamAgents,
-    leaderAgentId,
+    // Pass the team-internal lead — Boo Zero is the actual relay hub when
+    // present, so the orchestration hook prefers Boo Zero (see its impl).
+    leaderAgentId: teamInternalLeadId,
+    booZeroAgent,
     client,
     enabled: connectionStatus === 'connected' && orchestrationEnabled,
     userIntroText,
   })
 
+  // "Effective participants" — DB team members + Boo Zero (when present).
+  // Boo Zero is teamless in the DB but participates in every team chat via
+  // its team-scoped sessionKey. Every iteration that touches per-agent
+  // transcript / session / lookup state runs over this list, NOT
+  // `teamAgents` alone, so Boo Zero's responses appear in the merged
+  // transcript with its name + avatar (not "Agent").
+  const participants = useMemo(
+    () => (booZeroAgent ? [...teamAgents, booZeroAgent] : teamAgents),
+    [teamAgents, booZeroAgent],
+  )
+
   // Agent lookup for resolving names from sessionKeys
   const agentLookup = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>()
-    for (const a of teamAgents) {
+    for (const a of participants) {
       map.set(a.id, { id: a.id, name: a.name })
     }
     return map
-  }, [teamAgents])
+  }, [participants])
 
-  // For @mention autocomplete and visual rendering
+  // For @mention autocomplete and visual rendering — include Boo Zero so
+  // the user can `@Boo Zero` explicitly in a team chat to address it.
   const mentionAgentList = useMemo(
-    () => teamAgents.map((a) => ({ id: a.id, name: a.name })),
-    [teamAgents],
+    () => participants.map((a) => ({ id: a.id, name: a.name })),
+    [participants],
   )
-  const knownAgentNames = useMemo(() => teamAgents.map((a) => a.name), [teamAgents])
+  const knownAgentNames = useMemo(() => participants.map((a) => a.name), [participants])
   const composerRef = useRef<MessageComposerHandle>(null)
 
   // Team-scoped sessionKeys for isolation from 1:1 agent chat
   const teamSessionKeys = useMemo(
-    () => new Map(teamAgents.map((a) => [a.id, buildTeamSessionKey(a.id, teamId)])),
-    [teamAgents, teamId],
+    () => new Map(participants.map((a) => [a.id, buildTeamSessionKey(a.id, teamId)])),
+    [participants, teamId],
   )
 
   // ── Merge all team transcripts (using team-scoped sessionKeys) ────────────
   const mergedEntries = useMemo(() => {
     const all: TranscriptEntry[] = []
-    for (const agent of teamAgents) {
+    for (const agent of participants) {
       const teamSk = teamSessionKeys.get(agent.id)
       if (!teamSk) continue
       const entries = transcripts.get(teamSk)
@@ -105,13 +130,13 @@ export function GroupChatPanel({
       return a.sequenceKey - b.sequenceKey
     })
     return all
-  }, [teamAgents, teamSessionKeys, transcripts])
+  }, [participants, teamSessionKeys, transcripts])
 
   const blocks = useMemo(() => groupEntriesToBlocks(mergedEntries), [mergedEntries])
 
-  // ── Load persisted history for all team agents (team-scoped sessionKeys) ──
+  // ── Load persisted history for all participants (team-scoped sessionKeys) ──
   useEffect(() => {
-    for (const agent of teamAgents) {
+    for (const agent of participants) {
       const teamSk = teamSessionKeys.get(agent.id)
       if (!teamSk) continue
       const existing = useChatStore.getState().transcripts.get(teamSk)
@@ -126,7 +151,7 @@ export function GroupChatPanel({
         })
         .catch(() => {})
     }
-  }, [teamAgents, teamSessionKeys])
+  }, [participants, teamSessionKeys])
 
   // ── Auto-scroll ───────────────────────────────────────────────────────────
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -146,10 +171,11 @@ export function GroupChatPanel({
     })
   }, [scrollToBottom])
 
-  // Collect all streaming texts for team agents (using team-scoped sessionKeys)
+  // Collect all streaming texts for participants (using team-scoped sessionKeys).
+  // Boo Zero's stream lands in the merged transcript with its own avatar/name.
   const activeStreams = useMemo(() => {
     const streams: { agentId: string; agentName: string; text: string }[] = []
-    for (const agent of teamAgents) {
+    for (const agent of participants) {
       const teamSk = teamSessionKeys.get(agent.id)
       if (!teamSk) continue
       const text = streamingTextMap.get(teamSk)
@@ -158,7 +184,7 @@ export function GroupChatPanel({
       }
     }
     return streams
-  }, [teamAgents, teamSessionKeys, streamingTextMap])
+  }, [participants, teamSessionKeys, streamingTextMap])
 
   const anyRunning = teamAgents.some((a) => a.status === 'running')
 
@@ -186,14 +212,18 @@ export function GroupChatPanel({
         client,
         teamId,
         teamName: team?.name ?? 'Team',
-        leaderAgentId,
+        // `leaderAgentId` here is the team-internal lead (Boo-Zero-fallback);
+        // `sendGroupChatMessage` prefers `booZeroAgent` over this as the
+        // routing target.
+        leaderAgentId: teamInternalLeadId,
         teamAgents,
+        booZeroAgent,
         message,
         displayText: message, // raw message including @mention for transcript display
         userIntroText,
       })
     },
-    [client, teamId, team?.name, leaderAgentId, teamAgents, userIntroText],
+    [client, teamId, team?.name, teamInternalLeadId, teamAgents, booZeroAgent, userIntroText],
   )
 
   // ── Chip tag handler ───────────────────────────────────────────────────────

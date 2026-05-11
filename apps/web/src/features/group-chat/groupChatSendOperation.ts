@@ -36,8 +36,20 @@ export interface GroupChatSendParams {
   client: GatewayClientLike
   teamId: string
   teamName: string
+  /**
+   * The team-internal lead (CTO, Team Lead, etc.) — under Boo Zero. May be
+   * null when no genuine leader role was detected in the team. Only used as
+   * a routing fallback when Boo Zero is missing.
+   */
   leaderAgentId: string | null
   teamAgents: AgentState[]
+  /**
+   * Boo Zero, the universal team leader. When present, this is the default
+   * routing target for messages without an explicit `@mention`. Boo Zero is
+   * teamless (`teamId === null`) but participates in every team's chat via
+   * its team-scoped sessionKey: `agent:<booZeroId>:team:<teamId>`.
+   */
+  booZeroAgent?: AgentState | null
   message: string
   /** Original message with @mention for display in transcript. */
   displayText?: string
@@ -148,13 +160,26 @@ async function wakeTeamAgents(
 
 /**
  * Read all team transcripts from the chat store and merge into
- * TeamContextEntry[] for buildTeamContextPreamble.
+ * `TeamContextEntry[]` for `buildTeamContextPreamble`.
+ *
+ * When `booZeroAgent` is provided, its team-scoped session for this team is
+ * also merged in — Boo Zero is the universal team leader and its own
+ * contributions to the team's conversation belong in the merged context.
+ *
+ * `booZeroAgent` is intentionally separate from `teamAgents` (which is
+ * filtered by `agents.teamId === teamId`) because Boo Zero stays teamless
+ * in the DB.
  */
-export function getMergedTeamEntries(teamId: string, teamAgents: AgentState[]): TeamContextEntry[] {
+export function getMergedTeamEntries(
+  teamId: string,
+  teamAgents: AgentState[],
+  booZeroAgent?: AgentState | null,
+): TeamContextEntry[] {
   const transcripts = useChatStore.getState().transcripts
   const entries: TeamContextEntry[] = []
+  const participants = booZeroAgent ? [...teamAgents, booZeroAgent] : teamAgents
 
-  for (const agent of teamAgents) {
+  for (const agent of participants) {
     const teamSk = buildTeamSessionKey(agent.id, teamId)
     const transcript = transcripts.get(teamSk)
     if (!transcript) continue
@@ -173,6 +198,32 @@ export function getMergedTeamEntries(teamId: string, teamAgents: AgentState[]): 
   return entries
 }
 
+// ─── Team brief fetch ────────────────────────────────────────────────────────
+// Boo Zero reads the team brief on every message so it understands team
+// dynamics. SQLite is the source of truth (`/api/boo-zero/team-briefs/:teamId`);
+// when the brief is missing or the API errors, we fall through without it —
+// Boo Zero's general behavior comes from its global brief + on-disk identity.
+
+interface TeamBriefResponse {
+  content?: string | null
+}
+
+async function fetchTeamBrief(teamId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/boo-zero/team-briefs/${encodeURIComponent(teamId)}`)
+    if (!res.ok) return null
+    const body = (await res.json()) as TeamBriefResponse
+    return typeof body.content === 'string' && body.content.length > 0 ? body.content : null
+  } catch {
+    return null
+  }
+}
+
+/** Wraps the brief markdown in the structured envelope Boo Zero recognizes. */
+function buildTeamBriefBlock(teamName: string, brief: string): string {
+  return `[Team Brief: ${teamName}]\n${brief.trim()}\n[End Team Brief]`
+}
+
 // ─── Main operation ──────────────────────────────────────────────────────────
 
 export async function sendGroupChatMessage(params: GroupChatSendParams): Promise<void> {
@@ -182,34 +233,49 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
     teamName,
     leaderAgentId,
     teamAgents,
+    booZeroAgent,
     message,
     displayText,
     userIntroText,
   } = params
 
-  // Parse @mention to determine target agent
-  const { targetAgentId: mentionedId, cleanedMessage } = parseMention(
-    message,
-    teamAgents.map((a) => ({ id: a.id, name: a.name })),
-  )
+  // Build the @-mention candidate list: team members + Boo Zero. The user can
+  // address Boo Zero directly with `@<BooZero Name>` to force routing to it
+  // even in a team chat.
+  const mentionCandidates = booZeroAgent
+    ? [...teamAgents, booZeroAgent].map((a) => ({ id: a.id, name: a.name }))
+    : teamAgents.map((a) => ({ id: a.id, name: a.name }))
 
-  // Resolve target: @mentioned > leader > first team agent
-  const targetId = mentionedId ?? leaderAgentId ?? teamAgents[0]?.id
+  const { targetAgentId: mentionedId, cleanedMessage } = parseMention(message, mentionCandidates)
+
+  // Routing priority: @mention > Boo Zero (universal leader) > team-internal
+  // lead > first team member. Boo Zero is the new no-mention default.
+  const targetId = mentionedId ?? booZeroAgent?.id ?? leaderAgentId ?? teamAgents[0]?.id ?? null
   if (!targetId) return
 
-  const target = teamAgents.find((a) => a.id === targetId)
+  // Resolve the target. It may be a team member OR Boo Zero (which is not
+  // in `teamAgents` because it's teamless).
+  const target =
+    teamAgents.find((a) => a.id === targetId) ??
+    (booZeroAgent && booZeroAgent.id === targetId ? booZeroAgent : null)
   if (!target) return
 
-  // Compute team-scoped sessionKey for isolation from 1:1 chat
+  // Compute team-scoped sessionKey for isolation from 1:1 chat. Boo Zero
+  // gets its own team-scoped session per team — same scheme.
   const targetTeamSk = buildTeamSessionKey(target.id, teamId)
 
   // Set override so Gateway events (which use main sessionKey) get redirected
   // to the team session. Must be set BEFORE sending so events are captured.
+  // The override is pending until the first event with a runId promotes it.
   setTeamChatOverride(target.id, targetTeamSk)
 
   // ── Auto-wake agents that don't have active team sessions ─────────────────
+  // Include Boo Zero in the wake set (when present) so its team-scoped
+  // session exists on the Gateway — required for Boo Zero to receive
+  // relays from teammates.
   if (!wakeInFlight.has(teamId)) {
-    const nonTargetIds = teamAgents.filter((a) => a.id !== targetId).map((a) => a.id)
+    const wakeCandidates = booZeroAgent ? [...teamAgents, booZeroAgent] : teamAgents
+    const nonTargetIds = wakeCandidates.filter((a) => a.id !== targetId).map((a) => a.id)
     const sleeping = findSleepingAgents(nonTargetIds, teamId)
 
     if (sleeping.length > 0) {
@@ -220,7 +286,7 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
         const needsWake = sleeping.filter((id) => !confirmed.has(id))
 
         if (needsWake.length > 0) {
-          await wakeTeamAgents(client, teamAgents, needsWake, teamId, teamName, targetTeamSk)
+          await wakeTeamAgents(client, wakeCandidates, needsWake, teamId, teamName, targetTeamSk)
           // Settle delay — let agents initialize before actual message
           await new Promise((r) => setTimeout(r, WAKEUP_SETTLE_MS))
         }
@@ -231,18 +297,30 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
   }
 
   // ── Build context preamble for target agent ──────────────────────────────
-  // Always inject the user intro (if available) so the agent knows who
-  // they're talking to on every message — Gateway SOUL.md persistence is
-  // unreliable, so the preamble is the actual delivery mechanism.
-  const contextEntries = getMergedTeamEntries(teamId, teamAgents)
+  // Boo Zero's responses belong in the merged team context — include them
+  // in the merge so when Boo Zero delegates to a teammate (or vice versa)
+  // the recipient sees the full team conversation.
+  const contextEntries = getMergedTeamEntries(teamId, teamAgents, booZeroAgent ?? undefined)
   const preamble = buildTeamContextPreamble({
     entries: contextEntries,
     targetAgentName: target.name,
     userIntroText,
   })
 
+  // When the target is Boo Zero, ALSO fetch the team brief and prepend it.
+  // The brief is Boo Zero's per-team operating manual — what the team does,
+  // who its members are, who the internal lead is, anti-patterns. We only
+  // ship it when targeting Boo Zero because team members already have their
+  // own per-agent identity files. Best-effort — missing brief is silently OK.
+  let briefBlock: string | null = null
+  if (booZeroAgent && target.id === booZeroAgent.id) {
+    const brief = await fetchTeamBrief(teamId)
+    if (brief) briefBlock = buildTeamBriefBlock(teamName, brief)
+  }
+
   const messageToSend = mentionedId ? cleanedMessage : message
-  const messageWithContext = preamble ? `${preamble}\n\n${messageToSend}` : messageToSend
+  const sections = [briefBlock, preamble, messageToSend].filter((s): s is string => Boolean(s))
+  const messageWithContext = sections.join('\n\n')
 
   await sendChatMessage({
     client,
