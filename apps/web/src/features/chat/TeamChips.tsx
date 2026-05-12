@@ -15,7 +15,7 @@ export const TeamChips = memo(function TeamChips({ teams, onTag }: TeamChipsProp
 
   return (
     <div
-      className="flex items-center gap-1 overflow-x-auto border-t border-white/8 px-4 py-1.5"
+      className="flex items-center gap-1 overflow-x-auto px-4 py-1.5"
       style={{ scrollbarWidth: 'none' }}
     >
       <span className="shrink-0 text-[10px] uppercase tracking-wide text-secondary/40">Teams</span>

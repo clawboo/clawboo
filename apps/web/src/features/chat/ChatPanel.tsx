@@ -88,7 +88,18 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
   // source here is intentional: Boo Zero's individual chat doesn't have
   // a team-agent roster, so the only meaningful @-targets are teams.
   const mentionTargets = useMemo(
-    () => (isBooZeroChat ? activeTeams.map((t) => ({ id: t.id, name: t.name })) : []),
+    () =>
+      isBooZeroChat
+        ? activeTeams.map((t) => ({
+            id: t.id,
+            name: t.name,
+            // Pass the team's emoji + color so the dropdown renders the same
+            // emoji-disc as the `TeamChips` row instead of a random Boo avatar
+            // seeded from the team's UUID.
+            icon: t.icon,
+            color: t.color,
+          }))
+        : [],
     [isBooZeroChat, activeTeams],
   )
   const handleChipTag = useCallback((name: string) => {

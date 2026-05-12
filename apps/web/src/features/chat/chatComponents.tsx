@@ -715,6 +715,21 @@ export interface MessageComposerHandle {
   insertMention: (agentName: string) => void
 }
 
+/**
+ * Mention candidate for the composer dropdown. Can be either a team agent
+ * (renders as the agent's Boo avatar) OR a team (renders as the team's
+ * emoji + colored disc — same chrome as `TeamChips`). When `icon` is set,
+ * `color` should also be set so the disc matches the chip styling.
+ */
+export type MentionCandidate = {
+  id: string
+  name: string
+  /** Team emoji (e.g. "🚀"). When provided, renders emoji instead of a Boo avatar. */
+  icon?: string
+  /** Team accent color (hex). Used as a 33%-opacity disc background behind the emoji. */
+  color?: string
+}
+
 export const MessageComposer = memo(
   forwardRef<
     MessageComposerHandle,
@@ -722,8 +737,8 @@ export const MessageComposer = memo(
       onSend: (message: string) => void
       disabled: boolean
       placeholder?: string
-      /** Team agents for @mention autocomplete. Only provided in group chat. */
-      mentionAgents?: { id: string; name: string }[]
+      /** @mention autocomplete candidates — team agents (group chat) or teams (Boo Zero chat). */
+      mentionAgents?: MentionCandidate[]
     }
   >(function MessageComposer({ onSend, disabled, placeholder, mentionAgents }, ref) {
     const [draft, setDraft] = useState('')
@@ -936,7 +951,7 @@ const MentionDropdownInline = memo(function MentionDropdownInline({
   onSelect,
   onClose,
 }: {
-  agents: { id: string; name: string }[]
+  agents: MentionCandidate[]
   selectedIndex: number
   onSelect: (agentName: string) => void
   onClose: () => void
@@ -1003,7 +1018,30 @@ const MentionDropdownInline = memo(function MentionDropdownInline({
               (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
           }}
         >
-          <AgentBooAvatar agentId={agent.id} size={20} />
+          {agent.icon ? (
+            // Team candidate — render emoji on a colored disc matching the
+            // chip styling in `TeamChips.tsx`. Keeps the dropdown visually
+            // consistent with the chip the user clicked to discover the
+            // feature.
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                background: `${agent.color ?? '#E94560'}33`,
+                fontSize: 12,
+                flexShrink: 0,
+              }}
+              aria-hidden
+            >
+              {agent.icon}
+            </span>
+          ) : (
+            <AgentBooAvatar agentId={agent.id} size={20} />
+          )}
           <span className="truncate">{agent.name}</span>
         </button>
       ))}
