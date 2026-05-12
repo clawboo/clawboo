@@ -9,7 +9,7 @@ import { useTeamStore } from '@/stores/team'
 // Wrapper that owns the ReactFlowProvider context, toolbar, loading/error states,
 // and the empty-state illustration.
 
-export function GhostGraphPanel() {
+export function GhostGraphPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const { isLoadingFiles, filesError, nodes, resetLayout, hasRunLayout } = useGraphStore()
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
 
@@ -58,7 +58,7 @@ export function GhostGraphPanel() {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(232,232,232,0.5)' }}>
-            {selectedTeam ? `${selectedTeam.name} — Ghost Graph` : 'Ghost Graph'}
+            {embedded || !selectedTeam ? 'Ghost Graph' : `${selectedTeam.name} — Ghost Graph`}
           </span>
           {booCount > 0 && (
             <span

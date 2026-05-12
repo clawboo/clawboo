@@ -1,6 +1,6 @@
 // GroupChatPanel — merged transcript from all team agents, sorted chronologically.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -23,13 +23,14 @@ import {
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
-import { Zap } from 'lucide-react'
 
 // ─── GroupChatPanel ──────────────────────────────────────────────────────────
 
 export function GroupChatPanel({
   teamId,
   userIntroText,
+  embedded = false,
+  orchestrationEnabled: orchestrationEnabledProp,
 }: {
   teamId: string
   /**
@@ -41,6 +42,15 @@ export function GroupChatPanel({
    * who they're talking to.
    */
   userIntroText?: string
+  /**
+   * When true, suppresses the local header (the unified `GroupChatViewHeader`
+   * rendered above the graph + chat split owns team identity, orchestration
+   * toggle, and connection-status dot). The orchestration enabled flag is
+   * read from the prop instead of local state.
+   */
+  embedded?: boolean
+  /** Required when `embedded` is true — controls the orchestration hook. */
+  orchestrationEnabled?: boolean
 }) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
   const agents = useFleetStore((s) => s.agents)
@@ -61,11 +71,11 @@ export function GroupChatPanel({
   // each prefer `booZeroAgent` over this when present.
   const teamInternalLeadId = resolveTeamInternalLead(teamId, team?.leaderAgentId ?? null, agents)
 
-  // ── Orchestration toggle (persisted in localStorage) ──────────────────
-  const [orchestrationEnabled, setOrchestrationEnabled] = useState<boolean>(() => {
-    const stored = localStorage.getItem('clawboo:team-orchestration-enabled')
-    return stored !== null ? stored === 'true' : true
-  })
+  // Orchestration toggle is now owned by `GroupChatView` so the unified
+  // header (rendered above this panel) can show/toggle it. When `embedded`
+  // is true we trust the prop; the fallback path (`embedded === false`) is
+  // for any future caller that still mounts `GroupChatPanel` standalone.
+  const orchestrationEnabled = orchestrationEnabledProp ?? true
 
   // ── Team orchestration (delegation detection + context relay) ───────────
   useTeamOrchestration({
@@ -259,57 +269,33 @@ export function GroupChatPanel({
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div data-testid="group-chat-panel" className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b border-white/8 px-4 py-3">
-        {team && (
+      {/* Header is owned by `GroupChatViewHeader` when embedded. */}
+      {!embedded && (
+        <div className="flex items-center gap-3 border-b border-white/8 px-4 py-3">
+          {team && (
+            <span
+              className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-[16px]"
+              style={{ background: `${team.color}22` }}
+            >
+              {team.icon}
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <h2
+              className="truncate text-[14px] font-semibold text-text"
+              style={{ fontFamily: 'var(--font-body)' }}
+            >
+              {team?.name ?? 'Group Chat'}
+            </h2>
+            <p className="text-[10px] text-secondary/50">
+              {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''}
+            </p>
+          </div>
           <span
-            className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-[16px]"
-            style={{ background: `${team.color}22` }}
-          >
-            {team.icon}
-          </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <h2
-            className="truncate text-[14px] font-semibold text-text"
-            style={{ fontFamily: 'var(--font-body)' }}
-          >
-            {team?.name ?? 'Group Chat'}
-          </h2>
-          <p className="text-[10px] text-secondary/50">
-            {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''}
-          </p>
+            className={`h-2 w-2 shrink-0 rounded-full ${connectionStatus === 'connected' ? 'bg-mint' : 'bg-secondary/40'}`}
+          />
         </div>
-        <button
-          type="button"
-          title="Team orchestration — auto-relay responses between agents"
-          onClick={() => {
-            setOrchestrationEnabled((prev) => {
-              const next = !prev
-              localStorage.setItem('clawboo:team-orchestration-enabled', String(next))
-              return next
-            })
-          }}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            color: orchestrationEnabled ? '#34D399' : 'rgba(232,232,232,0.3)',
-            transition: 'color 0.15s',
-            padding: 4,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 4,
-            flexShrink: 0,
-          }}
-        >
-          <Zap size={14} />
-        </button>
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full ${connectionStatus === 'connected' ? 'bg-mint' : 'bg-secondary/40'}`}
-        />
-      </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4" onScroll={handleScroll}>
