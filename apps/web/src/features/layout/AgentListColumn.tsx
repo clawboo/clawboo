@@ -169,7 +169,11 @@ function AgentRow({
 // ─── Nav items ───────────────────────────────────────────────────────────────
 
 const PRIMARY_NAV: { id: NavView; label: string; emoji: string }[] = [
-  { id: 'graph', label: 'Ghost Graph', emoji: '👻' },
+  // `'graph'` opens Atlas — the global all-teams view with Boo Zero at
+  // the top of the hierarchy. Renamed from "Ghost Graph" because the
+  // team-scoped Ghost Graph still lives inside Group Chat; this slot is
+  // now specifically the org-wide map.
+  { id: 'graph', label: 'Atlas', emoji: '🌐' },
   { id: 'marketplace', label: 'Marketplace', emoji: '🛒' },
 ]
 

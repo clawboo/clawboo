@@ -5,6 +5,18 @@ import type { AgentStatus } from '@clawboo/gateway-client'
 
 export type SkillCategory = 'data' | 'comm' | 'code' | 'file' | 'web' | 'other'
 
+// ─── Ghost Graph scope ────────────────────────────────────────────────────────
+//
+// `'atlas'`: global all-teams view (rendered in the nav slot via
+// `ContentArea`). Ignores `selectedTeamId`, synthesizes Boo Zero at the top
+// with edges fanning out to every team's internal lead. Halos toggle is
+// visible.
+//
+// `'team'`: single-team view bound to `selectedTeamId` (rendered inside
+// `GroupChatView`). Halos toggle hidden + halos forced off regardless of
+// the sticky `showTeamHalos` value.
+export type GhostGraphScope = 'atlas' | 'team'
+
 // ─── Node data shapes ─────────────────────────────────────────────────────────
 // Each must extend Record<string, unknown> for @xyflow/react's generic constraint.
 
@@ -57,12 +69,33 @@ export interface ResourceNodeData extends Record<string, unknown> {
   isVisible?: boolean
 }
 
+// ─── Team-root node ──────────────────────────────────────────────────────────
+//
+// Invisible routing-only node synthesized in the Atlas view to act as the
+// JUNCTION between Boo Zero and a team's members. Reflects the user-drawn
+// sketch: BZ at top → vertical line → horizontal trunk → per-team
+// vertical → team's own trunk → members. The team-root sits at the
+// vertical-trunk position above each team's cluster. It's invisible in
+// the canvas (`TeamRootNode` renders only handle anchors, not a Boo) but
+// real to ELK and to the spanning tree, so the edges route through it
+// naturally.
+//
+// Why this and not the previous "anchor = first team member" idea: an
+// anchor that IS a team member adds a visible extra hierarchy level (one
+// member sits above its siblings). A team-root is invisible, so visually
+// every team member is still on the same level under Boo Zero — exactly
+// what the user wanted from the team-scoped Ghost Graph.
+export interface TeamRootNodeData extends Record<string, unknown> {
+  teamId: string
+}
+
 // ─── Typed ReactFlow nodes ────────────────────────────────────────────────────
 
 export type BooNode = Node<BooNodeData, 'boo'>
 export type SkillNode = Node<SkillNodeData, 'skill'>
 export type ResourceNode = Node<ResourceNodeData, 'resource'>
-export type GraphNode = BooNode | SkillNode | ResourceNode
+export type TeamRootNode = Node<TeamRootNodeData, 'team-root'>
+export type GraphNode = BooNode | SkillNode | ResourceNode | TeamRootNode
 export type GraphEdge = Edge<Record<string, unknown>>
 
 // ─── Parser output types ──────────────────────────────────────────────────────

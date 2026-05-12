@@ -65,12 +65,16 @@ const BOO_ENVELOPE_HEIGHT = 280
 // ─── Default node dimensions (used before ReactFlow measures them) ────────────
 
 function defaultWidth(nodeType: string | undefined): number {
+  // Team-root is an invisible 1px routing point — ELK needs to position
+  // it but it must NOT reserve a visible block of canvas around itself.
+  if (nodeType === 'team-root') return 1
   if (nodeType === 'skill') return 100
   if (nodeType === 'resource') return 140
   return 160
 }
 
 function defaultHeight(nodeType: string | undefined): number {
+  if (nodeType === 'team-root') return 1
   if (nodeType === 'skill') return 30
   if (nodeType === 'resource') return 64
   return 60
@@ -218,4 +222,151 @@ export async function computeElkLayout(
   })
 
   return targetAspect !== undefined ? stretchToAspect(elkResolved, targetAspect) : elkResolved
+}
+
+// ─── Atlas layout (per-team ELK + manual team-root + BZ positioning) ─────────
+//
+// Goal: every team renders with its own self-contained internal hierarchy
+// (matching its team-scoped Ghost Graph), and teams are visually distinct
+// horizontal clusters with Boo Zero presiding at the top. The user's
+// hand-drawn sketch maps directly:
+//
+//     Boo Zero               ← positioned manually at overall centroid X
+//        │
+//     ───┴───                ← TOP trunk = BZ's outgoing primary edges
+//     │     │                  (one per team-root) rendered by the
+//   TR-A  TR-B                trunk-and-branches edge logic
+//    │     │                ← invisible 1px team-root junctions, placed
+//   per-team-cluster          manually between BZ and each team's TOP
+//
+// We DON'T let ELK assign team-roots to layers globally, because different
+// teams have different internal depths (one team might have 4 levels of
+// AGENTS.md routing while another has 2). ELK's layered algorithm would
+// place team A's members and team B's members at different Y coordinates
+// because of unequal subtree depths — destroying the "all teams sit at
+// the same level under Boo Zero" visual the sketch shows.
+//
+// Instead: per-team ELK lays out each team's INTERNAL Boo cluster
+// independently. We then pack the clusters horizontally with a gap, and
+// manually position team-roots + Boo Zero at coordinates that produce
+// the two-trunk shape.
+
+// Atlas spacing constants. Geometry is deliberate:
+//
+//   y = 0           ┌─ Boo Zero envelope top
+//   y = 280         └─ Boo Zero envelope bottom (BZ source handle is here)
+//   y = ATLAS_TEAM_ROOT_Y = 400      ← team-root junctions (1px, invisible)
+//                                       BZ → team-root edges flow DOWNWARD
+//                                       cleanly because team-root is below
+//                                       BZ's envelope bottom by 120px.
+//   y = ATLAS_TEAM_TOP_Y = 540       ← every team's members (same Y → flat
+//                                       row, matches the user's sketch where
+//                                       every team Boo sits on the same line)
+//
+// BZ envelope bottom must be ABOVE team-root.y, otherwise the smooth-step
+// path bends backward and the arrowheads point UP — the "loose-end
+// arrows" bug.
+const ATLAS_MEMBER_GAP_X = 40 // horizontal gap between adjacent members within a team
+const ATLAS_TEAM_GAP_X = 200 // horizontal gap between adjacent team clusters
+const ATLAS_BZ_Y = 0 // Boo Zero's position.y (envelope top)
+const ATLAS_TEAM_ROOT_Y = 400 // team-root junctions' position.y (well below BZ envelope bottom = 280)
+const ATLAS_TEAM_TOP_Y = 540 // Y where each team's row of members starts
+
+export async function computeAtlasLayout(
+  nodes: GraphNode[],
+  _primaryDepEdges: GraphEdge[],
+  savedPositions: LayoutData['positions'],
+  teamOrder: string[],
+): Promise<GraphNode[]> {
+  if (nodes.length === 0) return nodes
+
+  // Partition nodes by role.
+  let booZero: GraphNode | undefined
+  const teamRoots: GraphNode[] = []
+  const teamBoos: GraphNode[] = []
+  for (const n of nodes) {
+    if (n.type === 'boo') {
+      const data = n.data as { isUniversalLeader?: boolean; teamId?: string | null }
+      if (data.isUniversalLeader) {
+        booZero = n
+      } else if (data.teamId) {
+        teamBoos.push(n)
+      }
+    } else if (n.type === 'team-root') {
+      teamRoots.push(n)
+    }
+  }
+
+  // Group team Boos by teamId
+  const boosByTeam = new Map<string, GraphNode[]>()
+  for (const n of teamBoos) {
+    const teamId = (n.data as { teamId?: string | null }).teamId
+    if (!teamId) continue
+    if (!boosByTeam.has(teamId)) boosByTeam.set(teamId, [])
+    boosByTeam.get(teamId)!.push(n)
+  }
+
+  // Order teams: stable from `teamOrder`, append unknowns at the end.
+  const orderedTeamIds: string[] = []
+  for (const id of teamOrder) {
+    if (boosByTeam.has(id)) orderedTeamIds.push(id)
+  }
+  for (const id of boosByTeam.keys()) {
+    if (!orderedTeamIds.includes(id)) orderedTeamIds.push(id)
+  }
+
+  // **Manual flat-row layout per team.** No ELK, no per-team sub-trees.
+  // The user's sketch shows every team Boo on a single horizontal row
+  // directly under its team-root. We honour that literally: each team
+  // becomes one row of Boos at ATLAS_TEAM_TOP_Y, spaced
+  // ATLAS_MEMBER_GAP_X apart. Internal AGENTS.md routing still exists
+  // as SECONDARY edges (rendered on hover) so the routing data isn't
+  // lost — just visually quieted.
+  const packed: GraphNode[] = []
+  const teamCentroidX = new Map<string, number>()
+  const memberStrideX = BOO_ENVELOPE_WIDTH + ATLAS_MEMBER_GAP_X
+  let xCursor = 0
+  for (const teamId of orderedTeamIds) {
+    const members = boosByTeam.get(teamId)!
+    // Determinism: sort members by id so reloads produce a stable layout.
+    const sortedMembers = [...members].sort((a, b) => a.id.localeCompare(b.id))
+    const teamStart = xCursor
+    for (let i = 0; i < sortedMembers.length; i++) {
+      const m = sortedMembers[i]!
+      packed.push({
+        ...m,
+        position: { x: teamStart + i * memberStrideX, y: ATLAS_TEAM_TOP_Y },
+      })
+    }
+    const teamWidth = sortedMembers.length * memberStrideX - ATLAS_MEMBER_GAP_X
+    // Centroid X for the team-root: midpoint between leftmost and
+    // rightmost member's envelope centres.
+    teamCentroidX.set(teamId, teamStart + teamWidth / 2 - BOO_ENVELOPE_WIDTH / 2)
+    xCursor = teamStart + teamWidth + ATLAS_TEAM_GAP_X
+  }
+  const totalWidth = Math.max(0, xCursor - ATLAS_TEAM_GAP_X)
+  const overallCentroidX = totalWidth / 2 - BOO_ENVELOPE_WIDTH / 2
+
+  // Position team-root junctions at each team's centroid X. ATLAS_TEAM_ROOT_Y
+  // is intentionally well below BZ's envelope bottom (280) so the smooth-
+  // step BZ → team-root path flows DOWNWARD cleanly.
+  for (const tr of teamRoots) {
+    const teamId = (tr.data as { teamId?: string }).teamId
+    const cx = teamId ? (teamCentroidX.get(teamId) ?? overallCentroidX) : overallCentroidX
+    packed.push({
+      ...tr,
+      position: { x: cx, y: ATLAS_TEAM_ROOT_Y },
+    })
+  }
+
+  // Position Boo Zero centered above all teams.
+  if (booZero) {
+    packed.push({
+      ...booZero,
+      position: { x: overallCentroidX, y: ATLAS_BZ_Y },
+    })
+  }
+
+  // Apply user-saved positions LAST (same precedence as computeElkLayout).
+  return packed.map((n) => (savedPositions[n.id] ? { ...n, position: savedPositions[n.id]! } : n))
 }

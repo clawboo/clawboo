@@ -24,7 +24,8 @@ import { GitBranch, Map, Pin, X } from 'lucide-react'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
-import { computeElkLayout } from './useGraphLayout'
+import { computeElkLayout, computeAtlasLayout } from './useGraphLayout'
+import { useTeamStore } from '@/stores/team'
 import { computeOrbitalPositions } from './computeOrbitalPositions'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
@@ -41,7 +42,7 @@ import { installSkillForAgent } from './operations/installSkill'
 import { removeRouting } from './operations/removeRouting'
 import { graphPhysics } from './graphPhysics'
 import { EdgeMarkers } from './edges/EdgeMarkers'
-import type { BooNodeData, SkillNodeData, GraphEdge, LayoutData } from './types'
+import type { BooNodeData, SkillNodeData, GraphEdge, LayoutData, GhostGraphScope } from './types'
 
 interface ContextMenuState {
   x: number
@@ -67,6 +68,9 @@ function pickFittableNodes(nodes: Node[], expandedBooIds: Set<string>): { id: st
   return nodes
     .filter((n) => {
       if (n.type === 'boo') return true
+      // Atlas team-root junctions are 1px invisible — exclude from fit
+      // so the camera frames the visible Boos, not the routing points.
+      if (n.type === 'team-root') return false
       if (n.type !== 'skill' && n.type !== 'resource') return true
       const agentIds = (n.data as { agentIds?: string[] } | undefined)?.agentIds
       const ownerAgentId = agentIds?.[0]
@@ -102,6 +106,9 @@ function GhostGraphMiniMapNode({
 }: MiniMapNodeProps) {
   const fill = color ?? '#e2e2e2'
   if (color === 'transparent') return null
+  // Atlas team-root junctions are invisible 1px routing points; the
+  // MiniMap should also hide them so it reflects what the user sees.
+  if (id.startsWith('team-root-')) return null
   const stroke = strokeColor ?? 'transparent'
   const sw = strokeWidth ?? 0
   if (id.startsWith('boo-')) {
@@ -142,8 +149,11 @@ function GhostGraphMiniMapNode({
 // ─── GhostGraph ───────────────────────────────────────────────────────────────
 //
 // Must be rendered inside <ReactFlowProvider> (done by GhostGraphPanel).
+//
+// `scope` controls global-vs-team data behavior + halos UX (see
+// `GhostGraphPanel` for the full contract). Defaults to `'team'`.
 
-export function GhostGraph() {
+export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {}) {
   const {
     nodes,
     edges,
@@ -190,9 +200,13 @@ export function GhostGraph() {
   const elkGenerationRef = useRef(0)
   const prevLayoutKeyRef = useRef(layoutKey)
 
-  // Wire data fetching and persistence
-  useGraphData()
-  const { savePositions, isLoaded } = useGraphPersistence()
+  // Wire data fetching and persistence. The scope drives whether
+  // `useGraphData` filters to `selectedTeamId` or shows every team at once,
+  // AND it scopes the persistence key so Atlas and the team-scoped Ghost
+  // Graph don't overwrite each other's saved positions (Atlas's positions
+  // are global; the team chat's positions are per-team).
+  useGraphData(scope)
+  const { savePositions, isLoaded } = useGraphPersistence(scope)
 
   // Wire physics wake callback — when a boo node is dragged, wake the physics engine
   useEffect(() => {
@@ -304,14 +318,19 @@ export function GhostGraph() {
     // Increment generation only when actually starting ELK computation.
     const generation = ++elkGenerationRef.current
 
-    // Layer 1: Only boo nodes + PRIMARY dependency edges go through ELK.
-    // Secondary edges (every routing rule outside the spanning tree from
-    // the team leader) are intentionally withheld — feeding them to ELK
-    // would re-introduce the edge-tangle that obscured the leader →
-    // teammate flow. Secondary edges are still rendered, but only on
-    // hover, and they don't influence layout.
+    // Layer 1: Boo nodes + team-root junctions + PRIMARY dependency edges
+    // go through ELK. Secondary edges (every routing rule outside the
+    // spanning tree from the team leader) are intentionally withheld —
+    // feeding them to ELK would re-introduce the edge-tangle that
+    // obscured the leader → teammate flow. Secondary edges are still
+    // rendered, but only on hover, and they don't influence layout.
+    // Team-root nodes are 1px invisible routing points used in Atlas to
+    // form the BZ → junction → team-members hierarchy — they participate
+    // in ELK's layered placement but are not orbital parents (skills /
+    // resources orbit Boos only).
     const booNodes = nodes.filter((n) => n.type === 'boo')
-    const nonBooNodes = nodes.filter((n) => n.type !== 'boo')
+    const layoutBooNodes = nodes.filter((n) => n.type === 'boo' || n.type === 'team-root')
+    const nonBooNodes = nodes.filter((n) => n.type !== 'boo' && n.type !== 'team-root')
     const primaryDepEdges = edges.filter(
       (e) => e.type === 'dependency' && (e.data as { isPrimary?: boolean })?.isPrimary !== false,
     )
@@ -359,66 +378,93 @@ export function GhostGraph() {
     const canvasAspect =
       containerSize.w > 0 && containerSize.h > 0 ? containerSize.w / containerSize.h : undefined
 
-    void computeElkLayout(booNodes, primaryDepEdges, effectiveSavedPositions, canvasAspect).then(
-      (layoutedBooNodes) => {
-        // Skip stale results — a newer ELK computation has started
-        if (generation !== elkGenerationRef.current) return
+    // **Team scope**: single-pass ELK over Boo nodes + primary edges.
+    // **Atlas scope**: per-team ELK + horizontal packing. Each team
+    // gets its own self-contained ELK pass, then the clusters are
+    // packed horizontally with team-root junctions and Boo Zero
+    // positioned manually above them. This decouples each team's
+    // internal hierarchy depth from every other team's, so all teams
+    // sit at the same visual level under Boo Zero regardless of how
+    // deep their internal AGENTS.md routing goes — exactly the shape
+    // in the user's hand-drawn sketch.
+    const teamOrder = useTeamStore.getState().teams.map((t) => t.id)
+    const layoutPromise =
+      scope === 'atlas'
+        ? computeAtlasLayout(layoutBooNodes, primaryDepEdges, effectiveSavedPositions, teamOrder)
+        : computeElkLayout(layoutBooNodes, primaryDepEdges, effectiveSavedPositions, canvasAspect)
 
-        // Layer 2: Position skills/resources in orbital arcs around their parent boo
-        const orbitalNodes = computeOrbitalPositions(
-          layoutedBooNodes,
-          nonBooNodes,
-          edges, // full edges needed for parent-child mapping
-          effectiveSavedPositions,
-        )
+    void layoutPromise.then((layoutedNodes) => {
+      // Skip stale results — a newer ELK computation has started
+      if (generation !== elkGenerationRef.current) return
 
-        setNodes([...layoutedBooNodes, ...orbitalNodes])
-        setHasRunLayout(true)
+      // Split ELK-positioned nodes back into Boos and team-roots so that
+      // computeOrbitalPositions only sees Boos (orbital parents). The
+      // team-roots are passed through to setNodes unchanged at their
+      // ELK-assigned positions.
+      const layoutedBooNodes = layoutedNodes.filter((n) => n.type === 'boo')
+      const layoutedTeamRoots = layoutedNodes.filter((n) => n.type === 'team-root')
 
-        // Persist the resulting positions so refresh is a no-op.
-        // This runs on EVERY successful ELK pass (initial layout, node-count
-        // change, re-layout button) — the debounce inside `savePositions`
-        // collapses rapid successive saves.
-        const nextPositions: LayoutData['positions'] = { ...savedPositions }
-        for (const n of layoutedBooNodes) nextPositions[n.id] = n.position
-        for (const n of orbitalNodes) nextPositions[n.id] = n.position
-        // If we cleared the saved set (re-layout or partial coverage), drop
-        // any stale entries that aren't in the current node list — they're
-        // for nodes that no longer exist.
-        if (reLayoutRequested || partialSavedCoverage) {
-          const currentIds = new Set([
-            ...layoutedBooNodes.map((n) => n.id),
-            ...orbitalNodes.map((n) => n.id),
-          ])
-          for (const id of Object.keys(nextPositions)) {
-            if (!currentIds.has(id)) delete nextPositions[id]
-          }
+      // Layer 2: Position skills/resources in orbital arcs around their parent boo
+      const orbitalNodes = computeOrbitalPositions(
+        layoutedBooNodes,
+        nonBooNodes,
+        edges, // full edges needed for parent-child mapping
+        effectiveSavedPositions,
+      )
+
+      setNodes([...layoutedBooNodes, ...layoutedTeamRoots, ...orbitalNodes])
+      setHasRunLayout(true)
+
+      // Persist the resulting positions so refresh is a no-op.
+      // This runs on EVERY successful ELK pass (initial layout, node-count
+      // change, re-layout button) — the debounce inside `savePositions`
+      // collapses rapid successive saves.
+      const nextPositions: LayoutData['positions'] = { ...savedPositions }
+      for (const n of layoutedBooNodes) nextPositions[n.id] = n.position
+      for (const n of layoutedTeamRoots) nextPositions[n.id] = n.position
+      for (const n of orbitalNodes) nextPositions[n.id] = n.position
+      // If we cleared the saved set (re-layout or partial coverage), drop
+      // any stale entries that aren't in the current node list — they're
+      // for nodes that no longer exist.
+      if (reLayoutRequested || partialSavedCoverage) {
+        const currentIds = new Set([
+          ...layoutedBooNodes.map((n) => n.id),
+          ...layoutedTeamRoots.map((n) => n.id),
+          ...orbitalNodes.map((n) => n.id),
+        ])
+        for (const id of Object.keys(nextPositions)) {
+          if (!currentIds.has(id)) delete nextPositions[id]
         }
-        savePositions(nextPositions)
+      }
+      savePositions(nextPositions)
 
-        // Initialize physics particles from layouted positions
-        requestAnimationFrame(() => {
-          const current = useGraphStore.getState()
-          graphPhysics.initialize(current.nodes, current.edges)
-        })
+      // Initialize physics particles from layouted positions
+      requestAnimationFrame(() => {
+        const current = useGraphStore.getState()
+        graphPhysics.initialize(current.nodes, current.edges)
+      })
 
-        requestAnimationFrame(() => {
-          // Tight padding gives Boos visual prominence; maxZoom caps the fit so
-          // tiny graphs (1–2 Boos) don't blow up to fill the canvas.
-          // `nodes` filter excludes the invisible-by-default orbital children —
-          // see pickFittableNodes() above for why this matters.
-          const state = useGraphStore.getState()
-          void fitView({
-            padding: 0.04,
-            duration: 500,
-            maxZoom: 1.5,
-            nodes: pickFittableNodes(state.nodes, state.expandedBooNodeIds),
-          })
+      requestAnimationFrame(() => {
+        // Tight padding gives Boos visual prominence; maxZoom caps the fit so
+        // tiny graphs (1–2 Boos) don't blow up to fill the canvas.
+        // `nodes` filter excludes the invisible-by-default orbital children —
+        // see pickFittableNodes() above for why this matters.
+        const state = useGraphStore.getState()
+        void fitView({
+          padding: 0.04,
+          duration: 500,
+          maxZoom: 1.5,
+          nodes: pickFittableNodes(state.nodes, state.expandedBooNodeIds),
         })
-      },
-    )
+      })
+    })
     // isLoaded gates layout until saved positions are fetched from SQLite.
-  }, [nodesInitialized, nodes.length, layoutKey, isLoaded])
+    // `scope` is in deps so the effect re-runs when Atlas ↔ team chat
+    // transitions swap which layout fn is needed. Scope-change remounts
+    // (via the `ReactFlowProvider` key in `GhostGraphPanel`) would also
+    // pick up the new scope through the closure on the fresh mount —
+    // keeping `scope` here is the defensive belt to that suspenders.
+  }, [nodesInitialized, nodes.length, layoutKey, isLoaded, scope])
 
   // ── Interaction handlers ─────────────────────────────────────────────────────
 
@@ -694,37 +740,46 @@ export function GhostGraph() {
           Mounted once — marker IDs are global to the document. */}
       <EdgeMarkers />
 
-      {/* Team halos layer — behind ReactFlow, matches pane pan/zoom */}
-      {showTeamHalos && <TeamHaloLayer nodes={nodes} />}
+      {/* Team halos layer — behind ReactFlow, matches pane pan/zoom.
+          Only renders in the global Atlas scope; team-scoped instances
+          (group chat) intentionally never show halos because the team
+          identity is already obvious from context (you're inside that
+          team's group chat). The sticky `showTeamHalos` store value is
+          ignored here when scope is `'team'`, so toggling it from Atlas
+          doesn't leak into other views. */}
+      {scope === 'atlas' && showTeamHalos && <TeamHaloLayer nodes={nodes} />}
 
-      {/* Team halos toggle */}
-      <button
-        onClick={() => setShowTeamHalos(!showTeamHalos)}
-        title="Toggle colored team hulls behind agents"
-        style={{
-          position: 'absolute',
-          top: 12,
-          right: 112,
-          zIndex: 20,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '6px 12px',
-          borderRadius: 8,
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: 'pointer',
-          border: showTeamHalos
-            ? '1px solid rgba(52,211,153,0.4)'
-            : '1px solid rgba(255,255,255,0.1)',
-          background: showTeamHalos ? 'rgba(52,211,153,0.18)' : '#111827',
-          color: showTeamHalos ? '#34D399' : 'rgba(232,232,232,0.5)',
-          transition: 'all 0.15s',
-        }}
-      >
-        <Pin size={14} />
-        Team halos
-      </button>
+      {/* Team halos toggle — Atlas-only control. Hidden in team scope so
+          the toolbar doesn't carry irrelevant chrome. */}
+      {scope === 'atlas' && (
+        <button
+          onClick={() => setShowTeamHalos(!showTeamHalos)}
+          title="Toggle colored team hulls behind agents"
+          style={{
+            position: 'absolute',
+            top: 12,
+            right: 112,
+            zIndex: 20,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 12px',
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: showTeamHalos
+              ? '1px solid rgba(52,211,153,0.4)'
+              : '1px solid rgba(255,255,255,0.1)',
+            background: showTeamHalos ? 'rgba(52,211,153,0.18)' : '#111827',
+            color: showTeamHalos ? '#34D399' : 'rgba(232,232,232,0.5)',
+            transition: 'all 0.15s',
+          }}
+        >
+          <Pin size={14} />
+          Team halos
+        </button>
+      )}
 
       {/* Connect mode toggle */}
       <button
@@ -832,6 +887,9 @@ export function GhostGraph() {
             }}
             nodeColor={(node) => {
               if (node.type === 'boo') return '#E94560'
+              // Atlas team-root junctions are invisible — hide them in the
+              // MiniMap too.
+              if (node.type === 'team-root') return 'transparent'
               // Skill / resource nodes inherit visibility from their parent
               // Boo via `data.isVisible` (set by the visibleNodes memo).
               // When the parent is collapsed, return 'transparent' so the

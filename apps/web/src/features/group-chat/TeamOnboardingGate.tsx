@@ -326,31 +326,12 @@ export function TeamOnboardingGate({
   }, [teamAgents, teamId, completedAgentIds, phase])
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  // No local header — `GroupChatViewHeader` (rendered by `GroupChatView`
+  // above the graph + chat split) already shows the team identity. Adding a
+  // second header here would duplicate the team name + agent count one line
+  // below the unified header.
   return (
     <div className="flex h-full flex-col bg-bg">
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b border-white/8 px-4 py-3">
-        {team && (
-          <span
-            className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-[16px]"
-            style={{ background: `${team.color}22` }}
-          >
-            {team.icon}
-          </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <h2
-            className="truncate text-[14px] font-semibold text-text"
-            style={{ fontFamily: 'var(--font-body)' }}
-          >
-            {team?.name ?? 'Team'}
-          </h2>
-          <p className="text-[10px] text-secondary/50">
-            {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''} • Setup
-          </p>
-        </div>
-      </div>
-
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-8">
         <AnimatePresence mode="wait">
@@ -363,12 +344,24 @@ export function TeamOnboardingGate({
               transition={{ duration: 0.2 }}
               className="mx-auto flex max-w-md flex-col items-center text-center"
             >
-              <div
-                className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
-                style={{ background: `${team?.color ?? '#34D399'}22` }}
-              >
-                <Sparkles size={22} style={{ color: team?.color ?? '#34D399' }} />
-              </div>
+              {/* The universal team leader (Boo Zero) introduces the team —
+                  its avatar replaces the abstract sparkle icon for a stronger
+                  "leader presenting the team" framing. Falls back to the
+                  sparkle in a colored ring when Boo Zero hasn't been
+                  identified (rare — should only happen in the brief window
+                  before `identifyBooZero` lands after first hydrate). */}
+              {booZeroAgent ? (
+                <div className="mb-4">
+                  <BooAvatar seed={booZeroAgent.id} size={56} isBooZero />
+                </div>
+              ) : (
+                <div
+                  className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
+                  style={{ background: `${team?.color ?? '#34D399'}22` }}
+                >
+                  <Sparkles size={22} style={{ color: team?.color ?? '#34D399' }} />
+                </div>
+              )}
               <h3
                 className="mb-2 text-[18px] font-semibold text-text"
                 style={{ fontFamily: 'var(--font-display)' }}
