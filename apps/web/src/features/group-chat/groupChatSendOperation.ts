@@ -177,7 +177,17 @@ export function getMergedTeamEntries(
 ): TeamContextEntry[] {
   const transcripts = useChatStore.getState().transcripts
   const entries: TeamContextEntry[] = []
-  const participants = booZeroAgent ? [...teamAgents, booZeroAgent] : teamAgents
+  // Dedup by id defensively — see the same rationale in `GroupChatPanel.tsx`.
+  // If Boo Zero is somehow already in `teamAgents` we'd otherwise pull its
+  // transcript twice and feed duplicate context into preambles.
+  const combined = booZeroAgent ? [...teamAgents, booZeroAgent] : teamAgents
+  const seen = new Set<string>()
+  const participants: AgentState[] = []
+  for (const a of combined) {
+    if (seen.has(a.id)) continue
+    seen.add(a.id)
+    participants.push(a)
+  }
 
   for (const agent of participants) {
     const teamSk = buildTeamSessionKey(agent.id, teamId)
@@ -196,6 +206,21 @@ export function getMergedTeamEntries(
 
   entries.sort((a, b) => a.timestampMs - b.timestampMs)
   return entries
+}
+
+// ─── Identity anchor ─────────────────────────────────────────────────────────
+// Boo Zero's actual `agent.name` may be anything — the user's OpenClaw setup
+// might leave it as the literal slug "main", or it might be a custom name
+// like "Mythos" the user picked during OpenClaw onboarding, or "Boo Zero"
+// (the Clawboo default after Phase E lands). Production showed the LLM drifting
+// between these (calling itself "Boo Zero" in one breath and "Mythos" in
+// another), so we anchor the name explicitly in the preamble. This is the
+// load-bearing anti-name-drift fix.
+
+function buildIdentityBlock(booZeroDisplayName: string): string {
+  return `[Your Identity]
+You are ${booZeroDisplayName}. This is your name — the only name you should use to refer to yourself. Do NOT use alternative names ("Mythos", "Boo", "main", "Boo Zero" if that's not your name, etc.) — those would confuse the user about who they're talking to. Even if you suspect the system invented a different name elsewhere, the name in this block is authoritative.
+[End Your Identity]`
 }
 
 // ─── Team brief fetch ────────────────────────────────────────────────────────
@@ -313,13 +338,25 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
   // ship it when targeting Boo Zero because team members already have their
   // own per-agent identity files. Best-effort — missing brief is silently OK.
   let briefBlock: string | null = null
+  let identityBlock: string | null = null
   if (booZeroAgent && target.id === booZeroAgent.id) {
     const brief = await fetchTeamBrief(teamId)
     if (brief) briefBlock = buildTeamBriefBlock(teamName, brief)
+
+    // Identity anchor — load-bearing fix for the "Mythos / main / Boo Zero"
+    // name-drift seen in production. The agent's actual display name (which
+    // may be the user-customized name from OpenClaw or Clawboo onboarding,
+    // OR the literal slug "main") is asserted up front so the LLM doesn't
+    // invent alternative names mid-response.
+    identityBlock = buildIdentityBlock(booZeroAgent.name)
   }
 
   const messageToSend = mentionedId ? cleanedMessage : message
-  const sections = [briefBlock, preamble, messageToSend].filter((s): s is string => Boolean(s))
+  // Order matters: identity first (anchors who you are), then team brief
+  // (anchors WHERE you are), then conversation preamble, then the message.
+  const sections = [identityBlock, briefBlock, preamble, messageToSend].filter((s): s is string =>
+    Boolean(s),
+  )
   const messageWithContext = sections.join('\n\n')
 
   await sendChatMessage({

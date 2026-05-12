@@ -444,6 +444,99 @@ function TeamBriefEditor({
   )
 }
 
+// ─── Display name editor ────────────────────────────────────────────────────
+//
+// Phase E: the user's Gateway-side agent name can be anything ("main", a slug,
+// or whatever they typed in OpenClaw onboarding — production saw "Mythos").
+// Clawboo applies a display-name override that lives in SQLite and is overlaid
+// on the Boo Zero fleet entry at hydration time. This editor lets the user
+// change the override or clear it at any time. The default ("Boo Zero") is
+// seeded on first connect — see `GatewayBootstrap.tsx`.
+
+function DisplayNameEditor({ agentId, currentName }: { agentId: string; currentName: string }) {
+  const [value, setValue] = useState<string>(currentName)
+  const [saving, setSaving] = useState<boolean>(false)
+  const isDirty = value.trim() !== currentName.trim()
+
+  const handleSave = useCallback(async () => {
+    const trimmed = value.trim() || 'Boo Zero'
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/boo-zero/display-name/${encodeURIComponent(agentId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      })
+      if (!res.ok) throw new Error('Save failed')
+      useToastStore.getState().addToast({
+        type: 'success',
+        message: `Boo Zero display name → "${trimmed}". Reload to apply across all views.`,
+      })
+    } catch (e) {
+      useToastStore
+        .getState()
+        .addToast({ type: 'error', message: (e as Error).message ?? 'Save failed' })
+    } finally {
+      setSaving(false)
+    }
+  }, [agentId, value])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)', margin: 0 }}>
+        How Boo Zero refers to itself in chats. Defaults to <code>Boo Zero</code>. Stored in
+        Clawboo&apos;s SQLite — the underlying OpenClaw agent name is not touched.
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Boo Zero"
+          maxLength={80}
+          disabled={saving}
+          style={{
+            flex: 1,
+            height: 30,
+            padding: '0 10px',
+            fontSize: 12,
+            fontFamily: 'var(--font-body, sans-serif)',
+            background: 'rgba(13,17,23,0.85)',
+            color: '#E8E8E8',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 6,
+          }}
+        />
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!isDirty || saving || value.trim().length === 0}
+          style={{
+            height: 30,
+            padding: '0 12px',
+            fontSize: 11,
+            fontWeight: 600,
+            borderRadius: 8,
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: isDirty && value.trim().length > 0 ? '#E94560' : 'rgba(255,255,255,0.06)',
+            color: isDirty && value.trim().length > 0 ? '#fff' : 'rgba(232,232,232,0.5)',
+            cursor: !isDirty || saving || value.trim().length === 0 ? 'default' : 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+          Save
+        </button>
+      </div>
+      {isDirty && (
+        <span style={{ fontSize: 10, color: '#FBBF24' }}>Unsaved — save and reload to apply.</span>
+      )}
+    </div>
+  )
+}
+
 // ─── Top-level panel ─────────────────────────────────────────────────────────
 
 export function BooZeroBriefsPanel() {
@@ -470,6 +563,23 @@ export function BooZeroBriefsPanel() {
         >
           Boo Zero is missing from the fleet. Briefs are still editable, but there&apos;s no agent
           to receive them until a primary agent is identified.
+        </div>
+      )}
+
+      {/* Display name */}
+      {booZeroAgent && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <h3
+            style={{
+              margin: 0,
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'rgba(232,232,232,0.85)',
+            }}
+          >
+            Display name
+          </h3>
+          <DisplayNameEditor agentId={booZeroAgent.id} currentName={booZeroAgent.name} />
         </div>
       )}
 

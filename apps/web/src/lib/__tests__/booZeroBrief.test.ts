@@ -155,8 +155,13 @@ describe('buildGlobalBrief', () => {
     const out = buildGlobalBrief({ teams })
     expect(out).toContain('# Boo Zero — Universal Team Leader')
     expect(out).toContain('## Role')
-    expect(out).toContain('I am the universal leader')
-    expect(out).toContain('## Responsibilities')
+    // Phase C: prompt is now written in second-person ("You are…") and uses
+    // imperative DO / DO NOT lists instead of first-person responsibilities.
+    expect(out).toContain('You are the universal leader')
+    expect(out).toContain('## Required behavior')
+    expect(out).toContain('**DO**')
+    expect(out).toContain('**DO NOT**')
+    expect(out).toContain('## Verification protocol')
     expect(out).toContain('## Available teams')
     expect(out).toContain('- **Dev Team** 👾: Code review and bug hunting.')
     expect(out).toContain('- **Marketing Boos** 📣: Content + campaigns.')

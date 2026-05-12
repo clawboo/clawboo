@@ -68,13 +68,18 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
     async (message: string) => {
       if (!client || !agent || !sessionKey) return
 
-      // In Boo Zero's individual chat, parse `@TeamName` mentions and inject
-      // that team's brief into the message preamble so Boo Zero can reason
-      // about the team's specifics. Outside of Boo Zero's chat (regular
-      // agent 1:1), this code path is bypassed entirely.
+      // In Boo Zero's individual chat, inject the identity anchor + (when
+      // the user `@TeamName`-mentions) the matching team brief. The
+      // identity anchor fires on EVERY message so the LLM stays consistent
+      // about its name. Outside Boo Zero's chat (regular agent 1:1), this
+      // path is bypassed — team agents have their own AGENTS.md / SOUL.md
+      // identity.
       if (isBooZeroChat) {
+        const identityBlock = `[Your Identity]\nYou are ${agent.name}. This is your name — the only name you should use to refer to yourself. Do NOT invent alternative names mid-response.\n[End Your Identity]`
+
         const teamCandidates = teams.map((t) => ({ id: t.id, name: t.name }))
         const mention = parseTeamOrAgentMention(message, teamCandidates)
+
         if (mention.kind === 'team' && mention.targetId) {
           let briefBlock: string | null = null
           try {
@@ -90,20 +95,29 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
           } catch {
             // Best-effort — missing brief is silently OK.
           }
-          // Keep the user-visible message (with the @TeamName prefix) as the
-          // display text; send Boo Zero the brief + the user's intent.
-          const sendBody = briefBlock
-            ? `${briefBlock}\n\n${mention.cleanedMessage}`
-            : mention.cleanedMessage
+          const sections = [identityBlock, briefBlock, mention.cleanedMessage].filter(
+            (s): s is string => Boolean(s),
+          )
           await sendChatMessage({
             client,
             agentId: agent.id,
             sessionKey,
-            message: sendBody,
+            message: sections.join('\n\n'),
             displayText: message,
           })
           return
         }
+
+        // No team mention — still inject the identity anchor on every Boo
+        // Zero turn.
+        await sendChatMessage({
+          client,
+          agentId: agent.id,
+          sessionKey,
+          message: `${identityBlock}\n\n${message}`,
+          displayText: message,
+        })
+        return
       }
 
       await sendChatMessage({ client, agentId: agent.id, sessionKey, message })

@@ -13,12 +13,26 @@ import { getDbPath } from '../lib/db'
 
 const GLOBAL_BRIEF_KEY = 'boo-zero:global-brief'
 
+/**
+ * Clawboo-side display-name override for Boo Zero. The user's primary
+ * OpenClaw agent might be slugged as "main" or named something the user
+ * picked in OpenClaw onboarding ("Mythos" was seen in production). Clawboo
+ * offers an optional onboarding step that sets a friendlier display name
+ * (default "Boo Zero"). The override is keyed by agent id so it survives
+ * even if the Gateway-side identity is unchanged.
+ */
+const DISPLAY_NAME_KEY_PREFIX = 'boo-zero:display-name:'
+
 interface TeamBriefBody {
   content?: string
 }
 
 interface GlobalBriefBody {
   content?: string
+}
+
+interface DisplayNameBody {
+  name?: string
 }
 
 // ─── GET /api/boo-zero/team-briefs/:teamId ──────────────────────────────────
@@ -127,6 +141,52 @@ export function globalBriefPUT(req: Request, res: Response): void {
     const db = createDb(getDbPath())
     setSetting(db, GLOBAL_BRIEF_KEY, body.content)
     res.json({ content: body.content, updatedAt: Date.now() })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/boo-zero/display-name/:agentId ────────────────────────────────
+// Returns the user's Clawboo-side display-name override for Boo Zero, or
+// `null` if none is set (caller falls back to the Gateway-side agent.name).
+
+export function displayNameGET(req: Request, res: Response): void {
+  const agentId = req.params['agentId'] as string | undefined
+  if (!agentId) {
+    res.status(400).json({ error: 'agentId required' })
+    return
+  }
+  try {
+    const db = createDb(getDbPath())
+    const raw = getSetting(db, DISPLAY_NAME_KEY_PREFIX + agentId)
+    res.json({ name: raw ?? null })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── PUT /api/boo-zero/display-name/:agentId ────────────────────────────────
+// Body: { name: string }. The empty string clears the override.
+// Max 80 chars (UI hints + chat headers don't need anything longer).
+
+const DISPLAY_NAME_MAX = 80
+
+export function displayNamePUT(req: Request, res: Response): void {
+  const agentId = req.params['agentId'] as string | undefined
+  if (!agentId) {
+    res.status(400).json({ error: 'agentId required' })
+    return
+  }
+  const body = req.body as DisplayNameBody | undefined
+  if (!body || typeof body !== 'object' || typeof body.name !== 'string') {
+    res.status(400).json({ error: 'name (string) required' })
+    return
+  }
+  const trimmed = body.name.trim().slice(0, DISPLAY_NAME_MAX)
+  try {
+    const db = createDb(getDbPath())
+    setSetting(db, DISPLAY_NAME_KEY_PREFIX + agentId, trimmed)
+    res.json({ name: trimmed })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

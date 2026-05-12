@@ -204,10 +204,71 @@ a null \`kid\` header gracefully. Report back what you find.
   the highest confidence; prose forms are only a fallback and may not route.
 - Wait for or poll teammates' responses; their replies arrive automatically as
   \`[Team Update]\` messages, after which you continue with that context.
+- **Take initiative on work that wasn't delegated to YOU.** Only act on
+  \`<delegate to="@${agentName}">\` blocks aimed at you specifically.
+  \`[Team Update]\` messages and other teammates' work are read-only context,
+  not action items. If you think you could help on something a teammate is
+  doing (e.g., you spotted a UX issue in their code), propose it via a
+  \`<delegate to="@<that teammate>">\` block — don't just start doing it
+  yourself in parallel. Production has shown that uncoordinated parallel
+  work produces duplicate / conflicting outputs.
+
+### Resuming sessions
+
+OpenClaw sessions go cold when idle. Before sending you a real task, the
+orchestrator may send a brief warm-up message that looks like this:
+
+> "You are resuming a team collaboration session as ${agentName} on team
+> ${teamName}. Stay quiet — the next message will be a [Team Update] or
+> a user message…"
+
+**This is a session-warmup signal, not work for you to do.**
+
+When you see it:
+- Do NOT respond.
+- Do NOT introduce yourself.
+- Do NOT greet teammates ("Welcome aboard!", "Hey Frontend Boo!", etc.).
+- Do NOT acknowledge the re-init.
+
+Your prior context — this AGENTS.md, your SOUL.md, your TOOLS.md, the team
+brief — is still loaded. The next message you receive (a \`[Team Update]\`
+from a teammate, or a fresh user message) is where you engage. Pick up the
+work as if there was no pause.
 
 ### Routing Rules
 ${rules}
 `
+}
+
+/**
+ * Silent re-init body for sleepy team-agent sessions.
+ *
+ * **Why this exists**: OpenClaw agents go cold after idle TTL. Before
+ * resuming agent-to-agent work, we need a chat.send to wake the session.
+ * The OLD wake body (`buildTeamWakeMessage` below) asked agents to
+ * introduce themselves AND listed teammates as `@AgentName` — both of
+ * those triggered a cascade of intros and false-positive delegations
+ * (the 11-message "Welcome aboard X" flood in production, CLAUDE.md
+ * §"Group Chat Onboarding Gate — Cascade Fix").
+ *
+ * This replacement says "you're resuming, stay quiet, the next message
+ * is the real one". It pairs with the new `### Resuming sessions` rule
+ * in `buildTeamAgentsMd` which deterministically loads into the agent's
+ * context every turn — so even if the LLM ignores the in-message hint,
+ * AGENTS.md tells it the same thing.
+ *
+ * Used by:
+ *   - `groupChatSendOperation.wakeTeamAgents` (user-message-time wake)
+ *   - `useTeamOrchestration` wake-on-relay path
+ *
+ * Both call sites converged on this helper to keep behavior consistent.
+ */
+export function buildSilentResumeWakeMessage(params: {
+  agentName: string
+  teamName: string
+}): string {
+  const { agentName, teamName } = params
+  return `You are resuming a team collaboration session as ${agentName} on team "${teamName}". Stay quiet — the next message will be a [Team Update] or a user message with the real context. Continue from where you left off; do NOT introduce yourself, do NOT greet teammates, do NOT acknowledge this re-init.`
 }
 
 export function buildTeamWakeMessage(params: BuildTeamWakeMessageParams): string {

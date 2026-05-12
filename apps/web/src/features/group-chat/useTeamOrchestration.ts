@@ -7,7 +7,7 @@ import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { AgentState } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { buildTeamSessionKey, setTeamChatOverride, hasTeamChatOverride } from '@/lib/sessionUtils'
-import { buildTeamContextPreamble, buildTeamWakeMessage } from '@/lib/teamProtocol'
+import { buildTeamContextPreamble, buildSilentResumeWakeMessage } from '@/lib/teamProtocol'
 import { isAgentAwake } from '@/lib/wakeTracker'
 import { detectDelegations, isRelayMessage } from './delegationDetector'
 import {
@@ -26,6 +26,13 @@ import { getMergedTeamEntries } from './groupChatSendOperation'
 
 export interface UseTeamOrchestrationParams {
   teamId: string | null
+  /**
+   * The team's display name. Threaded through here so the wake-on-relay
+   * path can use it in the silent-resume message body. Without this, the
+   * wake body used to read `team "<UUID>"` (raw team id) — a confusing
+   * artifact of the original implementation.
+   */
+  teamName: string
   teamAgents: AgentState[]
   /**
    * The team-internal lead (CTO, Team Lead, etc., detected via
@@ -57,6 +64,8 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
 
   // Keep latest params in refs so the subscribe callback sees current values
   // without needing to tear down / recreate the subscription.
+  const teamNameRef = useRef(params.teamName)
+  teamNameRef.current = params.teamName
   const teamAgentsRef = useRef(params.teamAgents)
   teamAgentsRef.current = params.teamAgents
   const leaderAgentIdRef = useRef(params.leaderAgentId)
@@ -73,24 +82,46 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
   // Tracking state (all refs — no re-renders)
   const lastCountsRef = useRef<Map<string, number>>(new Map())
   const delegationSourceRef = useRef<Map<string, string>>(new Map()) // targetAgentId → sourceAgentId
+  /**
+   * Per-batch wake dedup. When `processNewEntries` fires multiple relays
+   * inside a single tick (e.g., Boo Zero delegates to 6 sleeping agents
+   * and we relay back to the hub for each), we'd otherwise queue 6
+   * back-to-back wake messages on the SAME hub. Track agents we've already
+   * woken in this batch and skip subsequent wakes. The set is cleared at
+   * the end of each batch.
+   */
+  const wokenThisBatchRef = useRef<Set<string>>(new Set())
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!enabled || !teamId) return
 
     const processNewEntries = () => {
+      // Reset per-batch dedup set at the start of every batch so we never
+      // permanently skip an agent's future wakes.
+      wokenThisBatchRef.current = new Set<string>()
       const currentTeamId = teamIdRef.current
       const currentClient = clientRef.current
       const currentTeamMembers = teamAgentsRef.current
       const currentInternalLead = leaderAgentIdRef.current
       const currentBooZero = booZeroAgentRef.current
-      // "Effective participants" = team members + Boo Zero. Boo Zero's
-      // assistant entries can contain `<delegate>` blocks too, so we have
-      // to scan its transcript for delegation patterns; and the delegation
-      // target may be any participant (including Boo Zero).
-      const currentAgents = currentBooZero
+      // "Effective participants" = team members + Boo Zero, deduplicated by
+      // agent id. Boo Zero's assistant entries can contain `<delegate>`
+      // blocks too, so we have to scan its transcript for delegation
+      // patterns; and the delegation target may be any participant
+      // (including Boo Zero). Dedup defensively — if Boo Zero leaks into
+      // `teamAgents` we'd otherwise double-process its transcript and
+      // double-route its `<delegate>` blocks.
+      const combinedAgents = currentBooZero
         ? [...currentTeamMembers, currentBooZero]
         : currentTeamMembers
+      const seenAgentIds = new Set<string>()
+      const currentAgents: typeof combinedAgents = []
+      for (const a of combinedAgents) {
+        if (seenAgentIds.has(a.id)) continue
+        seenAgentIds.add(a.id)
+        currentAgents.push(a)
+      }
       if (!currentTeamId || !currentClient || currentAgents.length === 0) return
       // Relay hub: Boo Zero (when available) — every teammate's response is
       // relayed to Boo Zero so the universal leader stays in the loop. Fall
@@ -231,18 +262,33 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
 
                   const targetTeamSk = buildTeamSessionKey(targetId, currentTeamId)
 
-                  // Wake sleeping agent before relaying (best-effort)
-                  if (!isAgentAwake(targetId, currentTeamId)) {
-                    const teammatesPool = freshBooZero
-                      ? [...freshTeamMembers, freshBooZero]
-                      : freshTeamMembers
-                    const teammates = teammatesPool
-                      .filter((a) => a.id !== targetId)
-                      .map((a) => ({ name: a.name, role: a.name }))
-                    const wakeMsg = buildTeamWakeMessage({
+                  // Wake sleeping agent before relaying (best-effort).
+                  //
+                  // CRITICAL: this used to call `buildTeamWakeMessage` which
+                  // asked the agent to introduce itself AND listed teammates
+                  // as `@AgentName`. In production that triggered the
+                  // 11-message "Welcome aboard X" cascade (CLAUDE.md §"Group
+                  // Chat Onboarding Gate — Cascade Fix"). The Phase 4
+                  // onboarding-gate fix already replaced the user-message-
+                  // time wake with a silent-resume body — this is the same
+                  // fix for the orchestration wake-on-relay path.
+                  //
+                  // Pair with `### Resuming sessions` in `buildTeamAgentsMd`
+                  // which loads on every turn and tells the agent to stay
+                  // quiet on resume.
+                  //
+                  // Per-batch dedup (`wokenThisBatchRef`) below ensures we
+                  // don't fire multiple wakes for the same agent inside a
+                  // single processing tick — relays often target the same
+                  // hub repeatedly.
+                  if (
+                    !isAgentAwake(targetId, currentTeamId) &&
+                    !wokenThisBatchRef.current.has(targetId)
+                  ) {
+                    wokenThisBatchRef.current.add(targetId)
+                    const wakeMsg = buildSilentResumeWakeMessage({
                       agentName: targetAgent.name,
-                      teamName: currentTeamId, // best-effort — teamName not available here
-                      teammates,
+                      teamName: teamNameRef.current,
                     })
                     setTeamChatOverride(targetId, targetTeamSk)
                     await currentClient.call('chat.send', {
@@ -251,7 +297,12 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
                       deliver: false,
                       idempotencyKey: crypto.randomUUID(),
                     })
-                    await new Promise((r) => setTimeout(r, 5000))
+                    // Settle delay reduced from 5000ms → 2000ms. With N
+                    // sleeping teammates the original delay multiplied to a
+                    // visibly-bunched cascade window; 2s is still enough
+                    // for the Gateway to register the session before the
+                    // relay arrives, while keeping the overall flow tight.
+                    await new Promise((r) => setTimeout(r, 2000))
                   }
 
                   setTeamChatOverride(targetId, targetTeamSk)

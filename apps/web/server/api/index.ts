@@ -34,6 +34,8 @@ import {
   teamBriefDELETE,
   globalBriefGET,
   globalBriefPUT,
+  displayNameGET,
+  displayNamePUT,
 } from './booZero'
 
 const router: RouterType = Router()
@@ -106,5 +108,7 @@ router.put('/api/boo-zero/team-briefs/:teamId', teamBriefPUT)
 router.delete('/api/boo-zero/team-briefs/:teamId', teamBriefDELETE)
 router.get('/api/boo-zero/global-brief', globalBriefGET)
 router.put('/api/boo-zero/global-brief', globalBriefPUT)
+router.get('/api/boo-zero/display-name/:agentId', displayNameGET)
+router.put('/api/boo-zero/display-name/:agentId', displayNamePUT)
 
 export { router as apiRouter }

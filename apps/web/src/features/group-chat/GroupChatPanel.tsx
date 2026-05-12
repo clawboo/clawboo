@@ -70,6 +70,10 @@ export function GroupChatPanel({
   // ── Team orchestration (delegation detection + context relay) ───────────
   useTeamOrchestration({
     teamId,
+    // Pass the actual team name — used by the silent-resume wake message
+    // in the wake-on-relay path so the body reads `team "Dev Team"` rather
+    // than `team "<uuid>"`.
+    teamName: team?.name ?? 'Team',
     teamAgents,
     // Pass the team-internal lead — Boo Zero is the actual relay hub when
     // present, so the orchestration hook prefers Boo Zero (see its impl).
@@ -80,16 +84,32 @@ export function GroupChatPanel({
     userIntroText,
   })
 
-  // "Effective participants" — DB team members + Boo Zero (when present).
-  // Boo Zero is teamless in the DB but participates in every team chat via
-  // its team-scoped sessionKey. Every iteration that touches per-agent
-  // transcript / session / lookup state runs over this list, NOT
-  // `teamAgents` alone, so Boo Zero's responses appear in the merged
-  // transcript with its name + avatar (not "Agent").
-  const participants = useMemo(
-    () => (booZeroAgent ? [...teamAgents, booZeroAgent] : teamAgents),
-    [teamAgents, booZeroAgent],
-  )
+  // "Effective participants" — DB team members + Boo Zero (when present),
+  // deduplicated by agent id.
+  //
+  // Boo Zero is teamless in the DB and SHOULD NOT appear in `teamAgents`,
+  // but the auto-migrate path in `GatewayBootstrap` (which can assign
+  // unassigned agents to a "Default" team) plus any future migration that
+  // attaches Boo Zero to a team could cause it to leak into both
+  // `teamAgents` AND the explicit `booZeroAgent` spread. Two copies of the
+  // same agent in `participants` causes `mergedEntries` to pull the same
+  // transcript twice — a contributing factor to the production triple-
+  // render bug. Dedupe by id defensively.
+  //
+  // Every downstream iteration (teamSessionKeys, mergedEntries, agentLookup,
+  // mentionAgentList, knownAgentNames, persisted-history-load, activeStreams)
+  // walks `participants` directly, so a single dedup here covers them all.
+  const participants = useMemo(() => {
+    const combined = booZeroAgent ? [...teamAgents, booZeroAgent] : teamAgents
+    const seen = new Set<string>()
+    const out: typeof combined = []
+    for (const a of combined) {
+      if (seen.has(a.id)) continue
+      seen.add(a.id)
+      out.push(a)
+    }
+    return out
+  }, [teamAgents, booZeroAgent])
 
   // Agent lookup for resolving names from sessionKeys
   const agentLookup = useMemo(() => {
