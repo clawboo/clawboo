@@ -298,6 +298,19 @@ export function GatewayBootstrap() {
 
         hydrateAgents(mapped)
 
+        // One-shot ghost sweep. Removes local SQLite agent rows for agents
+        // no longer in the Gateway — leftovers from older delete paths that
+        // didn't clean up local state. Skipped when the Gateway returned
+        // zero agents (the server endpoint guards this too, but skipping
+        // here avoids the round-trip + the noisy 400 response).
+        if (mapped.length > 0) {
+          fetch('/api/agents/cleanup-ghosts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ liveAgentIds: mapped.map((a) => a.id) }),
+          }).catch(() => {})
+        }
+
         return result.agents.length
       } catch {
         setFleetError('Could not load your agent fleet. The Gateway may have restarted.')
