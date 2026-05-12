@@ -56,6 +56,16 @@ export interface SkillNodeData extends Record<string, unknown> {
    *   - false → collapsed (opacity 0, scale 0, behind the parent Boo)
    */
   isVisible?: boolean
+  /**
+   * When `true`, this is the synthesized "Leadership" orbital that
+   * accompanies Boo Zero. Replaces the old crown badge as Boo Zero's
+   * visible leadership signal. `SkillNode` overrides its color + icon
+   * and hides the Install button when this is set (the skill is bound
+   * to Boo Zero — non-transferrable). Synthesized in `useGraphData.ts`
+   * for every Boo with `BooNodeData.isUniversalLeader === true`. Not
+   * present in TOOLS.md.
+   */
+  isLeadership?: boolean
 }
 
 export interface ResourceNodeData extends Record<string, unknown> {

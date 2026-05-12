@@ -372,6 +372,53 @@ export function buildGraphElements(
     })
   }
 
+  // ── Boo Zero's "Leadership" orbital ─────────────────────────────────────
+  //
+  // Synthesized for every Boo with `isUniversalLeader: true` (i.e. Boo Zero
+  // in both atlas and team-selected scopes). Replaces the old crown badge
+  // as the visible leadership signal. Rendered as a normal SkillNode that
+  // orbits Boo Zero in the inner ring; `SkillNode` reads the `isLeadership`
+  // flag and overrides its color + icon + hides the Install button.
+  //
+  // Source-of-truth note: this skill is NOT in TOOLS.md — it's a graph-
+  // layer attribute. No client-side write to the Gateway, so it survives
+  // any future deletion of Boo Zero's tools. The skillId starts with the
+  // reserved prefix `clawboo-leadership-` so it can never collide with a
+  // marketplace skill or a user-added TOOLS.md entry.
+  for (const booNode of booNodes) {
+    const data = booNode.data as BooNodeData
+    if (!data.isUniversalLeader) continue
+    const agentId = data.agentId
+    const nodeId = `skill-${agentId}-clawboo-leadership`
+    skillNodes.push({
+      id: nodeId,
+      type: 'skill' as const,
+      data: {
+        skillId: 'clawboo-leadership',
+        name: 'Leadership',
+        // `'other'` is a graceful fallback for any code path that
+        // doesn't yet branch on `isLeadership` (e.g. legacy filters).
+        // The visual overrides in `SkillNode` short-circuit before any
+        // category styling kicks in.
+        category: 'other',
+        description:
+          'Universal team leader. This skill is reserved for Boo Zero and cannot be installed on other agents.',
+        agentIds: [agentId],
+        isLeadership: true,
+      } satisfies SkillNodeData,
+      position: { x: 0, y: 0 },
+    })
+    skillEdges.push({
+      id: `skilledge-${agentId}-clawboo-leadership`,
+      type: 'skill',
+      source: `boo-${agentId}`,
+      sourceHandle: 'center',
+      target: nodeId,
+      targetHandle: 'center',
+      data: {},
+    })
+  }
+
   for (const agent of agents) {
     const files = agentFiles.get(agent.id)
 
