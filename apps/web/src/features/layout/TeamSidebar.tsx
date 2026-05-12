@@ -406,8 +406,12 @@ export function TeamSidebar() {
             team={team}
             selected={team.id === selectedTeamId}
             onClick={() => {
+              // Clicking a team icon opens that team's Group Chat — the
+              // primary view for working WITH the team. (Atlas is the
+              // cross-team org-wide view, reachable from the nav slot
+              // labelled "🌐 Atlas" in the agent-list column.)
               selectTeam(team.id)
-              useViewStore.getState().navigateTo('graph')
+              useViewStore.getState().openGroupChat(team.id)
             }}
             onContextMenu={(e) => {
               e.preventDefault()
