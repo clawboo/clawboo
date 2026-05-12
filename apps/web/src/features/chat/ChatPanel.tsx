@@ -260,7 +260,7 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
               : isRunning
                 ? 'Agent is working…'
                 : isBooZeroChat
-                  ? 'Message Boo Zero… (@TeamName to pull a team brief into context)'
+                  ? 'Ask me anything… use @ to tag a team'
                   : 'Message…'
         }
       />
