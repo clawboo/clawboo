@@ -2,7 +2,6 @@ import { memo, useRef, type MutableRefObject } from 'react'
 import { Handle, Position, useConnection } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { motion } from 'framer-motion'
-import { Crown } from 'lucide-react'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import type { BooNodeData } from '../types'
 import { useGraphStore } from '../store'
@@ -301,35 +300,11 @@ export const BooNode = memo(function BooNode({
             Boo had no functional purpose; the agent-detail navigation
             happens through the right-click context menu / sidebar. */}
 
-        {/* ── Universal-leader crown — Boo Zero only ──────────────────────
-            Positioned above the morph wrapper so it visibly persists across
-            both card and circle shapes (overflow: visible on the wrapper).
-            A subtle pulse animation distinguishes it from other markers. */}
-        {data.isUniversalLeader && (
-          <motion.div
-            animate={{ y: [0, -2, 0] }}
-            transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
-            style={{
-              position: 'absolute',
-              top: -18,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 22,
-              height: 22,
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, #FBBF24 0%, #E94560 60%, #B91C1C 100%)',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-              pointerEvents: 'none',
-              zIndex: 5,
-            }}
-            aria-label="Universal team leader"
-          >
-            <Crown size={12} strokeWidth={2.5} color="#FFFAF0" fill="#FFD580" />
-          </motion.div>
-        )}
+        {/* Boo Zero needs no badge — the reserved OpenClaw-red tint plus the
+            slightly larger size (see `baseSize` / `booW` above) already mark
+            it as the universal team leader. The earlier crown badge was a
+            third visual cue layered on top, which read as decorative noise.
+            See `boo-avatar/src/index.ts` for the tint reservation. */}
 
         {showCard ? (
           <CardContent
