@@ -502,8 +502,14 @@ export function AgentListColumn() {
         </label>
       </div>
 
-      {/* Agent list — fixed at 40% of column height, scrollable */}
-      <div className="shrink-0 overflow-y-auto px-2 pb-2" style={{ height: '40%' }}>
+      {/* Agent list — grows to fill the space between search and the
+          global-nav block at the bottom. Scrolls when content overflows.
+          The previous `height: 40%` was a fixed sliver that left awkward
+          empty space mid-column and put the global nav adrift; using
+          `flex-1` instead anchors it to a clear top-half, with Create Boo
+          and the global nav (Atlas, Marketplace, Approvals, etc.) all
+          sitting at the bottom edge. */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
         {selectedTeam && filtered.length > 0 && (
           <>
             <GroupChatRow
