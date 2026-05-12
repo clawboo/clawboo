@@ -59,9 +59,8 @@ import { createFlipState, useFlipMorph, type FlipState } from './useFlipMorph'
 // sidebar). Team badge has been removed from the BooNode entirely.
 
 // ─── Card dimensions (kept in sync with computeElkLayout) ────────────────────
-
-export const BOO_CARD_WIDTH = 220
-export const BOO_CARD_HEIGHT = 120
+export const BOO_CARD_WIDTH = 280
+export const BOO_CARD_HEIGHT = 170
 
 // ─── Node footprint (matches ELK envelope in useGraphLayout.ts) ──────────────
 // The Boo renders centered inside this footprint so its visual center aligns
@@ -450,19 +449,19 @@ function CardContent({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          padding: '10px 12px',
+          gap: 12,
+          padding: '12px 14px',
           borderBottom: '1px solid rgba(255,255,255,0.06)',
           flexShrink: 0,
         }}
       >
-        <div ref={avatarRef} style={{ flexShrink: 0, width: 36, height: 36, position: 'relative' }}>
-          <AgentBooAvatar agentId={agentId} size={36} />
+        <div ref={avatarRef} style={{ flexShrink: 0, width: 44, height: 44, position: 'relative' }}>
+          <AgentBooAvatar agentId={agentId} size={44} />
         </div>
         <div ref={nameRef} style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              fontSize: 13,
+              fontSize: 14,
               fontWeight: 600,
               color: selected ? '#E94560' : '#E8E8E8',
               fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
@@ -478,9 +477,9 @@ function CardContent({
           </div>
           <div
             style={{
-              fontSize: 10,
+              fontSize: 11,
               color: 'rgba(232,232,232,0.45)',
-              marginTop: 2,
+              marginTop: 3,
               letterSpacing: '0.04em',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -494,13 +493,13 @@ function CardContent({
         <div ref={statusRef} style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
           {status === 'running' ? (
             <motion.div
-              style={{ width: 8, height: 8, borderRadius: '50%', background: cardStatusColor }}
+              style={{ width: 10, height: 10, borderRadius: '50%', background: cardStatusColor }}
               animate={{ opacity: [1, 0.25, 1] }}
               transition={{ duration: 1.1, repeat: Infinity }}
             />
           ) : (
             <div
-              style={{ width: 8, height: 8, borderRadius: '50%', background: cardStatusColor }}
+              style={{ width: 10, height: 10, borderRadius: '50%', background: cardStatusColor }}
             />
           )}
         </div>
@@ -513,7 +512,7 @@ function CardContent({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'flex-start',
-          padding: '6px 12px',
+          padding: '8px 14px',
           position: 'relative',
           background:
             'radial-gradient(circle at center, rgba(52,211,153,0.04) 0%, transparent 60%)',

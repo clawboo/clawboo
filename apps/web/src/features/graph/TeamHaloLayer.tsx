@@ -25,10 +25,6 @@ const LABEL_OFFSET = 20 // lift label above topmost hull vertex
 // envelope (BOO_FOOTPRINT = 280 in `nodes/BooNode.tsx`), so the visual
 // center is at half the envelope size — same anchor used by
 // `computeOrbitalPositions.ts` and `graphPhysics.ts` (`BOO_HALF_W/H = 140`).
-//
-// Previously 170 (half of an old 340-px envelope), which left the halo
-// centroid drifted 30 px off the actual Boo center — visible as halos
-// that hugged the wrong side of each team. Now correctly 140.
 const BOO_CENTER_OFFSET = 140
 
 interface Point {

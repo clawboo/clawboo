@@ -34,6 +34,34 @@ export function useGraphData(): void {
     [agents, selectedTeamId],
   )
 
+  // Resolve Boo Zero (universal team leader). When a team is selected AND Boo
+  // Zero is present, we include Boo Zero in the agents that drive both file
+  // fetching AND graph building — so Boo Zero's own TOOLS.md is fetched and
+  // its skill / resource children appear on click (peacock-feather expand).
+  // Boo Zero is teamless in the DB (`teamId === null`) so the per-team filter
+  // above excludes it; this is where we re-include it for graph purposes.
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  const booZeroAgent = useMemo(
+    () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
+    [agents, booZeroAgentId],
+  )
+
+  // "Graph agents" — the agents whose files we fetch and which appear in the
+  // built graph. Dedup by id in case Boo Zero is somehow already in filtered
+  // (auto-migrate edge case).
+  const graphAgents = useMemo(() => {
+    if (!booZeroAgent || !selectedTeamId) return filteredAgents
+    const combined = [...filteredAgents, booZeroAgent]
+    const seen = new Set<string>()
+    const out: typeof combined = []
+    for (const a of combined) {
+      if (seen.has(a.id)) continue
+      seen.add(a.id)
+      out.push(a)
+    }
+    return out
+  }, [filteredAgents, booZeroAgent, selectedTeamId])
+
   // Stable string key for team metadata — drives structural rebuild when a
   // team is renamed/recolored mid-session so BooNodeData.teamName/Color/Emoji
   // stay in sync without over-rebuilding on unrelated team store changes.
@@ -55,12 +83,12 @@ export function useGraphData(): void {
   }, [selectedTeamId])
 
   // Stable string keys for dependency comparison
-  const agentStructureKey = filteredAgents.map((a) => `${a.id}:${a.name}`).join('|')
-  const agentStatusKey = filteredAgents.map((a) => `${a.id}:${a.status}`).join('|')
+  const agentStructureKey = graphAgents.map((a) => `${a.id}:${a.name}`).join('|')
+  const agentStatusKey = graphAgents.map((a) => `${a.id}:${a.status}`).join('|')
 
   // Stable agent ID array (recomputed only when structure changes)
   const agentIds = useMemo(
-    () => filteredAgents.map((a) => a.id),
+    () => graphAgents.map((a) => a.id),
     [agentStructureKey], // intentionally using string key, not full agents array
   )
 
@@ -100,17 +128,13 @@ export function useGraphData(): void {
   }, [client, agentStructureKey, refreshKey]) // intentional: string key covers structural changes; refreshKey for skill install
 
   // ── 2. Structural rebuild ────────────────────────────────────────────────────
-  // Resolve Boo Zero (universal team leader). When a team is selected AND Boo
-  // Zero is present, `buildGraphElements` synthesizes a Boo-Zero node + edges
-  // from Boo Zero → genuine internal lead (if any) → members, OR directly to
-  // members when there's no internal lead. Boo Zero becomes the spanning-tree
-  // root, replacing the old "first team member" fallback.
-  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
-  const booZeroAgent = useMemo(
-    () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
-    [agents, booZeroAgentId],
-  )
-
+  // We pass `graphAgents` (filteredAgents + Boo Zero when team selected) so
+  // Boo Zero's BooNode is created naturally by the `agents.map` loop in
+  // `buildGraphElements` AND its TOOLS.md gets parsed into skill / resource
+  // children. Previously Boo Zero was added as a synthetic node AFTER the
+  // skill loop, so clicking Boo Zero showed no skill children — production
+  // bug reported by the user. The synthesized edges (Boo Zero → lead → members
+  // or Boo Zero → each member) still run for the team-routing concern.
   const teamInternalLeadId = useMemo(() => {
     if (!selectedTeamId) return null
     const team = teams.find((t) => t.id === selectedTeamId)
@@ -121,7 +145,7 @@ export function useGraphData(): void {
   const { rawNodes, rawEdges } = useMemo(
     () =>
       buildGraphElements(
-        filteredAgents,
+        graphAgents,
         agentFiles,
         teams,
         teamInternalLeadId,
@@ -150,7 +174,7 @@ export function useGraphData(): void {
     const store = useGraphStore.getState()
     if (store.nodes.length === 0) return
 
-    const agentMap = new Map(filteredAgents.map((a) => [a.id, a]))
+    const agentMap = new Map(graphAgents.map((a) => [a.id, a]))
 
     const patched = store.nodes.map((node) => {
       if (node.type !== 'boo') return node
