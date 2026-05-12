@@ -345,7 +345,16 @@ export function WelcomeState() {
       <CreateTeamModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        onCreated={() => setShowCreateModal(false)}
+        onCreated={() => {
+          setShowCreateModal(false)
+          // CreateTeamModal selects the newly-created team before firing
+          // onCreated — land in its group chat instead of leaving the user
+          // on the welcome screen with nothing visibly happening.
+          const newTeamId = useTeamStore.getState().selectedTeamId
+          if (newTeamId) {
+            useViewStore.getState().openGroupChat(newTeamId)
+          }
+        }}
       />
     </div>
   )

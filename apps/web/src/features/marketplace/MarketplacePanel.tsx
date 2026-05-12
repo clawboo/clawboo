@@ -4,6 +4,8 @@ import { Search } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
+import { useTeamStore } from '@/stores/team'
+import { useViewStore } from '@/stores/view'
 import type { InstalledSkillRecord } from '@/stores/marketplace'
 import { mutationQueue } from '@/lib/mutationQueue'
 import { useGraphStore } from '@/features/graph/store'
@@ -1056,6 +1058,13 @@ export function MarketplacePanel() {
         onCreated={() => {
           setShowCreateModal(false)
           setPrefilledProfile(null)
+          // CreateTeamModal selects the newly-created team before firing
+          // onCreated — switch the user into its group chat so they can
+          // immediately use the team they just deployed from the marketplace.
+          const newTeamId = useTeamStore.getState().selectedTeamId
+          if (newTeamId) {
+            useViewStore.getState().openGroupChat(newTeamId)
+          }
         }}
         initialProfile={prefilledProfile}
       />

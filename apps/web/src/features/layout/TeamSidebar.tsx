@@ -128,7 +128,19 @@ export function TeamSidebar() {
     setShowCreateModal(false)
     await hydrateTeams()
     useGraphStore.getState().triggerRefresh()
-    useViewStore.getState().navigateTo('graph')
+    // `CreateTeamModal` calls `useTeamStore.selectTeam(team.id)` right before
+    // firing `onCreated`, so by this point the newly-created team is the
+    // selected one. Open its group chat directly — that's where the user
+    // expects to land after deploying a team (chat with the new agents,
+    // or run through onboarding if it's a template team with no history).
+    // Fall back to Atlas defensively if selection didn't stick for some
+    // reason (e.g. an upstream rejection deselected the team).
+    const newTeamId = useTeamStore.getState().selectedTeamId
+    if (newTeamId) {
+      useViewStore.getState().openGroupChat(newTeamId)
+    } else {
+      useViewStore.getState().navigateTo('graph')
+    }
   }, [])
 
   const handleArchiveTeam = useCallback(async () => {
