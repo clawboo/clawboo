@@ -192,9 +192,15 @@ export const BooNode = memo(function BooNode({
     (s) => s.hoveredNodeId === null || (s.highlightedNodeIds?.has(`boo-${agentId}`) ?? false),
   )
 
-  // Degree-aware circle sizing (used only in idle shape)
+  // Degree-aware circle sizing (used only in idle shape). Increased from the
+  // old 60–78 range to give Boos more visual prominence in the canvas —
+  // production users reported "the boos are so small". Still well inside the
+  // 280 envelope so orbital ring spacing and physics are unaffected. Boo
+  // Zero (universal leader) gets a small extra boost so it visually anchors
+  // the top of the team's spanning tree.
   const edgeCount = data.edgeCount ?? 0
-  const booW = Math.min(60 + edgeCount * 3, 78)
+  const baseSize = data.isUniversalLeader ? 112 : 96
+  const booW = Math.min(baseSize + edgeCount * 3, data.isUniversalLeader ? 140 : 124)
   const booH = Math.round(booW * 0.92)
 
   // Box-shadow animation driven by status (glow at the wrapper edge, works

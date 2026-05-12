@@ -41,7 +41,7 @@ import { installSkillForAgent } from './operations/installSkill'
 import { removeRouting } from './operations/removeRouting'
 import { graphPhysics } from './graphPhysics'
 import { EdgeMarkers } from './edges/EdgeMarkers'
-import type { BooNodeData, SkillNodeData, GraphEdge } from './types'
+import type { BooNodeData, SkillNodeData, GraphEdge, LayoutData } from './types'
 
 interface ContextMenuState {
   x: number
@@ -265,11 +265,26 @@ export function GhostGraph() {
   // Layer 1: ELK positions boo nodes using dependency edges only (async).
   // Layer 2: Orbital positions skill/resource nodes around their parent boo (sync).
   // Re-runs when node count changes or user clicks "Re-layout" (layoutKey bump).
+  //
+  // Persistence: previously, ELK results were only applied to the local store
+  // (via setNodes) and NEVER saved to /api/graph-layout. The only save path was
+  // drag-end. Effect: clicking "Re-layout" sorted the visible canvas but on
+  // refresh the stale saved positions reloaded, undoing the sort. Fix: after
+  // every ELK computation, save the resulting positions so refresh is a no-op.
+  //
+  // Staleness: ELK preserves saved positions per node id, so when Boo Zero is
+  // synthesized into a team's graph for the first time (new node id), the
+  // other Boos still snap to their old saved positions while Boo Zero lays
+  // out fresh — looks broken. We detect this case (some boo nodes have saved
+  // positions, but the synthesized Boo Zero does not) and clear ALL saved
+  // boo positions for this layout, forcing a full re-layout. User-saved drag
+  // positions get re-established on the next deliberate drag.
   useEffect(() => {
-    // Reset when layoutKey bumps (user pressed "Re-layout").
-    // Must happen INSIDE this effect (not a separate one) to ensure the reset
-    // is processed before the guard check — React runs effects in definition order.
-    if (layoutKey !== prevLayoutKeyRef.current) {
+    // Reset when layoutKey bumps (user pressed "Re-layout"). We also CLEAR
+    // saved positions here so the re-layout produces a fresh ELK result
+    // (not constrained by the old user-dragged positions).
+    const reLayoutRequested = layoutKey !== prevLayoutKeyRef.current
+    if (reLayoutRequested) {
       prevLayoutKeyRef.current = layoutKey
       layoutRanRef.current = false
       prevNodeLengthRef.current = 0
@@ -301,13 +316,50 @@ export function GhostGraph() {
       (e) => e.type === 'dependency' && (e.data as { isPrimary?: boolean })?.isPrimary !== false,
     )
 
+    // Detect cases where saved positions can't be trusted:
+    //   (a) Partial coverage — some boos have saved positions, others don't.
+    //       Typically happens when Boo Zero is newly synthesized into a team
+    //       and the older non-Boo-Zero positions are still in SQLite.
+    //   (b) Runaway span — a previous version of `stretchToAspect` (now
+    //       fixed) stretched both axes and compounded across re-layouts,
+    //       producing layouts spanning thousands of ELK units. We detect
+    //       these by checking the bbox of saved boo positions; if either
+    //       dimension exceeds 4000 px the positions are stale-blown-up and
+    //       should be discarded.
+    const savedBooPositions = booNodes
+      .map((n) => savedPositions[n.id])
+      .filter((p): p is { x: number; y: number } => Boolean(p))
+    const savedBooIds = booNodes.filter((n) => savedPositions[n.id]).map((n) => n.id)
+    const partialSavedCoverage = savedBooIds.length > 0 && savedBooIds.length < booNodes.length
+
+    let runawaySpan = false
+    if (savedBooPositions.length >= 2) {
+      let minX = Infinity,
+        maxX = -Infinity,
+        minY = Infinity,
+        maxY = -Infinity
+      for (const p of savedBooPositions) {
+        if (p.x < minX) minX = p.x
+        if (p.x > maxX) maxX = p.x
+        if (p.y < minY) minY = p.y
+        if (p.y > maxY) maxY = p.y
+      }
+      const SPAN_LIMIT = 4000
+      if (maxX - minX > SPAN_LIMIT || maxY - minY > SPAN_LIMIT) {
+        runawaySpan = true
+      }
+    }
+
+    const effectiveSavedPositions =
+      reLayoutRequested || partialSavedCoverage || runawaySpan ? {} : savedPositions
+
     // Pass the canvas aspect so ELK's hierarchy-driven output can be stretched
     // to claim the empty bands fitView would otherwise leave (see
     // stretchToAspect in useGraphLayout.ts).
     const canvasAspect =
       containerSize.w > 0 && containerSize.h > 0 ? containerSize.w / containerSize.h : undefined
 
-    void computeElkLayout(booNodes, primaryDepEdges, savedPositions, canvasAspect).then(
+    void computeElkLayout(booNodes, primaryDepEdges, effectiveSavedPositions, canvasAspect).then(
       (layoutedBooNodes) => {
         // Skip stale results — a newer ELK computation has started
         if (generation !== elkGenerationRef.current) return
@@ -317,11 +369,32 @@ export function GhostGraph() {
           layoutedBooNodes,
           nonBooNodes,
           edges, // full edges needed for parent-child mapping
-          savedPositions,
+          effectiveSavedPositions,
         )
 
         setNodes([...layoutedBooNodes, ...orbitalNodes])
         setHasRunLayout(true)
+
+        // Persist the resulting positions so refresh is a no-op.
+        // This runs on EVERY successful ELK pass (initial layout, node-count
+        // change, re-layout button) — the debounce inside `savePositions`
+        // collapses rapid successive saves.
+        const nextPositions: LayoutData['positions'] = { ...savedPositions }
+        for (const n of layoutedBooNodes) nextPositions[n.id] = n.position
+        for (const n of orbitalNodes) nextPositions[n.id] = n.position
+        // If we cleared the saved set (re-layout or partial coverage), drop
+        // any stale entries that aren't in the current node list — they're
+        // for nodes that no longer exist.
+        if (reLayoutRequested || partialSavedCoverage) {
+          const currentIds = new Set([
+            ...layoutedBooNodes.map((n) => n.id),
+            ...orbitalNodes.map((n) => n.id),
+          ])
+          for (const id of Object.keys(nextPositions)) {
+            if (!currentIds.has(id)) delete nextPositions[id]
+          }
+        }
+        savePositions(nextPositions)
 
         // Initialize physics particles from layouted positions
         requestAnimationFrame(() => {

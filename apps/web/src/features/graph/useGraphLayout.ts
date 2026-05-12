@@ -37,16 +37,16 @@ const ELK_OPTIONS = {
   // Spacing tuned so the BOO_ENVELOPE (280px, accounts for orbital
   // children when expanded) clears between siblings AND between layers
   // with room for the bezier-curve dependency edge + arrowhead.
-  'elk.spacing.nodeNode': '100',
-  // Inter-layer spacing scales with the natural width of the widest
-  // layer. For star-shaped teams (one operator + many siblings on layer 2)
-  // ELK produces a wide-and-short layout that leaves lots of vertical
-  // empty space when fit into a wider-than-tall canvas. Spreading layers
-  // farther apart vertically pushes the layout aspect closer to the
-  // canvas aspect, eliminating the top / bottom empty bands without
-  // changing the topology. Set per-layout in computeElkLayout.
-  'elk.layered.spacing.nodeNodeBetweenLayers': '140',
-  'elk.padding': '[top=40, left=40, bottom=40, right=40]',
+  'elk.spacing.nodeNode': '80',
+  // Inter-layer spacing. Used to be 140 (allowing room for long bezier
+  // arrowheads + halo padding) but production showed this leaves massive
+  // empty vertical bands for the common 2-layer "Boo Zero + member row"
+  // case: 280 envelope + 140 gap + 280 envelope = 700 px vertical span
+  // for a tree of tiny circles. Reduced to 60 — the edge head still has
+  // room (arrows are <30 px), and `stretchToAspect` (below) handles
+  // canvas-aspect adaptation if more vertical span is actually needed.
+  'elk.layered.spacing.nodeNodeBetweenLayers': '60',
+  'elk.padding': '[top=24, left=40, bottom=24, right=40]',
 }
 
 // ─── Boo envelope dimensions ─────────────────────────────────────────────────
@@ -79,14 +79,30 @@ function defaultHeight(nodeType: string | undefined): number {
 // ─── Aspect-ratio post-processing ────────────────────────────────────────────
 // ELK lays out a hierarchy by topology, not by canvas geometry. For a
 // star-shaped team (1 operator + many siblings) the output is wide-and-short;
-// for a chain it's narrow-and-tall. Either shape leaves significant empty
-// space when fit into a canvas with a different aspect ratio (notably the
-// group-chat graph row, which is much wider than tall).
+// for a chain it's narrow-and-tall.
 //
-// `stretchToAspect` rescales node positions so the layout's bounding box
-// aspect matches the target. It only ever spreads nodes apart (never
-// crowds them closer than ELK's collision-aware output), so the topology
-// reads the same — we just claim the canvas's empty bands.
+// `stretchToAspect` historically rescaled both axes to match the canvas
+// aspect. That worked well for the **group-chat short-row canvas** (very
+// wide, very short — a natural ELK layout leaves huge horizontal bands), but
+// it ALSO triggered for the full Ghost Graph canvas (close to square), where
+// it caused runaway vertical blowup: a natural 700×600 layout was being
+// stretched to ~700×1054, then the saved-positions feedback loop (each
+// re-layout reads back the already-stretched positions, stretches AGAIN,
+// saves the bigger one) produced layouts spanning thousands of ELK units.
+// One real user session ended up with Boo Zero at y=-2268 and members at
+// y=2656 — total vertical span ≈ 4900 ELK units.
+//
+// **New rule** (Round 2 follow-up):
+//   1. **Only ever stretch the X axis.** A wider-than-natural layout fills
+//      horizontal empty bands without harming Boo prominence. The vertical
+//      stretch was the harmful direction.
+//   2. **Cap the X stretch factor at 1.6.** Above that the topology starts
+//      to look distorted (siblings drift apart and bezier edges get long).
+//   3. **Skip when the canvas aspect is close to the layout aspect.**
+//      No stretch is needed when they already match.
+//
+// fitView handles the rest — if there's residual empty canvas, the camera
+// just zooms in, which is the desired behaviour (it makes Boos more prominent).
 function stretchToAspect(nodes: GraphNode[], targetAspect: number): GraphNode[] {
   if (nodes.length < 2 || !Number.isFinite(targetAspect) || targetAspect <= 0) {
     return nodes
@@ -106,10 +122,6 @@ function stretchToAspect(nodes: GraphNode[], targetAspect: number): GraphNode[] 
     if (n.position.y < minY) minY = n.position.y
     if (n.position.y > maxY) maxY = n.position.y
   }
-  // posRange = distance between leftmost and rightmost POSITIONS (top-left
-  // corners). bbox = posRange + node footprint. We have to scale positions
-  // (not bboxes) to hit a target bbox aspect — so the scale derivation
-  // accounts for the fixed node width / height that doesn't stretch.
   const posRangeX = maxX - minX
   const posRangeY = maxY - minY
   const bboxW = posRangeX + BOO_ENVELOPE_WIDTH
@@ -117,29 +129,24 @@ function stretchToAspect(nodes: GraphNode[], targetAspect: number): GraphNode[] 
   if (bboxW <= 0 || bboxH <= 0) return nodes
   const layoutAspect = bboxW / bboxH
 
-  // Stretch only — never compress (compressing would risk overlapping
-  // sibling envelopes within the same layer).
+  // Only stretch X, only when layout is significantly TALLER than canvas
+  // (i.e. natural layout leaves horizontal empty bands).
   let xScale = 1
-  let yScale = 1
-  if (layoutAspect < targetAspect && posRangeX > 0) {
-    // Want bboxW' = bboxH * targetAspect → posRangeX' = bboxW' - envelope
+  const MAX_STRETCH = 1.6
+  const ASPECT_TOLERANCE = 0.15 // skip when aspects are within 15%
+  if (layoutAspect < targetAspect * (1 - ASPECT_TOLERANCE) && posRangeX > 0) {
     const targetPosRange = Math.max(0, bboxH * targetAspect - BOO_ENVELOPE_WIDTH)
-    xScale = targetPosRange / posRangeX
-  } else if (layoutAspect > targetAspect && posRangeY > 0) {
-    const targetPosRange = Math.max(0, bboxW / targetAspect - BOO_ENVELOPE_HEIGHT)
-    yScale = targetPosRange / posRangeY
+    xScale = Math.min(MAX_STRETCH, targetPosRange / posRangeX)
   }
-  if (xScale === 1 && yScale === 1) return nodes
-  // Pivot at the position-range center so the stretch is symmetric.
+  if (xScale === 1) return nodes
   const cx = (minX + maxX) / 2
-  const cy = (minY + maxY) / 2
   return nodes.map((n) => {
     if (n.type !== 'boo') return n
     return {
       ...n,
       position: {
         x: cx + (n.position.x - cx) * xScale,
-        y: cy + (n.position.y - cy) * yScale,
+        y: n.position.y,
       },
     }
   })
