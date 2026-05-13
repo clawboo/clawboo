@@ -1,15 +1,19 @@
 // GroupChatView — unified header + 2-row resizable layout. The header above
-// the split owns team identity (icon + name + agent count), the orchestration
-// toggle, and the connection-status dot — so the team name never renders
-// twice (it used to appear in both `GhostGraphPanel`'s toolbar and
-// `GroupChatPanel`'s header). Below the header: `GhostGraphPanel` on top
-// (in `embedded` mode → its toolbar drops the team-name prefix and just
-// says "Ghost Graph"), `GroupChatPanel` on bottom (in `embedded` mode →
-// its own header is suppressed). Gates the `GroupChatPanel` behind the
-// team onboarding flow ("Know Your Team" button → agent intros → user
-// self-intro → normal chat).
+// the split owns team identity (icon + name + agent count) — so the team
+// name never renders twice (it used to appear in both `GhostGraphPanel`'s
+// toolbar and `GroupChatPanel`'s header). Below the header:
+// `GhostGraphPanel` on top (in `embedded` mode → its toolbar drops the
+// team-name prefix and just says "Ghost Graph"), `GroupChatPanel` on
+// bottom (in `embedded` mode → its own header is suppressed). Gates the
+// `GroupChatPanel` behind the team onboarding flow ("Know Your Team"
+// button → agent intros → user self-intro → normal chat).
+//
+// Team orchestration (delegation routing + context relay) is ALWAYS on —
+// it's the whole point of a team chat. There's no UI toggle; the
+// `useTeamOrchestration` hook in `GroupChatPanel` is gated only by the
+// connection status (so it stays quiet when the Gateway is down).
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Group, Panel } from 'react-resizable-panels'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { ResizeHandle } from '@/features/shared/ResizeHandle'
@@ -25,34 +29,16 @@ import { useConnectionStore } from '@/stores/connection'
 import { useBooZeroStore } from '@/stores/booZero'
 import { buildTeamSessionKey } from '@/lib/sessionUtils'
 
-const ORCHESTRATION_STORAGE_KEY = 'clawboo:team-orchestration-enabled'
-
 export function GroupChatView({ teamId }: { teamId: string }) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
   const agents = useFleetStore((s) => s.agents)
   const client = useConnectionStore((s) => s.client)
-  const connectionStatus = useConnectionStore((s) => s.status)
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const booZeroAgent = useMemo(
     () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
     [agents, booZeroAgentId],
   )
-
-  // Orchestration toggle (persisted in localStorage). Lifted from
-  // `GroupChatPanel` so the unified header can render the Zap toggle above
-  // the graph + chat split.
-  const [orchestrationEnabled, setOrchestrationEnabled] = useState<boolean>(() => {
-    const stored = localStorage.getItem(ORCHESTRATION_STORAGE_KEY)
-    return stored !== null ? stored === 'true' : true
-  })
-  const toggleOrchestration = useCallback(() => {
-    setOrchestrationEnabled((prev) => {
-      const next = !prev
-      localStorage.setItem(ORCHESTRATION_STORAGE_KEY, String(next))
-      return next
-    })
-  }, [])
 
   const {
     agentsIntroduced,
@@ -84,15 +70,7 @@ export function GroupChatView({ teamId }: { teamId: string }) {
     }
   }, [teamAgents, teamId])
 
-  const header = (
-    <GroupChatViewHeader
-      team={team}
-      agentCount={teamAgents.length}
-      orchestrationEnabled={orchestrationEnabled}
-      onToggleOrchestration={toggleOrchestration}
-      connectionStatus={connectionStatus}
-    />
-  )
+  const header = <GroupChatViewHeader team={team} agentCount={teamAgents.length} />
 
   // While onboarding state is hydrating, render the layout but hide the
   // chat-side content to avoid a flash of the gate before redirecting to
@@ -155,12 +133,7 @@ export function GroupChatView({ teamId }: { teamId: string }) {
           </Panel>
           <ResizeHandle direction="vertical" />
           <Panel defaultSize={55} minSize={20}>
-            <GroupChatPanel
-              teamId={teamId}
-              userIntroText={userIntroText}
-              embedded
-              orchestrationEnabled={orchestrationEnabled}
-            />
+            <GroupChatPanel teamId={teamId} userIntroText={userIntroText} embedded />
           </Panel>
         </Group>
       </div>

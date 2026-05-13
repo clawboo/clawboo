@@ -30,7 +30,6 @@ export function GroupChatPanel({
   teamId,
   userIntroText,
   embedded = false,
-  orchestrationEnabled: orchestrationEnabledProp,
 }: {
   teamId: string
   /**
@@ -44,13 +43,9 @@ export function GroupChatPanel({
   userIntroText?: string
   /**
    * When true, suppresses the local header (the unified `GroupChatViewHeader`
-   * rendered above the graph + chat split owns team identity, orchestration
-   * toggle, and connection-status dot). The orchestration enabled flag is
-   * read from the prop instead of local state.
+   * rendered above the graph + chat split owns team identity).
    */
   embedded?: boolean
-  /** Required when `embedded` is true — controls the orchestration hook. */
-  orchestrationEnabled?: boolean
 }) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
   const agents = useFleetStore((s) => s.agents)
@@ -71,13 +66,12 @@ export function GroupChatPanel({
   // each prefer `booZeroAgent` over this when present.
   const teamInternalLeadId = resolveTeamInternalLead(teamId, team?.leaderAgentId ?? null, agents)
 
-  // Orchestration toggle is now owned by `GroupChatView` so the unified
-  // header (rendered above this panel) can show/toggle it. When `embedded`
-  // is true we trust the prop; the fallback path (`embedded === false`) is
-  // for any future caller that still mounts `GroupChatPanel` standalone.
-  const orchestrationEnabled = orchestrationEnabledProp ?? true
-
   // ── Team orchestration (delegation detection + context relay) ───────────
+  //
+  // Always on — relay + delegation routing is the whole point of a team
+  // chat, so there's no user toggle. The hook is gated only by the
+  // Gateway connection: when disconnected, the hook stays quiet to avoid
+  // queuing relays that would fail to send anyway.
   useTeamOrchestration({
     teamId,
     // Pass the actual team name — used by the silent-resume wake message
@@ -90,7 +84,7 @@ export function GroupChatPanel({
     leaderAgentId: teamInternalLeadId,
     booZeroAgent,
     client,
-    enabled: connectionStatus === 'connected' && orchestrationEnabled,
+    enabled: connectionStatus === 'connected',
     userIntroText,
   })
 
