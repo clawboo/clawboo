@@ -183,9 +183,17 @@ export function generateBooAvatar(params: BooAvatarParams): string {
   // Resolve eye shape
   const eyeShape: EyeShape = params.eyeShape ?? ((Math.abs(h >> 8) % 5) as EyeShape)
 
-  // Resolve accessory
+  // Resolve accessory. Boo Zero is the iconic Clawboo mascot — the clean
+  // ghost-lobster with no accessory. Everyone running Clawboo sees the
+  // same unadorned mascot as their Boo Zero, paired with the reserved
+  // OpenClaw-red tint (TINTS[0]). Forcing `'none'` here means we never
+  // need to maintain a separate "Boo Zero" SVG: the existing avatar
+  // pipeline produces it by virtue of the tint + accessory locks. Non-
+  // Boo-Zero agents still get hash-derived accessories from the full
+  // list, so individuality remains.
   const accList: Accessory[] = ['none', 'glasses', 'hat', 'headphones', 'crown']
-  const accessory: Accessory = params.accessory ?? accList[Math.abs(h >> 16) % accList.length]
+  const accessory: Accessory =
+    params.accessory ?? (params.isBooZero ? 'none' : accList[Math.abs(h >> 16) % accList.length])
 
   // Pupil color — cyan for OpenClaw red, white for all other tints
   const pupilColor = tint === '#ff4d4d' ? '#00e5cc' : '#ffffff'

@@ -27,4 +27,12 @@ export async function deleteAgentOperation(
       method: 'DELETE',
     }).catch(() => {})
   }
+
+  // 5. Clean up the local SQLite agent row + FK-referenced rows. Without
+  //    this the row lingers forever, inflating per-team `agentCount` in
+  //    `/api/teams` responses and polluting any future logic that reads
+  //    from the local DB. Best-effort, non-blocking — if the request fails
+  //    the worst case is one extra ghost row that the one-shot
+  //    `cleanup-ghosts` will sweep on the next bootstrap.
+  fetch(`/api/agents/${encodeURIComponent(agentId)}`, { method: 'DELETE' }).catch(() => {})
 }

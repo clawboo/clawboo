@@ -168,12 +168,25 @@ function AgentRow({
 
 // ─── Nav items ───────────────────────────────────────────────────────────────
 
-const PRIMARY_NAV: { id: NavView; label: string; emoji: string }[] = [
-  { id: 'graph', label: 'Ghost Graph', emoji: '👻' },
+interface NavItem {
+  id: NavView
+  label: string
+  emoji: string
+  /** Optional smaller, dimmer hint rendered beside the main label. */
+  subtitle?: string
+}
+
+const PRIMARY_NAV: NavItem[] = [
+  // `'graph'` opens Atlas — the global all-teams view with Boo Zero at
+  // the top of the hierarchy. Renamed from "Ghost Graph" because the
+  // team-scoped Ghost Graph still lives inside Group Chat; this slot is
+  // now specifically the org-wide map. Subtitle clarifies that Atlas is
+  // cross-team (vs. the per-team Ghost Graph users see inside Group Chat).
+  { id: 'graph', label: 'Atlas', emoji: '🌐', subtitle: '(All Teams)' },
   { id: 'marketplace', label: 'Marketplace', emoji: '🛒' },
 ]
 
-const SECONDARY_NAV: { id: NavView; label: string; emoji: string }[] = [
+const SECONDARY_NAV: NavItem[] = [
   { id: 'approvals', label: 'Approvals', emoji: '🔐' },
   { id: 'scheduler', label: 'Scheduler', emoji: '⏰' },
   { id: 'cost', label: 'Tokens Used', emoji: '📊' },
@@ -498,8 +511,14 @@ export function AgentListColumn() {
         </label>
       </div>
 
-      {/* Agent list — fixed at 40% of column height, scrollable */}
-      <div className="shrink-0 overflow-y-auto px-2 pb-2" style={{ height: '40%' }}>
+      {/* Agent list — grows to fill the space between search and the
+          global-nav block at the bottom. Scrolls when content overflows.
+          The previous `height: 40%` was a fixed sliver that left awkward
+          empty space mid-column and put the global nav adrift; using
+          `flex-1` instead anchors it to a clear top-half, with Create Boo
+          and the global nav (Atlas, Marketplace, Approvals, etc.) all
+          sitting at the bottom edge. */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
         {selectedTeam && filtered.length > 0 && (
           <>
             <GroupChatRow
@@ -587,7 +606,7 @@ export function AgentListColumn() {
       {/* Divider between Create Boo and nav */}
       <div className="mx-3 my-2 border-t border-white/6" />
 
-      {/* Primary nav — Ghost Graph & Marketplace */}
+      {/* Primary nav — Atlas & Marketplace */}
       <div className="px-2 flex flex-col gap-0.5">
         {PRIMARY_NAV.map((item) => {
           const isActive = viewMode.type === 'nav' && viewMode.view === item.id
@@ -600,11 +619,14 @@ export function AgentListColumn() {
                 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] font-semibold transition-all duration-150',
                 isActive
                   ? 'bg-accent/12 text-accent'
-                  : 'text-secondary/50 hover:bg-white/4 hover:text-secondary/80',
+                  : 'text-text/85 hover:bg-white/4 hover:text-text',
               ].join(' ')}
             >
               <span className="text-[14px]">{item.emoji}</span>
               <span>{item.label}</span>
+              {item.subtitle && (
+                <span className="text-[10px] font-normal text-text/45">{item.subtitle}</span>
+              )}
             </button>
           )
         })}
@@ -613,7 +635,7 @@ export function AgentListColumn() {
       {/* Divider */}
       <div className="mx-3 my-1.5 border-t border-white/6" />
 
-      {/* Secondary nav — Approvals, Scheduler, Cost */}
+      {/* Secondary nav — Approvals, Scheduler, Cost, System */}
       <div className="px-2 pb-3 flex flex-col gap-0.5">
         {SECONDARY_NAV.map((item) => {
           const isActive = viewMode.type === 'nav' && viewMode.view === item.id
@@ -627,7 +649,7 @@ export function AgentListColumn() {
                 'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150',
                 isActive
                   ? 'bg-accent/12 text-accent'
-                  : 'text-secondary/40 hover:bg-white/4 hover:text-secondary/70',
+                  : 'text-text/70 hover:bg-white/4 hover:text-text/90',
               ].join(' ')}
             >
               <span className="text-[12px]">{item.emoji}</span>

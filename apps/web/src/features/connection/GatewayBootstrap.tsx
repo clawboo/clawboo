@@ -242,10 +242,74 @@ export function GatewayBootstrap() {
           teamId: existingTeamIds.get(a.id) ?? null,
           execConfig: execConfigs.get(a.id) ?? null,
         }))
+
+        // Identify Boo Zero before applying the display-name override so
+        // we know which agent's name to overlay.
+        const booZeroId = identifyBooZero(mapped, result.defaultId)
+        useBooZeroStore.getState().setBooZeroAgentId(booZeroId)
+
+        // Phase E: Clawboo-side display-name override for Boo Zero. The
+        // user's Gateway agent name might be the literal slug "main" or a
+        // custom name they picked in OpenClaw onboarding ("Mythos" was
+        // seen in production). Clawboo's policy: lock the display name to
+        // "Boo Zero" by default; user can change it anytime in the System
+        // panel ("Boo Zero" section). The override lives in SQLite —
+        // Gateway-side identity is never touched.
+        //
+        // First-connect behavior: if no override exists yet, we write
+        // "Boo Zero" as the default so the chat header / identity anchor
+        // / briefs all read consistently. Subsequent connects respect
+        // whatever the user has saved.
+        if (booZeroId) {
+          let override = ''
+          try {
+            const res = await fetch(`/api/boo-zero/display-name/${encodeURIComponent(booZeroId)}`)
+            if (res.ok) {
+              const body = (await res.json()) as { name?: string | null }
+              override = (body.name ?? '').trim()
+            }
+          } catch {
+            // Best-effort.
+          }
+          // No override yet → seed with the Clawboo default "Boo Zero".
+          // Skipped silently on fetch failure (the user can still see the
+          // Gateway-side name; the next successful connect will seed).
+          if (override.length === 0) {
+            try {
+              const seed = await fetch(
+                `/api/boo-zero/display-name/${encodeURIComponent(booZeroId)}`,
+                {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ name: 'Boo Zero' }),
+                },
+              )
+              if (seed.ok) override = 'Boo Zero'
+            } catch {
+              // Best-effort.
+            }
+          }
+          if (override.length > 0) {
+            for (const a of mapped) {
+              if (a.id === booZeroId) a.name = override
+            }
+          }
+        }
+
         hydrateAgents(mapped)
 
-        // Identify Boo Zero
-        useBooZeroStore.getState().setBooZeroAgentId(identifyBooZero(mapped, result.defaultId))
+        // One-shot ghost sweep. Removes local SQLite agent rows for agents
+        // no longer in the Gateway — leftovers from older delete paths that
+        // didn't clean up local state. Skipped when the Gateway returned
+        // zero agents (the server endpoint guards this too, but skipping
+        // here avoids the round-trip + the noisy 400 response).
+        if (mapped.length > 0) {
+          fetch('/api/agents/cleanup-ghosts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ liveAgentIds: mapped.map((a) => a.id) }),
+          }).catch(() => {})
+        }
 
         return result.agents.length
       } catch {

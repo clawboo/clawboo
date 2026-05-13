@@ -5,6 +5,20 @@ export type BuildTeamAgentsMdParams = {
   teamName: string
   teammates: TeammateDef[]
   routingRules: string
+  /**
+   * Name of the universal team leader (Boo Zero). When provided, the
+   * generated AGENTS.md adds a "Universal Leader" section telling the
+   * agent it can route upward via `<delegate to="@Boo Zero">` for
+   * higher-level coordination, synthesis, or cross-team requests.
+   */
+  universalLeaderName?: string | null
+  /**
+   * Optional name of the team-internal lead (CTO, Team Lead, etc.,
+   * detected via `detectGenuineLeader`). When set AND distinct from
+   * `agentName`, the AGENTS.md surfaces it as the team's coordinator
+   * under the universal leader.
+   */
+  teamInternalLeadName?: string | null
 }
 
 export type BuildTeamWakeMessageParams = {
@@ -18,6 +32,8 @@ export type BuildClawbooHelpDocParams = {
   teamName: string
   /** Teammates excluding self. Roles are optional — only `name` is used for paths. */
   teammates: TeammateDef[]
+  /** Optional Boo Zero name for the universal-leader note. */
+  universalLeaderName?: string | null
 }
 
 /**
@@ -68,11 +84,47 @@ function formatTime(ms: number): string {
 }
 
 export function buildTeamAgentsMd(params: BuildTeamAgentsMdParams): string {
-  const { agentName, teamName, teammates, routingRules } = params
+  const {
+    agentName,
+    teamName,
+    teammates,
+    routingRules,
+    universalLeaderName,
+    teamInternalLeadName,
+  } = params
   const rules = routingRules.trim() || 'No specific routing rules defined.'
 
+  // Universal leader section — Boo Zero is the leader of every team. We
+  // mention it whether or not the agent has explicit routing rules to it,
+  // so any team agent can escalate / delegate "upward" via `<delegate>`.
+  const universalLeaderBlock = universalLeaderName
+    ? `### Universal Leader: @${universalLeaderName}
+**${universalLeaderName}** is the universal team leader on this Clawboo instance — sitting above every team, including yours. You can address it explicitly with \`@${universalLeaderName}\` in your responses, and route higher-level coordination, synthesis, or cross-team requests via:
+
+\`\`\`
+<delegate to="@${universalLeaderName}">
+A specific request — strategic decision, cross-team synthesis, blocker the team
+can't resolve alone, etc.
+</delegate>
+\`\`\`
+
+${
+  teamInternalLeadName && teamInternalLeadName !== agentName
+    ? `Within team **${teamName}**, **${teamInternalLeadName}** is the team-internal lead under ${universalLeaderName}. They coordinate intake from ${universalLeaderName} and own internal team flow.\n`
+    : ''
+}
+`
+    : ''
+
   if (teammates.length === 0) {
-    return `# AGENTS\n\n### Routing Rules\n${rules}\n`
+    return `# AGENTS
+
+## Your Team: ${teamName}
+You are **${agentName}**.
+
+${universalLeaderBlock}### Routing Rules
+${rules}
+`
   }
 
   const rows = teammates.map((t) => `| @${t.name} | ${t.role} |`).join('\n')
@@ -83,7 +135,7 @@ export function buildTeamAgentsMd(params: BuildTeamAgentsMdParams): string {
 ## Your Team: ${teamName}
 You are **${agentName}** — a member of a multi-agent team on this OpenClaw Gateway.
 
-### Teammates
+${universalLeaderBlock}### Teammates
 | Name | Role |
 |------|------|
 ${rows}
@@ -152,10 +204,71 @@ a null \`kid\` header gracefully. Report back what you find.
   the highest confidence; prose forms are only a fallback and may not route.
 - Wait for or poll teammates' responses; their replies arrive automatically as
   \`[Team Update]\` messages, after which you continue with that context.
+- **Take initiative on work that wasn't delegated to YOU.** Only act on
+  \`<delegate to="@${agentName}">\` blocks aimed at you specifically.
+  \`[Team Update]\` messages and other teammates' work are read-only context,
+  not action items. If you think you could help on something a teammate is
+  doing (e.g., you spotted a UX issue in their code), propose it via a
+  \`<delegate to="@<that teammate>">\` block — don't just start doing it
+  yourself in parallel. Production has shown that uncoordinated parallel
+  work produces duplicate / conflicting outputs.
+
+### Resuming sessions
+
+OpenClaw sessions go cold when idle. Before sending you a real task, the
+orchestrator may send a brief warm-up message that looks like this:
+
+> "You are resuming a team collaboration session as ${agentName} on team
+> ${teamName}. Stay quiet — the next message will be a [Team Update] or
+> a user message…"
+
+**This is a session-warmup signal, not work for you to do.**
+
+When you see it:
+- Do NOT respond.
+- Do NOT introduce yourself.
+- Do NOT greet teammates ("Welcome aboard!", "Hey Frontend Boo!", etc.).
+- Do NOT acknowledge the re-init.
+
+Your prior context — this AGENTS.md, your SOUL.md, your TOOLS.md, the team
+brief — is still loaded. The next message you receive (a \`[Team Update]\`
+from a teammate, or a fresh user message) is where you engage. Pick up the
+work as if there was no pause.
 
 ### Routing Rules
 ${rules}
 `
+}
+
+/**
+ * Silent re-init body for sleepy team-agent sessions.
+ *
+ * **Why this exists**: OpenClaw agents go cold after idle TTL. Before
+ * resuming agent-to-agent work, we need a chat.send to wake the session.
+ * The OLD wake body (`buildTeamWakeMessage` below) asked agents to
+ * introduce themselves AND listed teammates as `@AgentName` — both of
+ * those triggered a cascade of intros and false-positive delegations
+ * (the 11-message "Welcome aboard X" flood in production, CLAUDE.md
+ * §"Group Chat Onboarding Gate — Cascade Fix").
+ *
+ * This replacement says "you're resuming, stay quiet, the next message
+ * is the real one". It pairs with the new `### Resuming sessions` rule
+ * in `buildTeamAgentsMd` which deterministically loads into the agent's
+ * context every turn — so even if the LLM ignores the in-message hint,
+ * AGENTS.md tells it the same thing.
+ *
+ * Used by:
+ *   - `groupChatSendOperation.wakeTeamAgents` (user-message-time wake)
+ *   - `useTeamOrchestration` wake-on-relay path
+ *
+ * Both call sites converged on this helper to keep behavior consistent.
+ */
+export function buildSilentResumeWakeMessage(params: {
+  agentName: string
+  teamName: string
+}): string {
+  const { agentName, teamName } = params
+  return `You are resuming a team collaboration session as ${agentName} on team "${teamName}". Stay quiet — the next message will be a [Team Update] or a user message with the real context. Continue from where you left off; do NOT introduce yourself, do NOT greet teammates, do NOT acknowledge this re-init.`
 }
 
 export function buildTeamWakeMessage(params: BuildTeamWakeMessageParams): string {
@@ -240,7 +353,7 @@ export function buildTeamContextPreamble(params: BuildTeamContextPreambleParams)
  * `createAgent` exactly.
  */
 export function buildClawbooHelpDoc(params: BuildClawbooHelpDocParams): string {
-  const { agentName, teamName, teammates } = params
+  const { agentName, teamName, teammates, universalLeaderName } = params
   const yourSlug = slugifyAgentName(agentName)
   const teammatePathRows = teammates
     .map((t) => `  ${t.name}'s workspace: ~/.openclaw/workspace-${slugifyAgentName(t.name)}`)
@@ -250,11 +363,37 @@ export function buildClawbooHelpDoc(params: BuildClawbooHelpDocParams): string {
   // to invent a placeholder name. Fall back to a generic name if solo.
   const exampleName = teammates[0]?.name ?? 'Teammate Name'
 
+  const universalLeaderBlock = universalLeaderName
+    ? `## Universal Leader: ${universalLeaderName}
+
+**${universalLeaderName}** is Clawboo's universal team leader — it sits above
+every team on this instance, including ${teamName}. ${universalLeaderName}
+triages user messages, decides what each teammate should pick up, and synthesizes
+results back to the user. When you finish a delegated task, your response is
+relayed to ${universalLeaderName} automatically; you do not need to ping it.
+
+You CAN escalate upward by emitting:
+
+\`\`\`
+<delegate to="@${universalLeaderName}">
+A specific request — a strategic decision, a synthesis across teammates, a
+blocker your team can't resolve internally, a cross-team handoff.
+</delegate>
+\`\`\`
+
+Do NOT \`@${universalLeaderName}\` casually in prose — only via \`<delegate>\`
+blocks. Bare mentions are a best-effort fallback and may not route.
+
+`
+    : ''
+
   return `# CLAWBOO — Team Operating Reference
 
 You are **${agentName}**, an agent in team **${teamName}** on Clawboo, a
 multi-agent dashboard built on OpenClaw. This file is the detailed reference
 for how the team works. Read it any time you're unsure — \`cat ~/CLAWBOO.md\`.
+
+${universalLeaderBlock}
 
 ## Workspaces are isolated
 

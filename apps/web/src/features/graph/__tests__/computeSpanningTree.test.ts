@@ -145,6 +145,31 @@ describe('computeSpanningTree', () => {
     expect(primaryEdgeTargets.length).toBe(uniqueTargets.size)
   })
 
+  // Two-phase BFS for Atlas — `useGraphData` partitions dependency edges
+  // into synthetic-first / real-second so the synthetic Boo Zero → team-
+  // lead edges win adjacency-insertion order. Without that ordering, a
+  // cross-team @mention could steal a teammate's primary-parent slot.
+  it('claims synthetic edges over real edges when synthetic is listed first', () => {
+    // Setup: Boo Zero is the root. Agent `m1` has TWO candidate primary
+    // parents — a synthetic `bz → m1` AND a real `peer → m1` (cross-team
+    // @mention). Atlas orders the synthetic edge FIRST in the input
+    // array, so it wins the BFS race.
+    const edges = [
+      // Synthetic-first phase
+      edge('e-syn-bz-m1', 'bz', 'm1'),
+      edge('e-syn-bz-peer', 'bz', 'peer'),
+      // Real AGENTS.md phase — peer mentions m1 via @-routing
+      edge('e-real-peer-m1', 'peer', 'm1'),
+    ]
+    const result = computeSpanningTree(edges, 'bz')
+    // m1's primary parent is bz (synthetic), not peer (real).
+    expect(result.parentMap.get('m1')).toBe('bz')
+    expect(result.primaryEdgeIds.has('e-syn-bz-m1')).toBe(true)
+    // The cross-team real edge does NOT win primary status because
+    // synthetic was discovered first.
+    expect(result.primaryEdgeIds.has('e-real-peer-m1')).toBe(false)
+  })
+
   it('uses an adjacency map for O(1) lookup (smoke test on a 100-node graph)', () => {
     // Sanity check: doesn't blow up on a moderate graph.
     const edges: SpanningEdge[] = []

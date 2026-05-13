@@ -4,13 +4,23 @@ import type { TranscriptEntry } from '@clawboo/protocol'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Factory uses the entryId as part of the text + slightly-staggered timestamps
+ * so distinct entries are content-distinct too. The store now dedupes by
+ * content signature in addition to entryId (Round 2, Phase A) — tests that
+ * relied on multiple `entryId`s with identical text + timestamp were
+ * exercising a degenerate case that doesn't occur in production.
+ */
+let nextTs = 1_700_000_000_000
 function makeEntry(overrides: Partial<TranscriptEntry> = {}): TranscriptEntry {
+  const id = overrides.entryId ?? `e${nextTs}`
   return {
-    entryId: 'e1',
+    entryId: id,
     kind: 'assistant',
     source: 'runtime',
-    text: 'Hello world',
-    timestamp: Date.now(),
+    text: `Hello world ${id}`,
+    timestamp: nextTs++,
+    timestampMs: nextTs,
     ...overrides,
   } as TranscriptEntry
 }

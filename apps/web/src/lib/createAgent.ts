@@ -133,8 +133,25 @@ export async function refreshTeamAgentsMd(params: {
   agentName: string
   teamName: string
   teammates: TeammateDef[]
+  /**
+   * Boo Zero's name — the universal team leader. When provided, the
+   * regenerated AGENTS.md and CLAWBOO.md include the universal-leader
+   * section telling the agent how to escalate upward via `<delegate
+   * to="@Boo Zero">`. Omitted in tests / pre-Boo-Zero builds.
+   */
+  universalLeaderName?: string | null
+  /** Team-internal lead (CTO, Team Lead, etc.), if any. */
+  teamInternalLeadName?: string | null
 }): Promise<void> {
-  const { client, agentId, agentName, teamName, teammates } = params
+  const {
+    client,
+    agentId,
+    agentName,
+    teamName,
+    teammates,
+    universalLeaderName,
+    teamInternalLeadName,
+  } = params
   const content = await client.agents.files.read(agentId, 'AGENTS.md')
   let routingRules = content ?? ''
 
@@ -149,12 +166,19 @@ export async function refreshTeamAgentsMd(params: {
     teamName,
     teammates,
     routingRules,
+    universalLeaderName,
+    teamInternalLeadName,
   })
 
   // CLAWBOO.md is regenerated wholesale — there's no per-team customization
   // in it (every team gets the same operating reference, just with the team's
   // own teammate list inlined for path discoverability).
-  const clawboo = buildClawbooHelpDoc({ agentName, teamName, teammates })
+  const clawboo = buildClawbooHelpDoc({
+    agentName,
+    teamName,
+    teammates,
+    universalLeaderName,
+  })
 
   await client.agents.files.set(agentId, 'AGENTS.md', enhanced)
   // CLAWBOO.md is best-effort — see the comment in `createAgent` above.
