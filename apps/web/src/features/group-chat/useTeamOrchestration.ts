@@ -8,6 +8,8 @@ import type { AgentState } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { buildTeamSessionKey, setTeamChatOverride, hasTeamChatOverride } from '@/lib/sessionUtils'
 import { buildTeamContextPreamble, buildSilentResumeWakeMessage } from '@/lib/teamProtocol'
+import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
+import { buildTeamRulesBlock, fetchTeamRules } from '@/lib/teamRules'
 import { isAgentAwake } from '@/lib/wakeTracker'
 import { detectDelegations, isRelayMessage } from './delegationDetector'
 import {
@@ -306,9 +308,33 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
                   userIntroText: userIntroTextRef.current,
                 })
 
-                const messageBody = preamble
-                  ? `${preamble}\n\n${delegation.taskDescription}`
-                  : delegation.taskDescription
+                // Agent → Boo Zero delegations need the rules block too —
+                // Boo Zero stays identity-anchored and rule-bound across
+                // every code path that delivers a message to it (user
+                // turns, wake-ups, AND agent-to-Boo-Zero delegations).
+                const isDelegationToBooZero =
+                  freshBooZero !== null && delegation.targetAgentId === freshBooZero.id
+                const rulesBlock = isDelegationToBooZero
+                  ? buildBooZeroRulesBlock({
+                      displayName: freshBooZero!.name,
+                      teamName: teamNameRef.current,
+                    })
+                  : null
+
+                // Team Rules — same source of truth as user-message-time
+                // injection. Loaded for every agent-to-agent delegation so
+                // the user's persisted corrections never get lost as work
+                // hops between teammates.
+                const teamRulesContent = await fetchTeamRules(currentTeamId)
+                const teamRulesBlock = buildTeamRulesBlock(teamRulesContent)
+
+                const sections = [
+                  rulesBlock,
+                  teamRulesBlock,
+                  preamble,
+                  delegation.taskDescription,
+                ].filter((s): s is string => Boolean(s))
+                const messageBody = sections.join('\n\n')
 
                 // Final checkpoint before the network call. Without this,
                 // a Stop that fired during the synchronous preamble build
@@ -407,10 +433,19 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
                     !wokenThisBatchRef.current.has(targetId)
                   ) {
                     wokenThisBatchRef.current.add(targetId)
-                    const wakeMsg = buildSilentResumeWakeMessage({
+                    const baseWake = buildSilentResumeWakeMessage({
                       agentName: targetAgent.name,
                       teamName: teamNameRef.current,
                     })
+                    // When the wake target is Boo Zero, prefix with the
+                    // rules block — same rationale as `wakeTeamAgents` in
+                    // `groupChatSendOperation.ts`. Boo Zero's wake-on-relay
+                    // path was a documented cascade trigger; the rules
+                    // block keeps the identity + behavior anchored.
+                    const isBooZeroWake = freshBooZero !== null && targetId === freshBooZero.id
+                    const wakeMsg = isBooZeroWake
+                      ? `${buildBooZeroRulesBlock({ displayName: targetAgent.name, teamName: teamNameRef.current })}\n\n${baseWake}`
+                      : baseWake
                     setTeamChatOverride(targetId, targetTeamSk)
                     // Bail-2: Stop fired between IIFE start and wake send.
                     // If we proceed, the wake message gets delivered but
@@ -439,9 +474,20 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
                   // later, restarting the cascade past the freeze window.
                   if (getStopGeneration(currentTeamId) !== startGen) return
 
+                  // Relays targeting Boo Zero get the rules block prefix
+                  // for consistency with every other Boo-Zero delivery
+                  // path. Without this, a relay from a teammate that
+                  // wakes Boo Zero's session would land WITHOUT the
+                  // identity + behavioral anchor and could prompt the
+                  // exact drift production saw at 08:18 AM.
+                  const isRelayToBooZero = freshBooZero !== null && targetId === freshBooZero.id
+                  const finalRelayMsg = isRelayToBooZero
+                    ? `${buildBooZeroRulesBlock({ displayName: targetAgent.name, teamName: teamNameRef.current })}\n\n${relayMsg}`
+                    : relayMsg
+
                   await currentClient.call('chat.send', {
                     sessionKey: targetTeamSk,
-                    message: relayMsg,
+                    message: finalRelayMsg,
                     deliver: false,
                     idempotencyKey: crypto.randomUUID(),
                   })

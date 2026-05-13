@@ -136,6 +136,9 @@ export function buildDelegationLinkages(
     // Relays carry condensed summaries that may incidentally contain
     // delegate-looking strings — guard against false positives.
     if (isRelayMessage(text)) continue
+    // Resume-ack token is a protocol artifact (Phase 3) — never a source
+    // of delegations.
+    if (text.trim() === '__resumed__') continue
 
     const sourceAgentId = agentIdFromSessionKey(sourceEntry.sessionKey)
     if (!sourceAgentId) continue

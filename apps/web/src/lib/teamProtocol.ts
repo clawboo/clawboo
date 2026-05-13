@@ -216,19 +216,27 @@ a null \`kid\` header gracefully. Report back what you find.
 ### Resuming sessions
 
 OpenClaw sessions go cold when idle. Before sending you a real task, the
-orchestrator may send a brief warm-up message that looks like this:
+orchestrator sends a structured warm-up message that looks like this:
 
-> "You are resuming a team collaboration session as ${agentName} on team
-> ${teamName}. Stay quiet — the next message will be a [Team Update] or
-> a user message…"
+> "[RESUME_SIGNAL — this is NOT a user message]
+> Your session is being reactivated as ${agentName} on team "${teamName}".
+> This message is a warm-up ping, not work for you.
+>
+> REQUIRED RESPONSE: Reply with EXACTLY the single token \`__resumed__\` and
+> nothing else. No greeting. No introduction. No emoji. No acknowledgement
+> beyond that one word.
+>
+> The next message you receive will be the actual instruction. Pick up the
+> work then."
 
 **This is a session-warmup signal, not work for you to do.**
 
 When you see it:
-- Do NOT respond.
+- Reply with EXACTLY \`__resumed__\` (no other text, no whitespace, no
+  punctuation).
 - Do NOT introduce yourself.
 - Do NOT greet teammates ("Welcome aboard!", "Hey Frontend Boo!", etc.).
-- Do NOT acknowledge the re-init.
+- Do NOT acknowledge the re-init in any other way.
 
 Your prior context — this AGENTS.md, your SOUL.md, your TOOLS.md, the team
 brief — is still loaded. The next message you receive (a \`[Team Update]\`
@@ -263,12 +271,28 @@ ${rules}
  *
  * Both call sites converged on this helper to keep behavior consistent.
  */
+/**
+ * The literal token an agent should emit in response to a resume wake-up.
+ * Filtered out of the merged transcript renderer so it never pollutes the
+ * visible chat.
+ */
+export const RESUME_ACK_TOKEN = '__resumed__'
+
 export function buildSilentResumeWakeMessage(params: {
   agentName: string
   teamName: string
 }): string {
   const { agentName, teamName } = params
-  return `You are resuming a team collaboration session as ${agentName} on team "${teamName}". Stay quiet — the next message will be a [Team Update] or a user message with the real context. Continue from where you left off; do NOT introduce yourself, do NOT greet teammates, do NOT acknowledge this re-init.`
+  // Structural prompt — the LLM ignores prose "stay quiet" instructions
+  // more reliably than it ignores a literal-string contract. Pair with
+  // the AGENTS.md "Resuming sessions" rule (for team members) and the
+  // Boo Zero rules block (for the leader).
+  return `[RESUME_SIGNAL — this is NOT a user message]
+Your session is being reactivated as ${agentName} on team "${teamName}". This message is a warm-up ping, not work for you.
+
+REQUIRED RESPONSE: Reply with EXACTLY the single token \`${RESUME_ACK_TOKEN}\` and nothing else. No greeting. No introduction. No emoji. No acknowledgement beyond that one word.
+
+The next message you receive will be the actual instruction. Pick up the work then.`
 }
 
 export function buildTeamWakeMessage(params: BuildTeamWakeMessageParams): string {

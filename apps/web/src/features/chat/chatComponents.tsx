@@ -147,6 +147,10 @@ export function groupEntriesToBlocks(entries: TranscriptEntry[]): RenderBlock[] 
   for (const entry of entries) {
     // Skip injected context preamble entries (should not appear in UI)
     if (entry.text.startsWith('[Team Context')) continue
+    // Skip the resume-ack token — the wake message asks the agent to reply
+    // with EXACTLY `__resumed__` to confirm session warmup. The literal
+    // token is a protocol artifact, not chat content the user should see.
+    if (entry.text.trim() === '__resumed__') continue
 
     if (entry.kind === 'meta') {
       commitTurn()
@@ -1264,7 +1268,8 @@ export const MessageComposer = memo(
           )}
         </div>
         <p className="mt-1.5 text-right font-mono text-[10px] text-secondary/30">
-          Enter to send · Shift+Enter for newline · /reset for new session
+          Enter to send · Shift+Enter for newline · /reset for new session · /rule &lt;text&gt; to
+          save a team rule
         </p>
       </div>
     )

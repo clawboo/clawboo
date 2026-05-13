@@ -13,6 +13,9 @@ import { sendGroupChatMessage } from './groupChatSendOperation'
 import { useTeamOrchestration } from './useTeamOrchestration'
 import { buildDelegationLinkages } from './buildDelegationLinkages'
 import { stopAllInTeam } from '@/features/chat/stopChatOperation'
+import { appendRule, fetchTeamRules, parseRuleCommand, saveTeamRules } from '@/lib/teamRules'
+import { nextSeq } from '@/lib/sequenceKey'
+import { useToastStore } from '@/stores/toast'
 import {
   groupEntriesToBlocks,
   UserMessageCard,
@@ -76,6 +79,24 @@ export function GroupChatPanel({
   // orchestration-side cleanup.
   const [stopSignal, setStopSignal] = useState(0)
 
+  // ── History-hydration gate ──────────────────────────────────────────────
+  // `useTeamOrchestration` must NOT process historical entries that arrive
+  // via `/api/chat-history` hydration as if they were new — that's the root
+  // cause of the "7-hour-later cascade of intros / wake messages" we saw in
+  // production. The hook seeds `lastCountsRef` on mount; if it mounts before
+  // hydration completes, the seed reads `0` and every hydrated entry trips
+  // the subscription's "new entries" branch.
+  //
+  // We flip this flag to `true` AFTER `Promise.allSettled` over all per-
+  // participant history fetches resolves. The hook is gated on `enabled =
+  // connected && historyHydrated` so it only mounts (and thus only seeds)
+  // when the transcript is in its final settled shape.
+  //
+  // Resets on `teamId` change so reopening a different team waits for THAT
+  // team's hydration cycle. Falls open after a 5s timeout as a safety net —
+  // a hung fetch shouldn't lock the team chat orchestration forever.
+  const [historyHydrated, setHistoryHydrated] = useState(false)
+
   // ── Team orchestration (delegation detection + context relay) ───────────
   //
   // Always on — relay + delegation routing is the whole point of a team
@@ -94,7 +115,13 @@ export function GroupChatPanel({
     leaderAgentId: teamInternalLeadId,
     booZeroAgent,
     client,
-    enabled: connectionStatus === 'connected',
+    // Hold orchestration until history has fully hydrated. This is the
+    // load-bearing fix for the "rehydrate cascade" — see `historyHydrated`
+    // declaration above. While `false`, the hook returns early without
+    // subscribing, so the hydration-time `appendTranscript` calls don't
+    // trip the "new entries" branch and fire stale wake/relay messages
+    // for entries that landed hours ago.
+    enabled: connectionStatus === 'connected' && historyHydrated,
     userIntroText,
     stopSignal,
   })
@@ -216,21 +243,49 @@ export function GroupChatPanel({
   )
 
   // ── Load persisted history for all participants (team-scoped sessionKeys) ──
+  // Tracks completion via `historyHydrated`: `useTeamOrchestration` is gated
+  // on this flag so it doesn't see the hydration-time appends as "new"
+  // entries and replay stale wake/relay messages (the 7-hour-cascade bug).
+  // The 5s safety timeout is a fallback — if a fetch hangs forever we still
+  // want orchestration to come online eventually.
   useEffect(() => {
+    setHistoryHydrated(false)
+    let cancelled = false
+
+    const fetches: Promise<unknown>[] = []
     for (const agent of participants) {
       const teamSk = teamSessionKeys.get(agent.id)
       if (!teamSk) continue
       const existing = useChatStore.getState().transcripts.get(teamSk)
       if (existing && existing.length > 0) continue
 
-      fetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
-        .then((r) => r.json())
-        .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
-          if (historical && historical.length > 0) {
-            useChatStore.getState().appendTranscript(teamSk, historical)
-          }
-        })
-        .catch(() => {})
+      fetches.push(
+        fetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
+          .then((r) => r.json())
+          .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
+            if (cancelled) return
+            if (historical && historical.length > 0) {
+              useChatStore.getState().appendTranscript(teamSk, historical)
+            }
+          })
+          .catch(() => {}),
+      )
+    }
+
+    // Safety timeout — if a fetch hangs we still want orchestration online.
+    const timer = setTimeout(() => {
+      if (!cancelled) setHistoryHydrated(true)
+    }, 5000)
+
+    void Promise.allSettled(fetches).then(() => {
+      if (cancelled) return
+      clearTimeout(timer)
+      setHistoryHydrated(true)
+    })
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
     }
   }, [participants, teamSessionKeys])
 
@@ -294,6 +349,59 @@ export function GroupChatPanel({
   // ── Send handler ──────────────────────────────────────────────────────────
   const handleSend = useCallback(
     async (message: string) => {
+      // `/rule <text>` — intercept BEFORE routing to any agent. Appends the
+      // text to the team's durable rules in SQLite, drops a meta entry in
+      // every team session's transcript so the user gets visible
+      // confirmation, and short-circuits without sending to the Gateway.
+      const ruleText = parseRuleCommand(message)
+      if (ruleText !== null) {
+        try {
+          const existing = await fetchTeamRules(teamId)
+          const updated = appendRule(existing, ruleText)
+          const ok = await saveTeamRules(teamId, updated)
+          if (!ok) {
+            useToastStore.getState().addToast({
+              message: 'Could not save team rule. Try again?',
+              type: 'error',
+            })
+            return
+          }
+          // Drop a single meta confirmation into the first participant's
+          // session so the merged team view shows ONE entry, not N
+          // duplicates. The rule itself is global to the team (in SQLite),
+          // so the per-session anchor is just a visual breadcrumb.
+          const firstAgent = participants[0]
+          const firstSk = firstAgent ? teamSessionKeys.get(firstAgent.id) : null
+          if (firstSk) {
+            useChatStore.getState().appendTranscript(firstSk, [
+              {
+                entryId: crypto.randomUUID(),
+                runId: null,
+                sessionKey: firstSk,
+                kind: 'meta',
+                role: 'system',
+                text: `Rule saved for team: ${ruleText}`,
+                source: 'local-send',
+                timestampMs: Date.now(),
+                sequenceKey: nextSeq(),
+                confirmed: true,
+                fingerprint: crypto.randomUUID(),
+              },
+            ])
+          }
+          useToastStore.getState().addToast({
+            message: 'Team rule saved.',
+            type: 'success',
+          })
+        } catch {
+          useToastStore.getState().addToast({
+            message: 'Could not save team rule. Try again?',
+            type: 'error',
+          })
+        }
+        return
+      }
+
       if (!client) return
       await sendGroupChatMessage({
         client,
@@ -310,7 +418,17 @@ export function GroupChatPanel({
         userIntroText,
       })
     },
-    [client, teamId, team?.name, teamInternalLeadId, teamAgents, booZeroAgent, userIntroText],
+    [
+      client,
+      teamId,
+      team?.name,
+      teamInternalLeadId,
+      teamAgents,
+      booZeroAgent,
+      userIntroText,
+      participants,
+      teamSessionKeys,
+    ],
   )
 
   // ── Chip tag handler ───────────────────────────────────────────────────────

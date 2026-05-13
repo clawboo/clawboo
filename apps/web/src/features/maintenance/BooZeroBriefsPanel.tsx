@@ -10,8 +10,10 @@ import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useToastStore } from '@/stores/toast'
+import { useConnectionStore } from '@/stores/connection'
 import { buildGlobalBrief, buildTeamBrief, type TeamBriefMember } from '@/lib/booZeroBrief'
 import { detectGenuineLeader, matchedLeadershipKeyword } from '@/lib/genuineLeader'
+import { fetchTeamRules as fetchTeamRulesContent, saveTeamRules } from '@/lib/teamRules'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -438,6 +440,11 @@ function TeamBriefEditor({
               </div>
             </>
           )}
+          {/* Team Rules — user-captured durable rules injected into every
+              team agent's preamble. Source of truth: settings table
+              `team-rules:<teamId>`. Also writable via `/rule <text>` in
+              the team chat composer. */}
+          {!loading && <TeamRulesEditor teamId={teamId} />}
         </div>
       )}
     </div>
@@ -456,7 +463,9 @@ function TeamBriefEditor({
 function DisplayNameEditor({ agentId, currentName }: { agentId: string; currentName: string }) {
   const [value, setValue] = useState<string>(currentName)
   const [saving, setSaving] = useState<boolean>(false)
+  const [syncing, setSyncing] = useState<boolean>(false)
   const isDirty = value.trim() !== currentName.trim()
+  const client = useConnectionStore((s) => s.client)
 
   const handleSave = useCallback(async () => {
     const trimmed = value.trim() || 'Boo Zero'
@@ -480,6 +489,60 @@ function DisplayNameEditor({ agentId, currentName }: { agentId: string; currentN
       setSaving(false)
     }
   }, [agentId, value])
+
+  // Sync the override into the Gateway-side SOUL.md so the LLM's persisted
+  // identity ALSO reads as the display name. Best-effort — Gateway
+  // `agents.files.set('SOUL.md')` is documented as unreliable per CLAUDE.md.
+  // When it sticks, the LLM's natural self-reference shifts; when it
+  // doesn't, the per-turn rules block (Phase 2) is the authoritative
+  // anchor. We always treat the rules block as the primary identity
+  // surface — the SOUL.md sync is a nice-to-have alignment.
+  const handleSyncSoul = useCallback(async () => {
+    if (!client) {
+      useToastStore.getState().addToast({
+        type: 'error',
+        message: 'Not connected to Gateway — try after connecting.',
+      })
+      return
+    }
+    const trimmed = value.trim() || 'Boo Zero'
+    setSyncing(true)
+    try {
+      let current = ''
+      try {
+        const res = await client.call<{ file: { content?: string; missing?: boolean } }>(
+          'agents.files.get',
+          { agentId, name: 'SOUL.md' },
+        )
+        current = res?.file?.content ?? ''
+      } catch {
+        current = ''
+      }
+      // Prepend (or replace existing leading) `# <displayName>` line. We
+      // only touch the first heading so any subsequent SOUL.md content
+      // (role description, About-the-User block from onboarding, etc.)
+      // stays intact.
+      const stripped = current.replace(/^#\s+[^\n]*\n+/, '')
+      const next = `# ${trimmed}\n\n${stripped}`.trim() + '\n'
+      await client.call('agents.files.set', {
+        agentId,
+        name: 'SOUL.md',
+        content: next,
+      })
+      useToastStore.getState().addToast({
+        type: 'success',
+        message:
+          'SOUL.md sync attempted. The per-turn rules block remains the authoritative identity.',
+      })
+    } catch (e) {
+      useToastStore.getState().addToast({
+        type: 'error',
+        message: `SOUL.md sync failed: ${(e as Error).message ?? 'unknown'}. Display name still applies in Clawboo.`,
+      })
+    } finally {
+      setSyncing(false)
+    }
+  }, [agentId, client, value])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -529,9 +592,173 @@ function DisplayNameEditor({ agentId, currentName }: { agentId: string; currentN
           {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
           Save
         </button>
+        <button
+          type="button"
+          onClick={handleSyncSoul}
+          disabled={syncing || !client}
+          title="Best-effort: writes the display name into SOUL.md so the LLM's persisted identity matches. The per-turn rules block remains the load-bearing anchor regardless of whether this sticks."
+          style={{
+            height: 30,
+            padding: '0 12px',
+            fontSize: 11,
+            fontWeight: 600,
+            borderRadius: 8,
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: 'rgba(255,255,255,0.04)',
+            color: client ? 'rgba(232,232,232,0.7)' : 'rgba(232,232,232,0.35)',
+            cursor: syncing || !client ? 'default' : 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+          Sync to SOUL.md
+        </button>
       </div>
       {isDirty && (
         <span style={{ fontSize: 10, color: '#FBBF24' }}>Unsaved — save and reload to apply.</span>
+      )}
+    </div>
+  )
+}
+
+// ─── Team rules sub-section ──────────────────────────────────────────────────
+// Rendered inside the expanded TeamBriefEditor card so a user managing a
+// team's brief can also manage its rules in the same place. Rules are
+// user-captured durable constraints injected into every team agent's
+// preamble — survives across sessions, unlike chat history.
+
+function TeamRulesEditor({ teamId }: { teamId: string }) {
+  const [content, setContent] = useState<string>('')
+  const [clean, setClean] = useState<string>('')
+  const [loading, setLoading] = useState<boolean>(true)
+  const [saving, setSaving] = useState<boolean>(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    fetchTeamRulesContent(teamId)
+      .then((value) => {
+        if (cancelled) return
+        setContent(value)
+        setClean(value)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [teamId])
+
+  const isDirty = content !== clean
+
+  const handleSave = useCallback(async () => {
+    setSaving(true)
+    try {
+      const ok = await saveTeamRules(teamId, content)
+      if (ok) {
+        setClean(content)
+        useToastStore.getState().addToast({ message: 'Team rules saved.', type: 'success' })
+      } else {
+        useToastStore.getState().addToast({ message: 'Could not save rules.', type: 'error' })
+      }
+    } finally {
+      setSaving(false)
+    }
+  }, [content, teamId])
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: 10,
+        borderTop: '1px solid rgba(255,255,255,0.06)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'rgba(232,232,232,0.75)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        Team Rules
+        <span style={{ fontWeight: 400, color: 'rgba(232,232,232,0.45)' }}>
+          (one rule per line; also writable via <code>/rule &lt;text&gt;</code> in the team
+          composer)
+        </span>
+      </div>
+      {loading ? (
+        <div
+          style={{
+            padding: 10,
+            fontSize: 11,
+            color: 'rgba(232,232,232,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <Loader2 size={12} className="animate-spin" /> Loading rules…
+        </div>
+      ) : (
+        <>
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            disabled={saving}
+            spellCheck={false}
+            placeholder="No rules yet. Type one per line — they'll be injected into every team agent's preamble."
+            style={{
+              width: '100%',
+              minHeight: 100,
+              maxHeight: 260,
+              padding: 8,
+              fontSize: 12,
+              fontFamily: 'var(--font-geist-mono, monospace)',
+              lineHeight: 1.55,
+              background: 'rgba(13,17,23,0.85)',
+              color: '#E8E8E8',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 6,
+              resize: 'vertical',
+            }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!isDirty || saving}
+              style={{
+                height: 26,
+                padding: '0 10px',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.1)',
+                background: isDirty ? '#E94560' : 'rgba(255,255,255,0.06)',
+                color: isDirty ? '#fff' : 'rgba(232,232,232,0.5)',
+                cursor: !isDirty || saving ? 'default' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              Save rules
+            </button>
+            {isDirty && <span style={{ fontSize: 10, color: '#FBBF24' }}>Unsaved changes</span>}
+          </div>
+        </>
       )}
     </div>
   )

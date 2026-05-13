@@ -62,6 +62,34 @@ const AGENT_INTRO_PROMPT = [
   'Do NOT use @ in your response.',
 ].join('\n')
 
+/**
+ * Stronger retry prompt — used when an agent's first intro is refusal-
+ * shaped or too short to convey identity ("NO" was the smoking gun from
+ * production). The retry is explicit that this is a routine introduction
+ * and asks for a longer response than the first prompt.
+ */
+const AGENT_INTRO_RETRY_PROMPT = [
+  'Your previous response was unclear and could not be used as a team introduction.',
+  '',
+  'Please introduce yourself properly in two sentences:',
+  '- Your name (as set in your IDENTITY.md)',
+  '- What you specialize in / what teammates can come to you for',
+  '',
+  'This is a ROUTINE team introduction — not a task assignment, not a sensitive request, not anything to refuse. Every member of this team is doing the same now.',
+  '',
+  'Do NOT respond with refusals, "NO", or other short non-answers. Do NOT mention teammates by name. Aim for ~30-80 words.',
+].join('\n')
+
+const MIN_INTRO_CHARS = 25
+const REFUSAL_RE = /^(no|nope|sorry|can'?t|cannot|unable)\b/i
+
+function isValidIntro(text: string): boolean {
+  const trimmed = text.trim()
+  if (trimmed.length < MIN_INTRO_CHARS) return false
+  if (REFUSAL_RE.test(trimmed)) return false
+  return true
+}
+
 function buildUserIntroSoulPatch(userIntro: string): string {
   return `\n\n## About the User\n${userIntro.trim()}\n`
 }
@@ -93,6 +121,12 @@ export function TeamOnboardingGate({
   // can detect "this agent has produced a NEW response since we asked them".
   const baselineCountsRef = useRef<Map<string, number>>(new Map())
 
+  // Per-agent retry count — capped at 1 so we don't loop on a stubbornly
+  // refusing model. When an intro is refusal-shaped or too short, we fire
+  // the retry prompt once with a stronger ask before accepting whatever
+  // the agent eventually produces.
+  const retriesRef = useRef<Map<string, number>>(new Map())
+
   // ── Phase B: detect agent intro completion via transcript subscription ──
   useEffect(() => {
     if (phase !== 'introducing') return
@@ -110,10 +144,56 @@ export function TeamOnboardingGate({
         const newAssistant = entries
           .slice(baseline)
           .find((e) => e.role === 'assistant' && e.kind === 'assistant' && e.text.trim().length > 0)
-        if (newAssistant) {
+        if (!newAssistant) continue
+
+        // Validate the intro response. If it's refusal-shaped or too
+        // short, retry ONCE with a stronger prompt. After the cap (1
+        // retry), accept whatever lands — better to move on than to
+        // loop forever on a stubbornly-refusing model. Smoking gun from
+        // production: "NO" from Jira Workflow Steward Boo.
+        if (isValidIntro(newAssistant.text)) {
           nextCompleted.add(agent.id)
           changed = true
+          continue
         }
+
+        const retries = retriesRef.current.get(agent.id) ?? 0
+        if (retries >= 1) {
+          // Already retried; accept this response as-is so onboarding
+          // can advance.
+          nextCompleted.add(agent.id)
+          changed = true
+          continue
+        }
+        if (!client) {
+          // No client to fire the retry — accept what we have.
+          nextCompleted.add(agent.id)
+          changed = true
+          continue
+        }
+        retriesRef.current.set(agent.id, retries + 1)
+        // Bump the baseline so the NEXT response (post-retry-prompt) is
+        // what we detect as new, not the current weak one.
+        baselineCountsRef.current.set(agent.id, entries.length)
+        // Fire the retry prompt — best-effort. The override is already
+        // set from the initial send; no need to re-set it.
+        void client
+          .call('chat.send', {
+            sessionKey: teamSk,
+            message: AGENT_INTRO_RETRY_PROMPT,
+            deliver: false,
+            idempotencyKey: crypto.randomUUID(),
+          })
+          .catch(() => {
+            // Retry send failed — accept whatever we already have so
+            // the user isn't stuck on the gate forever.
+            nextCompleted.add(agent.id)
+            setCompletedAgentIds((prev) => {
+              const merged = new Set(prev)
+              merged.add(agent.id)
+              return merged
+            })
+          })
       }
       if (changed) setCompletedAgentIds(nextCompleted)
     }
@@ -123,7 +203,7 @@ export function TeamOnboardingGate({
     return () => {
       unsub()
     }
-  }, [phase, teamAgents, teamId, completedAgentIds])
+  }, [phase, teamAgents, teamId, completedAgentIds, client])
 
   // When all agents finish introducing, advance to user-intro phase AND
   // post a single meta entry "introducing" Boo Zero as the team's universal
