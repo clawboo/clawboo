@@ -22,6 +22,27 @@ import {
 } from './contextRelay'
 import { getMergedTeamEntries } from './groupChatSendOperation'
 
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+/**
+ * Duration of the post-Stop freeze window (milliseconds). While inside the
+ * window, `processNewEntries` skips delegation/relay scanning but still
+ * advances `lastCountsRef` so post-freeze processing doesn't re-scan what
+ * arrived during the freeze.
+ *
+ * Chosen as 3 s because:
+ *   • The Gateway commits `chat.abort` partial responses within ~100 ms.
+ *   • Fire-and-forget delegation IIFEs from a pre-stop batch finish their
+ *     own `chat.send` round-trip in well under 1 s.
+ *   • Cross-agent wake messages (`buildSilentResumeWakeMessage`) are
+ *     instructed to "stay quiet" per `AGENTS.md`, so even if one slips
+ *     through during the freeze its response normally contains no
+ *     `<delegate>` blocks.
+ * 3 s is comfortably past those windows without making the chat feel
+ * frozen to the user. Tunable if real-world cascades exceed this.
+ */
+const STOP_FREEZE_MS = 3000
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface UseTeamOrchestrationParams {
@@ -102,6 +123,25 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
   const wokenThisBatchRef = useRef<Set<string>>(new Set())
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // ── Post-stop freeze window ──────────────────────────────────────────────
+  //
+  // When the user presses Stop, we set this timestamp ~3 seconds into the
+  // future. While `Date.now() < frozenUntilRef.current`, `processNewEntries`
+  // skips delegation scanning AND skips relay scheduling — but still updates
+  // `lastCountsRef` so that anything that arrives DURING the freeze is
+  // treated as "already processed" once the freeze lifts. Catches the
+  // common cascade triggers after Stop:
+  //   • Partial-response commits from the in-flight runs that `chat.abort`
+  //     was racing to cancel (the `"NO_RE"`, `"NO"` truncated messages).
+  //   • Fire-and-forget delegation / relay IIFEs that were already queued
+  //     from the pre-stop batch — their wake messages + subsequent agent
+  //     responses land during the freeze and get silently absorbed.
+  //   • Tail events from the Gateway for the aborted runs.
+  // After the freeze, normal processing resumes — but `lastCountsRef` has
+  // been kept current, so we don't re-scan the entries that arrived during
+  // the freeze for delegations.
+  const frozenUntilRef = useRef<number>(0)
+
   useEffect(() => {
     if (!enabled || !teamId) return
 
@@ -132,12 +172,29 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
         currentAgents.push(a)
       }
       if (!currentTeamId || !currentClient || currentAgents.length === 0) return
+
+      const transcripts = useChatStore.getState().transcripts
+
+      // ── Post-stop freeze ────────────────────────────────────────────────
+      // If we're inside the freeze window (the user recently pressed Stop),
+      // suppress delegation/relay scanning but still update `lastCountsRef`
+      // so that entries that landed during the freeze are treated as
+      // already-processed once the freeze lifts. Without this, the
+      // post-freeze pass would scan everything that arrived during the
+      // freeze and could fire a fresh cascade of delegations.
+      if (Date.now() < frozenUntilRef.current) {
+        for (const agent of currentAgents) {
+          const teamSk = buildTeamSessionKey(agent.id, currentTeamId)
+          lastCountsRef.current.set(teamSk, transcripts.get(teamSk)?.length ?? 0)
+        }
+        return
+      }
+
       // Relay hub: Boo Zero (when available) — every teammate's response is
       // relayed to Boo Zero so the universal leader stays in the loop. Fall
       // back to the team-internal lead when Boo Zero is unavailable.
       const relayHubId = currentBooZero?.id ?? currentInternalLead
 
-      const transcripts = useChatStore.getState().transcripts
       const lastCounts = lastCountsRef.current
 
       for (const agent of currentAgents) {
@@ -371,20 +428,55 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
   }, [enabled, teamId]) // Intentionally minimal deps — refs carry current values
 
   // ── Stop-signal handler ──────────────────────────────────────────────────
-  // When the parent bumps `stopSignal` (Stop button pressed), abort any
-  // pending debounced batch AND wipe the in-batch bookkeeping so we don't
-  // process stale state on the next change. The initial `stopSignal=0` is
-  // skipped so we don't reset on first mount.
+  // When the parent bumps `stopSignal` (Stop button pressed):
+  //   1. Cancel any pending debounced batch — don't process whatever is
+  //      currently in the chat store with the pre-stop scan logic.
+  //   2. Snapshot `lastCountsRef` to current transcript lengths (DO NOT
+  //      clear it). Clearing made `processNewEntries` treat every existing
+  //      entry as "new" on the next chat-store update, causing it to re-
+  //      scan historic `<delegate>` blocks and trigger fresh wake+
+  //      delegation cascades. The bug fix is to keep "what we've already
+  //      processed" honest across the stop.
+  //   3. Clear delegation source map + per-batch dedup. These are
+  //      tactical state that shouldn't survive a stop.
+  //   4. Open a freeze window (`STOP_FREEZE_MS` from now) during which
+  //      `processNewEntries` skips scanning but keeps `lastCountsRef`
+  //      current. This catches partial commits from aborted runs, fire-
+  //      and-forget IIFEs from the pre-stop batch, and Gateway tail
+  //      events. After the freeze, normal processing resumes.
+  // The initial `stopSignal=0` is skipped so we don't trigger on mount.
   const prevStopSignalRef = useRef(stopSignal)
   useEffect(() => {
     if (stopSignal === prevStopSignalRef.current) return
     prevStopSignalRef.current = stopSignal
+
     if (debounceTimerRef.current !== null) {
       clearTimeout(debounceTimerRef.current)
       debounceTimerRef.current = null
     }
-    lastCountsRef.current = new Map()
+
+    // Snapshot current transcript lengths into lastCountsRef. Reconstruct
+    // the dedup'd participant list the same way `processNewEntries` does
+    // so the snapshot covers exactly the sessions the hook watches.
+    const currentTeamId = teamIdRef.current
+    if (currentTeamId) {
+      const transcripts = useChatStore.getState().transcripts
+      const combined = booZeroAgentRef.current
+        ? [...teamAgentsRef.current, booZeroAgentRef.current]
+        : teamAgentsRef.current
+      const seen = new Set<string>()
+      const newCounts = new Map<string, number>()
+      for (const agent of combined) {
+        if (seen.has(agent.id)) continue
+        seen.add(agent.id)
+        const teamSk = buildTeamSessionKey(agent.id, currentTeamId)
+        newCounts.set(teamSk, transcripts.get(teamSk)?.length ?? 0)
+      }
+      lastCountsRef.current = newCounts
+    }
+
     delegationSourceRef.current = new Map()
     wokenThisBatchRef.current = new Set()
+    frozenUntilRef.current = Date.now() + STOP_FREEZE_MS
   }, [stopSignal])
 }

@@ -514,6 +514,31 @@ export class GatewayClient {
       },
     ): Promise<SessionPatchResult> =>
       this.call<SessionPatchResult>('sessions.patch', { key, ...updates }),
+
+    /**
+     * Heavier session-level abort. Where `chat.abort` cancels a specific
+     * `runId`, `sessions.abort` aborts whatever is currently running on
+     * the session AND clears any queued/pending state.
+     *
+     * `runId` is optional: when omitted, the Gateway resolves the active
+     * run from `key`. We use this as the runId-less fallback in the Stop
+     * button path — when a user presses Stop very fast (before the first
+     * streaming event has landed and populated `agent.runId`), the
+     * surgical `chat.abort(sessionKey, runId)` is a no-op because we
+     * don't have a runId yet; `sessions.abort(key)` still does the right
+     * thing.
+     *
+     * Response shape mirrors `chat.abort` — `status: 'no-active-run'` is
+     * a benign no-op when the session is already idle.
+     */
+    abort: (
+      key: string,
+      runId?: string,
+    ): Promise<{ ok: boolean; abortedRunId?: string | null; status?: string }> =>
+      this.call<{ ok: boolean; abortedRunId?: string | null; status?: string }>(
+        'sessions.abort',
+        runId ? { key, runId } : { key },
+      ),
   }
 
   readonly config = {

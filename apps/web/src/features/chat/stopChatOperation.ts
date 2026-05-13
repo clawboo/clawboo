@@ -1,21 +1,32 @@
 // stopChatOperation — "pull the plug" for the chat composer's Stop button.
 //
-// Two layers, in this order:
+// Three layers, in this order:
 //   1. Optimistic local teardown — patches `useFleetStore` + `useChatStore`
 //      immediately so the UI flips to idle within one render. Without this
 //      step the user would stare at a streaming card while the abort RPC
 //      round-trips.
-//   2. Best-effort `chat.abort` RPC(s) — actually tells the Gateway to stop
-//      generating tokens. The Gateway then emits `chat:aborted` events
-//      which the existing event pipeline ([events/policy/work.ts:72]) maps
-//      to the SAME idle patch as step 1, so this is idempotent.
+//   2. `chat.abort(sessionKey, runId)` per running agent — the surgical
+//      cancel. Tells the Gateway to stop generating tokens on a specific
+//      in-flight run. Skipped when `runId` is null (very fast Stop press
+//      before the first streaming event populated the runId).
+//   3. `sessions.abort(sessionKey)` per session as a backstop — heavier
+//      session-level abort. Fires REGARDLESS of whether `runId` was
+//      available. Covers two cases that pure `chat.abort` misses:
+//         a. `runId` is null at stop time → `chat.abort` is skipped, but
+//            the Gateway resolves the active run from the sessionKey.
+//         b. Queued / pending work on the session (delegate sends, wake
+//            messages) gets nuked alongside the active run, instead of
+//            firing one beat later and starting a fresh cascade.
+// Both RPCs are idempotent — `status: 'no-active-run'` for already-idle
+// sessions is a benign no-op. We `Promise.allSettled` everything so a
+// single failure can't block the rest of the teardown.
 //
-// For group chat there's a third concern: the orchestration hook's
+// For group chat there's a fourth concern: the orchestration hook's
 // in-memory state (debounce timer, relay cooldowns, wake-in-flight set,
 // team-chat overrides). Those don't live in stores, so they need explicit
-// clears here. The debounce timer specifically is cleared via the
-// `stopSignal` counter the caller bumps before invoking this — see
-// `useTeamOrchestration`.
+// clears here. The debounce timer + `lastCountsRef` snapshot + post-stop
+// freeze window are cleared via the `stopSignal` counter the caller bumps
+// before invoking this — see `useTeamOrchestration`.
 
 import type { GatewayClient } from '@clawboo/gateway-client'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
@@ -55,14 +66,17 @@ export async function stopAgentRun(params: StopAgentRunParams): Promise<void> {
   //    `{ ok, abortedRunId, status }`; `status: 'no-active-run'` is a
   //    benign no-op (the run already finished). We don't surface errors —
   //    local state is already correct.
-  if (client && sessionKey && runId) {
-    try {
-      await client.chat.abort(sessionKey, runId)
-    } catch {
-      // Disconnected, race, or Gateway transient error — local cleanup
-      // already happened, so silently swallow.
-    }
+  if (!client || !sessionKey) return
+  const aborts: Promise<unknown>[] = []
+  if (runId) {
+    // Surgical: cancel this specific run.
+    aborts.push(client.chat.abort(sessionKey, runId).catch(() => undefined))
   }
+  // Backstop: heavier session-level abort. Catches the runId-less race
+  // (Stop pressed before the first streaming event) AND nukes any queued
+  // work on the session.
+  aborts.push(client.sessions.abort(sessionKey).catch(() => undefined))
+  await Promise.allSettled(aborts)
 }
 
 // ── Whole team ───────────────────────────────────────────────────────────────
@@ -117,12 +131,21 @@ export async function stopAllInTeam(params: StopAllInTeamParams): Promise<void> 
   //    sessionKey for each agent — group-chat runs are scoped to that
   //    session, so aborting on the 1:1 sessionKey would miss the actual
   //    in-flight run.
+  //
+  // Two aborts per agent: surgical `chat.abort` when `runId` is available,
+  // PLUS `sessions.abort` as a backstop. The backstop covers (a) the
+  // runId-less race where Stop fires before the first streaming event
+  // arrived, and (b) queued delegate / wake sends that would otherwise
+  // fire after the surgical abort and restart the cascade.
   if (!client) return
   const aborts: Promise<unknown>[] = []
   for (const agent of runningAgents) {
     const sk = teamSessionKeys.get(agent.id)
-    if (!sk || !agent.runId) continue
-    aborts.push(client.chat.abort(sk, agent.runId).catch(() => undefined))
+    if (!sk) continue
+    if (agent.runId) {
+      aborts.push(client.chat.abort(sk, agent.runId).catch(() => undefined))
+    }
+    aborts.push(client.sessions.abort(sk).catch(() => undefined))
   }
   await Promise.allSettled(aborts)
 }
