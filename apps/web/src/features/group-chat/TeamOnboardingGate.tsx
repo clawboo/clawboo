@@ -24,6 +24,7 @@ import { useToastStore } from '@/stores/toast'
 import { buildTeamSessionKey, setTeamChatOverride } from '@/lib/sessionUtils'
 import { markAgentAwake } from '@/lib/wakeTracker'
 import { nextSeq } from '@/lib/sequenceKey'
+import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -345,6 +346,19 @@ export function TeamOnboardingGate({
     })
     await Promise.allSettled(writePromises)
 
+    // Boo Zero SOUL.md sync — submitting the user intro is the per-team
+    // onboarding "approval moment". The user has just told us they're ready
+    // to chat with this team, which is the right moment to also re-anchor
+    // Boo Zero's persisted identity with the current display name. Best-
+    // effort; the per-turn rules block stays authoritative regardless.
+    if (booZeroAgent) {
+      void syncBooZeroSoulIdentity({
+        client,
+        agentId: booZeroAgent.id,
+        displayName: booZeroAgent.name,
+      })
+    }
+
     // Drop a meta entry into each agent's team transcript so the user sees
     // their introduction land in chat (the agents won't respond to it — it
     // was only written to SOUL.md, not sent as a chat message).
@@ -385,20 +399,42 @@ export function TeamOnboardingGate({
     } finally {
       setSubmittingUserIntro(false)
     }
-  }, [client, userIntroText, teamAgents, teamId, onMarkUserIntroduced])
+  }, [client, userIntroText, teamAgents, teamId, booZeroAgent, onMarkUserIntroduced])
 
   // ── Read agent intro responses to display in Phase C ──────────────────────
+  // Use the LAST assistant entry after the per-agent baseline so the recap
+  // shows the agent's actual introduction even when an earlier attempt was
+  // refusal-shaped and we retried. Before this fix, a "NO" intro from agent X
+  // would stay visible in the recap even after the retry produced a clean
+  // intro — `entries.find(...)` returned the first match, ignoring the retry.
   const agentIntros = useMemo(() => {
     const transcripts = useChatStore.getState().transcripts
     const intros = new Map<string, string>()
     for (const agent of teamAgents) {
       const teamSk = buildTeamSessionKey(agent.id, teamId)
       const entries = transcripts.get(teamSk) ?? []
-      // Find the first assistant entry — that's their introduction
-      const found = entries.find(
-        (e) => e.role === 'assistant' && e.kind === 'assistant' && e.text.trim().length > 0,
-      )
-      if (found) intros.set(agent.id, found.text.trim())
+      const baseline = baselineCountsRef.current.get(agent.id) ?? 0
+      // Walk backwards so we get the LATEST assistant entry post-baseline.
+      // (If the retry produced a longer/cleaner reply, that's the one to
+      // display; the refusal-shaped first attempt stays in chat history but
+      // the recap shows what the user can actually act on.)
+      let latest: string | null = null
+      for (let i = entries.length - 1; i >= baseline; i--) {
+        const e = entries[i]
+        if (e && e.role === 'assistant' && e.kind === 'assistant' && e.text.trim().length > 0) {
+          latest = e.text.trim()
+          break
+        }
+      }
+      // Fallback: if we didn't find anything post-baseline (shouldn't happen
+      // once the gate has detected completion), use the first overall.
+      if (!latest) {
+        const found = entries.find(
+          (e) => e.role === 'assistant' && e.kind === 'assistant' && e.text.trim().length > 0,
+        )
+        if (found) latest = found.text.trim()
+      }
+      if (latest) intros.set(agent.id, latest)
     }
     return intros
     // We re-derive whenever completedAgentIds changes (Phase B updates) or the

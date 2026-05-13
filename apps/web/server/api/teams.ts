@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import type { Request, Response } from 'express'
-import { createDb, teams, agents } from '@clawboo/db'
-import { eq, sql } from 'drizzle-orm'
+import { createDb, teams, agents, settings } from '@clawboo/db'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
 
 // ─── GET /api/teams ──────────────────────────────────────────────────────────
@@ -171,7 +171,13 @@ export function teamsPATCH(req: Request, res: Response): void {
 }
 
 // ─── DELETE /api/teams/:id ───────────────────────────────────────────────────
-// Deletes the team and orphans its agents (sets teamId = null).
+// Deletes the team and orphans its agents (sets teamId = null). Also cleans
+// up any team-scoped settings rows so deleted teams don't leave durable rows
+// behind in the key/value store:
+//   - `team-rules:<teamId>`     — user-captured rules
+//   - `team-onboarding:<teamId>` — onboarding flags + user intro text
+// The `boo_zero_team_briefs` table FK-cascades on team delete (see schema),
+// so that one cleans itself.
 
 export function teamsDELETE(req: Request, res: Response): void {
   const teamId = req.params['id'] as string | undefined
@@ -186,7 +192,15 @@ export function teamsDELETE(req: Request, res: Response): void {
     // Orphan agents belonging to this team
     db.update(agents).set({ teamId: null }).where(eq(agents.teamId, teamId)).run()
 
-    // Delete the team
+    // Clean up team-scoped settings rows. Drizzle's `inArray` matches the
+    // exact keys we wrote in `teamRules.ts` + `teamOnboarding.ts`. Safe to
+    // run unconditionally — `delete ... where` is a no-op when no row
+    // matches.
+    db.delete(settings)
+      .where(inArray(settings.key, [`team-rules:${teamId}`, `team-onboarding:${teamId}`]))
+      .run()
+
+    // Delete the team (boo_zero_team_briefs FK-cascades).
     db.delete(teams).where(eq(teams.id, teamId)).run()
 
     res.json({ ok: true })

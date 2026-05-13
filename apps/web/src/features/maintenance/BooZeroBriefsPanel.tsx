@@ -14,6 +14,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { buildGlobalBrief, buildTeamBrief, type TeamBriefMember } from '@/lib/booZeroBrief'
 import { detectGenuineLeader, matchedLeadershipKeyword } from '@/lib/genuineLeader'
 import { fetchTeamRules as fetchTeamRulesContent, saveTeamRules } from '@/lib/teamRules'
+import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -463,7 +464,6 @@ function TeamBriefEditor({
 function DisplayNameEditor({ agentId, currentName }: { agentId: string; currentName: string }) {
   const [value, setValue] = useState<string>(currentName)
   const [saving, setSaving] = useState<boolean>(false)
-  const [syncing, setSyncing] = useState<boolean>(false)
   const isDirty = value.trim() !== currentName.trim()
   const client = useConnectionStore((s) => s.client)
 
@@ -477,6 +477,15 @@ function DisplayNameEditor({ agentId, currentName }: { agentId: string; currentN
         body: JSON.stringify({ name: trimmed }),
       })
       if (!res.ok) throw new Error('Save failed')
+
+      // Auto-sync the new display name into Boo Zero's SOUL.md. The user's
+      // act of pressing Save IS the approval — they don't need a separate
+      // sync button. Best-effort (Gateway `agents.files.set('SOUL.md')` is
+      // documented unreliable); the per-turn rules block remains the
+      // authoritative identity surface either way.
+      if (client) {
+        void syncBooZeroSoulIdentity({ client, agentId, displayName: trimmed })
+      }
       useToastStore.getState().addToast({
         type: 'success',
         message: `Boo Zero display name → "${trimmed}". Reload to apply across all views.`,
@@ -488,67 +497,15 @@ function DisplayNameEditor({ agentId, currentName }: { agentId: string; currentN
     } finally {
       setSaving(false)
     }
-  }, [agentId, value])
-
-  // Sync the override into the Gateway-side SOUL.md so the LLM's persisted
-  // identity ALSO reads as the display name. Best-effort — Gateway
-  // `agents.files.set('SOUL.md')` is documented as unreliable per CLAUDE.md.
-  // When it sticks, the LLM's natural self-reference shifts; when it
-  // doesn't, the per-turn rules block (Phase 2) is the authoritative
-  // anchor. We always treat the rules block as the primary identity
-  // surface — the SOUL.md sync is a nice-to-have alignment.
-  const handleSyncSoul = useCallback(async () => {
-    if (!client) {
-      useToastStore.getState().addToast({
-        type: 'error',
-        message: 'Not connected to Gateway — try after connecting.',
-      })
-      return
-    }
-    const trimmed = value.trim() || 'Boo Zero'
-    setSyncing(true)
-    try {
-      let current = ''
-      try {
-        const res = await client.call<{ file: { content?: string; missing?: boolean } }>(
-          'agents.files.get',
-          { agentId, name: 'SOUL.md' },
-        )
-        current = res?.file?.content ?? ''
-      } catch {
-        current = ''
-      }
-      // Prepend (or replace existing leading) `# <displayName>` line. We
-      // only touch the first heading so any subsequent SOUL.md content
-      // (role description, About-the-User block from onboarding, etc.)
-      // stays intact.
-      const stripped = current.replace(/^#\s+[^\n]*\n+/, '')
-      const next = `# ${trimmed}\n\n${stripped}`.trim() + '\n'
-      await client.call('agents.files.set', {
-        agentId,
-        name: 'SOUL.md',
-        content: next,
-      })
-      useToastStore.getState().addToast({
-        type: 'success',
-        message:
-          'SOUL.md sync attempted. The per-turn rules block remains the authoritative identity.',
-      })
-    } catch (e) {
-      useToastStore.getState().addToast({
-        type: 'error',
-        message: `SOUL.md sync failed: ${(e as Error).message ?? 'unknown'}. Display name still applies in Clawboo.`,
-      })
-    } finally {
-      setSyncing(false)
-    }
   }, [agentId, client, value])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)', margin: 0 }}>
         How Boo Zero refers to itself in chats. Defaults to <code>Boo Zero</code>. Stored in
-        Clawboo&apos;s SQLite — the underlying OpenClaw agent name is not touched.
+        Clawboo&apos;s SQLite. Saving automatically syncs the heading of Boo Zero&apos;s
+        <code> SOUL.md</code> too (best-effort — the per-turn rules block stays authoritative either
+        way).
       </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <input
@@ -591,29 +548,6 @@ function DisplayNameEditor({ agentId, currentName }: { agentId: string; currentN
         >
           {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
           Save
-        </button>
-        <button
-          type="button"
-          onClick={handleSyncSoul}
-          disabled={syncing || !client}
-          title="Best-effort: writes the display name into SOUL.md so the LLM's persisted identity matches. The per-turn rules block remains the load-bearing anchor regardless of whether this sticks."
-          style={{
-            height: 30,
-            padding: '0 12px',
-            fontSize: 11,
-            fontWeight: 600,
-            borderRadius: 8,
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: 'rgba(255,255,255,0.04)',
-            color: client ? 'rgba(232,232,232,0.7)' : 'rgba(232,232,232,0.35)',
-            cursor: syncing || !client ? 'default' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-          Sync to SOUL.md
         </button>
       </div>
       {isDirty && (
