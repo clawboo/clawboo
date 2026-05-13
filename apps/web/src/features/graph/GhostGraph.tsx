@@ -20,7 +20,7 @@ import type {
   MiniMapNodeProps,
 } from '@xyflow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { GitBranch, Map, Pin, X } from 'lucide-react'
+import { GitBranch, Map, Pin, RefreshCw, X } from 'lucide-react'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
@@ -166,6 +166,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     setNodes,
     hasRunLayout,
     setHasRunLayout,
+    resetLayout,
     updateNodePosition,
     connectMode,
     setConnectMode,
@@ -748,6 +749,49 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           ignored here when scope is `'team'`, so toggling it from Atlas
           doesn't leak into other views. */}
       {scope === 'atlas' && showTeamHalos && <TeamHaloLayer nodes={nodes} />}
+
+      {/* Re-layout — bumps the layout key and saves new positions. Shown
+          on the canvas (instead of the now-suppressed panel toolbar) so
+          both Atlas and the embedded Group Chat graph have it in the
+          same place. Gated by `hasRunLayout` — there's nothing to
+          re-layout before the first ELK pass completes. Position 224px
+          from the right keeps a stable column order regardless of which
+          scope is active: [Re-layout] [Team halos] [Connect]. Team halos
+          is hidden in team scope, leaving a small empty band — preferred
+          over conditional offsets that would jitter as scope changes. */}
+      {hasRunLayout && (
+        <button
+          onClick={resetLayout}
+          title="Re-layout"
+          style={{
+            position: 'absolute',
+            top: 12,
+            right: 224,
+            zIndex: 20,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 12px',
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: '#111827',
+            color: 'rgba(232,232,232,0.5)',
+            transition: 'all 0.15s',
+          }}
+          onMouseOver={(e) =>
+            ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.85)')
+          }
+          onMouseOut={(e) =>
+            ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.5)')
+          }
+        >
+          <RefreshCw size={14} />
+          Re-layout
+        </button>
+      )}
 
       {/* Team halos toggle — Atlas-only control. Hidden in team scope so
           the toolbar doesn't carry irrelevant chrome. */}

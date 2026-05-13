@@ -39,7 +39,7 @@ export function GhostGraphPanel({
   embedded?: boolean
   scope?: GhostGraphScope
 } = {}) {
-  const { isLoadingFiles, filesError, nodes, resetLayout, hasRunLayout } = useGraphStore()
+  const { isLoadingFiles, filesError, nodes } = useGraphStore()
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
 
   // Reset graph state when team OR scope changes. This effect runs in the
@@ -76,66 +76,53 @@ export function GhostGraphPanel({
         overflow: 'hidden',
       }}
     >
-      {/* Toolbar */}
-      <div
-        style={{
-          height: 36,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(232,232,232,0.5)' }}>
-            {scope === 'atlas'
-              ? 'Atlas — All Teams'
-              : embedded || !selectedTeam
-                ? 'Ghost Graph'
-                : `${selectedTeam.name} — Ghost Graph`}
-          </span>
-          {booCount > 0 && (
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 500,
-                color: '#E94560',
-                background: 'rgba(233,69,96,0.12)',
-                borderRadius: 20,
-                padding: '1px 8px',
-              }}
-            >
-              {booCount} Boo{booCount !== 1 ? 's' : ''}
-              {skillCount > 0 && ` · ${skillCount} skills`}
+      {/* Toolbar — only rendered when NOT embedded.
+          In group chat the team header above the panel already shows the
+          team identity + Boo/skill counts, and the Re-layout button now
+          lives in the canvas's floating top-right toolbar (with Team
+          halos + Connect). So the embedded toolbar would be pure
+          redundancy and is suppressed entirely.
+          In Atlas (non-embedded) the toolbar is still the only chrome
+          identifying the view, so we keep it — minus the Re-layout
+          button, which also migrated to the canvas for consistency. */}
+      {!embedded && (
+        <div
+          style={{
+            height: 36,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 12px',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(232,232,232,0.5)' }}>
+              {scope === 'atlas'
+                ? 'Atlas — All Teams'
+                : selectedTeam
+                  ? `${selectedTeam.name} — Ghost Graph`
+                  : 'Ghost Graph'}
             </span>
-          )}
+            {booCount > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: '#E94560',
+                  background: 'rgba(233,69,96,0.12)',
+                  borderRadius: 20,
+                  padding: '1px 8px',
+                }}
+              >
+                {booCount} Boo{booCount !== 1 ? 's' : ''}
+                {skillCount > 0 && ` · ${skillCount} skills`}
+              </span>
+            )}
+          </div>
         </div>
-
-        {hasRunLayout && (
-          <button
-            onClick={resetLayout}
-            style={{
-              background: 'none',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 6,
-              color: 'rgba(232,232,232,0.45)',
-              cursor: 'pointer',
-              fontSize: 11,
-              padding: '2px 8px',
-            }}
-            onMouseOver={(e) =>
-              ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.8)')
-            }
-            onMouseOut={(e) =>
-              ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.45)')
-            }
-          >
-            Re-layout
-          </button>
-        )}
-      </div>
+      )}
 
       {/* Canvas area */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>

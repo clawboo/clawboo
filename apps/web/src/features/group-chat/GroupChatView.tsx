@@ -70,7 +70,7 @@ export function GroupChatView({ teamId }: { teamId: string }) {
     }
   }, [teamAgents, teamId])
 
-  const header = <GroupChatViewHeader team={team} agentCount={teamAgents.length} />
+  const header = <GroupChatViewHeader team={team} />
 
   // While onboarding state is hydrating, render the layout but hide the
   // chat-side content to avoid a flash of the gate before redirecting to
