@@ -1,6 +1,6 @@
 // GroupChatPanel — merged transcript from all team agents, sorted chronologically.
 
-import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -11,6 +11,7 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { sendGroupChatMessage } from './groupChatSendOperation'
 import { useTeamOrchestration } from './useTeamOrchestration'
+import { stopAllInTeam } from '@/features/chat/stopChatOperation'
 import {
   groupEntriesToBlocks,
   UserMessageCard,
@@ -66,6 +67,14 @@ export function GroupChatPanel({
   // each prefer `booZeroAgent` over this when present.
   const teamInternalLeadId = resolveTeamInternalLead(teamId, team?.leaderAgentId ?? null, agents)
 
+  // ── Stop signal ─────────────────────────────────────────────────────────
+  // Monotonic counter bumped when the Stop button is pressed. Feeds into
+  // `useTeamOrchestration` below so the hook can cancel its 500ms debounce
+  // timer and clear its bookkeeping refs. The `chat.abort` RPCs themselves
+  // are fired separately by `stopAllInTeam` — this signal only owns the
+  // orchestration-side cleanup.
+  const [stopSignal, setStopSignal] = useState(0)
+
   // ── Team orchestration (delegation detection + context relay) ───────────
   //
   // Always on — relay + delegation routing is the whole point of a team
@@ -86,6 +95,7 @@ export function GroupChatPanel({
     client,
     enabled: connectionStatus === 'connected',
     userIntroText,
+    stopSignal,
   })
 
   // "Effective participants" — DB team members + Boo Zero (when present),
@@ -360,6 +370,15 @@ export function GroupChatPanel({
         disabled={!canSend}
         placeholder="Message team… (@name to target)"
         mentionAgents={mentionAgentList}
+        // Stop button — replaces Send while ANY agent on the team is
+        // running OR mid-stream. Bumping `stopSignal` first ensures the
+        // orchestration hook tears down its in-flight state BEFORE the
+        // `chat.abort` events from the Gateway start landing.
+        isActive={anyRunning || activeStreams.length > 0}
+        onStop={() => {
+          setStopSignal((n) => n + 1)
+          void stopAllInTeam({ client, teamId, participants, teamSessionKeys })
+        }}
       />
     </div>
   )

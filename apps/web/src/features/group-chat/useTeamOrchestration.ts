@@ -55,12 +55,21 @@ export interface UseTeamOrchestrationParams {
    * the delegation is routed agent-to-agent (without a fresh user message).
    */
   userIntroText?: string
+  /**
+   * Monotonic counter bumped by the parent (`GroupChatPanel`) when the
+   * Stop button is pressed. On change, the hook cancels its pending 500ms
+   * debounce timer AND resets its bookkeeping refs so no relay or
+   * delegation fires for activity that was in flight at stop time. The
+   * actual `chat.abort` RPCs are sent by `stopAllInTeam` separately —
+   * this hook only owns the orchestration-side cleanup.
+   */
+  stopSignal?: number
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
-  const { teamId, enabled = true } = params
+  const { teamId, enabled = true, stopSignal = 0 } = params
 
   // Keep latest params in refs so the subscribe callback sees current values
   // without needing to tear down / recreate the subscription.
@@ -360,4 +369,22 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
       }
     }
   }, [enabled, teamId]) // Intentionally minimal deps — refs carry current values
+
+  // ── Stop-signal handler ──────────────────────────────────────────────────
+  // When the parent bumps `stopSignal` (Stop button pressed), abort any
+  // pending debounced batch AND wipe the in-batch bookkeeping so we don't
+  // process stale state on the next change. The initial `stopSignal=0` is
+  // skipped so we don't reset on first mount.
+  const prevStopSignalRef = useRef(stopSignal)
+  useEffect(() => {
+    if (stopSignal === prevStopSignalRef.current) return
+    prevStopSignalRef.current = stopSignal
+    if (debounceTimerRef.current !== null) {
+      clearTimeout(debounceTimerRef.current)
+      debounceTimerRef.current = null
+    }
+    lastCountsRef.current = new Map()
+    delegationSourceRef.current = new Map()
+    wokenThisBatchRef.current = new Set()
+  }, [stopSignal])
 }

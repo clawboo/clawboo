@@ -13,7 +13,7 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowRight, ChevronRight, Clock, SendHorizontal, Wrench } from 'lucide-react'
+import { ArrowRight, ChevronRight, Clock, SendHorizontal, Square, Wrench } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
@@ -739,8 +739,20 @@ export const MessageComposer = memo(
       placeholder?: string
       /** @mention autocomplete candidates — team agents (group chat) or teams (Boo Zero chat). */
       mentionAgents?: MentionCandidate[]
+      /**
+       * When `isActive` is true AND `onStop` is provided, the send button
+       * is replaced by a red Stop button. Click → `onStop()`. Always
+       * clickable regardless of `disabled` (the whole point of Stop is to
+       * interrupt a state where Send is unavailable).
+       */
+      onStop?: () => void
+      isActive?: boolean
     }
-  >(function MessageComposer({ onSend, disabled, placeholder, mentionAgents }, ref) {
+  >(function MessageComposer(
+    { onSend, disabled, placeholder, mentionAgents, onStop, isActive = false },
+    ref,
+  ) {
+    const showStop = isActive && Boolean(onStop)
     const [draft, setDraft] = useState('')
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const rafRef = useRef<number | null>(null)
@@ -922,16 +934,35 @@ export const MessageComposer = memo(
             className="flex-1 resize-none overflow-hidden rounded-lg border border-white/10 bg-surface px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-40"
             style={{ fontFamily: 'var(--font-body)', minHeight: '38px' }}
           />
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={sendDisabled}
-            data-testid="chat-send-button"
-            aria-label="Send message"
-            className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-muted disabled:text-secondary"
-          >
-            <SendHorizontal className="h-4 w-4" strokeWidth={2} />
-          </button>
+          {showStop ? (
+            // ── Stop button — "pull the plug" on the active run(s) ──────────
+            // Same 38×38 footprint as Send so the composer doesn't reflow on
+            // morph. Filled-square icon (`Square`) reads as Stop universally.
+            // Color: solid project accent red. NOT gated by `disabled` — the
+            // user pressed Stop precisely because the chat is in a state
+            // where Send is unavailable.
+            <button
+              type="button"
+              onClick={onStop}
+              data-testid="chat-stop-button"
+              aria-label="Stop"
+              title="Stop"
+              className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-white transition hover:brightness-110"
+            >
+              <Square className="h-3.5 w-3.5" strokeWidth={2} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={sendDisabled}
+              data-testid="chat-send-button"
+              aria-label="Send message"
+              className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-muted disabled:text-secondary"
+            >
+              <SendHorizontal className="h-4 w-4" strokeWidth={2} />
+            </button>
+          )}
         </div>
         <p className="mt-1.5 text-right font-mono text-[10px] text-secondary/30">
           Enter to send · Shift+Enter for newline · /reset for new session

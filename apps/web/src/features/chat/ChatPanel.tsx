@@ -7,6 +7,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useTeamStore } from '@/stores/team'
 import { sendChatMessage } from './chatSendOperation'
+import { stopAgentRun } from './stopChatOperation'
 import {
   groupEntriesToBlocks,
   MessageList,
@@ -263,6 +264,19 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
         // dropdown opens on `@` and filters as the user types. Empty array
         // outside Boo Zero's chat → no autocomplete (regular 1:1 behavior).
         mentionAgents={mentionTargets}
+        // Stop button — replaces Send while the agent is running. Pulls the
+        // plug on the in-flight LLM call via `chat.abort` AND optimistically
+        // clears local streaming state so the UI flips to idle within one
+        // render even if the RPC round-trips slowly. See `stopChatOperation`.
+        isActive={isRunning}
+        onStop={() => {
+          void stopAgentRun({
+            client,
+            agentId: agent.id,
+            sessionKey,
+            runId: agent.runId,
+          })
+        }}
         placeholder={
           !client
             ? 'Gateway not connected…'

@@ -27,6 +27,18 @@ export function resetWakeState(): void {
   clearAllWakeRecords()
 }
 
+/**
+ * Drop the in-flight-wake guard for a specific team. Called when the user
+ * presses Stop on the team chat — without this, the `wakeInFlight.has(teamId)`
+ * check in `sendGroupChatMessage` would block the NEXT user message from
+ * waking agents (until the guard naturally cleared via the existing
+ * `wakeInFlight.delete` calls along the wake path, which won't run because
+ * the wake was aborted mid-flight). Idempotent.
+ */
+export function clearWakeInFlight(teamId: string): void {
+  wakeInFlight.delete(teamId)
+}
+
 /** Delay after wakeup to let agents initialize before sending actual message. */
 const WAKEUP_SETTLE_MS = 5000
 
