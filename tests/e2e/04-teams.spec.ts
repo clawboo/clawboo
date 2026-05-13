@@ -27,8 +27,11 @@ test.describe('Teams', () => {
 
     const agentList = page.locator('[data-testid="agent-list-column"]')
 
-    // Default view is Ghost Graph — scope to main content area to avoid nav button ambiguity
-    await expect(page.getByRole('main').getByText('Ghost Graph')).toBeVisible({ timeout: 5_000 })
+    // Default view is Atlas (the 'graph' nav slot now renders the global
+    // all-teams view) — scope to main content area to avoid nav button ambiguity
+    await expect(page.getByRole('main').getByText('Atlas — All Teams')).toBeVisible({
+      timeout: 5_000,
+    })
 
     // Click Marketplace nav button
     await agentList.locator('button:has-text("Marketplace")').click()
@@ -38,8 +41,8 @@ test.describe('Teams', () => {
     await agentList.locator('button:has-text("Tokens Used")').click()
     await expect(page.getByText('Token usage by team and agent')).toBeVisible({ timeout: 5_000 })
 
-    // Click back to Ghost Graph
-    await agentList.locator('button:has-text("Ghost Graph")').click()
+    // Click back to Atlas
+    await agentList.locator('button:has-text("Atlas")').click()
     await expect(page.locator('.react-flow')).toBeVisible({ timeout: 10_000 })
   })
 

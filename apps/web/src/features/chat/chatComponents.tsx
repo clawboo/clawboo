@@ -14,12 +14,17 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowRight, ChevronRight, Clock, SendHorizontal, Square, Wrench } from 'lucide-react'
-import { BooAvatar } from '@clawboo/ui'
+import { BooAvatar, resolveBooTint } from '@clawboo/ui'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
+import { useBooZeroStore } from '@/stores/booZero'
 import { calculateCostUsd, formatCost } from '@/features/cost/costUtils'
+import {
+  buildDelegationLinkages,
+  type DelegationLinkage,
+} from '@/features/group-chat/buildDelegationLinkages'
 import { splitAssistantText } from './splitAssistantText'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -410,42 +415,311 @@ export const UserMessageCard = memo(function UserMessageCard({
 
 // ─── DelegationCard ───────────────────────────────────────────────────────────
 // Renders a `<delegate to="@Name">task</delegate>` block as a styled card
-// inside the assistant turn. The structured delegation protocol replaces
-// natural-language @-mentions with this explicit, machine-parseable form;
-// we visualize it so the user has a clear breadcrumb for who picked up
-// what work.
+// inside the assistant turn. When a `linkage` is supplied (group-chat path),
+// the target's reply nests inside the card via a collapsible body. Without
+// a linkage (1:1 chat path), the card renders header-only, matching the
+// pre-nesting behaviour.
+
+const MAX_NEST_DEPTH = 4
 
 export const DelegationCard = memo(function DelegationCard({
   targetName,
   task,
+  linkage,
+  teamId,
+  defaultExpanded = true,
+  depth = 0,
+  latestSourceEntryId,
 }: {
   targetName: string
   task: string
+  linkage?: DelegationLinkage
+  teamId?: string
+  defaultExpanded?: boolean
+  depth?: number
+  latestSourceEntryId?: string | null
 }) {
-  // Resolve the agent so we can render their boo avatar (if they're in the
-  // fleet store). For unknown agents, fall back to a deterministic seed
-  // based on the name so the avatar is at least consistent across renders.
-  const targetAgentId = useFleetStore(
+  // Resolve target agent — prefer the linkage's resolved id (covers cases
+  // where the LLM wrote a partial / case-mismatched name and we already
+  // mapped it to the canonical roster entry).
+  const targetAgentIdFromStore = useFleetStore(
     (s) => s.agents.find((a) => a.name === targetName)?.id ?? null,
   )
+  const targetAgentId = linkage?.targetAgentId ?? targetAgentIdFromStore
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  const isBooZero = targetAgentId !== null && targetAgentId === booZeroAgentId
   const avatarSeed = targetAgentId ?? targetName
+
+  // Target tint — same hex the avatar paints with, lifted from boo-avatar.
+  // Fall back to the existing emerald when we can't resolve a target.
+  const tint = targetAgentId ? resolveBooTint(targetAgentId, isBooZero) : '#10b981'
+
+  // Streaming text for the target — only the FIRST pending delegation per
+  // target session owns the live stream. Subsequent pending delegations
+  // wait their turn (queued by the Gateway anyway).
+  const ownsStreaming = Boolean(linkage?.isPending && linkage?.targetSessionKey && teamId)
+  const streamingText = useChatStore((s) =>
+    ownsStreaming && linkage?.targetSessionKey
+      ? (s.streamingText.get(linkage.targetSessionKey) ?? null)
+      : null,
+  )
+
+  const hasLinkedBody = Boolean(
+    linkage && (linkage.linkedEntries.length > 0 || streamingText !== null || linkage.isPending),
+  )
+  const canCollapse = hasLinkedBody && depth < MAX_NEST_DEPTH
+
+  const [expanded, setExpanded] = useState(defaultExpanded)
 
   return (
     <div
-      className="flex flex-col gap-1.5 rounded-lg border-l-2 border-emerald-500/40 bg-emerald-500/[0.04] py-2 pr-3 pl-3"
+      className="flex flex-col gap-1.5 rounded-lg py-2 pr-3 pl-3"
+      style={{
+        borderLeft: `2px solid ${tint}66`,
+        background: `${tint}0a`,
+      }}
       data-testid="delegation-card"
+      data-delegation-id={linkage?.delegationId}
     >
       <div className="flex items-center gap-2">
         <BooAvatar seed={avatarSeed} size={20} />
-        <ArrowRight size={11} className="text-emerald-500/70" />
-        <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-emerald-400">
+        <ArrowRight size={11} style={{ color: `${tint}b3` }} />
+        <span
+          className="font-mono text-[10px] font-semibold uppercase tracking-widest"
+          style={{ color: tint }}
+        >
           Delegated to
         </span>
         <span className="font-mono text-[10px] font-medium text-text">@{targetName}</span>
+        {canCollapse && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="ml-auto flex h-5 w-5 items-center justify-center rounded hover:bg-white/5"
+            aria-label={expanded ? 'Collapse delegation' : 'Expand delegation'}
+            data-testid="delegation-toggle"
+          >
+            <ChevronRight
+              size={12}
+              style={{ color: tint }}
+              className={`shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+            />
+          </button>
+        )}
       </div>
       <div className="text-[12px] leading-relaxed whitespace-pre-wrap text-secondary/80">
         {task}
       </div>
+      <AnimatePresence initial={false}>
+        {expanded && hasLinkedBody && linkage && (
+          <motion.div
+            key="body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="overflow-hidden"
+            data-testid="delegation-card-body"
+          >
+            <div
+              className="mt-1.5 flex flex-col gap-2 border-t pt-2 text-[13px] leading-relaxed text-text/95"
+              style={{ borderColor: `${tint}1a` }}
+            >
+              <NestedDelegationBody
+                entries={linkage.linkedEntries}
+                streamingText={streamingText}
+                teamId={teamId}
+                depth={depth + 1}
+                latestSourceEntryId={latestSourceEntryId}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+})
+
+// ─── NestedDelegationBody ─────────────────────────────────────────────────────
+// Renders the target's reply chunk inside a DelegationCard: thinking section,
+// tool calls, assistant prose (with recursive nested DelegationCards for any
+// `<delegate>` blocks the target itself emitted), and the live streaming
+// text when the target is still typing.
+
+const NestedDelegationBody = memo(function NestedDelegationBody({
+  entries,
+  streamingText,
+  teamId,
+  depth,
+  latestSourceEntryId,
+}: {
+  entries: TranscriptEntry[]
+  streamingText: string | null
+  teamId?: string
+  depth: number
+  latestSourceEntryId?: string | null
+}) {
+  // Group entries into the same Thinking / Tool / Assistant buckets the
+  // top-level renderer uses, so the nested body mirrors the visual rhythm.
+  const grouped = useMemo(() => groupEntriesToBlocks(entries), [entries])
+  // Linkages for any nested `<delegate>` blocks inside the target's reply.
+  // Built per-source so we don't need to re-derive across the whole
+  // conversation here — the parent computation already covers ancestors
+  // and the deeper levels are scoped to this body.
+  const nestedLinkages = useNestedLinkages(entries, teamId)
+
+  const hasContent = entries.length > 0 || (streamingText !== null && streamingText.length > 0)
+  if (!hasContent) {
+    return <TypingIndicator />
+  }
+
+  return (
+    <>
+      {grouped.map((block, i) => {
+        if (block.kind === 'meta') {
+          return <MetaMessageCard key={block.entry.entryId} entry={block.entry} />
+        }
+        if (block.kind === 'user') {
+          return <UserMessageCard key={block.entry.entryId} entry={block.entry} />
+        }
+        return (
+          <NestedAssistantContent
+            key={`nested-${i}`}
+            block={block}
+            linkagesBySourceEntry={nestedLinkages}
+            teamId={teamId}
+            depth={depth}
+            latestSourceEntryId={latestSourceEntryId}
+          />
+        )
+      })}
+      {streamingText !== null && streamingText.length > 0 && (
+        <div className="whitespace-pre-wrap text-text/80" data-testid="delegation-streaming">
+          {streamingText}
+        </div>
+      )}
+      {streamingText !== null && streamingText.length === 0 && <TypingIndicator />}
+    </>
+  )
+})
+
+// Build linkages for delegations that appear INSIDE the target's reply,
+// scoped to those entries only. Pure derivation; no Zustand subscription.
+function useNestedLinkages(
+  entries: TranscriptEntry[],
+  teamId: string | undefined,
+): Map<string, DelegationLinkage[]> {
+  // Pull participants from the fleet store ONCE — the team-id filter is
+  // applied inside the helper. We include Boo Zero (teamless) too so its
+  // delegations from nested replies resolve.
+  const agents = useFleetStore((s) => s.agents)
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  return useMemo(() => {
+    if (!teamId || entries.length === 0) return new Map()
+    const teamAgents = agents
+      .filter((a) => a.teamId === teamId)
+      .map((a) => ({ id: a.id, name: a.name }))
+    const booZero = booZeroAgentId ? agents.find((a) => a.id === booZeroAgentId) : null
+    const participants = booZero
+      ? [...teamAgents, { id: booZero.id, name: booZero.name }]
+      : teamAgents
+    // Defensive dedup (same shape as GroupChatPanel.participants).
+    const seen = new Set<string>()
+    const deduped = participants.filter((p) => {
+      if (seen.has(p.id)) return false
+      seen.add(p.id)
+      return true
+    })
+    const blocks = groupEntriesToBlocks(entries)
+    const result = buildDelegationLinkages({
+      blocks,
+      mergedEntries: entries,
+      teamId,
+      participants: deduped,
+    })
+    return result.linkagesBySourceEntry
+  }, [agents, booZeroAgentId, entries, teamId])
+}
+
+// ─── NestedAssistantContent ───────────────────────────────────────────────────
+// Compact assistant renderer used INSIDE a DelegationCard body. Skips the
+// outer agent-identity header/footer (the parent card already conveys who
+// is replying) and recurses into nested DelegationCards for any `<delegate>`
+// blocks inside.
+
+const NestedAssistantContent = memo(function NestedAssistantContent({
+  block,
+  linkagesBySourceEntry,
+  teamId,
+  depth,
+  latestSourceEntryId,
+}: {
+  block: AssistantBlock
+  linkagesBySourceEntry: Map<string, DelegationLinkage[]>
+  teamId?: string
+  depth: number
+  latestSourceEntryId?: string | null
+}) {
+  const isRelay = isTeamUpdateEntry(block.assistant)
+  const hasThinking = block.thinking.length > 0
+  const hasTools = block.tools.length > 0
+  const hasText = Boolean(block.assistant?.text)
+  const linkagesForBlock = block.assistant
+    ? (linkagesBySourceEntry.get(block.assistant.entryId) ?? [])
+    : []
+  const linkageByBlockStart = useMemo(() => {
+    const map = new Map<number, DelegationLinkage>()
+    for (const l of linkagesForBlock) map.set(l.blockStart, l)
+    return map
+  }, [linkagesForBlock])
+
+  return (
+    <div className="flex flex-col gap-2">
+      {hasThinking && (
+        <ThinkingSection entries={block.thinking} thinkingDurationMs={block.thinkingDurationMs} />
+      )}
+      {hasTools && (
+        <div className="flex flex-col gap-1">
+          {block.tools.map((entry) => (
+            <ToolCallCard key={entry.entryId} entry={entry} />
+          ))}
+        </div>
+      )}
+      {hasText && (
+        <div className="flex flex-col gap-2 text-[13px] leading-relaxed text-text/95">
+          {splitAssistantText(
+            isRelay ? stripRelayPrefix(block.assistant!.text) : block.assistant!.text,
+          ).map((segment, idx) => {
+            if (segment.kind === 'delegation') {
+              const nestedLinkage = linkageByBlockStart.get(segment.blockStart)
+              const expandedDefault = block.assistant
+                ? block.assistant.entryId === latestSourceEntryId
+                : true
+              return (
+                <DelegationCard
+                  key={`nested-delegation-${idx}`}
+                  targetName={segment.targetName}
+                  task={segment.task}
+                  linkage={nestedLinkage}
+                  teamId={teamId}
+                  defaultExpanded={expandedDefault}
+                  depth={depth}
+                  latestSourceEntryId={latestSourceEntryId}
+                />
+              )
+            }
+            return (
+              <ReactMarkdown
+                key={`nested-prose-${idx}`}
+                remarkPlugins={[remarkGfm]}
+                components={MD_COMPONENTS}
+              >
+                {segment.text}
+              </ReactMarkdown>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 })
@@ -457,11 +731,20 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
   agentId,
   agentName,
   streaming,
+  linkagesBySourceEntry,
+  teamId,
+  latestSourceEntryId,
 }: {
   block: AssistantBlock
   agentId: string
   agentName: string
   streaming?: boolean
+  /** Group-chat-only: pass-through so DelegationCard segments can nest target replies. */
+  linkagesBySourceEntry?: Map<string, DelegationLinkage[]>
+  /** Group-chat-only: needed by nested DelegationCards to resolve target session keys. */
+  teamId?: string
+  /** Group-chat-only: source entryId whose delegations default-expand (newest exposed). */
+  latestSourceEntryId?: string | null
 }) {
   const isRelay = isTeamUpdateEntry(block.assistant)
   const hasThinking = block.thinking.length > 0
@@ -526,14 +809,30 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
         <div className="flex flex-col gap-2 text-[13px] leading-relaxed text-text">
           {splitAssistantText(
             isRelay ? stripRelayPrefix(block.assistant!.text) : block.assistant!.text,
-          ).map((segment, idx) =>
-            segment.kind === 'delegation' ? (
-              <DelegationCard
-                key={`delegation-${idx}`}
-                targetName={segment.targetName}
-                task={segment.task}
-              />
-            ) : (
+          ).map((segment, idx) => {
+            if (segment.kind === 'delegation') {
+              const matchedLinkage =
+                block.assistant && linkagesBySourceEntry
+                  ? linkagesBySourceEntry
+                      .get(block.assistant.entryId)
+                      ?.find((l) => l.blockStart === segment.blockStart)
+                  : undefined
+              const expandedDefault = block.assistant
+                ? block.assistant.entryId === latestSourceEntryId
+                : true
+              return (
+                <DelegationCard
+                  key={`delegation-${idx}`}
+                  targetName={segment.targetName}
+                  task={segment.task}
+                  linkage={matchedLinkage}
+                  teamId={teamId}
+                  defaultExpanded={expandedDefault}
+                  latestSourceEntryId={latestSourceEntryId}
+                />
+              )
+            }
+            return (
               <ReactMarkdown
                 key={`prose-${idx}`}
                 remarkPlugins={[remarkGfm]}
@@ -541,8 +840,8 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
               >
                 {segment.text}
               </ReactMarkdown>
-            ),
-          )}
+            )
+          })}
         </div>
       )}
 

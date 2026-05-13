@@ -11,6 +11,7 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { sendGroupChatMessage } from './groupChatSendOperation'
 import { useTeamOrchestration } from './useTeamOrchestration'
+import { buildDelegationLinkages } from './buildDelegationLinkages'
 import { stopAllInTeam } from '@/features/chat/stopChatOperation'
 import {
   groupEntriesToBlocks,
@@ -168,6 +169,52 @@ export function GroupChatPanel({
 
   const blocks = useMemo(() => groupEntriesToBlocks(mergedEntries), [mergedEntries])
 
+  // ── Delegation linkages ──────────────────────────────────────────────────
+  // Pure scan of the merged transcript: pairs each `<delegate>` block in a
+  // source agent's reply with the next eligible target reply. Used by the
+  // renderer to (1) hide claimed target replies from the top-level stream
+  // and (2) nest those replies inside the source's DelegationCard.
+  const linkages = useMemo(
+    () =>
+      buildDelegationLinkages({
+        blocks,
+        mergedEntries,
+        teamId,
+        participants: participants.map((a) => ({ id: a.id, name: a.name })),
+      }),
+    [blocks, mergedEntries, teamId, participants],
+  )
+
+  // Pick the entryId of the chronologically-latest source-turn that contains
+  // delegations. All delegations on THAT source default-expand; older ones
+  // collapse (per the user's "newest expanded, older collapsed" choice).
+  const latestSourceEntryIdWithDelegations = useMemo(() => {
+    let latestSeq = -1
+    let latestId: string | null = null
+    for (const linkage of linkages.linkagesByDelegationId.values()) {
+      const sourceEntry = mergedEntries.find((e) => e.entryId === linkage.sourceEntryId)
+      if (!sourceEntry) continue
+      if (sourceEntry.sequenceKey > latestSeq) {
+        latestSeq = sourceEntry.sequenceKey
+        latestId = sourceEntry.entryId
+      }
+    }
+    return latestId
+  }, [linkages, mergedEntries])
+
+  // Filter assistant-turn blocks whose owning entry is claimed by some
+  // delegation — those render INSIDE a DelegationCard, not at the top level.
+  const topLevelBlocks = useMemo(
+    () =>
+      blocks.filter((b) => {
+        if (b.kind !== 'assistant-turn') return true
+        const owner = b.assistant ?? b.thinking[0] ?? b.tools[0] ?? null
+        if (!owner) return true
+        return !linkages.claimedEntries.has(owner.entryId)
+      }),
+    [blocks, linkages.claimedEntries],
+  )
+
   // ── Load persisted history for all participants (team-scoped sessionKeys) ──
   useEffect(() => {
     for (const agent of participants) {
@@ -207,18 +254,24 @@ export function GroupChatPanel({
 
   // Collect all streaming texts for participants (using team-scoped sessionKeys).
   // Boo Zero's stream lands in the merged transcript with its own avatar/name.
+  //
+  // Streams whose target sessionKey is OWNED by a pending DelegationCard are
+  // filtered out — that card subscribes to the same stream itself and renders
+  // it inline. Without this filter the stream would appear both inside the
+  // card AND as a duplicate top-level StreamingCard.
   const activeStreams = useMemo(() => {
     const streams: { agentId: string; agentName: string; text: string }[] = []
     for (const agent of participants) {
       const teamSk = teamSessionKeys.get(agent.id)
       if (!teamSk) continue
+      if (linkages.streamingOwnerByTargetSessionKey.has(teamSk)) continue
       const text = streamingTextMap.get(teamSk)
       if (text != null) {
         streams.push({ agentId: agent.id, agentName: agent.name, text })
       }
     }
     return streams
-  }, [participants, teamSessionKeys, streamingTextMap])
+  }, [participants, teamSessionKeys, streamingTextMap, linkages.streamingOwnerByTargetSessionKey])
 
   const anyRunning = teamAgents.some((a) => a.status === 'running')
 
@@ -230,7 +283,7 @@ export function GroupChatPanel({
         rafRef.current = null
       }
     }
-  }, [blocks.length, activeStreams.length, scheduleScroll])
+  }, [topLevelBlocks.length, activeStreams.length, scheduleScroll])
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
@@ -268,7 +321,7 @@ export function GroupChatPanel({
   const canSend = Boolean(
     client && connectionStatus === 'connected' && teamAgents.length > 0 && !anyRunning,
   )
-  const isEmpty = blocks.length === 0 && activeStreams.length === 0
+  const isEmpty = topLevelBlocks.length === 0 && activeStreams.length === 0
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -311,7 +364,7 @@ export function GroupChatPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-5 pb-2">
-            {blocks.map((block, i) => {
+            {topLevelBlocks.map((block, i) => {
               if (block.kind === 'meta') {
                 return <MetaMessageCard key={block.entry.entryId} entry={block.entry} />
               }
@@ -337,7 +390,12 @@ export function GroupChatPanel({
                   block={block}
                   agentId={ownerAgent?.id ?? 'unknown'}
                   agentName={ownerAgent?.name ?? 'Agent'}
-                  streaming={anyRunning && i === blocks.length - 1 && activeStreams.length === 0}
+                  streaming={
+                    anyRunning && i === topLevelBlocks.length - 1 && activeStreams.length === 0
+                  }
+                  linkagesBySourceEntry={linkages.linkagesBySourceEntry}
+                  teamId={teamId}
+                  latestSourceEntryId={latestSourceEntryIdWithDelegations}
                 />
               )
             })}
