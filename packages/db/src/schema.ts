@@ -147,6 +147,26 @@ export const teamProfiles = sqliteTable('team_profiles', {
   createdAt: integer('created_at').notNull(),
 })
 
+// ─── boo_zero_team_briefs ─────────────────────────────────────────────────────
+// Per-team context briefs that Boo Zero (the universal team leader) reads
+// when operating on a team. One row per team. Content is markdown.
+//
+// Backs the SQLite-first "virtual file" model — surfaced as editable docs in
+// the UI, injected into Boo Zero's context preamble at runtime.
+//
+// FK cascades on team delete so we don't leak orphaned briefs.
+
+export const booZeroTeamBriefs = sqliteTable('boo_zero_team_briefs', {
+  teamId: text('team_id')
+    .primaryKey()
+    .references(() => teams.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+export type DbBooZeroTeamBrief = typeof booZeroTeamBriefs.$inferSelect
+export type DbBooZeroTeamBriefInsert = typeof booZeroTeamBriefs.$inferInsert
+
 // ─── approval_history ─────────────────────────────────────────────────────────
 
 export const approvalHistory = sqliteTable(

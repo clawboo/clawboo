@@ -22,6 +22,9 @@ import type { ProfileLike, TeamProfile } from '@/features/teams/types'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
+import { detectGenuineLeader, matchedLeadershipKeyword } from '@/lib/genuineLeader'
+import { buildTeamBrief, type TeamBriefMember } from '@/lib/booZeroBrief'
+import { useBooZeroStore } from '@/stores/booZero'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
@@ -578,8 +581,26 @@ function DeployStep({
           // team creation failure is non-fatal — agents will be teamless
         }
 
+        // Genuine-leader detection: find the first catalog agent whose
+        // name/role matches a leadership archetype. Boo Zero is the universal
+        // leader; this column is now reserved for genuine team-internal
+        // leads (CTO, Team Lead, etc.).
+        const genuineLeaderCatalogAgent =
+          resolved.find((a) => detectGenuineLeader({ name: a.name, role: a.role })) ?? null
+        const genuineLeaderFinalName = genuineLeaderCatalogAgent
+          ? (dedupPlan.agentNameMap.get(genuineLeaderCatalogAgent.name) ??
+            genuineLeaderCatalogAgent.name)
+          : null
+
+        // Resolve Boo Zero name (universal leader) to thread through file gen.
+        const booZeroAgentId = useBooZeroStore.getState().booZeroAgentId
+        const booZeroAgent = booZeroAgentId
+          ? (useFleetStore.getState().agents.find((a) => a.id === booZeroAgentId) ?? null)
+          : null
+        const universalLeaderName = booZeroAgent?.name ?? null
+
         const workspaceDir = await resolveWorkspaceDir(client)
-        let firstAgentId: string | null = null
+        let genuineLeaderAgentId: string | null = null
         for (let i = 0; i < resolved.length; i++) {
           const agent = resolved[i]!
           const finalAgentName = dedupPlan.agentNameMap.get(agent.name) ?? agent.name
@@ -607,6 +628,8 @@ function DeployStep({
             teamName: finalTeamName,
             teammates: teammatesForProtocol,
             routingRules: rawRouting,
+            universalLeaderName,
+            teamInternalLeadName: genuineLeaderFinalName,
           })
           // CLAWBOO.md — workspace-resident operating reference. See
           // `lib/teamProtocol.ts` (`buildClawbooHelpDoc`).
@@ -614,6 +637,7 @@ function DeployStep({
             agentName: finalAgentName,
             teamName: finalTeamName,
             teammates: teammatesForProtocol,
+            universalLeaderName,
           })
 
           const agentId = await createAgent(client, finalAgentName, workspaceDir, {
@@ -631,7 +655,9 @@ function DeployStep({
             body: JSON.stringify({ agentId, values: defaultPersonality }),
           }).catch(() => {})
 
-          if (i === 0) firstAgentId = agentId
+          if (genuineLeaderCatalogAgent && agent.name === genuineLeaderCatalogAgent.name) {
+            genuineLeaderAgentId = agentId
+          }
           setProgress(i + 1)
 
           // Assign agent to team (best-effort)
@@ -648,17 +674,66 @@ function DeployStep({
           }
         }
 
-        // Set first agent as team leader (best-effort)
-        if (firstAgentId && teamId) {
+        // Set the team-internal lead (only when detected). Boo Zero is the
+        // universal leader; this column is reserved for genuine leads now.
+        if (teamId) {
           try {
             await fetch(`/api/teams/${teamId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ leaderAgentId: firstAgentId }),
+              body: JSON.stringify({ leaderAgentId: genuineLeaderAgentId }),
             })
-            useTeamStore.getState().updateTeam(teamId, { leaderAgentId: firstAgentId })
+            useTeamStore.getState().updateTeam(teamId, { leaderAgentId: genuineLeaderAgentId })
           } catch {
             // leader assignment is non-fatal
+          }
+        }
+
+        // Generate Boo Zero's per-team brief (best-effort).
+        if (teamId) {
+          const extractSkillsFromToolsMd = (md: string | undefined): string[] => {
+            if (!md) return []
+            const skillsMatch = md.match(/##\s+Skills\s*\n([\s\S]*?)(?=\n##\s|$)/i)
+            const body = skillsMatch?.[1] ?? ''
+            return body
+              .split('\n')
+              .map((l) => l.trim())
+              .filter((l) => l.startsWith('- '))
+              .map((l) => l.slice(2).trim())
+              .filter(Boolean)
+          }
+          const briefMembers: TeamBriefMember[] = resolved.map((a) => ({
+            name: dedupPlan.agentNameMap.get(a.name) ?? a.name,
+            role: a.role,
+            tools: extractSkillsFromToolsMd(a.toolsTemplate),
+          }))
+          const internalLeadKeyword = genuineLeaderCatalogAgent
+            ? matchedLeadershipKeyword({
+                name: genuineLeaderCatalogAgent.name,
+                role: genuineLeaderCatalogAgent.role,
+              })
+            : null
+          const briefMarkdown = buildTeamBrief({
+            team: {
+              name: finalTeamName,
+              icon: profile.emoji,
+              templateId: profile.id ?? null,
+              description: profile.description ?? '',
+            },
+            members: briefMembers,
+            internalLead:
+              genuineLeaderFinalName && internalLeadKeyword
+                ? { agentName: genuineLeaderFinalName, matchedKeyword: internalLeadKeyword }
+                : null,
+          })
+          try {
+            await fetch(`/api/boo-zero/team-briefs/${encodeURIComponent(teamId)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content: briefMarkdown }),
+            })
+          } catch {
+            // brief gen is non-fatal
           }
         }
 

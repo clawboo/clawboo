@@ -514,6 +514,31 @@ export class GatewayClient {
       },
     ): Promise<SessionPatchResult> =>
       this.call<SessionPatchResult>('sessions.patch', { key, ...updates }),
+
+    /**
+     * Heavier session-level abort. Where `chat.abort` cancels a specific
+     * `runId`, `sessions.abort` aborts whatever is currently running on
+     * the session AND clears any queued/pending state.
+     *
+     * `runId` is optional: when omitted, the Gateway resolves the active
+     * run from `key`. We use this as the runId-less fallback in the Stop
+     * button path — when a user presses Stop very fast (before the first
+     * streaming event has landed and populated `agent.runId`), the
+     * surgical `chat.abort(sessionKey, runId)` is a no-op because we
+     * don't have a runId yet; `sessions.abort(key)` still does the right
+     * thing.
+     *
+     * Response shape mirrors `chat.abort` — `status: 'no-active-run'` is
+     * a benign no-op when the session is already idle.
+     */
+    abort: (
+      key: string,
+      runId?: string,
+    ): Promise<{ ok: boolean; abortedRunId?: string | null; status?: string }> =>
+      this.call<{ ok: boolean; abortedRunId?: string | null; status?: string }>(
+        'sessions.abort',
+        runId ? { key, runId } : { key },
+      ),
   }
 
   readonly config = {
@@ -521,5 +546,27 @@ export class GatewayClient {
 
     patch: (updates: Partial<GatewayConfig>): Promise<void> =>
       this.call<void>('config.patch', updates),
+  }
+
+  // ── chat namespace ────────────────────────────────────────────────────────
+  // Currently only exposes `abort` (used by the chat composer's Stop button).
+  // `chat.send` is still called inline via `client.call('chat.send', …)` from
+  // `chatSendOperation.ts` / `groupChatSendOperation.ts` because those paths
+  // need to thread `displayText` overrides through the existing pipeline.
+  readonly chat = {
+    /**
+     * Cancel the in-flight LLM run on a session. The Gateway responds with
+     * `{ ok, abortedRunId, status }`. `status: 'no-active-run'` is a benign
+     * no-op when the run has already finished, so callers don't need to
+     * special-case it — local state is cleared optimistically anyway.
+     */
+    abort: (
+      sessionKey: string,
+      runId: string,
+    ): Promise<{ ok: boolean; abortedRunId?: string | null; status?: string }> =>
+      this.call<{ ok: boolean; abortedRunId?: string | null; status?: string }>('chat.abort', {
+        sessionKey,
+        runId,
+      }),
   }
 }

@@ -3,29 +3,61 @@ import { ReactFlowProvider } from '@xyflow/react'
 import { GhostGraph } from './GhostGraph'
 import { useGraphStore } from './store'
 import { useTeamStore } from '@/stores/team'
+import type { GhostGraphScope } from './types'
+
+// Re-export so existing consumers (e.g. `ContentArea`) can import the scope
+// type alongside the component.
+export type { GhostGraphScope }
 
 // ─── GhostGraphPanel ──────────────────────────────────────────────────────────
 //
 // Wrapper that owns the ReactFlowProvider context, toolbar, loading/error states,
 // and the empty-state illustration.
+//
+// Two orthogonal props:
+//   • `scope` (`'atlas' | 'team'`, default `'team'`)
+//     Controls WHAT the canvas renders:
+//       - `'atlas'`: global all-teams view. Ignores `selectedTeamId`,
+//         synthesizes Boo Zero at the top with edges fanning out to every
+//         team's internal lead. Halos toggle is visible.
+//       - `'team'`: single-team view bound to `selectedTeamId`. Halos
+//         toggle hidden + halos forced off regardless of sticky
+//         `showTeamHalos` value.
+//   • `embedded` (`boolean`, default `false`)
+//     Controls the CHROME — when `true`, the panel-level toolbar (title +
+//     boo/skill count badge + Re-layout) is suppressed because a parent
+//     view (e.g. `GroupChatViewHeader`) owns it. Independent of `scope`.
+//
+// Sidebar team highlight is INTENTIONALLY untouched when entering Atlas —
+// the user expects to return to their team's group chat with the same team
+// still highlighted in the sidebar after leaving Atlas.
 
-export function GhostGraphPanel() {
-  const { isLoadingFiles, filesError, nodes, resetLayout, hasRunLayout } = useGraphStore()
+export function GhostGraphPanel({
+  embedded = false,
+  scope = 'team',
+}: {
+  embedded?: boolean
+  scope?: GhostGraphScope
+} = {}) {
+  const { isLoadingFiles, filesError, nodes } = useGraphStore()
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
 
-  // Reset graph state when team changes. This effect runs in the PARENT
-  // (which does NOT remount on key change), so it reliably detects team switches
-  // even though GhostGraph/ReactFlowProvider are keyed and remount fresh.
+  // Reset graph state when team OR scope changes. This effect runs in the
+  // PARENT (which does NOT remount on key change), so it reliably detects
+  // both team switches AND scope switches even though GhostGraph /
+  // ReactFlowProvider are keyed below and remount fresh.
   const prevTeamIdRef = useRef(selectedTeamId)
+  const prevScopeRef = useRef(scope)
   useEffect(() => {
-    if (prevTeamIdRef.current === selectedTeamId) return
+    if (prevTeamIdRef.current === selectedTeamId && prevScopeRef.current === scope) return
     prevTeamIdRef.current = selectedTeamId
+    prevScopeRef.current = scope
     const store = useGraphStore.getState()
     store.resetLayout()
     store.setNodes([])
     store.setEdges([])
     useGraphStore.setState({ agentFiles: new Map() })
-  }, [selectedTeamId])
+  }, [selectedTeamId, scope])
   const selectedTeam = useTeamStore((s) =>
     s.selectedTeamId ? (s.teams.find((t) => t.id === s.selectedTeamId) ?? null) : null,
   )
@@ -44,62 +76,53 @@ export function GhostGraphPanel() {
         overflow: 'hidden',
       }}
     >
-      {/* Toolbar */}
-      <div
-        style={{
-          height: 36,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(232,232,232,0.5)' }}>
-            {selectedTeam ? `${selectedTeam.name} — Ghost Graph` : 'Ghost Graph'}
-          </span>
-          {booCount > 0 && (
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 500,
-                color: '#E94560',
-                background: 'rgba(233,69,96,0.12)',
-                borderRadius: 20,
-                padding: '1px 8px',
-              }}
-            >
-              {booCount} Boo{booCount !== 1 ? 's' : ''}
-              {skillCount > 0 && ` · ${skillCount} skills`}
+      {/* Toolbar — only rendered when NOT embedded.
+          In group chat the team header above the panel already shows the
+          team identity + Boo/skill counts, and the Re-layout button now
+          lives in the canvas's floating top-right toolbar (with Team
+          halos + Connect). So the embedded toolbar would be pure
+          redundancy and is suppressed entirely.
+          In Atlas (non-embedded) the toolbar is still the only chrome
+          identifying the view, so we keep it — minus the Re-layout
+          button, which also migrated to the canvas for consistency. */}
+      {!embedded && (
+        <div
+          style={{
+            height: 36,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 12px',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(232,232,232,0.5)' }}>
+              {scope === 'atlas'
+                ? 'Atlas — All Teams'
+                : selectedTeam
+                  ? `${selectedTeam.name} — Ghost Graph`
+                  : 'Ghost Graph'}
             </span>
-          )}
+            {booCount > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: '#E94560',
+                  background: 'rgba(233,69,96,0.12)',
+                  borderRadius: 20,
+                  padding: '1px 8px',
+                }}
+              >
+                {booCount} Boo{booCount !== 1 ? 's' : ''}
+                {skillCount > 0 && ` · ${skillCount} skills`}
+              </span>
+            )}
+          </div>
         </div>
-
-        {hasRunLayout && (
-          <button
-            onClick={resetLayout}
-            style={{
-              background: 'none',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 6,
-              color: 'rgba(232,232,232,0.45)',
-              cursor: 'pointer',
-              fontSize: 11,
-              padding: '2px 8px',
-            }}
-            onMouseOver={(e) =>
-              ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.8)')
-            }
-            onMouseOut={(e) =>
-              ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.45)')
-            }
-          >
-            Re-layout
-          </button>
-        )}
-      </div>
+      )}
 
       {/* Canvas area */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -189,12 +212,14 @@ export function GhostGraphPanel() {
           </div>
         )}
 
-        {/* React Flow canvas — keyed by team so switching teams gives a fresh
-            React Flow context (internal node init tracking, ResizeObservers).
-            Without the key, stale internal state can prevent ELK layout from
-            firing after async agent creation on a newly created team. */}
-        <ReactFlowProvider key={selectedTeamId ?? 'all'}>
-          <GhostGraph />
+        {/* React Flow canvas — keyed by `${scope}:${selectedTeamId ?? 'none'}`
+            so switching teams OR scope gives a fresh React Flow context
+            (internal node init tracking, ResizeObservers). Without the key,
+            stale internal state can prevent ELK layout from firing after
+            async agent creation on a newly created team, and switching
+            between Atlas → group chat would inherit Atlas's positions. */}
+        <ReactFlowProvider key={`${scope}:${selectedTeamId ?? 'none'}`}>
+          <GhostGraph scope={scope} />
         </ReactFlowProvider>
       </div>
 

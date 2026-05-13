@@ -20,6 +20,14 @@ const CATEGORY: Record<SkillCategory, { color: string; icon: string }> = {
   other: { color: '#6B7280', icon: '🔧' },
 }
 
+// Visual overrides for Boo Zero's "Leadership" orbital — see
+// `SkillNodeData.isLeadership` for context. Compass icon picks up the
+// "guides the team" metaphor without the crown's heraldic vibe; amber
+// signals elevated status while staying clearly distinct from any of the
+// regular category colors. Reused by `Description tooltip` and the
+// `name` color below.
+const LEADERSHIP_VISUAL = { color: '#FBBF24', icon: '🧭' } as const
+
 const CIRCLE = 38 // circle diameter in px (reduced from 52 — skills feel subordinate to Boo nodes)
 
 // ─── Handle style ─────────────────────────────────────────────────────────────
@@ -54,9 +62,13 @@ export const SkillNode = memo(function SkillNode({
   data,
   dragging,
 }: NodeProps<Node<SkillNodeData, 'skill'>>) {
-  const { name, category, description, isVisible } = data
+  const { name, category, description, isVisible, isLeadership } = data
   const floatRef = useFloatingMotion(nodeId, 'skill', dragging)
-  const { color, icon } = CATEGORY[category] ?? CATEGORY.other
+  // Leadership orbital reads its visuals from a dedicated constant — the
+  // `category` field is still set on the data (defaulted to `'other'` in
+  // `useGraphData`) so any downstream consumer that hasn't been taught
+  // about `isLeadership` falls back gracefully.
+  const { color, icon } = isLeadership ? LEADERSHIP_VISUAL : (CATEGORY[category] ?? CATEGORY.other)
   const [showPicker, setShowPicker] = useState(false)
 
   // Hover cascade — dim when another node is hovered
@@ -113,35 +125,41 @@ export const SkillNode = memo(function SkillNode({
             <span style={{ fontSize: 16, lineHeight: 1, userSelect: 'none' }}>{icon}</span>
           </div>
 
-          {/* Install button — appears on hover */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              setShowPicker((v) => !v)
-            }}
-            className="opacity-0 group-hover:opacity-100"
-            style={{
-              position: 'absolute',
-              top: -6,
-              right: -14,
-              background: '#34D399',
-              color: '#0A0E1A',
-              border: 'none',
-              borderRadius: 4,
-              fontSize: 9,
-              fontWeight: 700,
-              padding: '2px 6px',
-              cursor: 'pointer',
-              transition: 'opacity 0.15s',
-              whiteSpace: 'nowrap',
-              letterSpacing: '0.02em',
-            }}
-          >
-            Install →
-          </button>
+          {/* Install button — appears on hover. Hidden for the Leadership
+              orbital: it's reserved for Boo Zero and cannot be installed on
+              other agents (see `SkillNodeData.isLeadership`). Suppressing
+              the button removes the action AND avoids opening a no-op
+              picker dropdown. */}
+          {!isLeadership && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowPicker((v) => !v)
+              }}
+              className="opacity-0 group-hover:opacity-100"
+              style={{
+                position: 'absolute',
+                top: -6,
+                right: -14,
+                background: '#34D399',
+                color: '#0A0E1A',
+                border: 'none',
+                borderRadius: 4,
+                fontSize: 9,
+                fontWeight: 700,
+                padding: '2px 6px',
+                cursor: 'pointer',
+                transition: 'opacity 0.15s',
+                whiteSpace: 'nowrap',
+                letterSpacing: '0.02em',
+              }}
+            >
+              Install →
+            </button>
+          )}
 
-          {/* Agent picker dropdown */}
-          {showPicker && (
+          {/* Agent picker dropdown — same suppression rule as the button. */}
+          {!isLeadership && showPicker && (
             <AgentPickerDropdown
               onSelect={(agentId, agentName) => {
                 void installSkillForAgent(name, agentId, agentName)

@@ -31,6 +31,15 @@ export interface TeamOnboardingGateProps {
   teamId: string
   team: Team | null
   teamAgents: AgentState[]
+  /**
+   * Boo Zero — the universal team leader. When present, the welcome card
+   * shows a "Led by <BooZero Name>" badge so the user knows Boo Zero will
+   * be the team's first responder. Boo Zero does NOT participate in the
+   * Phase B intro cascade (it's teamless, so already excluded from
+   * `teamAgents`), avoiding any contribution to the message-flooding
+   * cascade the gate was originally introduced to prevent.
+   */
+  booZeroAgent?: AgentState | null
   client: GatewayClientLike | null
   agentsIntroduced: boolean
   userIntroduced: boolean
@@ -63,6 +72,7 @@ export function TeamOnboardingGate({
   teamId,
   team,
   teamAgents,
+  booZeroAgent,
   client,
   agentsIntroduced,
   userIntroduced: _userIntroduced,
@@ -115,16 +125,47 @@ export function TeamOnboardingGate({
     }
   }, [phase, teamAgents, teamId, completedAgentIds])
 
-  // When all agents finish introducing, advance to user-intro phase.
+  // When all agents finish introducing, advance to user-intro phase AND
+  // post a single meta entry "introducing" Boo Zero as the team's universal
+  // leader. We do this client-side (no Gateway round-trip) so the entry is
+  // free of any cascade risk and the user gets immediate feedback.
   useEffect(() => {
     if (phase !== 'introducing') return
     if (teamAgents.length === 0) return
     if (completedAgentIds.size < teamAgents.length) return
     void (async () => {
+      // Boo Zero "introducing itself" — meta entry into Boo Zero's team-scoped
+      // session so the merged transcript shows the universal-leader voice
+      // first when the user lands in normal chat.
+      if (booZeroAgent && team) {
+        const booTeamSk = buildTeamSessionKey(booZeroAgent.id, teamId)
+        const introEntry: TranscriptEntry = {
+          entryId: crypto.randomUUID(),
+          runId: null,
+          sessionKey: booTeamSk,
+          kind: 'assistant',
+          role: 'assistant',
+          text: `Hi — I'm ${booZeroAgent.name}, your universal team leader for ${team.name}. I'll triage your messages, delegate to the right teammate, and synthesize their work back to you.`,
+          source: 'local-send',
+          timestampMs: Date.now(),
+          sequenceKey: nextSeq(),
+          confirmed: true,
+          fingerprint: crypto.randomUUID(),
+        }
+        useChatStore.getState().appendTranscript(booTeamSk, [introEntry])
+      }
       await onMarkAgentsIntroduced()
       setPhase('user-intro')
     })()
-  }, [phase, teamAgents.length, completedAgentIds, onMarkAgentsIntroduced])
+  }, [
+    phase,
+    teamAgents.length,
+    completedAgentIds,
+    onMarkAgentsIntroduced,
+    booZeroAgent,
+    team,
+    teamId,
+  ])
 
   // ── Phase A action: Know Your Team button ─────────────────────────────────
   const handleStartIntros = useCallback(async () => {
@@ -285,31 +326,12 @@ export function TeamOnboardingGate({
   }, [teamAgents, teamId, completedAgentIds, phase])
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  // No local header — `GroupChatViewHeader` (rendered by `GroupChatView`
+  // above the graph + chat split) already shows the team identity. Adding a
+  // second header here would duplicate the team name + agent count one line
+  // below the unified header.
   return (
     <div className="flex h-full flex-col bg-bg">
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b border-white/8 px-4 py-3">
-        {team && (
-          <span
-            className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-[16px]"
-            style={{ background: `${team.color}22` }}
-          >
-            {team.icon}
-          </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <h2
-            className="truncate text-[14px] font-semibold text-text"
-            style={{ fontFamily: 'var(--font-body)' }}
-          >
-            {team?.name ?? 'Team'}
-          </h2>
-          <p className="text-[10px] text-secondary/50">
-            {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''} • Setup
-          </p>
-        </div>
-      </div>
-
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-8">
         <AnimatePresence mode="wait">
@@ -322,12 +344,24 @@ export function TeamOnboardingGate({
               transition={{ duration: 0.2 }}
               className="mx-auto flex max-w-md flex-col items-center text-center"
             >
-              <div
-                className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
-                style={{ background: `${team?.color ?? '#34D399'}22` }}
-              >
-                <Sparkles size={22} style={{ color: team?.color ?? '#34D399' }} />
-              </div>
+              {/* The universal team leader (Boo Zero) introduces the team —
+                  its avatar replaces the abstract sparkle icon for a stronger
+                  "leader presenting the team" framing. Falls back to the
+                  sparkle in a colored ring when Boo Zero hasn't been
+                  identified (rare — should only happen in the brief window
+                  before `identifyBooZero` lands after first hydrate). */}
+              {booZeroAgent ? (
+                <div className="mb-4">
+                  <BooAvatar seed={booZeroAgent.id} size={56} isBooZero />
+                </div>
+              ) : (
+                <div
+                  className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
+                  style={{ background: `${team?.color ?? '#34D399'}22` }}
+                >
+                  <Sparkles size={22} style={{ color: team?.color ?? '#34D399' }} />
+                </div>
+              )}
               <h3
                 className="mb-2 text-[18px] font-semibold text-text"
                 style={{ fontFamily: 'var(--font-display)' }}
@@ -341,7 +375,7 @@ export function TeamOnboardingGate({
               </p>
 
               {/* Agent avatars */}
-              <div className="mb-6 flex flex-wrap items-center justify-center gap-3">
+              <div className="mb-4 flex flex-wrap items-center justify-center gap-3">
                 {teamAgents.map((agent) => (
                   <div
                     key={agent.id}
@@ -355,6 +389,22 @@ export function TeamOnboardingGate({
                   </div>
                 ))}
               </div>
+
+              {/* "Led by Boo Zero" badge — Boo Zero is the universal team
+                  leader and will respond first in every team chat, even
+                  though it doesn't appear in the team's sidebar agent list. */}
+              {booZeroAgent && (
+                <div
+                  className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/8 bg-surface/60 px-3 py-1.5 text-[11px] text-secondary"
+                  data-testid="led-by-boo-zero-badge"
+                >
+                  <BooAvatar seed={booZeroAgent.id} size={20} />
+                  <span>
+                    Led by <strong className="text-text">{booZeroAgent.name}</strong> — your
+                    universal team leader
+                  </span>
+                </div>
+              )}
 
               <button
                 type="button"

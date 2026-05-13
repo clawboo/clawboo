@@ -27,7 +27,17 @@ import {
   teamAgentPOST,
   teamAgentDELETE,
 } from './teams'
+import { agentsDELETE, agentsCleanupPOST } from './agents'
 import { teamOnboardingGET, teamOnboardingPATCH } from './teamOnboarding'
+import {
+  teamBriefGET,
+  teamBriefPUT,
+  teamBriefDELETE,
+  globalBriefGET,
+  globalBriefPUT,
+  displayNameGET,
+  displayNamePUT,
+} from './booZero'
 
 const router: RouterType = Router()
 
@@ -90,5 +100,22 @@ router.delete('/api/teams/:id/agents/:agentId', teamAgentDELETE)
 // Team onboarding (per-team boolean flags for "Know Your Team" gate)
 router.get('/api/teams/:id/onboarding', teamOnboardingGET)
 router.patch('/api/teams/:id/onboarding', teamOnboardingPATCH)
+
+// Agents — local SQLite metadata cleanup. Gateway is the source of truth for
+// agent identity, so there's no `create` or `list` here — only delete + the
+// one-shot cleanup that removes rows for agents no longer in the Gateway.
+router.delete('/api/agents/:agentId', agentsDELETE)
+router.post('/api/agents/cleanup-ghosts', agentsCleanupPOST)
+
+// Boo Zero context — per-team briefs + global brief.
+// Per-team briefs are SQLite-backed and FK-cascade on team delete; the
+// global brief lives in the settings key/value table.
+router.get('/api/boo-zero/team-briefs/:teamId', teamBriefGET)
+router.put('/api/boo-zero/team-briefs/:teamId', teamBriefPUT)
+router.delete('/api/boo-zero/team-briefs/:teamId', teamBriefDELETE)
+router.get('/api/boo-zero/global-brief', globalBriefGET)
+router.put('/api/boo-zero/global-brief', globalBriefPUT)
+router.get('/api/boo-zero/display-name/:agentId', displayNameGET)
+router.put('/api/boo-zero/display-name/:agentId', displayNamePUT)
 
 export { router as apiRouter }

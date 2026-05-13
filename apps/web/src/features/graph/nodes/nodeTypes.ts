@@ -4,9 +4,11 @@ import type { NodeTypes } from '@xyflow/react'
 import { BooNode } from './BooNode'
 import { SkillNode } from './SkillNode'
 import { ResourceNode } from './ResourceNode'
+import { TeamRootNode } from './TeamRootNode'
 
 export const nodeTypes: NodeTypes = {
   boo: BooNode,
   skill: SkillNode,
   resource: ResourceNode,
+  'team-root': TeamRootNode,
 }

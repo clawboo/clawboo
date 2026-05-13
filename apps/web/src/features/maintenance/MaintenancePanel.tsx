@@ -3,6 +3,7 @@ import { ChevronDown, Loader2 } from 'lucide-react'
 import { GatewayControls } from './GatewayControls'
 import { ModelSelector } from './ModelSelector'
 import { ApiKeyManager } from './ApiKeyManager'
+import { BooZeroBriefsPanel } from './BooZeroBriefsPanel'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { consumeSSE } from '@/lib/sseClient'
@@ -570,7 +571,24 @@ export function MaintenancePanel() {
 
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
 
-      {/* Section 4: Agent Coordination */}
+      {/* Section 4: Boo Zero — universal team leader context */}
+      <div style={{ margin: '24px 0 28px' }} data-testid="boo-zero-briefs-section">
+        <SectionHeading>Boo Zero</SectionHeading>
+        <p
+          style={{
+            fontSize: 11,
+            color: 'rgba(232,232,232,0.45)',
+            margin: '4px 0 14px',
+          }}
+        >
+          Universal team leader. Read by Boo Zero on every interaction.
+        </p>
+        <BooZeroBriefsPanel />
+      </div>
+
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+
+      {/* Section 5: Agent Coordination */}
       <AgentCoordinationToggle />
 
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />

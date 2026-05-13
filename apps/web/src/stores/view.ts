@@ -4,6 +4,11 @@ import { create } from 'zustand'
 // Discriminated union replacing the old flat View type.
 // 'chat' is gone — selecting an agent opens chat via { type: 'agent' }.
 
+// The `'graph'` nav slot now renders the Atlas (global all-teams view) — a
+// canvas-wide Boo Zero hierarchy that shows every team at once. The id is
+// kept as `'graph'` for minimal churn across viewMode discriminants and
+// keyboard shortcut wiring; the team-scoped Ghost Graph still lives inside
+// `GroupChatView` and is unaffected.
 export type NavView = 'graph' | 'approvals' | 'cost' | 'marketplace' | 'scheduler' | 'system'
 
 export type ViewMode =

@@ -58,9 +58,8 @@ import { createFlipState, useFlipMorph, type FlipState } from './useFlipMorph'
 // sidebar). Team badge has been removed from the BooNode entirely.
 
 // ─── Card dimensions (kept in sync with computeElkLayout) ────────────────────
-
-export const BOO_CARD_WIDTH = 220
-export const BOO_CARD_HEIGHT = 120
+export const BOO_CARD_WIDTH = 280
+export const BOO_CARD_HEIGHT = 170
 
 // ─── Node footprint (matches ELK envelope in useGraphLayout.ts) ──────────────
 // The Boo renders centered inside this footprint so its visual center aligns
@@ -191,9 +190,15 @@ export const BooNode = memo(function BooNode({
     (s) => s.hoveredNodeId === null || (s.highlightedNodeIds?.has(`boo-${agentId}`) ?? false),
   )
 
-  // Degree-aware circle sizing (used only in idle shape)
+  // Degree-aware circle sizing (used only in idle shape). Increased from the
+  // old 60–78 range to give Boos more visual prominence in the canvas —
+  // production users reported "the boos are so small". Still well inside the
+  // 280 envelope so orbital ring spacing and physics are unaffected. Boo
+  // Zero (universal leader) gets a small extra boost so it visually anchors
+  // the top of the team's spanning tree.
   const edgeCount = data.edgeCount ?? 0
-  const booW = Math.min(60 + edgeCount * 3, 78)
+  const baseSize = data.isUniversalLeader ? 112 : 96
+  const booW = Math.min(baseSize + edgeCount * 3, data.isUniversalLeader ? 140 : 124)
   const booH = Math.round(booW * 0.92)
 
   // Box-shadow animation driven by status (glow at the wrapper edge, works
@@ -294,6 +299,12 @@ export const BooNode = memo(function BooNode({
         {/* Selection ring removed — the previous red ring around a clicked
             Boo had no functional purpose; the agent-detail navigation
             happens through the right-click context menu / sidebar. */}
+
+        {/* Boo Zero needs no badge — the reserved OpenClaw-red tint plus the
+            slightly larger size (see `baseSize` / `booW` above) already mark
+            it as the universal team leader. The earlier crown badge was a
+            third visual cue layered on top, which read as decorative noise.
+            See `boo-avatar/src/index.ts` for the tint reservation. */}
 
         {showCard ? (
           <CardContent
@@ -413,19 +424,19 @@ function CardContent({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          padding: '10px 12px',
+          gap: 12,
+          padding: '12px 14px',
           borderBottom: '1px solid rgba(255,255,255,0.06)',
           flexShrink: 0,
         }}
       >
-        <div ref={avatarRef} style={{ flexShrink: 0, width: 36, height: 36, position: 'relative' }}>
-          <AgentBooAvatar agentId={agentId} size={36} />
+        <div ref={avatarRef} style={{ flexShrink: 0, width: 44, height: 44, position: 'relative' }}>
+          <AgentBooAvatar agentId={agentId} size={44} />
         </div>
         <div ref={nameRef} style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              fontSize: 13,
+              fontSize: 14,
               fontWeight: 600,
               color: selected ? '#E94560' : '#E8E8E8',
               fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
@@ -441,9 +452,9 @@ function CardContent({
           </div>
           <div
             style={{
-              fontSize: 10,
+              fontSize: 11,
               color: 'rgba(232,232,232,0.45)',
-              marginTop: 2,
+              marginTop: 3,
               letterSpacing: '0.04em',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -457,13 +468,13 @@ function CardContent({
         <div ref={statusRef} style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
           {status === 'running' ? (
             <motion.div
-              style={{ width: 8, height: 8, borderRadius: '50%', background: cardStatusColor }}
+              style={{ width: 10, height: 10, borderRadius: '50%', background: cardStatusColor }}
               animate={{ opacity: [1, 0.25, 1] }}
               transition={{ duration: 1.1, repeat: Infinity }}
             />
           ) : (
             <div
-              style={{ width: 8, height: 8, borderRadius: '50%', background: cardStatusColor }}
+              style={{ width: 10, height: 10, borderRadius: '50%', background: cardStatusColor }}
             />
           )}
         </div>
@@ -476,7 +487,7 @@ function CardContent({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'flex-start',
-          padding: '6px 12px',
+          padding: '8px 14px',
           position: 'relative',
           background:
             'radial-gradient(circle at center, rgba(52,211,153,0.04) 0%, transparent 60%)',

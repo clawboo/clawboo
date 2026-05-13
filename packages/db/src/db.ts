@@ -140,6 +140,12 @@ export function createDb(dbPath: string): ClawbooDb {
       ON chat_messages (entry_id);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_ts
       ON chat_messages (session_key, timestamp_ms);
+
+    CREATE TABLE IF NOT EXISTS boo_zero_team_briefs (
+      team_id    TEXT    PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+      content    TEXT    NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `)
 
   // Existing-DB migrations: add columns that CREATE TABLE IF NOT EXISTS won't add.

@@ -164,9 +164,9 @@ export function WelcomeState() {
     },
     {
       num: '3',
-      text: 'Explore the Ghost Graph to see your fleet',
+      text: 'Open the Atlas to see all your teams',
       action: () => useViewStore.getState().navigateTo('graph'),
-      actionLabel: 'Open Graph',
+      actionLabel: 'Open Atlas',
     },
   ]
 
@@ -305,7 +305,7 @@ export function WelcomeState() {
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           {(
             [
-              { label: 'Ghost Graph', emoji: '👻', view: 'graph' as const },
+              { label: 'Atlas', emoji: '🌐', view: 'graph' as const },
               { label: 'Marketplace', emoji: '🛒', view: 'marketplace' as const },
               { label: 'Cost', emoji: '💰', view: 'cost' as const },
             ] as const
@@ -345,7 +345,16 @@ export function WelcomeState() {
       <CreateTeamModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        onCreated={() => setShowCreateModal(false)}
+        onCreated={() => {
+          setShowCreateModal(false)
+          // CreateTeamModal selects the newly-created team before firing
+          // onCreated — land in its group chat instead of leaving the user
+          // on the welcome screen with nothing visibly happening.
+          const newTeamId = useTeamStore.getState().selectedTeamId
+          if (newTeamId) {
+            useViewStore.getState().openGroupChat(newTeamId)
+          }
+        }}
       />
     </div>
   )

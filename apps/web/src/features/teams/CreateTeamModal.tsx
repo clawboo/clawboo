@@ -6,11 +6,14 @@ import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
+import { useBooZeroStore } from '@/stores/booZero'
 import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { hydrateTeams } from '@/lib/hydrateTeams'
+import { detectGenuineLeader, matchedLeadershipKeyword } from '@/lib/genuineLeader'
+import { buildTeamBrief, type TeamBriefMember } from '@/lib/booZeroBrief'
 import { useGraphStore } from '@/features/graph/store'
 import type { TeamTemplate, ProfileLike, TemplateSource, TemplateCategory } from './types'
 import {
@@ -244,8 +247,29 @@ export function CreateTeamModal({
       // Template team → deploy agents
       setStep('deploy')
 
+      // Genuine-leader detection: find the first catalog agent whose
+      // name/role matches a leadership archetype (CTO, Team Lead, etc.).
+      // Only THIS agent (if any) becomes the team-internal lead.
+      // Forced "first agent is leader" is gone — Boo Zero is the universal
+      // leader, the internal-lead column is now optional.
+      const genuineLeaderCatalogAgent =
+        resolved.find((a) => detectGenuineLeader({ name: a.name, role: a.role })) ?? null
+      const genuineLeaderFinalName = genuineLeaderCatalogAgent
+        ? (dedupPlan.agentNameMap.get(genuineLeaderCatalogAgent.name) ??
+          genuineLeaderCatalogAgent.name)
+        : null
+
+      // Resolve Boo Zero name to thread through agent file generation —
+      // every agent gets a "Universal Leader" block in their AGENTS.md and
+      // CLAWBOO.md so they know how to escalate upward via `<delegate>`.
+      const booZeroAgentId = useBooZeroStore.getState().booZeroAgentId
+      const booZeroAgent = booZeroAgentId
+        ? (useFleetStore.getState().agents.find((a) => a.id === booZeroAgentId) ?? null)
+        : null
+      const universalLeaderName = booZeroAgent?.name ?? null
+
       const workspaceDir = await resolveWorkspaceDir(client)
-      let firstAgentId: string | null = null
+      let genuineLeaderAgentId: string | null = null
       for (let i = 0; i < resolved.length; i++) {
         const agent = resolved[i]
         const finalAgentName = dedupPlan.agentNameMap.get(agent.name) ?? agent.name
@@ -274,6 +298,8 @@ export function CreateTeamModal({
           teamName: finalTeamName,
           teammates: teammatesForProtocol,
           routingRules: rawRouting,
+          universalLeaderName,
+          teamInternalLeadName: genuineLeaderFinalName,
         })
         // CLAWBOO.md sits at the agent's workspace root and provides the
         // detailed operating reference (workspace isolation paths,
@@ -283,6 +309,7 @@ export function CreateTeamModal({
           agentName: finalAgentName,
           teamName: finalTeamName,
           teammates: teammatesForProtocol,
+          universalLeaderName,
         })
 
         const agentId = await createAgent(client, finalAgentName, workspaceDir, {
@@ -300,7 +327,11 @@ export function CreateTeamModal({
           body: JSON.stringify({ agentId, values: defaultPersonality }),
         }).catch(() => {})
 
-        if (i === 0) firstAgentId = agentId
+        // Capture the agentId of the detected genuine leader so we can set
+        // it as the team-internal lead after the deploy loop completes.
+        if (genuineLeaderCatalogAgent && agent.name === genuineLeaderCatalogAgent.name) {
+          genuineLeaderAgentId = agentId
+        }
 
         // Assign agent to team (best-effort)
         try {
@@ -314,18 +345,75 @@ export function CreateTeamModal({
         }
       }
 
-      // Set first agent as team leader (best-effort)
-      if (firstAgentId && team.id) {
+      // Set the team-internal lead — ONLY when a genuine leader was detected.
+      // Forced first-agent-as-leader is gone; Boo Zero is the universal leader.
+      // PATCH always runs (with `null` when no genuine leader) so the column
+      // stays accurate even on re-deploys.
+      if (team.id) {
         try {
           await fetch(`/api/teams/${team.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ leaderAgentId: firstAgentId }),
+            body: JSON.stringify({ leaderAgentId: genuineLeaderAgentId }),
           })
-          useTeamStore.getState().updateTeam(team.id, { leaderAgentId: firstAgentId })
+          useTeamStore.getState().updateTeam(team.id, { leaderAgentId: genuineLeaderAgentId })
         } catch {
           // leader assignment is non-fatal
         }
+      }
+
+      // Generate and persist Boo Zero's per-team brief. The brief is what
+      // Boo Zero reads when entering this team's chat — team identity,
+      // member roster, internal lead (if any), routing patterns, anti-
+      // patterns. Best-effort: a failed PUT doesn't block the deploy.
+      // Extract skill names from each agent's TOOLS.md markdown bullets.
+      // `ResolvedAgent` doesn't carry `description` / `skillIds` directly
+      // (those live on AgentCatalogEntry), so we derive what we can from
+      // the templates the deploy loop already has in hand. Anything missing
+      // is left empty in the brief — the user can edit the brief later.
+      const extractSkillsFromToolsMd = (md: string | undefined): string[] => {
+        if (!md) return []
+        const skillsMatch = md.match(/##\s+Skills\s*\n([\s\S]*?)(?=\n##\s|$)/i)
+        const body = skillsMatch?.[1] ?? ''
+        return body
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l.startsWith('- '))
+          .map((l) => l.slice(2).trim())
+          .filter(Boolean)
+      }
+      const briefMembers: TeamBriefMember[] = resolved.map((a) => ({
+        name: dedupPlan.agentNameMap.get(a.name) ?? a.name,
+        role: a.role,
+        tools: extractSkillsFromToolsMd(a.toolsTemplate),
+      }))
+      const internalLeadKeyword = genuineLeaderCatalogAgent
+        ? matchedLeadershipKeyword({
+            name: genuineLeaderCatalogAgent.name,
+            role: genuineLeaderCatalogAgent.role,
+          })
+        : null
+      const briefMarkdown = buildTeamBrief({
+        team: {
+          name: finalTeamName,
+          icon: teamIcon,
+          templateId: selectedProfile.id ?? null,
+          description: selectedProfile.description ?? '',
+        },
+        members: briefMembers,
+        internalLead:
+          genuineLeaderFinalName && internalLeadKeyword
+            ? { agentName: genuineLeaderFinalName, matchedKeyword: internalLeadKeyword }
+            : null,
+      })
+      try {
+        await fetch(`/api/boo-zero/team-briefs/${encodeURIComponent(team.id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: briefMarkdown }),
+        })
+      } catch {
+        // brief generation is non-fatal — the brief is editable in the UI
       }
 
       setProgress({

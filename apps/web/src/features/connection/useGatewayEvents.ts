@@ -8,7 +8,11 @@ import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useApprovalsStore, type ApprovalRequest } from '@/stores/approvals'
 import { parseApprovalRequestPayload } from '@/features/approvals/useApprovalActions'
-import { getTeamChatOverride, clearTeamChatOverride } from '@/lib/sessionUtils'
+import {
+  getTeamChatOverride,
+  clearTeamChatOverride,
+  promoteOverrideToRun,
+} from '@/lib/sessionUtils'
 import { clearAllWakeRecords } from '@/lib/wakeTracker'
 import { nextSeq } from '@/lib/sequenceKey'
 
@@ -74,17 +78,26 @@ export function useGatewayEvents(client: GatewayClient | null): void {
               useFleetStore.getState().updateLastSeen(intent.agentId, Date.now())
               break
             }
+            // Capture the runId BEFORE the patch clears it — we need it to
+            // clear the run-scoped team override after dispatch (Boo Zero
+            // participates in N teams; clearing by agentId alone would wipe
+            // another team's still-active override).
+            const priorRunId =
+              useFleetStore.getState().agents.find((a) => a.id === intent.agentId)?.runId ?? null
             // outputLines already handled by appendOutputLines above;
             // apply the final status patch (idle/error, runId cleared)
             useFleetStore.getState().patchAgent(intent.agentId, intent.patch)
             useFleetStore.getState().updateLastSeen(intent.agentId, Date.now())
             // Clear team-scoped streaming text in the chat store + team override.
-            const teamKey = getTeamChatOverride(intent.agentId)
+            const teamKey = getTeamChatOverride(intent.agentId, priorRunId)
             if (teamKey) {
               useChatStore.getState().setStreamingText(teamKey, null)
               // Delay clearing override by 200ms so useTeamOrchestration can
               // process the newly committed entry before the override is gone.
-              setTimeout(() => clearTeamChatOverride(intent.agentId), 200)
+              setTimeout(() => {
+                if (priorRunId) clearTeamChatOverride(intent.agentId, priorRunId)
+                else clearTeamChatOverride(intent.agentId)
+              }, 200)
             } else if (intent.sessionKey) {
               useChatStore.getState().setStreamingText(intent.sessionKey, null)
             }
@@ -114,9 +127,21 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       // Live patch queue (streaming — RAF-batched)
       queueLivePatch: (agentId, patch, sessionKey?) => {
         patchQueue.enqueue({ agentId, updates: patch })
+        // Determine the runId for this streaming chunk:
+        //   1. `patch.runId` when the patch is starting a new run.
+        //   2. Fall back to the agent's current runId from the fleet store.
+        // The first patch that brings a runId triggers `promoteOverrideToRun`
+        // so subsequent events for this run hit the run-scoped slot.
+        const runIdFromPatch = typeof patch.runId === 'string' ? patch.runId : null
+        const runId =
+          runIdFromPatch ??
+          useFleetStore.getState().agents.find((a) => a.id === agentId)?.runId ??
+          null
+        if (runId) promoteOverrideToRun(agentId, runId)
         // Sync streaming text to chat store — use team override if active,
         // so GroupChatPanel reads streaming from the team sessionKey.
-        const resolvedKey = (agentId ? getTeamChatOverride(agentId) : undefined) ?? sessionKey
+        const resolvedKey =
+          (agentId ? getTeamChatOverride(agentId, runId) : undefined) ?? sessionKey
         if (resolvedKey && patch.streamText !== undefined) {
           useChatStore.getState().setStreamingText(resolvedKey, patch.streamText)
         }
@@ -131,9 +156,14 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       appendOutputLines: (agentId, lines, eventSessionKey?) => {
         if (lines.length === 0) return
         const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
+        // Promote any pending override to a run-scoped one now that we know
+        // the agent's runId (idempotent if already promoted).
+        if (agent?.runId) promoteOverrideToRun(agentId, agent.runId)
         // Team chat override: the Gateway echoes events with the main sessionKey even
         // when we sent to a team-scoped key. Redirect to the team session if active.
-        const teamOverride = agentId ? getTeamChatOverride(agentId) : undefined
+        const teamOverride = agentId
+          ? getTeamChatOverride(agentId, agent?.runId ?? null)
+          : undefined
         const sessionKey = teamOverride ?? eventSessionKey ?? agent?.sessionKey
         if (!sessionKey) return
 
@@ -257,6 +287,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
 
       let inputTokens = 0
       let outputTokens = 0
+      const runId = typeof p['runId'] === 'string' ? p['runId'] : null
 
       if (usage) {
         // Real token data from Gateway (when available)
@@ -269,8 +300,10 @@ export function useGatewayEvents(client: GatewayClient | null): void {
           outputTokens = Math.ceil(responseText.length / 4)
         }
 
-        // Estimate input from the last user message in this agent's transcript
-        const teamKey = getTeamChatOverride(agentId)
+        // Estimate input from the last user message in this agent's transcript.
+        // Use run-aware override lookup so Boo Zero's per-team transcripts
+        // don't get cross-contaminated.
+        const teamKey = getTeamChatOverride(agentId, runId)
         const mainKey = useFleetStore.getState().agents.find((a) => a.id === agentId)?.sessionKey
         const transcript = useChatStore.getState().transcripts.get(teamKey ?? mainKey ?? '')
         if (transcript) {
@@ -291,7 +324,6 @@ export function useGatewayEvents(client: GatewayClient | null): void {
           : typeof message['model'] === 'string'
             ? message['model']
             : 'unknown'
-      const runId = typeof p['runId'] === 'string' ? p['runId'] : null
 
       // Store token usage in chat store so ChatPanel can display real counts
       if (runId) {
@@ -334,7 +366,10 @@ export function useGatewayEvents(client: GatewayClient | null): void {
         if (!agentId) continue
 
         const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
-        const teamOverride = getTeamChatOverride(agentId)
+        // Approval-expiry meta entries inject into whatever session the agent
+        // is currently routed to. Use run-aware lookup so Boo Zero's per-team
+        // overrides resolve correctly when overlapping.
+        const teamOverride = getTeamChatOverride(agentId, agent?.runId ?? null)
         const sessionKey = teamOverride ?? agent?.sessionKey
         if (!sessionKey) continue
 

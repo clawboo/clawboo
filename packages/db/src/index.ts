@@ -2,6 +2,7 @@
 export {
   agents,
   approvalHistory,
+  booZeroTeamBriefs,
   chatMessages,
   costRecords,
   graphLayouts,
@@ -16,6 +17,8 @@ export type {
   DbAgentInsert,
   DbApprovalHistory,
   DbApprovalHistoryInsert,
+  DbBooZeroTeamBrief,
+  DbBooZeroTeamBriefInsert,
   DbChatMessage,
   DbChatMessageInsert,
   DbCostRecord,

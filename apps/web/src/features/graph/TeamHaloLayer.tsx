@@ -22,10 +22,10 @@ const LABEL_OFFSET = 20 // lift label above topmost hull vertex
 
 // Offset from each Boo's React Flow `node.position` (top-left of the
 // envelope) to its visual center. The Boo renders centered inside its
-// envelope (BOO_FOOTPRINT = 340 in `nodes/BooNode.tsx`), so the visual
+// envelope (BOO_FOOTPRINT = 280 in `nodes/BooNode.tsx`), so the visual
 // center is at half the envelope size — same anchor used by
-// `computeOrbitalPositions.ts` and `graphPhysics.ts`.
-const BOO_CENTER_OFFSET = 170
+// `computeOrbitalPositions.ts` and `graphPhysics.ts` (`BOO_HALF_W/H = 140`).
+const BOO_CENTER_OFFSET = 140
 
 interface Point {
   x: number
@@ -44,7 +44,10 @@ export interface TeamHaloGroup {
 
 /**
  * Groups graph nodes by `BooNodeData.teamId`. Skills/resources and teamless
- * Boos are excluded. Returns a Map keyed by teamId preserving insertion order.
+ * Boos are excluded. Boo Zero (the universal team leader) is ALSO excluded
+ * even if it ever appears with a teamId — the universal leader sits above
+ * teams in the org chart, not inside any team's hull. Returns a Map keyed
+ * by teamId preserving insertion order.
  */
 export function groupNodesByTeam(nodes: GraphNode[]): Map<string, TeamHaloGroup> {
   const groups = new Map<string, TeamHaloGroup>()
@@ -52,6 +55,7 @@ export function groupNodesByTeam(nodes: GraphNode[]): Map<string, TeamHaloGroup>
     if (node.type !== 'boo') continue
     const data = node.data as BooNodeData
     if (!data.teamId) continue
+    if (data.isUniversalLeader) continue
     const existing = groups.get(data.teamId)
     if (existing) {
       existing.nodes.push(node)
@@ -189,28 +193,79 @@ function computeGroupHalo(group: TeamHaloGroup): RenderedHalo | null {
 
   const centers = group.nodes.map(nodeCenter)
 
-  let path: string
-  if (centers.length === 2) {
-    // Rounded bounding-box fallback — 2-point hulls are degenerate (a line).
-    const minX = Math.min(centers[0].x, centers[1].x) - HALO_PADDING
-    const minY = Math.min(centers[0].y, centers[1].y) - HALO_PADDING
-    const maxX = Math.max(centers[0].x, centers[1].x) + HALO_PADDING
-    const maxY = Math.max(centers[0].y, centers[1].y) + HALO_PADDING
-    path = rectToRoundedPath(minX, minY, maxX - minX, maxY - minY, HALO_PADDING)
-    const labelX = (minX + maxX) / 2
+  // Bounding rect of centers — used both for the N=2 fallback AND for
+  // detecting "flat" layouts where the convex hull would render as a thin
+  // strip (e.g., every Boo in a team sitting on the same Y row in Atlas).
+  let bMinX = Infinity
+  let bMinY = Infinity
+  let bMaxX = -Infinity
+  let bMaxY = -Infinity
+  for (const c of centers) {
+    if (c.x < bMinX) bMinX = c.x
+    if (c.y < bMinY) bMinY = c.y
+    if (c.x > bMaxX) bMaxX = c.x
+    if (c.y > bMaxY) bMaxY = c.y
+  }
+  const xSpan = bMaxX - bMinX
+  const ySpan = bMaxY - bMinY
+  // If the layout is collapsed in one dimension to less than HALO_PADDING
+  // we treat it as flat: the inflated convex hull would either be a
+  // degenerate line (collinear vertices) or a paper-thin strip after
+  // centroid-push inflation. Threshold matches the inflation amount so we
+  // only kick in when the hull WOULD look like a line, not when the team
+  // is just naturally short / narrow.
+  const FLATNESS_THRESHOLD = HALO_PADDING
+  const isFlat = xSpan < FLATNESS_THRESHOLD || ySpan < FLATNESS_THRESHOLD
+
+  if (centers.length === 2 || isFlat) {
+    // Rounded bounding-box fallback. Doubling the padding in the degenerate
+    // dimension gives the halo a clear 2-D bubble look (≥ 160 px total in
+    // that dimension instead of the ~80 px the un-doubled padding produces).
+    // The doubled side is the one perpendicular to the row, so a horizontal
+    // row of Boos gets extra vertical breathing room (and vice versa).
+    const padX = xSpan < FLATNESS_THRESHOLD ? HALO_PADDING * 2 : HALO_PADDING
+    const padY = ySpan < FLATNESS_THRESHOLD ? HALO_PADDING * 2 : HALO_PADDING
+    const rectX = bMinX - padX
+    const rectY = bMinY - padY
+    const rectW = xSpan + padX * 2
+    const rectH = ySpan + padY * 2
+    const path = rectToRoundedPath(rectX, rectY, rectW, rectH, HALO_PADDING)
     return {
       teamId: group.teamId,
       path,
       color: group.teamColor,
       label: `${group.teamEmoji} ${group.teamName}`,
-      labelX,
-      labelY: minY - LABEL_OFFSET,
+      labelX: (bMinX + bMaxX) / 2,
+      labelY: rectY - LABEL_OFFSET,
     }
   }
 
-  const hull = computeConvexHull(centers)
-  const inflated = inflateHull(hull, HALO_PADDING)
-  path = hullToPath(inflated)
+  // Build the convex hull from CIRCLES around each Boo center, not from
+  // the centers themselves. Centroid-radial inflation only pushes hull
+  // VERTICES outward — Boos that sit on a hull EDGE (e.g. middle Boos in
+  // a mostly-collinear row with one outlier) are inside the hull but
+  // their silhouettes stick past the edge, so they end up only partially
+  // covered. Sampling 16 points around each Boo at `HALO_PADDING * 2`
+  // distance feeds the hull algorithm explicit silhouette boundary
+  // candidates; the resulting hull is guaranteed to clear every Boo by
+  // construction, since each Boo's silhouette points are themselves hull
+  // candidates. Trade-off: the hull becomes a 16-ish-gon instead of a
+  // 3-or-4-vertex polygon, but the SVG is still trivial (~20 path
+  // commands) and the rounded edges read cleaner.
+  const SILHOUETTE_SAMPLES = 16
+  const radius = HALO_PADDING * 2
+  const silhouettePoints: Point[] = []
+  for (const c of centers) {
+    for (let i = 0; i < SILHOUETTE_SAMPLES; i++) {
+      const angle = (i / SILHOUETTE_SAMPLES) * 2 * Math.PI
+      silhouettePoints.push({
+        x: c.x + radius * Math.cos(angle),
+        y: c.y + radius * Math.sin(angle),
+      })
+    }
+  }
+  const inflated = computeConvexHull(silhouettePoints)
+  const path = hullToPath(inflated)
 
   // Label above topmost vertex of inflated hull
   let minY = Infinity

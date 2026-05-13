@@ -27,9 +27,12 @@ const VIEW_STYLE = {
   overflow: 'hidden' as const,
 }
 
-// Nav view → component mapping
+// Nav view → component mapping. The `'graph'` slot renders Atlas — the
+// global all-teams view with Boo Zero at the top of the hierarchy. The
+// team-scoped Ghost Graph still lives inside `GroupChatView` (rendered
+// with the default `scope === 'team'`).
 const NAV_PANELS: Record<NavView, () => ReactNode> = {
-  graph: () => <GhostGraphPanel />,
+  graph: () => <GhostGraphPanel scope="atlas" />,
   scheduler: () => <SchedulerPanel />,
   approvals: () => <ApprovalsPanel />,
   cost: () => <CostDashboard />,
