@@ -34,6 +34,7 @@ import { useChatStore } from '@/stores/chat'
 import { clearTeamRelayState } from '@/features/group-chat/contextRelay'
 import { clearAllTeamChatOverridesForAgent } from '@/lib/sessionUtils'
 import { clearWakeInFlight } from '@/features/group-chat/groupChatSendOperation'
+import { bumpStopGeneration } from '@/features/group-chat/useTeamOrchestration'
 
 // ── Single agent ─────────────────────────────────────────────────────────────
 
@@ -103,6 +104,16 @@ export interface StopAllInTeamParams {
  */
 export async function stopAllInTeam(params: StopAllInTeamParams): Promise<void> {
   const { client, teamId, participants, teamSessionKeys } = params
+
+  // 0. Bump the orchestration generation counter FIRST — before any await
+  //    yields the microtask queue. Mid-flight delegation/relay IIFEs in
+  //    `useTeamOrchestration` will see the new generation at their next
+  //    checkpoint and bail before issuing their delayed `chat.send`. The
+  //    stop-signal useEffect inside the hook also bumps this, but that
+  //    runs after a React commit — bumping here avoids the small race
+  //    window where an IIFE could slip through its checkpoint before the
+  //    effect lands.
+  bumpStopGeneration(teamId)
 
   // Target every participant that's currently working — `running` covers the
   // common case. `sleeping` agents aren't generating, so no abort needed.

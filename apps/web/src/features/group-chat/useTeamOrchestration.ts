@@ -22,6 +22,35 @@ import {
 } from './contextRelay'
 import { getMergedTeamEntries } from './groupChatSendOperation'
 
+// ─── Stop-generation counter (module-level, keyed by teamId) ────────────────
+//
+// Bumped on every Stop. Fire-and-forget IIFEs created inside
+// `processNewEntries` capture this value at creation and re-check it before
+// each side-effecting `await chat.send(...)` — if it has changed, they bail.
+// This is what cancels mid-flight wake → settle → relay sequences when the
+// user presses Stop during the WAKEUP_SETTLE_MS sleep window (any payload
+// that fires AFTER the freeze ends would otherwise re-trigger a cascade).
+//
+// Module-level (not a React ref) so `stopAllInTeam` in `stopChatOperation.ts`
+// can bump it imperatively BEFORE any `await` — eliminating the
+// setStopSignal → render → useEffect-commit race that would otherwise leave
+// a small window where IIFEs see the old generation. The stop-signal
+// useEffect inside the hook also bumps it as belt-and-suspenders.
+//
+// Same pattern as `wakeInFlight` (in `groupChatSendOperation.ts`) and
+// `relayState` (in `contextRelay.ts`) — both intentionally module-level for
+// the same reason.
+
+const stopGenerations = new Map<string, number>()
+
+export function getStopGeneration(teamId: string): number {
+  return stopGenerations.get(teamId) ?? 0
+}
+
+export function bumpStopGeneration(teamId: string): void {
+  stopGenerations.set(teamId, (stopGenerations.get(teamId) ?? 0) + 1)
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /**
@@ -225,8 +254,16 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
           )
 
           for (const delegation of delegations) {
+            // Capture the stop-generation at IIFE creation. If the user
+            // presses Stop before this IIFE finishes, the generation
+            // bumps; we bail at each checkpoint below instead of issuing
+            // a stale `chat.send` that would restart the cascade.
+            const startGen = getStopGeneration(currentTeamId)
             const sendDelegation = async (retryCount = 0) => {
               try {
+                // Bail if Stop has fired since this IIFE was scheduled.
+                if (getStopGeneration(currentTeamId) !== startGen) return
+
                 // Guard: target agent may have been deleted during processing.
                 // The target may be Boo Zero — check both team members AND
                 // Boo Zero (Boo Zero is teamless so not in `teamAgentsRef`).
@@ -240,6 +277,8 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
                 // Guard: target is already processing a team message — retry once after 2s
                 if (hasTeamChatOverride(delegation.targetAgentId)) {
                   if (retryCount < 1) {
+                    // The retry inherits the same startGen via closure, so
+                    // when it fires it re-checks against the live generation.
                     setTimeout(() => void sendDelegation(retryCount + 1), 2000)
                   }
                   return
@@ -270,6 +309,11 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
                 const messageBody = preamble
                   ? `${preamble}\n\n${delegation.taskDescription}`
                   : delegation.taskDescription
+
+                // Final checkpoint before the network call. Without this,
+                // a Stop that fired during the synchronous preamble build
+                // above would still let the delegation send.
+                if (getStopGeneration(currentTeamId) !== startGen) return
 
                 await currentClient.call('chat.send', {
                   sessionKey: targetTeamSk,
@@ -314,8 +358,19 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             })
 
             for (const targetId of targets) {
+              // Capture the stop-generation at IIFE creation. If the user
+              // presses Stop while this IIFE is in the wake-and-settle
+              // window (the historical cascade source — a 2-second sleep
+              // between the wake send and the relay send), the generation
+              // bumps; we bail at the next checkpoint instead of issuing
+              // the delayed `chat.send` that would re-wake the target and
+              // restart the cascade.
+              const startGen = getStopGeneration(currentTeamId)
               void (async () => {
                 try {
+                  // Bail-1: Stop fired before this IIFE got to run.
+                  if (getStopGeneration(currentTeamId) !== startGen) return
+
                   // Guard: target agent may have been deleted during processing.
                   // Relay targets can include Boo Zero — check both team members
                   // and (when present) Boo Zero before bailing out.
@@ -357,6 +412,10 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
                       teamName: teamNameRef.current,
                     })
                     setTeamChatOverride(targetId, targetTeamSk)
+                    // Bail-2: Stop fired between IIFE start and wake send.
+                    // If we proceed, the wake message gets delivered but
+                    // the target then sits awake-but-idle — acceptable.
+                    if (getStopGeneration(currentTeamId) !== startGen) return
                     await currentClient.call('chat.send', {
                       sessionKey: targetTeamSk,
                       message: wakeMsg,
@@ -372,6 +431,13 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
                   }
 
                   setTeamChatOverride(targetId, targetTeamSk)
+
+                  // Bail-3: Stop fired during the settle window OR between
+                  // the awake-check and this point. This is the BIG one —
+                  // without this check, a Stop pressed during the 2s wake-
+                  // settle would still let the relay payload land 2s
+                  // later, restarting the cascade past the freeze window.
+                  if (getStopGeneration(currentTeamId) !== startGen) return
 
                   await currentClient.call('chat.send', {
                     sessionKey: targetTeamSk,
@@ -460,6 +526,13 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
     // so the snapshot covers exactly the sessions the hook watches.
     const currentTeamId = teamIdRef.current
     if (currentTeamId) {
+      // Belt-and-suspenders bump — `stopAllInTeam` also calls
+      // `bumpStopGeneration(teamId)` synchronously before any await, but
+      // bumping here too means even a caller that skipped `stopAllInTeam`
+      // (e.g. some future test harness that drives stopSignal directly)
+      // still cancels in-flight IIFEs.
+      bumpStopGeneration(currentTeamId)
+
       const transcripts = useChatStore.getState().transcripts
       const combined = booZeroAgentRef.current
         ? [...teamAgentsRef.current, booZeroAgentRef.current]
