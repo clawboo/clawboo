@@ -543,7 +543,7 @@ export function TeamOnboardingGate({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="mx-auto flex max-w-md flex-col"
+              className="mx-auto flex max-w-3xl flex-col"
             >
               <h3
                 className="mb-2 text-center text-[16px] font-semibold text-text"
@@ -603,7 +603,7 @@ export function TeamOnboardingGate({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2 }}
-              className="mx-auto flex max-w-md flex-col"
+              className="mx-auto flex max-w-3xl flex-col"
             >
               <h3
                 className="mb-2 text-center text-[16px] font-semibold text-text"
@@ -618,7 +618,7 @@ export function TeamOnboardingGate({
 
               {/* Show agent intros recap (if available) */}
               {agentIntros.size > 0 && (
-                <details className="mb-4 rounded-lg border border-white/8 bg-surface/30 p-3">
+                <details open className="mb-4 rounded-lg border border-white/8 bg-surface/30 p-3">
                   <summary className="cursor-pointer text-[11px] font-semibold text-secondary">
                     Recap: who&rsquo;s on the team
                   </summary>
