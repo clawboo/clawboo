@@ -24,6 +24,9 @@ import {
   MetaMessageCard,
   MessageComposer,
   NEAR_BOTTOM_PX,
+  isFollowupBlock,
+  blockMarginClass,
+  BLOCK_ROW_HOVER_CLASS,
   type MessageComposerHandle,
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
@@ -481,51 +484,88 @@ export function GroupChatPanel({
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-5 pb-2">
-            {topLevelBlocks.map((block, i) => {
-              if (block.kind === 'meta') {
-                return <MetaMessageCard key={block.entry.entryId} entry={block.entry} />
-              }
-              if (block.kind === 'user') {
-                const targetId = agentIdFromSessionKey(block.entry.sessionKey)
-                const targetAgent = targetId ? agentLookup.get(targetId) : null
-                return (
-                  <UserMessageCard
-                    key={block.entry.entryId}
-                    entry={block.entry}
-                    targetAgentName={targetAgent?.name}
-                    knownAgentNames={knownAgentNames}
-                  />
+          <div className="flex flex-col pb-2">
+            {(() => {
+              // Track the previous block + its owner across the loop so the
+              // follow-up check has both pieces of context. Same author +
+              // assistant-turn + within 5 min → drop the repeated header
+              // and tighten the top margin (the Slack/Discord/iMessage
+              // grouping pattern).
+              let prevBlock: (typeof topLevelBlocks)[number] | null = null
+              let prevOwnerAgentId: string | null = null
+              return topLevelBlocks.map((block, i) => {
+                let currentOwnerAgentId: string | null = null
+                if (block.kind === 'assistant-turn') {
+                  const firstEntry = block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
+                  currentOwnerAgentId = firstEntry
+                    ? agentIdFromSessionKey(firstEntry.sessionKey)
+                    : null
+                }
+                const isFollowup = isFollowupBlock(
+                  prevBlock,
+                  block,
+                  prevOwnerAgentId,
+                  currentOwnerAgentId,
                 )
-              }
-              // assistant-turn: determine owning agent from first entry
-              const firstEntry = block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
-              const ownerAgentId = firstEntry ? agentIdFromSessionKey(firstEntry.sessionKey) : null
-              const ownerAgent = ownerAgentId ? agentLookup.get(ownerAgentId) : null
-              return (
-                <AssistantTurnCard
-                  key={`turn-${i}`}
-                  block={block}
-                  agentId={ownerAgent?.id ?? 'unknown'}
-                  agentName={ownerAgent?.name ?? 'Agent'}
-                  streaming={
-                    anyRunning && i === topLevelBlocks.length - 1 && activeStreams.length === 0
-                  }
-                  linkagesBySourceEntry={linkages.linkagesBySourceEntry}
-                  teamId={teamId}
-                  latestSourceEntryId={latestSourceEntryIdWithDelegations}
-                />
-              )
-            })}
+                const margin = blockMarginClass(i, isFollowup)
+                prevBlock = block
+                prevOwnerAgentId = currentOwnerAgentId
 
-            {/* Live streaming — one card per actively streaming agent */}
+                if (block.kind === 'meta') {
+                  return (
+                    <div key={block.entry.entryId} className={margin}>
+                      <MetaMessageCard entry={block.entry} />
+                    </div>
+                  )
+                }
+                if (block.kind === 'user') {
+                  const targetId = agentIdFromSessionKey(block.entry.sessionKey)
+                  const targetAgent = targetId ? agentLookup.get(targetId) : null
+                  return (
+                    <div
+                      key={block.entry.entryId}
+                      className={`${margin} ${BLOCK_ROW_HOVER_CLASS}`.trim()}
+                    >
+                      <UserMessageCard
+                        entry={block.entry}
+                        targetAgentName={targetAgent?.name}
+                        knownAgentNames={knownAgentNames}
+                      />
+                    </div>
+                  )
+                }
+                const ownerAgent = currentOwnerAgentId ? agentLookup.get(currentOwnerAgentId) : null
+                return (
+                  <div key={`turn-${i}`} className={`${margin} ${BLOCK_ROW_HOVER_CLASS}`.trim()}>
+                    <AssistantTurnCard
+                      block={block}
+                      agentId={ownerAgent?.id ?? 'unknown'}
+                      agentName={ownerAgent?.name ?? 'Agent'}
+                      streaming={
+                        anyRunning && i === topLevelBlocks.length - 1 && activeStreams.length === 0
+                      }
+                      linkagesBySourceEntry={linkages.linkagesBySourceEntry}
+                      teamId={teamId}
+                      latestSourceEntryId={latestSourceEntryIdWithDelegations}
+                      isFollowup={isFollowup}
+                    />
+                  </div>
+                )
+              })
+            })()}
+
+            {/* Live streaming — one card per actively streaming agent.
+                Always gets the "new section" margin since we can't know
+                whether the streaming agent matches the chronologically-
+                last committed block's owner without extra bookkeeping. */}
             {activeStreams.map((stream) => (
-              <StreamingCard
-                key={`stream-${stream.agentId}`}
-                text={stream.text}
-                agentId={stream.agentId}
-                agentName={stream.agentName}
-              />
+              <div key={`stream-wrap-${stream.agentId}`} className="mt-7">
+                <StreamingCard
+                  text={stream.text}
+                  agentId={stream.agentId}
+                  agentName={stream.agentName}
+                />
+              </div>
             ))}
 
             <div ref={bottomRef} aria-hidden />

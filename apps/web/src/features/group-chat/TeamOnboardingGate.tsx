@@ -616,24 +616,30 @@ export function TeamOnboardingGate({
                 you&rsquo;d like the team to help. This is saved to each agent&rsquo;s context.
               </p>
 
-              {/* Show agent intros recap (if available) */}
+              {/* Show agent intros recap (if available) — sized to be
+                  readable, not a footnote. The intros are the user's main
+                  context for what each teammate does, so they get body-
+                  weight type (13px) at higher contrast (~85% opacity)
+                  with relaxed line-height. */}
               {agentIntros.size > 0 && (
-                <details open className="mb-4 rounded-lg border border-white/8 bg-surface/30 p-3">
-                  <summary className="cursor-pointer text-[11px] font-semibold text-secondary">
+                <details open className="mb-4 rounded-lg border border-white/8 bg-surface/30 p-4">
+                  <summary className="cursor-pointer text-[12px] font-semibold text-secondary/90">
                     Recap: who&rsquo;s on the team
                   </summary>
-                  <div className="mt-3 flex flex-col gap-2">
+                  <div className="mt-4 flex flex-col gap-4">
                     {teamAgents.map((agent) => {
                       const intro = agentIntros.get(agent.id)
                       if (!intro) return null
                       return (
-                        <div key={agent.id} className="flex items-start gap-2">
-                          <BooAvatar seed={agent.id} size={24} />
+                        <div key={agent.id} className="flex items-start gap-3">
+                          <BooAvatar seed={agent.id} size={32} />
                           <div className="min-w-0 flex-1">
-                            <span className="text-[11px] font-semibold text-text">
+                            <span className="text-[13px] font-semibold text-text">
                               {agent.name}
                             </span>
-                            <p className="text-[10px] text-secondary/70">{intro}</p>
+                            <p className="mt-0.5 text-[13px] leading-relaxed text-text/75">
+                              {intro}
+                            </p>
                           </div>
                         </div>
                       )

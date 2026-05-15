@@ -738,6 +738,7 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
   linkagesBySourceEntry,
   teamId,
   latestSourceEntryId,
+  isFollowup = false,
 }: {
   block: AssistantBlock
   agentId: string
@@ -749,6 +750,13 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
   teamId?: string
   /** Group-chat-only: source entryId whose delegations default-expand (newest exposed). */
   latestSourceEntryId?: string | null
+  /**
+   * When true, hide the avatar/name/timestamp header. Set by the parent
+   * renderer when this block is a continuation of the same author's
+   * previous block within a short window — drops the repeated chrome so
+   * a burst of messages from one agent reads as a single section.
+   */
+  isFollowup?: boolean
 }) {
   const isRelay = isTeamUpdateEntry(block.assistant)
   const hasThinking = block.thinking.length > 0
@@ -767,25 +775,37 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
     <div
       className={`flex flex-col gap-2${isRelay ? ' border-l-2 border-emerald-500/40 pl-3 opacity-80' : ''}`}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <AgentBooAvatar agentId={agentId} size={22} />
-          <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary/70">
-            {agentName}
-          </span>
-          {isRelay && (
-            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-mono text-[9px] font-medium text-emerald-400">
-              Team Update
+      {/* Header — avatar bumped to 28px and name lifted to 11.5px / full
+          secondary opacity so the agent identity is legible at a glance
+          (the previous 22px avatar + 10px name @ 70% opacity made the
+          header feel like a footnote under the body).
+          Suppressed when `isFollowup` — the parent renderer sets that flag
+          for consecutive same-author messages so the repeated chrome
+          doesn't double-render. The body still aligns under where the
+          header would be, so the burst reads as one continuous section. */}
+      {!isFollowup && (
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <AgentBooAvatar agentId={agentId} size={28} />
+            <span
+              className="font-mono font-semibold uppercase tracking-widest text-secondary"
+              style={{ fontSize: 11.5 }}
+            >
+              {agentName}
             </span>
+            {isRelay && (
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-mono text-[9px] font-medium text-emerald-400">
+                Team Update
+              </span>
+            )}
+          </div>
+          {block.timestampMs && (
+            <time className="font-mono text-[10px] text-secondary/50">
+              {formatTimestamp(block.timestampMs)}
+            </time>
           )}
         </div>
-        {block.timestampMs && (
-          <time className="font-mono text-[10px] text-secondary/50">
-            {formatTimestamp(block.timestampMs)}
-          </time>
-        )}
-      </div>
+      )}
 
       {/* Thinking trace */}
       {(hasThinking || (streaming && !hasText)) && (
@@ -808,9 +828,13 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
       {/* Assistant text — strip prefix for relay messages, split structured
           delegation blocks out into their own cards. Relay messages don't
           contain `<delegate>` blocks (they're condensed summaries), so the
-          split returns a single prose segment for them. */}
+          split returns a single prose segment for them.
+          `max-w-prose` (~65ch) caps line length to the optimal reading
+          measure regardless of window width — without this, body lines
+          stretched 150-200+ chars and the eye lost track of which line
+          it was on returning to the left margin. */}
       {hasText && (
-        <div className="flex flex-col gap-2 text-[13px] leading-relaxed text-text">
+        <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-text">
           {splitAssistantText(
             isRelay ? stripRelayPrefix(block.assistant!.text) : block.assistant!.text,
           ).map((segment, idx) => {
@@ -883,14 +907,17 @@ export const StreamingCard = memo(function StreamingCard({
   const segments = useMemo(() => splitAssistantText(text), [text])
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <AgentBooAvatar agentId={agentId} size={22} />
-        <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary/70">
+      <div className="flex items-center gap-2.5">
+        <AgentBooAvatar agentId={agentId} size={28} />
+        <span
+          className="font-mono font-semibold uppercase tracking-widest text-secondary"
+          style={{ fontSize: 11.5 }}
+        >
           {agentName}
         </span>
       </div>
       {hasText ? (
-        <div className="flex flex-col gap-2 text-[13px] leading-relaxed text-text opacity-80">
+        <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-text opacity-80">
           {segments.map((segment, idx) =>
             segment.kind === 'delegation' ? (
               <DelegationCard
@@ -911,6 +938,65 @@ export const StreamingCard = memo(function StreamingCard({
     </div>
   )
 })
+
+// ─── Author-grouping + spacing helpers ───────────────────────────────────────
+//
+// Slack / Discord / iMessage pattern: when consecutive assistant turns come
+// from the SAME agent inside a short window, drop the repeated avatar+name
+// chrome on the follow-ups so the burst reads as one continuous section.
+//
+// `FOLLOWUP_WINDOW_MS` — anything beyond this is treated as a new "section"
+// and gets a full header. 5 minutes is the sweet spot: long pauses (lunch,
+// next morning) read as a fresh thread; back-to-back streaming bursts read
+// as one author speaking continuously.
+
+const FOLLOWUP_WINDOW_MS = 5 * 60 * 1000
+
+/**
+ * True when `current` is a continuation of `prev`: both are assistant-turn
+ * blocks owned by the same agent, with timestamps within 5 min. User and
+ * meta blocks always break the streak (returning false).
+ */
+export function isFollowupBlock(
+  prev: RenderBlock | null,
+  current: RenderBlock,
+  prevOwnerAgentId: string | null,
+  currentOwnerAgentId: string | null,
+): boolean {
+  if (!prev || prev.kind !== 'assistant-turn' || current.kind !== 'assistant-turn') return false
+  if (!currentOwnerAgentId || prevOwnerAgentId !== currentOwnerAgentId) return false
+  const prevTs = prev.timestampMs
+  const currTs = current.timestampMs
+  if (prevTs === null || currTs === null) return false
+  return currTs - prevTs <= FOLLOWUP_WINDOW_MS
+}
+
+/**
+ * Tailwind margin class for a block based on whether it's the first block,
+ * a same-author continuation (tight), or a new author group (generous).
+ * Replaces uniform `gap-5` on the parent so spacing reads as grouping.
+ */
+export function blockMarginClass(index: number, isFollowup: boolean): string {
+  if (index === 0) return ''
+  return isFollowup ? 'mt-2' : 'mt-7'
+}
+
+/**
+ * Per-block hover affordance — Slack pattern. The `-mx-4 px-4` matches the
+ * parent scroll container's `px-4`, so the highlight extends edge-to-edge
+ * within the column (no awkward 4px gap on either side). Near-imperceptible
+ * bg tint on hover so each message becomes a discoverable interactive
+ * surface without adding chrome at rest.
+ *
+ * Applied uniformly to assistant turns AND user messages — Slack hovers
+ * user rows too, and at 1.8% opacity the stripe behind a right-aligned
+ * bubble reads as "this row is interactive" rather than as a misaligned
+ * background.
+ *
+ * Future per-message actions (copy, react, react bar) attach here.
+ */
+export const BLOCK_ROW_HOVER_CLASS =
+  '-mx-4 rounded-md px-4 transition-colors duration-150 hover:bg-white/[0.028]'
 
 // ─── MessageList ──────────────────────────────────────────────────────────────
 
@@ -978,29 +1064,68 @@ export const MessageList = memo(function MessageList({
           <p className="font-mono text-[12px] text-secondary/40">No messages yet.</p>
         </div>
       ) : (
-        <div className="flex flex-col gap-5 pb-2">
+        <div className="flex flex-col pb-2">
           {blocks.map((block, i) => {
+            const prev = i > 0 ? (blocks[i - 1] ?? null) : null
+            // 1:1 chat: every assistant turn is from the same agent (the
+            // `agentId` prop), so the owner check collapses to "is the
+            // previous block also an assistant-turn?" — handled by
+            // `isFollowupBlock` against equal owner ids.
+            const isFollowup = isFollowupBlock(prev, block, agentId, agentId)
+            const margin = blockMarginClass(i, isFollowup)
+
             if (block.kind === 'meta') {
-              return <MetaMessageCard key={block.entry.entryId} entry={block.entry} />
+              return (
+                <div key={block.entry.entryId} className={margin}>
+                  <MetaMessageCard entry={block.entry} />
+                </div>
+              )
             }
             if (block.kind === 'user') {
-              return <UserMessageCard key={block.entry.entryId} entry={block.entry} />
+              return (
+                <div
+                  key={block.entry.entryId}
+                  className={`${margin} ${BLOCK_ROW_HOVER_CLASS}`.trim()}
+                >
+                  <UserMessageCard entry={block.entry} />
+                </div>
+              )
             }
             return (
-              <AssistantTurnCard
-                key={`turn-${i}`}
-                block={block}
-                agentId={agentId}
-                agentName={agentName}
-                streaming={isRunning && i === blocks.length - 1 && !showLive}
-              />
+              <div key={`turn-${i}`} className={`${margin} ${BLOCK_ROW_HOVER_CLASS}`.trim()}>
+                <AssistantTurnCard
+                  block={block}
+                  agentId={agentId}
+                  agentName={agentName}
+                  streaming={isRunning && i === blocks.length - 1 && !showLive}
+                  isFollowup={isFollowup}
+                />
+              </div>
             )
           })}
 
-          {/* Live uncommitted stream */}
-          {showLive && (
-            <StreamingCard text={streamingText ?? ''} agentId={agentId} agentName={agentName} />
-          )}
+          {/* Live uncommitted stream — applies the same follow-up rule
+              against the last committed block so a streaming continuation
+              of the agent's own burst stays tight. */}
+          {showLive &&
+            (() => {
+              const last = blocks.length > 0 ? (blocks[blocks.length - 1] ?? null) : null
+              const streamIsFollowup =
+                last !== null &&
+                last.kind === 'assistant-turn' &&
+                last.timestampMs !== null &&
+                Date.now() - last.timestampMs <= FOLLOWUP_WINDOW_MS
+              const margin = blocks.length === 0 ? '' : streamIsFollowup ? 'mt-2' : 'mt-7'
+              return (
+                <div className={margin}>
+                  <StreamingCard
+                    text={streamingText ?? ''}
+                    agentId={agentId}
+                    agentName={agentName}
+                  />
+                </div>
+              )
+            })()}
 
           <div ref={bottomRef} aria-hidden />
         </div>
