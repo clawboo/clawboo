@@ -5,12 +5,13 @@
 import { useEffect, useRef } from 'react'
 import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { AgentState } from '@/stores/fleet'
-import { useChatStore } from '@/stores/chat'
+import { useChatStore, type PendingPlan } from '@/stores/chat'
 import { buildTeamSessionKey, setTeamChatOverride, hasTeamChatOverride } from '@/lib/sessionUtils'
 import {
   buildBatchedRelayMessage,
   buildTeamContextPreamble,
   buildSilentResumeWakeMessage,
+  shouldDropAssistantTurn,
 } from '@/lib/teamProtocol'
 import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
 import { buildTeamRulesBlock, fetchTeamRules } from '@/lib/teamRules'
@@ -22,6 +23,7 @@ import {
   parseStructuredDelegations,
   type DelegationIntent,
 } from './delegationDetector'
+import { findPlanBlocks, type PlanStep } from './planDetector'
 import {
   condenseSummary,
   determineRelayTargets,
@@ -173,7 +175,25 @@ interface PendingRelayBatch {
   /** Stop-generation captured when this batch was opened. */
   startGen: number
   timerId: ReturnType<typeof setTimeout>
+  /**
+   * Round 8 override-fix: number of times this batch has been deferred
+   * because the target had an active chat override (i.e., was processing
+   * another message). Each deferral reschedules the flush 2 s later, so
+   * the relay doesn't clobber the target's in-flight run with
+   * `setTeamChatOverride`. Capped at `RELAY_RETRY_LIMIT` — beyond that,
+   * we proceed with the override-overwrite to avoid pathological delay.
+   */
+  busyRetryCount: number
 }
+
+/**
+ * Round 8: max retries before we give up waiting for a busy target and
+ * dispatch anyway. With `RELAY_RETRY_DELAY_MS = 2000` this yields ~6 s of
+ * patience before forcing through — enough for a typical leader turn to
+ * finish, not so long that the chat feels stalled.
+ */
+const RELAY_RETRY_LIMIT = 3
+const RELAY_RETRY_DELAY_MS = 2000
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
@@ -227,6 +247,26 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
    *     commitChat time).
    */
   const dispatchedStreamingOffsetsRef = useRef<Map<string, Set<number>>>(new Map())
+  /**
+   * Round 8B: per-plan-step "already fired" guard. Keyed by
+   * `${planId}:${stepIndex}` so the same step never fires twice if
+   * `processNewEntries` runs again before the specialist replies. Cleared
+   * on Stop / team-switch alongside the other refs.
+   */
+  const firedPlanStepsRef = useRef<Set<string>>(new Set())
+  /**
+   * Round 8B: timestamp anchor for the in-flight step of each plan.
+   * `findTargetResponse` uses this to claim only specialist replies that
+   * arrived AFTER the step was fired (filters out stale entries hydrated
+   * from prior sessions). Keyed by `planId`.
+   */
+  const planStepFiredAtRef = useRef<Map<string, number>>(new Map())
+  /**
+   * Round 8B: dedup guard for the `[Plan Complete]` envelope. Once we've
+   * fired the final synthesis cue for a plan, don't fire it again on every
+   * subsequent subscription tick.
+   */
+  const planCompletedSetRef = useRef<Set<string>>(new Set())
   /**
    * Pending relay batches keyed by `${teamId}:${targetId}`. Each batch
    * accumulates items over `RELAY_BATCH_WINDOW_MS` and is then flushed as a
@@ -424,6 +464,117 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
       })()
     }
 
+    // ── Round 8B: plan-step dispatcher ─────────────────────────────────────
+    // Fires one step of a `<plan>` block as a delegation. Builds a task body
+    // that includes the prior steps' outputs as context (so step N+1 sees
+    // what step N produced). Guarded by `firedPlanStepsRef` so the same
+    // step never dispatches twice. Reuses `dispatchDelegation` for the
+    // actual `chat.send` + recording machinery — this is just the message-
+    // composition layer.
+    const dispatchPlanStep = (plan: PendingPlan, stepIndex: number): void => {
+      const step = plan.steps[stepIndex]
+      if (!step || !step.targetAgentId) return
+      const guardKey = `${plan.planId}:${stepIndex}`
+      if (firedPlanStepsRef.current.has(guardKey)) return
+      firedPlanStepsRef.current.add(guardKey)
+      planStepFiredAtRef.current.set(plan.planId, Date.now())
+
+      // Compose the task body: prior outputs (when any) prepended as
+      // context blocks, then the current step's task at the bottom.
+      const priorOutputs = plan.steps
+        .slice(0, stepIndex)
+        .map((s, i) => ({ idx: i, name: s.targetName, output: s.output }))
+        .filter((s): s is { idx: number; name: string; output: string } => Boolean(s.output))
+      const contextBlocks = priorOutputs
+        .map(
+          (s) =>
+            `[Plan step ${s.idx + 1} — @${s.name}'s output]\n${s.output}\n[End step ${s.idx + 1}]`,
+        )
+        .join('\n\n')
+      const taskBody = contextBlocks
+        ? `${contextBlocks}\n\n---\n\nYour step (#${stepIndex + 1} of ${plan.steps.length}) in this plan:\n${step.task}`
+        : step.task
+
+      const intent: DelegationIntent = {
+        targetAgentId: step.targetAgentId,
+        targetAgentName: step.targetName,
+        taskDescription: taskBody,
+        sourceAgentId: plan.sourceAgentId,
+        // Use the step index as the mentionOffset so each step has a stable
+        // positional key in case future linkage logic dedups by it.
+        mentionOffset: stepIndex,
+      }
+      dispatchDelegation(intent, plan.sourceAgentId, plan.sourceEntryId)
+    }
+
+    // ── Round 8B: send `[Plan Complete]` envelope to the leader ────────────
+    // Fired once when the plan's final step resolves. The leader's rules
+    // block (Round 8D) tells it to treat `[Plan Complete]` as the cue for
+    // final synthesis — bypasses the silence-on-relay rule.
+    const sendPlanCompleteEnvelope = (plan: PendingPlan): void => {
+      if (planCompletedSetRef.current.has(plan.planId)) return
+      planCompletedSetRef.current.add(plan.planId)
+
+      const currentTeamId = teamIdRef.current
+      const currentClient = clientRef.current
+      if (!currentTeamId || !currentClient) return
+
+      const leaderAgent =
+        teamAgentsRef.current.find((a) => a.id === plan.sourceAgentId) ??
+        (booZeroAgentRef.current && booZeroAgentRef.current.id === plan.sourceAgentId
+          ? booZeroAgentRef.current
+          : null)
+      if (!leaderAgent) return
+
+      const leaderSk = buildTeamSessionKey(plan.sourceAgentId, currentTeamId)
+      const summary = plan.steps
+        .map((s, i) => `[Step ${i + 1} — @${s.targetName}]\n${s.output ?? '(no output)'}`)
+        .join('\n\n---\n\n')
+      const body = `[Plan Complete] — all ${plan.steps.length} step(s) of your plan have finished.\nThe outputs are below. Synthesize a final answer for the user.\n---\n${summary}\n---`
+
+      // Identity rules + team rules (same machinery used by dispatchDelegation
+      // for Boo Zero deliveries). The whole point of the envelope is to
+      // re-enter the leader on a fresh turn with full context.
+      const isBooZero =
+        booZeroAgentRef.current !== null && plan.sourceAgentId === booZeroAgentRef.current.id
+      const sections: string[] = []
+      if (isBooZero) {
+        sections.push(
+          buildBooZeroRulesBlock({
+            displayName: leaderAgent.name,
+            teamName: teamNameRef.current,
+          }),
+        )
+      }
+      sections.push(body)
+      const messageBody = sections.join('\n\n')
+
+      const startGen = getStopGeneration(currentTeamId)
+      void (async () => {
+        try {
+          if (getStopGeneration(currentTeamId) !== startGen) return
+          if (
+            hasTeamChatOverride(plan.sourceAgentId) &&
+            !planCompletedSetRef.current.has(`${plan.planId}:retry`)
+          ) {
+            // Defer once if leader is busy — Round 8 override-fix
+            // philosophy. Re-fire on next subscription tick.
+            planCompletedSetRef.current.delete(plan.planId)
+            return
+          }
+          setTeamChatOverride(plan.sourceAgentId, leaderSk)
+          await currentClient.call('chat.send', {
+            sessionKey: leaderSk,
+            message: messageBody,
+            deliver: false,
+            idempotencyKey: crypto.randomUUID(),
+          })
+        } catch {
+          // Non-fatal.
+        }
+      })()
+    }
+
     // ── Mid-stream `<delegate>` scanner ────────────────────────────────────
     // Fires on every chat-store change with NO debounce so DelegationCards
     // appear inline as soon as the LLM closes a `</delegate>` tag — instead
@@ -502,21 +653,47 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
     const flushRelayBatch = (key: string): void => {
       const batch = pendingRelaysRef.current.get(key)
       if (!batch) return
-      // Always drop the batch on flush even when we bail below — leaving the
-      // entry would block future items at the same key.
-      pendingRelaysRef.current.delete(key)
 
       const currentTeamId = teamIdRef.current
       const currentClient = clientRef.current
-      if (!currentTeamId || !currentClient) return
-      if (getStopGeneration(currentTeamId) !== batch.startGen) return
+      if (!currentTeamId || !currentClient) {
+        pendingRelaysRef.current.delete(key)
+        return
+      }
+      if (getStopGeneration(currentTeamId) !== batch.startGen) {
+        pendingRelaysRef.current.delete(key)
+        return
+      }
 
       const freshBooZero = booZeroAgentRef.current
       const freshTeamMembers = teamAgentsRef.current
       const targetAgent =
         freshTeamMembers.find((a) => a.id === batch.targetId) ??
         (freshBooZero && freshBooZero.id === batch.targetId ? freshBooZero : null)
-      if (!targetAgent) return
+      if (!targetAgent) {
+        pendingRelaysRef.current.delete(key)
+        return
+      }
+
+      // Round 8 override-fix: if the target is currently processing another
+      // message (`hasTeamChatOverride` returns truthy), our `chat.send` here
+      // would overwrite the active override slot via `setTeamChatOverride`
+      // below — corrupting routing for the target's in-flight turn and
+      // adding 30-60 s of latency before our relay can be processed. Defer
+      // the flush by `RELAY_RETRY_DELAY_MS` so the target's current run has
+      // a chance to finish. We keep the batch in the pending map and bump
+      // `busyRetryCount`. After `RELAY_RETRY_LIMIT` retries we fall through
+      // and dispatch anyway — better to ship a possibly-conflicted relay
+      // than to silently drop the routing event.
+      if (hasTeamChatOverride(batch.targetId) && batch.busyRetryCount < RELAY_RETRY_LIMIT) {
+        batch.busyRetryCount += 1
+        batch.timerId = setTimeout(() => flushRelayBatch(key), RELAY_RETRY_DELAY_MS)
+        return
+      }
+
+      // From here on the batch is going out — remove it from the pending
+      // map so subsequent `enqueueRelayItem` calls open a fresh batch.
+      pendingRelaysRef.current.delete(key)
 
       const targetTeamSk = buildTeamSessionKey(batch.targetId, currentTeamId)
       setTeamChatOverride(batch.targetId, targetTeamSk)
@@ -619,6 +796,7 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
           items: [],
           startGen,
           timerId: setTimeout(() => flushRelayBatch(key), RELAY_BATCH_WINDOW_MS),
+          busyRetryCount: 0,
         }
         pendingRelaysRef.current.set(key, batch)
       }
@@ -770,6 +948,119 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             // Clean up delegation source after relay is queued.
             delegationSourceRef.current.delete(sourceAgentId)
           }
+
+          // ── Round 8B: plan capture ─────────────────────────────────────
+          // Parse `<plan>` blocks in the committed leader entry. For each
+          // plan, register it in the chat store and fire step 1. Steps 2+
+          // are fired automatically as each prior step's specialist responds
+          // (see the plan-progression pass at the bottom of this function).
+          // Inline target-name resolver (case-insensitive longest-prefix
+          // match against the dedup'd participant list — same heuristic as
+          // `delegationDetector.resolveTargetName`).
+          const resolveStepTarget = (raw: string): { id: string; name: string } | null => {
+            const stripped = raw.replace(/^@/, '').trim().toLowerCase()
+            if (!stripped) return null
+            const sorted = [...currentAgents].sort((a, b) => b.name.length - a.name.length)
+            for (const a of sorted) {
+              if (stripped === a.name.toLowerCase()) return { id: a.id, name: a.name }
+            }
+            for (const a of sorted) {
+              const lower = a.name.toLowerCase()
+              if (stripped.startsWith(lower) || lower.startsWith(stripped))
+                return { id: a.id, name: a.name }
+            }
+            return null
+          }
+          const planBlocks = findPlanBlocks(text)
+          for (const planBlock of planBlocks) {
+            if (planBlock.steps.length === 0) continue
+            const planId = `${currentTeamId}:${entry.entryId}:plan:${planBlock.blockStart}`
+            // Resolve each step's target name → agent id once at capture
+            // time so progression doesn't have to re-resolve on every tick.
+            const resolvedSteps = planBlock.steps.map((step: PlanStep) => {
+              const target = resolveStepTarget(step.targetName)
+              return {
+                targetName: target?.name ?? step.targetName.replace(/^@/, '').trim(),
+                targetAgentId: target?.id ?? null,
+                task: step.task,
+                output: null as string | null,
+                resolvedEntryId: null as string | null,
+              }
+            })
+            const plan: PendingPlan = {
+              planId,
+              sourceEntryId: entry.entryId,
+              sourceAgentId,
+              teamId: currentTeamId,
+              steps: resolvedSteps,
+              currentStepIndex: 0,
+              timestampMs: entry.timestampMs ?? Date.now(),
+            }
+            useChatStore.getState().setPendingPlan(plan)
+            // Fire step 1 immediately. Subsequent steps fire from the
+            // progression pass below as each prior step resolves.
+            dispatchPlanStep(plan, 0)
+          }
+        }
+      }
+
+      // ── Round 8B: plan progression pass ──────────────────────────────
+      // Iterate all pending plans for this team. For each plan whose
+      // active step's target has a fresh substantive response, resolve
+      // the step and fire the next step (or send `[Plan Complete]`).
+      const allPlans = useChatStore.getState().pendingPlans
+      for (const plan of allPlans.values()) {
+        if (plan.teamId !== currentTeamId) continue
+        // Re-read because resolvePlanStep mutates currentStepIndex.
+        const livePlan = useChatStore.getState().pendingPlans.get(plan.planId)
+        if (!livePlan) continue
+        // Plan complete? Send the synthesis envelope (once).
+        if (livePlan.currentStepIndex >= livePlan.steps.length) {
+          sendPlanCompleteEnvelope(livePlan)
+          continue
+        }
+        const stepIndex = livePlan.currentStepIndex
+        const step = livePlan.steps[stepIndex]
+        if (!step || !step.targetAgentId) continue
+        // Active step already resolved → advance via store action (no
+        // network call needed — we already pushed the resolution).
+        if (step.output !== null) {
+          // dispatchPlanStep is idempotent via firedPlanStepsRef so we can
+          // call it freely after the store advances.
+          if (livePlan.currentStepIndex < livePlan.steps.length) {
+            dispatchPlanStep(livePlan, livePlan.currentStepIndex)
+          }
+          continue
+        }
+        // Look for the specialist's fresh response: any assistant entry
+        // from this step's target with timestamp AFTER the step was fired
+        // (or after the plan was captured if `stepFiredAt` isn't set).
+        const stepFiredAt = planStepFiredAtRef.current.get(livePlan.planId) ?? livePlan.timestampMs
+        const targetSk = buildTeamSessionKey(step.targetAgentId, currentTeamId)
+        const targetEntries = transcripts.get(targetSk)
+        if (!targetEntries) continue
+        const reply = targetEntries.find(
+          (e) =>
+            e.role === 'assistant' &&
+            e.kind === 'assistant' &&
+            (e.timestampMs ?? 0) > stepFiredAt &&
+            e.text.length > 0 &&
+            !shouldDropAssistantTurn(e.text),
+        )
+        if (!reply) continue
+        // Resolve the step → advances currentStepIndex by 1 in the store.
+        useChatStore
+          .getState()
+          .resolvePlanStep(livePlan.planId, stepIndex, reply.text, reply.entryId)
+        // Fire the next step (if any). The progression pass loops over all
+        // plans on every tick, so we don't strictly need to fire here —
+        // the next tick would catch it. But firing immediately avoids one
+        // tick of latency.
+        const nextIndex = stepIndex + 1
+        if (nextIndex < livePlan.steps.length) {
+          dispatchPlanStep(livePlan, nextIndex)
+        } else {
+          sendPlanCompleteEnvelope(livePlan)
         }
       }
     }
@@ -906,7 +1197,14 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
     // the renderer's Path 3 cards from cancelled work don't linger.
     if (currentTeamId) {
       useChatStore.getState().clearClawbooDispatches(currentTeamId)
+      // Round 8B: also wipe any in-progress `<plan>` state machines so the
+      // next step doesn't fire after Stop.
+      useChatStore.getState().clearPendingPlans(currentTeamId)
     }
+    // Reset Round 8B refs so a new plan after Stop starts fresh.
+    firedPlanStepsRef.current = new Set()
+    planStepFiredAtRef.current = new Map()
+    planCompletedSetRef.current = new Set()
     frozenUntilRef.current = Date.now() + STOP_FREEZE_MS
   }, [stopSignal])
 }

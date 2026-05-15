@@ -40,6 +40,57 @@ export interface ClawbooDispatch {
   teamId: string
 }
 
+// ─── Round 8B: pending plan state ─────────────────────────────────────────
+//
+// When the leader emits a `<plan>` block (one or more `<step to="@X">…`
+// children), Clawboo captures the steps and progresses through them
+// automatically — firing step N+1 each time step N's specialist responds.
+// State machine lives here so:
+//   • The state survives across the `useTeamOrchestration` debounce window
+//     (refs would reset on the hook re-mount that happens on team switch).
+//   • The renderer can subscribe and show a step-tracker card per plan.
+//   • Stop / team-switch clears everything (`clearPendingPlans(teamId)`).
+//
+// One pending plan per leader-source-entry: keyed by `${teamId}:${sourceEntryId}`.
+// `currentStepIndex` advances 0 → 1 → … → steps.length. When it equals
+// `steps.length`, the plan is "complete" and the leader gets a final
+// `[Plan Complete]` envelope (assembled from each step's output) so it can
+// do final synthesis.
+
+export interface PendingPlanStep {
+  /** The agent name as written in `to="…"`. */
+  targetName: string
+  /** Resolved roster id (or null if the name didn't match any participant). */
+  targetAgentId: string | null
+  /** Task body emitted by the leader. */
+  task: string
+  /** Output text from the specialist when the step completes. Null until then. */
+  output: string | null
+  /** entryId of the specialist's response that satisfied this step (claim anchor). */
+  resolvedEntryId: string | null
+}
+
+export interface PendingPlan {
+  /** Stable id for React keys + dispatch records. */
+  planId: string
+  /** entryId of the leader entry that emitted the `<plan>` block. */
+  sourceEntryId: string
+  /** Agent id of the leader (the source). */
+  sourceAgentId: string
+  /** Team id — used for cleanup + dispatch keys. */
+  teamId: string
+  /** Steps in source order. Mutated as the plan progresses. */
+  steps: PendingPlanStep[]
+  /**
+   * Index of the step currently in flight (0-based). When `>= steps.length`,
+   * the plan is complete and the `[Plan Complete]` envelope has been sent
+   * to the leader.
+   */
+  currentStepIndex: number
+  /** Timestamp when the plan was captured (used as the dispatch anchor). */
+  timestampMs: number
+}
+
 // ─── Store ────────────────────────────────────────────────────────────────────
 // Keyed by sessionKey so multiple agent conversations are held simultaneously.
 
@@ -72,6 +123,15 @@ interface ChatStore {
    * Path 3 source for `DelegationCard` rendering.
    */
   clawbooDispatches: Map<string, ClawbooDispatch[]>
+  /**
+   * Round 8B: in-progress `<plan>` state machines, keyed by `planId` (one
+   * plan per leader-source-entry). Each plan progresses one step at a time
+   * — when step N's specialist responds, Clawboo fires step N+1 with the
+   * prior output piped in. When all steps complete, the leader receives a
+   * `[Plan Complete]` envelope cueing final synthesis. See
+   * `useTeamOrchestration` for the state-machine wiring.
+   */
+  pendingPlans: Map<string, PendingPlan>
   /** Token usage from final chat events, keyed by runId. */
   lastTokenUsage: Map<string, { inputTokens: number; outputTokens: number }>
 
@@ -111,6 +171,32 @@ interface ChatStore {
    */
   clearClawbooDispatches: (teamId: string) => void
 
+  /**
+   * Round 8B: register a new pending plan when the leader emits a
+   * `<plan>` block. `useTeamOrchestration` calls this immediately after
+   * parsing, then fires step 1.
+   */
+  setPendingPlan: (plan: PendingPlan) => void
+
+  /**
+   * Round 8B: mark a step as resolved with the specialist's output. The
+   * orchestration hook calls this when it observes the specialist's reply
+   * for the in-flight step. The store also bumps `currentStepIndex` so the
+   * hook's next subscription tick fires step N+1.
+   */
+  resolvePlanStep: (
+    planId: string,
+    stepIndex: number,
+    output: string,
+    resolvedEntryId: string,
+  ) => void
+
+  /**
+   * Round 8B: clear all plans for a team. Fired on Stop and on team-switch
+   * (mirrors `clearClawbooDispatches`).
+   */
+  clearPendingPlans: (teamId: string) => void
+
   /** Store token usage for a completed run. */
   setLastTokenUsage: (runId: string, inputTokens: number, outputTokens: number) => void
 }
@@ -120,6 +206,7 @@ export const useChatStore = create<ChatStore>((set) => ({
   streamingText: new Map(),
   streamStartedAt: new Map(),
   clawbooDispatches: new Map(),
+  pendingPlans: new Map(),
   lastTokenUsage: new Map(),
 
   appendTranscript: (sessionKey, entries) =>
@@ -279,6 +366,60 @@ export const useChatStore = create<ChatStore>((set) => ({
       }
       if (!changed) return state
       return { clawbooDispatches: next }
+    }),
+
+  setPendingPlan: (plan) =>
+    set((state) => {
+      // Idempotent — if a plan with the same id is already registered (e.g.,
+      // the orchestration hook re-parsed the same leader entry after a
+      // page reload), keep the existing one to preserve `output` /
+      // `resolvedEntryId` / `currentStepIndex` progress.
+      if (state.pendingPlans.has(plan.planId)) return state
+      const next = new Map(state.pendingPlans)
+      next.set(plan.planId, plan)
+      return { pendingPlans: next }
+    }),
+
+  resolvePlanStep: (planId, stepIndex, output, resolvedEntryId) =>
+    set((state) => {
+      const existing = state.pendingPlans.get(planId)
+      if (!existing) return state
+      const step = existing.steps[stepIndex]
+      if (!step) return state
+      // Idempotent — already resolved (same output) → no state change.
+      if (step.resolvedEntryId === resolvedEntryId && step.output === output) return state
+      const nextSteps = existing.steps.map((s, i) =>
+        i === stepIndex ? { ...s, output, resolvedEntryId } : s,
+      )
+      const nextPlan: PendingPlan = {
+        ...existing,
+        steps: nextSteps,
+        // Advance to the next step only if THIS one is the in-flight head.
+        // Out-of-order resolves (a later step's response arrives first) are
+        // possible in theory but rare; we let the hook re-fire the head step
+        // until it lands.
+        currentStepIndex:
+          stepIndex === existing.currentStepIndex
+            ? existing.currentStepIndex + 1
+            : existing.currentStepIndex,
+      }
+      const next = new Map(state.pendingPlans)
+      next.set(planId, nextPlan)
+      return { pendingPlans: next }
+    }),
+
+  clearPendingPlans: (teamId) =>
+    set((state) => {
+      const next = new Map(state.pendingPlans)
+      let changed = false
+      for (const [planId, plan] of next) {
+        if (plan.teamId === teamId) {
+          next.delete(planId)
+          changed = true
+        }
+      }
+      if (!changed) return state
+      return { pendingPlans: next }
     }),
 
   setLastTokenUsage: (runId, inputTokens, outputTokens) =>

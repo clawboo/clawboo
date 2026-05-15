@@ -23,13 +23,15 @@
 // user-editable Notes section in `buildGlobalBrief` continues to be
 // optional add-on context that the user can use for team-specific guidance.
 //
-// Size budget: ~2.5 KB (~650 tokens) after the Round 4 expansion that added
-// the "Delegation syntax — protocol-strict" section with positive examples
-// + anti-patterns. Prompt caching applies because the block is stable per
-// `displayName`, so the marginal cost approaches zero after the first turn.
-// The expanded block is load-bearing because production showed Boo Zero
-// emitting prose `---` separators instead of `<delegate>` tags — anti-pattern
-// examples are the only way the LLM reliably stops doing this.
+// Size budget: ~5 KB (~1.2 K tokens) after the Round 8D expansion that added
+// the "Multi-step pipelines" + "<plan> blocks" sections (continue-on-relay
+// rule + explicit plan syntax). Prompt caching applies because the block is
+// stable per `displayName`, so the marginal cost approaches zero after the
+// first turn. The expanded block is load-bearing because production showed
+// (a) Boo Zero emitting prose `---` separators instead of `<delegate>` tags,
+// and (b) Boo Zero abandoning multi-step pipelines because Round 4/5 told
+// it to stay silent on relays — anti-pattern examples + the explicit
+// continue-on-relay exception are the only way the LLM reliably progresses.
 
 export interface BooZeroRulesParams {
   /**
@@ -91,10 +93,63 @@ WRONG — these do NOT render as cards and teammates are NOT notified:
 
 Narrate your routing freely BEFORE/BETWEEN/AFTER the tags — the prose tells the user what you're doing. The \`<delegate>\` tags carry the actual work.
 
+## Multi-step pipelines — when YOU should respond to \`[Team Update]\`
+
+The silence-on-relay rule has ONE explicit exception, the multi-step
+pipeline case. When all of these are true:
+
+1. Your previous turn contained a \`<delegate>\` to the teammate the relay
+   is from (the relay header reads "[Team Update] — relayed summary from
+   @<name>" — match that name against your own previous turn).
+2. The delegation was step 1 of a plan you laid out (e.g., "Marketing
+   Content Creator writes copy first, then Designer reads it to make the
+   visual spec").
+3. There IS a meaningful next step that depends on this teammate's
+   output.
+
+…then you SHOULD respond — by firing the NEXT delegation in the plan,
+passing the teammate's output to the next step. Example flow:
+
+  Turn 1: "Step 1 — get the copy. <delegate to='@Marketing'>...</delegate>"
+  Turn 2 (after Marketing's relay arrives): "Step 2 — design from copy.
+    <delegate to='@Designer'>Based on copy '<insert quote>', create the
+    visual spec...</delegate>"
+
+This is NOT acknowledgment ("Got it — copy looks great!"). This is the
+NEXT step of the plan. Acknowledgment-only is still forbidden.
+
+## \`<plan>\` blocks — explicit multi-step orchestration
+
+If your plan has 3+ ordered steps, emit a \`<plan>\` block at the top of
+your response so Clawboo can track state across multiple turns:
+
+\`\`\`
+<plan>
+  <step to="@Marketing Content Creator Boo">Write the copy first.</step>
+  <step to="@Design Ui Designer Boo">Create the visual design from the copy.</step>
+  <step to="@Engineering Frontend Developer Boo">Build the page from the design.</step>
+</plan>
+\`\`\`
+
+When Clawboo sees a \`<plan>\`, it:
+- Fires step 1 immediately (you don't need a separate \`<delegate>\`).
+- After step 1's teammate responds, automatically fires step 2 with the
+  prior output piped in as context — you don't need to write the next
+  \`<delegate>\` yourself.
+- Continues through every step.
+- When the plan completes, the relay you receive will include a
+  \`[Plan Complete]\` header — that's your cue to do final synthesis if
+  the user's question warrants one.
+
+If a plan is just 1-2 steps OR is dynamic (depends on each prior result),
+keep using standalone \`<delegate>\` blocks plus the continue-on-relay
+behavior above.
+
 DO
 - Delegate every non-trivial request via the exact \`<delegate to="@AgentName">…</delegate>\` syntax. Multiple blocks in one response are encouraged.
-- Wait for \`[Team Update]\` messages — they're teammate progress reports, NOT fresh user input. Record them silently as context.
-- Synthesize ACROSS teammates ONLY when (a) the user has asked a follow-up that requires combining them, or (b) you need a unified takeaway to drive the next round of delegations. A single update never warrants a response.
+- Use \`<plan>\` for clear 3+ step pipelines so Clawboo auto-progresses without re-prompting.
+- Wait silently for \`[Team Update]\` messages MOST of the time — they're progress reports, not fresh user input. Record them as context. The ONE exception is the multi-step pipeline case above.
+- Synthesize ACROSS teammates ONLY when (a) the user has asked a follow-up that requires combining them, (b) a multi-step plan has finished (\`[Plan Complete]\` header), or (c) you need a unified takeaway to drive the next round of delegations.
 - Verify external state with tools (curl, ls, etc.) before claiming it. Honest uncertainty beats false certainty.
 
 DO NOT

@@ -294,4 +294,118 @@ describe('useChatStore', () => {
       expect(useChatStore.getState().clawbooDispatches.has('t2:a')).toBe(true)
     })
   })
+
+  // Round 8B: pending-plan state machine actions.
+  describe('setPendingPlan / resolvePlanStep / clearPendingPlans', () => {
+    beforeEach(() => {
+      useChatStore.setState({
+        pendingPlans: new Map(),
+      })
+    })
+
+    function makePlan(overrides: Partial<import('../chat').PendingPlan> = {}) {
+      return {
+        planId: 't1:src-1:plan:0',
+        sourceEntryId: 'src-1',
+        sourceAgentId: 'bz',
+        teamId: 't1',
+        steps: [
+          {
+            targetName: 'A',
+            targetAgentId: 'a',
+            task: 'step 1',
+            output: null,
+            resolvedEntryId: null,
+          },
+          {
+            targetName: 'B',
+            targetAgentId: 'b',
+            task: 'step 2',
+            output: null,
+            resolvedEntryId: null,
+          },
+          {
+            targetName: 'C',
+            targetAgentId: 'c',
+            task: 'step 3',
+            output: null,
+            resolvedEntryId: null,
+          },
+        ],
+        currentStepIndex: 0,
+        timestampMs: 1_700_000_000_000,
+        ...overrides,
+      }
+    }
+
+    it('stores a new plan by planId', () => {
+      const plan = makePlan()
+      useChatStore.getState().setPendingPlan(plan)
+      expect(useChatStore.getState().pendingPlans.get(plan.planId)).toBe(plan)
+    })
+
+    it('setPendingPlan is idempotent — re-registering same planId is a no-op (preserves progress)', () => {
+      const plan = makePlan()
+      useChatStore.getState().setPendingPlan(plan)
+      // Manually advance progress
+      useChatStore.getState().resolvePlanStep(plan.planId, 0, 'output from A', 'reply-a')
+      // Attempt re-register with the SAME planId — should NOT clobber progress
+      useChatStore.getState().setPendingPlan(plan)
+      const after = useChatStore.getState().pendingPlans.get(plan.planId)!
+      expect(after.currentStepIndex).toBe(1)
+      expect(after.steps[0]!.output).toBe('output from A')
+    })
+
+    it('resolvePlanStep stores output + advances currentStepIndex when resolving the head step', () => {
+      const plan = makePlan()
+      useChatStore.getState().setPendingPlan(plan)
+      useChatStore.getState().resolvePlanStep(plan.planId, 0, 'A produced this', 'reply-a')
+      const after = useChatStore.getState().pendingPlans.get(plan.planId)!
+      expect(after.steps[0]!.output).toBe('A produced this')
+      expect(after.steps[0]!.resolvedEntryId).toBe('reply-a')
+      expect(after.currentStepIndex).toBe(1)
+    })
+
+    it('resolvePlanStep is idempotent — same resolution data does not double-advance', () => {
+      const plan = makePlan()
+      useChatStore.getState().setPendingPlan(plan)
+      useChatStore.getState().resolvePlanStep(plan.planId, 0, 'A produced this', 'reply-a')
+      useChatStore.getState().resolvePlanStep(plan.planId, 0, 'A produced this', 'reply-a')
+      const after = useChatStore.getState().pendingPlans.get(plan.planId)!
+      expect(after.currentStepIndex).toBe(1) // not 2
+    })
+
+    it('resolvePlanStep does NOT advance currentStepIndex for out-of-order resolutions', () => {
+      const plan = makePlan()
+      useChatStore.getState().setPendingPlan(plan)
+      // Resolve step 2 before step 0 — rare but possible if a later target
+      // replies first. We store the output but don't advance the head.
+      useChatStore.getState().resolvePlanStep(plan.planId, 2, 'C result', 'reply-c')
+      const after = useChatStore.getState().pendingPlans.get(plan.planId)!
+      expect(after.currentStepIndex).toBe(0)
+      expect(after.steps[2]!.output).toBe('C result')
+    })
+
+    it('resolvePlanStep is a no-op for unknown plan or step index', () => {
+      const before = useChatStore.getState().pendingPlans
+      useChatStore.getState().resolvePlanStep('nonexistent', 0, 'x', 'y')
+      const after = useChatStore.getState().pendingPlans
+      expect(after).toBe(before) // same ref
+    })
+
+    it('clearPendingPlans(teamId) wipes only that team — other teams untouched', () => {
+      useChatStore.getState().setPendingPlan(makePlan({ planId: 't1:p1', teamId: 't1' }))
+      useChatStore.getState().setPendingPlan(makePlan({ planId: 't1:p2', teamId: 't1' }))
+      useChatStore.getState().setPendingPlan(makePlan({ planId: 't2:p1', teamId: 't2' }))
+      useChatStore.getState().clearPendingPlans('t1')
+      expect(useChatStore.getState().pendingPlans.has('t1:p1')).toBe(false)
+      expect(useChatStore.getState().pendingPlans.has('t1:p2')).toBe(false)
+      expect(useChatStore.getState().pendingPlans.has('t2:p1')).toBe(true)
+    })
+
+    it('initial state has empty pendingPlans', () => {
+      // beforeEach reset → empty.
+      expect(useChatStore.getState().pendingPlans.size).toBe(0)
+    })
+  })
 })
