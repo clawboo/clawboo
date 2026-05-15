@@ -329,3 +329,471 @@ describe('buildDelegationLinkages — idempotency + invariants', () => {
     expect(result.claimedEntries.size).toBe(1)
   })
 })
+
+// Round 6: `sessions_send` tool calls render as DelegationCards directly. The
+// LLM often skips structured `<delegate>` tags and calls OpenClaw's
+// `sessions_send` Gateway tool instead — that call IS visible as a tool
+// entry in the leader's transcript (kind: 'tool', text: '[[tool]] sessions_send …').
+// The renderer-side scan converts each such call into a structured linkage
+// using the EXACT JSON params (`to`, `message`) — no prose heuristics.
+
+function makeToolCallEntry(overrides: Partial<TranscriptEntry> = {}): TranscriptEntry {
+  return {
+    entryId: crypto.randomUUID(),
+    runId: 'run-' + Math.random().toString(36).slice(2, 9),
+    sessionKey: 'agent:bz:team:t1',
+    kind: 'tool',
+    role: 'tool',
+    text: '',
+    source: 'runtime-chat',
+    timestampMs: nextTs(),
+    sequenceKey: nextSeq(),
+    confirmed: true,
+    fingerprint: crypto.randomUUID(),
+    ...overrides,
+  } as TranscriptEntry
+}
+
+/**
+ * Build a `[[tool]] sessions_send …` line in the shape `@clawboo/protocol`'s
+ * `formatToolCallMarkdown` produces. OpenClaw's actual `sessions_send`
+ * schema is `{ sessionKey?, label?, agentId?, message }` — the caller
+ * supplies AT LEAST ONE routing identifier plus the message body. We
+ * provide a helper for each common form so tests can exercise the
+ * resolver paths independently.
+ */
+function sessionsSendToolText(
+  params: { sessionKey?: string; label?: string; agentId?: string; message: string },
+  callId = 'abc',
+): string {
+  return `[[tool]] sessions_send (${callId})\n\`\`\`json\n${JSON.stringify(params)}\n\`\`\``
+}
+
+describe('buildDelegationLinkages — sessions_send tool-call path (Round 6)', () => {
+  it('resolves a sessions_send call using `label` (agent display name)', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Let me have the team handle this.',
+    })
+    // Most common form in practice: the LLM uses the agent's display name.
+    const toolCall = makeToolCallEntry({
+      runId: source.runId,
+      text: sessionsSendToolText({ label: 'Engineer Boo', message: 'Build a TL;DR for voice AI' }),
+    })
+    const reply = makeAssistantEntry({
+      sessionKey: teamSk('eng'),
+      runId: 'run-eng-1',
+      text: 'Voice AI takes audio input...',
+    })
+    const result = build([source, toolCall, reply])
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.source).toBe('sessions-send')
+    expect(linkages[0]!.targetAgentId).toBe('eng')
+    expect(linkages[0]!.targetAgentName).toBe('Engineer Boo')
+    expect(linkages[0]!.task).toBe('Build a TL;DR for voice AI')
+    expect(linkages[0]!.linkedEntries).toEqual([reply])
+    expect(result.claimedEntries.has(toolCall.entryId)).toBe(true)
+    expect(result.claimedEntries.has(reply.entryId)).toBe(true)
+  })
+
+  it('resolves a sessions_send call using `agentId` (direct id)', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Routing by id.',
+    })
+    const toolCall = makeToolCallEntry({
+      runId: source.runId,
+      text: sessionsSendToolText({ agentId: 'eng', message: 'do the thing' }),
+    })
+    const reply = makeAssistantEntry({
+      sessionKey: teamSk('eng'),
+      runId: 'run-eng-id',
+      text: 'done',
+    })
+    const result = build([source, toolCall, reply])
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.targetAgentId).toBe('eng')
+  })
+
+  it('resolves a sessions_send call using `sessionKey` (parses agent:<id>:<session>)', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Routing by sessionKey.',
+    })
+    const toolCall = makeToolCallEntry({
+      runId: source.runId,
+      text: sessionsSendToolText({ sessionKey: 'agent:des:main', message: 'design something' }),
+    })
+    const reply = makeAssistantEntry({
+      sessionKey: teamSk('des'),
+      runId: 'run-des-sk',
+      text: 'design draft',
+    })
+    const result = build([source, toolCall, reply])
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.targetAgentId).toBe('des')
+    expect(linkages[0]!.task).toBe('design something')
+  })
+
+  it('skips sessions_send calls whose identifier resolves to no participant', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Misrouted call.',
+    })
+    const toolCall = makeToolCallEntry({
+      runId: source.runId,
+      text: sessionsSendToolText({ agentId: 'unknown-agent', message: 'this should not link' }),
+    })
+    const result = build([source, toolCall])
+    expect(result.linkagesByDelegationId.size).toBe(0)
+    expect(result.claimedEntries.has(toolCall.entryId)).toBe(false)
+  })
+
+  it('skips sessions_send calls that target the source agent itself', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Self-loop, ignore.',
+    })
+    const toolCall = makeToolCallEntry({
+      runId: source.runId,
+      text: sessionsSendToolText({ agentId: 'bz', message: 'I am calling myself' }),
+    })
+    const result = build([source, toolCall])
+    expect(result.linkagesByDelegationId.size).toBe(0)
+    expect(result.claimedEntries.has(toolCall.entryId)).toBe(false)
+  })
+
+  it('coexists with explicit <delegate> tags on the same source — both link', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Mixed routing. <delegate to="@Engineer Boo">tag-routed task</delegate>',
+    })
+    const toolCall = makeToolCallEntry({
+      runId: source.runId,
+      text: sessionsSendToolText({ label: 'Designer Boo', message: 'tool-routed task' }),
+    })
+    const engReply = makeAssistantEntry({
+      sessionKey: teamSk('eng'),
+      runId: 'run-eng',
+      text: 'engineer reply',
+    })
+    const desReply = makeAssistantEntry({
+      sessionKey: teamSk('des'),
+      runId: 'run-des',
+      text: 'designer reply',
+    })
+    const result = build([source, toolCall, engReply, desReply])
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(2)
+    const bySource = linkages.reduce<Record<string, (typeof linkages)[number]>>((acc, l) => {
+      acc[l.source] = l
+      return acc
+    }, {})
+    expect(bySource['delegate-tag']?.targetAgentId).toBe('eng')
+    expect(bySource['delegate-tag']?.task).toBe('tag-routed task')
+    expect(bySource['sessions-send']?.targetAgentId).toBe('des')
+    expect(bySource['sessions-send']?.task).toBe('tool-routed task')
+  })
+
+  it('gracefully ignores sessions_send tool entries with malformed JSON', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Routing.',
+    })
+    const toolCall = makeToolCallEntry({
+      runId: source.runId,
+      text: '[[tool]] sessions_send\n```json\n{ not valid json\n```',
+    })
+    const result = build([source, toolCall])
+    expect(result.linkagesByDelegationId.size).toBe(0)
+    expect(result.claimedEntries.has(toolCall.entryId)).toBe(false)
+  })
+
+  it('marks the linkage pending when the target has not responded yet', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Routing.',
+    })
+    const toolCall = makeToolCallEntry({
+      runId: source.runId,
+      text: sessionsSendToolText({ label: 'Engineer Boo', message: 'work in progress' }),
+    })
+    const result = build([source, toolCall])
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.isPending).toBe(true)
+    expect(linkages[0]!.linkedEntries).toEqual([])
+    expect(result.claimedEntries.has(toolCall.entryId)).toBe(true)
+  })
+})
+
+// Round 7: Path 3 — Clawboo's own routing events become DelegationCards.
+// When the LLM doesn't emit `<delegate>` tags OR `sessions_send` calls but
+// Clawboo's orchestration STILL routes work to specialists (via the
+// `detectDelegations` fallback regex OR `flushRelayBatch`), the recorded
+// dispatch in the chat store becomes the synthesis source. Cards reflect
+// actual Clawboo routing, not just the LLM's preferred emission format.
+
+import type { ClawbooDispatch } from '@/stores/chat'
+
+function makeDispatch(
+  overrides: Partial<ClawbooDispatch> & {
+    sourceEntryId: string
+    targetAgentId: string
+    targetAgentName: string
+  },
+): ClawbooDispatch {
+  return {
+    dispatchId: 'disp-' + Math.random().toString(36).slice(2, 9),
+    sourceAgentId: 'bz',
+    taskBody: 'do the thing',
+    origin: 'clawboo-relay',
+    sequenceKey: nextSeq(),
+    timestampMs: nextTs(),
+    teamId: 't1',
+    ...overrides,
+  } as ClawbooDispatch
+}
+
+function buildWithDispatches(
+  mergedEntries: TranscriptEntry[],
+  dispatches: Map<string, ClawbooDispatch[]>,
+) {
+  const blocks = groupEntriesToBlocks(mergedEntries)
+  return buildDelegationLinkages({
+    blocks,
+    mergedEntries,
+    teamId: 't1',
+    participants,
+    clawbooDispatches: dispatches,
+  })
+}
+
+describe('buildDelegationLinkages — Path 3 Clawboo-dispatch (Round 7)', () => {
+  it('synthesizes a relay-batch linkage when Clawboo routed without an explicit tag', () => {
+    // Order matters: nextSeq() is monotonic; the dispatch needs a
+    // sequenceKey LOWER than the reply for `findTargetResponse` to claim
+    // it. Real production flow guarantees this (the dispatch is recorded
+    // BEFORE the target's reply commits). Mirror that ordering here.
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Here is a markdown table summarizing what the team would say...',
+    })
+    const dispatch = makeDispatch({
+      sourceEntryId: source.entryId,
+      targetAgentId: 'eng',
+      targetAgentName: 'Engineer Boo',
+      origin: 'relay-batch',
+      taskBody: 'Relayed summary of leader response',
+    })
+    const reply = makeAssistantEntry({
+      sessionKey: teamSk('eng'),
+      runId: 'run-eng-relay',
+      text: '__skipped__',
+    })
+    const dispatches = new Map([[`t1:${source.entryId}`, [dispatch]]])
+    const result = buildWithDispatches([source, reply], dispatches)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.source).toBe('clawboo-relay')
+    expect(linkages[0]!.targetAgentId).toBe('eng')
+    expect(linkages[0]!.targetAgentName).toBe('Engineer Boo')
+    expect(linkages[0]!.task).toBe('Relayed summary of leader response')
+    // Note: reply text is `__skipped__` — `findTargetResponse` doesn't
+    // filter by content (that's `shouldDropAssistantTurn`'s job at render
+    // time, applied to the source not the target).
+    expect(linkages[0]!.linkedEntries).toEqual([reply])
+  })
+
+  it('synthesizes a dispatch-delegation linkage when the fallback regex routed', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: '@Engineer Boo, please look at this',
+    })
+    const dispatch = makeDispatch({
+      sourceEntryId: source.entryId,
+      targetAgentId: 'eng',
+      targetAgentName: 'Engineer Boo',
+      origin: 'dispatch-delegation',
+      taskBody: 'please look at this',
+    })
+    const dispatches = new Map([[`t1:${source.entryId}`, [dispatch]]])
+    const result = buildWithDispatches([source], dispatches)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.source).toBe('clawboo-dispatch')
+    expect(linkages[0]!.isPending).toBe(true)
+  })
+
+  it('skips Path 3 when Path 1 (<delegate>) already linked the same target', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: '<delegate to="@Engineer Boo">explicit task</delegate>',
+    })
+    const reply = makeAssistantEntry({
+      sessionKey: teamSk('eng'),
+      runId: 'run-eng-explicit',
+      text: 'engineer reply',
+    })
+    // A Path 3 dispatch ALSO exists for the same target.
+    const dispatch = makeDispatch({
+      sourceEntryId: source.entryId,
+      targetAgentId: 'eng',
+      targetAgentName: 'Engineer Boo',
+      origin: 'dispatch-delegation',
+      taskBody: 'this task should be ignored',
+    })
+    const dispatches = new Map([[`t1:${source.entryId}`, [dispatch]]])
+    const result = buildWithDispatches([source, reply], dispatches)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.source).toBe('delegate-tag')
+    expect(linkages[0]!.task).toBe('explicit task')
+  })
+
+  it('skips Path 3 when Path 2 (sessions_send) already linked the same target', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Calling the tool.',
+    })
+    const toolCall = makeToolCallEntry({
+      runId: source.runId,
+      text: sessionsSendToolText({ label: 'Engineer Boo', message: 'tool-routed task' }),
+    })
+    const dispatch = makeDispatch({
+      sourceEntryId: source.entryId,
+      targetAgentId: 'eng',
+      targetAgentName: 'Engineer Boo',
+      origin: 'dispatch-delegation',
+      taskBody: 'duplicate path 3 should be ignored',
+    })
+    const dispatches = new Map([[`t1:${source.entryId}`, [dispatch]]])
+    const result = buildWithDispatches([source, toolCall], dispatches)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.source).toBe('sessions-send')
+    expect(linkages[0]!.task).toBe('tool-routed task')
+  })
+
+  it('marks Path 3 linkage pending when no target reply exists yet', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Routing.',
+    })
+    const dispatch = makeDispatch({
+      sourceEntryId: source.entryId,
+      targetAgentId: 'eng',
+      targetAgentName: 'Engineer Boo',
+      origin: 'relay-batch',
+    })
+    const dispatches = new Map([[`t1:${source.entryId}`, [dispatch]]])
+    const result = buildWithDispatches([source], dispatches)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.isPending).toBe(true)
+    expect(linkages[0]!.linkedEntries).toEqual([])
+  })
+
+  it('skips Path 3 dispatches whose targetAgentId is not in participants', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Routing to ghost.',
+    })
+    const dispatch = makeDispatch({
+      sourceEntryId: source.entryId,
+      targetAgentId: 'ghost-agent',
+      targetAgentName: 'Ghost Boo',
+      origin: 'relay-batch',
+    })
+    const dispatches = new Map([[`t1:${source.entryId}`, [dispatch]]])
+    const result = buildWithDispatches([source], dispatches)
+    expect(result.linkagesByDelegationId.size).toBe(0)
+  })
+
+  it('skips Path 3 entirely when no clawbooDispatches map is supplied (1:1 chat path)', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Just talking.',
+    })
+    const blocks = groupEntriesToBlocks([source])
+    const result = buildDelegationLinkages({
+      blocks,
+      mergedEntries: [source],
+      teamId: 't1',
+      participants,
+      // clawbooDispatches omitted on purpose.
+    })
+    expect(result.linkagesByDelegationId.size).toBe(0)
+  })
+})
+
+// Round 7B: post-reload stale-entry filter. `sequenceKey` is process-local
+// (resets on page reload) while transcript data persists in SQLite. After a
+// reload, hydrated entries from prior sessions can have HIGHER sequenceKeys
+// than freshly-emitted entries — which is why the linkage scan filters by
+// `timestampMs` as the primary "after-source" check, not sequenceKey.
+
+describe('findTargetResponse (via buildDelegationLinkages) — post-reload stale-entry filter', () => {
+  it('does NOT pick a stale target entry whose sequenceKey is higher but timestamp is older', () => {
+    // Simulate post-reload state: an old hydrated entry has sequenceKey=999
+    // (carried over from a prior session) but its timestampMs is OLDER than
+    // the current source. The fresh response has a lower sequenceKey (counter
+    // restarted at 0 this session) but a newer timestamp. Round 7B's
+    // timestamp-primary filter must pick the FRESH one.
+    const staleTimestamp = 1_700_000_000_000 // older
+    const freshTimestamp = 1_700_000_005_000 // newer (5s later)
+
+    const sourceTs = 1_700_000_003_000 // between stale and fresh
+    const source: TranscriptEntry = {
+      entryId: 'source-current',
+      runId: 'run-current',
+      sessionKey: teamSk('bz'),
+      kind: 'assistant',
+      role: 'assistant',
+      text: '<delegate to="@Engineer Boo">do a fresh thing</delegate>',
+      source: 'runtime-chat',
+      timestampMs: sourceTs,
+      sequenceKey: 1, // low — current session, just reset
+      confirmed: true,
+      fingerprint: 'fp-source',
+    } as TranscriptEntry
+
+    const staleReply: TranscriptEntry = {
+      entryId: 'reply-stale',
+      runId: 'run-stale',
+      sessionKey: teamSk('eng'),
+      kind: 'assistant',
+      role: 'assistant',
+      text: "Hey! I'm Engineer Boo, and I specialize in ...",
+      source: 'runtime-chat',
+      timestampMs: staleTimestamp, // BEFORE source
+      sequenceKey: 999, // hydrated with high seqkey from prior session
+      confirmed: true,
+      fingerprint: 'fp-stale',
+    } as TranscriptEntry
+
+    const freshReply: TranscriptEntry = {
+      entryId: 'reply-fresh',
+      runId: 'run-fresh',
+      sessionKey: teamSk('eng'),
+      kind: 'assistant',
+      role: 'assistant',
+      text: 'Here is the fresh substantive answer from this session.',
+      source: 'runtime-chat',
+      timestampMs: freshTimestamp, // AFTER source
+      sequenceKey: 2, // current session
+      confirmed: true,
+      fingerprint: 'fp-fresh',
+    } as TranscriptEntry
+
+    const result = build([source, staleReply, freshReply])
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.linkedEntries).toEqual([freshReply])
+    // Stale entry must NOT be claimed.
+    expect(result.claimedEntries.has(staleReply.entryId)).toBe(false)
+  })
+})

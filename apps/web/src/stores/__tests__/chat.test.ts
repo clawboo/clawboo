@@ -32,6 +32,7 @@ describe('useChatStore', () => {
     useChatStore.setState({
       transcripts: new Map(),
       streamingText: new Map(),
+      streamStartedAt: new Map(),
       lastTokenUsage: new Map(),
     })
   })
@@ -40,6 +41,7 @@ describe('useChatStore', () => {
     const state = useChatStore.getState()
     expect(state.transcripts.size).toBe(0)
     expect(state.streamingText.size).toBe(0)
+    expect(state.streamStartedAt.size).toBe(0)
     expect(state.lastTokenUsage.size).toBe(0)
   })
 
@@ -161,6 +163,135 @@ describe('useChatStore', () => {
       expect(useChatStore.getState().lastTokenUsage.size).toBe(2)
       expect(useChatStore.getState().lastTokenUsage.get('r1')!.inputTokens).toBe(100)
       expect(useChatStore.getState().lastTokenUsage.get('r2')!.inputTokens).toBe(300)
+    })
+  })
+
+  // Round 5: stream-start timestamps moved from `lib/streamStartTracker.ts`
+  // into the chat store so renderers can subscribe reactively. The store
+  // anchors live `StreamingCard`s at their chronological position; on commit
+  // the entry's `timestampMs` reuses the same value so there's zero visible
+  // re-arrangement when the stream lands.
+  describe('setStreamStart / clearStreamStart', () => {
+    it('captures the first stream-start timestamp for a session', () => {
+      useChatStore.getState().setStreamStart('agent:a1:main', 1000)
+      expect(useChatStore.getState().streamStartedAt.get('agent:a1:main')).toBe(1000)
+    })
+
+    it('first capture wins — subsequent setStreamStart calls do not reset', () => {
+      useChatStore.getState().setStreamStart('agent:a1:main', 1000)
+      useChatStore.getState().setStreamStart('agent:a1:main', 1500)
+      useChatStore.getState().setStreamStart('agent:a1:main', 2000)
+      expect(useChatStore.getState().streamStartedAt.get('agent:a1:main')).toBe(1000)
+    })
+
+    it('clearStreamStart removes the anchor', () => {
+      useChatStore.getState().setStreamStart('agent:a1:main', 1000)
+      useChatStore.getState().clearStreamStart('agent:a1:main')
+      expect(useChatStore.getState().streamStartedAt.has('agent:a1:main')).toBe(false)
+    })
+
+    it('the next stream after clear re-anchors from scratch', () => {
+      useChatStore.getState().setStreamStart('agent:a1:main', 1000)
+      useChatStore.getState().clearStreamStart('agent:a1:main')
+      useChatStore.getState().setStreamStart('agent:a1:main', 5000)
+      expect(useChatStore.getState().streamStartedAt.get('agent:a1:main')).toBe(5000)
+    })
+
+    it('clearStreamStart is a no-op when the session has no anchor', () => {
+      const before = useChatStore.getState().streamStartedAt
+      useChatStore.getState().clearStreamStart('agent:nonexistent:main')
+      // Reference stays identical when nothing changed (Round 5 contract).
+      expect(useChatStore.getState().streamStartedAt).toBe(before)
+    })
+
+    it('isolates sessions — capturing one does not leak into another', () => {
+      useChatStore.getState().setStreamStart('agent:leader:team:t1', 1000)
+      useChatStore.getState().setStreamStart('agent:specialist:team:t1', 1500)
+      expect(useChatStore.getState().streamStartedAt.get('agent:leader:team:t1')).toBe(1000)
+      expect(useChatStore.getState().streamStartedAt.get('agent:specialist:team:t1')).toBe(1500)
+    })
+
+    it("clearTranscript also wipes the session's stream-start anchor", () => {
+      useChatStore.getState().setStreamStart('agent:a1:main', 1000)
+      useChatStore.getState().clearTranscript('agent:a1:main')
+      expect(useChatStore.getState().streamStartedAt.has('agent:a1:main')).toBe(false)
+    })
+
+    it('emits a new state reference (renderers re-subscribe correctly)', () => {
+      const before = useChatStore.getState().streamStartedAt
+      useChatStore.getState().setStreamStart('agent:a1:main', 1000)
+      const after = useChatStore.getState().streamStartedAt
+      expect(after).not.toBe(before)
+    })
+  })
+
+  // Round 7: setClawbooDispatch + clearClawbooDispatches. The store records
+  // every `chat.send` Clawboo fires to a team specialist so the renderer
+  // can surface those events as DelegationCards (Path 3 in
+  // `buildDelegationLinkages`), independent of LLM emission format.
+  describe('setClawbooDispatch / clearClawbooDispatches', () => {
+    beforeEach(() => {
+      useChatStore.setState({
+        clawbooDispatches: new Map(),
+      })
+    })
+
+    function makeDispatch(overrides: Partial<import('../chat').ClawbooDispatch> = {}) {
+      return {
+        dispatchId: 'd-' + Math.random().toString(36).slice(2, 9),
+        sourceEntryId: 'src-1',
+        sourceAgentId: 'bz',
+        targetAgentId: 'eng',
+        targetAgentName: 'Engineer Boo',
+        taskBody: 'do the thing',
+        origin: 'dispatch-delegation' as const,
+        sequenceKey: 1,
+        timestampMs: 1_700_000_000_000,
+        teamId: 't1',
+        ...overrides,
+      }
+    }
+
+    it('stores a dispatch under the `${teamId}:${sourceEntryId}` key', () => {
+      const dispatch = makeDispatch()
+      useChatStore.getState().setClawbooDispatch(dispatch)
+      const stored = useChatStore.getState().clawbooDispatches.get('t1:src-1')
+      expect(stored).toHaveLength(1)
+      expect(stored![0]).toBe(dispatch)
+    })
+
+    it('accumulates multiple dispatches under the same source entry', () => {
+      useChatStore
+        .getState()
+        .setClawbooDispatch(makeDispatch({ dispatchId: 'd-a', targetAgentId: 'eng' }))
+      useChatStore
+        .getState()
+        .setClawbooDispatch(makeDispatch({ dispatchId: 'd-b', targetAgentId: 'des' }))
+      useChatStore
+        .getState()
+        .setClawbooDispatch(makeDispatch({ dispatchId: 'd-c', targetAgentId: 'his' }))
+      const stored = useChatStore.getState().clawbooDispatches.get('t1:src-1')
+      expect(stored).toHaveLength(3)
+      expect(stored!.map((d) => d.dispatchId)).toEqual(['d-a', 'd-b', 'd-c'])
+    })
+
+    it('dedups by dispatchId — a retry with the same id is a no-op', () => {
+      const dispatch = makeDispatch()
+      useChatStore.getState().setClawbooDispatch(dispatch)
+      useChatStore.getState().setClawbooDispatch(dispatch)
+      useChatStore.getState().setClawbooDispatch(dispatch)
+      expect(useChatStore.getState().clawbooDispatches.get('t1:src-1')).toHaveLength(1)
+    })
+
+    it('clearClawbooDispatches(teamId) wipes only that team — other teams untouched', () => {
+      useChatStore.getState().setClawbooDispatch(makeDispatch({ teamId: 't1', sourceEntryId: 'a' }))
+      useChatStore.getState().setClawbooDispatch(makeDispatch({ teamId: 't1', sourceEntryId: 'b' }))
+      useChatStore.getState().setClawbooDispatch(makeDispatch({ teamId: 't2', sourceEntryId: 'a' }))
+      useChatStore.getState().clearClawbooDispatches('t1')
+      expect(useChatStore.getState().clawbooDispatches.has('t1:a')).toBe(false)
+      expect(useChatStore.getState().clawbooDispatches.has('t1:b')).toBe(false)
+      // t2 still there.
+      expect(useChatStore.getState().clawbooDispatches.has('t2:a')).toBe(true)
     })
   })
 })

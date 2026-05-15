@@ -7,13 +7,23 @@ import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { AgentState } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { buildTeamSessionKey, setTeamChatOverride, hasTeamChatOverride } from '@/lib/sessionUtils'
-import { buildTeamContextPreamble, buildSilentResumeWakeMessage } from '@/lib/teamProtocol'
+import {
+  buildBatchedRelayMessage,
+  buildTeamContextPreamble,
+  buildSilentResumeWakeMessage,
+} from '@/lib/teamProtocol'
 import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
 import { buildTeamRulesBlock, fetchTeamRules } from '@/lib/teamRules'
+import { nextSeq } from '@/lib/sequenceKey'
 import { isAgentAwake } from '@/lib/wakeTracker'
-import { detectDelegations, isRelayMessage } from './delegationDetector'
 import {
-  buildRelayMessage,
+  detectDelegations,
+  isRelayMessage,
+  parseStructuredDelegations,
+  type DelegationIntent,
+} from './delegationDetector'
+import {
+  condenseSummary,
   determineRelayTargets,
   shouldRelay,
   recordRelay,
@@ -74,6 +84,28 @@ export function bumpStopGeneration(teamId: string): void {
  */
 const STOP_FREEZE_MS = 3000
 
+/**
+ * Batching window for context relays destined for the same hub. Production
+ * observed Boo Zero acknowledging every parallel `[Team Update]` as a fresh
+ * user message — 5 specialists finishing in parallel produced 5 separate
+ * "Got it — that's the X layer" acknowledgments from Boo Zero (~576 redundant
+ * tokens in one cascade).
+ *
+ * With batching, items destined for `(teamId, targetId)` accumulate over a
+ * 3 s window. When the timer fires, ONE combined `[Team Update]` envelope is
+ * delivered containing all teammate progress reports — and the Boo Zero rules
+ * block now explicitly forbids acknowledgment-only responses, so the hub
+ * produces ONE synthesis (or zero if not warranted).
+ *
+ * 3 s chosen because: (a) parallel completions from delegations issued in
+ * the same Boo Zero response typically land within 500-1500 ms of each
+ * other; (b) tighter windows would split natural batches; (c) wider would
+ * make a single-item batch feel laggy. Pair with `POST_BATCH_COOLDOWN_MS`
+ * below — incoming items during the cooldown extend the NEXT batch instead
+ * of triggering an immediate second dispatch.
+ */
+const RELAY_BATCH_WINDOW_MS = 3000
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface UseTeamOrchestrationParams {
@@ -118,6 +150,31 @@ export interface UseTeamOrchestrationParams {
   stopSignal?: number
 }
 
+/**
+ * One accumulating batch of relay items destined for a single hub. Lives
+ * in `pendingRelaysRef` keyed by `${teamId}:${targetId}` until either
+ * `RELAY_BATCH_WINDOW_MS` expires (timer fires, batch is flushed as a
+ * single `chat.send`) OR the user presses Stop (timer cancelled, batch
+ * discarded).
+ */
+interface PendingRelayBatch {
+  targetId: string
+  /** Cached target name so `flushRelayBatch` can record dispatches without re-resolving. */
+  targetAgentName: string
+  items: Array<{
+    /** Agent id of the source agent whose commit triggered this relay item. */
+    sourceAgentId: string
+    /** entryId of the source's committed entry — anchors Round 7 Path 3 cards. */
+    sourceEntryId: string
+    fromAgentName: string
+    body: string
+    taskContext?: string
+  }>
+  /** Stop-generation captured when this batch was opened. */
+  startGen: number
+  timerId: ReturnType<typeof setTimeout>
+}
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
@@ -152,6 +209,31 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
    * the end of each batch.
    */
   const wokenThisBatchRef = useRef<Set<string>>(new Set())
+  /**
+   * Mid-stream delegation dedup. Maps sessionKey → Set of `mentionOffset`
+   * values for `<delegate>` blocks we've already dispatched (either from
+   * the streaming-text path OR from the commit-time path, whichever fired
+   * first). Prevents double-routing when a `<delegate>` block closes
+   * mid-stream and the same block then appears in the committed entry.
+   *
+   * Lifecycle:
+   *   • Mid-stream scan adds (sessionKey, offset) when it dispatches.
+   *   • Commit-time scan also adds (and skips if already present).
+   *   • After commit-time processing finishes for a session, the entry
+   *     for that sessionKey is cleared — the next streaming burst starts
+   *     from offset 0 anyway, so the set would otherwise grow unbounded.
+   *   • Mid-stream scan also clears when it observes streamingText
+   *     transitioning to null/empty (e.g., setStreamingText(sk, null) at
+   *     commitChat time).
+   */
+  const dispatchedStreamingOffsetsRef = useRef<Map<string, Set<number>>>(new Map())
+  /**
+   * Pending relay batches keyed by `${teamId}:${targetId}`. Each batch
+   * accumulates items over `RELAY_BATCH_WINDOW_MS` and is then flushed as a
+   * single combined `[Team Update]` envelope to the target. See the constant's
+   * doc comment and Layer 2 in the plan for full rationale.
+   */
+  const pendingRelaysRef = useRef<Map<string, PendingRelayBatch>>(new Map())
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Post-stop freeze window ──────────────────────────────────────────────
@@ -175,6 +257,379 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
 
   useEffect(() => {
     if (!enabled || !teamId) return
+
+    // ── Round 7: Clawboo-dispatch recorder ─────────────────────────────────
+    // Every `chat.send` Clawboo fires to a team specialist passes through
+    // one of two chokepoints (`dispatchDelegation` for delegations,
+    // `flushRelayBatch` for relays). Each one calls this helper AFTER the
+    // network round-trip succeeds so the renderer can surface the routing
+    // event as a DelegationCard — see `buildDelegationLinkages` Path 3.
+    //
+    // `sourceEntryId` is undefined for mid-stream dispatches (the source
+    // entry hasn't committed yet) — we skip recording in that case because
+    // Path 1 (`<delegate>` scan in `findDelegationBlocks`) will render the
+    // card via the leader's committed text. Recording only happens when a
+    // committed entryId is available, which is exactly when Path 1 / Path 2
+    // can't claim the routing (fallback regex from `detectDelegations` and
+    // relay-batch).
+    const recordClawbooDispatch = (params: {
+      sourceEntryId: string | undefined
+      sourceAgentId: string
+      targetAgentId: string
+      targetAgentName: string
+      taskBody: string
+      origin: 'dispatch-delegation' | 'relay-batch'
+    }): void => {
+      if (!params.sourceEntryId) return
+      const currentTeamId = teamIdRef.current
+      if (!currentTeamId) return
+      useChatStore.getState().setClawbooDispatch({
+        dispatchId: crypto.randomUUID(),
+        sourceEntryId: params.sourceEntryId,
+        sourceAgentId: params.sourceAgentId,
+        targetAgentId: params.targetAgentId,
+        targetAgentName: params.targetAgentName,
+        taskBody: params.taskBody,
+        origin: params.origin,
+        sequenceKey: nextSeq(),
+        timestampMs: Date.now(),
+        teamId: currentTeamId,
+      })
+    }
+
+    // ── Shared delegation dispatcher ───────────────────────────────────────
+    // Used by both the mid-stream `<delegate>` scanner (which fires as soon
+    // as a `</delegate>` closing tag appears in the streaming text) AND the
+    // commit-time scanner inside `processNewEntries`. The dispatch path is
+    // identical: identity rules + team rules + team context preamble + task
+    // body → `chat.send` to the target's team-scoped session. Extracting
+    // this once keeps the two scan paths in lock-step.
+    //
+    // `sourceEntryId` is passed only from the commit-time path (mid-stream
+    // hasn't committed yet); see `recordClawbooDispatch` above for the
+    // skip-when-undefined logic.
+    const dispatchDelegation = (
+      delegation: DelegationIntent,
+      sourceAgentId: string,
+      sourceEntryId: string | undefined,
+      retryCount = 0,
+    ): void => {
+      const currentTeamId = teamIdRef.current
+      const currentClient = clientRef.current
+      if (!currentTeamId || !currentClient) return
+
+      // Capture the stop-generation at IIFE creation. If the user presses
+      // Stop before this IIFE finishes, the generation bumps; we bail at
+      // each checkpoint below instead of issuing a stale `chat.send` that
+      // would restart the cascade.
+      const startGen = getStopGeneration(currentTeamId)
+      void (async () => {
+        try {
+          if (getStopGeneration(currentTeamId) !== startGen) return
+
+          // Guard: target agent may have been deleted during processing.
+          // Boo Zero may be the target — check both team members AND Boo
+          // Zero (Boo Zero is teamless so not in `teamAgentsRef`).
+          const freshTeamMembers = teamAgentsRef.current
+          const freshBooZero = booZeroAgentRef.current
+          const freshParticipants = freshBooZero
+            ? [...freshTeamMembers, freshBooZero]
+            : freshTeamMembers
+          if (!freshParticipants.some((a) => a.id === delegation.targetAgentId)) return
+
+          // Guard: target is already processing a team message — retry once after 2s
+          if (hasTeamChatOverride(delegation.targetAgentId)) {
+            if (retryCount < 1) {
+              // The retry inherits the same startGen via closure on the next
+              // call — when it fires it re-checks against the live generation.
+              setTimeout(
+                () => dispatchDelegation(delegation, sourceAgentId, sourceEntryId, retryCount + 1),
+                2000,
+              )
+            }
+            return
+          }
+
+          const targetTeamSk = buildTeamSessionKey(delegation.targetAgentId, currentTeamId)
+
+          // Set override BEFORE sending so Gateway events get redirected.
+          setTeamChatOverride(delegation.targetAgentId, targetTeamSk)
+
+          // Build context preamble from merged transcript — also injects the
+          // user intro so the target agent knows who the user is (delegations
+          // are agent-to-agent, no fresh user message).
+          const contextEntries = getMergedTeamEntries(currentTeamId, freshTeamMembers, freshBooZero)
+          const targetAgent = freshParticipants.find((a) => a.id === delegation.targetAgentId)
+          const preamble = buildTeamContextPreamble({
+            entries: contextEntries,
+            targetAgentName: targetAgent?.name ?? '',
+            userIntroText: userIntroTextRef.current,
+          })
+
+          // Agent → Boo Zero delegations need the rules block — Boo Zero
+          // stays identity-anchored and rule-bound across every delivery
+          // path (user turns, wake-ups, AND agent-to-Boo-Zero delegations).
+          const isDelegationToBooZero =
+            freshBooZero !== null && delegation.targetAgentId === freshBooZero.id
+          const rulesBlock = isDelegationToBooZero
+            ? buildBooZeroRulesBlock({
+                displayName: freshBooZero!.name,
+                teamName: teamNameRef.current,
+              })
+            : null
+
+          // Team Rules — same source of truth as user-message-time injection.
+          // Loaded for every agent-to-agent delegation so the user's
+          // persisted corrections never get lost as work hops between
+          // teammates.
+          const teamRulesContent = await fetchTeamRules(currentTeamId)
+          const teamRulesBlock = buildTeamRulesBlock(teamRulesContent)
+
+          const sections = [
+            rulesBlock,
+            teamRulesBlock,
+            preamble,
+            delegation.taskDescription,
+          ].filter((s): s is string => Boolean(s))
+          const messageBody = sections.join('\n\n')
+
+          // Final checkpoint before the network call.
+          if (getStopGeneration(currentTeamId) !== startGen) return
+
+          await currentClient.call('chat.send', {
+            sessionKey: targetTeamSk,
+            message: messageBody,
+            deliver: false,
+            idempotencyKey: crypto.randomUUID(),
+          })
+
+          // Track delegation source for relay routing.
+          delegationSourceRef.current.set(delegation.targetAgentId, sourceAgentId)
+
+          // Round 7: record this dispatch so the renderer can surface it
+          // as a DelegationCard. Skipped when `sourceEntryId` is undefined
+          // (mid-stream path — Path 1 handles `<delegate>` rendering via
+          // `findDelegationBlocks` on the committed text).
+          recordClawbooDispatch({
+            sourceEntryId,
+            sourceAgentId,
+            targetAgentId: delegation.targetAgentId,
+            targetAgentName: targetAgent?.name ?? delegation.targetAgentId,
+            taskBody: delegation.taskDescription,
+            origin: 'dispatch-delegation',
+          })
+        } catch {
+          // Non-fatal — delegation failure doesn't block other processing.
+        }
+      })()
+    }
+
+    // ── Mid-stream `<delegate>` scanner ────────────────────────────────────
+    // Fires on every chat-store change with NO debounce so DelegationCards
+    // appear inline as soon as the LLM closes a `</delegate>` tag — instead
+    // of after the leader's full response commits (often 20-30 s later).
+    // This is the topology fix: by routing targets mid-stream, specialists
+    // start working WHILE the leader is still streaming, so the user sees
+    // them respond in the natural flow rather than after a long silence.
+    //
+    // Dedup: every block dispatched here is recorded in
+    // `dispatchedStreamingOffsetsRef` so the commit-time scanner doesn't
+    // re-dispatch the same block when the entry lands. The set is keyed by
+    // `sessionKey + mentionOffset` (the byte offset of the `<delegate>`
+    // opener in the source text — stable across the streaming-to-commit
+    // transition because we only dispatch CLOSED blocks).
+    const processStreamingDelegations = (): void => {
+      const currentTeamId = teamIdRef.current
+      if (!currentTeamId) return
+      if (Date.now() < frozenUntilRef.current) return
+
+      const currentTeamMembers = teamAgentsRef.current
+      const currentBooZero = booZeroAgentRef.current
+      const combined = currentBooZero ? [...currentTeamMembers, currentBooZero] : currentTeamMembers
+      if (combined.length === 0) return
+
+      const seen = new Set<string>()
+      const participants: AgentState[] = []
+      for (const a of combined) {
+        if (seen.has(a.id)) continue
+        seen.add(a.id)
+        participants.push(a)
+      }
+
+      const streamingText = useChatStore.getState().streamingText
+      for (const agent of participants) {
+        const teamSk = buildTeamSessionKey(agent.id, currentTeamId)
+        const streaming = streamingText.get(teamSk)
+        if (!streaming || streaming.length === 0) {
+          // End-of-stream signal — clear so the next streaming burst starts
+          // from offset 0 without false dedup hits.
+          dispatchedStreamingOffsetsRef.current.delete(teamSk)
+          continue
+        }
+        if (isRelayMessage(streaming)) continue
+
+        const intents = parseStructuredDelegations(
+          streaming,
+          agent.id,
+          participants.map((p) => ({ id: p.id, name: p.name })),
+        )
+        if (intents.length === 0) continue
+
+        let dispatched = dispatchedStreamingOffsetsRef.current.get(teamSk)
+        if (!dispatched) {
+          dispatched = new Set<number>()
+          dispatchedStreamingOffsetsRef.current.set(teamSk, dispatched)
+        }
+        for (const intent of intents) {
+          if (dispatched.has(intent.mentionOffset)) continue
+          dispatched.add(intent.mentionOffset)
+          // Mid-stream: source entry hasn't committed yet — pass undefined
+          // so the recorder skips. Path 1 (`<delegate>` scan on committed
+          // text) will render the card when the entry lands.
+          dispatchDelegation(intent, agent.id, undefined)
+        }
+      }
+    }
+
+    // ── Relay batching ─────────────────────────────────────────────────────
+    //
+    // Replaces the previous per-target IIFE relay loop. Each item destined
+    // for `(teamId, targetId)` is accumulated; the first item starts a 3-s
+    // batch window; the timer flushes the combined batch as ONE `chat.send`.
+    // Same hub never receives N parallel relays. See `buildBatchedRelayMessage`
+    // in `lib/teamProtocol.ts` for the envelope shape.
+
+    const flushRelayBatch = (key: string): void => {
+      const batch = pendingRelaysRef.current.get(key)
+      if (!batch) return
+      // Always drop the batch on flush even when we bail below — leaving the
+      // entry would block future items at the same key.
+      pendingRelaysRef.current.delete(key)
+
+      const currentTeamId = teamIdRef.current
+      const currentClient = clientRef.current
+      if (!currentTeamId || !currentClient) return
+      if (getStopGeneration(currentTeamId) !== batch.startGen) return
+
+      const freshBooZero = booZeroAgentRef.current
+      const freshTeamMembers = teamAgentsRef.current
+      const targetAgent =
+        freshTeamMembers.find((a) => a.id === batch.targetId) ??
+        (freshBooZero && freshBooZero.id === batch.targetId ? freshBooZero : null)
+      if (!targetAgent) return
+
+      const targetTeamSk = buildTeamSessionKey(batch.targetId, currentTeamId)
+      setTeamChatOverride(batch.targetId, targetTeamSk)
+
+      const baseRelay = buildBatchedRelayMessage(batch.items)
+      const isRelayToBooZero = freshBooZero !== null && batch.targetId === freshBooZero.id
+      const finalRelayMsg = isRelayToBooZero
+        ? `${buildBooZeroRulesBlock({ displayName: targetAgent.name, teamName: teamNameRef.current })}\n\n${baseRelay}`
+        : baseRelay
+
+      void (async () => {
+        try {
+          if (getStopGeneration(currentTeamId) !== batch.startGen) return
+          await currentClient.call('chat.send', {
+            sessionKey: targetTeamSk,
+            message: finalRelayMsg,
+            deliver: false,
+            idempotencyKey: crypto.randomUUID(),
+          })
+
+          // Round 7: emit one dispatch record per accumulated item so each
+          // source-entry → target-agent routing surfaces as a DelegationCard.
+          // The batched envelope contains all items, but visually each source
+          // turn should be linked to its own card on the target.
+          for (const item of batch.items) {
+            recordClawbooDispatch({
+              sourceEntryId: item.sourceEntryId,
+              sourceAgentId: item.sourceAgentId,
+              targetAgentId: batch.targetId,
+              targetAgentName: batch.targetAgentName,
+              taskBody: item.body,
+              origin: 'relay-batch',
+            })
+          }
+        } catch {
+          // Non-fatal.
+        }
+      })()
+    }
+
+    const enqueueRelayItem = (params: {
+      teamId: string
+      targetId: string
+      /** Source agent id whose committed entry triggered this relay item. */
+      sourceAgentId: string
+      /** entryId of the source's committed entry — anchors Round 7 Path 3 cards. */
+      sourceEntryId: string
+      fromAgentName: string
+      condensedBody: string
+    }): void => {
+      const key = `${params.teamId}:${params.targetId}`
+      let batch = pendingRelaysRef.current.get(key)
+
+      if (!batch) {
+        const startGen = getStopGeneration(params.teamId)
+        const freshBooZero = booZeroAgentRef.current
+        const freshTeamMembers = teamAgentsRef.current
+        const currentClient = clientRef.current
+        const targetAgent =
+          freshTeamMembers.find((a) => a.id === params.targetId) ??
+          (freshBooZero && freshBooZero.id === params.targetId ? freshBooZero : null)
+        if (!targetAgent || !currentClient) return
+
+        // Wake the target on FIRST item if sleeping. The wake send + 3-s
+        // batch window doubles as the settle delay (Gateway registers the
+        // session before the flushed relay lands).
+        if (
+          !isAgentAwake(params.targetId, params.teamId) &&
+          !wokenThisBatchRef.current.has(params.targetId)
+        ) {
+          wokenThisBatchRef.current.add(params.targetId)
+          const targetTeamSk = buildTeamSessionKey(params.targetId, params.teamId)
+          const baseWake = buildSilentResumeWakeMessage({
+            agentName: targetAgent.name,
+            teamName: teamNameRef.current,
+          })
+          const isBooZeroWake = freshBooZero !== null && params.targetId === freshBooZero.id
+          const wakeMsg = isBooZeroWake
+            ? `${buildBooZeroRulesBlock({ displayName: targetAgent.name, teamName: teamNameRef.current })}\n\n${baseWake}`
+            : baseWake
+          setTeamChatOverride(params.targetId, targetTeamSk)
+          void (async () => {
+            try {
+              if (getStopGeneration(params.teamId) !== startGen) return
+              await currentClient.call('chat.send', {
+                sessionKey: targetTeamSk,
+                message: wakeMsg,
+                deliver: false,
+                idempotencyKey: crypto.randomUUID(),
+              })
+            } catch {
+              // Non-fatal.
+            }
+          })()
+        }
+
+        batch = {
+          targetId: params.targetId,
+          targetAgentName: targetAgent.name,
+          items: [],
+          startGen,
+          timerId: setTimeout(() => flushRelayBatch(key), RELAY_BATCH_WINDOW_MS),
+        }
+        pendingRelaysRef.current.set(key, batch)
+      }
+
+      batch.items.push({
+        sourceAgentId: params.sourceAgentId,
+        sourceEntryId: params.sourceEntryId,
+        fromAgentName: params.fromAgentName,
+        body: params.condensedBody,
+      })
+    }
 
     const processNewEntries = () => {
       // Reset per-batch dedup set at the start of every batch so we never
@@ -255,106 +710,20 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             currentAgents.map((a) => ({ id: a.id, name: a.name })),
           )
 
+          // Dedup against mid-stream dispatches: any `<delegate>` block at
+          // the same byte offset already routed by `processStreamingDelegations`
+          // is skipped here so the same block doesn't double-fire.
+          let dispatched = dispatchedStreamingOffsetsRef.current.get(teamSk)
+          if (!dispatched) {
+            dispatched = new Set<number>()
+            dispatchedStreamingOffsetsRef.current.set(teamSk, dispatched)
+          }
           for (const delegation of delegations) {
-            // Capture the stop-generation at IIFE creation. If the user
-            // presses Stop before this IIFE finishes, the generation
-            // bumps; we bail at each checkpoint below instead of issuing
-            // a stale `chat.send` that would restart the cascade.
-            const startGen = getStopGeneration(currentTeamId)
-            const sendDelegation = async (retryCount = 0) => {
-              try {
-                // Bail if Stop has fired since this IIFE was scheduled.
-                if (getStopGeneration(currentTeamId) !== startGen) return
-
-                // Guard: target agent may have been deleted during processing.
-                // The target may be Boo Zero — check both team members AND
-                // Boo Zero (Boo Zero is teamless so not in `teamAgentsRef`).
-                const freshTeamMembers = teamAgentsRef.current
-                const freshBooZero = booZeroAgentRef.current
-                const freshParticipants = freshBooZero
-                  ? [...freshTeamMembers, freshBooZero]
-                  : freshTeamMembers
-                if (!freshParticipants.some((a) => a.id === delegation.targetAgentId)) return
-
-                // Guard: target is already processing a team message — retry once after 2s
-                if (hasTeamChatOverride(delegation.targetAgentId)) {
-                  if (retryCount < 1) {
-                    // The retry inherits the same startGen via closure, so
-                    // when it fires it re-checks against the live generation.
-                    setTimeout(() => void sendDelegation(retryCount + 1), 2000)
-                  }
-                  return
-                }
-
-                const targetTeamSk = buildTeamSessionKey(delegation.targetAgentId, currentTeamId)
-
-                // Set override BEFORE sending so Gateway events get redirected
-                setTeamChatOverride(delegation.targetAgentId, targetTeamSk)
-
-                // Build context preamble from merged transcript — also injects
-                // the user intro so the target agent knows who the user is
-                // (delegations are agent-to-agent, no fresh user message).
-                // Pass team members + Boo Zero as separate args so the merge
-                // includes Boo Zero's transcript without double-counting.
-                const contextEntries = getMergedTeamEntries(
-                  currentTeamId,
-                  freshTeamMembers,
-                  freshBooZero,
-                )
-                const targetAgent = freshParticipants.find((a) => a.id === delegation.targetAgentId)
-                const preamble = buildTeamContextPreamble({
-                  entries: contextEntries,
-                  targetAgentName: targetAgent?.name ?? '',
-                  userIntroText: userIntroTextRef.current,
-                })
-
-                // Agent → Boo Zero delegations need the rules block too —
-                // Boo Zero stays identity-anchored and rule-bound across
-                // every code path that delivers a message to it (user
-                // turns, wake-ups, AND agent-to-Boo-Zero delegations).
-                const isDelegationToBooZero =
-                  freshBooZero !== null && delegation.targetAgentId === freshBooZero.id
-                const rulesBlock = isDelegationToBooZero
-                  ? buildBooZeroRulesBlock({
-                      displayName: freshBooZero!.name,
-                      teamName: teamNameRef.current,
-                    })
-                  : null
-
-                // Team Rules — same source of truth as user-message-time
-                // injection. Loaded for every agent-to-agent delegation so
-                // the user's persisted corrections never get lost as work
-                // hops between teammates.
-                const teamRulesContent = await fetchTeamRules(currentTeamId)
-                const teamRulesBlock = buildTeamRulesBlock(teamRulesContent)
-
-                const sections = [
-                  rulesBlock,
-                  teamRulesBlock,
-                  preamble,
-                  delegation.taskDescription,
-                ].filter((s): s is string => Boolean(s))
-                const messageBody = sections.join('\n\n')
-
-                // Final checkpoint before the network call. Without this,
-                // a Stop that fired during the synchronous preamble build
-                // above would still let the delegation send.
-                if (getStopGeneration(currentTeamId) !== startGen) return
-
-                await currentClient.call('chat.send', {
-                  sessionKey: targetTeamSk,
-                  message: messageBody,
-                  deliver: false,
-                  idempotencyKey: crypto.randomUUID(),
-                })
-
-                // Track delegation source for relay routing
-                delegationSourceRef.current.set(delegation.targetAgentId, sourceAgentId)
-              } catch {
-                // Non-fatal — delegation failure doesn't block other processing
-              }
-            }
-            void sendDelegation()
+            if (dispatched.has(delegation.mentionOffset)) continue
+            dispatched.add(delegation.mentionOffset)
+            // Pass the committed source entryId so `recordClawbooDispatch`
+            // (Round 7 Path 3) can attribute the dispatch to this turn.
+            dispatchDelegation(delegation, sourceAgentId, entry.entryId)
           }
 
           // ── Context relay ──────────────────────────────────────
@@ -377,129 +746,28 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
               delegationSourceId: delegationSource,
             })
 
-            const relayMsg = buildRelayMessage({
-              fromAgentName: agent.name,
-              responseText: text,
-              maxChars: DEFAULT_RELAY_CONFIG.maxSummaryChars,
-            })
+            // Condense the source's body once; the batcher accumulates this
+            // per-target, then `buildBatchedRelayMessage` assembles a single
+            // multi-source envelope at flush time.
+            const condensedBody = condenseSummary(text, DEFAULT_RELAY_CONFIG.maxSummaryChars)
 
             for (const targetId of targets) {
-              // Capture the stop-generation at IIFE creation. If the user
-              // presses Stop while this IIFE is in the wake-and-settle
-              // window (the historical cascade source — a 2-second sleep
-              // between the wake send and the relay send), the generation
-              // bumps; we bail at the next checkpoint instead of issuing
-              // the delayed `chat.send` that would re-wake the target and
-              // restart the cascade.
-              const startGen = getStopGeneration(currentTeamId)
-              void (async () => {
-                try {
-                  // Bail-1: Stop fired before this IIFE got to run.
-                  if (getStopGeneration(currentTeamId) !== startGen) return
-
-                  // Guard: target agent may have been deleted during processing.
-                  // Relay targets can include Boo Zero — check both team members
-                  // and (when present) Boo Zero before bailing out.
-                  const freshTeamMembers = teamAgentsRef.current
-                  const freshBooZero = booZeroAgentRef.current
-                  const targetAgent =
-                    freshTeamMembers.find((a) => a.id === targetId) ??
-                    (freshBooZero && freshBooZero.id === targetId ? freshBooZero : null)
-                  if (!targetAgent) return
-
-                  const targetTeamSk = buildTeamSessionKey(targetId, currentTeamId)
-
-                  // Wake sleeping agent before relaying (best-effort).
-                  //
-                  // CRITICAL: this used to call `buildTeamWakeMessage` which
-                  // asked the agent to introduce itself AND listed teammates
-                  // as `@AgentName`. In production that triggered the
-                  // 11-message "Welcome aboard X" cascade (CLAUDE.md §"Group
-                  // Chat Onboarding Gate — Cascade Fix"). The Phase 4
-                  // onboarding-gate fix already replaced the user-message-
-                  // time wake with a silent-resume body — this is the same
-                  // fix for the orchestration wake-on-relay path.
-                  //
-                  // Pair with `### Resuming sessions` in `buildTeamAgentsMd`
-                  // which loads on every turn and tells the agent to stay
-                  // quiet on resume.
-                  //
-                  // Per-batch dedup (`wokenThisBatchRef`) below ensures we
-                  // don't fire multiple wakes for the same agent inside a
-                  // single processing tick — relays often target the same
-                  // hub repeatedly.
-                  if (
-                    !isAgentAwake(targetId, currentTeamId) &&
-                    !wokenThisBatchRef.current.has(targetId)
-                  ) {
-                    wokenThisBatchRef.current.add(targetId)
-                    const baseWake = buildSilentResumeWakeMessage({
-                      agentName: targetAgent.name,
-                      teamName: teamNameRef.current,
-                    })
-                    // When the wake target is Boo Zero, prefix with the
-                    // rules block — same rationale as `wakeTeamAgents` in
-                    // `groupChatSendOperation.ts`. Boo Zero's wake-on-relay
-                    // path was a documented cascade trigger; the rules
-                    // block keeps the identity + behavior anchored.
-                    const isBooZeroWake = freshBooZero !== null && targetId === freshBooZero.id
-                    const wakeMsg = isBooZeroWake
-                      ? `${buildBooZeroRulesBlock({ displayName: targetAgent.name, teamName: teamNameRef.current })}\n\n${baseWake}`
-                      : baseWake
-                    setTeamChatOverride(targetId, targetTeamSk)
-                    // Bail-2: Stop fired between IIFE start and wake send.
-                    // If we proceed, the wake message gets delivered but
-                    // the target then sits awake-but-idle — acceptable.
-                    if (getStopGeneration(currentTeamId) !== startGen) return
-                    await currentClient.call('chat.send', {
-                      sessionKey: targetTeamSk,
-                      message: wakeMsg,
-                      deliver: false,
-                      idempotencyKey: crypto.randomUUID(),
-                    })
-                    // Settle delay reduced from 5000ms → 2000ms. With N
-                    // sleeping teammates the original delay multiplied to a
-                    // visibly-bunched cascade window; 2s is still enough
-                    // for the Gateway to register the session before the
-                    // relay arrives, while keeping the overall flow tight.
-                    await new Promise((r) => setTimeout(r, 2000))
-                  }
-
-                  setTeamChatOverride(targetId, targetTeamSk)
-
-                  // Bail-3: Stop fired during the settle window OR between
-                  // the awake-check and this point. This is the BIG one —
-                  // without this check, a Stop pressed during the 2s wake-
-                  // settle would still let the relay payload land 2s
-                  // later, restarting the cascade past the freeze window.
-                  if (getStopGeneration(currentTeamId) !== startGen) return
-
-                  // Relays targeting Boo Zero get the rules block prefix
-                  // for consistency with every other Boo-Zero delivery
-                  // path. Without this, a relay from a teammate that
-                  // wakes Boo Zero's session would land WITHOUT the
-                  // identity + behavioral anchor and could prompt the
-                  // exact drift production saw at 08:18 AM.
-                  const isRelayToBooZero = freshBooZero !== null && targetId === freshBooZero.id
-                  const finalRelayMsg = isRelayToBooZero
-                    ? `${buildBooZeroRulesBlock({ displayName: targetAgent.name, teamName: teamNameRef.current })}\n\n${relayMsg}`
-                    : relayMsg
-
-                  await currentClient.call('chat.send', {
-                    sessionKey: targetTeamSk,
-                    message: finalRelayMsg,
-                    deliver: false,
-                    idempotencyKey: crypto.randomUUID(),
-                  })
-                } catch {
-                  // Non-fatal
-                }
-              })()
+              enqueueRelayItem({
+                teamId: currentTeamId,
+                targetId,
+                // Pipe the committed source's identity through to the batch
+                // so `flushRelayBatch` can record a Round 7 dispatch for the
+                // renderer.
+                sourceAgentId,
+                sourceEntryId: entry.entryId,
+                fromAgentName: agent.name,
+                condensedBody,
+              })
             }
 
             recordRelay(currentTeamId, sourceAgentId)
             incrementRelayDepth(currentTeamId, sourceAgentId)
-            // Clean up delegation source after relay is sent
+            // Clean up delegation source after relay is queued.
             delegationSourceRef.current.delete(sourceAgentId)
           }
         }
@@ -519,8 +787,21 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
       lastCountsRef.current.set(teamSk, entries?.length ?? 0)
     }
 
-    // Subscribe to chat store changes with debounce
+    // Subscribe to chat store changes.
+    //
+    // Mid-stream delegation detection (`processStreamingDelegations`) fires
+    // IMMEDIATELY on every change so DelegationCards appear inline as soon
+    // as the LLM closes a `</delegate>` tag — instead of after the leader's
+    // full response commits (often 20-30 s later). The scan is cheap (one
+    // regex per active team session).
+    //
+    // Commit-time scanning (`processNewEntries`) stays on a 500 ms debounce
+    // because it does heavier work — context preamble builds, team-rules
+    // fetches, relay routing decisions. Mid-stream dispatches are recorded
+    // in `dispatchedStreamingOffsetsRef` so the committed-entry pass doesn't
+    // re-route what already fired.
     const unsub = useChatStore.subscribe(() => {
+      processStreamingDelegations()
       if (debounceTimerRef.current !== null) {
         clearTimeout(debounceTimerRef.current)
       }
@@ -536,6 +817,14 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
         clearTimeout(debounceTimerRef.current)
         debounceTimerRef.current = null
       }
+      // Cancel + discard any pending relay batches when the hook unmounts
+      // (team switch, page navigation). Without this, a timer scheduled
+      // before unmount would fire after the team is gone and try to
+      // `chat.send` to a stale team's session.
+      for (const batch of pendingRelaysRef.current.values()) {
+        clearTimeout(batch.timerId)
+      }
+      pendingRelaysRef.current = new Map()
     }
   }, [enabled, teamId]) // Intentionally minimal deps — refs carry current values
 
@@ -596,6 +885,28 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
 
     delegationSourceRef.current = new Map()
     wokenThisBatchRef.current = new Set()
+    // Clear mid-stream dispatch dedup — any in-flight streaming burst that
+    // continues to commit after Stop should be treated as fresh (its
+    // `<delegate>` blocks were already cancelled at the dispatch layer via
+    // the stop-generation bump in `dispatchDelegation`, so no double-send
+    // risk; we just don't want stale offsets to silently mask future blocks
+    // at the same byte position in a different turn).
+    dispatchedStreamingOffsetsRef.current = new Map()
+    // Cancel any pending relay batches AND discard their accumulated items.
+    // Without this, a 3-second timer scheduled before Stop would fire
+    // afterwards and dispatch a relay containing pre-stop teammate updates.
+    // The downstream `chat.send` would be cancelled by the bumped
+    // stop-generation check inside `flushRelayBatch`, but we avoid the
+    // network call and the noisy log by clearing here.
+    for (const batch of pendingRelaysRef.current.values()) {
+      clearTimeout(batch.timerId)
+    }
+    pendingRelaysRef.current = new Map()
+    // Round 7: wipe Clawboo's dispatched-routing records for this team so
+    // the renderer's Path 3 cards from cancelled work don't linger.
+    if (currentTeamId) {
+      useChatStore.getState().clearClawbooDispatches(currentTeamId)
+    }
     frozenUntilRef.current = Date.now() + STOP_FREEZE_MS
   }, [stopSignal])
 }

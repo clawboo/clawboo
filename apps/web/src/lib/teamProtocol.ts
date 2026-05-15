@@ -243,6 +243,64 @@ brief — is still loaded. The next message you receive (a \`[Team Update]\`
 from a teammate, or a fresh user message) is where you engage. Pick up the
 work as if there was no pause.
 
+### When you have nothing substantive to add
+
+If a \`[Team Update]\` or delegation arrives and you genuinely have nothing
+to contribute (the work is outside your specialty, you'd just be repeating
+a teammate's point, etc.), emit ONLY the literal token \`__skipped__\` and
+nothing else. The renderer filters it out — the chat stays clean and the
+orchestrator knows you've acknowledged.
+
+OpenClaw protocol tokens (\`ANNOUNCE_SKIP\`, \`NO_REPLY\`) are also filtered
+by the renderer as a safety net, but prefer \`__skipped__\` as the canonical
+Clawboo signal.
+
+DO NOT emit:
+- A bare \`NO\` or \`NOPE\` — these get filtered as broken-shape leaks, and
+  you should not emit them in the first place. If you disagree with
+  something, explain why in a full sentence (≥25 chars).
+- An acknowledgment ("OK", "Got it", "Will do") with no other content. If
+  you have nothing else to add, use \`__skipped__\` instead.
+- Variations like \`SKIP\`, \`PASS\`, \`NO_RESPONSE\`, or invented control
+  tokens. Stick to the canonical \`__skipped__\`.
+
+### Receiving [Team Update] messages
+
+A \`[Team Update]\` message looks like this:
+
+> [Team Update] — relayed summary from @<Name> (not a fresh user message)
+> The teammate finished a delegated task. Continue your own work using this update as context.
+> ---
+> ...summary body...
+> ---
+
+**This is a progress report, NOT a fresh user message.** Do NOT respond to
+it as if the user just spoke. Record it silently as context for your own
+work. Only emit a new response if you have substantive new work to do based
+on this update — and even then, the response should be that NEW work, not
+an acknowledgment.
+
+DO NOT emit:
+- "Got it — that's the X layer"
+- "Done! Created Y"
+- "Quiz created — N questions covering ..."
+- "Ready for the next deliverable"
+- Any text that just narrates what the teammate did
+
+If you have nothing substantive to add, emit ONLY \`__skipped__\` and
+nothing else.
+
+### After producing a deliverable
+
+When you produce a deliverable (a file write, a code block, a JSON object,
+a table, a structured response), the deliverable IS the response. Do NOT
+emit a separate acknowledgment turn ("Done!", "Quiz created — 5 questions
+covering X, Y, Z. Ready for next.") after the actual content.
+Acknowledgment-only turns are pure noise — the user can already see your
+deliverable above. If a follow-up is genuinely warranted (e.g., a question
+back to the orchestrator), make sure it has substantive content; do not
+narrate completion.
+
 ### Routing Rules
 ${rules}
 `
@@ -277,6 +335,95 @@ ${rules}
  * visible chat.
  */
 export const RESUME_ACK_TOKEN = '__resumed__'
+
+// ─── Render-time defensive filters ─────────────────────────────────────────
+//
+// Production showed three distinct families of broken-shape assistant turns
+// leaking into the visible chat:
+//
+//   1. OpenClaw protocol control tokens — `ANNOUNCE_SKIP`, `NO_REPLY`, and the
+//      stripped variant `NO`. These are emitted by the Gateway's agent-to-
+//      agent coordination layer (see OpenClaw issue tracker). The Gateway
+//      does NOT pre-filter them — Clawboo reads raw event streams, so the
+//      renderer is the right place.
+//   2. Clawboo control tokens — `__resumed__` (already filtered) and the new
+//      `__skipped__` canonical "no contribution" signal we instruct agents
+//      to use when they have nothing substantive to add.
+//   3. Short refusal-shape responses from team agents during normal turns —
+//      bare "Sorry", "Nope", "Cannot", "Unable". Onboarding has its own
+//      retry logic (`TeamOnboardingGate.tsx`); this catches everything else.
+//      Note: bare "NO" is covered by category 1 (the stripped NO_REPLY)
+//      rather than this refusal regex.
+//
+// `shouldDropAssistantTurn` is the single render-time entry point. It's wired
+// into both `chatComponents.groupEntriesToBlocks` (UI render) AND
+// `buildDelegationLinkages` (renderer-only delegation scan) so the same
+// turn-shape never seeds a misattributed delegation either.
+
+/**
+ * Canonical Clawboo "no substantive contribution" token. We instruct agents
+ * in `buildTeamAgentsMd` to emit ONLY this string when they have nothing to
+ * add to a delegation or relay. Filtered out of the visible chat so the
+ * transcript stays clean.
+ */
+export const SKIP_ACK_TOKEN = '__skipped__'
+
+const OPENCLAW_CONTROL_TOKENS = new Set<string>(['ANNOUNCE_SKIP', 'NO_REPLY', 'NO'])
+
+// OpenClaw Gateway has a known truncation bug that strips `NO_REPLY` to
+// variable lengths. Round 4 caught `NO_REPLY` and the fully-stripped `NO`;
+// Round 5 production showed `NO_RE` leaking through (Academic Psychologist
+// Boo emitted it twice). This regex matches any underscore-form prefix:
+//   NO_, NO_R, NO_RE, NO_REP, NO_REPL, NO_REPLY
+// Natural language doesn't write these underscore-form prefixes, so the
+// false-positive risk is zero. Bare `NO` is still matched by the canonical
+// set entry above to keep the existing semantics.
+const NO_REPLY_PREFIX_RE = /^NO_R?E?P?L?Y?$/i
+
+export function isOpenclawControlToken(text: string): boolean {
+  const trimmed = text.trim()
+  if (OPENCLAW_CONTROL_TOKENS.has(trimmed.toUpperCase())) return true
+  if (NO_REPLY_PREFIX_RE.test(trimmed)) return true
+  return false
+}
+
+export function isClawbooControlToken(text: string): boolean {
+  const t = text.trim()
+  return t === RESUME_ACK_TOKEN || t === SKIP_ACK_TOKEN
+}
+
+// Refusal regex used for short bare refusals in normal team turns. NOTE: the
+// onboarding-time regex in `TeamOnboardingGate.tsx` ALSO matches `no|nope`;
+// here we only match the longer refusal openers because bare `NO` is already
+// covered by `isOpenclawControlToken` (it's the stripped `NO_REPLY` variant
+// per OpenClaw issue tracker). Matching `no` here would over-trigger on
+// legitimate sentences starting with "No problem".
+const REFUSAL_RE = /^(nope|sorry|can'?t|cannot|unable)\b/i
+
+/** Threshold below which a refusal-shape text is treated as a leak. */
+export const MIN_SUBSTANTIVE_LENGTH = 25
+
+/**
+ * True when the text is a short refusal-shape response (likely a leak from a
+ * confused agent). The length floor (`MIN_SUBSTANTIVE_LENGTH`) prevents
+ * over-triggering on legitimate longer responses that begin with the same
+ * opener (e.g., "Sorry — I think we should re-frame this; ...").
+ */
+export function isLikelyRefusal(text: string): boolean {
+  const t = text.trim()
+  return t.length < MIN_SUBSTANTIVE_LENGTH && REFUSAL_RE.test(t)
+}
+
+/**
+ * Single render-time gate for dropping broken-shape assistant turns. Returns
+ * true if the renderer should skip the entry entirely (control tokens AND
+ * short refusal-shape leaks). The merged transcript renderer in
+ * `chatComponents.groupEntriesToBlocks` and the delegation source scanner in
+ * `buildDelegationLinkages` both call this to keep behavior consistent.
+ */
+export function shouldDropAssistantTurn(text: string): boolean {
+  return isOpenclawControlToken(text) || isClawbooControlToken(text) || isLikelyRefusal(text)
+}
 
 export function buildSilentResumeWakeMessage(params: {
   agentName: string
@@ -518,4 +665,61 @@ export function buildSelfDocumentingRelayHeader(params: {
   header +=
     '\nThe teammate finished a delegated task. Continue your own work using this update as context.'
   return header
+}
+
+/**
+ * Build a batched `[Team Update]` envelope that combines N teammate progress
+ * reports into ONE message. Used by `useTeamOrchestration`'s relay-batching
+ * path to coalesce parallel completions destined for the same hub (typically
+ * Boo Zero) inside a 3-second debounce window.
+ *
+ * Why batching matters: without it, 5 teammates finishing in parallel produce
+ * 5 separate `chat.send` calls to Boo Zero, each waking a fresh LLM turn,
+ * each generating an acknowledgment ("Got it — that's the X layer"). That
+ * was the ~576-token redundant-acknowledgment cascade observed in production.
+ * One batched envelope ⇒ one Boo Zero turn ⇒ one synthesis (or zero, per the
+ * rules block which now explicitly forbids acknowledgment-only responses).
+ *
+ * Note: each item's body is expected to be already condensed by
+ * `contextRelay.condenseSummary` before being passed in. This builder does
+ * NOT re-condense.
+ */
+export function buildBatchedRelayMessage(
+  items: Array<{
+    fromAgentName: string
+    body: string
+    taskContext?: string
+  }>,
+): string {
+  if (items.length === 0) return ''
+  if (items.length === 1) {
+    // Single-item case still goes through here when the batch window expires
+    // with only one teammate's update accumulated. Use the self-documenting
+    // single-item header for visual parity with the non-batched path.
+    const item = items[0]!
+    const header = buildSelfDocumentingRelayHeader({
+      fromAgentName: item.fromAgentName,
+      taskContext: item.taskContext,
+    })
+    return `${header}\n---\n${item.body}\n---`
+  }
+
+  const headerLines = [
+    `[Team Update] — ${items.length} teammates finished delegated tasks (not fresh user messages)`,
+    'The following are progress reports. Continue your own work using these updates as context.',
+    'Synthesize across them ONLY when the user has asked a follow-up that requires combining them, OR when you need a unified takeaway to drive the next round of delegations. Do NOT acknowledge them individually.',
+  ]
+  const sections = [headerLines.join('\n'), '---']
+  for (const item of items) {
+    let header = `@${item.fromAgentName}:`
+    if (item.taskContext) {
+      const ctx =
+        item.taskContext.length > 80 ? item.taskContext.slice(0, 80) + '...' : item.taskContext
+      header += ` (re: "${ctx}")`
+    }
+    sections.push(header)
+    sections.push(item.body)
+    sections.push('---')
+  }
+  return sections.join('\n')
 }

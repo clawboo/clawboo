@@ -25,6 +25,8 @@ import {
   buildDelegationLinkages,
   type DelegationLinkage,
 } from '@/features/group-chat/buildDelegationLinkages'
+import { shouldDropAssistantTurn } from '@/lib/teamProtocol'
+import { parseToolEntry } from './parseToolEntry'
 import { splitAssistantText } from './splitAssistantText'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -42,20 +44,11 @@ export const formatDuration = (ms: number) => {
   return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`
 }
 
-/** Parse [[tool]] / [[tool-result]] lines from the protocol. */
-export function parseToolEntry(
-  text: string,
-): { kind: 'call' | 'result'; name: string; body: string } | null {
-  const isCall = text.startsWith('[[tool]]')
-  const isResult = text.startsWith('[[tool-result]]')
-  if (!isCall && !isResult) return null
-  const prefix = isCall ? '[[tool]]' : '[[tool-result]]'
-  const rest = text.slice(prefix.length)
-  const nl = rest.indexOf('\n')
-  const name = (nl === -1 ? rest : rest.slice(0, nl)).trim()
-  const body = nl === -1 ? '' : rest.slice(nl + 1).trim()
-  return { kind: isCall ? 'call' : 'result', name, body }
-}
+// `parseToolEntry` lives in its own module so `buildDelegationLinkages` can
+// import it without a circular reference through chatComponents (which itself
+// imports `buildDelegationLinkages`). Re-exported here so existing consumers
+// keep working.
+export { parseToolEntry } from './parseToolEntry'
 
 /**
  * Inline @mention highlighting for group chat messages.
@@ -147,10 +140,14 @@ export function groupEntriesToBlocks(entries: TranscriptEntry[]): RenderBlock[] 
   for (const entry of entries) {
     // Skip injected context preamble entries (should not appear in UI)
     if (entry.text.startsWith('[Team Context')) continue
-    // Skip the resume-ack token — the wake message asks the agent to reply
-    // with EXACTLY `__resumed__` to confirm session warmup. The literal
-    // token is a protocol artifact, not chat content the user should see.
-    if (entry.text.trim() === '__resumed__') continue
+    // Drop broken-shape assistant turns: OpenClaw protocol control tokens
+    // (ANNOUNCE_SKIP / NO_REPLY / NO), Clawboo control tokens (__resumed__,
+    // __skipped__), and short refusal-shape leaks. See `shouldDropAssistantTurn`
+    // in `lib/teamProtocol.ts` for the canonical filter (extracted as a
+    // shared utility so the delegation source scanner uses the same gate).
+    // Meta and user entries pass through — the filter only catches assistant
+    // turns whose entire body is a broken-shape signal.
+    if (entry.role === 'assistant' && shouldDropAssistantTurn(entry.text)) continue
 
     if (entry.kind === 'meta') {
       commitTurn()
@@ -488,13 +485,50 @@ export const DelegationCard = memo(function DelegationCard({
       <div className="flex items-center gap-2">
         <BooAvatar seed={avatarSeed} size={20} />
         <ArrowRight size={11} style={{ color: `${tint}b3` }} />
-        <span
-          className="font-mono text-[10px] font-semibold uppercase tracking-widest"
-          style={{ color: tint }}
-        >
-          Delegated to
-        </span>
+        {(() => {
+          // Round 7: verb + badge differ by routing source so the user can
+          // tell apart "the LLM explicitly delegated" vs. "Clawboo
+          // routed this on the LLM's behalf".
+          const src = linkage?.source ?? 'delegate-tag'
+          const verb = src === 'clawboo-relay' ? 'Routed to' : 'Delegated to'
+          return (
+            <span
+              className="font-mono text-[10px] font-semibold uppercase tracking-widest"
+              style={{ color: tint }}
+            >
+              {verb}
+            </span>
+          )
+        })()}
         <span className="font-mono text-[10px] font-medium text-text">@{targetName}</span>
+        {(() => {
+          // Show an origin badge for the non-canonical paths so the user
+          // sees the routing wasn't an explicit `<delegate>` tag.
+          const src = linkage?.source ?? 'delegate-tag'
+          if (src === 'clawboo-dispatch') {
+            return (
+              <span
+                className="ml-1 rounded-full px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider"
+                style={{ color: tint, background: `${tint}1a` }}
+                title="Clawboo dispatched this to the target on the LLM's behalf (fallback regex match)"
+              >
+                via clawboo
+              </span>
+            )
+          }
+          if (src === 'clawboo-relay') {
+            return (
+              <span
+                className="ml-1 rounded-full px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider"
+                style={{ color: 'rgba(232,232,232,0.55)', background: 'rgba(255,255,255,0.06)' }}
+                title="Clawboo forwarded the source's response to this teammate as a [Team Update]"
+              >
+                routed
+              </span>
+            )
+          }
+          return null
+        })()}
         {canCollapse && (
           <button
             type="button"
@@ -736,6 +770,7 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
   agentName,
   streaming,
   linkagesBySourceEntry,
+  claimedEntries,
   teamId,
   latestSourceEntryId,
   isFollowup = false,
@@ -746,6 +781,14 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
   streaming?: boolean
   /** Group-chat-only: pass-through so DelegationCard segments can nest target replies. */
   linkagesBySourceEntry?: Map<string, DelegationLinkage[]>
+  /**
+   * Group-chat-only: ids of tool entries claimed by Round 6's
+   * `sessions_send` linkage scan. Those entries already render as
+   * DelegationCards inside the prose region — the raw `[[tool]]`
+   * `ToolCallCard` is suppressed so the same routing event doesn't appear
+   * twice. Defaults to an empty set when omitted (1:1 chat path).
+   */
+  claimedEntries?: Set<string>
   /** Group-chat-only: needed by nested DelegationCards to resolve target session keys. */
   teamId?: string
   /** Group-chat-only: source entryId whose delegations default-expand (newest exposed). */
@@ -760,7 +803,14 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
 }) {
   const isRelay = isTeamUpdateEntry(block.assistant)
   const hasThinking = block.thinking.length > 0
-  const hasTools = block.tools.length > 0
+  // Round 6: filter tool entries claimed by `sessions_send` linkages — those
+  // render as DelegationCards inside the prose region below; rendering the
+  // raw `[[tool]] sessions_send` ToolCallCard would duplicate the routing
+  // event visually.
+  const visibleTools = claimedEntries
+    ? block.tools.filter((entry) => !claimedEntries.has(entry.entryId))
+    : block.tools
+  const hasTools = visibleTools.length > 0
   const hasText = Boolean(block.assistant?.text)
   const charCount = block.assistant?.text?.length ?? 0
   const runId = block.assistant?.runId ?? null
@@ -816,62 +866,103 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
         />
       )}
 
-      {/* Tool calls */}
+      {/* Tool calls (after filtering out Round 6's `sessions_send` entries
+          that already render as DelegationCards in the prose region below). */}
       {hasTools && (
         <div className="flex flex-col gap-1">
-          {block.tools.map((entry) => (
+          {visibleTools.map((entry) => (
             <ToolCallCard key={entry.entryId} entry={entry} />
           ))}
         </div>
       )}
 
-      {/* Assistant text — strip prefix for relay messages, split structured
-          delegation blocks out into their own cards. Relay messages don't
-          contain `<delegate>` blocks (they're condensed summaries), so the
-          split returns a single prose segment for them.
+      {/* Assistant text — strip relay prefix, split structured `<delegate>`
+          blocks into their own cards. Round 6 also injects DelegationCards
+          for `sessions_send` tool calls between the leader's intro prose
+          and any post-`\n---\n` summary prose, restoring the natural
+          "intro → cards → summary" flow within the leader's card.
           `max-w-prose` (~65ch) caps line length to the optimal reading
-          measure regardless of window width — without this, body lines
-          stretched 150-200+ chars and the eye lost track of which line
-          it was on returning to the left margin. */}
-      {hasText && (
-        <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-text">
-          {splitAssistantText(
-            isRelay ? stripRelayPrefix(block.assistant!.text) : block.assistant!.text,
-          ).map((segment, idx) => {
-            if (segment.kind === 'delegation') {
-              const matchedLinkage =
-                block.assistant && linkagesBySourceEntry
-                  ? linkagesBySourceEntry
-                      .get(block.assistant.entryId)
-                      ?.find((l) => l.blockStart === segment.blockStart)
-                  : undefined
-              const expandedDefault = block.assistant
-                ? block.assistant.entryId === latestSourceEntryId
-                : true
+          measure regardless of window width. */}
+      {hasText &&
+        (() => {
+          const rawText = isRelay ? stripRelayPrefix(block.assistant!.text) : block.assistant!.text
+          // Pull `sessions_send` linkages for this source — they go BETWEEN
+          // the intro prose and the post-`\n---\n` summary prose so the
+          // leader's response reads in narrative order.
+          const allLinkagesForSource =
+            block.assistant && linkagesBySourceEntry
+              ? (linkagesBySourceEntry.get(block.assistant.entryId) ?? [])
+              : []
+          const sessionsSendLinkages = allLinkagesForSource.filter(
+            (l) => l.source === 'sessions-send',
+          )
+
+          // Split the prose at the first `\n---\n` markdown horizontal rule
+          // when we have `sessions_send` cards to inject. Without cards the
+          // whole prose renders as one segment (no behavioral regression for
+          // turns that don't use sessions_send routing).
+          const splitMatch = sessionsSendLinkages.length > 0 ? rawText.match(/\n---\n/) : null
+          const splitIdx = splitMatch?.index ?? -1
+          const introText = splitIdx >= 0 ? rawText.slice(0, splitIdx) : rawText
+          const summaryText =
+            splitIdx >= 0 && splitMatch ? rawText.slice(splitIdx + splitMatch[0].length) : ''
+
+          const expandedDefault = block.assistant
+            ? block.assistant.entryId === latestSourceEntryId
+            : true
+
+          const renderProseSegments = (proseText: string, keyBase: string) =>
+            splitAssistantText(proseText).map((segment, idx) => {
+              if (segment.kind === 'delegation') {
+                const matchedLinkage =
+                  block.assistant && linkagesBySourceEntry
+                    ? linkagesBySourceEntry
+                        .get(block.assistant.entryId)
+                        ?.find(
+                          (l) => l.source === 'delegate-tag' && l.blockStart === segment.blockStart,
+                        )
+                    : undefined
+                return (
+                  <DelegationCard
+                    key={`${keyBase}-delegation-${idx}`}
+                    targetName={segment.targetName}
+                    task={segment.task}
+                    linkage={matchedLinkage}
+                    teamId={teamId}
+                    defaultExpanded={expandedDefault}
+                    latestSourceEntryId={latestSourceEntryId}
+                  />
+                )
+              }
               return (
+                <ReactMarkdown
+                  key={`${keyBase}-prose-${idx}`}
+                  remarkPlugins={[remarkGfm]}
+                  components={MD_COMPONENTS}
+                >
+                  {segment.text}
+                </ReactMarkdown>
+              )
+            })
+
+          return (
+            <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-text">
+              {renderProseSegments(introText, 'intro')}
+              {sessionsSendLinkages.map((linkage) => (
                 <DelegationCard
-                  key={`delegation-${idx}`}
-                  targetName={segment.targetName}
-                  task={segment.task}
-                  linkage={matchedLinkage}
+                  key={linkage.delegationId}
+                  targetName={`@${linkage.targetAgentName}`}
+                  task={linkage.task}
+                  linkage={linkage}
                   teamId={teamId}
                   defaultExpanded={expandedDefault}
                   latestSourceEntryId={latestSourceEntryId}
                 />
-              )
-            }
-            return (
-              <ReactMarkdown
-                key={`prose-${idx}`}
-                remarkPlugins={[remarkGfm]}
-                components={MD_COMPONENTS}
-              >
-                {segment.text}
-              </ReactMarkdown>
-            )
-          })}
-        </div>
-      )}
+              ))}
+              {summaryText && renderProseSegments(summaryText, 'summary')}
+            </div>
+          )
+        })()}
 
       {/* Streaming text */}
       {streaming && !hasText && !hasThinking && <TypingIndicator />}
@@ -926,8 +1017,20 @@ export const StreamingCard = memo(function StreamingCard({
                 task={segment.task}
               />
             ) : (
-              <div key={`stream-prose-${idx}`} className="whitespace-pre-wrap">
-                {segment.text}
+              // Round 6 (Layer 6B): render streaming prose with the same
+              // ReactMarkdown pipeline used by `AssistantTurnCard` so bold /
+              // lists / code blocks / links format progressively as text
+              // streams in — instead of staying as raw text until commit.
+              // ReactMarkdown's parser is tolerant of partial markdown
+              // (unfinished `**bold`, partial `[link](`, unclosed fences):
+              // it renders what's parseable and leaves the rest as text.
+              // `splitAssistantText` (above) already excludes partial
+              // `<delegate>` tags from the prose, so the markdown parser
+              // never sees them.
+              <div key={`stream-prose-${idx}`}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                  {segment.text}
+                </ReactMarkdown>
               </div>
             ),
           )}

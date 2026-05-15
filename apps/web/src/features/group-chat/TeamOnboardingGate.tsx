@@ -81,6 +81,14 @@ const AGENT_INTRO_RETRY_PROMPT = [
   'Do NOT respond with refusals, "NO", or other short non-answers. Do NOT mention teammates by name. Aim for ~30-80 words.',
 ].join('\n')
 
+// Onboarding's "did the agent introduce itself?" check is intentionally
+// stricter than the general-purpose `isLikelyRefusal` in
+// `lib/teamProtocol.ts`. The renderer filter excludes bare `no` because the
+// OpenClaw protocol-token filter catches `NO` / `NO_REPLY` separately. Here
+// we ALSO want to catch "No, I won't introduce myself" (length>25 but still
+// a refusal at the start of a sentence). Both regexes overlap on the longer
+// openers (nope/sorry/can't/cannot/unable) — kept local to avoid coupling
+// the two semantic uses.
 const MIN_INTRO_CHARS = 25
 const REFUSAL_RE = /^(no|nope|sorry|can'?t|cannot|unable)\b/i
 

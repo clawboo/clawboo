@@ -60,6 +60,16 @@ export function GroupChatPanel({
   const connectionStatus = useConnectionStore((s) => s.status)
   const transcripts = useChatStore((s) => s.transcripts)
   const streamingTextMap = useChatStore((s) => s.streamingText)
+  // Round 5: subscribe to stream-start timestamps so live StreamingCards
+  // can position themselves at their chronological slot in the merged
+  // timeline (not always-at-the-end). After commit, the committed entry
+  // takes the same `timestampMs` value — zero visible re-arrangement.
+  const streamStartedAtMap = useChatStore((s) => s.streamStartedAt)
+  // Round 7: Clawboo's recorded outgoing routing events for this team.
+  // Threaded into `buildDelegationLinkages` Path 3 so DelegationCards
+  // surface ACTUAL Clawboo routing — `dispatchDelegation` + relay batches
+  // — independent of whatever the LLM emits in prose.
+  const clawbooDispatchesMap = useChatStore((s) => s.clawbooDispatches)
 
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
@@ -210,8 +220,9 @@ export function GroupChatPanel({
         mergedEntries,
         teamId,
         participants: participants.map((a) => ({ id: a.id, name: a.name })),
+        clawbooDispatches: clawbooDispatchesMap,
       }),
-    [blocks, mergedEntries, teamId, participants],
+    [blocks, mergedEntries, teamId, participants, clawbooDispatchesMap],
   )
 
   // Pick the entryId of the chronologically-latest source-turn that contains
@@ -317,18 +328,83 @@ export function GroupChatPanel({
   // it inline. Without this filter the stream would appear both inside the
   // card AND as a duplicate top-level StreamingCard.
   const activeStreams = useMemo(() => {
-    const streams: { agentId: string; agentName: string; text: string }[] = []
+    const streams: {
+      agentId: string
+      agentName: string
+      text: string
+      sessionKey: string
+      streamStartedAt: number
+    }[] = []
     for (const agent of participants) {
       const teamSk = teamSessionKeys.get(agent.id)
       if (!teamSk) continue
       if (linkages.streamingOwnerByTargetSessionKey.has(teamSk)) continue
       const text = streamingTextMap.get(teamSk)
       if (text != null) {
-        streams.push({ agentId: agent.id, agentName: agent.name, text })
+        // Stream-start anchors the live card's chronological position in
+        // the timeline. Falls back to "now" on the first render after a
+        // chunk lands but before the store update commits (vanishingly
+        // rare in practice — Zustand updates are synchronous).
+        const streamStartedAt = streamStartedAtMap.get(teamSk) ?? Date.now()
+        streams.push({
+          agentId: agent.id,
+          agentName: agent.name,
+          text,
+          sessionKey: teamSk,
+          streamStartedAt,
+        })
       }
     }
     return streams
-  }, [participants, teamSessionKeys, streamingTextMap, linkages.streamingOwnerByTargetSessionKey])
+  }, [
+    participants,
+    teamSessionKeys,
+    streamingTextMap,
+    streamStartedAtMap,
+    linkages.streamingOwnerByTargetSessionKey,
+  ])
+
+  // ── Interleaved render timeline ───────────────────────────────────────────
+  // Committed blocks and active streaming cards merged into ONE chronologically-
+  // sorted list. Each item carries the timestamp at which the leader's
+  // response BEGAN — committed entries from `appendOutputLines` use the same
+  // stream-start anchor, so a streaming card and its eventual committed entry
+  // occupy the same chronological slot. No visible re-arrangement on commit.
+  type RenderItem =
+    | { kind: 'block'; block: (typeof topLevelBlocks)[number]; ts: number; tieKey: number }
+    | { kind: 'stream'; stream: (typeof activeStreams)[number]; ts: number; tieKey: number }
+  const renderItems = useMemo<RenderItem[]>(() => {
+    const blockTs = (block: (typeof topLevelBlocks)[number]): number => {
+      // AssistantBlock carries its own `timestampMs`; meta/user blocks
+      // anchor on their underlying entry. Fall back to 0 only as a defensive
+      // last resort.
+      if (block.kind === 'assistant-turn') return block.timestampMs ?? 0
+      return block.entry.timestampMs ?? 0
+    }
+    const items: RenderItem[] = []
+    for (let i = 0; i < topLevelBlocks.length; i++) {
+      const block = topLevelBlocks[i]!
+      items.push({ kind: 'block', block, ts: blockTs(block), tieKey: i })
+    }
+    for (const stream of activeStreams) {
+      // Streams sort AFTER committed blocks with the same timestamp because
+      // the committed entry IS what the stream produced — once it commits,
+      // the stream disappears and the committed block takes the slot. While
+      // streaming, the slight tieKey bump keeps the live card visually below
+      // any same-timestamp tool/thinking block that already committed.
+      items.push({
+        kind: 'stream',
+        stream,
+        ts: stream.streamStartedAt,
+        tieKey: Number.MAX_SAFE_INTEGER,
+      })
+    }
+    items.sort((a, b) => {
+      if (a.ts !== b.ts) return a.ts - b.ts
+      return a.tieKey - b.tieKey
+    })
+    return items
+  }, [topLevelBlocks, activeStreams])
 
   const anyRunning = teamAgents.some((a) => a.status === 'running')
 
@@ -485,14 +561,34 @@ export function GroupChatPanel({
         ) : (
           <div className="flex flex-col pb-2">
             {(() => {
-              // Track the previous block + its owner across the loop so the
-              // follow-up check has both pieces of context. Same author +
-              // assistant-turn + within 5 min → drop the repeated header
-              // and tighten the top margin (the Slack/Discord/iMessage
-              // grouping pattern).
+              // Track previous BLOCK across the loop (not previous stream)
+              // so the same-author follow-up grouping survives stream
+              // interruptions. Streams are always rendered with the
+              // "new section" margin — they don't participate in the
+              // Slack/Discord/iMessage author-grouping rhythm.
               let prevBlock: (typeof topLevelBlocks)[number] | null = null
               let prevOwnerAgentId: string | null = null
-              return topLevelBlocks.map((block, i) => {
+              let blockIdx = -1
+              const lastBlockSeenIdx = topLevelBlocks.length - 1
+
+              return renderItems.map((item, i) => {
+                if (item.kind === 'stream') {
+                  const stream = item.stream
+                  return (
+                    <div
+                      key={`stream-wrap-${stream.agentId}-${stream.sessionKey}`}
+                      className={i === 0 ? '' : 'mt-7'}
+                    >
+                      <StreamingCard
+                        text={stream.text}
+                        agentId={stream.agentId}
+                        agentName={stream.agentName}
+                      />
+                    </div>
+                  )
+                }
+                blockIdx += 1
+                const block = item.block
                 let currentOwnerAgentId: string | null = null
                 if (block.kind === 'assistant-turn') {
                   const firstEntry = block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
@@ -506,7 +602,10 @@ export function GroupChatPanel({
                   prevOwnerAgentId,
                   currentOwnerAgentId,
                 )
-                const margin = blockMarginClass(i, isFollowup)
+                // Use `i === 0` (timeline position) for the "first item
+                // has no top margin" check; `blockIdx` only matters for
+                // the followup-vs-new-author choice.
+                const margin = i === 0 ? '' : blockMarginClass(blockIdx, isFollowup)
                 prevBlock = block
                 prevOwnerAgentId = currentOwnerAgentId
 
@@ -532,15 +631,16 @@ export function GroupChatPanel({
                 }
                 const ownerAgent = currentOwnerAgentId ? agentLookup.get(currentOwnerAgentId) : null
                 return (
-                  <div key={`turn-${i}`} className={margin}>
+                  <div key={`turn-${blockIdx}`} className={margin}>
                     <AssistantTurnCard
                       block={block}
                       agentId={ownerAgent?.id ?? 'unknown'}
                       agentName={ownerAgent?.name ?? 'Agent'}
                       streaming={
-                        anyRunning && i === topLevelBlocks.length - 1 && activeStreams.length === 0
+                        anyRunning && blockIdx === lastBlockSeenIdx && activeStreams.length === 0
                       }
                       linkagesBySourceEntry={linkages.linkagesBySourceEntry}
+                      claimedEntries={linkages.claimedEntries}
                       teamId={teamId}
                       latestSourceEntryId={latestSourceEntryIdWithDelegations}
                       isFollowup={isFollowup}
@@ -549,20 +649,6 @@ export function GroupChatPanel({
                 )
               })
             })()}
-
-            {/* Live streaming — one card per actively streaming agent.
-                Always gets the "new section" margin since we can't know
-                whether the streaming agent matches the chronologically-
-                last committed block's owner without extra bookkeeping. */}
-            {activeStreams.map((stream) => (
-              <div key={`stream-wrap-${stream.agentId}`} className="mt-7">
-                <StreamingCard
-                  text={stream.text}
-                  agentId={stream.agentId}
-                  agentName={stream.agentName}
-                />
-              </div>
-            ))}
 
             <div ref={bottomRef} aria-hidden />
           </div>
