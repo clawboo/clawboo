@@ -981,23 +981,6 @@ export function blockMarginClass(index: number, isFollowup: boolean): string {
   return isFollowup ? 'mt-2' : 'mt-7'
 }
 
-/**
- * Per-block hover affordance — Slack pattern. The `-mx-4 px-4` matches the
- * parent scroll container's `px-4`, so the highlight extends edge-to-edge
- * within the column (no awkward 4px gap on either side). Near-imperceptible
- * bg tint on hover so each message becomes a discoverable interactive
- * surface without adding chrome at rest.
- *
- * Applied uniformly to assistant turns AND user messages — Slack hovers
- * user rows too, and at 1.8% opacity the stripe behind a right-aligned
- * bubble reads as "this row is interactive" rather than as a misaligned
- * background.
- *
- * Future per-message actions (copy, react, react bar) attach here.
- */
-export const BLOCK_ROW_HOVER_CLASS =
-  '-mx-4 rounded-md px-4 transition-colors duration-150 hover:bg-white/[0.028]'
-
 // ─── MessageList ──────────────────────────────────────────────────────────────
 
 export const NEAR_BOTTOM_PX = 80
@@ -1083,16 +1066,13 @@ export const MessageList = memo(function MessageList({
             }
             if (block.kind === 'user') {
               return (
-                <div
-                  key={block.entry.entryId}
-                  className={`${margin} ${BLOCK_ROW_HOVER_CLASS}`.trim()}
-                >
+                <div key={block.entry.entryId} className={margin}>
                   <UserMessageCard entry={block.entry} />
                 </div>
               )
             }
             return (
-              <div key={`turn-${i}`} className={`${margin} ${BLOCK_ROW_HOVER_CLASS}`.trim()}>
+              <div key={`turn-${i}`} className={margin}>
                 <AssistantTurnCard
                   block={block}
                   agentId={agentId}

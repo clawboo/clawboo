@@ -26,7 +26,6 @@ import {
   NEAR_BOTTOM_PX,
   isFollowupBlock,
   blockMarginClass,
-  BLOCK_ROW_HOVER_CLASS,
   type MessageComposerHandle,
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
@@ -522,10 +521,7 @@ export function GroupChatPanel({
                   const targetId = agentIdFromSessionKey(block.entry.sessionKey)
                   const targetAgent = targetId ? agentLookup.get(targetId) : null
                   return (
-                    <div
-                      key={block.entry.entryId}
-                      className={`${margin} ${BLOCK_ROW_HOVER_CLASS}`.trim()}
-                    >
+                    <div key={block.entry.entryId} className={margin}>
                       <UserMessageCard
                         entry={block.entry}
                         targetAgentName={targetAgent?.name}
@@ -536,7 +532,7 @@ export function GroupChatPanel({
                 }
                 const ownerAgent = currentOwnerAgentId ? agentLookup.get(currentOwnerAgentId) : null
                 return (
-                  <div key={`turn-${i}`} className={`${margin} ${BLOCK_ROW_HOVER_CLASS}`.trim()}>
+                  <div key={`turn-${i}`} className={margin}>
                     <AssistantTurnCard
                       block={block}
                       agentId={ownerAgent?.id ?? 'unknown'}
