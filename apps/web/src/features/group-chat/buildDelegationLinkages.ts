@@ -15,8 +15,9 @@ import type { TranscriptEntry } from '@clawboo/protocol'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { shouldDropAssistantTurn } from '@/lib/teamProtocol'
 import { findDelegationBlocks, isRelayMessage } from './delegationDetector'
+import { findPlanBlocks } from './planDetector'
 import { parseToolEntry } from '@/features/chat/parseToolEntry'
-import type { ClawbooDispatch } from '@/stores/chat'
+import type { ClawbooDispatch, PendingWorkstreams } from '@/stores/chat'
 import type { RenderBlock } from '@/features/chat/chatComponents'
 
 export interface DelegationLinkage {
@@ -62,6 +63,35 @@ export interface DelegationLinkage {
    *     produced the wake.
    */
   source: 'delegate-tag' | 'sessions-send' | 'clawboo-dispatch' | 'clawboo-relay'
+  /**
+   * Round 9: when this linkage is a step of a `<plan>` block, the parent
+   * plan's id. The renderer (`AssistantTurnCard` → `PlanCard`) groups all
+   * linkages with the same `planId` under one PlanCard header. Null /
+   * undefined for one-shot delegations (`<delegate>`, `sessions_send`,
+   * fallback regex, relay batches not part of a plan).
+   */
+  planId?: string | null
+  /**
+   * Round 9: the step's index within the parent plan (0-based). The
+   * renderer orders step cards under the PlanCard header by this index.
+   * Paired with `planId`.
+   */
+  planStepIndex?: number | null
+  /**
+   * Round 10: when this linkage is one target of a parallel workstream
+   * batch (≥2 sibling `<delegate>` tags emitted in one leader turn, no
+   * `<plan>` wrapper), carries the parent workstream's id so the renderer
+   * (`AssistantTurnCard` → `WorkstreamCard`) groups all sibling-linkages
+   * with the same `workstreamId` under one card. Null / undefined for
+   * one-shot delegations, plan steps, or `sessions_send` cards.
+   */
+  workstreamId?: string | null
+  /**
+   * Round 10: the target's index within the parent workstream (0-based).
+   * Sourced from `ClawbooDispatch.workstreamTargetIndex`. Stable across
+   * dispatches arriving out of order.
+   */
+  workstreamTargetIndex?: number | null
 }
 
 export interface BuildDelegationLinkagesResult {
@@ -98,6 +128,41 @@ export interface BuildDelegationLinkagesParams {
    * `sessions_send`. When omitted (1:1 chat path), Path 3 is skipped.
    */
   clawbooDispatches?: Map<string, ClawbooDispatch[]>
+  /**
+   * Round 13: Clawboo's implicit-fan-out workstream records, keyed by
+   * `workstreamId`. Threaded in from `GroupChatPanel` via
+   * `useChatStore(s => s.pendingWorkstreams)`. Path 4 in the linkage
+   * scan synthesizes DelegationLinkages for these workstreams when the
+   * leader's response had NO explicit `<delegate>` / `sessions_send`
+   * tags BUT Clawboo's orchestration detected "I'll ask all teammates"
+   * fan-out prose and minted a workstream record. Without this, no
+   * cards would render — the user sees flat plain-assistant turns from
+   * the teammates with no DONE pills or grid layout.
+   */
+  pendingWorkstreams?: Map<string, PendingWorkstreams>
+  /**
+   * Round 15: live streaming text per participant session — keyed by
+   * sessionKey, matching `useChatStore.streamingText`. Used by the
+   * leader-streaming pass below to scan for mid-stream `<delegate>`
+   * blocks BEFORE the leader's source entry commits. Without this scan,
+   * the target's reply would appear at top-level as a `StreamingCard`
+   * (and then briefly as a top-level `AssistantTurnCard` after the
+   * target commits but before the leader does), then jump inside the
+   * eventual DelegationCard once the leader's entry commits and Path 1
+   * builds the real linkage. With this scan, ownership transfers to the
+   * card from the moment the closing `</delegate>` tag appears in the
+   * leader's stream — the visible card stays stable across commit.
+   */
+  streamingTexts?: Map<string, string>
+  /**
+   * Round 15: per-session stream-start timestamps (`useChatStore.streamStartedAt`).
+   * Anchors the leader-streaming scan's "after-source" filter — pre-stream
+   * target entries (e.g., the target's old onboarding intro) are NOT
+   * claimed, only entries that landed AFTER the leader's stream started.
+   * Same role as `sourceTimestampMs` in `findTargetResponse` but resolved
+   * from the stream anchor instead of a committed entry.
+   */
+  streamStartedAt?: Map<string, number>
 }
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
@@ -337,14 +402,34 @@ function bucketByAgent(mergedEntries: TranscriptEntry[]): Map<string, Transcript
 export function buildDelegationLinkages(
   params: BuildDelegationLinkagesParams,
 ): BuildDelegationLinkagesResult {
-  const { blocks, mergedEntries, teamId, participants, clawbooDispatches } = params
+  const {
+    blocks,
+    mergedEntries,
+    teamId,
+    participants,
+    clawbooDispatches,
+    pendingWorkstreams,
+    streamingTexts,
+    streamStartedAt,
+  } = params
 
   const linkagesByDelegationId = new Map<string, DelegationLinkage>()
   const linkagesBySourceEntry = new Map<string, DelegationLinkage[]>()
   const claimedEntries = new Set<string>()
   const streamingOwnerByTargetSessionKey = new Map<string, string>()
 
-  if (blocks.length === 0 || mergedEntries.length === 0) {
+  // Early-return: nothing to scan AND nothing streaming. Round 15's
+  // streaming-text pass still needs to run when `blocks.length === 0`
+  // but the leader is mid-stream — that's the exact "before commit"
+  // window the pass is designed for.
+  const hasStreamingWithDelegateLike = (() => {
+    if (!streamingTexts || streamingTexts.size === 0) return false
+    for (const t of streamingTexts.values()) {
+      if (t && t.includes('<delegate')) return true
+    }
+    return false
+  })()
+  if (blocks.length === 0 && !hasStreamingWithDelegateLike) {
     return {
       linkagesByDelegationId,
       linkagesBySourceEntry,
@@ -386,13 +471,41 @@ export function buildDelegationLinkages(
     }
 
     // ─── Path 1: structured `<delegate>` tags (the canonical Clawboo flow) ──
+    //
+    // Round 10: when the source contains ≥2 valid `<delegate>` blocks AND
+    // no `<plan>` wrapper, attribute each linkage to a single workstreamId
+    // so the renderer (`AssistantTurnCard` → `WorkstreamCard`) groups them
+    // under one card. The id is derived deterministically from the source
+    // entry's id — same scheme as `useTeamOrchestration` uses when minting
+    // the `PendingWorkstreams` store record, so the renderer can read live
+    // progress from the store via the same key.
     const delegateBlocks = findDelegationBlocks(text)
-    for (const delegateBlock of delegateBlocks) {
-      if (!delegateBlock.task) continue
-      const target = resolveTarget(delegateBlock.targetName, participants)
-      if (!target) continue
-      if (target.id === sourceAgentId) continue
+    // Pre-validate so the workstream batch decision uses real targets
+    // (filters self / unknown / empty-task — same gates the orchestration
+    // hook uses via `detectDelegations`). This also avoids attributing a
+    // workstreamId to a 1-valid + 1-invalid case which the user perceives
+    // as a single delegation, not a batch.
+    const validDelegateBlocks = delegateBlocks
+      .map((b) => {
+        if (!b.task) return null
+        const t = resolveTarget(b.targetName, participants)
+        if (!t) return null
+        if (t.id === sourceAgentId) return null
+        return { block: b, target: t }
+      })
+      .filter(
+        (
+          x,
+        ): x is { block: (typeof delegateBlocks)[number]; target: { id: string; name: string } } =>
+          x !== null,
+      )
+    const sourceHasPlan = findPlanBlocks(text).length > 0
+    const isWorkstreamBatch = validDelegateBlocks.length >= 2 && !sourceHasPlan
+    const workstreamIdForSource = isWorkstreamBatch
+      ? `${teamId}:${sourceEntry.entryId}:workstreams`
+      : null
 
+    validDelegateBlocks.forEach(({ block: delegateBlock, target }, idx) => {
       const targetSessionKey = buildTeamSessionKey(target.id, teamId)
       const targetBucket = entriesByAgent.get(target.id) ?? []
       const linkedEntries = findTargetResponse({
@@ -415,8 +528,12 @@ export function buildDelegationLinkages(
         linkedEntries,
         isPending: linkedEntries.length === 0,
         source: 'delegate-tag',
+        // Round 10: when this source emitted N≥2 valid `<delegate>` tags
+        // without a `<plan>` wrapper, group them under one WorkstreamCard.
+        workstreamId: workstreamIdForSource,
+        workstreamTargetIndex: workstreamIdForSource !== null ? idx : null,
       })
-    }
+    })
 
     // ─── Path 2: Round 6 — OpenClaw `sessions_send` tool calls ──────────────
     // The LLM often skips structured `<delegate>` tags and uses OpenClaw's
@@ -528,7 +645,145 @@ export function buildDelegationLinkages(
           linkedEntries,
           isPending: linkedEntries.length === 0,
           source: dispatch.origin === 'dispatch-delegation' ? 'clawboo-dispatch' : 'clawboo-relay',
+          // Round 9: propagate plan provenance so the renderer can group
+          // plan-step linkages under a single PlanCard header.
+          planId: dispatch.planId ?? null,
+          planStepIndex: dispatch.planStepIndex ?? null,
+          // Round 10: propagate workstream provenance so the renderer can
+          // group sibling-delegation linkages under a single WorkstreamCard.
+          workstreamId: dispatch.workstreamId ?? null,
+          workstreamTargetIndex: dispatch.workstreamTargetIndex ?? null,
         })
+      }
+    }
+
+    // ─── Path 4: Round 13 — implicit fan-out workstreams ──────────────────
+    // When the leader emits plural-routing prose ("I'll ask all teammates",
+    // "got responses from all three", etc.) WITHOUT any structured tag,
+    // `useTeamOrchestration.processNewEntries` mints a PendingWorkstreams
+    // record with `:implicit-fanout` suffix. Path 4 synthesizes one
+    // linkage per target so the existing WorkstreamCard pipeline renders.
+    //
+    // Subordinate to Paths 1-3: if any of them produced linkages on this
+    // source, we SKIP — explicit / Gateway-routed signals always win.
+    if (pendingWorkstreams) {
+      const existing = linkagesBySourceEntry.get(sourceEntry.entryId)
+      if (!existing || existing.length === 0) {
+        for (const ws of pendingWorkstreams.values()) {
+          if (ws.teamId !== teamId) continue
+          if (ws.sourceEntryId !== sourceEntry.entryId) continue
+          if (!ws.workstreamId.endsWith(':implicit-fanout')) continue
+          ws.targets.forEach((target, idx) => {
+            if (!target.targetAgentId) return
+            if (target.targetAgentId === sourceAgentId) return
+            const targetSessionKey = buildTeamSessionKey(target.targetAgentId, teamId)
+            const targetBucket = entriesByAgent.get(target.targetAgentId) ?? []
+            const linkedEntries = findTargetResponse({
+              bucket: targetBucket,
+              sourceTimestampMs: ws.timestampMs,
+              sourceSequenceKey: sourceEntry.sequenceKey,
+              claimedEntries,
+            })
+            recordLinkage({
+              // Synthetic delegationId — `:fanout:<idx>` makes it
+              // distinguishable from Path 1 ids in debug tooling.
+              delegationId: `${ws.workstreamId}:${idx}`,
+              sourceEntryId: sourceEntry.entryId,
+              sourceAgentId: ws.sourceAgentId,
+              // Synthetic offset beyond any plausible real blockStart so
+              // the splitAssistantText renderer doesn't try to claim it
+              // for inline rendering — implicit fanout cards render via
+              // WorkstreamCard grouping, not inline prose splitting.
+              blockStart: 1_000_000 + idx,
+              targetAgentId: target.targetAgentId,
+              targetAgentName: target.targetAgentName,
+              targetRawName: target.targetAgentName,
+              task: target.task,
+              targetSessionKey,
+              linkedEntries,
+              isPending: linkedEntries.length === 0,
+              // Reuse Round 7's `clawboo-dispatch` source kind — visually
+              // it's the same kind of signal: Clawboo's orchestration
+              // routed work to this teammate without an LLM-emitted tag.
+              source: 'clawboo-dispatch',
+              planId: null,
+              planStepIndex: null,
+              workstreamId: ws.workstreamId,
+              workstreamTargetIndex: idx,
+            })
+          })
+        }
+      }
+    }
+  }
+
+  // ─── Round 15: leader-streaming pass ────────────────────────────────────
+  // BEFORE the leader's source entry commits, its `<delegate>` blocks live
+  // only in `streamingText` — `mergedEntries` doesn't yet contain the
+  // leader entry, so Paths 1–4 above never run for it. Without this pass,
+  // the target's reply (whether still streaming or already committed)
+  // appears at top level as a `StreamingCard` / `AssistantTurnCard` and
+  // visually "jumps inside" the eventual DelegationCard only after the
+  // leader commits and Path 1 builds the real linkage.
+  //
+  // This pass closes that gap: scan every participant's streaming text
+  // for closed `<delegate>` blocks. For each closed block:
+  //   1. Claim the target sessionKey via `streamingOwnerByTargetSessionKey`
+  //      so `GroupChatPanel.activeStreams` filters out the target's
+  //      top-level `StreamingCard` while it streams.
+  //   2. Claim any already-committed target entries whose timestamp is
+  //      AFTER the leader's stream-start anchor — these are the eventual
+  //      linkage's `linkedEntries` once the leader commits and Path 1
+  //      runs. Adding them to `claimedEntries` now keeps them out of the
+  //      top-level transcript during the brief target-committed-but-
+  //      leader-still-streaming window.
+  //
+  // Skipped when an existing committed linkage already owns the target —
+  // committed linkages have full provenance (source + dispatch + ids) and
+  // should never be overwritten by the streaming pass.
+  if (streamingTexts && streamingTexts.size > 0) {
+    for (const [sourceSk, streamText] of streamingTexts) {
+      if (!streamText) continue
+      const sourceAgentId = agentIdFromSessionKey(sourceSk)
+      if (!sourceAgentId) continue
+      // Only participants count. Defensive — `streamingText` may contain
+      // sessions outside the current team (older 1:1 chat sessions, etc.).
+      if (!participants.some((p) => p.id === sourceAgentId)) continue
+      // Skip relays / control tokens — same guards as the committed path
+      // uses to prevent false positives from incidental delegate-looking
+      // strings.
+      if (isRelayMessage(streamText)) continue
+      const streamBlocks = findDelegationBlocks(streamText)
+      if (streamBlocks.length === 0) continue
+      const streamStarted = streamStartedAt?.get(sourceSk) ?? 0
+      for (const block of streamBlocks) {
+        if (!block.task) continue
+        const target = resolveTarget(block.targetName, participants)
+        if (!target) continue
+        if (target.id === sourceAgentId) continue
+        const targetSk = buildTeamSessionKey(target.id, teamId)
+        // Don't clobber a committed linkage that already owns this target.
+        if (streamingOwnerByTargetSessionKey.has(targetSk)) continue
+        // Synthetic owner id — prefixed `stream:` so debug tooling can
+        // distinguish it from real delegationIds (which are entry-ids).
+        streamingOwnerByTargetSessionKey.set(targetSk, `stream:${sourceSk}:${block.blockStart}`)
+        // Claim any committed target replies that arrived AFTER the
+        // leader's stream started. Substantive replies only — control
+        // tokens stay filtered. Anchor on stream-start so stale entries
+        // (target's prior onboarding intro) are NOT claimed.
+        if (streamStarted > 0) {
+          const targetBucket = entriesByAgent.get(target.id) ?? []
+          for (const e of targetBucket) {
+            if (claimedEntries.has(e.entryId)) continue
+            if ((e.timestampMs ?? 0) <= streamStarted) continue
+            if (!e.text) continue
+            if (shouldDropAssistantTurn(e.text)) continue
+            // Only assistant entries — tool / thinking / meta keep their
+            // own rendering paths.
+            if (e.kind !== 'assistant') continue
+            claimedEntries.add(e.entryId)
+          }
+        }
       }
     }
   }

@@ -38,6 +38,35 @@ export interface ClawbooDispatch {
   timestampMs: number
   /** Team id — used by `clearClawbooDispatches(teamId)` on Stop / team switch. */
   teamId: string
+  /**
+   * Round 9: when this dispatch is one step of a `<plan>` block, carries
+   * the parent plan's id so the renderer can group all step-dispatches
+   * for the same plan into a single PlanCard. Null/undefined for one-shot
+   * dispatches (regular `<delegate>` blocks, fallback regex matches,
+   * relay batches).
+   */
+  planId?: string | null
+  /**
+   * Round 9: the step's index within the parent plan (0-based). The
+   * renderer uses this to order step cards under the PlanCard header even
+   * if dispatches arrive out of source order. Paired with `planId`.
+   */
+  planStepIndex?: number | null
+  /**
+   * Round 10: when this dispatch is one target of a parallel workstream
+   * batch (≥2 sibling `<delegate>` tags emitted in one leader turn, no
+   * `<plan>` wrapper), carries the parent workstream's id so the renderer
+   * groups all sibling-dispatches for the same workstream into a single
+   * `WorkstreamCard`. Null/undefined for one-shot delegations.
+   */
+  workstreamId?: string | null
+  /**
+   * Round 10: the target's index within the parent workstream (0-based).
+   * Order is "source order" — first `<delegate>` tag in the leader turn is
+   * index 0, etc. Used by the renderer to render `Workstream N` labels
+   * stably even when dispatches arrive out of order.
+   */
+  workstreamTargetIndex?: number | null
 }
 
 // ─── Round 8B: pending plan state ─────────────────────────────────────────
@@ -91,6 +120,53 @@ export interface PendingPlan {
   timestampMs: number
 }
 
+// ─── Round 10: parallel workstreams state ────────────────────────────────────
+//
+// When the leader emits ≥2 sibling `<delegate>` tags in ONE turn — without a
+// `<plan>` wrapper — Clawboo captures them as a "workstream batch". Each
+// target works independently in parallel; there's no ordering, just an
+// in-flight set. When ALL targets respond, the leader receives a
+// `[Workstreams Complete]` envelope (mirror of `[Plan Complete]`) so it can
+// synthesize across them. Without this, Round 4/5's silence-on-relay rule
+// leaves the leader silent after parallel work resolves — the production
+// "talk is cheap, show me what you can do" failure mode.
+//
+// One pending workstreams record per leader-source-entry:
+// keyed by `${teamId}:${sourceEntryId}:workstreams` (the `:workstreams`
+// suffix keeps the id distinct from any plan id on the same source).
+
+export interface WorkstreamTarget {
+  /** Resolved roster id (or null if the `to=` name didn't match). */
+  targetAgentId: string | null
+  /** Resolved roster name of the target (for display + the complete envelope). */
+  targetAgentName: string
+  /** Task body emitted by the leader (verbatim from the `<delegate>` body). */
+  task: string
+  /** Output text from the specialist when the target completes. Null until then. */
+  output: string | null
+  /** entryId of the specialist's response that satisfied this target. */
+  resolvedEntryId: string | null
+}
+
+export interface PendingWorkstreams {
+  /** Stable id for React keys + dispatch records. */
+  workstreamId: string
+  /** entryId of the leader entry that emitted the parallel delegations. */
+  sourceEntryId: string
+  /** Agent id of the leader (the source). */
+  sourceAgentId: string
+  /** Team id — used for cleanup + dispatch keys. */
+  teamId: string
+  /** Targets in source order (first `<delegate>` is index 0, etc.). */
+  targets: WorkstreamTarget[]
+  /**
+   * Timestamp when the workstream was captured. Used as the "after" anchor
+   * for the progression pass's `findFreshResponse` — specialists' replies
+   * with timestamps >= this are eligible to resolve a target.
+   */
+  timestampMs: number
+}
+
 // ─── Store ────────────────────────────────────────────────────────────────────
 // Keyed by sessionKey so multiple agent conversations are held simultaneously.
 
@@ -132,6 +208,15 @@ interface ChatStore {
    * `useTeamOrchestration` for the state-machine wiring.
    */
   pendingPlans: Map<string, PendingPlan>
+  /**
+   * Round 10: in-progress parallel-workstream state machines, keyed by
+   * `workstreamId`. One record per leader turn that emitted ≥2 sibling
+   * `<delegate>` tags. Targets resolve independently; when all targets
+   * resolve, the leader receives a `[Workstreams Complete]` envelope.
+   * Mutually exclusive with `pendingPlans` on the same source entry
+   * (`planBlocks.length === 0` gate in `useTeamOrchestration`).
+   */
+  pendingWorkstreams: Map<string, PendingWorkstreams>
   /** Token usage from final chat events, keyed by runId. */
   lastTokenUsage: Map<string, { inputTokens: number; outputTokens: number }>
 
@@ -197,6 +282,32 @@ interface ChatStore {
    */
   clearPendingPlans: (teamId: string) => void
 
+  /**
+   * Round 10: register a new pending-workstreams record when the leader
+   * fires ≥2 parallel `<delegate>` tags in one turn (no `<plan>` wrapper).
+   * Idempotent — preserves progress on re-register (e.g., the orchestration
+   * subscription tick re-processes the same leader entry).
+   */
+  setPendingWorkstreams: (workstreams: PendingWorkstreams) => void
+
+  /**
+   * Round 10: mark one target as resolved with the specialist's output.
+   * Called by the orchestration progression pass when it observes a fresh
+   * substantive response from the target.
+   */
+  resolveWorkstreamTarget: (
+    workstreamId: string,
+    targetAgentId: string,
+    output: string,
+    resolvedEntryId: string,
+  ) => void
+
+  /**
+   * Round 10: clear all workstreams for a team. Fired on Stop and on
+   * team-switch (mirrors `clearPendingPlans` / `clearClawbooDispatches`).
+   */
+  clearPendingWorkstreams: (teamId: string) => void
+
   /** Store token usage for a completed run. */
   setLastTokenUsage: (runId: string, inputTokens: number, outputTokens: number) => void
 }
@@ -207,6 +318,7 @@ export const useChatStore = create<ChatStore>((set) => ({
   streamStartedAt: new Map(),
   clawbooDispatches: new Map(),
   pendingPlans: new Map(),
+  pendingWorkstreams: new Map(),
   lastTokenUsage: new Map(),
 
   appendTranscript: (sessionKey, entries) =>
@@ -420,6 +532,49 @@ export const useChatStore = create<ChatStore>((set) => ({
       }
       if (!changed) return state
       return { pendingPlans: next }
+    }),
+
+  setPendingWorkstreams: (workstreams) =>
+    set((state) => {
+      // Idempotent — preserve progress (resolved targets) on re-register so
+      // the orchestration subscription tick re-processing the same source
+      // entry doesn't wipe in-flight state.
+      if (state.pendingWorkstreams.has(workstreams.workstreamId)) return state
+      const next = new Map(state.pendingWorkstreams)
+      next.set(workstreams.workstreamId, workstreams)
+      return { pendingWorkstreams: next }
+    }),
+
+  resolveWorkstreamTarget: (workstreamId, targetAgentId, output, resolvedEntryId) =>
+    set((state) => {
+      const existing = state.pendingWorkstreams.get(workstreamId)
+      if (!existing) return state
+      const idx = existing.targets.findIndex((t) => t.targetAgentId === targetAgentId)
+      if (idx < 0) return state
+      const target = existing.targets[idx]
+      if (!target) return state
+      // Idempotent — already resolved with the same payload.
+      if (target.resolvedEntryId === resolvedEntryId && target.output === output) return state
+      const nextTargets = existing.targets.map((t, i) =>
+        i === idx ? { ...t, output, resolvedEntryId } : t,
+      )
+      const next = new Map(state.pendingWorkstreams)
+      next.set(workstreamId, { ...existing, targets: nextTargets })
+      return { pendingWorkstreams: next }
+    }),
+
+  clearPendingWorkstreams: (teamId) =>
+    set((state) => {
+      const next = new Map(state.pendingWorkstreams)
+      let changed = false
+      for (const [wsId, ws] of next) {
+        if (ws.teamId === teamId) {
+          next.delete(wsId)
+          changed = true
+        }
+      }
+      if (!changed) return state
+      return { pendingWorkstreams: next }
     }),
 
   setLastTokenUsage: (runId, inputTokens, outputTokens) =>

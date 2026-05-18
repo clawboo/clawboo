@@ -13,7 +13,7 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowRight, ChevronRight, Clock, SendHorizontal, Square, Wrench } from 'lucide-react'
+import { ChevronRight, Clock, SendHorizontal, Square, Wrench } from 'lucide-react'
 import { BooAvatar, resolveBooTint } from '@clawboo/ui'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
@@ -28,6 +28,8 @@ import {
 import { shouldDropAssistantTurn } from '@/lib/teamProtocol'
 import { parseToolEntry } from './parseToolEntry'
 import { splitAssistantText } from './splitAssistantText'
+import { stripPlanBlocks } from '@/features/group-chat/planDetector'
+import { pickLatestActivity } from '@/features/graph/nodes/pickLatestActivity'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -414,6 +416,176 @@ export const UserMessageCard = memo(function UserMessageCard({
   )
 })
 
+// ─── firstSentencePreview ─────────────────────────────────────────────────────
+//
+// Round 12B: derive a single-line preview from an agent's reply body. Used
+// by `DelegationCard` when the card is collapsed so the user gets a gist
+// of "what the agent said" without expanding. Pure prose extraction — no
+// markdown parsing, no API call. The first sentence (or first newline /
+// truncated tail) of the reply, trimmed of leading markdown punctuation.
+//
+// Examples:
+//   "**Fall** — the crisp air, rich colors..." →  "Fall — the crisp air, rich colors..."
+//   "Hi! Quick answer: react.\n\nLonger..."     →  "Hi!"
+//   one long unbroken sentence > 90 chars       →  truncated with "…"
+
+function firstSentencePreview(text: string, maxChars = 90): string {
+  // Strip leading markdown noise (bold/italic/heading/quote/code markers)
+  // so the preview starts with the first real word.
+  const cleaned = text
+    .trim()
+    .replace(/^[\s>#`*_~-]+/, '')
+    .trim()
+  if (!cleaned) return ''
+  // First sentence end or first newline — whichever comes first.
+  const sentenceMatch = cleaned.match(/^[\s\S]+?[.!?](\s|$)/)
+  const firstLine = cleaned.split('\n')[0] ?? cleaned
+  let raw = (sentenceMatch?.[0] ?? firstLine).trim()
+  // Strip trailing punctuation-only artifacts then truncate.
+  if (raw.length > maxChars) raw = `${raw.slice(0, maxChars - 1).trimEnd()}…`
+  return raw
+}
+
+// ─── LiveActivityFeed ─────────────────────────────────────────────────────────
+//
+// What the target agent is doing RIGHT NOW — replaces the previous generic
+// "Thinking..." spinner inside a pending DelegationCard. Mirrors how Claude
+// Code surfaces tool calls / streamed prose: subscribe to the target's
+// session, ask `pickLatestActivity` what the most-recent activity is, and
+// render it with kind-specific affordances (mint pulse for streaming, 🔧
+// for tool calls, prose markdown for final responses).
+//
+// When `isRunning` is true but no signal has landed yet, falls back to the
+// `TypingIndicator` (animated dots). When the agent is idle and we have
+// nothing to show, renders a muted "Awaiting response" line — better than
+// a lingering "Thinking..." that the user reads as "the system is stuck".
+
+const LiveActivityFeed = memo(function LiveActivityFeed({
+  targetAgentId,
+  targetSessionKey,
+  tint,
+}: {
+  targetAgentId: string | null
+  targetSessionKey?: string
+  tint: string
+}) {
+  // Subscribe by primitive lookups so unrelated agents' updates don't
+  // re-render this card.
+  const agentStatus = useFleetStore((s) =>
+    targetAgentId ? (s.agents.find((a) => a.id === targetAgentId)?.status ?? null) : null,
+  )
+  const isRunning = agentStatus === 'running'
+
+  const streamingText = useChatStore((s) =>
+    targetSessionKey ? (s.streamingText.get(targetSessionKey) ?? null) : null,
+  )
+  // Pull a small tail of the target's transcript — last 6 entries is enough
+  // to find the most recent assistant turn / tool call. Using a wider
+  // window would only matter for very chatty agents, which isn't typical.
+  const recentEntries = useChatStore((s) =>
+    targetSessionKey ? (s.transcripts.get(targetSessionKey) ?? null) : null,
+  )
+  const tail = useMemo(
+    () => (recentEntries && recentEntries.length > 0 ? recentEntries.slice(-6) : null),
+    [recentEntries],
+  )
+  const picked = pickLatestActivity(streamingText, tail)
+
+  if (!picked) {
+    if (isRunning) return <TypingIndicator />
+    return (
+      <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-text/35">
+        <motion.span
+          aria-hidden
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ background: tint }}
+          initial={{ opacity: 0.25 }}
+          animate={{ opacity: [0.25, 0.55, 0.25] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <span>Awaiting response</span>
+      </div>
+    )
+  }
+
+  if (picked.kind === 'streaming') {
+    // Streaming text with a blinking cursor at the tail — mirrors Claude
+    // Code's typewriter feel so the user can SEE the agent thinking
+    // word-by-word in real time.
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="text-[13px] leading-relaxed text-text/95">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+            {picked.text}
+          </ReactMarkdown>
+          {/* Blinking cursor — sits inline at the tail of the streamed
+              text so the eye anchors on the live edge. */}
+          <motion.span
+            aria-hidden
+            className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] rounded-sm align-middle"
+            style={{ background: tint }}
+            animate={{ opacity: [1, 0, 1] }}
+            transition={{ duration: 0.9, repeat: Infinity, ease: 'easeInOut' }}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  if (picked.kind === 'tool') {
+    // Format `[[tool: <label>]]` → extract label, render as a styled chip
+    // (matches Claude Code's tool-call pill). The label may contain a
+    // primary name + dimmed argument (e.g. `read package.json`); we split
+    // on the first space to render that distinction.
+    const label = picked.text.match(/\[\[tool:\s*(.+?)\]\]/)?.[1]?.trim() ?? 'tool'
+    const spaceIdx = label.indexOf(' ')
+    const toolName = spaceIdx >= 0 ? label.slice(0, spaceIdx) : label
+    const toolArg = spaceIdx >= 0 ? label.slice(spaceIdx + 1) : null
+    return (
+      <motion.div
+        className="inline-flex items-center gap-2 self-start rounded-md border px-2 py-1"
+        style={{
+          borderColor: `${tint}33`,
+          background: `${tint}10`,
+        }}
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={isRunning ? { opacity: 1, scale: [1, 1.02, 1] } : { opacity: 1, scale: 1 }}
+        transition={
+          isRunning
+            ? { scale: { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } }
+            : { duration: 0.2 }
+        }
+      >
+        <Wrench size={11} style={{ color: tint }} />
+        <span
+          className="font-mono text-[10px] font-semibold uppercase tracking-wider"
+          style={{ color: tint }}
+        >
+          {isRunning ? 'Calling' : 'Last called'}
+        </span>
+        <span className="font-mono text-[11px] text-text">{toolName}</span>
+        {toolArg && <span className="truncate font-mono text-[11px] text-text/60">{toolArg}</span>}
+        {isRunning && (
+          <span
+            aria-hidden
+            className="h-1.5 w-1.5 animate-pulse rounded-full"
+            style={{ background: tint }}
+          />
+        )}
+      </motion.div>
+    )
+  }
+
+  // picked.kind === 'assistant' — committed response, render in full.
+  return (
+    <div className="text-[13px] leading-relaxed text-text/95">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+        {picked.text}
+      </ReactMarkdown>
+    </div>
+  )
+})
+
 // ─── DelegationCard ───────────────────────────────────────────────────────────
 // Renders a `<delegate to="@Name">task</delegate>` block as a styled card
 // inside the assistant turn. When a `linkage` is supplied (group-chat path),
@@ -431,6 +603,7 @@ export const DelegationCard = memo(function DelegationCard({
   defaultExpanded = true,
   depth = 0,
   latestSourceEntryId,
+  animationIndex = 0,
 }: {
   targetName: string
   task: string
@@ -439,6 +612,13 @@ export const DelegationCard = memo(function DelegationCard({
   defaultExpanded?: boolean
   depth?: number
   latestSourceEntryId?: string | null
+  /**
+   * Round 11: per-card index inside a WorkstreamCard / PlanCard grid. Used
+   * to stagger entry animations (delay = idx * 40 ms) so a batch of cards
+   * fades in as a wave, not all at once. Defaults to 0 for standalone
+   * inline cards (no stagger needed).
+   */
+  animationIndex?: number
 }) {
   // Resolve target agent — prefer the linkage's resolved id (covers cases
   // where the LLM wrote a partial / case-mismatched name and we already
@@ -455,6 +635,13 @@ export const DelegationCard = memo(function DelegationCard({
   // Fall back to the existing emerald when we can't resolve a target.
   const tint = targetAgentId ? resolveBooTint(targetAgentId, isBooZero) : '#10b981'
 
+  // Round 11: target agent live status (running / idle) drives the
+  // pulse-glow on the card border and the small status dot in the header.
+  const targetAgentStatus = useFleetStore((s) =>
+    targetAgentId ? (s.agents.find((a) => a.id === targetAgentId)?.status ?? null) : null,
+  )
+  const targetIsRunning = targetAgentStatus === 'running'
+
   // Streaming text for the target — only the FIRST pending delegation per
   // target session owns the live stream. Subsequent pending delegations
   // wait their turn (queued by the Gateway anyway).
@@ -465,116 +652,401 @@ export const DelegationCard = memo(function DelegationCard({
       : null,
   )
 
-  const hasLinkedBody = Boolean(
-    linkage && (linkage.linkedEntries.length > 0 || streamingText !== null || linkage.isPending),
-  )
-  const canCollapse = hasLinkedBody && depth < MAX_NEST_DEPTH
+  const hasLinkedEntries = Boolean(linkage && linkage.linkedEntries.length > 0)
+  const hasStreaming = streamingText !== null && streamingText.length > 0
+  // The card has SOMETHING to show in its body when ANY of these hold:
+  // claimed reply entries, live streaming, or pending state (which falls
+  // through to the LiveActivityFeed for the target).
+  const hasBody = Boolean(linkage) && depth < MAX_NEST_DEPTH
 
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  // Round 12: subscribe to the full transcripts map ONCE — same pattern as
+  // Round 11A's WorkstreamCard counter heuristic. Used for two derivations:
+  //   (a) `sourceTimestampMs` — when did this card's source entry commit?
+  //       Filters the fallback peek to replies AFTER the source so stale
+  //       responses from prior batches don't count.
+  //   (b) `hasFallbackReply` / `previewText` — both look at the target's
+  //       last ~6 entries for a fresh non-control-token assistant reply.
+  const transcripts = useChatStore((s) => s.transcripts)
+
+  // Anchor: when did the source commit? We resolve the source entry by id
+  // across every session's bucket. O(N total entries) but bounded by the
+  // chat's last-500-entry cap per session, called once per card mount/dep
+  // change. Fall back to 0 (matches any timestamp) when not found.
+  const sourceTimestampMs = useMemo(() => {
+    if (!linkage?.sourceEntryId) return 0
+    for (const bucket of transcripts.values()) {
+      for (let i = bucket.length - 1; i >= 0; i--) {
+        const e = bucket[i]
+        if (e?.entryId === linkage.sourceEntryId) return e.timestampMs ?? 0
+      }
+    }
+    return 0
+  }, [transcripts, linkage?.sourceEntryId])
+
+  // Round 12A: "has the agent's reply landed anywhere?" — same fallback
+  // heuristic Round 11A uses for the WorkstreamCard counter. When true,
+  // the card stops glowing regardless of whether the linkage claim path
+  // succeeded.
+  const hasFallbackReply = useMemo(() => {
+    if (!linkage?.targetSessionKey) return false
+    const bucket = transcripts.get(linkage.targetSessionKey)
+    if (!bucket || bucket.length === 0) return false
+    const tail = bucket.slice(-6)
+    for (let i = tail.length - 1; i >= 0; i--) {
+      const e = tail[i]
+      if (!e || !e.text) continue
+      if (e.kind !== 'assistant') continue
+      if (shouldDropAssistantTurn(e.text)) continue
+      if ((e.timestampMs ?? 0) <= sourceTimestampMs) continue
+      return true
+    }
+    return false
+  }, [linkage?.targetSessionKey, transcripts, sourceTimestampMs])
+
+  // Round 12B: preview text for the collapsed card. First sentence (or
+  // ~90 chars) of the agent's reply, extracted from the same sources
+  // LiveActivityFeed peeks at — claimed linkedEntries first, then bucket.
+  const previewText = useMemo(() => {
+    if (linkage) {
+      for (const e of linkage.linkedEntries) {
+        if (e.kind === 'assistant' && e.text && !shouldDropAssistantTurn(e.text)) {
+          return firstSentencePreview(e.text)
+        }
+      }
+    }
+    if (!linkage?.targetSessionKey) return null
+    const bucket = transcripts.get(linkage.targetSessionKey)
+    if (!bucket || bucket.length === 0) return null
+    const tail = bucket.slice(-6)
+    for (let i = tail.length - 1; i >= 0; i--) {
+      const e = tail[i]
+      if (!e || !e.text) continue
+      if (e.kind !== 'assistant') continue
+      if (shouldDropAssistantTurn(e.text)) continue
+      if ((e.timestampMs ?? 0) <= sourceTimestampMs) continue
+      return firstSentencePreview(e.text)
+    }
+    return null
+  }, [linkage, transcripts, sourceTimestampMs])
+
+  // The unified "this card has visible content" signal — feeds the glow
+  // gate (12A), the DONE pill (12C), and the just-completed flash (12D).
+  const hasContent = hasLinkedEntries || hasStreaming || hasFallbackReply
+
+  // Accordion topology — when this card's source isn't the latest
+  // delegation in the leader's turn, default-collapse the response body so
+  // the visible chat stays focused on the newest work. A user manual
+  // toggle wins until `latestSourceEntryId` changes again (a new
+  // delegation lands → old user override resets → newest auto-opens, old
+  // auto-collapses).
+  const isLatest = Boolean(
+    linkage && latestSourceEntryId !== null && linkage.sourceEntryId === latestSourceEntryId,
+  )
+  // No linkage (1:1 chat path) → fall back to caller's `defaultExpanded`.
+  const wantExpanded = linkage
+    ? linkage.sourceEntryId === latestSourceEntryId ||
+      (latestSourceEntryId === null && defaultExpanded)
+    : defaultExpanded
+  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null)
+  const expanded = expandedOverride !== null ? expandedOverride : wantExpanded
+  // Reset the manual override whenever the latest-source pointer moves —
+  // a new delegation just landed, so this card's accordion state should
+  // re-align with the "is this the newest one?" signal.
+  useEffect(() => {
+    setExpandedOverride(null)
+  }, [latestSourceEntryId])
+
+  // Task body — moved into the body top per Round 11B. Hidden by default
+  // because the user wants the AGENT'S RESPONSE to be the primary visible
+  // content; the instruction body is a debug detail.
+  const [taskExpanded, setTaskExpanded] = useState(false)
+
+  // Round 12A: glow gated by the visible-content signal (NOT the linkage's
+  // raw `isPending`). When `LiveActivityFeed`'s fallback peek surfaces the
+  // agent's reply, the body LOOKS done — the glow needs to match.
+  const showPulseGlow = targetIsRunning && !hasContent
+
+  // Round 12D: one-shot completion flash. When `hasContent` transitions
+  // from false to true (the agent's reply just landed), fire a bright
+  // mint glow that pulses up + fades for 1.5s, then settles to no glow.
+  // After this, the card stays calm (no infinite pulse).
+  const [justCompleted, setJustCompleted] = useState(false)
+  const prevHadContent = useRef(hasContent)
+  useEffect(() => {
+    if (!prevHadContent.current && hasContent) {
+      setJustCompleted(true)
+      prevHadContent.current = hasContent
+      const t = setTimeout(() => setJustCompleted(false), 1500)
+      return () => clearTimeout(t)
+    }
+    prevHadContent.current = hasContent
+  }, [hasContent])
 
   return (
-    <div
-      className="flex flex-col gap-1.5 rounded-lg py-2 pr-3 pl-3"
+    <motion.div
+      className="flex flex-col gap-2 rounded-xl px-4 py-3"
       style={{
-        borderLeft: `2px solid ${tint}66`,
-        background: `${tint}0a`,
+        border: `1px solid ${tint}33`,
+        background: `linear-gradient(180deg, ${tint}10 0%, ${tint}06 55%, ${tint}03 100%)`,
+        // Inset highlight keeps a subtle "lit edge" along the top so the
+        // gradient reads as depth, not a flat panel.
+        boxShadow: `inset 0 1px 0 ${tint}20`,
       }}
+      initial={{ opacity: 0, y: 6 }}
+      animate={
+        showPulseGlow
+          ? {
+              // Working — infinite breathing glow in the agent's tint.
+              opacity: 1,
+              y: 0,
+              boxShadow: [
+                `inset 0 1px 0 ${tint}20, 0 0 0 0 ${tint}00`,
+                `inset 0 1px 0 ${tint}20, 0 0 26px -8px ${tint}66`,
+                `inset 0 1px 0 ${tint}20, 0 0 0 0 ${tint}00`,
+              ],
+            }
+          : justCompleted
+            ? {
+                // Just landed — one-shot bright mint flash that fades to
+                // nothing. Signals "reply delivered" without lingering.
+                opacity: 1,
+                y: 0,
+                boxShadow: [
+                  `inset 0 1px 0 ${tint}20, 0 0 0 0 #34d39900`,
+                  `inset 0 1px 0 ${tint}20, 0 0 32px -6px #34d399cc`,
+                  `inset 0 1px 0 ${tint}20, 0 0 16px -8px #34d39966`,
+                  `inset 0 1px 0 ${tint}20, 0 0 0 0 #34d39900`,
+                ],
+              }
+            : { opacity: 1, y: 0 }
+      }
+      transition={
+        showPulseGlow
+          ? {
+              opacity: {
+                duration: 0.28,
+                delay: animationIndex * 0.04,
+                ease: [0.22, 0.61, 0.36, 1],
+              },
+              y: { duration: 0.28, delay: animationIndex * 0.04, ease: [0.22, 0.61, 0.36, 1] },
+              boxShadow: { duration: 2.4, repeat: Infinity, ease: 'easeInOut' },
+            }
+          : justCompleted
+            ? {
+                opacity: { duration: 0.2 },
+                y: { duration: 0.2 },
+                boxShadow: { duration: 1.4, repeat: 0, ease: [0.22, 0.61, 0.36, 1] },
+              }
+            : { duration: 0.28, delay: animationIndex * 0.04, ease: [0.22, 0.61, 0.36, 1] }
+      }
       data-testid="delegation-card"
       data-delegation-id={linkage?.delegationId}
+      data-is-latest={isLatest ? 'true' : 'false'}
     >
-      <div className="flex items-center gap-2">
-        <BooAvatar seed={avatarSeed} size={20} />
-        <ArrowRight size={11} style={{ color: `${tint}b3` }} />
-        {(() => {
-          // Round 7: verb + badge differ by routing source so the user can
-          // tell apart "the LLM explicitly delegated" vs. "Clawboo
-          // routed this on the LLM's behalf".
-          const src = linkage?.source ?? 'delegate-tag'
-          const verb = src === 'clawboo-relay' ? 'Routed to' : 'Delegated to'
-          return (
+      <div className="flex items-center gap-2.5">
+        <BooAvatar seed={avatarSeed} size={28} />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex items-center gap-1.5">
+            {(() => {
+              // Round 7: verb + badge differ by routing source so the user can
+              // tell apart "the LLM explicitly delegated" vs. "Clawboo
+              // routed this on the LLM's behalf".
+              const src = linkage?.source ?? 'delegate-tag'
+              const verb = src === 'clawboo-relay' ? 'Routed to' : 'Delegated to'
+              return (
+                <span
+                  className="font-mono text-[10px] font-semibold uppercase tracking-widest"
+                  style={{ color: tint }}
+                >
+                  {verb}
+                </span>
+              )
+            })()}
+            {(() => {
+              // Origin badge for non-canonical paths.
+              const src = linkage?.source ?? 'delegate-tag'
+              if (src === 'clawboo-dispatch') {
+                return (
+                  <span
+                    className="rounded-full px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider"
+                    style={{ color: tint, background: `${tint}1a` }}
+                    title="Clawboo dispatched this to the target on the LLM's behalf (fallback regex match)"
+                  >
+                    via clawboo
+                  </span>
+                )
+              }
+              if (src === 'clawboo-relay') {
+                return (
+                  <span
+                    className="rounded-full px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider"
+                    style={{
+                      color: 'rgba(232,232,232,0.55)',
+                      background: 'rgba(255,255,255,0.06)',
+                    }}
+                    title="Clawboo forwarded the source's response to this teammate as a [Team Update]"
+                  >
+                    routed
+                  </span>
+                )
+              }
+              return null
+            })()}
+          </div>
+          <span className="truncate font-mono text-[11.5px] font-semibold text-text">
+            @{targetName}
+          </span>
+          {/* Round 12B/E: preview line — single muted sentence of the
+              agent's reply, shown ONLY when the card is collapsed. When
+              expanded, the full reply renders below and the preview would
+              be redundant. */}
+          {!expanded && previewText && (
             <span
-              className="font-mono text-[10px] font-semibold uppercase tracking-widest"
-              style={{ color: tint }}
+              className="truncate text-[11px] leading-snug text-text/55 italic"
+              data-testid="delegation-card-preview"
+              title={previewText}
             >
-              {verb}
+              {previewText}
             </span>
-          )
-        })()}
-        <span className="font-mono text-[10px] font-medium text-text">@{targetName}</span>
-        {(() => {
-          // Show an origin badge for the non-canonical paths so the user
-          // sees the routing wasn't an explicit `<delegate>` tag.
-          const src = linkage?.source ?? 'delegate-tag'
-          if (src === 'clawboo-dispatch') {
-            return (
+          )}
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          {/* Round 12C: status indicator — three states.
+              - Working (running + no content yet): animated mint pulse-ring
+              - Done (content visible — linked OR fallback): mint DONE pill
+              - Idle / waiting: dim gray dot */}
+          {showPulseGlow ? (
+            <span className="relative flex h-2 w-2" title="Working…">
               <span
-                className="ml-1 rounded-full px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider"
-                style={{ color: tint, background: `${tint}1a` }}
-                title="Clawboo dispatched this to the target on the LLM's behalf (fallback regex match)"
-              >
-                via clawboo
-              </span>
-            )
-          }
-          if (src === 'clawboo-relay') {
-            return (
+                aria-hidden
+                className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
+                style={{ background: tint }}
+              />
               <span
-                className="ml-1 rounded-full px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider"
-                style={{ color: 'rgba(232,232,232,0.55)', background: 'rgba(255,255,255,0.06)' }}
-                title="Clawboo forwarded the source's response to this teammate as a [Team Update]"
-              >
-                routed
-              </span>
-            )
-          }
-          return null
-        })()}
-        {canCollapse && (
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="ml-auto flex h-5 w-5 items-center justify-center rounded hover:bg-white/5"
-            aria-label={expanded ? 'Collapse delegation' : 'Expand delegation'}
-            data-testid="delegation-toggle"
-          >
-            <ChevronRight
-              size={12}
-              style={{ color: tint }}
-              className={`shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+                aria-hidden
+                className="relative inline-flex h-2 w-2 rounded-full"
+                style={{ background: tint }}
+              />
+            </span>
+          ) : hasContent ? (
+            <span
+              className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-emerald-300"
+              title="Reply delivered"
+            >
+              Done
+            </span>
+          ) : (
+            <span
+              aria-hidden
+              className="h-2 w-2 rounded-full"
+              style={{ background: 'rgba(255,255,255,0.15)' }}
+              title="Awaiting response"
             />
-          </button>
-        )}
+          )}
+          {hasBody && (
+            <button
+              type="button"
+              onClick={() => setExpandedOverride(expanded ? false : true)}
+              className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-white/5"
+              aria-label={expanded ? 'Collapse response' : 'Expand response'}
+              data-testid="delegation-toggle"
+            >
+              <ChevronRight
+                size={14}
+                style={{ color: tint }}
+                className={`shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+              />
+            </button>
+          )}
+        </div>
       </div>
-      <div className="text-[12px] leading-relaxed whitespace-pre-wrap text-secondary/80">
-        {task}
-      </div>
+
+      {/* Response body — primary visible content. The TASK toggle moved
+          here per Round 11B (was in the header, was cluttered). */}
       <AnimatePresence initial={false}>
-        {expanded && hasLinkedBody && linkage && (
+        {expanded && hasBody && linkage && (
           <motion.div
             key="body"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18 }}
+            transition={{ duration: 0.22, ease: [0.22, 0.61, 0.36, 1] }}
             className="overflow-hidden"
             data-testid="delegation-card-body"
           >
             <div
-              className="mt-1.5 flex flex-col gap-2 border-t pt-2 text-[13px] leading-relaxed text-text/95"
-              style={{ borderColor: `${tint}1a` }}
+              className="mt-1 flex flex-col gap-2 border-t border-dashed pt-2.5 text-[13px] leading-relaxed text-text/95"
+              style={{ borderColor: `${tint}20` }}
             >
-              <NestedDelegationBody
-                entries={linkage.linkedEntries}
-                streamingText={streamingText}
-                teamId={teamId}
-                depth={depth + 1}
-                latestSourceEntryId={latestSourceEntryId}
-              />
+              {/* Round 11B: task toggle lives at the top of the body. */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-[9px] font-semibold uppercase tracking-wider text-text/45">
+                  Response
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTaskExpanded((v) => !v)}
+                  className={`flex items-center gap-1 rounded font-mono text-[9px] uppercase tracking-wider transition-opacity hover:text-text/80 ${
+                    taskExpanded ? 'text-text/70' : 'text-text/40'
+                  }`}
+                  aria-label={taskExpanded ? 'Hide task' : 'Show task'}
+                  data-testid="delegation-task-toggle"
+                  title="Show the task body Clawboo sent to the agent"
+                >
+                  <span className="underline decoration-dotted underline-offset-4">
+                    {taskExpanded ? 'Hide task' : 'Show task'}
+                  </span>
+                  <ChevronRight
+                    size={9}
+                    className={`shrink-0 transition-transform ${taskExpanded ? 'rotate-90' : ''}`}
+                  />
+                </button>
+              </div>
+
+              <AnimatePresence>
+                {taskExpanded && (
+                  <motion.div
+                    key="task"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.18, ease: [0.22, 0.61, 0.36, 1] }}
+                    className="overflow-hidden"
+                    data-testid="delegation-card-task"
+                  >
+                    <div
+                      className="rounded-md border border-dashed px-3 py-2 text-[12px] leading-relaxed whitespace-pre-wrap text-text/75"
+                      style={{ borderColor: `${tint}33`, background: `${tint}08` }}
+                    >
+                      <div className="mb-1 font-mono text-[8px] font-semibold uppercase tracking-widest text-text/45">
+                        Task from Clawboo
+                      </div>
+                      {task}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {hasLinkedEntries || hasStreaming ? (
+                <NestedDelegationBody
+                  entries={linkage.linkedEntries}
+                  streamingText={streamingText}
+                  teamId={teamId}
+                  depth={depth + 1}
+                  latestSourceEntryId={latestSourceEntryId}
+                />
+              ) : (
+                <LiveActivityFeed
+                  targetAgentId={targetAgentId}
+                  targetSessionKey={linkage.targetSessionKey}
+                  tint={tint}
+                />
+              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   )
 })
 
@@ -632,8 +1104,13 @@ const NestedDelegationBody = memo(function NestedDelegationBody({
         )
       })}
       {streamingText !== null && streamingText.length > 0 && (
-        <div className="whitespace-pre-wrap text-text/80" data-testid="delegation-streaming">
-          {streamingText}
+        <div
+          className="max-w-prose text-[13px] leading-relaxed text-text/90"
+          data-testid="delegation-streaming"
+        >
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+            {streamingText}
+          </ReactMarkdown>
         </div>
       )}
       {streamingText !== null && streamingText.length === 0 && <TypingIndicator />}
@@ -762,6 +1239,266 @@ const NestedAssistantContent = memo(function NestedAssistantContent({
   )
 })
 
+// ─── PlanCard (Round 9) ──────────────────────────────────────────────────────
+//
+// Visual container for a `<plan>` block's step-DelegationCards. Renders a
+// header with the step count + progress, then each step card under a
+// numbered "Step N" label. The individual step cards are still
+// `DelegationCard`s — PlanCard is purely the visual grouping wrapper.
+//
+// Progress signal comes from `pendingPlans` in the chat store: the plan's
+// `currentStepIndex` tells the renderer how many steps have completed.
+// `currentStepIndex >= steps.length` ⇒ "Complete" badge replaces the
+// in-progress indicator.
+
+export const PlanCard = memo(function PlanCard({
+  planId,
+  linkages,
+  teamId,
+  defaultExpanded = true,
+  latestSourceEntryId,
+}: {
+  planId: string
+  /** Plan-step linkages, in stepIndex order. Pre-sorted by the caller. */
+  linkages: DelegationLinkage[]
+  teamId?: string
+  defaultExpanded?: boolean
+  latestSourceEntryId?: string | null
+}) {
+  // Subscribe to the plan's progress state. The pendingPlan may not exist
+  // (e.g., after a page reload — the store doesn't persist plans). In that
+  // case we derive progress from the linkages themselves: a step is
+  // "complete" if its linkage has linkedEntries.
+  const pendingPlan = useChatStore((s) => s.pendingPlans.get(planId) ?? null)
+  const totalSteps = pendingPlan?.steps.length ?? linkages.length
+  const completedFromStore = pendingPlan?.currentStepIndex ?? 0
+  const completedFromLinkages = linkages.filter((l) => !l.isPending).length
+  // Use whichever is more up-to-date — store advances reactively during the
+  // active session, linkages capture historical state after reload.
+  const completedSteps = Math.max(completedFromStore, completedFromLinkages)
+  const isComplete = completedSteps >= totalSteps && totalSteps > 0
+
+  return (
+    <div
+      className="@container flex flex-col gap-3 rounded-xl border border-white/8 bg-gradient-to-b from-white/[0.025] to-white/[0.005] p-4"
+      data-testid="plan-card"
+      data-plan-id={planId}
+    >
+      <div className="flex items-center gap-2 border-b border-white/5 pb-2.5">
+        <span aria-hidden className="text-[15px]">
+          📋
+        </span>
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary">
+          Plan
+        </span>
+        <span className="font-mono text-[10px] text-text/70">
+          {totalSteps} {totalSteps === 1 ? 'step' : 'steps'}
+        </span>
+        <span className="ml-auto flex items-center gap-1.5">
+          {isComplete ? (
+            <span
+              className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider text-emerald-400"
+              title="All plan steps complete — the leader has received a [Plan Complete] envelope and should now synthesize."
+            >
+              Complete
+            </span>
+          ) : (
+            <>
+              <span
+                aria-hidden
+                className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400/80"
+              />
+              <span className="font-mono text-[10px] text-text/70">
+                {completedSteps} / {totalSteps} done
+              </span>
+            </>
+          )}
+        </span>
+      </div>
+      {/* Plans are SEQUENTIAL (Round 8) but the grid still gives them
+          breathing room at wide widths — cards stack 1-col on narrow
+          screens and pair to 2-col at >=640px container width. */}
+      <div className="grid grid-cols-1 gap-3 @[640px]:grid-cols-2">
+        {linkages.map((linkage, idx) => {
+          // Step index — prefer the stored planStepIndex; fall back to
+          // render order so layout is stable even when the field is missing.
+          const stepNum = (linkage.planStepIndex ?? idx) + 1
+          return (
+            <div
+              key={linkage.delegationId}
+              className="flex flex-col gap-1"
+              data-plan-step-index={linkage.planStepIndex ?? idx}
+            >
+              <span className="font-mono text-[9px] font-semibold uppercase tracking-wider text-secondary/70">
+                Step {stepNum}
+              </span>
+              <DelegationCard
+                // DelegationCard renders `@{targetName}` itself; pass bare
+                // name (no leading `@`) to avoid `@@` double-prefix.
+                targetName={linkage.targetAgentName}
+                task={linkage.task}
+                linkage={linkage}
+                teamId={teamId}
+                defaultExpanded={defaultExpanded}
+                latestSourceEntryId={latestSourceEntryId}
+                animationIndex={idx}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+})
+
+// ─── WorkstreamCard (Round 10) ────────────────────────────────────────────────
+//
+// Visual container for a parallel-workstream batch (≥2 sibling `<delegate>`
+// tags emitted in one leader turn, no `<plan>` wrapper). Mirrors PlanCard's
+// structure but with parallel semantics — no step ordering, just an
+// in-flight set with X / N done progress.
+//
+// Progress signal comes from two sources:
+//   1. `pendingWorkstreams` in the chat store — reactive during the active
+//      session, drives the in-flight indicator.
+//   2. The linkages themselves — `linkages.filter(l => !l.isPending).length`.
+//      Survives page reload (the in-memory `pendingWorkstreams` map resets,
+//      but linkages re-derive from committed transcript on every render).
+// `Math.max(storeCount, linkageCount)` keeps the card accurate in both
+// active and post-reload contexts.
+
+export const WorkstreamCard = memo(function WorkstreamCard({
+  workstreamId,
+  linkages,
+  teamId,
+  defaultExpanded = true,
+  latestSourceEntryId,
+}: {
+  workstreamId: string
+  /** Workstream-step linkages, in target-index order. Pre-sorted by the caller. */
+  linkages: DelegationLinkage[]
+  teamId?: string
+  defaultExpanded?: boolean
+  latestSourceEntryId?: string | null
+}) {
+  const pendingWs = useChatStore((s) => s.pendingWorkstreams.get(workstreamId) ?? null)
+  const totalTargets = pendingWs?.targets.length ?? linkages.length
+  const completedFromStore =
+    pendingWs?.targets.filter((t) => t.resolvedEntryId !== null).length ?? 0
+
+  // Round 11A: count cards as "done" if either the linkage was claimed OR
+  // the LiveActivityFeed would render a substantive assistant reply (the
+  // user sees content → it's "done" from their perspective). Mirrors
+  // `pickLatestActivity`'s heuristic but skips streaming-state (that's
+  // in-progress, not done) and skips control tokens via
+  // `shouldDropAssistantTurn`.
+  const transcripts = useChatStore((s) => s.transcripts)
+  const wsTimestamp = pendingWs?.timestampMs ?? 0
+  const completedFromContent = useMemo(() => {
+    let count = 0
+    for (const l of linkages) {
+      if (!l.isPending) {
+        count++
+        continue
+      }
+      // Pending linkage — peek at the target's bucket for a fresh
+      // substantive reply (mirror of `LiveActivityFeed`'s fallback).
+      const bucket = transcripts.get(l.targetSessionKey)
+      if (!bucket || bucket.length === 0) continue
+      const tail = bucket.slice(-6)
+      let found = false
+      for (let i = tail.length - 1; i >= 0; i--) {
+        const e = tail[i]
+        if (!e || !e.text) continue
+        if (e.kind !== 'assistant') continue
+        if (shouldDropAssistantTurn(e.text)) continue
+        if ((e.timestampMs ?? 0) <= wsTimestamp) continue
+        found = true
+        break
+      }
+      if (found) count++
+    }
+    return count
+  }, [linkages, transcripts, wsTimestamp])
+
+  const completedTargets = Math.max(completedFromStore, completedFromContent)
+  const isComplete = completedTargets >= totalTargets && totalTargets > 0
+
+  return (
+    <div
+      className="@container flex flex-col gap-3 rounded-xl border border-white/8 bg-gradient-to-b from-white/[0.025] to-white/[0.005] p-4"
+      data-testid="workstream-card"
+      data-workstream-id={workstreamId}
+    >
+      <div className="flex items-center gap-2 border-b border-white/5 pb-2.5">
+        <span aria-hidden className="text-[15px]">
+          📡
+        </span>
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary">
+          Workstreams
+        </span>
+        <span className="font-mono text-[10px] text-text/70">
+          {totalTargets} {totalTargets === 1 ? 'workstream' : 'workstreams'}
+        </span>
+        <span className="ml-auto flex items-center gap-1.5">
+          {isComplete ? (
+            <span
+              className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider text-emerald-400"
+              title="All parallel workstreams complete — the leader has received a [Workstreams Complete] envelope and should now synthesize across them."
+            >
+              Complete
+            </span>
+          ) : (
+            <>
+              <span
+                aria-hidden
+                className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400/80"
+              />
+              <span className="font-mono text-[10px] text-text/70">
+                {completedTargets} / {totalTargets} done
+              </span>
+            </>
+          )}
+        </span>
+      </div>
+      {/* Round 11D: responsive 2-col grid. Tailwind 4 container queries —
+          the grid adapts to the WorkstreamCard's OWN width (not the
+          viewport's), so a narrow chat panel collapses to 1-col cleanly
+          and a wide panel uses the previously-unused horizontal space. */}
+      <div className="grid grid-cols-1 gap-3 @[640px]:grid-cols-2">
+        {linkages.map((linkage, idx) => {
+          // Workstream index — prefer the stored workstreamTargetIndex; fall
+          // back to render order so layout is stable even when the field is
+          // missing.
+          const wsNum = (linkage.workstreamTargetIndex ?? idx) + 1
+          return (
+            <div
+              key={linkage.delegationId}
+              className="flex flex-col gap-1"
+              data-workstream-target-index={linkage.workstreamTargetIndex ?? idx}
+            >
+              <span className="font-mono text-[9px] font-semibold uppercase tracking-wider text-secondary/70">
+                Workstream {wsNum}
+              </span>
+              <DelegationCard
+                // DelegationCard renders `@{targetName}` itself; pass bare
+                // name (no leading `@`) to avoid `@@` double-prefix.
+                targetName={linkage.targetAgentName}
+                task={linkage.task}
+                linkage={linkage}
+                teamId={teamId}
+                defaultExpanded={defaultExpanded}
+                latestSourceEntryId={latestSourceEntryId}
+                animationIndex={idx}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+})
+
 // ─── AssistantTurnCard ────────────────────────────────────────────────────────
 
 export const AssistantTurnCard = memo(function AssistantTurnCard({
@@ -881,14 +1618,16 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
           for `sessions_send` tool calls between the leader's intro prose
           and any post-`\n---\n` summary prose, restoring the natural
           "intro → cards → summary" flow within the leader's card.
+          Round 9 adds the PlanCard rendering: linkages with the same
+          `planId` get grouped under one `<PlanCard>` (rendered alongside
+          sessions_send cards between intro + outro prose). Raw `<plan>`
+          markdown is stripped so it doesn't show as text.
           `max-w-prose` (~65ch) caps line length to the optimal reading
           measure regardless of window width. */}
       {hasText &&
         (() => {
-          const rawText = isRelay ? stripRelayPrefix(block.assistant!.text) : block.assistant!.text
-          // Pull `sessions_send` linkages for this source — they go BETWEEN
-          // the intro prose and the post-`\n---\n` summary prose so the
-          // leader's response reads in narrative order.
+          let rawText = isRelay ? stripRelayPrefix(block.assistant!.text) : block.assistant!.text
+          // Pull linkages for this source and split them by source kind.
           const allLinkagesForSource =
             block.assistant && linkagesBySourceEntry
               ? (linkagesBySourceEntry.get(block.assistant.entryId) ?? [])
@@ -896,12 +1635,60 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
           const sessionsSendLinkages = allLinkagesForSource.filter(
             (l) => l.source === 'sessions-send',
           )
+          // Round 9: group plan-step linkages by `planId`. Each plan
+          // becomes one `<PlanCard>` containing its step DelegationCards.
+          const planGroups = new Map<string, DelegationLinkage[]>()
+          for (const linkage of allLinkagesForSource) {
+            if (!linkage.planId) continue
+            const group = planGroups.get(linkage.planId)
+            if (group) group.push(linkage)
+            else planGroups.set(linkage.planId, [linkage])
+          }
+          // Sort each group's linkages by step index for stable display.
+          for (const group of planGroups.values()) {
+            group.sort((a, b) => (a.planStepIndex ?? 0) - (b.planStepIndex ?? 0))
+          }
+          // Round 9: strip raw `<plan>…</plan>` markdown when we'll render
+          // PlanCards in its place. Without this the leader's prose would
+          // show the unrendered tags as text alongside the visual cards.
+          if (planGroups.size > 0) {
+            rawText = stripPlanBlocks(rawText)
+          }
+
+          // Round 10: group parallel-workstream linkages by `workstreamId`.
+          // Each group becomes one `<WorkstreamCard>` containing its
+          // sibling DelegationCards under a "📡 WORKSTREAMS" header with
+          // progress indicator. Workstream linkages always have
+          // `source: 'delegate-tag'` (they're Path 1 linkages with the
+          // `workstreamId` field attributed by `buildDelegationLinkages`
+          // when N≥2 valid `<delegate>` blocks exist on a non-plan source).
+          const workstreamGroups = new Map<string, DelegationLinkage[]>()
+          for (const linkage of allLinkagesForSource) {
+            if (!linkage.workstreamId) continue
+            const group = workstreamGroups.get(linkage.workstreamId)
+            if (group) group.push(linkage)
+            else workstreamGroups.set(linkage.workstreamId, [linkage])
+          }
+          for (const group of workstreamGroups.values()) {
+            group.sort((a, b) => (a.workstreamTargetIndex ?? 0) - (b.workstreamTargetIndex ?? 0))
+          }
+          // Round 10: build a set of `blockStart` offsets that belong to a
+          // workstream so the inline-delegation renderer can skip them (they
+          // render inside the WorkstreamCard instead, and rendering them
+          // twice would clutter the leader's card).
+          const workstreamBlockStarts = new Set<number>()
+          for (const group of workstreamGroups.values()) {
+            for (const l of group) workstreamBlockStarts.add(l.blockStart)
+          }
 
           // Split the prose at the first `\n---\n` markdown horizontal rule
-          // when we have `sessions_send` cards to inject. Without cards the
-          // whole prose renders as one segment (no behavioral regression for
-          // turns that don't use sessions_send routing).
-          const splitMatch = sessionsSendLinkages.length > 0 ? rawText.match(/\n---\n/) : null
+          // when we have `sessions_send`, PlanCards, OR WorkstreamCards to
+          // inject. Without any, the whole prose renders as one segment (no
+          // behavioral regression for turns that don't use any path).
+          const splitMatch =
+            sessionsSendLinkages.length > 0 || planGroups.size > 0 || workstreamGroups.size > 0
+              ? rawText.match(/\n---\n/)
+              : null
           const splitIdx = splitMatch?.index ?? -1
           const introText = splitIdx >= 0 ? rawText.slice(0, splitIdx) : rawText
           const summaryText =
@@ -914,6 +1701,11 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
           const renderProseSegments = (proseText: string, keyBase: string) =>
             splitAssistantText(proseText).map((segment, idx) => {
               if (segment.kind === 'delegation') {
+                // Round 10: when this delegation is part of a workstream
+                // batch, skip the inline render — it'll appear inside the
+                // WorkstreamCard below. Rendering it both inline AND in the
+                // card would duplicate the routing event visually.
+                if (workstreamBlockStarts.has(segment.blockStart)) return null
                 const matchedLinkage =
                   block.assistant && linkagesBySourceEntry
                     ? linkagesBySourceEntry
@@ -945,21 +1737,60 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
               )
             })
 
+          // Round 11D — break PlanCards / WorkstreamCards OUT of the
+          // `max-w-prose` cap so they can use the full chat-panel width
+          // (the previously-empty horizontal space the user pointed at).
+          // Intro / outro PROSE segments stay capped at the ~65ch reading
+          // measure; `sessions_send` cards sit inside the prose flow
+          // because they're typically one-off (not a parallel batch).
+          const hasFullWidthCards = planGroups.size > 0 || workstreamGroups.size > 0
           return (
-            <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-text">
-              {renderProseSegments(introText, 'intro')}
-              {sessionsSendLinkages.map((linkage) => (
-                <DelegationCard
-                  key={linkage.delegationId}
-                  targetName={`@${linkage.targetAgentName}`}
-                  task={linkage.task}
-                  linkage={linkage}
-                  teamId={teamId}
-                  defaultExpanded={expandedDefault}
-                  latestSourceEntryId={latestSourceEntryId}
-                />
-              ))}
-              {summaryText && renderProseSegments(summaryText, 'summary')}
+            <div className="flex flex-col gap-2 text-[13px] leading-relaxed text-text">
+              <div className="max-w-prose">{renderProseSegments(introText, 'intro')}</div>
+              {hasFullWidthCards && (
+                <div className="flex w-full flex-col gap-3">
+                  {/* Round 9: PlanCards (one per `planId`). Each contains
+                      its step DelegationCards under a "📋 Plan" header
+                      with progress indicator. */}
+                  {Array.from(planGroups.entries()).map(([planId, group]) => (
+                    <PlanCard
+                      key={`plan-${planId}`}
+                      planId={planId}
+                      linkages={group}
+                      teamId={teamId}
+                      defaultExpanded={expandedDefault}
+                      latestSourceEntryId={latestSourceEntryId}
+                    />
+                  ))}
+                  {/* Round 10: WorkstreamCards (one per `workstreamId`). */}
+                  {Array.from(workstreamGroups.entries()).map(([wsId, group]) => (
+                    <WorkstreamCard
+                      key={`workstream-${wsId}`}
+                      workstreamId={wsId}
+                      linkages={group}
+                      teamId={teamId}
+                      defaultExpanded={expandedDefault}
+                      latestSourceEntryId={latestSourceEntryId}
+                    />
+                  ))}
+                </div>
+              )}
+              <div className="flex max-w-prose flex-col gap-2">
+                {sessionsSendLinkages.map((linkage) => (
+                  <DelegationCard
+                    key={linkage.delegationId}
+                    // DelegationCard renders `@{targetName}` itself; pass
+                    // bare name to avoid `@@` double-prefix.
+                    targetName={linkage.targetAgentName}
+                    task={linkage.task}
+                    linkage={linkage}
+                    teamId={teamId}
+                    defaultExpanded={expandedDefault}
+                    latestSourceEntryId={latestSourceEntryId}
+                  />
+                ))}
+                {summaryText && renderProseSegments(summaryText, 'summary')}
+              </div>
             </div>
           )
         })()}

@@ -797,3 +797,453 @@ describe('findTargetResponse (via buildDelegationLinkages) — post-reload stale
     expect(result.claimedEntries.has(staleReply.entryId)).toBe(false)
   })
 })
+
+// Round 9: Path 3 propagates `planId` + `planStepIndex` from
+// `ClawbooDispatch` onto the synthesized `DelegationLinkage`. The renderer
+// uses these fields to group plan-step linkages under one `<PlanCard>`.
+
+describe('buildDelegationLinkages — Path 3 plan provenance (Round 9)', () => {
+  it('propagates planId + planStepIndex onto the linkage when dispatch carries them', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: '<plan><step to="@Engineer Boo">build it</step></plan>',
+    })
+    const dispatch = makeDispatch({
+      sourceEntryId: source.entryId,
+      targetAgentId: 'eng',
+      targetAgentName: 'Engineer Boo',
+      origin: 'dispatch-delegation',
+      planId: 'plan-abc',
+      planStepIndex: 0,
+    })
+    const dispatches = new Map([[`t1:${source.entryId}`, [dispatch]]])
+    const result = buildWithDispatches([source], dispatches)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.planId).toBe('plan-abc')
+    expect(linkages[0]!.planStepIndex).toBe(0)
+    expect(linkages[0]!.source).toBe('clawboo-dispatch')
+  })
+
+  it('non-plan dispatches keep planId / planStepIndex null', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'normal prose, no plan',
+    })
+    const dispatch = makeDispatch({
+      sourceEntryId: source.entryId,
+      targetAgentId: 'eng',
+      targetAgentName: 'Engineer Boo',
+      origin: 'dispatch-delegation',
+      // planId / planStepIndex deliberately omitted.
+    })
+    const dispatches = new Map([[`t1:${source.entryId}`, [dispatch]]])
+    const result = buildWithDispatches([source], dispatches)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.planId).toBeNull()
+    expect(linkages[0]!.planStepIndex).toBeNull()
+  })
+
+  it('groups three plan-step linkages under one planId in source-entry order', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: '<plan>...</plan>',
+    })
+    const planId = 'plan-xyz'
+    const dispatches = new Map([
+      [
+        `t1:${source.entryId}`,
+        [
+          makeDispatch({
+            sourceEntryId: source.entryId,
+            targetAgentId: 'eng',
+            targetAgentName: 'Engineer Boo',
+            origin: 'dispatch-delegation',
+            planId,
+            planStepIndex: 0,
+          }),
+          makeDispatch({
+            sourceEntryId: source.entryId,
+            targetAgentId: 'des',
+            targetAgentName: 'Designer Boo',
+            origin: 'dispatch-delegation',
+            planId,
+            planStepIndex: 1,
+          }),
+        ],
+      ],
+    ])
+    const result = buildWithDispatches([source], dispatches)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(2)
+    // All linkages share the same planId.
+    expect(linkages.every((l) => l.planId === planId)).toBe(true)
+    // Step indices preserved.
+    expect(linkages.map((l) => l.planStepIndex)).toEqual([0, 1])
+  })
+})
+
+// Round 10: Path 1 attributes `workstreamId` when the source emits ≥2 valid
+// `<delegate>` blocks without a `<plan>` wrapper. The renderer groups the
+// resulting linkages under a single `<WorkstreamCard>`.
+
+describe('buildDelegationLinkages — Path 1 workstream attribution (Round 10)', () => {
+  it('attributes a single workstreamId + sequential targetIndex to ≥2 sibling <delegate> linkages', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text:
+        'Firing 3 parallel workstreams.\n\n' +
+        '<delegate to="@Engineer Boo">research market</delegate>\n\n' +
+        '<delegate to="@Designer Boo">research features</delegate>\n\n' +
+        '<delegate to="@Boo Zero">research sentiment</delegate>',
+    })
+    const result = build([source])
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    // 3 valid linkages (Boo Zero is in participants but is the source — self-
+    // delegations are filtered out; so only Engineer + Designer remain).
+    expect(linkages).toHaveLength(2)
+    const expectedWsId = `t1:${source.entryId}:workstreams`
+    expect(linkages.every((l) => l.workstreamId === expectedWsId)).toBe(true)
+    expect(linkages.map((l) => l.workstreamTargetIndex)).toEqual([0, 1])
+    expect(linkages.every((l) => l.source === 'delegate-tag')).toBe(true)
+  })
+
+  it('does NOT attribute workstreamId for a single <delegate> (N<2)', () => {
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'Single delegation.\n\n<delegate to="@Engineer Boo">do it</delegate>',
+    })
+    const result = build([source])
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.workstreamId).toBeNull()
+    expect(linkages[0]!.workstreamTargetIndex).toBeNull()
+  })
+
+  it('does NOT attribute workstreamId when a <plan> block is on the same source (plans take precedence)', () => {
+    // Two `<delegate>` blocks + one `<plan>` block on the same source.
+    // The plan gate short-circuits workstream minting; both delegations
+    // render as standalone DelegationCards under the leader's prose.
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text:
+        '<plan><step to="@Engineer Boo">step 1</step><step to="@Designer Boo">step 2</step></plan>\n\n' +
+        '<delegate to="@Engineer Boo">also do this</delegate>\n\n' +
+        '<delegate to="@Designer Boo">and this</delegate>',
+    })
+    const result = build([source])
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    // Both delegations exist as linkages (with `source: 'delegate-tag'`),
+    // but neither carries a workstreamId because `findPlanBlocks(text).length > 0`.
+    expect(linkages).toHaveLength(2)
+    expect(linkages.every((l) => l.workstreamId === null)).toBe(true)
+    expect(linkages.every((l) => l.workstreamTargetIndex === null)).toBe(true)
+  })
+})
+
+// Round 13: Path 4 — implicit fan-out workstreams synthesized from
+// `pendingWorkstreams` map. When the leader emits pure fan-out prose
+// WITHOUT structured tags, the orchestration hook mints a workstream
+// record; Path 4 turns those into renderable DelegationLinkages.
+
+describe('buildDelegationLinkages — Path 4 implicit fan-out (Round 13)', () => {
+  function buildWithPendingWs(
+    mergedEntries: TranscriptEntry[],
+    pendingWorkstreams: Map<string, import('@/stores/chat').PendingWorkstreams>,
+  ) {
+    const blocks = groupEntriesToBlocks(mergedEntries)
+    return buildDelegationLinkages({
+      blocks,
+      mergedEntries,
+      teamId: 't1',
+      participants,
+      pendingWorkstreams,
+    })
+  }
+
+  it('synthesizes linkages for an :implicit-fanout workstream when no Path 1 tags exist', () => {
+    // Leader emits prose only — no <delegate> tags. Orchestration minted
+    // an implicit workstream with 2 targets. Path 4 should produce 2
+    // linkages for the source.
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: "I'll ask all teammates for their take. Got responses from all three.",
+    })
+    const replyEng = makeAssistantEntry({
+      sessionKey: teamSk('eng'),
+      text: 'Engineering says: build it.',
+    })
+    const replyDes = makeAssistantEntry({
+      sessionKey: teamSk('des'),
+      text: 'Designer says: make it pretty.',
+    })
+    const wsId = `t1:${source.entryId}:implicit-fanout`
+    const pendingWs = new Map<string, import('@/stores/chat').PendingWorkstreams>([
+      [
+        wsId,
+        {
+          workstreamId: wsId,
+          sourceEntryId: source.entryId,
+          sourceAgentId: 'bz',
+          teamId: 't1',
+          targets: [
+            {
+              targetAgentId: 'eng',
+              targetAgentName: 'Engineer Boo',
+              task: 'user question text',
+              output: null,
+              resolvedEntryId: null,
+            },
+            {
+              targetAgentId: 'des',
+              targetAgentName: 'Designer Boo',
+              task: 'user question text',
+              output: null,
+              resolvedEntryId: null,
+            },
+          ],
+          timestampMs: source.timestampMs! - 1, // workstream minted at-or-before the source's commit
+        },
+      ],
+    ])
+    const result = buildWithPendingWs([source, replyEng, replyDes], pendingWs)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(2)
+    expect(linkages.every((l) => l.source === 'clawboo-dispatch')).toBe(true)
+    expect(linkages.every((l) => l.workstreamId === wsId)).toBe(true)
+    expect(linkages.map((l) => l.workstreamTargetIndex)).toEqual([0, 1])
+    // Both replies should be claimed via findTargetResponse.
+    expect(linkages[0]!.linkedEntries).toEqual([replyEng])
+    expect(linkages[1]!.linkedEntries).toEqual([replyDes])
+    expect(linkages.every((l) => !l.isPending)).toBe(true)
+  })
+
+  it('SKIPS Path 4 when Path 1 already produced linkages on the same source', () => {
+    // The leader's response has BOTH fan-out prose AND a structured
+    // <delegate> tag. Path 1 wins; Path 4 must not double-mint.
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'I\'ll ask all teammates. <delegate to="@Engineer Boo">just you</delegate>',
+    })
+    const reply = makeAssistantEntry({ sessionKey: teamSk('eng'), text: 'done' })
+    const wsId = `t1:${source.entryId}:implicit-fanout`
+    const pendingWs = new Map<string, import('@/stores/chat').PendingWorkstreams>([
+      [
+        wsId,
+        {
+          workstreamId: wsId,
+          sourceEntryId: source.entryId,
+          sourceAgentId: 'bz',
+          teamId: 't1',
+          targets: [
+            {
+              targetAgentId: 'eng',
+              targetAgentName: 'Engineer Boo',
+              task: 'should not appear',
+              output: null,
+              resolvedEntryId: null,
+            },
+            {
+              targetAgentId: 'des',
+              targetAgentName: 'Designer Boo',
+              task: 'should not appear',
+              output: null,
+              resolvedEntryId: null,
+            },
+          ],
+          timestampMs: source.timestampMs! - 1,
+        },
+      ],
+    ])
+    const result = buildWithPendingWs([source, reply], pendingWs)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    // Only Path 1's single <delegate> linkage should exist.
+    expect(linkages).toHaveLength(1)
+    expect(linkages[0]!.source).toBe('delegate-tag')
+    expect(linkages[0]!.targetAgentId).toBe('eng')
+  })
+
+  it('does NOT synthesize Path 4 for a workstreamId WITHOUT :implicit-fanout suffix', () => {
+    // Regular workstreams (Round 10) use `:workstreams` suffix.
+    // Path 4 ONLY handles `:implicit-fanout`. The Round 10 flow goes
+    // through Path 1's workstreamId attribution path, not here.
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: 'normal turn, no fan-out prose',
+    })
+    const wsId = `t1:${source.entryId}:workstreams` // NOT :implicit-fanout
+    const pendingWs = new Map<string, import('@/stores/chat').PendingWorkstreams>([
+      [
+        wsId,
+        {
+          workstreamId: wsId,
+          sourceEntryId: source.entryId,
+          sourceAgentId: 'bz',
+          teamId: 't1',
+          targets: [
+            {
+              targetAgentId: 'eng',
+              targetAgentName: 'Engineer Boo',
+              task: 'x',
+              output: null,
+              resolvedEntryId: null,
+            },
+          ],
+          timestampMs: source.timestampMs!,
+        },
+      ],
+    ])
+    const result = buildWithPendingWs([source], pendingWs)
+    const linkages = result.linkagesBySourceEntry.get(source.entryId) ?? []
+    expect(linkages).toHaveLength(0)
+  })
+})
+
+// ── Round 15 — leader-streaming pass ───────────────────────────────────────
+// BEFORE the leader's source entry commits, its `<delegate>` blocks live
+// only in `streamingText`. The Round 15 pass scans streaming texts for
+// closed `<delegate>` tags and claims the targets so the target's reply
+// (streaming OR briefly-pre-leader-commit) stops appearing at top level.
+
+function buildWithStreaming(
+  mergedEntries: TranscriptEntry[],
+  streamingTexts: Map<string, string>,
+  streamStartedAt?: Map<string, number>,
+) {
+  const blocks = groupEntriesToBlocks(mergedEntries)
+  return buildDelegationLinkages({
+    blocks,
+    mergedEntries,
+    teamId: 't1',
+    participants,
+    streamingTexts,
+    streamStartedAt,
+  })
+}
+
+describe('buildDelegationLinkages — Round 15 leader-streaming pass', () => {
+  it('claims streaming-only target sessionKey when leader has not committed yet', () => {
+    // The leader is still streaming; only their streaming text contains
+    // the closed `<delegate>` tag. No committed leader entry exists. The
+    // target hasn't committed yet either — pure pre-commit state.
+    const streamingTexts = new Map<string, string>([
+      [
+        teamSk('bz'),
+        'Working on it. <delegate to="@Engineer Boo">Do the thing</delegate> back soon.',
+      ],
+    ])
+    const result = buildWithStreaming([], streamingTexts)
+    // Streaming ownership transfers — the StreamingCard for the target
+    // session will be suppressed.
+    expect(result.streamingOwnerByTargetSessionKey.get(teamSk('eng'))).toBeDefined()
+    expect(result.streamingOwnerByTargetSessionKey.get(teamSk('eng'))).toMatch(/^stream:/)
+    // No committed entries → no linkages built — the actual Path 1
+    // linkage will form when the leader commits.
+    expect(result.linkagesByDelegationId.size).toBe(0)
+  })
+
+  it('claims a target reply that committed BEFORE the leader committed', () => {
+    // Race: leader is streaming, target finishes first and commits. Without
+    // Round 15 this committed target entry would appear at top level (no
+    // linkage exists yet because the leader's source isn't in mergedEntries).
+    const streamStarted = Date.now()
+    const targetReply = makeAssistantEntry({
+      sessionKey: teamSk('eng'),
+      text: 'Here is the deliverable.',
+      timestampMs: streamStarted + 2000,
+    })
+    const streamingTexts = new Map<string, string>([
+      [teamSk('bz'), 'Coordinating now. <delegate to="@Engineer Boo">Build it</delegate>'],
+    ])
+    const streamStartedAt = new Map<string, number>([[teamSk('bz'), streamStarted]])
+    const result = buildWithStreaming([targetReply], streamingTexts, streamStartedAt)
+    expect(result.claimedEntries.has(targetReply.entryId)).toBe(true)
+    expect(result.streamingOwnerByTargetSessionKey.has(teamSk('eng'))).toBe(true)
+  })
+
+  it('does NOT claim target entries from BEFORE the leader stream started', () => {
+    // Stale entry: the target's previous onboarding intro was committed
+    // BEFORE the leader started this turn's stream. Must NOT be claimed
+    // by Round 15 — that's exactly the stale-content bug Round 14A
+    // addressed for LiveActivityFeed and that the Round 15 pass must
+    // honor here too.
+    const streamStarted = Date.now()
+    const staleEntry = makeAssistantEntry({
+      sessionKey: teamSk('eng'),
+      text: "Hi! I'm Engineer Boo, ready to help.",
+      timestampMs: streamStarted - 60_000, // 1 minute before the stream
+    })
+    const streamingTexts = new Map<string, string>([
+      [teamSk('bz'), '<delegate to="@Engineer Boo">Do it</delegate>'],
+    ])
+    const streamStartedAt = new Map<string, number>([[teamSk('bz'), streamStarted]])
+    const result = buildWithStreaming([staleEntry], streamingTexts, streamStartedAt)
+    expect(result.claimedEntries.has(staleEntry.entryId)).toBe(false)
+    // But streaming ownership still transfers (no committed reply yet).
+    expect(result.streamingOwnerByTargetSessionKey.has(teamSk('eng'))).toBe(true)
+  })
+
+  it('does NOT clobber a committed-path linkage that already owns the target', () => {
+    // Both happened: the LEADER ALREADY committed (so Path 1 ran and
+    // owns the linkage) AND the leader's NEXT turn is also streaming
+    // with a `<delegate>` to the same target. Round 15 should NOT
+    // overwrite the committed Path 1 owner with a `stream:` synthetic id.
+    const source = makeAssistantEntry({
+      sessionKey: teamSk('bz'),
+      text: '<delegate to="@Engineer Boo">First task</delegate>',
+    })
+    const streamingTexts = new Map<string, string>([
+      [teamSk('bz'), '<delegate to="@Engineer Boo">Second task, still streaming</delegate>'],
+    ])
+    const result = buildWithStreaming([source], streamingTexts)
+    const owner = result.streamingOwnerByTargetSessionKey.get(teamSk('eng'))
+    expect(owner).toBeDefined()
+    // The committed linkage's delegationId is the source entry id with
+    // a `:blockStart` suffix — NOT `stream:`. Round 15 must preserve it.
+    expect(owner).not.toMatch(/^stream:/)
+  })
+
+  it('handles open / unclosed `<delegate>` tags by ignoring them (partial-stream safety)', () => {
+    // The leader has typed `<delegate to="@Engineer Boo">` but the
+    // closing tag hasn't arrived yet. `findDelegationBlocks` requires a
+    // closing `</delegate>` — partial blocks are NOT yet routable, so
+    // Round 15 should NOT claim ownership prematurely.
+    const streamingTexts = new Map<string, string>([
+      [teamSk('bz'), 'Routing now. <delegate to="@Engineer Boo">half a task, no closing tag'],
+    ])
+    const result = buildWithStreaming([], streamingTexts)
+    expect(result.streamingOwnerByTargetSessionKey.size).toBe(0)
+    expect(result.claimedEntries.size).toBe(0)
+  })
+
+  it('skips streaming texts for non-participant agents (defensive)', () => {
+    // `streamingText` may contain sessions outside the current team
+    // (older 1:1 chat sessions). They must NOT contribute claims.
+    const streamingTexts = new Map<string, string>([
+      ['agent:outsider:main', '<delegate to="@Engineer Boo">should be ignored</delegate>'],
+    ])
+    const result = buildWithStreaming([], streamingTexts)
+    expect(result.streamingOwnerByTargetSessionKey.size).toBe(0)
+  })
+
+  it('skips empty / undefined streaming text values', () => {
+    const streamingTexts = new Map<string, string>([[teamSk('bz'), '']])
+    const result = buildWithStreaming([], streamingTexts)
+    expect(result.streamingOwnerByTargetSessionKey.size).toBe(0)
+  })
+
+  it('claims multiple target sessions when the leader streams sibling delegates', () => {
+    // Workstream batch — TWO closed `<delegate>` tags in the streaming
+    // text. Both targets should be owned so their streams suppress.
+    const streamingTexts = new Map<string, string>([
+      [
+        teamSk('bz'),
+        '<delegate to="@Engineer Boo">Build it</delegate> and <delegate to="@Designer Boo">Style it</delegate>',
+      ],
+    ])
+    const result = buildWithStreaming([], streamingTexts)
+    expect(result.streamingOwnerByTargetSessionKey.has(teamSk('eng'))).toBe(true)
+    expect(result.streamingOwnerByTargetSessionKey.has(teamSk('des'))).toBe(true)
+  })
+})

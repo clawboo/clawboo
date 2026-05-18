@@ -5,7 +5,12 @@
 import { useEffect, useRef } from 'react'
 import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { AgentState } from '@/stores/fleet'
-import { useChatStore, type PendingPlan } from '@/stores/chat'
+import {
+  useChatStore,
+  type PendingPlan,
+  type PendingWorkstreams,
+  type WorkstreamTarget,
+} from '@/stores/chat'
 import { buildTeamSessionKey, setTeamChatOverride, hasTeamChatOverride } from '@/lib/sessionUtils'
 import {
   buildBatchedRelayMessage,
@@ -24,6 +29,7 @@ import {
   type DelegationIntent,
 } from './delegationDetector'
 import { findPlanBlocks, type PlanStep } from './planDetector'
+import { detectFanOutIntent } from './fanOutDetector'
 import {
   condenseSummary,
   determineRelayTargets,
@@ -268,6 +274,18 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
    */
   const planCompletedSetRef = useRef<Set<string>>(new Set())
   /**
+   * Round 10: timestamp anchor for each parallel workstream batch. The
+   * progression pass scans target transcripts for replies with
+   * `timestampMs > workstreamFiredAtRef.get(workstreamId)` — filters out
+   * stale entries (e.g., the target's old onboarding intro).
+   */
+  const workstreamFiredAtRef = useRef<Map<string, number>>(new Map())
+  /**
+   * Round 10: dedup guard for the `[Workstreams Complete]` envelope (mirror
+   * of `planCompletedSetRef`). One-shot per workstreamId.
+   */
+  const workstreamCompletedSetRef = useRef<Set<string>>(new Set())
+  /**
    * Pending relay batches keyed by `${teamId}:${targetId}`. Each batch
    * accumulates items over `RELAY_BATCH_WINDOW_MS` and is then flushed as a
    * single combined `[Team Update]` envelope to the target. See the constant's
@@ -319,6 +337,13 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
       targetAgentName: string
       taskBody: string
       origin: 'dispatch-delegation' | 'relay-batch'
+      /**
+       * Round 9: when this dispatch is a step of a `<plan>` block, carry
+       * the parent plan's id + step index so the renderer can group plan
+       * steps under one PlanCard. Pass-through to `setClawbooDispatch`.
+       */
+      planId?: string | null
+      planStepIndex?: number | null
     }): void => {
       if (!params.sourceEntryId) return
       const currentTeamId = teamIdRef.current
@@ -334,6 +359,8 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
         sequenceKey: nextSeq(),
         timestampMs: Date.now(),
         teamId: currentTeamId,
+        planId: params.planId ?? null,
+        planStepIndex: params.planStepIndex ?? null,
       })
     }
 
@@ -353,6 +380,14 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
       sourceAgentId: string,
       sourceEntryId: string | undefined,
       retryCount = 0,
+      /**
+       * Round 9: when this dispatch is a step of a `<plan>` block, the
+       * caller (`dispatchPlanStep`) passes the parent plan's id + step
+       * index. Propagated into the `clawboo-dispatch` record so the
+       * renderer can group plan steps under one PlanCard. `undefined` for
+       * non-plan dispatches (regular `<delegate>` blocks, fallback regex).
+       */
+      planContext?: { planId: string; stepIndex: number },
     ): void => {
       const currentTeamId = teamIdRef.current
       const currentClient = clientRef.current
@@ -383,7 +418,14 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
               // The retry inherits the same startGen via closure on the next
               // call — when it fires it re-checks against the live generation.
               setTimeout(
-                () => dispatchDelegation(delegation, sourceAgentId, sourceEntryId, retryCount + 1),
+                () =>
+                  dispatchDelegation(
+                    delegation,
+                    sourceAgentId,
+                    sourceEntryId,
+                    retryCount + 1,
+                    planContext, // Round 9: preserve plan context across retries.
+                  ),
                 2000,
               )
             }
@@ -457,6 +499,11 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             targetAgentName: targetAgent?.name ?? delegation.targetAgentId,
             taskBody: delegation.taskDescription,
             origin: 'dispatch-delegation',
+            // Round 9: propagate plan provenance when this dispatch is a
+            // step of a `<plan>` block. The renderer groups plan-step
+            // linkages under a single PlanCard via these fields.
+            planId: planContext?.planId ?? null,
+            planStepIndex: planContext?.stepIndex ?? null,
           })
         } catch {
           // Non-fatal — delegation failure doesn't block other processing.
@@ -504,7 +551,14 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
         // positional key in case future linkage logic dedups by it.
         mentionOffset: stepIndex,
       }
-      dispatchDelegation(intent, plan.sourceAgentId, plan.sourceEntryId)
+      // Round 9: pass plan context so the dispatch record carries
+      // `planId` + `planStepIndex`. The renderer (`AssistantTurnCard`)
+      // groups all linkages with matching `planId` under a single
+      // PlanCard.
+      dispatchDelegation(intent, plan.sourceAgentId, plan.sourceEntryId, 0, {
+        planId: plan.planId,
+        stepIndex,
+      })
     }
 
     // ── Round 8B: send `[Plan Complete]` envelope to the leader ────────────
@@ -563,6 +617,74 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             return
           }
           setTeamChatOverride(plan.sourceAgentId, leaderSk)
+          await currentClient.call('chat.send', {
+            sessionKey: leaderSk,
+            message: messageBody,
+            deliver: false,
+            idempotencyKey: crypto.randomUUID(),
+          })
+        } catch {
+          // Non-fatal.
+        }
+      })()
+    }
+
+    // ── Round 10: send `[Workstreams Complete]` envelope to the leader ─────
+    // Mirror of `sendPlanCompleteEnvelope` but for parallel workstreams
+    // (N≥2 sibling `<delegate>` tags emitted in one leader turn, no
+    // `<plan>` wrapper). Fired once when ALL targets have responded — cues
+    // the leader to synthesize across the parallel outputs. Round 4/5's
+    // silence-on-relay rule would otherwise keep the leader quiet after
+    // parallel work resolves (the "talk is cheap" production failure mode).
+    const sendWorkstreamsCompleteEnvelope = (ws: PendingWorkstreams): void => {
+      if (workstreamCompletedSetRef.current.has(ws.workstreamId)) return
+      workstreamCompletedSetRef.current.add(ws.workstreamId)
+
+      const currentTeamId = teamIdRef.current
+      const currentClient = clientRef.current
+      if (!currentTeamId || !currentClient) return
+
+      const leaderAgent =
+        teamAgentsRef.current.find((a) => a.id === ws.sourceAgentId) ??
+        (booZeroAgentRef.current && booZeroAgentRef.current.id === ws.sourceAgentId
+          ? booZeroAgentRef.current
+          : null)
+      if (!leaderAgent) return
+
+      const leaderSk = buildTeamSessionKey(ws.sourceAgentId, currentTeamId)
+      const summary = ws.targets
+        .map((t, i) => `Workstream ${i + 1} — @${t.targetAgentName}:\n${t.output ?? '(no output)'}`)
+        .join('\n\n---\n\n')
+      const body = `[Workstreams Complete] — all ${ws.targets.length} of your parallel workstreams have responded.\nThe outputs are below. Synthesize across them now. This is your synthesis cue — do not skip it.\n---\n${summary}\n---`
+
+      const isBooZero =
+        booZeroAgentRef.current !== null && ws.sourceAgentId === booZeroAgentRef.current.id
+      const sections: string[] = []
+      if (isBooZero) {
+        sections.push(
+          buildBooZeroRulesBlock({
+            displayName: leaderAgent.name,
+            teamName: teamNameRef.current,
+          }),
+        )
+      }
+      sections.push(body)
+      const messageBody = sections.join('\n\n')
+
+      const startGen = getStopGeneration(currentTeamId)
+      void (async () => {
+        try {
+          if (getStopGeneration(currentTeamId) !== startGen) return
+          if (
+            hasTeamChatOverride(ws.sourceAgentId) &&
+            !workstreamCompletedSetRef.current.has(`${ws.workstreamId}:retry`)
+          ) {
+            // Defer once if leader is busy — Round 8 override-fix.
+            // Re-fire on next subscription tick.
+            workstreamCompletedSetRef.current.delete(ws.workstreamId)
+            return
+          }
+          setTeamChatOverride(ws.sourceAgentId, leaderSk)
           await currentClient.call('chat.send', {
             sessionKey: leaderSk,
             message: messageBody,
@@ -881,6 +1003,13 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
 
           const sourceAgentId = agent.id
 
+          // Round 10: pre-compute plan blocks here (used by the plan-capture
+          // pass below AND by the workstream-detection branch). Knowing
+          // whether a `<plan>` is on this source up-front lets us gate
+          // workstream minting (plans take precedence — they have their own
+          // sequential state machine).
+          const planBlocks = findPlanBlocks(text)
+
           // ── Delegation detection ──────────────────────────────
           const delegations = detectDelegations(
             text,
@@ -902,6 +1031,99 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             // Pass the committed source entryId so `recordClawbooDispatch`
             // (Round 7 Path 3) can attribute the dispatch to this turn.
             dispatchDelegation(delegation, sourceAgentId, entry.entryId)
+          }
+
+          // ── Round 10: parallel workstreams capture ─────────────────────
+          // When the leader fires N≥2 sibling `<delegate>` tags in one turn
+          // WITHOUT a `<plan>` wrapper, register them as a parallel
+          // workstream batch. The progression pass below (after this entry
+          // loop) tracks each target's response; when all targets resolve,
+          // `sendWorkstreamsCompleteEnvelope` cues final synthesis — the
+          // mechanism that Round 4/5's silence-on-relay rule was missing.
+          //
+          // `planBlocks.length === 0` gate: when a `<plan>` is present on
+          // the same source, the plan state machine handles ordering. Loose
+          // `<delegate>` tags on a plan-turn are not part of the workstream
+          // batch (rare edge case — see "Out of scope" in the plan).
+          if (delegations.length >= 2 && planBlocks.length === 0) {
+            const workstreamId = `${currentTeamId}:${entry.entryId}:workstreams`
+            const wsTimestamp = entry.timestampMs ?? Date.now()
+            const targets: WorkstreamTarget[] = delegations.map((d) => ({
+              targetAgentId: d.targetAgentId,
+              targetAgentName: d.targetAgentName,
+              task: d.taskDescription,
+              output: null,
+              resolvedEntryId: null,
+            }))
+            const workstreams: PendingWorkstreams = {
+              workstreamId,
+              sourceEntryId: entry.entryId,
+              sourceAgentId,
+              teamId: currentTeamId,
+              targets,
+              timestampMs: wsTimestamp,
+            }
+            useChatStore.getState().setPendingWorkstreams(workstreams)
+            workstreamFiredAtRef.current.set(workstreamId, wsTimestamp)
+          }
+
+          // ── Round 13: implicit fan-out detection ──────────────────────
+          // When the leader (Boo Zero) emits PURE PROSE claiming "I'll ask
+          // all teammates" / "got responses from all three" / etc. WITHOUT
+          // emitting any structured routing primitive (`<delegate>`,
+          // `<plan>`, `sessions_send`), AND the team has 2+ other
+          // teammates that may have responded via the wake-context fan-out
+          // (Round 4-era behavior), synthesize a workstream batch so the
+          // existing WorkstreamCard / DelegationCard pipeline renders the
+          // same DONE pills, preview lines, and 2-col grid as an explicit
+          // delegation.
+          // `sessions_send` tool calls live in separate `kind: 'tool'`
+          // transcript entries — they're not directly accessible from
+          // this assistant entry here. We rely on Path 4's "skip when
+          // existing linkages found" guard in `buildDelegationLinkages`
+          // to defer to Path 2 (sessions_send) when both exist.
+          const sourceIsLeader = currentBooZero?.id === sourceAgentId
+          const noStructuredRouting = delegations.length === 0 && planBlocks.length === 0
+          if (sourceIsLeader && noStructuredRouting && detectFanOutIntent(text)) {
+            // Targets = every OTHER team member (skip the leader / source).
+            const otherMembers = currentTeamMembers.filter((m) => m.id !== sourceAgentId)
+            if (otherMembers.length >= 2) {
+              const implicitWsId = `${currentTeamId}:${entry.entryId}:implicit-fanout`
+              const wsTimestamp = entry.timestampMs ?? Date.now()
+              // Task body: the user's most recent message (the actual
+              // question the leader fanned out about). Walk the leader's
+              // team session backward to find it. Falls back to a
+              // descriptive placeholder.
+              const leaderSk = buildTeamSessionKey(sourceAgentId, currentTeamId)
+              const leaderBucket = transcripts.get(leaderSk) ?? []
+              let userTask = '(team fan-out — no explicit task body)'
+              for (let i = leaderBucket.length - 1; i >= 0; i--) {
+                const e = leaderBucket[i]
+                if (!e) continue
+                if ((e.timestampMs ?? 0) > wsTimestamp) continue
+                if (e.kind === 'user' && e.text) {
+                  userTask = e.text.slice(0, 400)
+                  break
+                }
+              }
+              const targets: WorkstreamTarget[] = otherMembers.map((m) => ({
+                targetAgentId: m.id,
+                targetAgentName: m.name,
+                task: userTask,
+                output: null,
+                resolvedEntryId: null,
+              }))
+              const implicitWs: PendingWorkstreams = {
+                workstreamId: implicitWsId,
+                sourceEntryId: entry.entryId,
+                sourceAgentId,
+                teamId: currentTeamId,
+                targets,
+                timestampMs: wsTimestamp,
+              }
+              useChatStore.getState().setPendingWorkstreams(implicitWs)
+              workstreamFiredAtRef.current.set(implicitWsId, wsTimestamp)
+            }
           }
 
           // ── Context relay ──────────────────────────────────────
@@ -957,6 +1179,8 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
           // Inline target-name resolver (case-insensitive longest-prefix
           // match against the dedup'd participant list — same heuristic as
           // `delegationDetector.resolveTargetName`).
+          // `planBlocks` was pre-computed at the top of this entry loop
+          // (Round 10) so workstream detection could gate on its emptiness.
           const resolveStepTarget = (raw: string): { id: string; name: string } | null => {
             const stripped = raw.replace(/^@/, '').trim().toLowerCase()
             if (!stripped) return null
@@ -971,7 +1195,6 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
             }
             return null
           }
-          const planBlocks = findPlanBlocks(text)
           for (const planBlock of planBlocks) {
             if (planBlock.steps.length === 0) continue
             const planId = `${currentTeamId}:${entry.entryId}:plan:${planBlock.blockStart}`
@@ -1061,6 +1284,57 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
           dispatchPlanStep(livePlan, nextIndex)
         } else {
           sendPlanCompleteEnvelope(livePlan)
+        }
+      }
+
+      // ── Round 10: parallel-workstreams progression pass ──────────────
+      // Iterate all pending workstream batches for this team. For each
+      // unresolved target, look for a fresh substantive response in its
+      // session's transcript. When every target has resolved, fire the
+      // `[Workstreams Complete]` envelope so the leader synthesizes.
+      const allWorkstreams = useChatStore.getState().pendingWorkstreams
+      for (const ws of allWorkstreams.values()) {
+        if (ws.teamId !== currentTeamId) continue
+        // Re-read because resolveWorkstreamTarget mutates targets.
+        const liveWs = useChatStore.getState().pendingWorkstreams.get(ws.workstreamId)
+        if (!liveWs) continue
+        // Already fully complete? Fire envelope (one-shot via ref) and skip.
+        if (liveWs.targets.every((t) => t.resolvedEntryId !== null)) {
+          sendWorkstreamsCompleteEnvelope(liveWs)
+          continue
+        }
+        // Anchor for "after-workstream" filtering. Pre-workstream entries
+        // (e.g., the target's prior onboarding intro) must not satisfy a
+        // workstream target.
+        const firedAt = workstreamFiredAtRef.current.get(liveWs.workstreamId) ?? liveWs.timestampMs
+        for (const target of liveWs.targets) {
+          if (target.resolvedEntryId !== null) continue
+          if (!target.targetAgentId) continue
+          const targetSk = buildTeamSessionKey(target.targetAgentId, currentTeamId)
+          const targetEntries = transcripts.get(targetSk)
+          if (!targetEntries) continue
+          const reply = targetEntries.find(
+            (e) =>
+              e.role === 'assistant' &&
+              e.kind === 'assistant' &&
+              (e.timestampMs ?? 0) > firedAt &&
+              e.text.length > 0 &&
+              !shouldDropAssistantTurn(e.text),
+          )
+          if (!reply) continue
+          useChatStore
+            .getState()
+            .resolveWorkstreamTarget(
+              liveWs.workstreamId,
+              target.targetAgentId,
+              reply.text,
+              reply.entryId,
+            )
+        }
+        // Re-read post-resolve. If everything's resolved now, fire envelope.
+        const postResolveWs = useChatStore.getState().pendingWorkstreams.get(ws.workstreamId)
+        if (postResolveWs && postResolveWs.targets.every((t) => t.resolvedEntryId !== null)) {
+          sendWorkstreamsCompleteEnvelope(postResolveWs)
         }
       }
     }
@@ -1200,11 +1474,17 @@ export function useTeamOrchestration(params: UseTeamOrchestrationParams): void {
       // Round 8B: also wipe any in-progress `<plan>` state machines so the
       // next step doesn't fire after Stop.
       useChatStore.getState().clearPendingPlans(currentTeamId)
+      // Round 10: wipe any in-progress parallel-workstream batches so the
+      // synthesis envelope doesn't fire after Stop.
+      useChatStore.getState().clearPendingWorkstreams(currentTeamId)
     }
     // Reset Round 8B refs so a new plan after Stop starts fresh.
     firedPlanStepsRef.current = new Set()
     planStepFiredAtRef.current = new Map()
     planCompletedSetRef.current = new Set()
+    // Reset Round 10 refs so a new workstream batch after Stop starts fresh.
+    workstreamFiredAtRef.current = new Map()
+    workstreamCompletedSetRef.current = new Set()
     frozenUntilRef.current = Date.now() + STOP_FREEZE_MS
   }, [stopSignal])
 }

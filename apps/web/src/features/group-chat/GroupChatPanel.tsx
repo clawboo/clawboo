@@ -70,6 +70,14 @@ export function GroupChatPanel({
   // surface ACTUAL Clawboo routing — `dispatchDelegation` + relay batches
   // — independent of whatever the LLM emits in prose.
   const clawbooDispatchesMap = useChatStore((s) => s.clawbooDispatches)
+  // Round 13: implicit fan-out workstreams. When the leader emits pure
+  // prose like "I'll ask all teammates" without structured tags,
+  // `useTeamOrchestration` mints a `pendingWorkstreams` record with
+  // `:implicit-fanout` suffix. Threaded into `buildDelegationLinkages`
+  // Path 4 so the WorkstreamCard renders the implicit batch with the
+  // same DONE pills / preview lines / grid as an explicit `<delegate>`
+  // batch.
+  const pendingWorkstreamsMap = useChatStore((s) => s.pendingWorkstreams)
 
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
@@ -221,26 +229,66 @@ export function GroupChatPanel({
         teamId,
         participants: participants.map((a) => ({ id: a.id, name: a.name })),
         clawbooDispatches: clawbooDispatchesMap,
+        pendingWorkstreams: pendingWorkstreamsMap,
+        // Round 15: feed live streaming text + stream-start anchors into the
+        // linkage scan so closed `<delegate>` blocks emitted mid-stream
+        // (before the leader's source entry commits) claim their target's
+        // streaming/committed reply. Without this, the target's reply
+        // appears at top level during the gap and "jumps inside" the card
+        // only once the leader commits.
+        streamingTexts: streamingTextMap,
+        streamStartedAt: streamStartedAtMap,
       }),
-    [blocks, mergedEntries, teamId, participants, clawbooDispatchesMap],
+    [
+      blocks,
+      mergedEntries,
+      teamId,
+      participants,
+      clawbooDispatchesMap,
+      pendingWorkstreamsMap,
+      streamingTextMap,
+      streamStartedAtMap,
+    ],
   )
 
-  // Pick the entryId of the chronologically-latest source-turn that contains
-  // delegations. All delegations on THAT source default-expand; older ones
-  // collapse (per the user's "newest expanded, older collapsed" choice).
+  // Pick the entryId of the chronologically-latest LEADER source-turn that
+  // contains visible delegations. All delegations on THAT source default-
+  // expand; older ones collapse (per the user's "newest expanded, older
+  // collapsed" accordion topology).
+  //
+  // Restrict to leader = Boo Zero. A specialist agent occasionally emits
+  // its own `<delegate>` tag in a response — those linkages have higher
+  // timestamps than Boo Zero's last delegation turn and would otherwise
+  // win the "latest" comparison, but their cards render NESTED inside the
+  // parent DelegationCard (not at top level), so they never receive the
+  // auto-expand signal. Net effect of including them: ALL visible top-
+  // level cards stay collapsed forever. Filtering to leader-source
+  // linkages restores the "newest top-level workstream auto-opens"
+  // behavior the user expects.
+  //
+  // Sort by `timestampMs` (wall-clock, stable across reloads) NOT
+  // `sequenceKey` (process-local, resets to 0 on reload) — same lesson as
+  // Round 7B's `findTargetResponse` fix.
   const latestSourceEntryIdWithDelegations = useMemo(() => {
+    let latestTs = -1
     let latestSeq = -1
     let latestId: string | null = null
     for (const linkage of linkages.linkagesByDelegationId.values()) {
+      // Only consider linkages whose source is the leader (Boo Zero). A
+      // specialist's rogue `<delegate>` shouldn't move the accordion
+      // pointer because its cards aren't visible top-level.
+      if (booZeroAgent && linkage.sourceAgentId !== booZeroAgent.id) continue
       const sourceEntry = mergedEntries.find((e) => e.entryId === linkage.sourceEntryId)
       if (!sourceEntry) continue
-      if (sourceEntry.sequenceKey > latestSeq) {
+      const ts = sourceEntry.timestampMs ?? 0
+      if (ts > latestTs || (ts === latestTs && sourceEntry.sequenceKey > latestSeq)) {
+        latestTs = ts
         latestSeq = sourceEntry.sequenceKey
         latestId = sourceEntry.entryId
       }
     }
     return latestId
-  }, [linkages, mergedEntries])
+  }, [linkages, mergedEntries, booZeroAgent])
 
   // Filter assistant-turn blocks whose owning entry is claimed by some
   // delegation — those render INSIDE a DelegationCard, not at the top level.
@@ -261,13 +309,55 @@ export function GroupChatPanel({
   // entries and replay stale wake/relay messages (the 7-hour-cascade bug).
   // The 5s safety timeout is a fallback — if a fetch hangs forever we still
   // want orchestration to come online eventually.
+  //
+  // **CRITICAL — stable dep signature**: depend on a STRING derived from
+  // participant ids, not the participants array reference. `participants`
+  // is a `useMemo` over `[teamAgents, booZeroAgent]`, both of which are
+  // Zustand selector results — the array reference REALLOCATES on every
+  // fleet store update (every agent status patch during streaming). With
+  // the array as a dep, this effect re-fired on every chat tick, resetting
+  // `historyHydrated` to `false` → disabling orchestration → the
+  // `useTeamOrchestration` subscription kept unmounting and remounting,
+  // its `processNewEntries` never running. That broke Round 7's dispatch
+  // recording, Round 8's plan state machine, AND Round 10's workstream
+  // auto-synthesis. The string signature only changes when the set of
+  // participant IDs actually changes (e.g., team switch, agent deleted).
+  const participantSignature = useMemo(
+    () =>
+      participants
+        .map((a) => a.id)
+        .sort()
+        .join('|'),
+    [participants],
+  )
+  // Stash the latest array/map refs so the effect can read them at fire
+  // time without participating in the dependency list. We DELIBERATELY do
+  // NOT include `participants` / `teamSessionKeys` in the effect's deps —
+  // see the multi-line rationale in the effect body below.
+  const participantsRef = useRef(participants)
+  participantsRef.current = participants
+  const teamSessionKeysRef = useRef(teamSessionKeys)
+  teamSessionKeysRef.current = teamSessionKeys
   useEffect(() => {
     setHistoryHydrated(false)
     let cancelled = false
 
+    // Read the latest participants/teamSessionKeys via refs (not deps). The
+    // `participants` array reference reallocates whenever the fleet-store
+    // agents array reallocates (which happens on EVERY agent status patch
+    // during streaming — a chat tick can fire 10+ patches per second), and
+    // `teamSessionKeys` is downstream of that. If we put them in the deps,
+    // this effect re-fires on every chat tick, resets `historyHydrated` to
+    // `false`, and the `useTeamOrchestration` subscription gated on it
+    // unmounts/remounts in a tight loop — breaking Round 7 dispatch
+    // recording, Round 8 plan state machines, AND Round 10 workstream
+    // auto-synthesis. The `participantSignature` string only changes when
+    // the set of participant IDs actually changes (team switch, agent
+    // added/removed), which is the right granularity for "re-hydrate
+    // history".
     const fetches: Promise<unknown>[] = []
-    for (const agent of participants) {
-      const teamSk = teamSessionKeys.get(agent.id)
+    for (const agent of participantsRef.current) {
+      const teamSk = teamSessionKeysRef.current.get(agent.id)
       if (!teamSk) continue
       const existing = useChatStore.getState().transcripts.get(teamSk)
       if (existing && existing.length > 0) continue
@@ -300,7 +390,7 @@ export function GroupChatPanel({
       cancelled = true
       clearTimeout(timer)
     }
-  }, [participants, teamSessionKeys])
+  }, [participantSignature])
 
   // ── Auto-scroll ───────────────────────────────────────────────────────────
   const scrollRef = useRef<HTMLDivElement>(null)

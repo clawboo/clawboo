@@ -408,4 +408,126 @@ describe('useChatStore', () => {
       expect(useChatStore.getState().pendingPlans.size).toBe(0)
     })
   })
+
+  // Round 10: parallel-workstreams state machine actions.
+  describe('setPendingWorkstreams / resolveWorkstreamTarget / clearPendingWorkstreams', () => {
+    beforeEach(() => {
+      useChatStore.setState({
+        pendingWorkstreams: new Map(),
+      })
+    })
+
+    function makeWorkstreams(
+      overrides: Partial<import('../chat').PendingWorkstreams> = {},
+    ): import('../chat').PendingWorkstreams {
+      return {
+        workstreamId: 't1:src-1:workstreams',
+        sourceEntryId: 'src-1',
+        sourceAgentId: 'bz',
+        teamId: 't1',
+        targets: [
+          {
+            targetAgentId: 'a',
+            targetAgentName: 'A',
+            task: 'workstream 1 task',
+            output: null,
+            resolvedEntryId: null,
+          },
+          {
+            targetAgentId: 'b',
+            targetAgentName: 'B',
+            task: 'workstream 2 task',
+            output: null,
+            resolvedEntryId: null,
+          },
+          {
+            targetAgentId: 'c',
+            targetAgentName: 'C',
+            task: 'workstream 3 task',
+            output: null,
+            resolvedEntryId: null,
+          },
+        ],
+        timestampMs: 1_700_000_000_000,
+        ...overrides,
+      }
+    }
+
+    it('stores a new workstreams record by workstreamId', () => {
+      const ws = makeWorkstreams()
+      useChatStore.getState().setPendingWorkstreams(ws)
+      expect(useChatStore.getState().pendingWorkstreams.get(ws.workstreamId)).toBe(ws)
+    })
+
+    it('setPendingWorkstreams is idempotent — re-registering preserves resolved targets', () => {
+      const ws = makeWorkstreams()
+      useChatStore.getState().setPendingWorkstreams(ws)
+      // Resolve target 'b' to capture in-flight progress.
+      useChatStore.getState().resolveWorkstreamTarget(ws.workstreamId, 'b', 'B output', 'reply-b')
+      // Re-registering the SAME workstreamId must NOT clobber progress.
+      useChatStore.getState().setPendingWorkstreams(ws)
+      const after = useChatStore.getState().pendingWorkstreams.get(ws.workstreamId)!
+      expect(after.targets[1]!.resolvedEntryId).toBe('reply-b')
+      expect(after.targets[1]!.output).toBe('B output')
+    })
+
+    it('resolveWorkstreamTarget stores output for any target (parallel, no ordering)', () => {
+      const ws = makeWorkstreams()
+      useChatStore.getState().setPendingWorkstreams(ws)
+      // Resolve out-of-order: target C first, then A — parallel semantics
+      // don't care which lands first.
+      useChatStore.getState().resolveWorkstreamTarget(ws.workstreamId, 'c', 'C result', 'reply-c')
+      useChatStore.getState().resolveWorkstreamTarget(ws.workstreamId, 'a', 'A result', 'reply-a')
+      const after = useChatStore.getState().pendingWorkstreams.get(ws.workstreamId)!
+      expect(after.targets[0]!.output).toBe('A result')
+      expect(after.targets[0]!.resolvedEntryId).toBe('reply-a')
+      expect(after.targets[2]!.output).toBe('C result')
+      expect(after.targets[2]!.resolvedEntryId).toBe('reply-c')
+      // Target B is still unresolved.
+      expect(after.targets[1]!.resolvedEntryId).toBeNull()
+    })
+
+    it('resolveWorkstreamTarget is idempotent — same payload is a no-op', () => {
+      const ws = makeWorkstreams()
+      useChatStore.getState().setPendingWorkstreams(ws)
+      useChatStore.getState().resolveWorkstreamTarget(ws.workstreamId, 'a', 'A result', 'reply-a')
+      const after1 = useChatStore.getState().pendingWorkstreams
+      // Re-fire with the same payload — store should return the previous state ref.
+      useChatStore.getState().resolveWorkstreamTarget(ws.workstreamId, 'a', 'A result', 'reply-a')
+      const after2 = useChatStore.getState().pendingWorkstreams
+      expect(after2).toBe(after1)
+    })
+
+    it('resolveWorkstreamTarget is a no-op for unknown workstream or target', () => {
+      const ws = makeWorkstreams()
+      useChatStore.getState().setPendingWorkstreams(ws)
+      const before = useChatStore.getState().pendingWorkstreams
+      // Unknown workstream id.
+      useChatStore.getState().resolveWorkstreamTarget('nonexistent', 'a', 'x', 'y')
+      // Unknown target agent id on a known workstream.
+      useChatStore.getState().resolveWorkstreamTarget(ws.workstreamId, 'never-in-team', 'x', 'y')
+      const after = useChatStore.getState().pendingWorkstreams
+      expect(after).toBe(before)
+    })
+
+    it('clearPendingWorkstreams(teamId) wipes only that team — other teams untouched', () => {
+      useChatStore
+        .getState()
+        .setPendingWorkstreams(makeWorkstreams({ workstreamId: 't1:w1', teamId: 't1' }))
+      useChatStore
+        .getState()
+        .setPendingWorkstreams(makeWorkstreams({ workstreamId: 't1:w2', teamId: 't1' }))
+      useChatStore
+        .getState()
+        .setPendingWorkstreams(makeWorkstreams({ workstreamId: 't2:w1', teamId: 't2' }))
+      useChatStore.getState().clearPendingWorkstreams('t1')
+      expect(useChatStore.getState().pendingWorkstreams.has('t1:w1')).toBe(false)
+      expect(useChatStore.getState().pendingWorkstreams.has('t1:w2')).toBe(false)
+      expect(useChatStore.getState().pendingWorkstreams.has('t2:w1')).toBe(true)
+    })
+
+    it('initial state has empty pendingWorkstreams', () => {
+      expect(useChatStore.getState().pendingWorkstreams.size).toBe(0)
+    })
+  })
 })

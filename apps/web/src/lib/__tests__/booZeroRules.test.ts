@@ -61,15 +61,17 @@ describe('buildBooZeroRulesBlock', () => {
     expect(a).toBe(b)
   })
 
-  it('stays under a soft 7500-char budget so the per-turn token cost is bounded', () => {
+  it('stays under a soft 9500-char budget so the per-turn token cost is bounded', () => {
     const out = buildBooZeroRulesBlock({
       displayName: 'Boo Zero',
       teamName: 'A Sample Team With A Reasonable Length',
     })
     // After Round 8D expansion (Multi-step pipelines + <plan> blocks +
     // continue-on-relay exception), the block grew from ~4200 chars to ~6500
-    // chars. Prompt caching keeps the per-turn cost near zero. The 7500-char
-    // ceiling catches further runaway expansion without breaking on minor edits.
-    expect(out.length).toBeLessThan(7500)
+    // chars. Round 10 added the Parallel-workstreams section + extended the
+    // silence-on-relay rule reference, taking it to ~7400 chars. Prompt
+    // caching keeps the per-turn cost near zero. The 9500-char ceiling
+    // catches further runaway expansion without breaking on minor edits.
+    expect(out.length).toBeLessThan(9500)
   })
 })
