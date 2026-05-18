@@ -51,6 +51,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - run: pnpm verify:ingest
+
       - run: pnpm build
 
       - run: bash scripts/assemble-cli.sh

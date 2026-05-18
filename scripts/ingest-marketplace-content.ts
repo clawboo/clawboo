@@ -13,6 +13,20 @@
 
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import prettier from 'prettier'
+
+// Write `content` to `outPath` after running it through Prettier with the
+// repo's resolved config. Without this, freshly-generated files would be
+// unformatted (the renderers emit double-quoted, single-line strings) and
+// drift against the existing committed files (which were formatted) — see
+// `scripts/verify-ingest.ts`, which mirrors the same Prettier-normalize step.
+async function writeFormatted(outPath: string, content: string): Promise<void> {
+  const formatted = await prettier.format(content, {
+    parser: 'typescript',
+    filepath: outPath,
+  })
+  await fs.writeFile(outPath, formatted, 'utf8')
+}
 import {
   AGENCY_AGENTS_SHA,
   AWESOME_OPENCLAW_SHA,
@@ -125,14 +139,14 @@ async function main(): Promise<void> {
     const agents = domainAgents.get(domain) ?? []
     const content = renderDomainFile(domain, agents)
     const outPath = domainFilePath(domain)
-    writePromises.push(fs.writeFile(outPath, content, 'utf8'))
+    writePromises.push(writeFormatted(outPath, content))
     console.log(`  Wrote ${path.relative(process.cwd(), outPath)} (${agents.length} entries)`)
   }
   await Promise.all(writePromises)
 
   // 6. Write agency/index.ts
   const agencyIndex = renderAgencyIndex()
-  await fs.writeFile(agencyIndexPath(), agencyIndex, 'utf8')
+  await writeFormatted(agencyIndexPath(), agencyIndex)
   console.log(`  Wrote ${path.relative(process.cwd(), agencyIndexPath())}`)
 
   // ─── Awesome OpenClaw pipeline ──────────────────────────────────────────────
@@ -164,19 +178,19 @@ async function main(): Promise<void> {
 
   // Write awesome-openclaw/usecases.ts
   const awesomeFileContent = renderAwesomeOpenclawFile(awesomeAgents)
-  await fs.writeFile(awesomeOpenclawFilePath(), awesomeFileContent, 'utf8')
+  await writeFormatted(awesomeOpenclawFilePath(), awesomeFileContent)
   console.log(
     `  Wrote ${path.relative(process.cwd(), awesomeOpenclawFilePath())} (${awesomeAgents.length} entries)`,
   )
 
   // Write awesome-openclaw/index.ts
   const awesomeIndex = renderAwesomeOpenclawIndex()
-  await fs.writeFile(awesomeOpenclawIndexPath(), awesomeIndex, 'utf8')
+  await writeFormatted(awesomeOpenclawIndexPath(), awesomeIndex)
   console.log(`  Wrote ${path.relative(process.cwd(), awesomeOpenclawIndexPath())}`)
 
   // 7. Write agents/index.ts (imports from all three sources)
   const agentsIndex = renderAgentsIndex()
-  await fs.writeFile(agentsIndexPath(), agentsIndex, 'utf8')
+  await writeFormatted(agentsIndexPath(), agentsIndex)
   console.log(`  Wrote ${path.relative(process.cwd(), agentsIndexPath())}`)
 
   // ─── Team file generation ──────────────────────────────────────────────────
@@ -212,7 +226,7 @@ async function main(): Promise<void> {
     workflowBodies,
     agentNameById,
   )
-  await fs.writeFile(agencyWorkflowsTeamPath(), agencyWorkflowsContent, 'utf8')
+  await writeFormatted(agencyWorkflowsTeamPath(), agencyWorkflowsContent)
   console.log(
     `  Wrote ${path.relative(process.cwd(), agencyWorkflowsTeamPath())} (${WORKFLOW_TEAM_CONFIGS.length} teams)`,
   )
@@ -220,7 +234,7 @@ async function main(): Promise<void> {
   // 9. Group awesome-openclaw agents by usecase + emit teams/awesome-openclaw.ts
   const awesomeGroups = groupAwesomeByUsecase(awesomeAgents)
   const awesomeTeamsContent = renderAwesomeOpenclawTeamsFile(awesomeGroups)
-  await fs.writeFile(awesomeOpenclawTeamsPath(), awesomeTeamsContent, 'utf8')
+  await writeFormatted(awesomeOpenclawTeamsPath(), awesomeTeamsContent)
   console.log(
     `  Wrote ${path.relative(process.cwd(), awesomeOpenclawTeamsPath())} (${awesomeGroups.size} teams)`,
   )
@@ -229,7 +243,7 @@ async function main(): Promise<void> {
   const excludeIds = workflowAgentIds()
   const syntheticTeams = generateSyntheticTeams(domainAgents, excludeIds)
   const syntheticContent = renderSyntheticTeamsFile(syntheticTeams)
-  await fs.writeFile(syntheticTeamsPath(), syntheticContent, 'utf8')
+  await writeFormatted(syntheticTeamsPath(), syntheticContent)
   console.log(
     `  Wrote ${path.relative(process.cwd(), syntheticTeamsPath())} (${syntheticTeams.length} teams)`,
   )
