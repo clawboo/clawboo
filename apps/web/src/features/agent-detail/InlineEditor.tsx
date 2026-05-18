@@ -18,10 +18,15 @@ import { clawbooEditorTheme } from '@/features/editor/editorTheme'
 import { useAgentFiles, CORE_FILE_TABS, ALL_FILE_TABS } from '@/features/editor/useAgentFiles'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
 import { ExecSettings } from '@/features/settings/ExecSettings'
+import { useBooZeroStore } from '@/stores/booZero'
+import { useFleetStore } from '@/stores/fleet'
+import { DisplayNameEditor } from '@/features/boo-zero/DisplayNameEditor'
+import { GlobalBriefEditor } from '@/features/boo-zero/GlobalBriefEditor'
 
 // ─── Tab types ───────────────────────────────────────────────────────────────
 
-type EditorTab = 'personality' | 'permissions' | AgentFileName
+// `'brief'` is Boo-Zero-only — gated by `isBooZero` at the tab-list level.
+type EditorTab = 'personality' | 'permissions' | 'brief' | AgentFileName
 
 const FILE_TAB_LABELS: Record<AgentFileName, string> = {
   'SOUL.md': 'SOUL',
@@ -36,7 +41,13 @@ const FILE_TAB_LABELS: Record<AgentFileName, string> = {
 function getTabLabel(tab: EditorTab): string {
   if (tab === 'personality') return 'Personality'
   if (tab === 'permissions') return 'Permissions'
+  if (tab === 'brief') return 'Brief'
   return FILE_TAB_LABELS[tab] ?? tab.replace('.md', '')
+}
+
+/** Type guard: is this tab one of the file-backed CodeMirror tabs? */
+function isAgentFileTab(tab: EditorTab): tab is AgentFileName {
+  return tab !== 'personality' && tab !== 'permissions' && tab !== 'brief'
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -63,9 +74,24 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
     return [...coreTabs, ...extras]
   }, [fileExists])
 
+  // The Brief tab is Boo-Zero-only — it holds the Display Name override + the
+  // Global Brief (Boo Zero's load-bearing identity surface). Other agents
+  // don't get the tab at all, so the tab strip stays clean.
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  const isBooZero = booZeroAgentId !== null && booZeroAgentId === agentId
+  // Pull the latest display name from the fleet store so the editor sees
+  // whatever override is currently applied (rather than a stale prop).
+  const liveAgent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
+  const liveAgentName = liveAgent?.name ?? agentName
+
   const allTabs: EditorTab[] = useMemo(
-    () => ['personality', 'permissions', ...visibleFileTabs],
-    [visibleFileTabs],
+    () => [
+      'personality',
+      'permissions',
+      ...(isBooZero ? (['brief'] as const) : []),
+      ...visibleFileTabs,
+    ],
+    [visibleFileTabs, isBooZero],
   )
 
   const [activeTab, setActiveTab] = useState<EditorTab>('personality')
@@ -115,7 +141,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
             key: 'Mod-s',
             run: () => {
               const tab = activeTabRef.current
-              if (tab !== 'personality' && tab !== 'permissions') {
+              if (isAgentFileTab(tab)) {
                 void handleSaveRef.current(tab)
               }
               return true
@@ -127,7 +153,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             const tab = activeTabRef.current
-            if (tab !== 'personality' && tab !== 'permissions') {
+            if (isAgentFileTab(tab)) {
               updateFileContent(tab, update.state.doc.toString())
             }
           }
@@ -150,7 +176,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
     const view = viewRef.current
     if (!view || loading) return
 
-    if (activeTab === 'personality' || activeTab === 'permissions') return
+    if (!isAgentFileTab(activeTab)) return
 
     const fileState = filesRef.current[activeTab]
     if (!fileState) return
@@ -163,22 +189,20 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
     }
 
     view.dispatch({
-      effects: placeholderComp.current.reconfigure(
-        placeholder(AGENT_FILE_PLACEHOLDERS[activeTab as AgentFileName]),
-      ),
+      effects: placeholderComp.current.reconfigure(placeholder(AGENT_FILE_PLACEHOLDERS[activeTab])),
     })
   }, [activeTab, loading])
 
   // ─── Active file tab data ─────────────────────────────────────────────────
 
-  const isFileTab = activeTab !== 'personality' && activeTab !== 'permissions'
-  const isFileDirty = isFileTab && isDirty(activeTab as AgentFileName)
+  const isFileTab = isAgentFileTab(activeTab)
+  const isFileDirty = isFileTab && isDirty(activeTab)
 
   const onSaveClick = useCallback(() => {
-    if (isFileTab) {
-      void handleSave(activeTab as AgentFileName)
+    if (isAgentFileTab(activeTab)) {
+      void handleSave(activeTab)
     }
-  }, [handleSave, activeTab, isFileTab])
+  }, [handleSave, activeTab])
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -206,8 +230,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
       >
         {allTabs.map((tab) => {
           const isActive = tab === activeTab
-          const dirty =
-            tab !== 'personality' && tab !== 'permissions' && isDirty(tab as AgentFileName)
+          const dirty = isAgentFileTab(tab) && isDirty(tab)
           return (
             <button
               key={tab}
@@ -321,12 +344,56 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
           </div>
         )}
 
-        {/* CodeMirror container — hidden (not destroyed) when personality tab active */}
+        {/* Brief tab — Boo Zero only (gated at allTabs construction).
+            Holds the Display Name override + the Global Brief — the
+            load-bearing identity surface that runs through every Boo
+            Zero turn. */}
+        {activeTab === 'brief' && isBooZero && (
+          <div
+            style={{
+              height: '100%',
+              overflowY: 'auto',
+              padding: '12px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 18,
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'rgba(232,232,232,0.85)',
+                }}
+              >
+                Display name
+              </h3>
+              <DisplayNameEditor agentId={agentId} currentName={liveAgentName} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'rgba(232,232,232,0.85)',
+                }}
+              >
+                Global brief
+              </h3>
+              <GlobalBriefEditor />
+            </div>
+          </div>
+        )}
+
+        {/* CodeMirror container — hidden (not destroyed) when a non-file tab is active */}
         <div
           ref={editorContainerRef}
           style={{
             height: '100%',
-            display: activeTab === 'personality' || activeTab === 'permissions' ? 'none' : 'block',
+            display: isAgentFileTab(activeTab) ? 'block' : 'none',
           }}
         />
       </div>
@@ -351,7 +418,9 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
             ? `${agentName} · Personality`
             : activeTab === 'permissions'
               ? `${agentName} · Permissions`
-              : AGENT_FILE_META[activeTab as AgentFileName].hint}
+              : activeTab === 'brief'
+                ? `${agentName} · Brief — display name + global brief`
+                : AGENT_FILE_META[activeTab].hint}
         </span>
         <span>
           {anyDirty ? 'Unsaved' : 'Saved'}

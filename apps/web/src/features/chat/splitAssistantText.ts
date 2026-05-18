@@ -7,7 +7,7 @@ import { findDelegationBlocks } from '@/features/group-chat/delegationDetector'
 
 export type AssistantSegment =
   | { kind: 'prose'; text: string }
-  | { kind: 'delegation'; targetName: string; task: string }
+  | { kind: 'delegation'; targetName: string; task: string; blockStart: number; blockEnd: number }
 
 /**
  * Walk the assistant text and produce an ordered list of segments. Empty
@@ -39,6 +39,8 @@ export function splitAssistantText(text: string): AssistantSegment[] {
       kind: 'delegation',
       targetName: cleanedName,
       task: block.task,
+      blockStart: block.blockStart,
+      blockEnd: block.blockEnd,
     })
     cursor = block.blockEnd
   }

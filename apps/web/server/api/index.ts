@@ -29,6 +29,7 @@ import {
 } from './teams'
 import { agentsDELETE, agentsCleanupPOST } from './agents'
 import { teamOnboardingGET, teamOnboardingPATCH } from './teamOnboarding'
+import { teamRulesGET, teamRulesPUT } from './teamRules'
 import {
   teamBriefGET,
   teamBriefPUT,
@@ -100,6 +101,11 @@ router.delete('/api/teams/:id/agents/:agentId', teamAgentDELETE)
 // Team onboarding (per-team boolean flags for "Know Your Team" gate)
 router.get('/api/teams/:id/onboarding', teamOnboardingGET)
 router.patch('/api/teams/:id/onboarding', teamOnboardingPATCH)
+
+// Team rules — user-captured rules injected into every team agent's preamble.
+// Source: maintenance panel textarea OR /rule slash command in the composer.
+router.get('/api/team-rules/:teamId', teamRulesGET)
+router.put('/api/team-rules/:teamId', teamRulesPUT)
 
 // Agents — local SQLite metadata cleanup. Gateway is the source of truth for
 // agent identity, so there's no `create` or `list` here — only delete + the

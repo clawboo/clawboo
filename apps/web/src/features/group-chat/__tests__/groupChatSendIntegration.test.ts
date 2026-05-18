@@ -186,9 +186,14 @@ describe('sendGroupChatMessage — context preamble integration', () => {
     // Wake message must NOT ask for introductions or list teammates as
     // @mentions — that triggered the message-flooding cascade in production.
     // The full team protocol lives in AGENTS.md, loaded on every interaction.
+    // Phase 3 (cascade-fix): the body is now a structural prompt asking for
+    // a literal `__resumed__` token; the RESUME_SIGNAL sentinel + target
+    // agent name still appear.
     const wakeMessage = wakeCalls[0][1].message as string
-    expect(wakeMessage).toContain('resuming')
+    expect(wakeMessage).toContain('RESUME_SIGNAL')
+    expect(wakeMessage).toContain('reactivated')
     expect(wakeMessage).toContain('Worker Boo')
+    expect(wakeMessage).toContain('__resumed__')
     expect(wakeMessage).not.toContain('@')
     expect(wakeMessage).not.toMatch(/introduce yourself/i)
   })

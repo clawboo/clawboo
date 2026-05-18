@@ -144,6 +144,16 @@ export function useGatewayEvents(client: GatewayClient | null): void {
           (agentId ? getTeamChatOverride(agentId, runId) : undefined) ?? sessionKey
         if (resolvedKey && patch.streamText !== undefined) {
           useChatStore.getState().setStreamingText(resolvedKey, patch.streamText)
+          // Anchor the stream-start timestamp for this session in the chat
+          // store. First chunk wins (the store action is no-op when already
+          // set). Skipped when `streamText` is null (end-of-stream marker)
+          // so we don't re-anchor right before commit. The renderer reads
+          // this timestamp to position the live StreamingCard at its
+          // chronological slot — no more "bottom-of-list during stream,
+          // jump to top on commit" re-arrangement.
+          if (patch.streamText !== null) {
+            useChatStore.getState().setStreamStart(resolvedKey, Date.now())
+          }
         }
       },
 
@@ -167,7 +177,17 @@ export function useGatewayEvents(client: GatewayClient | null): void {
         const sessionKey = teamOverride ?? eventSessionKey ?? agent?.sessionKey
         if (!sessionKey) return
 
-        const now = Date.now()
+        // Anchor the commit batch to when streaming STARTED for this session,
+        // not when it commits. Without this, a long-streaming leader's commit
+        // lands AFTER fast specialists' commits even though the leader's
+        // response began first. Stream-start lives in the chat store so
+        // renderers can subscribe AND `appendOutputLines` can read it here.
+        // Falls back to commit time for tool-only batches that never streamed.
+        const streamStart = useChatStore.getState().streamStartedAt.get(sessionKey) ?? null
+        if (streamStart !== null) {
+          useChatStore.getState().clearStreamStart(sessionKey)
+        }
+        const timestamp = streamStart ?? Date.now()
         const entries: TranscriptEntry[] = lines.map((text) => ({
           entryId: crypto.randomUUID(),
           runId: agent?.runId ?? null,
@@ -179,10 +199,10 @@ export function useGatewayEvents(client: GatewayClient | null): void {
           role: 'assistant' as const,
           text,
           source: 'runtime-chat' as const,
-          timestampMs: now,
+          timestampMs: timestamp,
           // Each line in the batch gets a unique strictly-increasing
           // sequenceKey so the merged-view sort can break ties even when
-          // every line shares `now`.
+          // every line shares the same timestamp.
           sequenceKey: nextSeq(),
           confirmed: true,
           fingerprint: crypto.randomUUID(),
@@ -401,6 +421,10 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       patchQueue.dispose()
       handler.dispose()
       clearAllWakeRecords()
+      // Stream-start anchors live in the chat store (Round 5) — they're
+      // already wiped per-session via `clearStreamStart` at commit time
+      // and via `clearTranscript` for session resets. No global cleanup
+      // needed here.
     }
   }, [client])
 }

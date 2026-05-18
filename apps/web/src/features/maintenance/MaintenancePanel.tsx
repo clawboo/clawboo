@@ -571,7 +571,11 @@ export function MaintenancePanel() {
 
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
 
-      {/* Section 4: Boo Zero — universal team leader context */}
+      {/* Section 4: Boo Zero — universal team leader context. The actual
+          editors moved out of System: Display Name + Global Brief now live
+          in Boo Zero's agent "Brief" tab, and per-team brief + rules live in
+          each team's settings sheet (gear icon on the team-chat header).
+          This section is a breadcrumb to the new homes. */}
       <div style={{ margin: '24px 0 28px' }} data-testid="boo-zero-briefs-section">
         <SectionHeading>Boo Zero</SectionHeading>
         <p
@@ -581,7 +585,8 @@ export function MaintenancePanel() {
             margin: '4px 0 14px',
           }}
         >
-          Universal team leader. Read by Boo Zero on every interaction.
+          Manage Boo Zero in the Boo Zero agent view, and per-team settings in each team&apos;s chat
+          header.
         </p>
         <BooZeroBriefsPanel />
       </div>

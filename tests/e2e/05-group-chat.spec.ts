@@ -171,4 +171,98 @@ test.describe('Group Chat', () => {
     // Ghost Graph should still be visible alongside the gate (2-panel layout)
     await expect(page.locator('.react-flow')).toBeVisible({ timeout: 10_000 })
   })
+
+  test('nests delegated agent response inside the source DelegationCard', async ({
+    page,
+    request,
+    gateway,
+  }) => {
+    const { teamId } = await connectWithTeam(page, request, gateway.url)
+
+    // Seed two transcript entries on the team-scoped session keys:
+    //   1. Source assistant entry on a1 (Boo Zero / Test Boo) emitting a
+    //      `<delegate to="@Research Boo">…</delegate>` block.
+    //   2. Target reply assistant entry on a2 (Research Boo).
+    // After hydration, GroupChatPanel runs buildDelegationLinkages which
+    // pairs the two — the target reply should render INSIDE the source's
+    // DelegationCard (delegation-card-body), not as a sibling top-level
+    // assistant card.
+    const sourceSk = `agent:a1:team:${teamId}`
+    const targetSk = `agent:a2:team:${teamId}`
+    const baseTs = Date.now()
+    // Unique-per-run IDs so the chat-history POST isn't silently no-op'd by
+    // ON CONFLICT (entry_id) DO NOTHING when previous test runs left rows.
+    const runId = `e2e-${baseTs}`
+    const srcId = `src-${runId}`
+    const tgtId = `tgt-${runId}`
+    const replyText =
+      'Voice AI converts speech to structured intent — used in kiosks, in-car assistants, and call centers.'
+
+    await request.post(`${API_BASE}/api/chat-history`, {
+      data: {
+        sessionKey: sourceSk,
+        gatewayUrl: gateway.url,
+        entries: [
+          {
+            entryId: srcId,
+            runId: `run-bz-${runId}`,
+            sessionKey: sourceSk,
+            kind: 'assistant',
+            role: 'assistant',
+            text: 'On it. <delegate to="@Research Boo">Quick TL;DR of voice AI</delegate>',
+            source: 'runtime-chat',
+            timestampMs: baseTs,
+            sequenceKey: 1,
+            confirmed: true,
+            fingerprint: `fp-${srcId}`,
+          },
+        ],
+      },
+    })
+
+    await request.post(`${API_BASE}/api/chat-history`, {
+      data: {
+        sessionKey: targetSk,
+        gatewayUrl: gateway.url,
+        entries: [
+          {
+            entryId: tgtId,
+            runId: `run-eng-${runId}`,
+            sessionKey: targetSk,
+            kind: 'assistant',
+            role: 'assistant',
+            text: replyText,
+            source: 'runtime-chat',
+            timestampMs: baseTs + 5_000,
+            sequenceKey: 2,
+            confirmed: true,
+            fingerprint: `fp-${tgtId}`,
+          },
+        ],
+      },
+    })
+
+    // Open group chat
+    const agentList = page.locator('[data-testid="agent-list-column"]')
+    const groupChatRow = agentList.locator('[data-testid="group-chat-row"]')
+    await expect(groupChatRow).toBeVisible({ timeout: 5_000 })
+    await groupChatRow.click()
+    await expect(page.locator('[data-testid="group-chat-panel"]')).toBeVisible({ timeout: 5_000 })
+
+    // Exactly one DelegationCard renders for our seeded source block.
+    const card = page.locator('[data-testid="delegation-card"]')
+    await expect(card).toHaveCount(1, { timeout: 10_000 })
+
+    // The card body is visible (default-expanded for the newest delegation)
+    // and contains the target's reply text.
+    const cardBody = card.locator('[data-testid="delegation-card-body"]')
+    await expect(cardBody).toBeVisible({ timeout: 5_000 })
+    await expect(cardBody).toContainText('Voice AI converts speech to structured intent')
+
+    // The target reply must NOT also appear as a top-level sibling card
+    // outside the DelegationCard — count assert: the only paragraph
+    // containing the reply text lives inside delegation-card-body.
+    const allReplyMatches = page.locator(`text=${replyText}`)
+    await expect(allReplyMatches).toHaveCount(1)
+  })
 })

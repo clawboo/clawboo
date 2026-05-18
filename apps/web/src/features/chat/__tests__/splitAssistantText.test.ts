@@ -14,9 +14,16 @@ describe('splitAssistantText', () => {
 
   it('returns a single delegation segment when text is just a delegate block', () => {
     const result = splitAssistantText('<delegate to="@Bug Fixer Boo">fix the parser</delegate>')
-    expect(result).toEqual([
-      { kind: 'delegation', targetName: 'Bug Fixer Boo', task: 'fix the parser' },
-    ])
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      kind: 'delegation',
+      targetName: 'Bug Fixer Boo',
+      task: 'fix the parser',
+    })
+    // blockStart/blockEnd carried through from findDelegationBlocks
+    const seg = result[0] as { blockStart: number; blockEnd: number }
+    expect(seg.blockStart).toBe(0)
+    expect(seg.blockEnd).toBeGreaterThan(0)
   })
 
   it('preserves order: prose, delegation, prose', () => {
@@ -29,7 +36,7 @@ Let me know what you find.`
     expect(result).toHaveLength(3)
     expect(result[0]).toMatchObject({ kind: 'prose' })
     expect((result[0] as { text: string }).text).toContain("Here's the plan")
-    expect(result[1]).toEqual({
+    expect(result[1]).toMatchObject({
       kind: 'delegation',
       targetName: 'Bug Fixer Boo',
       task: 'fix the parser',
@@ -98,5 +105,23 @@ Check JWT signing for null safety.
     const text = '<delegate to="Bug Fixer Boo">fix the parser</delegate>'
     const result = splitAssistantText(text)
     expect((result[0] as { targetName: string }).targetName).toBe('Bug Fixer Boo')
+  })
+
+  it('preserves distinct blockStart offsets for multiple delegations in same text', () => {
+    const text = `Plan:
+<delegate to="@A">first</delegate>
+mid prose
+<delegate to="@B">second</delegate>`
+    const result = splitAssistantText(text)
+    const dels = result.filter(
+      (s): s is Extract<typeof s, { kind: 'delegation' }> => s.kind === 'delegation',
+    )
+    expect(dels).toHaveLength(2)
+    expect(dels[0]!.blockStart).toBeLessThan(dels[1]!.blockStart)
+    expect(dels[0]!.blockEnd).toBeLessThan(dels[1]!.blockStart)
+    // The blockStart for each delegation matches the actual character index
+    // of '<delegate' in the source text.
+    expect(text.slice(dels[0]!.blockStart, dels[0]!.blockStart + 9)).toBe('<delegate')
+    expect(text.slice(dels[1]!.blockStart, dels[1]!.blockStart + 9)).toBe('<delegate')
   })
 })

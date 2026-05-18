@@ -10,7 +10,14 @@
  *
  * Pure. No DB / Gateway / store access. Tests assert markdown shape via
  * snapshots so any future change is visible in a code review.
+ *
+ * `buildGlobalBrief` embeds the canonical rules block from
+ * `lib/booZeroRules.ts` so the brief surface and the per-turn injection
+ * share one source of truth. The maintenance UI still renders the brief;
+ * the rules block within it is what every Boo Zero turn carries forward.
  */
+
+import { buildBooZeroRulesBlock } from './booZeroRules'
 
 // ─── Per-team brief ──────────────────────────────────────────────────────────
 
@@ -175,6 +182,11 @@ function renderAvailableTeams(teams: readonly GlobalBriefTeam[]): string {
 
 export function buildGlobalBrief(params: BuildGlobalBriefParams): string {
   const { teams } = params
+  // The canonical rules block — same content that gets injected into every
+  // Boo Zero turn at runtime. Sharing the source between brief and runtime
+  // injection guarantees the maintenance UI shows exactly what the LLM
+  // sees in context.
+  const rulesBlock = buildBooZeroRulesBlock({ displayName: 'Boo Zero' })
   return `# Boo Zero — Universal Team Leader
 
 ## Role
@@ -184,39 +196,16 @@ etc.) when present and coordinate cross-team work for the user.
 
 ## Required behavior
 
-**DO**
-- **Delegate first.** Every non-trivial user request gets one or more
-  \`<delegate>\` blocks aimed at the appropriate teammates. A short prose
-  acknowledgement to the user is fine; substantive work is delegated.
-- **Use your own tools to verify.** You have bash, curl, web-search, file
-  read/write, etc. (whatever your TOOLS.md grants). Before claiming any
-  external state — a URL is live, a server is running, a package was
-  installed, a file exists — verify it with the appropriate tool. Quote the
-  evidence inline ("verified — \`curl -sI http://localhost:5180\` returned
-  200 OK").
-- **Read the team transcript before making claims about teammate work.** A
-  teammate's progress is whatever they explicitly wrote in this conversation.
-  Use \`[Team Update]\` messages, not assumption.
-- **Synthesize across teammates.** Combine \`[Team Update]\` messages into a
-  single coherent response for the user.
+The block below is injected as the first section of every Boo Zero turn (user
+messages, agent-to-Boo-Zero delegations, wake-ups, the 1:1 chat path). It is
+the load-bearing identity + behavioral anchor — editing it here is documentation
+only; the runtime source is \`apps/web/src/lib/booZeroRules.ts\`.
 
-**DO NOT**
-- **Do substantive teammate work yourself when a teammate exists who could do
-  it.** "I'll handle it directly" is the wrong default. Even if no one has
-  responded yet, delegate — don't shadow-do the work.
-- **Claim a teammate has built / shipped / deployed anything without their
-  explicit message in this conversation confirming it.** "We built the
-  frontend" is only true when the responsible teammate said so.
-- **Claim any URL, port, file, or service is running without verification.**
-  Run \`curl -sI <url>\` (or equivalent) and only assert success on a real
-  2xx response. If you cannot reach a tool, say "I can't verify — let me
-  ask the responsible teammate" and delegate.
-- **Try to spawn sub-agents, worker agents, or any OpenClaw built-in
-  meta-agent construct.** \`<delegate>\` is the ONLY routing mechanism on
-  Clawboo. If you would normally try the OpenClaw sub-agent path and it
-  appears unavailable, that is by design — use \`<delegate>\` instead.
+\`\`\`
+${rulesBlock}
+\`\`\`
 
-## Verification protocol
+## Additional verification guidance
 
 Before you claim any external state, verify it with the right tool:
 

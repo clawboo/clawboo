@@ -11,7 +11,13 @@ import { useChatStore } from '@/stores/chat'
 import { sendChatMessage } from '@/features/chat/chatSendOperation'
 import { buildTeamSessionKey, setTeamChatOverride } from '@/lib/sessionUtils'
 import { findSleepingAgents, markAgentAwake, clearAllWakeRecords } from '@/lib/wakeTracker'
-import { buildTeamContextPreamble, type TeamContextEntry } from '@/lib/teamProtocol'
+import {
+  buildSilentResumeWakeMessage,
+  buildTeamContextPreamble,
+  type TeamContextEntry,
+} from '@/lib/teamProtocol'
+import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
+import { buildTeamRulesBlock, fetchTeamRules } from '@/lib/teamRules'
 import { nextSeq } from '@/lib/sequenceKey'
 import { parseMention } from './parseMention'
 
@@ -116,6 +122,16 @@ async function wakeTeamAgents(
   teamId: string,
   teamName: string,
   targetTeamSessionKey: string,
+  /**
+   * Boo Zero agent reference — when one of the agents being woken IS Boo
+   * Zero, we MUST prefix its wake message with `buildBooZeroRulesBlock` so
+   * the LLM has its identity + behavioral rules in context. The 7-hour
+   * cascade in production happened because Boo Zero's wake messages had
+   * neither identity nor rules — the LLM defaulted to "Mythos" and
+   * produced unsolicited greetings. Team-member wakes don't need this
+   * (their AGENTS.md carries the rules).
+   */
+  booZeroAgent: AgentState | null,
 ): Promise<void> {
   // Append a meta notification to the target's team transcript so it appears
   // in the group chat merge just before the user's actual message.
@@ -145,12 +161,28 @@ async function wakeTeamAgents(
     // Set override so Gateway events (which use main sessionKey) get redirected
     setTeamChatOverride(agent.id, agentTeamSk)
 
-    // Silent re-initialization message — does NOT ask for introductions or list
-    // teammates as @mentions. The full team protocol (roster + anti-sub-agent
-    // instructions) lives in AGENTS.md, which is loaded on every interaction.
-    // Asking for introductions here would trigger the message-flooding cascade
-    // (intros contain @mentions → false delegations → relay → more intros).
-    const wakeMessage = `You are resuming a team collaboration session as ${agent.name} on team "${teamName}". Acknowledge silently — no introduction needed.`
+    // Structural resume wake — asks the agent to reply with EXACTLY
+    // `__resumed__` and nothing else. The literal-token contract is more
+    // reliable than prose "stay quiet" instructions. Pairs with the
+    // AGENTS.md "Resuming sessions" rule for team members and the Boo
+    // Zero rules block injected below for the leader. The UI filters
+    // `__resumed__` entries out of the merged transcript so they never
+    // pollute the visible chat.
+    const baseWake = buildSilentResumeWakeMessage({
+      agentName: agent.name,
+      teamName,
+    })
+
+    // When the agent being woken IS Boo Zero, prefix with the rules block so
+    // the LLM has its identity + behavioral rules in context. Without this
+    // the 08:18 AM production cascade fires: Boo Zero's wake produces
+    // unsolicited intros + name drift ("Mythos"). Team-member wakes already
+    // carry the rules via their team AGENTS.md so they don't need this
+    // injection.
+    const isBooZeroWake = booZeroAgent !== null && agent.id === booZeroAgent.id
+    const wakeMessage = isBooZeroWake
+      ? `${buildBooZeroRulesBlock({ displayName: agent.name, teamName })}\n\n${baseWake}`
+      : baseWake
 
     return client
       .call('chat.send', {
@@ -220,20 +252,14 @@ export function getMergedTeamEntries(
   return entries
 }
 
-// ─── Identity anchor ─────────────────────────────────────────────────────────
-// Boo Zero's actual `agent.name` may be anything — the user's OpenClaw setup
-// might leave it as the literal slug "main", or it might be a custom name
-// like "Mythos" the user picked during OpenClaw onboarding, or "Boo Zero"
-// (the Clawboo default after Phase E lands). Production showed the LLM drifting
-// between these (calling itself "Boo Zero" in one breath and "Mythos" in
-// another), so we anchor the name explicitly in the preamble. This is the
-// load-bearing anti-name-drift fix.
-
-function buildIdentityBlock(booZeroDisplayName: string): string {
-  return `[Your Identity]
-You are ${booZeroDisplayName}. This is your name — the only name you should use to refer to yourself. Do NOT use alternative names ("Mythos", "Boo", "main", "Boo Zero" if that's not your name, etc.) — those would confuse the user about who they're talking to. Even if you suspect the system invented a different name elsewhere, the name in this block is authoritative.
-[End Your Identity]`
-}
+// ─── Identity anchor + rules block ────────────────────────────────────────────
+// Boo Zero's identity AND its load-bearing behavioral rules ("delegate first,
+// don't do work yourself, never use the Task tool, don't claim teammate
+// timeouts, don't greet on resume") are baked into `buildBooZeroRulesBlock`.
+// We inject it as the FIRST section of every Boo Zero turn — every code path
+// that sends a message to Boo Zero MUST include this block. Production saw
+// the LLM drift in all these dimensions when the rules weren't in context,
+// so the per-turn injection is load-bearing for both the name and behavior.
 
 // ─── Team brief fetch ────────────────────────────────────────────────────────
 // Boo Zero reads the team brief on every message so it understands team
@@ -323,7 +349,15 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
         const needsWake = sleeping.filter((id) => !confirmed.has(id))
 
         if (needsWake.length > 0) {
-          await wakeTeamAgents(client, wakeCandidates, needsWake, teamId, teamName, targetTeamSk)
+          await wakeTeamAgents(
+            client,
+            wakeCandidates,
+            needsWake,
+            teamId,
+            teamName,
+            targetTeamSk,
+            booZeroAgent ?? null,
+          )
           // Settle delay — let agents initialize before actual message
           await new Promise((r) => setTimeout(r, WAKEUP_SETTLE_MS))
         }
@@ -350,24 +384,37 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
   // ship it when targeting Boo Zero because team members already have their
   // own per-agent identity files. Best-effort — missing brief is silently OK.
   let briefBlock: string | null = null
-  let identityBlock: string | null = null
+  let rulesBlock: string | null = null
   if (booZeroAgent && target.id === booZeroAgent.id) {
     const brief = await fetchTeamBrief(teamId)
     if (brief) briefBlock = buildTeamBriefBlock(teamName, brief)
 
-    // Identity anchor — load-bearing fix for the "Mythos / main / Boo Zero"
-    // name-drift seen in production. The agent's actual display name (which
-    // may be the user-customized name from OpenClaw or Clawboo onboarding,
-    // OR the literal slug "main") is asserted up front so the LLM doesn't
-    // invent alternative names mid-response.
-    identityBlock = buildIdentityBlock(booZeroAgent.name)
+    // Boo Zero rules — load-bearing fix for identity drift + "doing work
+    // yourself" + Task-tool reach + "claimed teammate timed out" + resume
+    // greetings. The rules block fires on EVERY Boo Zero turn so the LLM
+    // can never lose the constraint even after long pauses or many
+    // turns. Lives in `lib/booZeroRules.ts`; user-uneditable by design.
+    rulesBlock = buildBooZeroRulesBlock({
+      displayName: booZeroAgent.name,
+      teamName,
+    })
   }
 
+  // Team Rules — user-captured durable rules. Loaded for EVERY message in
+  // the team chat (target may be a team member OR Boo Zero). This is what
+  // makes user corrections survive across sessions: when the user types
+  // `/rule don't do work yourself` it persists here and is injected on
+  // every future turn even after a 7-hour gap.
+  const teamRulesContent = await fetchTeamRules(teamId)
+  const teamRulesBlock = buildTeamRulesBlock(teamRulesContent)
+
   const messageToSend = mentionedId ? cleanedMessage : message
-  // Order matters: identity first (anchors who you are), then team brief
-  // (anchors WHERE you are), then conversation preamble, then the message.
-  const sections = [identityBlock, briefBlock, preamble, messageToSend].filter((s): s is string =>
-    Boolean(s),
+  // Order matters: rules first (anchors who you are + how you must behave),
+  // then team brief (anchors WHERE you are this turn), then team rules
+  // (user-set authoritative constraints), then conversation preamble, then
+  // the actual message.
+  const sections = [rulesBlock, briefBlock, teamRulesBlock, preamble, messageToSend].filter(
+    (s): s is string => Boolean(s),
   )
   const messageWithContext = sections.join('\n\n')
 

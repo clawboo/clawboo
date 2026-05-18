@@ -151,7 +151,7 @@ describe('buildGlobalBrief', () => {
     { name: 'Marketing Boos', icon: '📣', description: 'Content + campaigns.' },
   ]
 
-  it('renders role, responsibilities, teams index, delegation protocol, mention syntax, pitfalls, notes', () => {
+  it('renders role, required-behavior rules block, teams index, delegation protocol, mention syntax, pitfalls, notes', () => {
     const out = buildGlobalBrief({ teams })
     expect(out).toContain('# Boo Zero — Universal Team Leader')
     expect(out).toContain('## Role')
@@ -159,9 +159,13 @@ describe('buildGlobalBrief', () => {
     // imperative DO / DO NOT lists instead of first-person responsibilities.
     expect(out).toContain('You are the universal leader')
     expect(out).toContain('## Required behavior')
-    expect(out).toContain('**DO**')
-    expect(out).toContain('**DO NOT**')
-    expect(out).toContain('## Verification protocol')
+    // Phase 2 (cascade-fix): the required-behavior section now embeds the
+    // canonical rules block from `lib/booZeroRules.ts` so brief and per-
+    // turn injection share one source of truth.
+    expect(out).toContain('[Your Rules — authoritative]')
+    expect(out).toContain('[End Your Rules]')
+    expect(out).toContain('<delegate to="@AgentName">')
+    expect(out).toContain('## Additional verification guidance')
     expect(out).toContain('## Available teams')
     expect(out).toContain('- **Dev Team** 👾: Code review and bug hunting.')
     expect(out).toContain('- **Marketing Boos** 📣: Content + campaigns.')

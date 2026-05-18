@@ -24,7 +24,7 @@ export interface BooAvatarParams {
 
 // ─── Constants ───────────────────────────────────────────────────
 
-const TINTS = [
+export const TINTS = [
   '#ff4d4d', // OpenClaw red (default)
   '#34D399', // mint
   '#FBBF24', // amber
@@ -46,6 +46,23 @@ function fnv1a(str: string): number {
     h = Math.imul(h, 0x01000193)
   }
   return h >>> 0
+}
+
+// ─── Tint resolution ─────────────────────────────────────────────
+
+/**
+ * Resolve an agent's tint from its seed (deterministic FNV-1a hash).
+ * Boo Zero gets the reserved OpenClaw Red (TINTS[0]); other agents
+ * skip index 0 and map into TINTS[1..9].
+ *
+ * This is the same logic `generateBooAvatar` uses internally —
+ * exported so consumers (e.g. DelegationCard) can accent UI with
+ * the exact same colour the avatar paints with.
+ */
+export function resolveBooTint(seed: string, isBooZero = false): string {
+  if (isBooZero) return TINTS[0]
+  const h = fnv1a(seed)
+  return TINTS[1 + (Math.abs(h) % (TINTS.length - 1))]
 }
 
 function createRng(seed: number): () => number {
@@ -166,8 +183,7 @@ export function generateBooAvatar(params: BooAvatarParams): string {
   const gidBody = `boo-body-${uid}`
 
   // Resolve tint — Boo Zero always gets OpenClaw Red; others skip index 0
-  const tint =
-    params.tint ?? (params.isBooZero ? TINTS[0] : TINTS[1 + (Math.abs(h) % (TINTS.length - 1))])
+  const tint = params.tint ?? resolveBooTint(seed, params.isBooZero)
   const tintDark = darkenHex(tint, 0.6)
 
   // Per-seed variations

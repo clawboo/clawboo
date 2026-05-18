@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { generateBooAvatar, booAvatarToDataUrl } from '../index'
+import { generateBooAvatar, booAvatarToDataUrl, resolveBooTint, TINTS } from '../index'
 import type { EyeShape, Accessory } from '../index'
 
 describe('generateBooAvatar', () => {
@@ -112,6 +112,38 @@ describe('isBooZero tint reservation', () => {
     // Explicit tint should win over isBooZero
     expect(svg).toContain('#34D399')
     expect(svg).not.toContain('stop-color="#ff4d4d"')
+  })
+})
+
+describe('resolveBooTint', () => {
+  it('returns one of the 10 TINTS for any seed', () => {
+    const tint = resolveBooTint('any-seed')
+    expect(TINTS).toContain(tint)
+  })
+
+  it('isBooZero=true returns the reserved OpenClaw red (TINTS[0])', () => {
+    expect(resolveBooTint('whatever', true)).toBe(TINTS[0])
+    expect(resolveBooTint('whatever', true)).toBe('#ff4d4d')
+  })
+
+  it('isBooZero=false never returns TINTS[0]', () => {
+    for (let i = 0; i < 50; i++) {
+      const tint = resolveBooTint(`agent-${i}`, false)
+      expect(tint).not.toBe(TINTS[0])
+    }
+  })
+
+  it('deterministic — same seed returns same tint', () => {
+    expect(resolveBooTint('determinism')).toBe(resolveBooTint('determinism'))
+  })
+
+  it('matches the tint that generateBooAvatar paints for the same seed', () => {
+    // Pick a few seeds and assert the resolved tint appears in the SVG
+    for (const seed of ['alpha', 'beta', 'gamma-007', 'long-seed-string-with-stuff']) {
+      const tint = resolveBooTint(seed)
+      const svg = generateBooAvatar({ seed })
+      expect(svg).toContain(tint)
+    }
   })
 })
 
