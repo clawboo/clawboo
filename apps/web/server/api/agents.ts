@@ -1,7 +1,17 @@
 import type { Request, Response } from 'express'
-import { createDb, agents, costRecords, approvalHistory } from '@clawboo/db'
+import { createDb, agents, costRecords, approvalHistory, settings } from '@clawboo/db'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
+
+// Per-agent `settings` keys that should be removed alongside the agent row.
+// Today the only per-agent key is `boo-zero:display-name:<agentId>` (see
+// `server/api/booZero.ts` DISPLAY_NAME_KEY_PREFIX). Add new prefixes here
+// whenever a per-agent settings key is introduced — the helper is consumed
+// by BOTH `agentsDELETE` (single agent) and `agentsCleanupPOST` (ghost
+// sweep) so adding a row stays a one-line change.
+function perAgentSettingKeys(agentId: string): string[] {
+  return [`boo-zero:display-name:${agentId}`]
+}
 
 // ─── DELETE /api/agents/:agentId ─────────────────────────────────────────────
 //
@@ -27,6 +37,11 @@ export function agentsDELETE(req: Request, res: Response): void {
     // Order matters — children before parent.
     db.delete(costRecords).where(eq(costRecords.agentId, agentId)).run()
     db.delete(approvalHistory).where(eq(approvalHistory.agentId, agentId)).run()
+    // Per-agent KV settings (display-name override etc.) don't FK to
+    // `agents` so they'd otherwise survive the agent delete and rot in
+    // SQLite. Wipe them in lock-step.
+    const settingKeys = perAgentSettingKeys(agentId)
+    db.delete(settings).where(inArray(settings.key, settingKeys)).run()
     db.delete(agents).where(eq(agents.id, agentId)).run()
     res.json({ ok: true })
   } catch (err) {
@@ -85,6 +100,11 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
     // Children before parent (FK guards).
     db.delete(costRecords).where(inArray(costRecords.agentId, toDelete)).run()
     db.delete(approvalHistory).where(inArray(approvalHistory.agentId, toDelete)).run()
+    // Per-agent KV settings (no FK to `agents`) — same sweep, same scope.
+    const settingKeys = toDelete.flatMap(perAgentSettingKeys)
+    if (settingKeys.length > 0) {
+      db.delete(settings).where(inArray(settings.key, settingKeys)).run()
+    }
     db.delete(agents).where(inArray(agents.id, toDelete)).run()
 
     // Sanity-log how many remain — useful when debugging via curl.

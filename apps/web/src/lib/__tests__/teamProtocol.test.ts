@@ -5,7 +5,14 @@ import {
   buildTeamContextPreamble,
   buildClawbooHelpDoc,
   buildSelfDocumentingRelayHeader,
+  buildBatchedRelayMessage,
+  isOpenclawControlToken,
+  isClawbooControlToken,
+  isLikelyRefusal,
+  shouldDropAssistantTurn,
   slugifyAgentName,
+  RESUME_ACK_TOKEN,
+  SKIP_ACK_TOKEN,
 } from '../teamProtocol'
 
 describe('buildTeamAgentsMd', () => {
@@ -638,5 +645,177 @@ describe('buildSelfDocumentingRelayHeader', () => {
       taskContext: longContext,
     })
     expect(result).toContain('(re: "' + 'A'.repeat(80) + '...")')
+  })
+})
+
+describe('isOpenclawControlToken', () => {
+  it('matches ANNOUNCE_SKIP exactly', () => {
+    expect(isOpenclawControlToken('ANNOUNCE_SKIP')).toBe(true)
+  })
+  it('matches NO_REPLY exactly', () => {
+    expect(isOpenclawControlToken('NO_REPLY')).toBe(true)
+  })
+  it('matches stripped NO variant', () => {
+    expect(isOpenclawControlToken('NO')).toBe(true)
+  })
+  it('matches lowercase no (the stripped form regardless of casing)', () => {
+    expect(isOpenclawControlToken('no')).toBe(true)
+  })
+  it('matches whitespace-surrounded token', () => {
+    expect(isOpenclawControlToken('  ANNOUNCE_SKIP  ')).toBe(true)
+  })
+  it('does NOT match longer text starting with NO', () => {
+    expect(isOpenclawControlToken('No problem — happy to help')).toBe(false)
+  })
+  it('does NOT match unrelated text', () => {
+    expect(isOpenclawControlToken('Hello there')).toBe(false)
+  })
+  it('does NOT match invented variants outside the allowlist', () => {
+    // `__skipped__` is a Clawboo token, not an OpenClaw one.
+    expect(isOpenclawControlToken('__skipped__')).toBe(false)
+    expect(isOpenclawControlToken('SKIP')).toBe(false)
+    expect(isOpenclawControlToken('PASS')).toBe(false)
+  })
+  // Round 5: OpenClaw Gateway truncation bug strips NO_REPLY to variable
+  // lengths. Production observed `NO_RE` leaking twice. All underscore-form
+  // prefixes must match.
+  it('matches NO_REPLY prefix-truncated variants (Round 5 production bug)', () => {
+    expect(isOpenclawControlToken('NO_')).toBe(true)
+    expect(isOpenclawControlToken('NO_R')).toBe(true)
+    expect(isOpenclawControlToken('NO_RE')).toBe(true)
+    expect(isOpenclawControlToken('NO_REP')).toBe(true)
+    expect(isOpenclawControlToken('NO_REPL')).toBe(true)
+  })
+  it('matches NO_REPLY prefix variants case-insensitively', () => {
+    expect(isOpenclawControlToken('no_re')).toBe(true)
+    expect(isOpenclawControlToken('No_Repl')).toBe(true)
+  })
+  it('does NOT match unrelated NO_-prefixed tokens', () => {
+    expect(isOpenclawControlToken('NO_REASON')).toBe(false)
+    expect(isOpenclawControlToken('NO_THANKS')).toBe(false)
+    expect(isOpenclawControlToken('NO_X')).toBe(false)
+  })
+})
+
+describe('isClawbooControlToken', () => {
+  it('matches RESUME_ACK_TOKEN', () => {
+    expect(isClawbooControlToken(RESUME_ACK_TOKEN)).toBe(true)
+    expect(isClawbooControlToken('__resumed__')).toBe(true)
+  })
+  it('matches SKIP_ACK_TOKEN', () => {
+    expect(isClawbooControlToken(SKIP_ACK_TOKEN)).toBe(true)
+    expect(isClawbooControlToken('__skipped__')).toBe(true)
+  })
+  it('is case-sensitive (Clawboo tokens are literal __snake__ strings)', () => {
+    expect(isClawbooControlToken('__SKIPPED__')).toBe(false)
+    expect(isClawbooControlToken('__Skipped__')).toBe(false)
+  })
+  it('does NOT match OpenClaw tokens or other text', () => {
+    expect(isClawbooControlToken('ANNOUNCE_SKIP')).toBe(false)
+    expect(isClawbooControlToken('arbitrary message')).toBe(false)
+  })
+})
+
+describe('isLikelyRefusal', () => {
+  it('matches short Nope / Sorry / Cannot openers', () => {
+    expect(isLikelyRefusal('Nope.')).toBe(true)
+    expect(isLikelyRefusal('Sorry, no.')).toBe(true)
+    expect(isLikelyRefusal('Cannot help')).toBe(true)
+    expect(isLikelyRefusal("can't")).toBe(true)
+    expect(isLikelyRefusal('Unable')).toBe(true)
+  })
+  it('does NOT match longer refusal-shaped text (full explanation)', () => {
+    // 25 chars is the floor — explanations are not leaks.
+    expect(isLikelyRefusal("Sorry, I can't help with that because it's outside my domain.")).toBe(
+      false,
+    )
+  })
+  it('does NOT match bare NO (covered separately by isOpenclawControlToken)', () => {
+    expect(isLikelyRefusal('NO')).toBe(false)
+    expect(isLikelyRefusal('no')).toBe(false)
+  })
+  it('does NOT match unrelated text', () => {
+    expect(isLikelyRefusal('Hello')).toBe(false)
+    expect(isLikelyRefusal('Got it')).toBe(false)
+  })
+})
+
+describe('shouldDropAssistantTurn', () => {
+  it('drops OpenClaw control tokens', () => {
+    expect(shouldDropAssistantTurn('ANNOUNCE_SKIP')).toBe(true)
+    expect(shouldDropAssistantTurn('NO_REPLY')).toBe(true)
+    expect(shouldDropAssistantTurn('NO')).toBe(true)
+  })
+  it('drops Clawboo control tokens', () => {
+    expect(shouldDropAssistantTurn('__resumed__')).toBe(true)
+    expect(shouldDropAssistantTurn('__skipped__')).toBe(true)
+  })
+  it('drops short refusal-shape responses', () => {
+    expect(shouldDropAssistantTurn('Nope.')).toBe(true)
+    expect(shouldDropAssistantTurn('Sorry')).toBe(true)
+  })
+  it('does NOT drop legitimate assistant content', () => {
+    expect(shouldDropAssistantTurn("Here's my analysis: ...")).toBe(false)
+    expect(
+      shouldDropAssistantTurn('I will look into that and respond with a full breakdown shortly.'),
+    ).toBe(false)
+  })
+  it('does NOT drop refusals that include a full explanation', () => {
+    // Long enough that the agent justified itself — not a leak.
+    expect(
+      shouldDropAssistantTurn(
+        "Sorry, I can't help with that because it requires database write access.",
+      ),
+    ).toBe(false)
+  })
+})
+
+describe('buildBatchedRelayMessage', () => {
+  it('returns empty string for empty items', () => {
+    expect(buildBatchedRelayMessage([])).toBe('')
+  })
+  it('renders single-item batch with self-documenting header', () => {
+    const out = buildBatchedRelayMessage([
+      { fromAgentName: 'Geographer Boo', body: 'Volcanic island in temperate latitude.' },
+    ])
+    expect(out).toContain('[Team Update] — relayed summary from @Geographer Boo')
+    expect(out).toContain('not a fresh user message')
+    expect(out).toContain('Volcanic island in temperate latitude.')
+    expect(out).not.toContain('teammates finished')
+  })
+  it('renders multi-item batch with N-teammates header', () => {
+    const out = buildBatchedRelayMessage([
+      { fromAgentName: 'Geographer Boo', body: 'Volcanic island.' },
+      { fromAgentName: 'Anthropologist Boo', body: 'Patrilineal clans.' },
+      { fromAgentName: 'Historian Boo', body: 'Shattering War origin.' },
+    ])
+    expect(out).toContain('3 teammates finished delegated tasks')
+    expect(out).toContain('@Geographer Boo:')
+    expect(out).toContain('Volcanic island.')
+    expect(out).toContain('@Anthropologist Boo:')
+    expect(out).toContain('@Historian Boo:')
+    expect(out).toContain('Synthesize across them ONLY')
+    expect(out).toContain('Do NOT acknowledge them individually')
+  })
+  it('preserves source ordering in the batched envelope', () => {
+    const out = buildBatchedRelayMessage([
+      { fromAgentName: 'A', body: 'first body' },
+      { fromAgentName: 'B', body: 'second body' },
+      { fromAgentName: 'C', body: 'third body' },
+    ])
+    const idxA = out.indexOf('@A:')
+    const idxB = out.indexOf('@B:')
+    const idxC = out.indexOf('@C:')
+    expect(idxA).toBeGreaterThan(0)
+    expect(idxB).toBeGreaterThan(idxA)
+    expect(idxC).toBeGreaterThan(idxB)
+  })
+  it('truncates over-long taskContext to 80 chars in each item', () => {
+    const longCtx = 'X'.repeat(120)
+    const out = buildBatchedRelayMessage([
+      { fromAgentName: 'A', body: 'body 1', taskContext: longCtx },
+      { fromAgentName: 'B', body: 'body 2' },
+    ])
+    expect(out).toContain('(re: "' + 'X'.repeat(80) + '...")')
   })
 })

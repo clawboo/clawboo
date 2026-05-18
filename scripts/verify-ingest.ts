@@ -15,6 +15,7 @@
  */
 
 import * as fs from 'node:fs/promises'
+import prettier from 'prettier'
 import {
   AGENCY_AGENTS_SHA,
   AWESOME_OPENCLAW_SHA,
@@ -263,6 +264,16 @@ async function main(): Promise<void> {
     expected: renderSyntheticTeamsFile(syntheticTeams),
   })
 
+  // Normalize both sides through Prettier before comparing — the raw
+  // generator output is unformatted (double quotes, single-line strings)
+  // while committed files have been formatted by the repo's Prettier
+  // config (single quotes, line-wrapped). Without this normalization a
+  // freshly-regenerated file would never match a committed file even
+  // when the content is semantically identical.
+  async function format(text: string, filePath: string): Promise<string> {
+    return prettier.format(text, { parser: 'typescript', filepath: filePath })
+  }
+
   const failures: string[] = []
   for (const { label, path: filePath, expected } of filesToCheck) {
     let actual: string
@@ -272,8 +283,12 @@ async function main(): Promise<void> {
       failures.push(`  ❌ ${label}: FILE MISSING`)
       continue
     }
-    if (actual !== expected) {
-      failures.push(`  ❌ ${label}: content differs\n${shortDiff(expected, actual)}`)
+    const [expectedFmt, actualFmt] = await Promise.all([
+      format(expected, filePath),
+      format(actual, filePath),
+    ])
+    if (actualFmt !== expectedFmt) {
+      failures.push(`  ❌ ${label}: content differs\n${shortDiff(expectedFmt, actualFmt)}`)
     } else {
       console.log(`  ✓ ${label}`)
     }

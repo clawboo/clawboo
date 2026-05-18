@@ -1,6 +1,172 @@
 import { create } from 'zustand'
 import type { TranscriptEntry } from '@clawboo/protocol'
 
+// ─── Clawboo dispatch event ──────────────────────────────────────────────────
+//
+// Round 7: when Clawboo itself fires `chat.send` to a team specialist —
+// either via `dispatchDelegation` (a parsed `<delegate>` tag) or via
+// `flushRelayBatch` (forwarding the leader's response as a `[Team Update]`
+// envelope) — we record the routing event here. The renderer
+// (`buildDelegationLinkages`) consumes the map as a third synthesis source
+// alongside `<delegate>` tags and `sessions_send` tool entries, so
+// `DelegationCard`s reflect actual Clawboo routing regardless of what the
+// LLM emits in its prose.
+//
+// Wake events (`wakeTeamAgents` in `groupChatSendOperation.ts`) are
+// intentionally NOT recorded — those carry the `[RESUME_SIGNAL]` body and
+// the target's expected reply is `__resumed__` (filtered). Recording them
+// would render 5 empty cards per user message.
+
+export interface ClawbooDispatch {
+  /** Stable id for React keys + linkage dedup. */
+  dispatchId: string
+  /** entryId of the leader's transcript entry that triggered the dispatch. */
+  sourceEntryId: string
+  /** Agent id of the leader (the source). */
+  sourceAgentId: string
+  /** Agent id of the team specialist that received the chat.send. */
+  targetAgentId: string
+  /** Resolved roster name of the target. */
+  targetAgentName: string
+  /** The message body Clawboo sent (the task or relay summary). */
+  taskBody: string
+  /** Origin of the dispatch — affects visual badge in DelegationCard. */
+  origin: 'dispatch-delegation' | 'relay-batch'
+  /** Monotonic sequence key (lib/sequenceKey.ts) so target-response accrual works. */
+  sequenceKey: number
+  /** Timestamp when Clawboo fired the send. */
+  timestampMs: number
+  /** Team id — used by `clearClawbooDispatches(teamId)` on Stop / team switch. */
+  teamId: string
+  /**
+   * Round 9: when this dispatch is one step of a `<plan>` block, carries
+   * the parent plan's id so the renderer can group all step-dispatches
+   * for the same plan into a single PlanCard. Null/undefined for one-shot
+   * dispatches (regular `<delegate>` blocks, fallback regex matches,
+   * relay batches).
+   */
+  planId?: string | null
+  /**
+   * Round 9: the step's index within the parent plan (0-based). The
+   * renderer uses this to order step cards under the PlanCard header even
+   * if dispatches arrive out of source order. Paired with `planId`.
+   */
+  planStepIndex?: number | null
+  /**
+   * Round 10: when this dispatch is one target of a parallel workstream
+   * batch (≥2 sibling `<delegate>` tags emitted in one leader turn, no
+   * `<plan>` wrapper), carries the parent workstream's id so the renderer
+   * groups all sibling-dispatches for the same workstream into a single
+   * `WorkstreamCard`. Null/undefined for one-shot delegations.
+   */
+  workstreamId?: string | null
+  /**
+   * Round 10: the target's index within the parent workstream (0-based).
+   * Order is "source order" — first `<delegate>` tag in the leader turn is
+   * index 0, etc. Used by the renderer to render `Workstream N` labels
+   * stably even when dispatches arrive out of order.
+   */
+  workstreamTargetIndex?: number | null
+}
+
+// ─── Round 8B: pending plan state ─────────────────────────────────────────
+//
+// When the leader emits a `<plan>` block (one or more `<step to="@X">…`
+// children), Clawboo captures the steps and progresses through them
+// automatically — firing step N+1 each time step N's specialist responds.
+// State machine lives here so:
+//   • The state survives across the `useTeamOrchestration` debounce window
+//     (refs would reset on the hook re-mount that happens on team switch).
+//   • The renderer can subscribe and show a step-tracker card per plan.
+//   • Stop / team-switch clears everything (`clearPendingPlans(teamId)`).
+//
+// One pending plan per leader-source-entry: keyed by `${teamId}:${sourceEntryId}`.
+// `currentStepIndex` advances 0 → 1 → … → steps.length. When it equals
+// `steps.length`, the plan is "complete" and the leader gets a final
+// `[Plan Complete]` envelope (assembled from each step's output) so it can
+// do final synthesis.
+
+export interface PendingPlanStep {
+  /** The agent name as written in `to="…"`. */
+  targetName: string
+  /** Resolved roster id (or null if the name didn't match any participant). */
+  targetAgentId: string | null
+  /** Task body emitted by the leader. */
+  task: string
+  /** Output text from the specialist when the step completes. Null until then. */
+  output: string | null
+  /** entryId of the specialist's response that satisfied this step (claim anchor). */
+  resolvedEntryId: string | null
+}
+
+export interface PendingPlan {
+  /** Stable id for React keys + dispatch records. */
+  planId: string
+  /** entryId of the leader entry that emitted the `<plan>` block. */
+  sourceEntryId: string
+  /** Agent id of the leader (the source). */
+  sourceAgentId: string
+  /** Team id — used for cleanup + dispatch keys. */
+  teamId: string
+  /** Steps in source order. Mutated as the plan progresses. */
+  steps: PendingPlanStep[]
+  /**
+   * Index of the step currently in flight (0-based). When `>= steps.length`,
+   * the plan is complete and the `[Plan Complete]` envelope has been sent
+   * to the leader.
+   */
+  currentStepIndex: number
+  /** Timestamp when the plan was captured (used as the dispatch anchor). */
+  timestampMs: number
+}
+
+// ─── Round 10: parallel workstreams state ────────────────────────────────────
+//
+// When the leader emits ≥2 sibling `<delegate>` tags in ONE turn — without a
+// `<plan>` wrapper — Clawboo captures them as a "workstream batch". Each
+// target works independently in parallel; there's no ordering, just an
+// in-flight set. When ALL targets respond, the leader receives a
+// `[Workstreams Complete]` envelope (mirror of `[Plan Complete]`) so it can
+// synthesize across them. Without this, Round 4/5's silence-on-relay rule
+// leaves the leader silent after parallel work resolves — the production
+// "talk is cheap, show me what you can do" failure mode.
+//
+// One pending workstreams record per leader-source-entry:
+// keyed by `${teamId}:${sourceEntryId}:workstreams` (the `:workstreams`
+// suffix keeps the id distinct from any plan id on the same source).
+
+export interface WorkstreamTarget {
+  /** Resolved roster id (or null if the `to=` name didn't match). */
+  targetAgentId: string | null
+  /** Resolved roster name of the target (for display + the complete envelope). */
+  targetAgentName: string
+  /** Task body emitted by the leader (verbatim from the `<delegate>` body). */
+  task: string
+  /** Output text from the specialist when the target completes. Null until then. */
+  output: string | null
+  /** entryId of the specialist's response that satisfied this target. */
+  resolvedEntryId: string | null
+}
+
+export interface PendingWorkstreams {
+  /** Stable id for React keys + dispatch records. */
+  workstreamId: string
+  /** entryId of the leader entry that emitted the parallel delegations. */
+  sourceEntryId: string
+  /** Agent id of the leader (the source). */
+  sourceAgentId: string
+  /** Team id — used for cleanup + dispatch keys. */
+  teamId: string
+  /** Targets in source order (first `<delegate>` is index 0, etc.). */
+  targets: WorkstreamTarget[]
+  /**
+   * Timestamp when the workstream was captured. Used as the "after" anchor
+   * for the progression pass's `findFreshResponse` — specialists' replies
+   * with timestamps >= this are eligible to resolve a target.
+   */
+  timestampMs: number
+}
+
 // ─── Store ────────────────────────────────────────────────────────────────────
 // Keyed by sessionKey so multiple agent conversations are held simultaneously.
 
@@ -9,6 +175,48 @@ interface ChatStore {
   transcripts: Map<string, TranscriptEntry[]>
   /** Live streaming text that hasn't been committed yet, keyed by sessionKey. */
   streamingText: Map<string, string>
+  /**
+   * Stream-start timestamp per session (ms since epoch). Captured on the
+   * FIRST streaming chunk for a session and used by:
+   *   1. `useGatewayEvents.appendOutputLines` to anchor the eventual
+   *      committed entry's `timestampMs` (so a long-streaming leader sorts
+   *      ABOVE fast specialists that wake mid-stream and commit first).
+   *   2. The renderer (`GroupChatPanel`, `chatComponents.MessageList`) to
+   *      position the live `StreamingCard` at its chronological slot in the
+   *      merged timeline — instead of always-at-the-end, which produced the
+   *      visible "leader's card jumps from bottom to top" re-arrangement
+   *      on commit (Round 5 production bug).
+   * Moved from `lib/streamStartTracker.ts` module-level Map (which wasn't
+   * reactive to React) so the renderer subscribes via Zustand.
+   */
+  streamStartedAt: Map<string, number>
+  /**
+   * Round 7: Clawboo's outgoing routing events, keyed by
+   * `${teamId}:${sourceEntryId}` so each leader entry can accumulate
+   * multiple dispatches (e.g., one Boo Zero turn triggering 5 relays).
+   * Populated by `useTeamOrchestration` whenever Clawboo fires `chat.send`
+   * to a team specialist. Consumed by `buildDelegationLinkages` as the
+   * Path 3 source for `DelegationCard` rendering.
+   */
+  clawbooDispatches: Map<string, ClawbooDispatch[]>
+  /**
+   * Round 8B: in-progress `<plan>` state machines, keyed by `planId` (one
+   * plan per leader-source-entry). Each plan progresses one step at a time
+   * — when step N's specialist responds, Clawboo fires step N+1 with the
+   * prior output piped in. When all steps complete, the leader receives a
+   * `[Plan Complete]` envelope cueing final synthesis. See
+   * `useTeamOrchestration` for the state-machine wiring.
+   */
+  pendingPlans: Map<string, PendingPlan>
+  /**
+   * Round 10: in-progress parallel-workstream state machines, keyed by
+   * `workstreamId`. One record per leader turn that emitted ≥2 sibling
+   * `<delegate>` tags. Targets resolve independently; when all targets
+   * resolve, the leader receives a `[Workstreams Complete]` envelope.
+   * Mutually exclusive with `pendingPlans` on the same source entry
+   * (`planBlocks.length === 0` gate in `useTeamOrchestration`).
+   */
+  pendingWorkstreams: Map<string, PendingWorkstreams>
   /** Token usage from final chat events, keyed by runId. */
   lastTokenUsage: Map<string, { inputTokens: number; outputTokens: number }>
 
@@ -18,8 +226,87 @@ interface ChatStore {
   /** Set (or clear) the live streaming text for a session. */
   setStreamingText: (sessionKey: string, text: string | null) => void
 
+  /**
+   * Capture the first streaming chunk's timestamp. No-op if a stream-start
+   * is already recorded for this session (preserves the original anchor
+   * across mid-stream patches).
+   */
+  setStreamStart: (sessionKey: string, ts: number) => void
+
+  /**
+   * Clear the stream-start anchor — called at commit time AFTER
+   * `appendOutputLines` has read the value so the next streamed turn for
+   * the same session re-anchors from scratch.
+   */
+  clearStreamStart: (sessionKey: string) => void
+
   /** Wipe all transcript + streaming state for a session. */
   clearTranscript: (sessionKey: string) => void
+
+  /**
+   * Record one Clawboo outgoing routing event under the appropriate
+   * `${teamId}:${sourceEntryId}` key. Multiple dispatches accumulate per
+   * key (one source entry can route to many targets).
+   */
+  setClawbooDispatch: (dispatch: ClawbooDispatch) => void
+
+  /**
+   * Clear ALL dispatches for a given team. Fired on Stop and on team
+   * switch so zombie cards from cancelled work don't persist.
+   */
+  clearClawbooDispatches: (teamId: string) => void
+
+  /**
+   * Round 8B: register a new pending plan when the leader emits a
+   * `<plan>` block. `useTeamOrchestration` calls this immediately after
+   * parsing, then fires step 1.
+   */
+  setPendingPlan: (plan: PendingPlan) => void
+
+  /**
+   * Round 8B: mark a step as resolved with the specialist's output. The
+   * orchestration hook calls this when it observes the specialist's reply
+   * for the in-flight step. The store also bumps `currentStepIndex` so the
+   * hook's next subscription tick fires step N+1.
+   */
+  resolvePlanStep: (
+    planId: string,
+    stepIndex: number,
+    output: string,
+    resolvedEntryId: string,
+  ) => void
+
+  /**
+   * Round 8B: clear all plans for a team. Fired on Stop and on team-switch
+   * (mirrors `clearClawbooDispatches`).
+   */
+  clearPendingPlans: (teamId: string) => void
+
+  /**
+   * Round 10: register a new pending-workstreams record when the leader
+   * fires ≥2 parallel `<delegate>` tags in one turn (no `<plan>` wrapper).
+   * Idempotent — preserves progress on re-register (e.g., the orchestration
+   * subscription tick re-processes the same leader entry).
+   */
+  setPendingWorkstreams: (workstreams: PendingWorkstreams) => void
+
+  /**
+   * Round 10: mark one target as resolved with the specialist's output.
+   * Called by the orchestration progression pass when it observes a fresh
+   * substantive response from the target.
+   */
+  resolveWorkstreamTarget: (
+    workstreamId: string,
+    targetAgentId: string,
+    output: string,
+    resolvedEntryId: string,
+  ) => void
+
+  /**
+   * Round 10: clear all workstreams for a team. Fired on Stop and on
+   * team-switch (mirrors `clearPendingPlans` / `clearClawbooDispatches`).
+   */
+  clearPendingWorkstreams: (teamId: string) => void
 
   /** Store token usage for a completed run. */
   setLastTokenUsage: (runId: string, inputTokens: number, outputTokens: number) => void
@@ -28,6 +315,10 @@ interface ChatStore {
 export const useChatStore = create<ChatStore>((set) => ({
   transcripts: new Map(),
   streamingText: new Map(),
+  streamStartedAt: new Map(),
+  clawbooDispatches: new Map(),
+  pendingPlans: new Map(),
+  pendingWorkstreams: new Map(),
   lastTokenUsage: new Map(),
 
   appendTranscript: (sessionKey, entries) =>
@@ -128,13 +419,162 @@ export const useChatStore = create<ChatStore>((set) => ({
       return { streamingText: next }
     }),
 
+  setStreamStart: (sessionKey, ts) =>
+    set((state) => {
+      // First-capture-wins: if a stream-start is already recorded, don't
+      // overwrite. Mid-stream patches keep arriving but the original anchor
+      // is what positions the card.
+      if (state.streamStartedAt.has(sessionKey)) return state
+      const next = new Map(state.streamStartedAt)
+      next.set(sessionKey, ts)
+      return { streamStartedAt: next }
+    }),
+
+  clearStreamStart: (sessionKey) =>
+    set((state) => {
+      if (!state.streamStartedAt.has(sessionKey)) return state
+      const next = new Map(state.streamStartedAt)
+      next.delete(sessionKey)
+      return { streamStartedAt: next }
+    }),
+
   clearTranscript: (sessionKey) =>
     set((state) => {
       const nextTranscripts = new Map(state.transcripts)
       const nextStreaming = new Map(state.streamingText)
+      const nextStreamStart = new Map(state.streamStartedAt)
       nextTranscripts.delete(sessionKey)
       nextStreaming.delete(sessionKey)
-      return { transcripts: nextTranscripts, streamingText: nextStreaming }
+      nextStreamStart.delete(sessionKey)
+      return {
+        transcripts: nextTranscripts,
+        streamingText: nextStreaming,
+        streamStartedAt: nextStreamStart,
+      }
+    }),
+
+  setClawbooDispatch: (dispatch) =>
+    set((state) => {
+      const next = new Map(state.clawbooDispatches)
+      const key = `${dispatch.teamId}:${dispatch.sourceEntryId}`
+      const existing = next.get(key) ?? []
+      // Dedup by dispatchId so a retry from the same call site doesn't
+      // accumulate duplicate cards (e.g., dispatchDelegation's 2-second
+      // retry-once-on-override-conflict path that reruns the same closure).
+      if (existing.some((d) => d.dispatchId === dispatch.dispatchId)) return state
+      next.set(key, [...existing, dispatch])
+      return { clawbooDispatches: next }
+    }),
+
+  clearClawbooDispatches: (teamId) =>
+    set((state) => {
+      const next = new Map(state.clawbooDispatches)
+      let changed = false
+      for (const key of next.keys()) {
+        if (key.startsWith(`${teamId}:`)) {
+          next.delete(key)
+          changed = true
+        }
+      }
+      if (!changed) return state
+      return { clawbooDispatches: next }
+    }),
+
+  setPendingPlan: (plan) =>
+    set((state) => {
+      // Idempotent — if a plan with the same id is already registered (e.g.,
+      // the orchestration hook re-parsed the same leader entry after a
+      // page reload), keep the existing one to preserve `output` /
+      // `resolvedEntryId` / `currentStepIndex` progress.
+      if (state.pendingPlans.has(plan.planId)) return state
+      const next = new Map(state.pendingPlans)
+      next.set(plan.planId, plan)
+      return { pendingPlans: next }
+    }),
+
+  resolvePlanStep: (planId, stepIndex, output, resolvedEntryId) =>
+    set((state) => {
+      const existing = state.pendingPlans.get(planId)
+      if (!existing) return state
+      const step = existing.steps[stepIndex]
+      if (!step) return state
+      // Idempotent — already resolved (same output) → no state change.
+      if (step.resolvedEntryId === resolvedEntryId && step.output === output) return state
+      const nextSteps = existing.steps.map((s, i) =>
+        i === stepIndex ? { ...s, output, resolvedEntryId } : s,
+      )
+      const nextPlan: PendingPlan = {
+        ...existing,
+        steps: nextSteps,
+        // Advance to the next step only if THIS one is the in-flight head.
+        // Out-of-order resolves (a later step's response arrives first) are
+        // possible in theory but rare; we let the hook re-fire the head step
+        // until it lands.
+        currentStepIndex:
+          stepIndex === existing.currentStepIndex
+            ? existing.currentStepIndex + 1
+            : existing.currentStepIndex,
+      }
+      const next = new Map(state.pendingPlans)
+      next.set(planId, nextPlan)
+      return { pendingPlans: next }
+    }),
+
+  clearPendingPlans: (teamId) =>
+    set((state) => {
+      const next = new Map(state.pendingPlans)
+      let changed = false
+      for (const [planId, plan] of next) {
+        if (plan.teamId === teamId) {
+          next.delete(planId)
+          changed = true
+        }
+      }
+      if (!changed) return state
+      return { pendingPlans: next }
+    }),
+
+  setPendingWorkstreams: (workstreams) =>
+    set((state) => {
+      // Idempotent — preserve progress (resolved targets) on re-register so
+      // the orchestration subscription tick re-processing the same source
+      // entry doesn't wipe in-flight state.
+      if (state.pendingWorkstreams.has(workstreams.workstreamId)) return state
+      const next = new Map(state.pendingWorkstreams)
+      next.set(workstreams.workstreamId, workstreams)
+      return { pendingWorkstreams: next }
+    }),
+
+  resolveWorkstreamTarget: (workstreamId, targetAgentId, output, resolvedEntryId) =>
+    set((state) => {
+      const existing = state.pendingWorkstreams.get(workstreamId)
+      if (!existing) return state
+      const idx = existing.targets.findIndex((t) => t.targetAgentId === targetAgentId)
+      if (idx < 0) return state
+      const target = existing.targets[idx]
+      if (!target) return state
+      // Idempotent — already resolved with the same payload.
+      if (target.resolvedEntryId === resolvedEntryId && target.output === output) return state
+      const nextTargets = existing.targets.map((t, i) =>
+        i === idx ? { ...t, output, resolvedEntryId } : t,
+      )
+      const next = new Map(state.pendingWorkstreams)
+      next.set(workstreamId, { ...existing, targets: nextTargets })
+      return { pendingWorkstreams: next }
+    }),
+
+  clearPendingWorkstreams: (teamId) =>
+    set((state) => {
+      const next = new Map(state.pendingWorkstreams)
+      let changed = false
+      for (const [wsId, ws] of next) {
+        if (ws.teamId === teamId) {
+          next.delete(wsId)
+          changed = true
+        }
+      }
+      if (!changed) return state
+      return { pendingWorkstreams: next }
     }),
 
   setLastTokenUsage: (runId, inputTokens, outputTokens) =>

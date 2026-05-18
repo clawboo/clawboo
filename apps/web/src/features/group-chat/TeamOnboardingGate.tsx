@@ -24,6 +24,7 @@ import { useToastStore } from '@/stores/toast'
 import { buildTeamSessionKey, setTeamChatOverride } from '@/lib/sessionUtils'
 import { markAgentAwake } from '@/lib/wakeTracker'
 import { nextSeq } from '@/lib/sequenceKey'
+import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,42 @@ const AGENT_INTRO_PROMPT = [
   'Do NOT use @ in your response.',
 ].join('\n')
 
+/**
+ * Stronger retry prompt — used when an agent's first intro is refusal-
+ * shaped or too short to convey identity ("NO" was the smoking gun from
+ * production). The retry is explicit that this is a routine introduction
+ * and asks for a longer response than the first prompt.
+ */
+const AGENT_INTRO_RETRY_PROMPT = [
+  'Your previous response was unclear and could not be used as a team introduction.',
+  '',
+  'Please introduce yourself properly in two sentences:',
+  '- Your name (as set in your IDENTITY.md)',
+  '- What you specialize in / what teammates can come to you for',
+  '',
+  'This is a ROUTINE team introduction — not a task assignment, not a sensitive request, not anything to refuse. Every member of this team is doing the same now.',
+  '',
+  'Do NOT respond with refusals, "NO", or other short non-answers. Do NOT mention teammates by name. Aim for ~30-80 words.',
+].join('\n')
+
+// Onboarding's "did the agent introduce itself?" check is intentionally
+// stricter than the general-purpose `isLikelyRefusal` in
+// `lib/teamProtocol.ts`. The renderer filter excludes bare `no` because the
+// OpenClaw protocol-token filter catches `NO` / `NO_REPLY` separately. Here
+// we ALSO want to catch "No, I won't introduce myself" (length>25 but still
+// a refusal at the start of a sentence). Both regexes overlap on the longer
+// openers (nope/sorry/can't/cannot/unable) — kept local to avoid coupling
+// the two semantic uses.
+const MIN_INTRO_CHARS = 25
+const REFUSAL_RE = /^(no|nope|sorry|can'?t|cannot|unable)\b/i
+
+function isValidIntro(text: string): boolean {
+  const trimmed = text.trim()
+  if (trimmed.length < MIN_INTRO_CHARS) return false
+  if (REFUSAL_RE.test(trimmed)) return false
+  return true
+}
+
 function buildUserIntroSoulPatch(userIntro: string): string {
   return `\n\n## About the User\n${userIntro.trim()}\n`
 }
@@ -93,6 +130,12 @@ export function TeamOnboardingGate({
   // can detect "this agent has produced a NEW response since we asked them".
   const baselineCountsRef = useRef<Map<string, number>>(new Map())
 
+  // Per-agent retry count — capped at 1 so we don't loop on a stubbornly
+  // refusing model. When an intro is refusal-shaped or too short, we fire
+  // the retry prompt once with a stronger ask before accepting whatever
+  // the agent eventually produces.
+  const retriesRef = useRef<Map<string, number>>(new Map())
+
   // ── Phase B: detect agent intro completion via transcript subscription ──
   useEffect(() => {
     if (phase !== 'introducing') return
@@ -110,10 +153,56 @@ export function TeamOnboardingGate({
         const newAssistant = entries
           .slice(baseline)
           .find((e) => e.role === 'assistant' && e.kind === 'assistant' && e.text.trim().length > 0)
-        if (newAssistant) {
+        if (!newAssistant) continue
+
+        // Validate the intro response. If it's refusal-shaped or too
+        // short, retry ONCE with a stronger prompt. After the cap (1
+        // retry), accept whatever lands — better to move on than to
+        // loop forever on a stubbornly-refusing model. Smoking gun from
+        // production: "NO" from Jira Workflow Steward Boo.
+        if (isValidIntro(newAssistant.text)) {
           nextCompleted.add(agent.id)
           changed = true
+          continue
         }
+
+        const retries = retriesRef.current.get(agent.id) ?? 0
+        if (retries >= 1) {
+          // Already retried; accept this response as-is so onboarding
+          // can advance.
+          nextCompleted.add(agent.id)
+          changed = true
+          continue
+        }
+        if (!client) {
+          // No client to fire the retry — accept what we have.
+          nextCompleted.add(agent.id)
+          changed = true
+          continue
+        }
+        retriesRef.current.set(agent.id, retries + 1)
+        // Bump the baseline so the NEXT response (post-retry-prompt) is
+        // what we detect as new, not the current weak one.
+        baselineCountsRef.current.set(agent.id, entries.length)
+        // Fire the retry prompt — best-effort. The override is already
+        // set from the initial send; no need to re-set it.
+        void client
+          .call('chat.send', {
+            sessionKey: teamSk,
+            message: AGENT_INTRO_RETRY_PROMPT,
+            deliver: false,
+            idempotencyKey: crypto.randomUUID(),
+          })
+          .catch(() => {
+            // Retry send failed — accept whatever we already have so
+            // the user isn't stuck on the gate forever.
+            nextCompleted.add(agent.id)
+            setCompletedAgentIds((prev) => {
+              const merged = new Set(prev)
+              merged.add(agent.id)
+              return merged
+            })
+          })
       }
       if (changed) setCompletedAgentIds(nextCompleted)
     }
@@ -123,7 +212,7 @@ export function TeamOnboardingGate({
     return () => {
       unsub()
     }
-  }, [phase, teamAgents, teamId, completedAgentIds])
+  }, [phase, teamAgents, teamId, completedAgentIds, client])
 
   // When all agents finish introducing, advance to user-intro phase AND
   // post a single meta entry "introducing" Boo Zero as the team's universal
@@ -265,6 +354,19 @@ export function TeamOnboardingGate({
     })
     await Promise.allSettled(writePromises)
 
+    // Boo Zero SOUL.md sync — submitting the user intro is the per-team
+    // onboarding "approval moment". The user has just told us they're ready
+    // to chat with this team, which is the right moment to also re-anchor
+    // Boo Zero's persisted identity with the current display name. Best-
+    // effort; the per-turn rules block stays authoritative regardless.
+    if (booZeroAgent) {
+      void syncBooZeroSoulIdentity({
+        client,
+        agentId: booZeroAgent.id,
+        displayName: booZeroAgent.name,
+      })
+    }
+
     // Drop a meta entry into each agent's team transcript so the user sees
     // their introduction land in chat (the agents won't respond to it — it
     // was only written to SOUL.md, not sent as a chat message).
@@ -305,20 +407,42 @@ export function TeamOnboardingGate({
     } finally {
       setSubmittingUserIntro(false)
     }
-  }, [client, userIntroText, teamAgents, teamId, onMarkUserIntroduced])
+  }, [client, userIntroText, teamAgents, teamId, booZeroAgent, onMarkUserIntroduced])
 
   // ── Read agent intro responses to display in Phase C ──────────────────────
+  // Use the LAST assistant entry after the per-agent baseline so the recap
+  // shows the agent's actual introduction even when an earlier attempt was
+  // refusal-shaped and we retried. Before this fix, a "NO" intro from agent X
+  // would stay visible in the recap even after the retry produced a clean
+  // intro — `entries.find(...)` returned the first match, ignoring the retry.
   const agentIntros = useMemo(() => {
     const transcripts = useChatStore.getState().transcripts
     const intros = new Map<string, string>()
     for (const agent of teamAgents) {
       const teamSk = buildTeamSessionKey(agent.id, teamId)
       const entries = transcripts.get(teamSk) ?? []
-      // Find the first assistant entry — that's their introduction
-      const found = entries.find(
-        (e) => e.role === 'assistant' && e.kind === 'assistant' && e.text.trim().length > 0,
-      )
-      if (found) intros.set(agent.id, found.text.trim())
+      const baseline = baselineCountsRef.current.get(agent.id) ?? 0
+      // Walk backwards so we get the LATEST assistant entry post-baseline.
+      // (If the retry produced a longer/cleaner reply, that's the one to
+      // display; the refusal-shaped first attempt stays in chat history but
+      // the recap shows what the user can actually act on.)
+      let latest: string | null = null
+      for (let i = entries.length - 1; i >= baseline; i--) {
+        const e = entries[i]
+        if (e && e.role === 'assistant' && e.kind === 'assistant' && e.text.trim().length > 0) {
+          latest = e.text.trim()
+          break
+        }
+      }
+      // Fallback: if we didn't find anything post-baseline (shouldn't happen
+      // once the gate has detected completion), use the first overall.
+      if (!latest) {
+        const found = entries.find(
+          (e) => e.role === 'assistant' && e.kind === 'assistant' && e.text.trim().length > 0,
+        )
+        if (found) latest = found.text.trim()
+      }
+      if (latest) intros.set(agent.id, latest)
     }
     return intros
     // We re-derive whenever completedAgentIds changes (Phase B updates) or the
@@ -427,7 +551,7 @@ export function TeamOnboardingGate({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="mx-auto flex max-w-md flex-col"
+              className="mx-auto flex max-w-3xl flex-col"
             >
               <h3
                 className="mb-2 text-center text-[16px] font-semibold text-text"
@@ -487,7 +611,7 @@ export function TeamOnboardingGate({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2 }}
-              className="mx-auto flex max-w-md flex-col"
+              className="mx-auto flex max-w-3xl flex-col"
             >
               <h3
                 className="mb-2 text-center text-[16px] font-semibold text-text"
@@ -500,24 +624,30 @@ export function TeamOnboardingGate({
                 you&rsquo;d like the team to help. This is saved to each agent&rsquo;s context.
               </p>
 
-              {/* Show agent intros recap (if available) */}
+              {/* Show agent intros recap (if available) — sized to be
+                  readable, not a footnote. The intros are the user's main
+                  context for what each teammate does, so they get body-
+                  weight type (13px) at higher contrast (~85% opacity)
+                  with relaxed line-height. */}
               {agentIntros.size > 0 && (
-                <details className="mb-4 rounded-lg border border-white/8 bg-surface/30 p-3">
-                  <summary className="cursor-pointer text-[11px] font-semibold text-secondary">
+                <details open className="mb-4 rounded-lg border border-white/8 bg-surface/30 p-4">
+                  <summary className="cursor-pointer text-[12px] font-semibold text-secondary/90">
                     Recap: who&rsquo;s on the team
                   </summary>
-                  <div className="mt-3 flex flex-col gap-2">
+                  <div className="mt-4 flex flex-col gap-4">
                     {teamAgents.map((agent) => {
                       const intro = agentIntros.get(agent.id)
                       if (!intro) return null
                       return (
-                        <div key={agent.id} className="flex items-start gap-2">
-                          <BooAvatar seed={agent.id} size={24} />
+                        <div key={agent.id} className="flex items-start gap-3">
+                          <BooAvatar seed={agent.id} size={32} />
                           <div className="min-w-0 flex-1">
-                            <span className="text-[11px] font-semibold text-text">
+                            <span className="text-[13px] font-semibold text-text">
                               {agent.name}
                             </span>
-                            <p className="text-[10px] text-secondary/70">{intro}</p>
+                            <p className="mt-0.5 text-[13px] leading-relaxed text-text/75">
+                              {intro}
+                            </p>
                           </div>
                         </div>
                       )

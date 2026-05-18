@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2, RotateCcw } from 'lucide-react'
 import { GatewayClient, resolveProxyGatewayUrl } from '@clawboo/gateway-client'
+import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayConnectScreen } from './GatewayConnectScreen'
 import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard'
@@ -293,6 +294,16 @@ export function GatewayBootstrap() {
             for (const a of mapped) {
               if (a.id === booZeroId) a.name = override
             }
+            // Auto-sync the display name into Boo Zero's SOUL.md. Idempotent
+            // (no-op when the SOUL.md heading already matches). Best-effort —
+            // the per-turn rules block in `lib/booZeroRules.ts` is the
+            // authoritative anchor regardless of whether the sync sticks.
+            // Fire-and-forget so a slow Gateway doesn't delay fleet hydration.
+            void syncBooZeroSoulIdentity({
+              client: liveClient,
+              agentId: booZeroId,
+              displayName: override,
+            })
           }
         }
 

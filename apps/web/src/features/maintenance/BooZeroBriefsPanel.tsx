@@ -1,633 +1,190 @@
-// Boo Zero brief management — global brief + per-team briefs.
-// Lives inside MaintenancePanel ("System" view). SQLite-backed (Phase 1
-// API routes), surfaced as editable virtual files. Boo Zero reads briefs
-// at runtime via the context preamble injection in `groupChatSendOperation`
-// and `ChatPanel` (when the user `@TeamName`s in Boo Zero's individual chat).
+// Boo Zero brief management — *redirected*.
+//
+// History note: this panel used to host four editors (Display Name, Global
+// Brief, Per-Team Briefs, Team Rules) in the System view. That conflated
+// agent-scoped surfaces (Display Name + Global Brief belong to Boo Zero) with
+// team-scoped surfaces (Per-Team Brief + Team Rules belong to each team).
+//
+// The editors have moved to where their data actually lives:
+//   • Display Name + Global Brief → Boo Zero's individual agent view, in
+//     the new `Brief` tab (visible only when viewing Boo Zero).
+//   • Per-Team Brief + Team Rules → each team's settings sheet, opened from
+//     the gear icon on the team chat header.
+//
+// This panel is now just a breadcrumb in the System view so users who
+// learned the old location can find the new homes in one click.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, RefreshCw, Save, ChevronRight } from 'lucide-react'
-import { useTeamStore } from '@/stores/team'
-import { useFleetStore } from '@/stores/fleet'
 import { useBooZeroStore } from '@/stores/booZero'
+import { useFleetStore } from '@/stores/fleet'
+import { useTeamStore } from '@/stores/team'
+import { useViewStore } from '@/stores/view'
 import { useToastStore } from '@/stores/toast'
-import { buildGlobalBrief, buildTeamBrief, type TeamBriefMember } from '@/lib/booZeroBrief'
-import { detectGenuineLeader, matchedLeadershipKeyword } from '@/lib/genuineLeader'
+import { ArrowRight, Settings } from 'lucide-react'
+import { BooAvatar } from '@clawboo/ui'
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-interface BriefResponse {
-  content?: string | null
-  updatedAt?: number | null
-}
-
-async function fetchGlobalBrief(): Promise<BriefResponse> {
-  const res = await fetch('/api/boo-zero/global-brief')
-  if (!res.ok) throw new Error('Failed to load global brief')
-  return (await res.json()) as BriefResponse
-}
-
-async function fetchTeamBrief(teamId: string): Promise<BriefResponse> {
-  const res = await fetch(`/api/boo-zero/team-briefs/${encodeURIComponent(teamId)}`)
-  if (!res.ok) throw new Error('Failed to load team brief')
-  return (await res.json()) as BriefResponse
-}
-
-async function putGlobalBrief(content: string): Promise<void> {
-  const res = await fetch('/api/boo-zero/global-brief', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
-  })
-  if (!res.ok) throw new Error('Failed to save global brief')
-}
-
-async function putTeamBrief(teamId: string, content: string): Promise<void> {
-  const res = await fetch(`/api/boo-zero/team-briefs/${encodeURIComponent(teamId)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
-  })
-  if (!res.ok) throw new Error('Failed to save team brief')
-}
-
-// ─── Global brief sub-section ────────────────────────────────────────────────
-
-function GlobalBriefEditor() {
-  const teams = useTeamStore((s) => s.teams)
-  const teamsRef = useRef(teams)
-  teamsRef.current = teams
-
-  const [content, setContent] = useState<string>('')
-  const [clean, setClean] = useState<string>('')
-  const [loading, setLoading] = useState<boolean>(true)
-  const [saving, setSaving] = useState<boolean>(false)
-  const seededRef = useRef<boolean>(false)
-
-  useEffect(() => {
-    // Intentionally seed exactly once on mount. Subsequent team changes
-    // shouldn't blow away user edits — they can press "Regenerate" if they
-    // want a fresh draft from the current team list. `teamsRef` is read at
-    // load-time so the initial default still reflects the current state.
-    if (seededRef.current) return
-    seededRef.current = true
-    let cancelled = false
-    setLoading(true)
-    fetchGlobalBrief()
-      .then((r) => {
-        if (cancelled) return
-        const value =
-          r.content && r.content.length > 0
-            ? r.content
-            : buildGlobalBrief({
-                teams: teamsRef.current.map((t) => ({ name: t.name, icon: t.icon })),
-              })
-        setContent(value)
-        setClean(value)
-      })
-      .catch(() => {
-        if (cancelled) return
-        const fallback = buildGlobalBrief({
-          teams: teamsRef.current.map((t) => ({ name: t.name, icon: t.icon })),
-        })
-        setContent(fallback)
-        setClean(fallback)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const isDirty = content !== clean
-
-  const handleSave = useCallback(async () => {
-    setSaving(true)
-    try {
-      await putGlobalBrief(content)
-      setClean(content)
-      useToastStore.getState().addToast({ type: 'success', message: 'Global brief saved' })
-    } catch (e) {
-      useToastStore
-        .getState()
-        .addToast({ type: 'error', message: (e as Error).message ?? 'Save failed' })
-    } finally {
-      setSaving(false)
-    }
-  }, [content])
-
-  const handleRegenerate = useCallback(() => {
-    const fresh = buildGlobalBrief({
-      teams: teams.map((t) => ({ name: t.name, icon: t.icon })),
-    })
-    setContent(fresh)
-  }, [teams])
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)', margin: 0 }}>
-        Boo Zero&apos;s overall responsibilities + the list of teams it leads. Injected into Boo
-        Zero&apos;s context preamble on every interaction.
-      </p>
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        disabled={loading || saving}
-        spellCheck={false}
-        style={{
-          width: '100%',
-          minHeight: 240,
-          maxHeight: 480,
-          padding: 12,
-          fontSize: 12,
-          fontFamily: 'var(--font-geist-mono, monospace)',
-          lineHeight: 1.55,
-          background: 'rgba(13,17,23,0.85)',
-          color: '#E8E8E8',
-          border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: 8,
-          resize: 'vertical',
-        }}
-      />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={!isDirty || saving || loading}
-          style={{
-            height: 30,
-            padding: '0 12px',
-            fontSize: 11,
-            fontWeight: 600,
-            borderRadius: 8,
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: isDirty ? '#E94560' : 'rgba(255,255,255,0.06)',
-            color: isDirty ? '#fff' : 'rgba(232,232,232,0.5)',
-            cursor: !isDirty || saving || loading ? 'default' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-          Save
-        </button>
-        <button
-          type="button"
-          onClick={handleRegenerate}
-          disabled={loading || saving}
-          style={{
-            height: 30,
-            padding: '0 12px',
-            fontSize: 11,
-            fontWeight: 600,
-            borderRadius: 8,
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: 'rgba(255,255,255,0.04)',
-            color: 'rgba(232,232,232,0.7)',
-            cursor: loading || saving ? 'default' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-          title="Regenerate from current team list (does not save yet)"
-        >
-          <RefreshCw size={12} />
-          Regenerate from teams
-        </button>
-        {isDirty && <span style={{ fontSize: 10, color: '#FBBF24' }}>Unsaved changes</span>}
-      </div>
-    </div>
-  )
-}
-
-// ─── Team brief sub-section ──────────────────────────────────────────────────
-
-function TeamBriefEditor({
-  teamId,
-  teamName,
-  teamIcon,
-  templateId,
-  teamColor,
-  collapsed,
-  onToggle,
+function RedirectLink({
+  icon,
+  iconTinted = true,
+  title,
+  description,
+  cta,
+  onClick,
+  disabled = false,
+  disabledReason,
 }: {
-  teamId: string
-  teamName: string
-  teamIcon: string
-  templateId: string | null
-  teamColor: string
-  collapsed: boolean
-  onToggle: () => void
+  icon: React.ReactNode
+  /** When false, the icon renders without the accent-tinted disc background. */
+  iconTinted?: boolean
+  title: string
+  description: string
+  cta: string
+  onClick: () => void
+  disabled?: boolean
+  disabledReason?: string
 }) {
-  const agents = useFleetStore((s) => s.agents)
-  const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
-
-  const [content, setContent] = useState<string>('')
-  const [clean, setClean] = useState<string>('')
-  const [loading, setLoading] = useState<boolean>(false)
-  const [saving, setSaving] = useState<boolean>(false)
-  const [loadedOnce, setLoadedOnce] = useState<boolean>(false)
-
-  const computeDefaultBrief = useCallback((): string => {
-    const genuineLead =
-      teamAgents.find((a) => detectGenuineLeader({ name: a.name, role: a.name })) ?? null
-    const matched = genuineLead
-      ? matchedLeadershipKeyword({ name: genuineLead.name, role: genuineLead.name })
-      : null
-    const members: TeamBriefMember[] = teamAgents.map((a) => ({
-      name: a.name,
-      role: a.name,
-    }))
-    return buildTeamBrief({
-      team: { name: teamName, icon: teamIcon, templateId, description: null },
-      members,
-      internalLead:
-        genuineLead && matched ? { agentName: genuineLead.name, matchedKeyword: matched } : null,
-    })
-  }, [teamAgents, teamName, teamIcon, templateId])
-
-  // Load when expanded (lazy).
-  useEffect(() => {
-    if (collapsed || loadedOnce) return
-    let cancelled = false
-    setLoading(true)
-    fetchTeamBrief(teamId)
-      .then((r) => {
-        if (cancelled) return
-        const value = r.content && r.content.length > 0 ? r.content : computeDefaultBrief()
-        setContent(value)
-        setClean(value)
-        setLoadedOnce(true)
-      })
-      .catch(() => {
-        if (cancelled) return
-        const fallback = computeDefaultBrief()
-        setContent(fallback)
-        setClean(fallback)
-        setLoadedOnce(true)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [collapsed, loadedOnce, teamId, computeDefaultBrief])
-
-  const isDirty = content !== clean
-
-  const handleSave = useCallback(async () => {
-    setSaving(true)
-    try {
-      await putTeamBrief(teamId, content)
-      setClean(content)
-      useToastStore.getState().addToast({ type: 'success', message: `Brief for ${teamName} saved` })
-    } catch (e) {
-      useToastStore
-        .getState()
-        .addToast({ type: 'error', message: (e as Error).message ?? 'Save failed' })
-    } finally {
-      setSaving(false)
-    }
-  }, [teamId, teamName, content])
-
-  const handleRegenerate = useCallback(() => {
-    setContent(computeDefaultBrief())
-  }, [computeDefaultBrief])
-
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={disabled ? disabledReason : title}
       style={{
-        border: '1px solid rgba(255,255,255,0.06)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: 12,
+        background: 'rgba(255,255,255,0.03)',
+        border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 8,
-        background: 'rgba(255,255,255,0.02)',
-        overflow: 'hidden',
+        textAlign: 'left',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.55 : 1,
+        transition: 'background 0.15s ease, border-color 0.15s ease',
+      }}
+      onMouseEnter={(e) => {
+        if (!disabled) {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+          e.currentTarget.style.borderColor = 'rgba(233,69,96,0.4)'
+        }
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
+        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
       }}
     >
-      <button
-        type="button"
-        onClick={onToggle}
+      <span
         style={{
-          width: '100%',
-          padding: '10px 12px',
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          color: '#E8E8E8',
-          display: 'flex',
+          display: 'inline-flex',
           alignItems: 'center',
-          gap: 10,
-          fontSize: 12,
-          textAlign: 'left',
+          justifyContent: 'center',
+          width: 32,
+          height: 32,
+          borderRadius: 8,
+          background: iconTinted ? 'rgba(233,69,96,0.12)' : 'transparent',
+          color: iconTinted ? '#E94560' : 'inherit',
+          flexShrink: 0,
         }}
-        aria-expanded={!collapsed}
       >
-        <span
+        {icon}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 22,
-            height: 22,
-            borderRadius: 6,
-            background: `${teamColor}22`,
-            fontSize: 13,
-          }}
-        >
-          {teamIcon}
-        </span>
-        <span style={{ flex: 1, fontWeight: 600 }}>{teamName}</span>
-        <span style={{ fontSize: 10, color: 'rgba(232,232,232,0.4)' }}>
-          {teamAgents.length} {teamAgents.length === 1 ? 'agent' : 'agents'}
-        </span>
-        <ChevronRight
-          size={14}
-          style={{
-            transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)',
-            transition: 'transform 0.15s ease',
-            opacity: 0.5,
-          }}
-        />
-      </button>
-      {!collapsed && (
-        <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {loading && !loadedOnce ? (
-            <div
-              style={{
-                padding: 16,
-                fontSize: 11,
-                color: 'rgba(232,232,232,0.5)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <Loader2 size={12} className="animate-spin" /> Loading brief…
-            </div>
-          ) : (
-            <>
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                disabled={saving}
-                spellCheck={false}
-                style={{
-                  width: '100%',
-                  minHeight: 200,
-                  maxHeight: 420,
-                  padding: 10,
-                  fontSize: 12,
-                  fontFamily: 'var(--font-geist-mono, monospace)',
-                  lineHeight: 1.55,
-                  background: 'rgba(13,17,23,0.85)',
-                  color: '#E8E8E8',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: 6,
-                  resize: 'vertical',
-                }}
-              />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={!isDirty || saving}
-                  style={{
-                    height: 28,
-                    padding: '0 10px',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    borderRadius: 6,
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: isDirty ? '#E94560' : 'rgba(255,255,255,0.06)',
-                    color: isDirty ? '#fff' : 'rgba(232,232,232,0.5)',
-                    cursor: !isDirty || saving ? 'default' : 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                >
-                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRegenerate}
-                  disabled={saving}
-                  style={{
-                    height: 28,
-                    padding: '0 10px',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    borderRadius: 6,
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'rgba(255,255,255,0.04)',
-                    color: 'rgba(232,232,232,0.7)',
-                    cursor: saving ? 'default' : 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                  title="Regenerate from current team members (does not save until you press Save)"
-                >
-                  <RefreshCw size={12} />
-                  Regenerate
-                </button>
-                {isDirty && <span style={{ fontSize: 10, color: '#FBBF24' }}>Unsaved changes</span>}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Display name editor ────────────────────────────────────────────────────
-//
-// Phase E: the user's Gateway-side agent name can be anything ("main", a slug,
-// or whatever they typed in OpenClaw onboarding — production saw "Mythos").
-// Clawboo applies a display-name override that lives in SQLite and is overlaid
-// on the Boo Zero fleet entry at hydration time. This editor lets the user
-// change the override or clear it at any time. The default ("Boo Zero") is
-// seeded on first connect — see `GatewayBootstrap.tsx`.
-
-function DisplayNameEditor({ agentId, currentName }: { agentId: string; currentName: string }) {
-  const [value, setValue] = useState<string>(currentName)
-  const [saving, setSaving] = useState<boolean>(false)
-  const isDirty = value.trim() !== currentName.trim()
-
-  const handleSave = useCallback(async () => {
-    const trimmed = value.trim() || 'Boo Zero'
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/boo-zero/display-name/${encodeURIComponent(agentId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: trimmed }),
-      })
-      if (!res.ok) throw new Error('Save failed')
-      useToastStore.getState().addToast({
-        type: 'success',
-        message: `Boo Zero display name → "${trimmed}". Reload to apply across all views.`,
-      })
-    } catch (e) {
-      useToastStore
-        .getState()
-        .addToast({ type: 'error', message: (e as Error).message ?? 'Save failed' })
-    } finally {
-      setSaving(false)
-    }
-  }, [agentId, value])
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)', margin: 0 }}>
-        How Boo Zero refers to itself in chats. Defaults to <code>Boo Zero</code>. Stored in
-        Clawboo&apos;s SQLite — the underlying OpenClaw agent name is not touched.
-      </p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="Boo Zero"
-          maxLength={80}
-          disabled={saving}
-          style={{
-            flex: 1,
-            height: 30,
-            padding: '0 10px',
             fontSize: 12,
-            fontFamily: 'var(--font-body, sans-serif)',
-            background: 'rgba(13,17,23,0.85)',
-            color: '#E8E8E8',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 6,
-          }}
-        />
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={!isDirty || saving || value.trim().length === 0}
-          style={{
-            height: 30,
-            padding: '0 12px',
-            fontSize: 11,
             fontWeight: 600,
-            borderRadius: 8,
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: isDirty && value.trim().length > 0 ? '#E94560' : 'rgba(255,255,255,0.06)',
-            color: isDirty && value.trim().length > 0 ? '#fff' : 'rgba(232,232,232,0.5)',
-            cursor: !isDirty || saving || value.trim().length === 0 ? 'default' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
+            color: '#E8E8E8',
+            marginBottom: 2,
           }}
         >
-          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-          Save
-        </button>
+          {title}
+        </div>
+        <div style={{ fontSize: 11, color: 'rgba(232,232,232,0.55)', lineHeight: 1.45 }}>
+          {description}
+        </div>
+        {disabled && disabledReason && (
+          <div style={{ fontSize: 10, color: '#FBBF24', marginTop: 4 }}>{disabledReason}</div>
+        )}
       </div>
-      {isDirty && (
-        <span style={{ fontSize: 10, color: '#FBBF24' }}>Unsaved — save and reload to apply.</span>
-      )}
-    </div>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          fontSize: 11,
+          fontWeight: 500,
+          color: disabled ? 'rgba(232,232,232,0.35)' : 'rgba(232,232,232,0.7)',
+          flexShrink: 0,
+        }}
+      >
+        {cta} <ArrowRight size={12} />
+      </span>
+    </button>
   )
 }
 
 // ─── Top-level panel ─────────────────────────────────────────────────────────
 
 export function BooZeroBriefsPanel() {
-  const teams = useTeamStore((s) => s.teams).filter((t) => !t.isArchived)
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const agents = useFleetStore((s) => s.agents)
   const booZeroAgent = booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null
 
-  const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null)
+  const teams = useTeamStore((s) => s.teams).filter((t) => !t.isArchived)
+  const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
+  // The team that will actually open when the user clicks the second card:
+  // the currently-selected team from the sidebar, falling back to the first
+  // un-archived team when nothing is selected. The button label mirrors
+  // this resolution so it always reads what's about to open.
+  const targetTeam =
+    (selectedTeamId ? teams.find((t) => t.id === selectedTeamId) : null) ?? teams[0] ?? null
+
+  const openAgent = useViewStore((s) => s.openAgent)
+  const openGroupChat = useViewStore((s) => s.openGroupChat)
+
+  const handleOpenBooZeroBrief = () => {
+    if (!booZeroAgent) return
+    openAgent(booZeroAgent.id)
+    useToastStore.getState().addToast({
+      type: 'success',
+      message: 'Open the "Brief" tab in the right-hand editor.',
+    })
+  }
+
+  const handleOpenTeamSettings = () => {
+    if (!targetTeam) return
+    openGroupChat(targetTeam.id)
+    useToastStore.getState().addToast({
+      type: 'success',
+      message: `Open “Brief & Rules” in ${targetTeam.name}'s chat header.`,
+    })
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {!booZeroAgent && (
-        <div
-          style={{
-            padding: 10,
-            fontSize: 11,
-            color: '#FBBF24',
-            border: '1px solid rgba(251,191,36,0.3)',
-            borderRadius: 6,
-            background: 'rgba(251,191,36,0.05)',
-          }}
-          data-testid="boo-zero-missing-banner"
-        >
-          Boo Zero is missing from the fleet. Briefs are still editable, but there&apos;s no agent
-          to receive them until a primary agent is identified.
-        </div>
-      )}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <RedirectLink
+        icon={booZeroAgent ? <BooAvatar seed={booZeroAgent.id} size={26} isBooZero /> : null}
+        iconTinted={false}
+        title="Boo Zero — Display name & Global brief"
+        description="Live in the Boo Zero agent view, in the Brief tab."
+        cta="Open Boo Zero"
+        onClick={handleOpenBooZeroBrief}
+        disabled={!booZeroAgent}
+        disabledReason={!booZeroAgent ? 'Boo Zero not identified yet.' : undefined}
+      />
 
-      {/* Display name */}
-      {booZeroAgent && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <h3
-            style={{
-              margin: 0,
-              fontSize: 12,
-              fontWeight: 600,
-              color: 'rgba(232,232,232,0.85)',
-            }}
-          >
-            Display name
-          </h3>
-          <DisplayNameEditor agentId={booZeroAgent.id} currentName={booZeroAgent.name} />
-        </div>
-      )}
-
-      {/* Global brief */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <h3
-          style={{
-            margin: 0,
-            fontSize: 12,
-            fontWeight: 600,
-            color: 'rgba(232,232,232,0.85)',
-          }}
-        >
-          Global brief
-        </h3>
-        <GlobalBriefEditor />
-      </div>
-
-      {/* Per-team briefs */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <h3
-          style={{
-            margin: 0,
-            fontSize: 12,
-            fontWeight: 600,
-            color: 'rgba(232,232,232,0.85)',
-          }}
-        >
-          Per-team briefs
-        </h3>
-        {teams.length === 0 && (
-          <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)', margin: 0 }}>
-            No teams deployed yet. Briefs appear here once you deploy your first team.
-          </p>
-        )}
-        {teams.map((team) => (
-          <TeamBriefEditor
-            key={team.id}
-            teamId={team.id}
-            teamName={team.name}
-            teamIcon={team.icon}
-            teamColor={team.color}
-            templateId={team.templateId ?? null}
-            collapsed={expandedTeamId !== team.id}
-            onToggle={() => setExpandedTeamId(expandedTeamId === team.id ? null : team.id)}
-          />
-        ))}
-      </div>
+      <RedirectLink
+        icon={<Settings size={15} />}
+        title="Per-team brief & rules"
+        description={
+          targetTeam
+            ? `Open the Brief & Rules button (top right) in ${targetTeam.name}'s chat header.`
+            : 'Open a team chat, then click Brief & Rules (top right of the header).'
+        }
+        cta={targetTeam ? `Open ${targetTeam.name}` : 'No teams yet'}
+        onClick={handleOpenTeamSettings}
+        disabled={!targetTeam}
+        disabledReason={!targetTeam ? 'Deploy a team first.' : undefined}
+      />
     </div>
   )
 }

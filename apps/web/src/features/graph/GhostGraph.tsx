@@ -750,84 +750,12 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           doesn't leak into other views. */}
       {scope === 'atlas' && showTeamHalos && <TeamHaloLayer nodes={nodes} />}
 
-      {/* Re-layout — bumps the layout key and saves new positions. Shown
-          on the canvas (instead of the now-suppressed panel toolbar) so
-          both Atlas and the embedded Group Chat graph have it in the
-          same place. Gated by `hasRunLayout` — there's nothing to
-          re-layout before the first ELK pass completes. Position 224px
-          from the right keeps a stable column order regardless of which
-          scope is active: [Re-layout] [Team halos] [Connect]. Team halos
-          is hidden in team scope, leaving a small empty band — preferred
-          over conditional offsets that would jitter as scope changes. */}
-      {hasRunLayout && (
-        <button
-          onClick={resetLayout}
-          title="Re-layout"
-          style={{
-            position: 'absolute',
-            top: 12,
-            right: 224,
-            zIndex: 20,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 12px',
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: '#111827',
-            color: 'rgba(232,232,232,0.5)',
-            transition: 'all 0.15s',
-          }}
-          onMouseOver={(e) =>
-            ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.85)')
-          }
-          onMouseOut={(e) =>
-            ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.5)')
-          }
-        >
-          <RefreshCw size={14} />
-          Re-layout
-        </button>
-      )}
-
-      {/* Team halos toggle — Atlas-only control. Hidden in team scope so
-          the toolbar doesn't carry irrelevant chrome. */}
-      {scope === 'atlas' && (
-        <button
-          onClick={() => setShowTeamHalos(!showTeamHalos)}
-          title="Toggle colored team hulls behind agents"
-          style={{
-            position: 'absolute',
-            top: 12,
-            right: 112,
-            zIndex: 20,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 12px',
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            border: showTeamHalos
-              ? '1px solid rgba(52,211,153,0.4)'
-              : '1px solid rgba(255,255,255,0.1)',
-            background: showTeamHalos ? 'rgba(52,211,153,0.18)' : '#111827',
-            color: showTeamHalos ? '#34D399' : 'rgba(232,232,232,0.5)',
-            transition: 'all 0.15s',
-          }}
-        >
-          <Pin size={14} />
-          Team halos
-        </button>
-      )}
-
-      {/* Connect mode toggle */}
-      <button
-        onClick={() => setConnectMode(!connectMode)}
+      {/* Floating top-right toolbar — Re-layout / Team halos (Atlas only) /
+          Connect. Wrapped in a single flex row so the buttons always sit
+          adjacent regardless of which subset is visible. The previous
+          layout pinned each button to a fixed `right:` offset, which left
+          a visible gap in team scope where Team halos was hidden. */}
+      <div
         style={{
           position: 'absolute',
           top: 12,
@@ -835,21 +763,95 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           zIndex: 20,
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
-          padding: '6px 12px',
-          borderRadius: 8,
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: 'pointer',
-          border: connectMode ? '1px solid rgba(233,69,96,0.4)' : '1px solid rgba(255,255,255,0.1)',
-          background: connectMode ? 'rgba(233,69,96,0.2)' : '#111827',
-          color: connectMode ? '#E94560' : 'rgba(232,232,232,0.5)',
-          transition: 'all 0.15s',
+          gap: 8,
         }}
       >
-        <GitBranch size={14} />
-        {connectMode ? 'Drawing Edges' : 'Connect'}
-      </button>
+        {/* Re-layout — bumps the layout key and saves new positions.
+            Gated by `hasRunLayout` — there's nothing to re-layout
+            before the first ELK pass completes. */}
+        {hasRunLayout && (
+          <button
+            onClick={resetLayout}
+            title="Re-layout"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: '1px solid rgba(255,255,255,0.1)',
+              background: '#111827',
+              color: 'rgba(232,232,232,0.5)',
+              transition: 'all 0.15s',
+            }}
+            onMouseOver={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.85)')
+            }
+            onMouseOut={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.5)')
+            }
+          >
+            <RefreshCw size={14} />
+            Re-layout
+          </button>
+        )}
+
+        {/* Team halos toggle — Atlas-only. Hidden in team scope so the
+            toolbar doesn't carry irrelevant chrome; with flex layout,
+            removing it leaves no gap. */}
+        {scope === 'atlas' && (
+          <button
+            onClick={() => setShowTeamHalos(!showTeamHalos)}
+            title="Toggle colored team hulls behind agents"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: showTeamHalos
+                ? '1px solid rgba(52,211,153,0.4)'
+                : '1px solid rgba(255,255,255,0.1)',
+              background: showTeamHalos ? 'rgba(52,211,153,0.18)' : '#111827',
+              color: showTeamHalos ? '#34D399' : 'rgba(232,232,232,0.5)',
+              transition: 'all 0.15s',
+            }}
+          >
+            <Pin size={14} />
+            Team halos
+          </button>
+        )}
+
+        {/* Connect mode toggle */}
+        <button
+          onClick={() => setConnectMode(!connectMode)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 12px',
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: connectMode
+              ? '1px solid rgba(233,69,96,0.4)'
+              : '1px solid rgba(255,255,255,0.1)',
+            background: connectMode ? 'rgba(233,69,96,0.2)' : '#111827',
+            color: connectMode ? '#E94560' : 'rgba(232,232,232,0.5)',
+            transition: 'all 0.15s',
+          }}
+        >
+          <GitBranch size={14} />
+          {connectMode ? 'Drawing Edges' : 'Connect'}
+        </button>
+      </div>
 
       {/* MiniMap minimize/maximize toggle. Sits at the bottom-right corner —
           where the MiniMap itself lives — so the relationship between the

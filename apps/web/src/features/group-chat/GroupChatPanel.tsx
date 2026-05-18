@@ -11,7 +11,11 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { sendGroupChatMessage } from './groupChatSendOperation'
 import { useTeamOrchestration } from './useTeamOrchestration'
+import { buildDelegationLinkages } from './buildDelegationLinkages'
 import { stopAllInTeam } from '@/features/chat/stopChatOperation'
+import { appendRule, fetchTeamRules, parseRuleCommand, saveTeamRules } from '@/lib/teamRules'
+import { nextSeq } from '@/lib/sequenceKey'
+import { useToastStore } from '@/stores/toast'
 import {
   groupEntriesToBlocks,
   UserMessageCard,
@@ -20,6 +24,8 @@ import {
   MetaMessageCard,
   MessageComposer,
   NEAR_BOTTOM_PX,
+  isFollowupBlock,
+  blockMarginClass,
   type MessageComposerHandle,
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
@@ -54,6 +60,24 @@ export function GroupChatPanel({
   const connectionStatus = useConnectionStore((s) => s.status)
   const transcripts = useChatStore((s) => s.transcripts)
   const streamingTextMap = useChatStore((s) => s.streamingText)
+  // Round 5: subscribe to stream-start timestamps so live StreamingCards
+  // can position themselves at their chronological slot in the merged
+  // timeline (not always-at-the-end). After commit, the committed entry
+  // takes the same `timestampMs` value — zero visible re-arrangement.
+  const streamStartedAtMap = useChatStore((s) => s.streamStartedAt)
+  // Round 7: Clawboo's recorded outgoing routing events for this team.
+  // Threaded into `buildDelegationLinkages` Path 3 so DelegationCards
+  // surface ACTUAL Clawboo routing — `dispatchDelegation` + relay batches
+  // — independent of whatever the LLM emits in prose.
+  const clawbooDispatchesMap = useChatStore((s) => s.clawbooDispatches)
+  // Round 13: implicit fan-out workstreams. When the leader emits pure
+  // prose like "I'll ask all teammates" without structured tags,
+  // `useTeamOrchestration` mints a `pendingWorkstreams` record with
+  // `:implicit-fanout` suffix. Threaded into `buildDelegationLinkages`
+  // Path 4 so the WorkstreamCard renders the implicit batch with the
+  // same DONE pills / preview lines / grid as an explicit `<delegate>`
+  // batch.
+  const pendingWorkstreamsMap = useChatStore((s) => s.pendingWorkstreams)
 
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
@@ -75,6 +99,24 @@ export function GroupChatPanel({
   // orchestration-side cleanup.
   const [stopSignal, setStopSignal] = useState(0)
 
+  // ── History-hydration gate ──────────────────────────────────────────────
+  // `useTeamOrchestration` must NOT process historical entries that arrive
+  // via `/api/chat-history` hydration as if they were new — that's the root
+  // cause of the "7-hour-later cascade of intros / wake messages" we saw in
+  // production. The hook seeds `lastCountsRef` on mount; if it mounts before
+  // hydration completes, the seed reads `0` and every hydrated entry trips
+  // the subscription's "new entries" branch.
+  //
+  // We flip this flag to `true` AFTER `Promise.allSettled` over all per-
+  // participant history fetches resolves. The hook is gated on `enabled =
+  // connected && historyHydrated` so it only mounts (and thus only seeds)
+  // when the transcript is in its final settled shape.
+  //
+  // Resets on `teamId` change so reopening a different team waits for THAT
+  // team's hydration cycle. Falls open after a 5s timeout as a safety net —
+  // a hung fetch shouldn't lock the team chat orchestration forever.
+  const [historyHydrated, setHistoryHydrated] = useState(false)
+
   // ── Team orchestration (delegation detection + context relay) ───────────
   //
   // Always on — relay + delegation routing is the whole point of a team
@@ -93,7 +135,13 @@ export function GroupChatPanel({
     leaderAgentId: teamInternalLeadId,
     booZeroAgent,
     client,
-    enabled: connectionStatus === 'connected',
+    // Hold orchestration until history has fully hydrated. This is the
+    // load-bearing fix for the "rehydrate cascade" — see `historyHydrated`
+    // declaration above. While `false`, the hook returns early without
+    // subscribing, so the hydration-time `appendTranscript` calls don't
+    // trip the "new entries" branch and fire stale wake/relay messages
+    // for entries that landed hours ago.
+    enabled: connectionStatus === 'connected' && historyHydrated,
     userIntroText,
     stopSignal,
   })
@@ -168,24 +216,181 @@ export function GroupChatPanel({
 
   const blocks = useMemo(() => groupEntriesToBlocks(mergedEntries), [mergedEntries])
 
+  // ── Delegation linkages ──────────────────────────────────────────────────
+  // Pure scan of the merged transcript: pairs each `<delegate>` block in a
+  // source agent's reply with the next eligible target reply. Used by the
+  // renderer to (1) hide claimed target replies from the top-level stream
+  // and (2) nest those replies inside the source's DelegationCard.
+  const linkages = useMemo(
+    () =>
+      buildDelegationLinkages({
+        blocks,
+        mergedEntries,
+        teamId,
+        participants: participants.map((a) => ({ id: a.id, name: a.name })),
+        clawbooDispatches: clawbooDispatchesMap,
+        pendingWorkstreams: pendingWorkstreamsMap,
+        // Round 15: feed live streaming text + stream-start anchors into the
+        // linkage scan so closed `<delegate>` blocks emitted mid-stream
+        // (before the leader's source entry commits) claim their target's
+        // streaming/committed reply. Without this, the target's reply
+        // appears at top level during the gap and "jumps inside" the card
+        // only once the leader commits.
+        streamingTexts: streamingTextMap,
+        streamStartedAt: streamStartedAtMap,
+      }),
+    [
+      blocks,
+      mergedEntries,
+      teamId,
+      participants,
+      clawbooDispatchesMap,
+      pendingWorkstreamsMap,
+      streamingTextMap,
+      streamStartedAtMap,
+    ],
+  )
+
+  // Pick the entryId of the chronologically-latest LEADER source-turn that
+  // contains visible delegations. All delegations on THAT source default-
+  // expand; older ones collapse (per the user's "newest expanded, older
+  // collapsed" accordion topology).
+  //
+  // Restrict to leader = Boo Zero. A specialist agent occasionally emits
+  // its own `<delegate>` tag in a response — those linkages have higher
+  // timestamps than Boo Zero's last delegation turn and would otherwise
+  // win the "latest" comparison, but their cards render NESTED inside the
+  // parent DelegationCard (not at top level), so they never receive the
+  // auto-expand signal. Net effect of including them: ALL visible top-
+  // level cards stay collapsed forever. Filtering to leader-source
+  // linkages restores the "newest top-level workstream auto-opens"
+  // behavior the user expects.
+  //
+  // Sort by `timestampMs` (wall-clock, stable across reloads) NOT
+  // `sequenceKey` (process-local, resets to 0 on reload) — same lesson as
+  // Round 7B's `findTargetResponse` fix.
+  const latestSourceEntryIdWithDelegations = useMemo(() => {
+    let latestTs = -1
+    let latestSeq = -1
+    let latestId: string | null = null
+    for (const linkage of linkages.linkagesByDelegationId.values()) {
+      // Only consider linkages whose source is the leader (Boo Zero). A
+      // specialist's rogue `<delegate>` shouldn't move the accordion
+      // pointer because its cards aren't visible top-level.
+      if (booZeroAgent && linkage.sourceAgentId !== booZeroAgent.id) continue
+      const sourceEntry = mergedEntries.find((e) => e.entryId === linkage.sourceEntryId)
+      if (!sourceEntry) continue
+      const ts = sourceEntry.timestampMs ?? 0
+      if (ts > latestTs || (ts === latestTs && sourceEntry.sequenceKey > latestSeq)) {
+        latestTs = ts
+        latestSeq = sourceEntry.sequenceKey
+        latestId = sourceEntry.entryId
+      }
+    }
+    return latestId
+  }, [linkages, mergedEntries, booZeroAgent])
+
+  // Filter assistant-turn blocks whose owning entry is claimed by some
+  // delegation — those render INSIDE a DelegationCard, not at the top level.
+  const topLevelBlocks = useMemo(
+    () =>
+      blocks.filter((b) => {
+        if (b.kind !== 'assistant-turn') return true
+        const owner = b.assistant ?? b.thinking[0] ?? b.tools[0] ?? null
+        if (!owner) return true
+        return !linkages.claimedEntries.has(owner.entryId)
+      }),
+    [blocks, linkages.claimedEntries],
+  )
+
   // ── Load persisted history for all participants (team-scoped sessionKeys) ──
+  // Tracks completion via `historyHydrated`: `useTeamOrchestration` is gated
+  // on this flag so it doesn't see the hydration-time appends as "new"
+  // entries and replay stale wake/relay messages (the 7-hour-cascade bug).
+  // The 5s safety timeout is a fallback — if a fetch hangs forever we still
+  // want orchestration to come online eventually.
+  //
+  // **CRITICAL — stable dep signature**: depend on a STRING derived from
+  // participant ids, not the participants array reference. `participants`
+  // is a `useMemo` over `[teamAgents, booZeroAgent]`, both of which are
+  // Zustand selector results — the array reference REALLOCATES on every
+  // fleet store update (every agent status patch during streaming). With
+  // the array as a dep, this effect re-fired on every chat tick, resetting
+  // `historyHydrated` to `false` → disabling orchestration → the
+  // `useTeamOrchestration` subscription kept unmounting and remounting,
+  // its `processNewEntries` never running. That broke Round 7's dispatch
+  // recording, Round 8's plan state machine, AND Round 10's workstream
+  // auto-synthesis. The string signature only changes when the set of
+  // participant IDs actually changes (e.g., team switch, agent deleted).
+  const participantSignature = useMemo(
+    () =>
+      participants
+        .map((a) => a.id)
+        .sort()
+        .join('|'),
+    [participants],
+  )
+  // Stash the latest array/map refs so the effect can read them at fire
+  // time without participating in the dependency list. We DELIBERATELY do
+  // NOT include `participants` / `teamSessionKeys` in the effect's deps —
+  // see the multi-line rationale in the effect body below.
+  const participantsRef = useRef(participants)
+  participantsRef.current = participants
+  const teamSessionKeysRef = useRef(teamSessionKeys)
+  teamSessionKeysRef.current = teamSessionKeys
   useEffect(() => {
-    for (const agent of participants) {
-      const teamSk = teamSessionKeys.get(agent.id)
+    setHistoryHydrated(false)
+    let cancelled = false
+
+    // Read the latest participants/teamSessionKeys via refs (not deps). The
+    // `participants` array reference reallocates whenever the fleet-store
+    // agents array reallocates (which happens on EVERY agent status patch
+    // during streaming — a chat tick can fire 10+ patches per second), and
+    // `teamSessionKeys` is downstream of that. If we put them in the deps,
+    // this effect re-fires on every chat tick, resets `historyHydrated` to
+    // `false`, and the `useTeamOrchestration` subscription gated on it
+    // unmounts/remounts in a tight loop — breaking Round 7 dispatch
+    // recording, Round 8 plan state machines, AND Round 10 workstream
+    // auto-synthesis. The `participantSignature` string only changes when
+    // the set of participant IDs actually changes (team switch, agent
+    // added/removed), which is the right granularity for "re-hydrate
+    // history".
+    const fetches: Promise<unknown>[] = []
+    for (const agent of participantsRef.current) {
+      const teamSk = teamSessionKeysRef.current.get(agent.id)
       if (!teamSk) continue
       const existing = useChatStore.getState().transcripts.get(teamSk)
       if (existing && existing.length > 0) continue
 
-      fetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
-        .then((r) => r.json())
-        .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
-          if (historical && historical.length > 0) {
-            useChatStore.getState().appendTranscript(teamSk, historical)
-          }
-        })
-        .catch(() => {})
+      fetches.push(
+        fetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
+          .then((r) => r.json())
+          .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
+            if (cancelled) return
+            if (historical && historical.length > 0) {
+              useChatStore.getState().appendTranscript(teamSk, historical)
+            }
+          })
+          .catch(() => {}),
+      )
     }
-  }, [participants, teamSessionKeys])
+
+    // Safety timeout — if a fetch hangs we still want orchestration online.
+    const timer = setTimeout(() => {
+      if (!cancelled) setHistoryHydrated(true)
+    }, 5000)
+
+    void Promise.allSettled(fetches).then(() => {
+      if (cancelled) return
+      clearTimeout(timer)
+      setHistoryHydrated(true)
+    })
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [participantSignature])
 
   // ── Auto-scroll ───────────────────────────────────────────────────────────
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -207,18 +412,89 @@ export function GroupChatPanel({
 
   // Collect all streaming texts for participants (using team-scoped sessionKeys).
   // Boo Zero's stream lands in the merged transcript with its own avatar/name.
+  //
+  // Streams whose target sessionKey is OWNED by a pending DelegationCard are
+  // filtered out — that card subscribes to the same stream itself and renders
+  // it inline. Without this filter the stream would appear both inside the
+  // card AND as a duplicate top-level StreamingCard.
   const activeStreams = useMemo(() => {
-    const streams: { agentId: string; agentName: string; text: string }[] = []
+    const streams: {
+      agentId: string
+      agentName: string
+      text: string
+      sessionKey: string
+      streamStartedAt: number
+    }[] = []
     for (const agent of participants) {
       const teamSk = teamSessionKeys.get(agent.id)
       if (!teamSk) continue
+      if (linkages.streamingOwnerByTargetSessionKey.has(teamSk)) continue
       const text = streamingTextMap.get(teamSk)
       if (text != null) {
-        streams.push({ agentId: agent.id, agentName: agent.name, text })
+        // Stream-start anchors the live card's chronological position in
+        // the timeline. Falls back to "now" on the first render after a
+        // chunk lands but before the store update commits (vanishingly
+        // rare in practice — Zustand updates are synchronous).
+        const streamStartedAt = streamStartedAtMap.get(teamSk) ?? Date.now()
+        streams.push({
+          agentId: agent.id,
+          agentName: agent.name,
+          text,
+          sessionKey: teamSk,
+          streamStartedAt,
+        })
       }
     }
     return streams
-  }, [participants, teamSessionKeys, streamingTextMap])
+  }, [
+    participants,
+    teamSessionKeys,
+    streamingTextMap,
+    streamStartedAtMap,
+    linkages.streamingOwnerByTargetSessionKey,
+  ])
+
+  // ── Interleaved render timeline ───────────────────────────────────────────
+  // Committed blocks and active streaming cards merged into ONE chronologically-
+  // sorted list. Each item carries the timestamp at which the leader's
+  // response BEGAN — committed entries from `appendOutputLines` use the same
+  // stream-start anchor, so a streaming card and its eventual committed entry
+  // occupy the same chronological slot. No visible re-arrangement on commit.
+  type RenderItem =
+    | { kind: 'block'; block: (typeof topLevelBlocks)[number]; ts: number; tieKey: number }
+    | { kind: 'stream'; stream: (typeof activeStreams)[number]; ts: number; tieKey: number }
+  const renderItems = useMemo<RenderItem[]>(() => {
+    const blockTs = (block: (typeof topLevelBlocks)[number]): number => {
+      // AssistantBlock carries its own `timestampMs`; meta/user blocks
+      // anchor on their underlying entry. Fall back to 0 only as a defensive
+      // last resort.
+      if (block.kind === 'assistant-turn') return block.timestampMs ?? 0
+      return block.entry.timestampMs ?? 0
+    }
+    const items: RenderItem[] = []
+    for (let i = 0; i < topLevelBlocks.length; i++) {
+      const block = topLevelBlocks[i]!
+      items.push({ kind: 'block', block, ts: blockTs(block), tieKey: i })
+    }
+    for (const stream of activeStreams) {
+      // Streams sort AFTER committed blocks with the same timestamp because
+      // the committed entry IS what the stream produced — once it commits,
+      // the stream disappears and the committed block takes the slot. While
+      // streaming, the slight tieKey bump keeps the live card visually below
+      // any same-timestamp tool/thinking block that already committed.
+      items.push({
+        kind: 'stream',
+        stream,
+        ts: stream.streamStartedAt,
+        tieKey: Number.MAX_SAFE_INTEGER,
+      })
+    }
+    items.sort((a, b) => {
+      if (a.ts !== b.ts) return a.ts - b.ts
+      return a.tieKey - b.tieKey
+    })
+    return items
+  }, [topLevelBlocks, activeStreams])
 
   const anyRunning = teamAgents.some((a) => a.status === 'running')
 
@@ -230,7 +506,7 @@ export function GroupChatPanel({
         rafRef.current = null
       }
     }
-  }, [blocks.length, activeStreams.length, scheduleScroll])
+  }, [topLevelBlocks.length, activeStreams.length, scheduleScroll])
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
@@ -241,6 +517,59 @@ export function GroupChatPanel({
   // ── Send handler ──────────────────────────────────────────────────────────
   const handleSend = useCallback(
     async (message: string) => {
+      // `/rule <text>` — intercept BEFORE routing to any agent. Appends the
+      // text to the team's durable rules in SQLite, drops a meta entry in
+      // every team session's transcript so the user gets visible
+      // confirmation, and short-circuits without sending to the Gateway.
+      const ruleText = parseRuleCommand(message)
+      if (ruleText !== null) {
+        try {
+          const existing = await fetchTeamRules(teamId)
+          const updated = appendRule(existing, ruleText)
+          const ok = await saveTeamRules(teamId, updated)
+          if (!ok) {
+            useToastStore.getState().addToast({
+              message: 'Could not save team rule. Try again?',
+              type: 'error',
+            })
+            return
+          }
+          // Drop a single meta confirmation into the first participant's
+          // session so the merged team view shows ONE entry, not N
+          // duplicates. The rule itself is global to the team (in SQLite),
+          // so the per-session anchor is just a visual breadcrumb.
+          const firstAgent = participants[0]
+          const firstSk = firstAgent ? teamSessionKeys.get(firstAgent.id) : null
+          if (firstSk) {
+            useChatStore.getState().appendTranscript(firstSk, [
+              {
+                entryId: crypto.randomUUID(),
+                runId: null,
+                sessionKey: firstSk,
+                kind: 'meta',
+                role: 'system',
+                text: `Rule saved for team: ${ruleText}`,
+                source: 'local-send',
+                timestampMs: Date.now(),
+                sequenceKey: nextSeq(),
+                confirmed: true,
+                fingerprint: crypto.randomUUID(),
+              },
+            ])
+          }
+          useToastStore.getState().addToast({
+            message: 'Team rule saved.',
+            type: 'success',
+          })
+        } catch {
+          useToastStore.getState().addToast({
+            message: 'Could not save team rule. Try again?',
+            type: 'error',
+          })
+        }
+        return
+      }
+
       if (!client) return
       await sendGroupChatMessage({
         client,
@@ -257,7 +586,17 @@ export function GroupChatPanel({
         userIntroText,
       })
     },
-    [client, teamId, team?.name, teamInternalLeadId, teamAgents, booZeroAgent, userIntroText],
+    [
+      client,
+      teamId,
+      team?.name,
+      teamInternalLeadId,
+      teamAgents,
+      booZeroAgent,
+      userIntroText,
+      participants,
+      teamSessionKeys,
+    ],
   )
 
   // ── Chip tag handler ───────────────────────────────────────────────────────
@@ -268,7 +607,7 @@ export function GroupChatPanel({
   const canSend = Boolean(
     client && connectionStatus === 'connected' && teamAgents.length > 0 && !anyRunning,
   )
-  const isEmpty = blocks.length === 0 && activeStreams.length === 0
+  const isEmpty = topLevelBlocks.length === 0 && activeStreams.length === 0
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -310,47 +649,96 @@ export function GroupChatPanel({
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-5 pb-2">
-            {blocks.map((block, i) => {
-              if (block.kind === 'meta') {
-                return <MetaMessageCard key={block.entry.entryId} entry={block.entry} />
-              }
-              if (block.kind === 'user') {
-                const targetId = agentIdFromSessionKey(block.entry.sessionKey)
-                const targetAgent = targetId ? agentLookup.get(targetId) : null
-                return (
-                  <UserMessageCard
-                    key={block.entry.entryId}
-                    entry={block.entry}
-                    targetAgentName={targetAgent?.name}
-                    knownAgentNames={knownAgentNames}
-                  />
-                )
-              }
-              // assistant-turn: determine owning agent from first entry
-              const firstEntry = block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
-              const ownerAgentId = firstEntry ? agentIdFromSessionKey(firstEntry.sessionKey) : null
-              const ownerAgent = ownerAgentId ? agentLookup.get(ownerAgentId) : null
-              return (
-                <AssistantTurnCard
-                  key={`turn-${i}`}
-                  block={block}
-                  agentId={ownerAgent?.id ?? 'unknown'}
-                  agentName={ownerAgent?.name ?? 'Agent'}
-                  streaming={anyRunning && i === blocks.length - 1 && activeStreams.length === 0}
-                />
-              )
-            })}
+          <div className="flex flex-col pb-2">
+            {(() => {
+              // Track previous BLOCK across the loop (not previous stream)
+              // so the same-author follow-up grouping survives stream
+              // interruptions. Streams are always rendered with the
+              // "new section" margin — they don't participate in the
+              // Slack/Discord/iMessage author-grouping rhythm.
+              let prevBlock: (typeof topLevelBlocks)[number] | null = null
+              let prevOwnerAgentId: string | null = null
+              let blockIdx = -1
+              const lastBlockSeenIdx = topLevelBlocks.length - 1
 
-            {/* Live streaming — one card per actively streaming agent */}
-            {activeStreams.map((stream) => (
-              <StreamingCard
-                key={`stream-${stream.agentId}`}
-                text={stream.text}
-                agentId={stream.agentId}
-                agentName={stream.agentName}
-              />
-            ))}
+              return renderItems.map((item, i) => {
+                if (item.kind === 'stream') {
+                  const stream = item.stream
+                  return (
+                    <div
+                      key={`stream-wrap-${stream.agentId}-${stream.sessionKey}`}
+                      className={i === 0 ? '' : 'mt-7'}
+                    >
+                      <StreamingCard
+                        text={stream.text}
+                        agentId={stream.agentId}
+                        agentName={stream.agentName}
+                      />
+                    </div>
+                  )
+                }
+                blockIdx += 1
+                const block = item.block
+                let currentOwnerAgentId: string | null = null
+                if (block.kind === 'assistant-turn') {
+                  const firstEntry = block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
+                  currentOwnerAgentId = firstEntry
+                    ? agentIdFromSessionKey(firstEntry.sessionKey)
+                    : null
+                }
+                const isFollowup = isFollowupBlock(
+                  prevBlock,
+                  block,
+                  prevOwnerAgentId,
+                  currentOwnerAgentId,
+                )
+                // Use `i === 0` (timeline position) for the "first item
+                // has no top margin" check; `blockIdx` only matters for
+                // the followup-vs-new-author choice.
+                const margin = i === 0 ? '' : blockMarginClass(blockIdx, isFollowup)
+                prevBlock = block
+                prevOwnerAgentId = currentOwnerAgentId
+
+                if (block.kind === 'meta') {
+                  return (
+                    <div key={block.entry.entryId} className={margin}>
+                      <MetaMessageCard entry={block.entry} />
+                    </div>
+                  )
+                }
+                if (block.kind === 'user') {
+                  const targetId = agentIdFromSessionKey(block.entry.sessionKey)
+                  const targetAgent = targetId ? agentLookup.get(targetId) : null
+                  return (
+                    <div key={block.entry.entryId} className={margin}>
+                      <UserMessageCard
+                        entry={block.entry}
+                        targetAgentName={targetAgent?.name}
+                        knownAgentNames={knownAgentNames}
+                      />
+                    </div>
+                  )
+                }
+                const ownerAgent = currentOwnerAgentId ? agentLookup.get(currentOwnerAgentId) : null
+                return (
+                  <div key={`turn-${blockIdx}`} className={margin}>
+                    <AssistantTurnCard
+                      block={block}
+                      agentId={ownerAgent?.id ?? 'unknown'}
+                      agentName={ownerAgent?.name ?? 'Agent'}
+                      streaming={
+                        anyRunning && blockIdx === lastBlockSeenIdx && activeStreams.length === 0
+                      }
+                      linkagesBySourceEntry={linkages.linkagesBySourceEntry}
+                      claimedEntries={linkages.claimedEntries}
+                      teamId={teamId}
+                      latestSourceEntryId={latestSourceEntryIdWithDelegations}
+                      isFollowup={isFollowup}
+                    />
+                  </div>
+                )
+              })
+            })()}
 
             <div ref={bottomRef} aria-hidden />
           </div>
