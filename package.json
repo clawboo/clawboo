@@ -12,7 +12,9 @@
     "format": "prettier --write .",
     "prepare": "husky",
     "ingest:marketplace": "tsx scripts/ingest-marketplace-content.ts",
-    "verify:ingest": "tsx scripts/verify-ingest.ts"
+    "verify:ingest": "tsx scripts/verify-ingest.ts",
+    "test:clean-install": "node scripts/test-clean-install.mjs",
+    "prepublish:check": "pnpm assemble && pnpm test:clean-install"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

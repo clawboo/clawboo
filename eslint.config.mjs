@@ -23,6 +23,11 @@ const nodeGlobals = {
   clearImmediate: 'readonly',
   global: 'readonly',
   globalThis: 'readonly',
+  // Web APIs that Node 18+ exposes globally — used by scripts/test-clean-install.mjs
+  fetch: 'readonly',
+  AbortController: 'readonly',
+  URL: 'readonly',
+  URLSearchParams: 'readonly',
 }
 
 export default tseslint.config(
@@ -47,6 +52,15 @@ export default tseslint.config(
     files: ['**/*.cjs'],
     languageOptions: {
       sourceType: 'commonjs',
+      globals: nodeGlobals,
+    },
+  },
+  // ESM scripts in scripts/ (e.g. `scripts/test-clean-install.mjs`) — same
+  // story but ESM-shaped. `.mjs` is implicitly sourceType: module.
+  {
+    files: ['scripts/**/*.{mjs,js}'],
+    languageOptions: {
+      sourceType: 'module',
       globals: nodeGlobals,
     },
   },
