@@ -1,6 +1,9 @@
 {
   "name": "@clawboo/ui",
   "version": "0.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Shared React components, BooAvatar, design tokens, and utilities for Clawboo",
   "license": "MIT",
   "repository": {

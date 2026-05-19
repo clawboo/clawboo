@@ -1,6 +1,9 @@
 {
   "name": "@clawboo/db",
   "version": "0.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "SQLite database layer for Clawboo using Drizzle ORM and better-sqlite3",
   "license": "MIT",
   "repository": {
