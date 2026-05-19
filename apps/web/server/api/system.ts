@@ -13,6 +13,7 @@ import {
   findProcessByPort,
 } from '../lib/processManager'
 import { getModelsFromCli } from '../lib/modelCache'
+import { findExecutable, resolveShimName } from '../lib/platform'
 import { MODEL_GROUPS as STATIC_MODEL_GROUPS } from '../../src/lib/modelCatalog'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -53,18 +54,20 @@ function sendEvent(res: Response, data: Record<string, unknown>): void {
 }
 
 function detectOpenClaw(): { installed: boolean; version: string | null; path: string | null } {
+  // findExecutable wraps the platform-specific `which` (Unix) / `where`
+  // (Windows) lookup. Returns null when not on PATH — no throw, so we
+  // can branch cleanly.
+  const binPath = findExecutable('openclaw')
+  if (!binPath) return { installed: false, version: null, path: null }
   try {
-    const binPath = execFileSync('which', ['openclaw'], { encoding: 'utf8' }).trim()
-    if (!binPath) return { installed: false, version: null, path: null }
-    try {
-      const raw = execFileSync(binPath, ['--version'], { encoding: 'utf8' }).trim()
-      const version = raw.replace(/^openclaw\s+v?/i, '').trim() || raw
-      return { installed: true, version, path: binPath }
-    } catch {
-      return { installed: true, version: null, path: binPath }
-    }
+    // Node 22 handles full-path .cmd invocation correctly (post
+    // CVE-2024-27980 fix in 20.12+), so passing a Windows .cmd path
+    // straight to execFileSync works.
+    const raw = execFileSync(binPath, ['--version'], { encoding: 'utf8' }).trim()
+    const version = raw.replace(/^openclaw\s+v?/i, '').trim() || raw
+    return { installed: true, version, path: binPath }
   } catch {
-    return { installed: false, version: null, path: null }
+    return { installed: true, version: null, path: binPath }
   }
 }
 
@@ -340,7 +343,17 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
 
   sendEvent(res, { type: 'progress', step: 'installing', message: 'Installing OpenClaw...' })
 
-  const child = spawn('npm', ['install', '-g', 'openclaw@latest'], {
+  // Two Windows-compat fixes folded into this call site:
+  //   1. `resolveShimName('npm')` returns `npm.cmd` on Windows. Bare 'npm'
+  //      throws ENOENT on Windows because Node's spawn doesn't auto-resolve
+  //      .cmd extensions.
+  //   2. Pin to `openclaw@^2026.5` rather than `@latest`. OpenClaw bumped the
+  //      WS connect protocol from 3 to 4 in 2026.5.x, and Clawboo's
+  //      gateway-client now advertises maxProtocol: 4 to match. A future
+  //      OpenClaw 2026.6+ could bump to protocol 5; pinning to ^2026.5 means
+  //      new users get a Clawboo-compatible openclaw until we widen the
+  //      protocol range and ship a new clawboo.
+  const child = spawn(resolveShimName('npm'), ['install', '-g', 'openclaw@^2026.5'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 

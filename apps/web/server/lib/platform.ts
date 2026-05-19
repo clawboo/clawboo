@@ -1,0 +1,56 @@
+// Tiny cross-platform helpers for invoking shell-shim binaries (npm,
+// pnpm, openclaw) and discovering executables in PATH.
+//
+// Why this exists: Node's child_process spawn/execFile on Windows does
+// NOT auto-resolve `.cmd` extensions when given a bare name like 'npm'
+// (since npm on Windows is actually npm.cmd — a batch wrapper). Bypassing
+// this helper causes ENOENT on Windows even when the tool IS installed.
+// Symmetrically, `which` is a Unix command; Windows uses `where`.
+//
+// Use `findExecutable` when you need the full absolute path to a tool
+// (preferred — explicit, no PATH-resolution surprises at spawn time).
+// Use `resolveShimName` only when you must invoke a known shim by name
+// (e.g., for `spawn('npm', ...)` style calls).
+//
+// Bugs this prevents (regression history):
+// - v0.1.3 spawn('npm', ['install', '-g', 'openclaw@latest']) threw
+//   `Error: spawn npm ENOENT` on Windows. Reported by a user running
+//   `npx clawboo` on Windows; blocked the entire onboarding flow.
+// - v0.1.3 execFileSync('which', ['openclaw']) threw silently on
+//   Windows (catch returned `installed: false`). Onboarding always
+//   routed Windows users to InstallStep even after a successful
+//   manual `npm install -g openclaw@...`.
+
+import { execFileSync } from 'node:child_process'
+
+export const isWindows = process.platform === 'win32'
+
+/**
+ * Cross-platform `which`. Returns the absolute path to the first match,
+ * or `null` if not found. On Windows uses `where` (which can return
+ * multiple paths separated by CRLF — we take the first).
+ */
+export function findExecutable(name: string): string | null {
+  try {
+    const cmd = isWindows ? 'where' : 'which'
+    const out = execFileSync(cmd, [name], { encoding: 'utf8' }).trim()
+    if (!out) return null
+    // `where` on Windows may return multiple paths; first one wins.
+    const first = out.split(/\r?\n/)[0]
+    return first ? first.trim() : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve a shell-shim binary name (npm, pnpm, openclaw) to the actual
+ * executable name. On Windows, npm-CLI tools install as `<name>.cmd`
+ * batch wrappers; Node's spawn won't find them by bare name.
+ *
+ * Prefer `findExecutable` + spawn-the-full-path when possible. Use this
+ * only for callers that hardcode the binary name.
+ */
+export function resolveShimName(name: string): string {
+  return isWindows ? `${name}.cmd` : name
+}
