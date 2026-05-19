@@ -32,7 +32,6 @@ jobs:
     name: Publish packages
     runs-on: ubuntu-latest
     needs: [check]
-    if: needs.check.outputs.has_changesets == 'true'
     permissions:
       contents: write
       pull-requests: write
