@@ -1,6 +1,9 @@
 {
   "name": "@clawboo/gateway-proxy",
   "version": "0.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Same-origin WebSocket proxy for the OpenClaw Gateway with server-side auth injection",
   "license": "MIT",
   "repository": {
