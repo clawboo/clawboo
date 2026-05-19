@@ -1,6 +1,9 @@
 {
   "name": "@clawboo/events",
   "version": "0.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Bridge-Policy-Handler event pipeline for processing OpenClaw Gateway events",
   "license": "MIT",
   "repository": {

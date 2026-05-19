@@ -1,6 +1,9 @@
 {
   "name": "@clawboo/logger",
   "version": "0.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Pino-based structured logger for Clawboo packages",
   "license": "MIT",
   "repository": {
