@@ -100,3 +100,62 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm verify:ingest
+
+  smoke-test-bundle:
+    name: Smoke test bundled CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm assemble
+
+      - name: Boot bundled server in background
+        working-directory: apps/cli
+        run: |
+          node dist/server.js > /tmp/clawboo-server.log 2>&1 &
+          echo $! > /tmp/clawboo-server.pid
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:18790/api/settings > /dev/null 2>&1; then
+              echo "Server is up after ${i} attempts"
+              break
+            fi
+            sleep 0.5
+          done
+          if ! curl -fsS http://localhost:18790/api/settings > /dev/null 2>&1; then
+            echo "FAIL: server did not become ready within 15s"
+            cat /tmp/clawboo-server.log
+            exit 1
+          fi
+
+      - name: Verify SPA at root path
+        run: |
+          body=$(curl -fsS http://localhost:18790/)
+          echo "$body" | grep -q '<div id="root"></div>' \
+            || (echo "FAIL: root did not return SPA HTML"; echo "$body" | head -20; cat /tmp/clawboo-server.log; exit 1)
+          echo "PASS: GET / returned SPA HTML"
+
+      - name: Verify deep SPA route falls through to index.html
+        run: |
+          body=$(curl -fsS http://localhost:18790/some/spa/route)
+          echo "$body" | grep -q '<div id="root"></div>' \
+            || (echo "FAIL: deep route did not fall through to SPA"; exit 1)
+          echo "PASS: GET /some/spa/route returned SPA HTML"
+
+      - name: Verify API route still works
+        run: |
+          curl -fsS http://localhost:18790/api/settings | grep -q hasToken \
+            || (echo "FAIL: API route broken"; exit 1)
+          echo "PASS: GET /api/settings returned JSON"
+
+      - name: Cleanup
+        if: always()
+        run: kill "$(cat /tmp/clawboo-server.pid)" 2>/dev/null || true
