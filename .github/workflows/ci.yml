@@ -103,8 +103,12 @@ jobs:
 
   smoke-test-bundle:
     name: Smoke test bundled CLI (clean install simulation)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 
@@ -124,4 +128,8 @@ jobs:
       # OpenClaw Gateway auxiliary port that broke v0.1.2). Asserts the
       # CLI's port-discovery correctly skips 18791, the SPA renders, the
       # deep-route catch-all works, and /api/settings returns JSON.
+      #
+      # Runs on both ubuntu-latest and windows-latest. The Windows run is
+      # the regression gate for v0.1.4's Windows-compat fixes (npm.cmd
+      # resolution, which→where shim, netstat-based findProcessByPort).
       - run: pnpm test:clean-install

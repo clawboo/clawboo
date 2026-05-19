@@ -118,6 +118,28 @@ async function connectClient(
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('GatewayClient', () => {
+  describe('connect protocol range', () => {
+    it('advertises minProtocol: 3, maxProtocol: 4', async () => {
+      // OpenClaw 2026.5.x requires protocol 4. Older openclaw (2026.3.x and
+      // earlier) accepts protocol 3. Advertising the [3, 4] range lets both
+      // versions negotiate cleanly. Regression-locks this — if a future
+      // refactor accidentally narrows the range, this test fails.
+      const client = new GatewayClient()
+      const ws = await connectClient(client)
+
+      const connectReq = ws.sent
+        .map((s) => JSON.parse(s) as Record<string, unknown>)
+        .find((f) => f['method'] === 'connect')
+
+      expect(connectReq).toBeDefined()
+      const params = connectReq!['params'] as Record<string, unknown>
+      expect(params['minProtocol']).toBe(3)
+      expect(params['maxProtocol']).toBe(4)
+
+      client.disconnect()
+    })
+  })
+
   describe('call()', () => {
     it('sends a req frame with unique id and correct method', async () => {
       const client = new GatewayClient()

@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
+import { resolveShimName } from './platform'
+
 const execFileAsync = promisify(execFile)
 
 export interface ModelOption {
@@ -56,10 +58,16 @@ export async function getModelsFromCli(): Promise<ModelGroup[] | null> {
   if (cachedGroups && now - cacheTime < CACHE_TTL) return cachedGroups
 
   try {
-    const { stdout } = await execFileAsync('openclaw', ['models', 'list', '--all', '--json'], {
-      timeout: 15_000,
-      env: { ...process.env },
-    })
+    // On Windows, bare 'openclaw' is openclaw.cmd — Node spawn won't resolve
+    // the .cmd extension by itself, so use the platform-aware shim name.
+    const { stdout } = await execFileAsync(
+      resolveShimName('openclaw'),
+      ['models', 'list', '--all', '--json'],
+      {
+        timeout: 15_000,
+        env: { ...process.env },
+      },
+    )
     const parsed = JSON.parse(stdout) as CliOutput | CliModel[]
     const models = Array.isArray(parsed) ? parsed : parsed.models
     if (!Array.isArray(models) || models.length === 0) return cachedGroups

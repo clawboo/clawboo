@@ -319,8 +319,14 @@ export class GatewayClient {
     }
 
     const params = {
+      // OpenClaw bumped the connect protocol from 3 → 4 in 2026.5.x.
+      // We advertise support for both so old (2026.3.x and earlier) and new
+      // (2026.5+) Gateways both negotiate cleanly. If openclaw ever bumps to
+      // 5, the install spec in apps/web/server/api/system.ts pins to ^2026.5
+      // — that prevents fresh installs from grabbing an incompatible version
+      // before this range is widened.
       minProtocol: 3,
-      maxProtocol: 3,
+      maxProtocol: 4,
       client: {
         id: opts.clientName ?? 'openclaw-control-ui',
         version: opts.clientVersion ?? '0.0.0',
