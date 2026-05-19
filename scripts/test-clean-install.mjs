@@ -107,6 +107,11 @@ process.on('SIGTERM', () => {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async function killByPort(port) {
+  // Cleanup is best-effort. On Windows there's no `lsof` — CI runners are
+  // ephemeral, so leftover processes get reaped when the job exits anyway.
+  // Implementing a `netstat -ano` parse here would be defensible but adds
+  // moving parts to a script whose main job is asserting onboarding works.
+  if (process.platform === 'win32') return
   try {
     const out = await runCmd('lsof', ['-ti', `:${port}`])
     const pids = out.trim().split('\n').filter(Boolean)
@@ -183,25 +188,39 @@ async function main() {
   // 5. Build a shadow PATH that includes node + npm + which (Clawboo needs
   //    them) but NOT `open` / `xdg-open` — that way the CLI's browser-open
   //    fails silently and we don't get a real browser launch during tests.
-  shadowBinDir = await fs.mkdtemp(path.join(os.tmpdir(), 'clawboo-shadow-bin-'))
-  const allowedBins = ['node', 'npm', 'pnpm', 'which', 'ls']
-  for (const dir of ['/usr/bin', '/bin', '/usr/local/bin', path.dirname(process.execPath)]) {
-    for (const bin of allowedBins) {
-      const src = path.join(dir, bin)
-      try {
-        await fs.access(src)
-        await fs.symlink(src, path.join(shadowBinDir, bin)).catch(() => {})
-      } catch {
-        /* skip missing */
+  //
+  //    Windows: symlinking system binaries requires admin in some setups,
+  //    and `start` (the Windows browser-open shim) on a headless CI runner
+  //    won't open anything anyway. Skip the shadow PATH on Windows and let
+  //    the CLI inherit the system PATH.
+  const useShadowPath = process.platform !== 'win32'
+  let cliEnvPath = process.env.PATH ?? ''
+  if (useShadowPath) {
+    shadowBinDir = await fs.mkdtemp(path.join(os.tmpdir(), 'clawboo-shadow-bin-'))
+    const allowedBins = ['node', 'npm', 'pnpm', 'which', 'ls']
+    for (const dir of ['/usr/bin', '/bin', '/usr/local/bin', path.dirname(process.execPath)]) {
+      for (const bin of allowedBins) {
+        const src = path.join(dir, bin)
+        try {
+          await fs.access(src)
+          await fs.symlink(src, path.join(shadowBinDir, bin)).catch(() => {})
+        } catch {
+          /* skip missing */
+        }
       }
     }
+    cliEnvPath = shadowBinDir
   }
 
   // 6. Spawn the CLI binary
   cliProc = spawn('node', [CLI_PATH], {
     env: {
-      PATH: shadowBinDir,
+      PATH: cliEnvPath,
       HOME: tmpDir,
+      // Windows uses USERPROFILE — Node's os.homedir() reads it. Keep it
+      // pointed at the isolated state dir so any HOME-derived state goes
+      // there too.
+      USERPROFILE: tmpDir,
       OPENCLAW_STATE_DIR: path.join(tmpDir, '.openclaw'),
       STUDIO_ACCESS_TOKEN: '',
       CLAWBOO_API_PORT: '',
