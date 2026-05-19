@@ -56,6 +56,13 @@ jobs:
 
       - run: bash scripts/assemble-cli.sh
 
+      # Smoke-test the bundled CLI before publishing. Catches the class of
+      # bug that v0.1.1 (Cannot GET /) and v0.1.2 (Unauthorized via port
+      # collision) shipped broken on. Belt-and-suspenders even if the same
+      # test ran on the PR — race conditions or upstream-changed lockfiles
+      # could cause divergence.
+      - run: pnpm test:clean-install
+
       - name: Create Release PR or Publish
         uses: changesets/action@v1
         with:

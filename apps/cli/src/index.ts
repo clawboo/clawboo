@@ -67,6 +67,44 @@ function probePort(host: string, port: number, timeoutMs = 2_000): Promise<boole
   })
 }
 
+/**
+ * Verify a port is hosting Clawboo's dashboard (not some other service that
+ * happens to be TCP-listening on the same port). Cheap TCP-probe first to
+ * skip closed ports, then an HTTP GET /api/settings that validates a
+ * Clawboo-shaped JSON response. Critical because Clawboo's auto-fallback
+ * range (18790-18809) overlaps with the OpenClaw Gateway's auxiliary ports
+ * (18791-18792) AND with things like Chrome's --remote-debugging-port
+ * (commonly 18800). A naive TCP probe accepts any of those as "Clawboo",
+ * routes the browser there, and the user sees an unrelated 401 / empty
+ * page / DevTools UI.
+ */
+async function probeClawbooDashboard(
+  host: string,
+  port: number,
+  timeoutMs = 1_500,
+): Promise<boolean> {
+  // Cheap TCP probe first — skip the HTTP cost on closed ports.
+  if (!(await probePort(host, port, Math.min(timeoutMs, 1_000)))) return false
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const res = await fetch(`http://${host}:${port}/api/settings`, {
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    if (!res.ok) return false
+    const ct = res.headers.get('content-type') ?? ''
+    if (!ct.includes('application/json')) return false
+    const body = (await res.json()) as Record<string, unknown>
+    // Clawboo's /api/settings ALWAYS includes these two fields. Gateway's
+    // auxiliary ports return plain "Unauthorized"; Chrome's debug returns
+    // an array of debugger targets — neither matches this shape.
+    return typeof body['gatewayUrl'] === 'string' && typeof body['hasToken'] === 'boolean'
+  } catch {
+    return false
+  }
+}
+
 // ─── Dashboard port discovery ─────────────────────────────────────────────────
 //
 // Mirrors `apps/web/server/lib/portUtils.ts` — kept in lockstep:
@@ -111,22 +149,30 @@ function readRuntimePort(): number | null {
 }
 
 /**
- * Find an already-running dashboard. Returns the port if one responds, null
+ * Find an already-running Clawboo dashboard. Returns the port if a port in
+ * the search space hosts Clawboo (validated via HTTP signature), null
  * otherwise. Tries: env var → runtime file → port-range scan from 18790.
+ *
+ * Uses `probeClawbooDashboard` (TCP probe + Clawboo-shaped JSON check) so
+ * unrelated services that happen to listen in 18790-18809 — Gateway aux
+ * ports, Chrome --remote-debugging-port, etc. — are correctly skipped
+ * instead of mistaken for Clawboo.
  */
 async function findRunningDashboard(): Promise<number | null> {
   const explicit = readPortEnv('CLAWBOO_API_PORT')
   if (explicit !== null) {
-    if (await probePort('localhost', explicit, 1_500)) return explicit
+    if (await probeClawbooDashboard('localhost', explicit, 1_500)) return explicit
     return null
   }
   const fromFile = readRuntimePort()
-  if (fromFile !== null && (await probePort('localhost', fromFile, 1_500))) return fromFile
+  if (fromFile !== null && (await probeClawbooDashboard('localhost', fromFile, 1_500))) {
+    return fromFile
+  }
   // Scan the standard window — covers the case where the server was started
   // by `pnpm dev` or another launcher and never wrote the runtime file.
   for (let i = 0; i < MAX_PORT_ATTEMPTS; i++) {
     const port = DEFAULT_API_PORT + i
-    if (await probePort('localhost', port, 500)) return port
+    if (await probeClawbooDashboard('localhost', port, 800)) return port
   }
   return null
 }
