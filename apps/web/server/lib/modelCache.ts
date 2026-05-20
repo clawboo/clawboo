@@ -62,6 +62,8 @@ export async function getModelsFromCli(): Promise<ModelGroup[] | null> {
     // the .cmd extension by itself, so use the platform-aware shim name.
     // `shell: isWindows` — Node 18.20.2+ / 20.12.2+ / 22+ refuse to spawn
     // .cmd files without it (CVE-2024-27980 fix). On Unix it's a no-op.
+    // `windowsHide: isWindows` — hide the cmd.exe console window that would
+    // otherwise flash in front of the dashboard on each model-list refresh.
     const { stdout } = await execFileAsync(
       resolveShimName('openclaw'),
       ['models', 'list', '--all', '--json'],
@@ -69,6 +71,7 @@ export async function getModelsFromCli(): Promise<ModelGroup[] | null> {
         timeout: 15_000,
         env: { ...process.env },
         shell: isWindows,
+        windowsHide: isWindows,
       },
     )
     const parsed = JSON.parse(stdout) as CliOutput | CliModel[]

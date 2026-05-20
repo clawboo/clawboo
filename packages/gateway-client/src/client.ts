@@ -170,7 +170,7 @@ export class GatewayClient {
 
   // ── Request/response ────────────────────────────────────────────────────────
 
-  async call<T = unknown>(method: string, params?: unknown, timeoutMs = 30_000): Promise<T> {
+  async call<T = unknown>(method: string, params?: unknown, timeoutMs = 60_000): Promise<T> {
     if (!method.trim()) throw new Error('Gateway method is required.')
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('Gateway is not connected.')
@@ -479,8 +479,16 @@ export class GatewayClient {
   readonly agents = {
     list: (): Promise<AgentsListResult> => this.call<AgentsListResult>('agents.list', {}),
 
+    // `agents.create` is the slowest known RPC because the Gateway has to
+    // resolve and validate the agent's default model, which on Windows can
+    // include an OpenRouter capabilities fetch that runs 30-75 seconds
+    // (Windows Defender / DNS / firewall variability). Observed real
+    // latencies on a fresh Windows install: 16s / 18s / 33s / 33s. We pass
+    // a 2-minute timeout so the team deploy doesn't fail half-way through.
+    // No-op on a fast Mac — the call returns in 2-3s and the timer never
+    // fires. See v0.1.7 round-2 Windows compat fix.
     create: (config: AgentCreateConfig): Promise<AgentCreateResult> =>
-      this.call<AgentCreateResult>('agents.create', config),
+      this.call<AgentCreateResult>('agents.create', config, 120_000),
 
     delete: (id: string): Promise<void> => this.call<void>('agents.delete', { agentId: id }),
 
@@ -497,8 +505,13 @@ export class GatewayClient {
         return ''
       },
 
+      // `agents.files.set` is fast individually but a team deploy fires it
+      // 4-5 times per agent (SOUL / IDENTITY / TOOLS / AGENTS / CLAWBOO).
+      // The first batch right after agents.create can pile up against the
+      // Gateway's still-warming-up state machine on Windows. 2-minute
+      // timeout matches agents.create — same v0.1.7 round-2 rationale.
       set: (agentId: string, name: string, content: string): Promise<void> =>
-        this.call<void>('agents.files.set', { agentId, name, content }),
+        this.call<void>('agents.files.set', { agentId, name, content }, 120_000),
     },
   }
 
