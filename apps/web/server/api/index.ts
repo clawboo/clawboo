@@ -18,6 +18,7 @@ import {
   openclawConfigGET,
   openclawConfigPATCH,
   systemModelsGET,
+  approveDevicePOST,
 } from './system'
 import {
   teamsGET,
@@ -89,6 +90,7 @@ router.post('/api/system/gateway', gatewayControlPOST)
 router.get('/api/system/openclaw-config', openclawConfigGET)
 router.patch('/api/system/openclaw-config', openclawConfigPATCH)
 router.get('/api/system/models', systemModelsGET)
+router.post('/api/system/approve-device', approveDevicePOST)
 
 // Teams
 router.get('/api/teams', teamsGET)

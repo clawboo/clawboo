@@ -334,6 +334,59 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
   }
 }
 
+// POST /api/system/approve-device
+//
+// Approves the most-recently pending OpenClaw device pairing request.
+// Required because OpenClaw 2026.5.x dropped the auto-pair-on-first-connect
+// behavior — now every fresh install must approve its device once. Without
+// this endpoint, users hit a raw "Gateway error (NOT_PAIRED): pairing
+// required: device is not approved yet" with no in-product remediation.
+//
+// Two-step implementation:
+//   1. `openclaw devices approve --latest` is a PREVIEW (per the CLI's own
+//      help text: "Show the most recent pending request to approve
+//      explicitly"). It prints the pending requestId in the line:
+//        "Approve this exact request with: openclaw devices approve <UUID>"
+//   2. We parse that UUID, then run `openclaw devices approve <UUID>` to
+//      actually perform the approval. (There's no --yes / one-shot flag.)
+export async function approveDevicePOST(_req: Request, res: Response): Promise<void> {
+  const oc = detectOpenClaw()
+  if (!oc.installed || !oc.path) {
+    res.status(400).json({ error: 'OpenClaw not installed' })
+    return
+  }
+  try {
+    // Step 1: preview to get the pending requestId.
+    const previewOut = execFileSync(oc.path, ['devices', 'approve', '--latest'], {
+      encoding: 'utf8',
+      timeout: 5_000,
+    })
+    // Regex matches the documented "openclaw devices approve <UUID>" line.
+    // Loose enough to survive minor wording changes (catches any line that
+    // ends with the canonical approve command + UUID).
+    const match = previewOut.match(/openclaw devices approve\s+([a-f0-9-]{36})/i)
+    if (!match) {
+      res.status(404).json({
+        error: 'No pending device pairing requests found',
+        details: previewOut.trim().slice(0, 500),
+      })
+      return
+    }
+    const requestId = match[1]
+
+    // Step 2: actually approve with the explicit ID.
+    const approveOut = execFileSync(oc.path, ['devices', 'approve', requestId], {
+      encoding: 'utf8',
+      timeout: 10_000,
+    })
+    res.json({ ok: true, requestId, output: approveOut.trim().slice(0, 1000) })
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
 // POST /api/system/install-openclaw
 export async function installOpenclawPOST(_req: Request, res: Response): Promise<void> {
   res.setHeader('Content-Type', 'text/event-stream')
