@@ -297,8 +297,13 @@ async function run(): Promise<void> {
     }
 
     // Poll for the dashboard via port discovery (env / runtime file / scan).
-    // Up to 15 seconds; the server typically binds in ~500ms.
-    const maxAttempts = 30
+    // Up to 45 seconds. The server typically binds in ~500ms on a warm
+    // install, but on Windows the FIRST cold boot of the bundled CJS (1.4 MB
+    // + better-sqlite3 native bindings + Express + WS proxy) can take 20-30s
+    // due to Windows Defender real-time scanning of the freshly-extracted
+    // npm package + Node's first-load module compile. 15s timed out on
+    // fresh Windows installs — see v0.1.7 round-2 Windows compat fix.
+    const maxAttempts = 90
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 500))
       const found = await findRunningDashboard()
