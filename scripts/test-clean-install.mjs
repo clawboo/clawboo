@@ -45,7 +45,12 @@ const REPO_ROOT = path.resolve(__dirname, '..')
 const CLI_PATH = path.join(REPO_ROOT, 'apps/cli/dist/index.js')
 const FAKE_PORT = 18791
 const READY_TIMEOUT_MS = 30_000
-const HTTP_TIMEOUT_MS = 5_000
+// /api/system/status does multiple I/O ops: filesystem checks for
+// openclaw.json + .env, a 2-s probeGatewayPort fetch to :18789, plus
+// the openclaw binary probe via which/where. On Windows CI runners the
+// cumulative latency exceeded 5 s in practice. 20 s is a generous cap
+// that still fails fast on real hangs.
+const HTTP_TIMEOUT_MS = 20_000
 
 // ─── Tiny logger ─────────────────────────────────────────────────────────────
 
