@@ -13,7 +13,7 @@ import {
   findProcessByPort,
 } from '../lib/processManager'
 import { getModelsFromCli } from '../lib/modelCache'
-import { findExecutable, resolveShimName } from '../lib/platform'
+import { findExecutable, isWindows, resolveShimName } from '../lib/platform'
 import { MODEL_GROUPS as STATIC_MODEL_GROUPS } from '../../src/lib/modelCatalog'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -60,10 +60,15 @@ function detectOpenClaw(): { installed: boolean; version: string | null; path: s
   const binPath = findExecutable('openclaw')
   if (!binPath) return { installed: false, version: null, path: null }
   try {
-    // Node 22 handles full-path .cmd invocation correctly (post
-    // CVE-2024-27980 fix in 20.12+), so passing a Windows .cmd path
-    // straight to execFileSync works.
-    const raw = execFileSync(binPath, ['--version'], { encoding: 'utf8' }).trim()
+    // `shell: isWindows` is required because Node 18.20.2+ / 20.12.2+ / 22+
+    // refuse to spawn .cmd / .bat files without it (CVE-2024-27980 fix).
+    // On Windows, binPath is the absolute path to openclaw.cmd, so this
+    // applies even though we're passing an absolute path. On Unix, the
+    // option is a no-op.
+    const raw = execFileSync(binPath, ['--version'], {
+      encoding: 'utf8',
+      shell: isWindows,
+    }).trim()
     const version = raw.replace(/^openclaw\s+v?/i, '').trim() || raw
     return { installed: true, version, path: binPath }
   } catch {
@@ -364,9 +369,13 @@ export async function approveDevicePOST(_req: Request, res: Response): Promise<v
   }
 
   // Step 1: preview to discover the pending requestId.
+  // `shell: isWindows` — required by Node 18.20.2+ / 20.12.2+ / 22+ when
+  // oc.path resolves to a .cmd shim on Windows (CVE-2024-27980 fix). No-op
+  // on Unix.
   const preview = spawnSync(oc.path, ['devices', 'approve', '--latest'], {
     encoding: 'utf8',
     timeout: 5_000,
+    shell: isWindows,
   })
 
   if (preview.error) {
@@ -393,9 +402,11 @@ export async function approveDevicePOST(_req: Request, res: Response): Promise<v
   // a real failure — surface stderr cleanly instead of Node's "Command
   // failed: <argv>" wrapper.
   try {
+    // `shell: isWindows` — see detectOpenClaw for rationale (CVE-2024-27980).
     const approveOut = execFileSync(oc.path, ['devices', 'approve', requestId], {
       encoding: 'utf8',
       timeout: 10_000,
+      shell: isWindows,
     })
     res.json({ ok: true, requestId, output: approveOut.trim().slice(0, 1000) })
   } catch (err) {
@@ -421,19 +432,41 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
 
   sendEvent(res, { type: 'progress', step: 'installing', message: 'Installing OpenClaw...' })
 
-  // Two Windows-compat fixes folded into this call site:
+  // Three Windows-compat fixes folded into this call site:
   //   1. `resolveShimName('npm')` returns `npm.cmd` on Windows. Bare 'npm'
   //      throws ENOENT on Windows because Node's spawn doesn't auto-resolve
   //      .cmd extensions.
-  //   2. Pin to `openclaw@^2026.5` rather than `@latest`. OpenClaw bumped the
+  //   2. `shell: isWindows` — Node 18.20.2+ / 20.12.2+ / 22+ refuse to spawn
+  //      .cmd / .bat files without shell:true (CVE-2024-27980 fix). Without
+  //      it, spawn THROWS EINVAL synchronously, the throw escapes the
+  //      request handler after the SSE headers are already flushed, and the
+  //      browser surfaces the dropped connection as "Network error". On
+  //      Unix the option is a no-op.
+  //   3. Pin to `openclaw@^2026.5` rather than `@latest`. OpenClaw bumped the
   //      WS connect protocol from 3 to 4 in 2026.5.x, and Clawboo's
   //      gateway-client now advertises maxProtocol: 4 to match. A future
   //      OpenClaw 2026.6+ could bump to protocol 5; pinning to ^2026.5 means
   //      new users get a Clawboo-compatible openclaw until we widen the
   //      protocol range and ship a new clawboo.
-  const child = spawn(resolveShimName('npm'), ['install', '-g', 'openclaw@^2026.5'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+  let child
+  try {
+    child = spawn(resolveShimName('npm'), ['install', '-g', 'openclaw@^2026.5'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: isWindows,
+    })
+  } catch (err) {
+    // Defensive: if spawn throws synchronously (CVE-2024-27980 EINVAL, or
+    // any future similar guard), surface the actual error as an SSE event
+    // instead of crashing the request handler and letting the SPA show a
+    // generic "Network error" from the dropped fetch stream.
+    sendEvent(res, {
+      type: 'error',
+      code: 'SPAWN_THROW',
+      message: err instanceof Error ? err.message : String(err),
+    })
+    res.end()
+    return
+  }
 
   child.stdout?.on('data', (chunk: Buffer) => {
     const lines = chunk.toString().split('\n').filter(Boolean)
@@ -664,10 +697,26 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
       message: `Starting gateway on port ${port}...`,
     })
 
-    const child = spawn(oc.path, ['gateway', '--port', String(port), '--allow-unconfigured'], {
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    // `shell: isWindows` — required by Node 18.20.2+ / 20.12.2+ / 22+ when
+    // oc.path resolves to openclaw.cmd on Windows (CVE-2024-27980 fix).
+    // Without it, spawn throws EINVAL synchronously after SSE headers are
+    // flushed, and the SPA sees a dropped stream as "Network error".
+    let child
+    try {
+      child = spawn(oc.path, ['gateway', '--port', String(port), '--allow-unconfigured'], {
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: isWindows,
+      })
+    } catch (err) {
+      sendEvent(res, {
+        type: 'error',
+        code: 'SPAWN_THROW',
+        message: err instanceof Error ? err.message : String(err),
+      })
+      res.end()
+      return
+    }
 
     child.unref()
 
