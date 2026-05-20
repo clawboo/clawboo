@@ -9,9 +9,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, Check, ChevronDown, Loader2, RotateCcw } from 'lucide-react'
-import { GatewayClient, resolveProxyGatewayUrl } from '@clawboo/gateway-client'
+import {
+  GatewayClient,
+  GatewayResponseError,
+  resolveProxyGatewayUrl,
+} from '@clawboo/gateway-client'
 import { consumeSSE } from '@/lib/sseClient'
 import { useSystemStore } from '@/stores/system'
+import { DevicePairingApproval } from '@/features/connection/DevicePairingApproval'
 import { StepIndicator } from '../StepIndicator'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -23,13 +28,16 @@ export type StartGatewayStepProps = {
 
 // ─── Status phases ───────────────────────────────────────────────────────────
 
-type Phase = 'starting' | 'connecting' | 'connected' | 'error'
+type Phase = 'starting' | 'connecting' | 'connected' | 'error' | 'pairing-required'
 
 const PHASE_LABELS: Record<Phase, string> = {
   starting: 'Starting Gateway…',
   connecting: 'Connecting…',
   connected: 'Connected!',
   error: 'Something went wrong',
+  // 'pairing-required' hides the status label entirely — the
+  // DevicePairingApproval card below has its own "Approve this device" header.
+  'pairing-required': '',
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -65,6 +73,17 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
       setGatewayControlStatus('running')
       onStarted(client)
     } catch (err) {
+      // OpenClaw 2026.5+ rejects unapproved devices with NOT_PAIRED on first
+      // connect. Render the in-product approval card inline instead of
+      // showing the generic "Something went wrong" error — saves the user
+      // from having to refresh the page to escape the wizard. After they
+      // click Approve, `onApproved` calls autoConnect() again and the
+      // wizard advances to the next step normally.
+      if (err instanceof GatewayResponseError && err.code === 'NOT_PAIRED') {
+        setPhase('pairing-required')
+        clientRef.current = null
+        return
+      }
       setPhase('error')
       setGatewayControlStatus('error')
       setErrorMessage(err instanceof Error ? err.message : 'Failed to connect to Gateway')
@@ -159,7 +178,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
                     scale: [1, 1.06, 1],
                     opacity: [0.4, 0.7, 0.4],
                   }
-                : phase === 'connected'
+                : phase === 'connected' || phase === 'pairing-required'
                   ? { scale: 1, opacity: 1 }
                   : { scale: 1, opacity: 0.3 }
             }
@@ -175,34 +194,52 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
           />
         </div>
 
-        {/* ── Status text ───────────────────────────────────── */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={phase}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.2 }}
-            className="mb-1 flex items-center gap-2"
-          >
-            {phase === 'connected' && <Check className="h-4 w-4 text-mint" strokeWidth={2.5} />}
-            {isRunning && (
-              <Loader2 className="h-4 w-4 animate-spin text-accent" strokeWidth={2.5} />
-            )}
-            <span
-              className={[
-                'text-[15px] font-semibold',
-                phase === 'connected'
-                  ? 'text-mint'
-                  : phase === 'error'
-                    ? 'text-destructive'
-                    : 'text-text',
-              ].join(' ')}
-              style={{ fontFamily: 'var(--font-display)' }}
+        {/* ── Status text (hidden during pairing — approval card owns its own header) ── */}
+        {phase !== 'pairing-required' && (
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={phase}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2 }}
+              className="mb-1 flex items-center gap-2"
             >
-              {PHASE_LABELS[phase]}
-            </span>
-          </motion.div>
+              {phase === 'connected' && <Check className="h-4 w-4 text-mint" strokeWidth={2.5} />}
+              {isRunning && (
+                <Loader2 className="h-4 w-4 animate-spin text-accent" strokeWidth={2.5} />
+              )}
+              <span
+                className={[
+                  'text-[15px] font-semibold',
+                  phase === 'connected'
+                    ? 'text-mint'
+                    : phase === 'error'
+                      ? 'text-destructive'
+                      : 'text-text',
+                ].join(' ')}
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                {PHASE_LABELS[phase]}
+              </span>
+            </motion.div>
+          </AnimatePresence>
+        )}
+
+        {/* ── Device pairing approval (OpenClaw 2026.5+ NOT_PAIRED) ── */}
+        <AnimatePresence initial={false}>
+          {phase === 'pairing-required' && (
+            <motion.div
+              key="pairing"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.18 }}
+              className="mt-2 mb-4 w-full overflow-hidden"
+            >
+              <DevicePairingApproval onApproved={() => void autoConnect()} />
+            </motion.div>
+          )}
         </AnimatePresence>
 
         {/* ── Log toggle ─────────────────────────────────────── */}

@@ -2,7 +2,7 @@ import type { Request, Response } from 'express'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { resolveStateDir, loadSettings, saveSettings } from '@clawboo/config'
 import {
   readGatewayPid,
@@ -343,46 +343,71 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
 // required: device is not approved yet" with no in-product remediation.
 //
 // Two-step implementation:
-//   1. `openclaw devices approve --latest` is a PREVIEW (per the CLI's own
-//      help text: "Show the most recent pending request to approve
-//      explicitly"). It prints the pending requestId in the line:
-//        "Approve this exact request with: openclaw devices approve <UUID>"
-//   2. We parse that UUID, then run `openclaw devices approve <UUID>` to
-//      actually perform the approval. (There's no --yes / one-shot flag.)
+//   1. `openclaw devices approve --latest` is a PREVIEW on 2026.5.x — the
+//      CLI prints "Approve this exact request with: openclaw devices approve
+//      <UUID>" AND exits non-zero (the non-zero is the CLI's own "preview
+//      only — run the real command next" signal). We parse the UUID out of
+//      the captured stdout/stderr.
+//   2. We then run `openclaw devices approve <UUID>` to actually perform
+//      the approval. There's no --yes / one-shot flag in OpenClaw 2026.5.x.
+//
+// v0.1.7 fix: step 1 MUST use spawnSync (returns a result object) rather
+// than execFileSync (throws on non-zero exit). v0.1.5 used execFileSync
+// here and the throw discarded the stdout containing the requestId before
+// the regex could run, so the user saw "Command failed: …" in the SPA's
+// approval dialog instead of a successful approval.
 export async function approveDevicePOST(_req: Request, res: Response): Promise<void> {
   const oc = detectOpenClaw()
   if (!oc.installed || !oc.path) {
     res.status(400).json({ error: 'OpenClaw not installed' })
     return
   }
-  try {
-    // Step 1: preview to get the pending requestId.
-    const previewOut = execFileSync(oc.path, ['devices', 'approve', '--latest'], {
-      encoding: 'utf8',
-      timeout: 5_000,
-    })
-    // Regex matches the documented "openclaw devices approve <UUID>" line.
-    // Loose enough to survive minor wording changes (catches any line that
-    // ends with the canonical approve command + UUID).
-    const match = previewOut.match(/openclaw devices approve\s+([a-f0-9-]{36})/i)
-    if (!match) {
-      res.status(404).json({
-        error: 'No pending device pairing requests found',
-        details: previewOut.trim().slice(0, 500),
-      })
-      return
-    }
-    const requestId = match[1]
 
-    // Step 2: actually approve with the explicit ID.
+  // Step 1: preview to discover the pending requestId.
+  const preview = spawnSync(oc.path, ['devices', 'approve', '--latest'], {
+    encoding: 'utf8',
+    timeout: 5_000,
+  })
+
+  if (preview.error) {
+    // Spawn-level failure (ENOENT, timeout, etc.) — distinct from the child
+    // exiting non-zero in preview mode.
+    res.status(500).json({ error: `Failed to run openclaw: ${preview.error.message}` })
+    return
+  }
+
+  // Scan both channels defensively — different openclaw versions may emit
+  // the requestId line to either stdout or stderr.
+  const combined = `${preview.stdout ?? ''}\n${preview.stderr ?? ''}`
+  const match = combined.match(/openclaw devices approve\s+([a-f0-9-]{36})/i)
+  if (!match) {
+    res.status(404).json({
+      error: 'No pending device pairing requests found',
+      details: combined.trim().slice(0, 500),
+    })
+    return
+  }
+  const requestId = match[1]
+
+  // Step 2: actually approve with the explicit UUID. Non-zero exit here IS
+  // a real failure — surface stderr cleanly instead of Node's "Command
+  // failed: <argv>" wrapper.
+  try {
     const approveOut = execFileSync(oc.path, ['devices', 'approve', requestId], {
       encoding: 'utf8',
       timeout: 10_000,
     })
     res.json({ ok: true, requestId, output: approveOut.trim().slice(0, 1000) })
   } catch (err) {
+    const stderr = (err as { stderr?: Buffer | string }).stderr
+    const stdout = (err as { stdout?: Buffer | string }).stdout
+    const message =
+      String(stderr ?? '').trim() ||
+      String(stdout ?? '').trim() ||
+      (err instanceof Error ? err.message : String(err))
     res.status(500).json({
-      error: err instanceof Error ? err.message : String(err),
+      error: `Failed to approve device: ${message.slice(0, 500)}`,
+      requestId,
     })
   }
 }
