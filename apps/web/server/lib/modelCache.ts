@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
-import { resolveShimName } from './platform'
+import { isWindows, resolveShimName } from './platform'
 
 const execFileAsync = promisify(execFile)
 
@@ -60,12 +60,15 @@ export async function getModelsFromCli(): Promise<ModelGroup[] | null> {
   try {
     // On Windows, bare 'openclaw' is openclaw.cmd — Node spawn won't resolve
     // the .cmd extension by itself, so use the platform-aware shim name.
+    // `shell: isWindows` — Node 18.20.2+ / 20.12.2+ / 22+ refuse to spawn
+    // .cmd files without it (CVE-2024-27980 fix). On Unix it's a no-op.
     const { stdout } = await execFileAsync(
       resolveShimName('openclaw'),
       ['models', 'list', '--all', '--json'],
       {
         timeout: 15_000,
         env: { ...process.env },
+        shell: isWindows,
       },
     )
     const parsed = JSON.parse(stdout) as CliOutput | CliModel[]
