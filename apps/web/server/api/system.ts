@@ -65,9 +65,13 @@ function detectOpenClaw(): { installed: boolean; version: string | null; path: s
     // On Windows, binPath is the absolute path to openclaw.cmd, so this
     // applies even though we're passing an absolute path. On Unix, the
     // option is a no-op.
+    // `windowsHide: isWindows` — with shell:true on Windows we go through
+    // cmd.exe which would otherwise pop a visible console window in front
+    // of the dashboard. Hide it. No-op on Unix.
     const raw = execFileSync(binPath, ['--version'], {
       encoding: 'utf8',
       shell: isWindows,
+      windowsHide: isWindows,
     }).trim()
     const version = raw.replace(/^openclaw\s+v?/i, '').trim() || raw
     return { installed: true, version, path: binPath }
@@ -371,11 +375,12 @@ export async function approveDevicePOST(_req: Request, res: Response): Promise<v
   // Step 1: preview to discover the pending requestId.
   // `shell: isWindows` — required by Node 18.20.2+ / 20.12.2+ / 22+ when
   // oc.path resolves to a .cmd shim on Windows (CVE-2024-27980 fix). No-op
-  // on Unix.
+  // on Unix. `windowsHide: isWindows` — hide the cmd.exe console window.
   const preview = spawnSync(oc.path, ['devices', 'approve', '--latest'], {
     encoding: 'utf8',
     timeout: 5_000,
     shell: isWindows,
+    windowsHide: isWindows,
   })
 
   if (preview.error) {
@@ -403,10 +408,12 @@ export async function approveDevicePOST(_req: Request, res: Response): Promise<v
   // failed: <argv>" wrapper.
   try {
     // `shell: isWindows` — see detectOpenClaw for rationale (CVE-2024-27980).
+    // `windowsHide: isWindows` — hide the cmd.exe console window.
     const approveOut = execFileSync(oc.path, ['devices', 'approve', requestId], {
       encoding: 'utf8',
       timeout: 10_000,
       shell: isWindows,
+      windowsHide: isWindows,
     })
     res.json({ ok: true, requestId, output: approveOut.trim().slice(0, 1000) })
   } catch (err) {
@@ -432,7 +439,7 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
 
   sendEvent(res, { type: 'progress', step: 'installing', message: 'Installing OpenClaw...' })
 
-  // Three Windows-compat fixes folded into this call site:
+  // Four Windows-compat fixes folded into this call site:
   //   1. `resolveShimName('npm')` returns `npm.cmd` on Windows. Bare 'npm'
   //      throws ENOENT on Windows because Node's spawn doesn't auto-resolve
   //      .cmd extensions.
@@ -442,7 +449,10 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
   //      request handler after the SSE headers are already flushed, and the
   //      browser surfaces the dropped connection as "Network error". On
   //      Unix the option is a no-op.
-  //   3. Pin to `openclaw@^2026.5` rather than `@latest`. OpenClaw bumped the
+  //   3. `windowsHide: isWindows` — with shell:true on Windows, Node spawns
+  //      through cmd.exe, which by default pops a console window in front
+  //      of the dashboard. Hide it. No-op on Unix.
+  //   4. Pin to `openclaw@^2026.5` rather than `@latest`. OpenClaw bumped the
   //      WS connect protocol from 3 to 4 in 2026.5.x, and Clawboo's
   //      gateway-client now advertises maxProtocol: 4 to match. A future
   //      OpenClaw 2026.6+ could bump to protocol 5; pinning to ^2026.5 means
@@ -453,6 +463,7 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
     child = spawn(resolveShimName('npm'), ['install', '-g', 'openclaw@^2026.5'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: isWindows,
+      windowsHide: isWindows,
     })
   } catch (err) {
     // Defensive: if spawn throws synchronously (CVE-2024-27980 EINVAL, or
@@ -668,6 +679,45 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
       await new Promise((r) => setTimeout(r, 500))
     }
 
+    // Reusable polling helper — called from BOTH the "spawn fresh" path and
+    // the "join existing launch" path (when a previous request already
+    // spawned the Gateway and we just need to wait for it to bind). Polls
+    // for 60s total (120 × 500ms). 15s was too short for Windows where the
+    // Gateway can take 30-50s to bind on cold start — see v0.1.7 round-2.
+    const maxAttempts = 120
+    const pollUntilReachable = (reportPid: number | undefined): void => {
+      let attempts = 0
+      const poll = async () => {
+        attempts++
+        const reachable = await probeGatewayPort(port)
+        if (reachable) {
+          // Sync .env token → Clawboo settings so the proxy uses the correct token.
+          // The .env file is the Gateway's source of truth for auth tokens.
+          syncTokenFromEnv()
+          sendEvent(res, { type: 'complete', success: true, pid: reportPid ?? null, port })
+          res.end()
+          return
+        }
+        if (attempts >= maxAttempts) {
+          sendEvent(res, {
+            type: 'error',
+            code: 'TIMEOUT',
+            message: `Gateway did not become reachable within ${maxAttempts / 2}s`,
+          })
+          res.end()
+          return
+        }
+        sendEvent(res, {
+          type: 'progress',
+          step: 'waiting',
+          message: `Waiting for gateway... (${attempts}/${maxAttempts})`,
+        })
+        setTimeout(() => void poll(), 500)
+      }
+      // Start polling after a brief delay
+      setTimeout(() => void poll(), 500)
+    }
+
     // Check if already running (for start only)
     if (action === 'start') {
       const reachable = await probeGatewayPort(port)
@@ -681,6 +731,31 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
         res.end()
         return
       }
+      // Mid-launch detection — if a previous request spawned the Gateway
+      // and its process is still alive but the port hasn't bound yet, do
+      // NOT spawn a duplicate (which would race for port 18789 and one
+      // would fail with EADDRINUSE). Join the polling with the existing
+      // pid instead. This is the load-bearing fix for the Windows "Retry
+      // button doesn't help, only refresh does" symptom — on Windows the
+      // first start takes longer than the previous 15s polling window, so
+      // users would click Retry while the Gateway was still mid-boot and
+      // the duplicate spawn would corrupt things. With this guard, Retry
+      // just joins the in-flight launch and waits patiently.
+      const pidInfo = readGatewayPid()
+      const alive = pidInfo ? isProcessAlive(pidInfo.pid) : false
+      if (pidInfo && alive) {
+        sendEvent(res, {
+          type: 'progress',
+          step: 'starting',
+          message: 'Gateway is starting (joined in-flight launch)...',
+        })
+        pollUntilReachable(pidInfo.pid)
+        // Detached child outlives the request; keep res.on('close') no-op
+        res.on('close', () => {})
+        return
+      }
+      // Otherwise: stale pid (process exited) — clean up and fall through to spawn.
+      if (pidInfo && !alive) removeGatewayPid()
     }
 
     // Find openclaw binary
@@ -701,12 +776,15 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
     // oc.path resolves to openclaw.cmd on Windows (CVE-2024-27980 fix).
     // Without it, spawn throws EINVAL synchronously after SSE headers are
     // flushed, and the SPA sees a dropped stream as "Network error".
+    // `windowsHide: isWindows` — hide the cmd.exe console window so the
+    // Gateway start doesn't flash a black terminal in front of the dashboard.
     let child
     try {
       child = spawn(oc.path, ['gateway', '--port', String(port), '--allow-unconfigured'], {
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: isWindows,
+        windowsHide: isWindows,
       })
     } catch (err) {
       sendEvent(res, {
@@ -744,38 +822,8 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
       res.end()
     })
 
-    // Poll until gateway is reachable
-    let attempts = 0
-    const maxAttempts = 30
-    const poll = async () => {
-      attempts++
-      const reachable = await probeGatewayPort(port)
-      if (reachable) {
-        // Sync .env token → Clawboo settings so the proxy uses the correct token.
-        // The .env file is the Gateway's source of truth for auth tokens.
-        syncTokenFromEnv()
-        sendEvent(res, { type: 'complete', success: true, pid: child.pid, port })
-        res.end()
-        return
-      }
-      if (attempts >= maxAttempts) {
-        sendEvent(res, {
-          type: 'error',
-          code: 'TIMEOUT',
-          message: `Gateway did not become reachable within ${maxAttempts / 2}s`,
-        })
-        res.end()
-        return
-      }
-      sendEvent(res, {
-        type: 'progress',
-        step: 'waiting',
-        message: `Waiting for gateway... (${attempts}/${maxAttempts})`,
-      })
-      setTimeout(() => void poll(), 500)
-    }
-    // Start polling after a brief delay
-    setTimeout(() => void poll(), 500)
+    // Begin polling for the freshly-spawned child
+    pollUntilReachable(child.pid)
 
     // Do NOT kill detached child on client disconnect
     res.on('close', () => {
