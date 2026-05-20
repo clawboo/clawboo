@@ -43,12 +43,12 @@ import type { SystemInfo } from '@/stores/system'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// `clawboo.onboarded` is set after the user successfully reaches a
+// connected dashboard. It's a hint, NOT a source of truth — the actual
+// gate is whether OpenClaw is installed + configured on disk. Browser
+// localStorage survives uninstalling the npm package and clearing
+// ~/.openclaw/, so it can't be trusted alone. See the useEffect below.
 const ONBOARDED_KEY = 'clawboo.onboarded'
-
-function isFirstTimeUser(): boolean {
-  if (typeof window === 'undefined') return false
-  return !localStorage.getItem(ONBOARDED_KEY)
-}
 
 function markOnboarded(): void {
   if (typeof window !== 'undefined') {
@@ -174,27 +174,40 @@ export function GatewayBootstrap() {
   const [showWizard, setShowWizard] = useState<boolean | null>(null)
 
   useEffect(() => {
-    // Fast path: localStorage says we're onboarded
-    if (!isFirstTimeUser()) {
-      setShowWizard(false)
-      return
-    }
-    // Slow path: localStorage missing — check if system is already configured
+    // ALWAYS verify system state. The previous "fast path" trusted the
+    // `clawboo.onboarded` localStorage flag alone — but localStorage
+    // persists by origin (localhost:18790), not by npm-package version.
+    // A user who onboarded with an earlier clawboo + then uninstalled
+    // OpenClaw would still have the flag set on next launch, and the
+    // wizard would be skipped even though there's no OpenClaw to
+    // connect to. That dumped users straight to "Connect to an OpenClaw
+    // Gateway" with no way forward besides `Gateway closed (1011):
+    // upstream error`.
+    //
+    // New rule: the on-disk system state is the source of truth. If
+    // OpenClaw is installed AND configured, mark as onboarded (idempotent)
+    // and skip the wizard. Otherwise clear the stale flag and show the
+    // wizard so the user can re-install + reconfigure.
     void (async () => {
       try {
         const resp = await fetch('/api/system/status')
         if (resp.ok) {
           const info = (await resp.json()) as SystemInfo
-          if (info.openclaw.installed && info.openclaw.configExists && info.openclaw.envExists) {
-            // System is fully configured — treat as returning user
+          const configured =
+            info.openclaw.installed && info.openclaw.configExists && info.openclaw.envExists
+          if (configured) {
             markOnboarded()
             setShowWizard(false)
             return
           }
         }
       } catch {
-        // Status check failed — fall through to wizard
+        // Status check failed — fall through to wizard as the safe default.
       }
+      // System not configured (or status fetch failed). If we previously
+      // marked the user onboarded, the flag is now stale — clear it so a
+      // future successful onboarding can re-set it cleanly.
+      if (typeof window !== 'undefined') localStorage.removeItem(ONBOARDED_KEY)
       setShowWizard(true)
     })()
   }, [])
