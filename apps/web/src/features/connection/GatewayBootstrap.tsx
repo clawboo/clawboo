@@ -19,7 +19,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2, RotateCcw } from 'lucide-react'
-import { GatewayClient, resolveProxyGatewayUrl } from '@clawboo/gateway-client'
+import {
+  GatewayClient,
+  GatewayResponseError,
+  resolveProxyGatewayUrl,
+} from '@clawboo/gateway-client'
 import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayConnectScreen } from './GatewayConnectScreen'
@@ -476,6 +480,15 @@ export function GatewayBootstrap() {
             preloadApprovalHistory()
           } catch (err) {
             setStartingGateway(false)
+            // OpenClaw 2026.5+ rejects unapproved devices with NOT_PAIRED.
+            // The GatewayConnectScreen has an in-product pairing flow — close
+            // this overlay so the user lands there. Otherwise they see a raw
+            // gateway error and have no obvious next action.
+            if (err instanceof GatewayResponseError && err.code === 'NOT_PAIRED') {
+              setGatewayOffline(false)
+              setStartGatewayError(null)
+              return
+            }
             setStartGatewayError(
               err instanceof Error ? err.message : 'Failed to connect after starting Gateway',
             )
