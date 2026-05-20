@@ -3,11 +3,13 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import {
   GatewayClient,
+  GatewayResponseError,
   formatGatewayError,
   isLocalGatewayUrl,
   resolveProxyGatewayUrl,
 } from '@clawboo/gateway-client'
 import { useConnectionStore } from '@/stores/connection'
+import { DevicePairingApproval } from './DevicePairingApproval'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -39,6 +41,10 @@ export function GatewayConnectScreen({
   const [showToken, setShowToken] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Set when the gateway rejects the connect with NOT_PAIRED. Renders the
+  // DevicePairingApproval component in place of the connect form until the
+  // user approves the device (one-time, OpenClaw 2026.5+ requirement).
+  const [needsPairing, setNeedsPairing] = useState(false)
 
   // Stable GatewayClient instance — created once, reused across retries
   const clientRef = useRef<GatewayClient | null>(null)
@@ -117,6 +123,17 @@ export function GatewayConnectScreen({
       setGatewayUrl(trimmedUrl)
       onConnected(client)
     } catch (err) {
+      // OpenClaw 2026.5+ requires explicit device-pairing approval before a
+      // new client can connect. Detect that specific rejection and surface
+      // the in-dashboard approval UI instead of the raw error toast.
+      if (err instanceof GatewayResponseError && err.code === 'NOT_PAIRED') {
+        setNeedsPairing(true)
+        setError(null)
+        setStatus('error')
+        setConnecting(false)
+        clientRef.current = null
+        return
+      }
       const message = formatGatewayError(err)
       setError(message)
       setStatus('error')
@@ -125,6 +142,13 @@ export function GatewayConnectScreen({
       clientRef.current = null
     }
   }, [url, token, connecting, setStatus, setGatewayUrl, onConnected])
+
+  // Called by DevicePairingApproval once the user approves. We auto-retry
+  // the original connect with the existing form values.
+  const handlePairingApproved = useCallback(() => {
+    setNeedsPairing(false)
+    void handleConnect()
+  }, [handleConnect])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -171,120 +195,128 @@ export function GatewayConnectScreen({
           </div>
         </div>
 
-        {/* ── Form ── */}
-        <div className="flex flex-col gap-4" onKeyDown={handleKeyDown} role="group">
-          {/* Gateway URL */}
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="gateway-url"
-              className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary"
-            >
-              Gateway URL
-            </label>
-            <input
-              id="gateway-url"
-              type="text"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="ws://localhost:18789"
-              spellCheck={false}
-              autoComplete="off"
-              disabled={connecting}
-              data-testid="gateway-url-input"
-              className="h-10 rounded-lg border border-white/10 bg-background px-3 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
-            />
-            {isLocal && (
-              <p className="font-mono text-[10px] text-mint/60">Local gateway detected</p>
-            )}
-          </div>
-
-          {/* Gateway token */}
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="gateway-token"
-              className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary"
-            >
-              Token{' '}
-              <span className="normal-case font-normal text-secondary/50">
-                {initialHasToken ? '(saved)' : '(optional)'}
-              </span>
-            </label>
-            <div className="relative">
+        {/* ── Pairing-approval branch (OpenClaw 2026.5+ NOT_PAIRED) ── */}
+        {needsPairing ? (
+          <DevicePairingApproval
+            onApproved={handlePairingApproved}
+            onCancel={() => setNeedsPairing(false)}
+          />
+        ) : (
+          /* ── Form ── */
+          <div className="flex flex-col gap-4" onKeyDown={handleKeyDown} role="group">
+            {/* Gateway URL */}
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="gateway-url"
+                className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary"
+              >
+                Gateway URL
+              </label>
               <input
-                id="gateway-token"
-                type={showToken ? 'text' : 'password'}
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                onFocus={() => {
-                  // Clear placeholder dots so user can type real value
-                  if (token === '••••••••') setToken('')
-                }}
-                placeholder="gateway-token"
+                id="gateway-url"
+                type="text"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="ws://localhost:18789"
                 spellCheck={false}
-                autoComplete="current-password"
+                autoComplete="off"
                 disabled={connecting}
-                data-testid="gateway-token-input"
-                className="h-10 w-full rounded-lg border border-white/10 bg-background px-3 pr-10 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
+                data-testid="gateway-url-input"
+                className="h-10 rounded-lg border border-white/10 bg-background px-3 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
               />
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={() => setShowToken((v) => !v)}
-                aria-label={showToken ? 'Hide token' : 'Show token'}
-                className="absolute inset-y-0 right-2 flex items-center text-secondary/40 transition hover:text-secondary"
-              >
-                {showToken ? (
-                  <EyeOff className="h-4 w-4" strokeWidth={1.75} />
-                ) : (
-                  <Eye className="h-4 w-4" strokeWidth={1.75} />
-                )}
-              </button>
+              {isLocal && (
+                <p className="font-mono text-[10px] text-mint/60">Local gateway detected</p>
+              )}
             </div>
-            <p className="font-mono text-[10px] text-secondary/40">
-              Leave empty for unauthenticated local gateways.
-            </p>
-          </div>
 
-          {/* Error message */}
-          <AnimatePresence initial={false}>
-            {error && (
-              <motion.div
-                key="error"
-                initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                animate={{ opacity: 1, height: 'auto', marginTop: 0 }}
-                exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                transition={{ duration: 0.15 }}
-                className="overflow-hidden"
+            {/* Gateway token */}
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="gateway-token"
+                className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary"
               >
-                <div
-                  role="alert"
-                  data-testid="gateway-connect-error"
-                  className="rounded-lg border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-snug text-destructive"
+                Token{' '}
+                <span className="normal-case font-normal text-secondary/50">
+                  {initialHasToken ? '(saved)' : '(optional)'}
+                </span>
+              </label>
+              <div className="relative">
+                <input
+                  id="gateway-token"
+                  type={showToken ? 'text' : 'password'}
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  onFocus={() => {
+                    // Clear placeholder dots so user can type real value
+                    if (token === '••••••••') setToken('')
+                  }}
+                  placeholder="gateway-token"
+                  spellCheck={false}
+                  autoComplete="current-password"
+                  disabled={connecting}
+                  data-testid="gateway-token-input"
+                  className="h-10 w-full rounded-lg border border-white/10 bg-background px-3 pr-10 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowToken((v) => !v)}
+                  aria-label={showToken ? 'Hide token' : 'Show token'}
+                  className="absolute inset-y-0 right-2 flex items-center text-secondary/40 transition hover:text-secondary"
                 >
-                  {error}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  {showToken ? (
+                    <EyeOff className="h-4 w-4" strokeWidth={1.75} />
+                  ) : (
+                    <Eye className="h-4 w-4" strokeWidth={1.75} />
+                  )}
+                </button>
+              </div>
+              <p className="font-mono text-[10px] text-secondary/40">
+                Leave empty for unauthenticated local gateways.
+              </p>
+            </div>
 
-          {/* Connect button */}
-          <button
-            type="button"
-            onClick={() => void handleConnect()}
-            disabled={connectDisabled}
-            data-testid="gateway-connect-button"
-            className="mt-1 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {connecting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.5} />
-                Connecting…
-              </>
-            ) : (
-              'Connect'
-            )}
-          </button>
-        </div>
+            {/* Error message */}
+            <AnimatePresence initial={false}>
+              {error && (
+                <motion.div
+                  key="error"
+                  initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                  animate={{ opacity: 1, height: 'auto', marginTop: 0 }}
+                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="overflow-hidden"
+                >
+                  <div
+                    role="alert"
+                    data-testid="gateway-connect-error"
+                    className="rounded-lg border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-snug text-destructive"
+                  >
+                    {error}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Connect button */}
+            <button
+              type="button"
+              onClick={() => void handleConnect()}
+              disabled={connectDisabled}
+              data-testid="gateway-connect-button"
+              className="mt-1 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {connecting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.5} />
+                  Connecting…
+                </>
+              ) : (
+                'Connect'
+              )}
+            </button>
+          </div>
+        )}
 
         {/* ── Footer hint ── */}
         <p className="mt-6 text-center font-mono text-[10px] text-secondary/30">
