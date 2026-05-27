@@ -45,8 +45,9 @@ describe('buildBooZeroRulesBlock', () => {
     // Don't reply to [Team Update] as fresh user input
     expect(out).toContain('[Team Update]')
     expect(out).toMatch(/NOT fresh user input/i)
-    // No Task tool / sub-agents
-    expect(out).toMatch(/Task-tool/i)
+    // No spawning sub-agents / worker agents via built-in primitives
+    expect(out).toMatch(/Spawn sub-agents, worker agents/i)
+    expect(out).toMatch(/task-orchestration primitive/i)
     // No resume greetings
     expect(out).toMatch(/Greet teammates, introduce yourself/i)
     // File namespacing for duplicate deliverables
