@@ -449,11 +449,11 @@ function firstSentencePreview(text: string, maxChars = 90): string {
 // ─── LiveActivityFeed ─────────────────────────────────────────────────────────
 //
 // What the target agent is doing RIGHT NOW — replaces the previous generic
-// "Thinking..." spinner inside a pending DelegationCard. Mirrors how Claude
-// Code surfaces tool calls / streamed prose: subscribe to the target's
-// session, ask `pickLatestActivity` what the most-recent activity is, and
-// render it with kind-specific affordances (mint pulse for streaming, 🔧
-// for tool calls, prose markdown for final responses).
+// "Thinking..." spinner inside a pending DelegationCard. Surfaces tool
+// calls / streamed prose the way modern chat UIs do: subscribe to the
+// target's session, ask `pickLatestActivity` what the most-recent activity
+// is, and render it with kind-specific affordances (mint pulse for
+// streaming, 🔧 for tool calls, prose markdown for final responses).
 //
 // When `isRunning` is true but no signal has landed yet, falls back to the
 // `TypingIndicator` (animated dots). When the agent is idle and we have
@@ -509,8 +509,8 @@ const LiveActivityFeed = memo(function LiveActivityFeed({
   }
 
   if (picked.kind === 'streaming') {
-    // Streaming text with a blinking cursor at the tail — mirrors Claude
-    // Code's typewriter feel so the user can SEE the agent thinking
+    // Streaming text with a blinking cursor at the tail — the typewriter
+    // feel of streaming chat lets the user SEE the agent thinking
     // word-by-word in real time.
     return (
       <div className="flex flex-col gap-1.5">
@@ -534,9 +534,9 @@ const LiveActivityFeed = memo(function LiveActivityFeed({
 
   if (picked.kind === 'tool') {
     // Format `[[tool: <label>]]` → extract label, render as a styled chip
-    // (matches Claude Code's tool-call pill). The label may contain a
-    // primary name + dimmed argument (e.g. `read package.json`); we split
-    // on the first space to render that distinction.
+    // (a tool-call pill in the chat). The label may contain a primary name
+    // + dimmed argument (e.g. `read package.json`); we split on the first
+    // space to render that distinction.
     const label = picked.text.match(/\[\[tool:\s*(.+?)\]\]/)?.[1]?.trim() ?? 'tool'
     const spaceIdx = label.indexOf(' ')
     const toolName = spaceIdx >= 0 ? label.slice(0, spaceIdx) : label

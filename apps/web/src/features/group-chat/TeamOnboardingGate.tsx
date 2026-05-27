@@ -317,11 +317,11 @@ export function TeamOnboardingGate({
     // `packages/gateway-client/src/client.ts:485,495`). Earlier code used
     // `path:`, which the Gateway silently dropped — writes never landed.
     //
-    // ALSO: per CLAUDE.md, `agents.files.set('SOUL.md')` is known to be
-    // unreliable for persistence. We treat the SOUL.md write as best-effort
-    // and rely on the SQLite-backed user-intro persistence + context preamble
-    // injection (handled by markUserIntroduced + groupChatSendOperation) as
-    // the actual source of truth.
+    // ALSO: Gateway `agents.files.set('SOUL.md')` is known to be unreliable
+    // for persistence in older runtimes. We treat the SOUL.md write as
+    // best-effort and rely on the SQLite-backed user-intro persistence +
+    // context preamble injection (handled by markUserIntroduced +
+    // groupChatSendOperation) as the actual source of truth.
     const writePromises = teamAgents.map(async (agent) => {
       try {
         let current = ''

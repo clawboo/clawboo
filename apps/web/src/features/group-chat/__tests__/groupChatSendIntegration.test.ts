@@ -270,8 +270,8 @@ describe('sendGroupChatMessage — context preamble integration', () => {
   // whether their self-introduction was reaching the agent. Two bugs:
   //   (a) TeamOnboardingGate sent the wrong RPC param name (`path` instead
   //       of `name`), so the SOUL.md write silently failed.
-  //   (b) Even when fixed, Gateway SOUL.md persistence is unreliable per
-  //       CLAUDE.md.
+  //   (b) Even when fixed, Gateway SOUL.md persistence is unreliable in
+  //       older runtimes.
   // Fix: SQLite is the source of truth for the user intro, and on every
   // group-chat send we inject it into the team context preamble. These
   // tests verify the preamble actually contains the intro text.
