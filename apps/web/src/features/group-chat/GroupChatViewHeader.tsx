@@ -37,7 +37,7 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
   const hasGraph = booCount > 0
   return (
     <>
-      <div className="flex shrink-0 items-center gap-3 border-b border-white/8 px-4 py-3">
+      <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
         {team && (
           <span
             className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-[16px]"
@@ -60,32 +60,12 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
               "0 Boos · 0 skills" flashing in. */}
           <div className="mt-1.5 flex">
             {hasGraph ? (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: '#E94560',
-                  background: 'rgba(233,69,96,0.12)',
-                  borderRadius: 20,
-                  padding: '2px 10px',
-                  lineHeight: '16px',
-                }}
-              >
+              <span className="rounded-full bg-primary/12 px-2.5 py-0.5 text-[11px] font-medium leading-4 text-primary">
                 {booCount} Boo{booCount !== 1 ? 's' : ''}
                 {skillCount > 0 && ` · ${skillCount} skill${skillCount !== 1 ? 's' : ''}`}
               </span>
             ) : (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: 'rgba(232,232,232,0.35)',
-                  background: 'rgba(255,255,255,0.04)',
-                  borderRadius: 20,
-                  padding: '2px 10px',
-                  lineHeight: '16px',
-                }}
-              >
+              <span className="rounded-full bg-foreground/[0.04] px-2.5 py-0.5 text-[11px] font-medium leading-4 text-foreground/35">
                 …
               </span>
             )}
@@ -103,7 +83,7 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
             aria-label={`${team.name} — brief & rules`}
             title="Team brief & rules"
             data-testid="team-settings-button"
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-white/8 bg-surface/40 px-2.5 text-[11px] font-medium text-text/70 transition hover:bg-surface/70 hover:text-text"
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-foreground/[0.04] px-2.5 text-[11px] font-medium text-text/70 transition hover:bg-foreground/[0.08] hover:text-text"
           >
             <Settings size={13} strokeWidth={1.75} />
             Brief &amp; Rules

@@ -54,8 +54,8 @@ export function TeamContextMenu({
         left: x,
         top: y,
         zIndex: 100,
-        background: '#111827',
-        border: '1px solid rgba(255,255,255,0.1)',
+        background: 'var(--card)',
+        border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
         borderRadius: 8,
         padding: '4px 0',
         minWidth: 160,
@@ -67,8 +67,8 @@ export function TeamContextMenu({
         style={{
           padding: '6px 14px 4px',
           fontSize: 11,
-          color: 'rgba(232,232,232,0.4)',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          color: 'rgb(var(--foreground-rgb) / 0.4)',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
           marginBottom: 4,
         }}
       >
@@ -85,13 +85,13 @@ export function TeamContextMenu({
           padding: '8px 14px',
           background: 'transparent',
           border: 'none',
-          color: '#E8E8E8',
+          color: 'var(--foreground)',
           fontSize: 13,
           cursor: 'pointer',
           textAlign: 'left',
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+          e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = 'transparent'
@@ -111,13 +111,13 @@ export function TeamContextMenu({
           padding: '8px 14px',
           background: 'transparent',
           border: 'none',
-          color: '#E8E8E8',
+          color: 'var(--foreground)',
           fontSize: 13,
           cursor: 'pointer',
           textAlign: 'left',
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+          e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = 'transparent'
@@ -137,13 +137,13 @@ export function TeamContextMenu({
           padding: '8px 14px',
           background: 'transparent',
           border: 'none',
-          color: '#E94560',
+          color: 'var(--primary)',
           fontSize: 13,
           cursor: 'pointer',
           textAlign: 'left',
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+          e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = 'transparent'
@@ -163,13 +163,13 @@ export function TeamContextMenu({
           padding: '8px 14px',
           background: 'transparent',
           border: 'none',
-          color: '#E94560',
+          color: 'var(--primary)',
           fontSize: 13,
           cursor: 'pointer',
           textAlign: 'left',
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+          e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = 'transparent'

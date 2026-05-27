@@ -25,7 +25,7 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'rgba(232,232,232,0.4)',
+          color: 'rgb(var(--foreground-rgb) / 0.4)',
           fontSize: 13,
           fontFamily: 'var(--font-body)',
         }}

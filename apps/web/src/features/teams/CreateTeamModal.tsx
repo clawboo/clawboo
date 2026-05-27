@@ -26,9 +26,9 @@ import {
 import { TeamTemplateDetail } from '@/features/marketplace/TeamTemplateDetail'
 
 const PRESET_COLORS = [
-  '#E94560',
-  '#34D399',
-  '#FBBF24',
+  'var(--primary)',
+  'var(--mint)',
+  'var(--amber)',
   '#60A5FA',
   '#A78BFA',
   '#F472B6',
@@ -39,7 +39,7 @@ const PRESET_COLORS = [
 // ─── Pick-step source filter entries (agency-agents first, clawboo last) ─────
 
 const PICK_SOURCE_ENTRIES: { key: TemplateSource | 'all'; label: string; color: string }[] = [
-  { key: 'all', label: 'All', color: '#E8E8E8' },
+  { key: 'all', label: 'All', color: 'var(--foreground)' },
   {
     key: 'agency-agents',
     label: SOURCE_META['agency-agents'].label,
@@ -493,7 +493,7 @@ export function CreateTeamModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 backdrop-blur-sm"
           onClick={handleClose}
         >
           <motion.div
@@ -501,7 +501,7 @@ export function CreateTeamModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-            className={`relative w-full ${step === 'pick' ? 'max-w-2xl' : 'max-w-lg'} rounded-2xl border border-white/8 bg-surface shadow-[0_16px_64px_rgba(0,0,0,0.6)] transition-all duration-200`}
+            className={`relative w-full ${step === 'pick' ? 'max-w-2xl' : 'max-w-lg'} rounded-2xl border border-border bg-surface shadow-[0_16px_64px_rgba(0,0,0,0.6)] transition-all duration-200`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close button */}
@@ -541,7 +541,7 @@ export function CreateTeamModal({
                     value={pickSearch}
                     onChange={(e) => setPickSearch(e.target.value)}
                     placeholder="Search templates..."
-                    className="w-full rounded-lg border border-white/8 bg-white/[0.03] py-2 pl-8 pr-3 text-[12px] text-text outline-none transition placeholder:text-secondary/35 focus:border-white/15"
+                    className="w-full rounded-lg border border-border bg-foreground/[0.03] py-2 pl-8 pr-3 text-[12px] text-text outline-none transition placeholder:text-secondary/35 focus:border-foreground/20"
                     style={{ fontFamily: 'var(--font-body)' }}
                   />
                 </div>
@@ -552,12 +552,18 @@ export function CreateTeamModal({
                     type="button"
                     onClick={() => setPickCategory('all')}
                     style={{
-                      background: pickCategory === 'all' ? 'rgba(232,232,232,0.12)' : 'transparent',
+                      background:
+                        pickCategory === 'all'
+                          ? 'rgb(var(--foreground-rgb) / 0.12)'
+                          : 'transparent',
                       border:
                         pickCategory === 'all'
-                          ? '1px solid rgba(232,232,232,0.3)'
-                          : '1px solid rgba(255,255,255,0.06)',
-                      color: pickCategory === 'all' ? '#E8E8E8' : 'rgba(232,232,232,0.45)',
+                          ? '1px solid rgb(var(--foreground-rgb) / 0.3)'
+                          : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                      color:
+                        pickCategory === 'all'
+                          ? 'var(--foreground)'
+                          : 'rgb(var(--foreground-rgb) / 0.45)',
                       borderRadius: 12,
                       padding: '2px 8px',
                       fontSize: 10,
@@ -580,8 +586,8 @@ export function CreateTeamModal({
                           background: isActive ? `${cat.color}20` : 'transparent',
                           border: isActive
                             ? `1px solid ${cat.color}55`
-                            : '1px solid rgba(255,255,255,0.06)',
-                          color: isActive ? cat.color : 'rgba(232,232,232,0.45)',
+                            : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                          color: isActive ? cat.color : 'rgb(var(--foreground-rgb) / 0.45)',
                           borderRadius: 12,
                           padding: '2px 8px',
                           fontSize: 10,
@@ -613,8 +619,8 @@ export function CreateTeamModal({
                           background: isActive ? `${src.color}20` : 'transparent',
                           border: isActive
                             ? `1px solid ${src.color}55`
-                            : '1px solid rgba(255,255,255,0.06)',
-                          color: isActive ? src.color : 'rgba(232,232,232,0.45)',
+                            : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                          color: isActive ? src.color : 'rgb(var(--foreground-rgb) / 0.45)',
                           borderRadius: 12,
                           padding: '2px 8px',
                           fontSize: 10,
@@ -671,7 +677,7 @@ export function CreateTeamModal({
                             handlePickProfile(profile)
                           }
                         }}
-                        className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2.5 text-left transition-colors hover:bg-white/[0.05] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/20"
+                        className="flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-foreground/[0.02] px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.05] focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/20"
                       >
                         <div
                           className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-base"
@@ -729,7 +735,7 @@ export function CreateTeamModal({
                 <button
                   type="button"
                   onClick={handlePickEmpty}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/12 px-4 py-3 text-[12px] font-medium text-secondary/60 transition-colors hover:border-white/20 hover:text-secondary"
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-[12px] font-medium text-secondary/60 transition-colors hover:border-foreground/20 hover:text-secondary"
                 >
                   Start empty
                 </button>
@@ -766,7 +772,7 @@ export function CreateTeamModal({
                     type="text"
                     value={teamName}
                     onChange={(e) => setTeamName(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-[13px] text-text outline-none placeholder:text-secondary/40 focus:border-white/20 focus:ring-1 focus:ring-ring/30"
+                    className="w-full rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-[13px] text-text outline-none placeholder:text-secondary/40 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
                     placeholder="Team name"
                   />
                 </label>
@@ -780,7 +786,7 @@ export function CreateTeamModal({
                     type="text"
                     value={teamIcon}
                     onChange={(e) => setTeamIcon(e.target.value)}
-                    className="w-20 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-center text-lg outline-none focus:border-white/20 focus:ring-1 focus:ring-ring/30"
+                    className="w-20 rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-center text-lg outline-none focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
                     maxLength={4}
                   />
                 </label>
@@ -800,7 +806,9 @@ export function CreateTeamModal({
                         style={{
                           backgroundColor: color,
                           boxShadow:
-                            teamColor === color ? `0 0 0 2px #0A0E1A, 0 0 0 4px ${color}` : 'none',
+                            teamColor === color
+                              ? `0 0 0 2px var(--background), 0 0 0 4px ${color}`
+                              : 'none',
                         }}
                       />
                     ))}
@@ -808,7 +816,7 @@ export function CreateTeamModal({
                 </div>
 
                 {/* Preview */}
-                <div className="mb-5 flex items-center gap-3 rounded-xl border border-white/6 bg-white/[0.02] px-4 py-3">
+                <div className="mb-5 flex items-center gap-3 rounded-xl border border-border bg-foreground/[0.02] px-4 py-3">
                   <div
                     className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-xl"
                     style={{
@@ -856,7 +864,7 @@ export function CreateTeamModal({
                   type="button"
                   onClick={() => void handleConfirmCustomize()}
                   disabled={!teamName.trim()}
-                  className="flex h-10 w-full items-center justify-center gap-2 rounded-lg text-[13px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-10 w-full items-center justify-center gap-2 rounded-lg text-[13px] font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{ backgroundColor: teamColor }}
                 >
                   {isSingleAgentMode
@@ -887,7 +895,7 @@ export function CreateTeamModal({
                 <p className="mb-6 text-[12px] text-secondary">Creating {progress.label}…</p>
 
                 {/* Progress bar */}
-                <div className="mb-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-white/10">
+                <div className="mb-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-foreground/10">
                   <motion.div
                     className="h-full rounded-full"
                     style={{ backgroundColor: teamColor }}
@@ -909,7 +917,7 @@ export function CreateTeamModal({
                     <button
                       type="button"
                       onClick={() => setStep('customize')}
-                      className="rounded-lg border border-white/10 px-4 py-1.5 text-[12px] font-medium text-secondary transition-colors hover:text-text"
+                      className="rounded-lg border border-border px-4 py-1.5 text-[12px] font-medium text-secondary transition-colors hover:text-text"
                     >
                       Back
                     </button>
@@ -929,7 +937,7 @@ export function CreateTeamModal({
                   <CheckCircle2
                     className="mb-3 h-12 w-12"
                     strokeWidth={1.5}
-                    style={{ color: '#34D399' }}
+                    style={{ color: 'var(--mint)' }}
                   />
                 </motion.div>
                 <h2

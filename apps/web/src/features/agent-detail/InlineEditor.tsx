@@ -14,7 +14,8 @@ import { closeBrackets } from '@codemirror/autocomplete'
 import { highlightSelectionMatches } from '@codemirror/search'
 import { AGENT_FILE_META, AGENT_FILE_PLACEHOLDERS } from '@clawboo/protocol'
 import type { AgentFileName } from '@clawboo/protocol'
-import { clawbooEditorTheme } from '@/features/editor/editorTheme'
+import { clawbooEditorThemeDark, clawbooEditorThemeLight } from '@/features/editor/editorTheme'
+import { useTheme } from '@/features/theme/useTheme'
 import { useAgentFiles, CORE_FILE_TABS, ALL_FILE_TABS } from '@/features/editor/useAgentFiles'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
 import { ExecSettings } from '@/features/settings/ExecSettings'
@@ -64,6 +65,8 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
     saveAllDirty,
     updateFileContent,
   } = useAgentFiles(agentId)
+
+  const { resolvedTheme } = useTheme()
 
   // Build dynamic tab list: core file tabs always shown + extras only when non-empty
   const visibleFileTabs = useMemo(() => {
@@ -127,7 +130,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
     const state = EditorState.create({
       doc: '',
       extensions: [
-        ...clawbooEditorTheme,
+        ...(resolvedTheme === 'light' ? clawbooEditorThemeLight : clawbooEditorThemeDark),
         markdown(),
         history(),
         highlightActiveLine(),
@@ -168,7 +171,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
       view.destroy()
       viewRef.current = null
     }
-  }, [updateFileContent])
+  }, [updateFileContent, resolvedTheme])
 
   // ─── Sync CodeMirror content when tab or loading changes ──────────────────
 
@@ -213,7 +216,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
         flexDirection: 'column',
         height: '100%',
         minHeight: 0,
-        background: '#0d1117',
+        background: 'var(--background)',
       }}
     >
       {/* Tab bar */}
@@ -223,8 +226,8 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
           alignItems: 'center',
           gap: 0,
           padding: '0 8px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
-          background: '#111827',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+          background: 'var(--card)',
           flexShrink: 0,
         }}
       >
@@ -242,9 +245,9 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
                 gap: 4,
                 padding: '6px 10px',
                 border: 'none',
-                borderBottom: isActive ? '2px solid #E94560' : '2px solid transparent',
+                borderBottom: isActive ? '2px solid var(--primary)' : '2px solid transparent',
                 background: 'transparent',
-                color: isActive ? '#E8E8E8' : 'rgba(232,232,232,0.45)',
+                color: isActive ? 'var(--foreground)' : 'rgb(var(--foreground-rgb) / 0.45)',
                 fontSize: 10,
                 fontWeight: isActive ? 600 : 400,
                 fontFamily: 'var(--font-mono)',
@@ -252,10 +255,10 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
                 transition: 'all 0.15s',
               }}
               onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.color = 'rgba(232,232,232,0.7)'
+                if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.7)'
               }}
               onMouseLeave={(e) => {
-                if (!isActive) e.currentTarget.style.color = 'rgba(232,232,232,0.45)'
+                if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.45)'
               }}
             >
               {getTabLabel(tab)}
@@ -265,7 +268,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
                     width: 5,
                     height: 5,
                     borderRadius: '50%',
-                    background: '#FBBF24',
+                    background: 'var(--amber)',
                     flexShrink: 0,
                   }}
                 />
@@ -288,8 +291,8 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
               padding: '4px 8px',
               borderRadius: 4,
               border: 'none',
-              background: isFileDirty ? '#E94560' : 'rgba(255,255,255,0.06)',
-              color: isFileDirty ? '#fff' : 'rgba(232,232,232,0.4)',
+              background: isFileDirty ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.06)',
+              color: isFileDirty ? '#fff' : 'rgb(var(--foreground-rgb) / 0.4)',
               fontSize: 10,
               fontWeight: 500,
               cursor: isFileDirty ? 'pointer' : 'default',
@@ -319,10 +322,10 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
               alignItems: 'center',
               justifyContent: 'center',
               gap: 8,
-              color: 'rgba(232,232,232,0.4)',
+              color: 'rgb(var(--foreground-rgb) / 0.4)',
               fontSize: 12,
               zIndex: 1,
-              background: '#0d1117',
+              background: 'var(--background)',
             }}
           >
             <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" strokeWidth={2} />
@@ -365,7 +368,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
                   margin: 0,
                   fontSize: 12,
                   fontWeight: 600,
-                  color: 'rgba(232,232,232,0.85)',
+                  color: 'rgb(var(--foreground-rgb) / 0.85)',
                 }}
               >
                 Display name
@@ -378,7 +381,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
                   margin: 0,
                   fontSize: 12,
                   fontWeight: 600,
-                  color: 'rgba(232,232,232,0.85)',
+                  color: 'rgb(var(--foreground-rgb) / 0.85)',
                 }}
               >
                 Global brief
@@ -405,10 +408,10 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '4px 12px',
-          borderTop: '1px solid rgba(255,255,255,0.06)',
-          background: '#111827',
+          borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+          background: 'var(--card)',
           fontSize: 10,
-          color: 'rgba(232,232,232,0.35)',
+          color: 'rgb(var(--foreground-rgb) / 0.35)',
           fontFamily: 'var(--font-mono)',
           flexShrink: 0,
         }}

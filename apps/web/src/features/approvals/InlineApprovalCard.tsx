@@ -32,8 +32,8 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
     >
       <div
         style={{
-          background: '#111827',
-          border: '1px solid rgba(251,191,36,0.25)',
+          background: 'var(--card)',
+          border: '1px solid rgb(var(--amber-rgb) / 0.25)',
           borderRadius: 8,
           padding: '10px 12px',
           display: 'flex',
@@ -59,7 +59,7 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
                 width: 7,
                 height: 7,
                 borderRadius: '50%',
-                background: '#FBBF24',
+                background: 'var(--amber)',
                 flexShrink: 0,
               }}
             />
@@ -67,7 +67,7 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
               style={{
                 fontSize: 11,
                 fontWeight: 600,
-                color: '#FBBF24',
+                color: 'var(--amber)',
                 fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
               }}
             >
@@ -77,7 +77,7 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
               <span
                 style={{
                   fontSize: 10,
-                  color: 'rgba(232,232,232,0.4)',
+                  color: 'rgb(var(--foreground-rgb) / 0.4)',
                   marginLeft: 2,
                 }}
               >
@@ -88,7 +88,7 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
           <span
             style={{
               fontSize: 10,
-              color: 'rgba(232,232,232,0.3)',
+              color: 'rgb(var(--foreground-rgb) / 0.3)',
               letterSpacing: '0.04em',
               flexShrink: 0,
             }}
@@ -100,12 +100,12 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
         {/* Row 2: Command preview */}
         <div
           style={{
-            background: 'rgba(0,0,0,0.32)',
+            background: 'rgb(0 0 0 / 0.32)',
             borderRadius: 5,
             padding: '6px 8px',
             fontFamily: 'var(--font-geist-mono, monospace)',
             fontSize: 11,
-            color: '#E8E8E8',
+            color: 'var(--foreground)',
             wordBreak: 'break-all',
             lineHeight: 1.5,
             maxHeight: 36,
@@ -120,8 +120,8 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
           <div
             style={{
               fontSize: 10,
-              color: '#E94560',
-              background: 'rgba(233,69,96,0.08)',
+              color: 'var(--primary)',
+              background: 'rgb(var(--primary-rgb) / 0.08)',
               borderRadius: 4,
               padding: '3px 6px',
             }}
@@ -137,10 +137,12 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
             onClick={() => void handleApproval(approval.id, 'allow-once')}
             style={{
               flex: 1,
-              background: approval.resolving ? 'rgba(52,211,153,0.08)' : 'rgba(52,211,153,0.15)',
-              border: '1px solid rgba(52,211,153,0.35)',
+              background: approval.resolving
+                ? 'rgb(var(--mint-rgb) / 0.08)'
+                : 'rgb(var(--mint-rgb) / 0.15)',
+              border: '1px solid rgb(var(--mint-rgb) / 0.35)',
               borderRadius: 5,
-              color: '#34D399',
+              color: 'var(--mint)',
               cursor: approval.resolving ? 'not-allowed' : 'pointer',
               fontSize: 11,
               fontWeight: 600,
@@ -156,10 +158,12 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
             onClick={() => void handleApproval(approval.id, 'allow-always')}
             style={{
               flex: 1,
-              background: approval.resolving ? 'rgba(251,191,36,0.08)' : 'rgba(251,191,36,0.15)',
-              border: '1px solid rgba(251,191,36,0.35)',
+              background: approval.resolving
+                ? 'rgb(var(--amber-rgb) / 0.08)'
+                : 'rgb(var(--amber-rgb) / 0.15)',
+              border: '1px solid rgb(var(--amber-rgb) / 0.35)',
               borderRadius: 5,
-              color: '#FBBF24',
+              color: 'var(--amber)',
               cursor: approval.resolving ? 'not-allowed' : 'pointer',
               fontSize: 11,
               fontWeight: 600,
@@ -175,10 +179,12 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
             onClick={() => void handleApproval(approval.id, 'deny')}
             style={{
               flex: 1,
-              background: approval.resolving ? 'rgba(233,69,96,0.08)' : 'rgba(233,69,96,0.15)',
-              border: '1px solid rgba(233,69,96,0.35)',
+              background: approval.resolving
+                ? 'rgb(var(--primary-rgb) / 0.08)'
+                : 'rgb(var(--primary-rgb) / 0.15)',
+              border: '1px solid rgb(var(--primary-rgb) / 0.35)',
               borderRadius: 5,
-              color: '#E94560',
+              color: 'var(--primary)',
               cursor: approval.resolving ? 'not-allowed' : 'pointer',
               fontSize: 11,
               fontWeight: 600,

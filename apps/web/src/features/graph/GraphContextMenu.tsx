@@ -73,8 +73,8 @@ export function GraphContextMenu({
         left: x,
         top: y,
         zIndex: 100,
-        background: '#111827',
-        border: '1px solid rgba(255,255,255,0.1)',
+        background: 'var(--card)',
+        border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
         borderRadius: 8,
         padding: '4px 0',
         minWidth: 180,
@@ -93,13 +93,13 @@ export function GraphContextMenu({
             padding: '8px 14px',
             background: 'transparent',
             border: 'none',
-            color: item.action === 'delete' ? '#E94560' : '#E8E8E8',
+            color: item.action === 'delete' ? 'var(--primary)' : 'var(--foreground)',
             fontSize: 13,
             cursor: 'pointer',
             textAlign: 'left',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+            e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'transparent'

@@ -15,6 +15,30 @@
     <!-- Cabinet Grotesk — display font -->
     <link rel="preconnect" href="https://api.fontshare.com" />
     <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&display=swap" rel="stylesheet" />
+
+    <!-- Theme init — runs synchronously before React mounts to prevent FOUC.
+         Reads localStorage('clawboo.theme'), defaults to system preference.
+         Mirror of the resolver inside features/theme/ThemeProvider.tsx. -->
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem('clawboo.theme');
+          var pref =
+            stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+          var resolved =
+            pref === 'system'
+              ? window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+              : pref;
+          var root = document.documentElement;
+          if (resolved === 'dark') root.classList.add('dark');
+          else root.classList.remove('dark');
+        } catch (_e) {
+          /* fall back to default (no class) — light theme renders */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

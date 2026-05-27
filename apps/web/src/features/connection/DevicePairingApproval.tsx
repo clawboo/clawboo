@@ -116,7 +116,7 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
           onClick={() => void handleApprove()}
           disabled={phase === 'approving' || phase === 'approved'}
           data-testid="device-pairing-approve-button"
-          className="flex h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[12px] font-semibold tracking-wide text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[12px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {phase === 'approving' && (
             <>
@@ -137,7 +137,7 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
             type="button"
             onClick={onCancel}
             data-testid="device-pairing-cancel-button"
-            className="h-10 rounded-lg border border-white/8 bg-transparent px-3 font-mono text-[12px] text-secondary transition hover:bg-white/4"
+            className="h-10 rounded-lg border border-border bg-transparent px-3 font-mono text-[12px] text-secondary transition hover:bg-foreground/[0.04]"
           >
             Cancel
           </button>
@@ -147,11 +147,11 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
       {/* Footer hint — how to do it manually */}
       <p className="font-mono text-[10px] leading-relaxed text-secondary/40">
         Or from your terminal:{' '}
-        <code className="rounded bg-white/4 px-1 py-0.5 text-secondary/60">
+        <code className="rounded bg-foreground/[0.04] px-1 py-0.5 text-secondary/60">
           openclaw devices approve --latest
         </code>{' '}
         then{' '}
-        <code className="rounded bg-white/4 px-1 py-0.5 text-secondary/60">
+        <code className="rounded bg-foreground/[0.04] px-1 py-0.5 text-secondary/60">
           openclaw devices approve &lt;requestId&gt;
         </code>
         .

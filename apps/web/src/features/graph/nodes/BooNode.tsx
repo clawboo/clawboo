@@ -92,16 +92,16 @@ type GlowConfig = { color: string; pulse: boolean }
 
 const STATUS_GLOW: Record<string, GlowConfig | null> = {
   idle: null,
-  running: { color: 'rgba(52,211,153,0.55)', pulse: true },
+  running: { color: 'rgb(var(--mint-rgb) / 0.55)', pulse: true },
   error: { color: 'rgba(249,115,22,0.55)', pulse: false },
   sleeping: { color: 'rgba(96,115,140,0.30)', pulse: false },
 }
 
 const STATUS_DOT: Record<string, string> = {
   idle: '#4B5563',
-  running: '#34D399',
+  running: 'var(--mint)',
   error: '#F97316',
-  sleeping: '#FBBF24',
+  sleeping: 'var(--amber)',
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -115,15 +115,15 @@ const STATUS_LABEL: Record<string, string> = {
 
 const handleBase: React.CSSProperties = {
   background: 'transparent',
-  border: '1.5px solid rgba(255,255,255,0.22)',
+  border: '1.5px solid rgb(var(--foreground-rgb) / 0.22)',
   width: 8,
   height: 8,
   transition: 'opacity 0.15s, background 0.15s, width 0.15s, height 0.15s',
 }
 
 const handleConnecting: React.CSSProperties = {
-  background: 'rgba(233,69,96,0.5)',
-  border: '1px solid rgba(233,69,96,0.3)',
+  background: 'rgb(var(--primary-rgb) / 0.5)',
+  border: '1px solid rgb(var(--primary-rgb) / 0.3)',
   width: 12,
   height: 12,
   borderRadius: '50%',
@@ -258,11 +258,11 @@ export const BooNode = memo(function BooNode({
           cursor: 'pointer',
           pointerEvents: 'auto',
           borderRadius: showCard ? 12 : '50%',
-          background: showCard ? '#111827' : 'transparent',
+          background: showCard ? 'var(--card)' : 'transparent',
           // Card always uses the same subtle outline regardless of selection
           // state — the selection-thickening was visually inconsistent with
           // the now-removed circle ring and didn't add information.
-          border: showCard ? '1px solid rgba(255,255,255,0.08)' : 'none',
+          border: showCard ? '1px solid var(--border)' : 'none',
           opacity: isHighlighted ? 1 : 0.22,
           transition: SHAPE_TRANSITION,
           // 'visible' (not 'hidden') so children rendering outside the
@@ -279,9 +279,9 @@ export const BooNode = memo(function BooNode({
             animate={{
               opacity: [0.6, 1, 0.6],
               boxShadow: [
-                '0 0 0 0 rgba(251,191,36,0.55)',
+                '0 0 0 0 rgb(var(--amber-rgb) / 0.55)',
                 '0 0 0 4px rgba(251,191,36,0)',
-                '0 0 0 0 rgba(251,191,36,0.55)',
+                '0 0 0 0 rgb(var(--amber-rgb) / 0.55)',
               ],
             }}
             transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
@@ -289,7 +289,7 @@ export const BooNode = memo(function BooNode({
               position: 'absolute',
               inset: -2,
               borderRadius: showCard ? 14 : '50%',
-              border: '2px solid #FBBF24',
+              border: '2px solid var(--amber)',
               pointerEvents: 'none',
               zIndex: 1,
             }}
@@ -426,7 +426,7 @@ function CardContent({
           alignItems: 'center',
           gap: 12,
           padding: '12px 14px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          borderBottom: '1px solid var(--border)',
           flexShrink: 0,
         }}
       >
@@ -438,7 +438,7 @@ function CardContent({
             style={{
               fontSize: 14,
               fontWeight: 600,
-              color: selected ? '#E94560' : '#E8E8E8',
+              color: selected ? 'var(--primary)' : 'var(--foreground)',
               fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -453,7 +453,7 @@ function CardContent({
           <div
             style={{
               fontSize: 11,
-              color: 'rgba(232,232,232,0.45)',
+              color: 'var(--muted-foreground)',
               marginTop: 3,
               letterSpacing: '0.04em',
               whiteSpace: 'nowrap',
@@ -490,7 +490,7 @@ function CardContent({
           padding: '8px 14px',
           position: 'relative',
           background:
-            'radial-gradient(circle at center, rgba(52,211,153,0.04) 0%, transparent 60%)',
+            'radial-gradient(circle at center, rgb(var(--mint-rgb) / 0.06) 0%, transparent 60%)',
           overflow: 'hidden',
         }}
       >
@@ -501,9 +501,9 @@ function CardContent({
       <div
         style={{
           padding: '6px 12px',
-          borderTop: '1px solid rgba(255,255,255,0.06)',
+          borderTop: '1px solid var(--border)',
           fontSize: 10,
-          color: 'rgba(232,232,232,0.4)',
+          color: 'var(--muted-foreground)',
           flexShrink: 0,
           minHeight: 24,
         }}
@@ -563,7 +563,7 @@ function CircleContent({
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: selected ? '#E94560' : '#E8E8E8',
+            color: selected ? 'var(--primary)' : 'var(--foreground)',
             fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
             // No max-width / truncation: the name sits BELOW the avatar in
             // circle mode and has the entire 340px envelope width to
@@ -611,7 +611,7 @@ function CircleContent({
               style={{ width: 5, height: 5, borderRadius: '50%', background: cardStatusColor }}
             />
           )}
-          <span style={{ fontSize: 10, color: 'rgba(232,232,232,0.38)', letterSpacing: '0.05em' }}>
+          <span style={{ fontSize: 10, color: 'var(--muted-foreground)', letterSpacing: '0.05em' }}>
             {STATUS_LABEL[status] ?? 'idle'}
           </span>
         </div>
@@ -634,7 +634,7 @@ function CircleContent({
           <div
             style={{
               fontSize: 9,
-              color: 'rgba(232,232,232,0.25)',
+              color: 'var(--muted-foreground)',
               whiteSpace: 'nowrap',
               letterSpacing: '0.03em',
             }}

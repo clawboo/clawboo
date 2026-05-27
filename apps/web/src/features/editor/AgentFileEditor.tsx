@@ -25,7 +25,8 @@ import {
   mergeSoulWithPersonality,
   isPersonalityValues,
 } from '@/lib/soulPersonality'
-import { clawbooEditorTheme } from './editorTheme'
+import { clawbooEditorThemeDark, clawbooEditorThemeLight } from './editorTheme'
+import { useTheme } from '@/features/theme/useTheme'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,9 @@ interface AgentFileEditorProps {
 
 export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditorProps) {
   const client = useConnectionStore((s) => s.client)
+  const { resolvedTheme } = useTheme()
+  const editorThemeRef = useRef(resolvedTheme)
+  editorThemeRef.current = resolvedTheme
 
   const [activeTab, setActiveTab] = useState<AgentFileName>('SOUL.md')
   const [files, setFiles] = useState<FilesMap>(() => {
@@ -246,7 +250,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
     const state = EditorState.create({
       doc: '',
       extensions: [
-        ...clawbooEditorTheme,
+        ...(resolvedTheme === 'light' ? clawbooEditorThemeLight : clawbooEditorThemeDark),
         markdown(),
         history(),
         highlightActiveLine(),
@@ -286,7 +290,10 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
       view.destroy()
       viewRef.current = null
     }
-  }, [])
+    // Recreate the editor instance when the resolved theme flips so the new
+    // theme extensions take effect. Cheap — the editor unmount/remount stays
+    // local and the active doc is restored by the tab-sync effect below.
+  }, [resolvedTheme])
 
   // ─── Sync content when tab changes or loading finishes ──────────────────────
   // NOTE: files intentionally excluded from deps to avoid render loops.
@@ -347,7 +354,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
         bottom: 0,
         left: 268,
         zIndex: 40,
-        background: '#0d1117',
+        background: 'var(--background)',
         display: 'flex',
         flexDirection: 'column',
       }}
@@ -359,8 +366,8 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '10px 16px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
-          background: '#111827',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+          background: 'var(--card)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -369,7 +376,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
             style={{
               fontSize: 13,
               fontWeight: 600,
-              color: '#E8E8E8',
+              color: 'var(--foreground)',
               fontFamily: 'var(--font-body)',
             }}
           >
@@ -399,8 +406,10 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
               padding: '5px 12px',
               borderRadius: 6,
               border: 'none',
-              background: isDirty(activeTab) ? '#E94560' : 'rgba(255,255,255,0.06)',
-              color: isDirty(activeTab) ? '#fff' : 'rgba(232,232,232,0.4)',
+              background: isDirty(activeTab)
+                ? 'var(--primary)'
+                : 'rgb(var(--foreground-rgb) / 0.06)',
+              color: isDirty(activeTab) ? '#fff' : 'rgb(var(--foreground-rgb) / 0.4)',
               fontSize: 12,
               fontWeight: 500,
               cursor: isDirty(activeTab) ? 'pointer' : 'default',
@@ -430,17 +439,17 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
               borderRadius: 6,
               border: 'none',
               background: 'transparent',
-              color: 'rgba(232,232,232,0.5)',
+              color: 'rgb(var(--foreground-rgb) / 0.5)',
               cursor: 'pointer',
               transition: 'all 0.15s',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.06)'
-              e.currentTarget.style.color = '#E8E8E8'
+              e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.06)'
+              e.currentTarget.style.color = 'var(--foreground)'
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.color = 'rgba(232,232,232,0.5)'
+              e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.5)'
             }}
           >
             <X className="h-4 w-4" strokeWidth={2} />
@@ -454,8 +463,8 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
           display: 'flex',
           gap: 2,
           padding: '0 12px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
-          background: '#111827',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+          background: 'var(--card)',
         }}
       >
         {visibleTabs.map((tab) => {
@@ -473,9 +482,9 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
                 gap: 6,
                 padding: '8px 14px',
                 border: 'none',
-                borderBottom: isActive ? '2px solid #E94560' : '2px solid transparent',
+                borderBottom: isActive ? '2px solid var(--primary)' : '2px solid transparent',
                 background: 'transparent',
-                color: isActive ? '#E8E8E8' : 'rgba(232,232,232,0.45)',
+                color: isActive ? 'var(--foreground)' : 'rgb(var(--foreground-rgb) / 0.45)',
                 fontSize: 11,
                 fontWeight: isActive ? 600 : 400,
                 fontFamily: 'var(--font-mono)',
@@ -483,10 +492,10 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
                 transition: 'all 0.15s',
               }}
               onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.color = 'rgba(232,232,232,0.7)'
+                if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.7)'
               }}
               onMouseLeave={(e) => {
-                if (!isActive) e.currentTarget.style.color = 'rgba(232,232,232,0.45)'
+                if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.45)'
               }}
             >
               {tab.replace('.md', '')}
@@ -496,7 +505,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
                     width: 6,
                     height: 6,
                     borderRadius: '50%',
-                    background: '#FBBF24',
+                    background: 'var(--amber)',
                   }}
                 />
               )}
@@ -517,10 +526,10 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
               alignItems: 'center',
               justifyContent: 'center',
               gap: 8,
-              color: 'rgba(232,232,232,0.4)',
+              color: 'rgb(var(--foreground-rgb) / 0.4)',
               fontSize: 13,
               zIndex: 1,
-              background: '#0d1117',
+              background: 'var(--background)',
             }}
           >
             <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
@@ -537,10 +546,10 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '6px 16px',
-          borderTop: '1px solid rgba(255,255,255,0.06)',
-          background: '#111827',
+          borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+          background: 'var(--card)',
           fontSize: 11,
-          color: 'rgba(232,232,232,0.4)',
+          color: 'rgb(var(--foreground-rgb) / 0.4)',
           fontFamily: 'var(--font-mono)',
         }}
       >

@@ -48,7 +48,7 @@ function EmptyState() {
         alignItems: 'center',
         justifyContent: 'center',
         gap: 12,
-        color: 'rgba(232,232,232,0.25)',
+        color: 'rgb(var(--foreground-rgb) / 0.25)',
         padding: 40,
       }}
     >
@@ -68,7 +68,7 @@ function TableHeader() {
   const colStyle: React.CSSProperties = {
     fontSize: 11,
     fontWeight: 600,
-    color: 'rgba(232,232,232,0.35)',
+    color: 'rgb(var(--foreground-rgb) / 0.35)',
     letterSpacing: '0.05em',
     textTransform: 'uppercase',
     padding: '8px 16px',
@@ -80,8 +80,8 @@ function TableHeader() {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr 1fr 1fr auto',
         gap: 12,
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
-        background: 'rgba(255,255,255,0.02)',
+        borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+        background: 'rgb(var(--foreground-rgb) / 0.02)',
       }}
     >
       <div style={colStyle}>Agent / Job</div>
@@ -129,9 +129,9 @@ function GroupedJobList({ jobs, onToggle, onDelete, onRunNow }: GroupedJobListPr
                 padding: '6px 16px',
                 fontSize: 11,
                 fontWeight: 600,
-                color: 'rgba(232,232,232,0.35)',
-                background: 'rgba(255,255,255,0.015)',
-                borderBottom: '1px solid rgba(255,255,255,0.04)',
+                color: 'rgb(var(--foreground-rgb) / 0.35)',
+                background: 'rgb(var(--foreground-rgb) / 0.015)',
+                borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.04)',
                 letterSpacing: '0.04em',
               }}
             >
@@ -300,7 +300,7 @@ export function SchedulerPanel() {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: '#0A0E1A',
+        background: 'var(--background)',
         overflow: 'hidden',
       }}
     >
@@ -313,11 +313,13 @@ export function SchedulerPanel() {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '0 12px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(232,232,232,0.5)' }}>
+          <span
+            style={{ fontSize: 12, fontWeight: 600, color: 'rgb(var(--foreground-rgb) / 0.5)' }}
+          >
             Scheduler
           </span>
           {jobs.length > 0 && (
@@ -325,8 +327,8 @@ export function SchedulerPanel() {
               style={{
                 fontSize: 11,
                 fontWeight: 500,
-                color: '#FBBF24',
-                background: 'rgba(251,191,36,0.1)',
+                color: 'var(--amber)',
+                background: 'rgb(var(--amber-rgb) / 0.1)',
                 borderRadius: 20,
                 padding: '1px 8px',
               }}
@@ -348,8 +350,8 @@ export function SchedulerPanel() {
             padding: '3px 10px',
             borderRadius: 6,
             background: 'transparent',
-            border: '1px solid rgba(255,255,255,0.08)',
-            color: 'rgba(232,232,232,0.4)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+            color: 'rgb(var(--foreground-rgb) / 0.4)',
             fontSize: 11,
             cursor: isLoading || !isConnected ? 'not-allowed' : 'pointer',
             opacity: !isConnected ? 0.4 : 1,
@@ -375,7 +377,7 @@ export function SchedulerPanel() {
             alignItems: 'center',
             justifyContent: 'center',
             gap: 10,
-            color: 'rgba(232,232,232,0.25)',
+            color: 'rgb(var(--foreground-rgb) / 0.25)',
           }}
         >
           <CalendarClock size={32} strokeWidth={1.2} />
@@ -395,7 +397,7 @@ export function SchedulerPanel() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 8,
-                color: 'rgba(232,232,232,0.35)',
+                color: 'rgb(var(--foreground-rgb) / 0.35)',
               }}
             >
               <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
@@ -413,7 +415,7 @@ export function SchedulerPanel() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 8,
-                color: '#E94560',
+                color: 'var(--primary)',
               }}
             >
               <AlertCircle size={24} strokeWidth={1.5} />
@@ -424,9 +426,9 @@ export function SchedulerPanel() {
                   marginTop: 4,
                   padding: '6px 14px',
                   borderRadius: 6,
-                  background: 'rgba(233,69,96,0.1)',
-                  border: '1px solid rgba(233,69,96,0.3)',
-                  color: '#E94560',
+                  background: 'rgb(var(--primary-rgb) / 0.1)',
+                  border: '1px solid rgb(var(--primary-rgb) / 0.3)',
+                  color: 'var(--primary)',
                   fontSize: 12,
                   cursor: 'pointer',
                 }}

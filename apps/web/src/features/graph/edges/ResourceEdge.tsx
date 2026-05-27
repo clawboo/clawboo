@@ -39,7 +39,7 @@ export const ResourceEdge = memo(function ResourceEdge({
       id={id}
       path={edgePath}
       style={{
-        stroke: selected ? '#FBBF24' : 'rgba(251,191,36,0.35)',
+        stroke: selected ? 'var(--amber)' : 'rgb(var(--amber-rgb) / 0.35)',
         strokeWidth: selected ? 2 : 1,
         // No strokeDasharray, no animation — solid static line.
         transition: 'stroke 0.15s, stroke-width 0.15s, opacity 0.2s ease',

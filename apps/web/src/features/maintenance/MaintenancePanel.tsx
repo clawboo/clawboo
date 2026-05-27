@@ -46,7 +46,7 @@ function SectionHeading({ children }: { children: string }) {
       style={{
         fontSize: 14,
         fontWeight: 600,
-        color: '#E8E8E8',
+        color: 'var(--foreground)',
         margin: 0,
         fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
       }}
@@ -64,7 +64,7 @@ function InfoRow({ label, value }: { label: string; value: string | null }) {
       <span
         style={{
           fontSize: 11,
-          color: 'rgba(232,232,232,0.4)',
+          color: 'rgb(var(--foreground-rgb) / 0.4)',
           fontWeight: 500,
           minWidth: 100,
           flexShrink: 0,
@@ -75,7 +75,7 @@ function InfoRow({ label, value }: { label: string; value: string | null }) {
       <span
         style={{
           fontSize: 13,
-          color: '#E8E8E8',
+          color: 'var(--foreground)',
           fontFamily: 'var(--font-geist-mono, monospace)',
           wordBreak: 'break-all',
         }}
@@ -92,7 +92,7 @@ const toggleTrack: CSSProperties = {
   width: 36,
   height: 20,
   borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.1)',
+  border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
   cursor: 'pointer',
   position: 'relative',
   transition: 'background 0.15s',
@@ -103,7 +103,7 @@ const toggleThumb: CSSProperties = {
   width: 14,
   height: 14,
   borderRadius: 7,
-  background: '#E8E8E8',
+  background: 'var(--foreground)',
   position: 'absolute',
   top: 2,
   transition: 'left 0.15s',
@@ -181,12 +181,14 @@ function AgentCoordinationToggle() {
           aria-label="Toggle agent-to-agent coordination"
           style={{
             ...toggleTrack,
-            background: enabled ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.04)',
+            background: enabled
+              ? 'rgb(var(--mint-rgb) / 0.25)'
+              : 'rgb(var(--foreground-rgb) / 0.04)',
           }}
         >
           <div style={{ ...toggleThumb, left: enabled ? 18 : 2 }} />
         </button>
-        <span style={{ fontSize: 12, color: 'rgba(232,232,232,0.6)' }}>
+        <span style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.6)' }}>
           {enabled
             ? 'Agents can delegate tasks to each other'
             : 'Agent-to-agent messaging disabled'}
@@ -196,7 +198,7 @@ function AgentCoordinationToggle() {
         style={{
           marginTop: 8,
           fontSize: 11,
-          color: 'rgba(232,232,232,0.3)',
+          color: 'rgb(var(--foreground-rgb) / 0.3)',
           lineHeight: 1.5,
         }}
       >
@@ -286,7 +288,7 @@ function CommandApprovalDefault() {
           gap: 12,
         }}
       >
-        <span style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)' }}>Default:</span>
+        <span style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.5)' }}>Default:</span>
         <div style={{ position: 'relative', flex: 1, maxWidth: 220 }}>
           <select
             value={execAsk}
@@ -296,9 +298,9 @@ function CommandApprovalDefault() {
               width: '100%',
               padding: '7px 32px 7px 10px',
               borderRadius: 6,
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: '#0A0E1A',
-              color: '#E8E8E8',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+              background: 'var(--background)',
+              color: 'var(--foreground)',
               fontSize: 12,
               fontWeight: 500,
               fontFamily: 'inherit',
@@ -322,7 +324,7 @@ function CommandApprovalDefault() {
               transform: 'translateY(-50%)',
               width: 14,
               height: 14,
-              color: 'rgba(232,232,232,0.4)',
+              color: 'rgb(var(--foreground-rgb) / 0.4)',
               pointerEvents: 'none',
             }}
             strokeWidth={2}
@@ -333,7 +335,7 @@ function CommandApprovalDefault() {
         style={{
           marginTop: 6,
           fontSize: 10,
-          color: 'rgba(232,232,232,0.3)',
+          color: 'rgb(var(--foreground-rgb) / 0.3)',
           lineHeight: 1.4,
         }}
       >
@@ -343,7 +345,7 @@ function CommandApprovalDefault() {
         style={{
           marginTop: 8,
           fontSize: 11,
-          color: 'rgba(232,232,232,0.3)',
+          color: 'rgb(var(--foreground-rgb) / 0.3)',
           lineHeight: 1.5,
         }}
       >
@@ -493,8 +495,8 @@ export function MaintenancePanel() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: '#0A0E1A',
-          color: 'rgba(232,232,232,0.4)',
+          background: 'var(--background)',
+          color: 'rgb(var(--foreground-rgb) / 0.4)',
         }}
       >
         <Loader2
@@ -510,9 +512,9 @@ export function MaintenancePanel() {
       style={{
         height: '100%',
         overflowY: 'auto',
-        background: '#0A0E1A',
+        background: 'var(--background)',
         padding: '24px 28px',
-        color: '#E8E8E8',
+        color: 'var(--foreground)',
       }}
     >
       {/* Header */}
@@ -521,14 +523,14 @@ export function MaintenancePanel() {
           style={{
             fontSize: 22,
             fontWeight: 700,
-            color: '#E8E8E8',
+            color: 'var(--foreground)',
             margin: 0,
             fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
           }}
         >
           System
         </h1>
-        <p style={{ fontSize: 12, color: 'rgba(232,232,232,0.45)', margin: '4px 0 0' }}>
+        <p style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.45)', margin: '4px 0 0' }}>
           Manage your OpenClaw installation
         </p>
       </div>
@@ -541,7 +543,7 @@ export function MaintenancePanel() {
         </div>
       </div>
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+      <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
 
       {/* Section 2: Default Model */}
       <div style={{ margin: '24px 0 28px' }}>
@@ -554,12 +556,12 @@ export function MaintenancePanel() {
             gap: 12,
           }}
         >
-          <span style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)' }}>Current:</span>
+          <span style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.5)' }}>Current:</span>
           <ModelSelector currentModel={currentModel} onModelChange={handleModelChange} />
         </div>
       </div>
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+      <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
 
       {/* Section 3: API Keys */}
       <div style={{ margin: '24px 0 28px' }}>
@@ -569,7 +571,7 @@ export function MaintenancePanel() {
         </div>
       </div>
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+      <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
 
       {/* Section 4: Boo Zero — universal team leader context. The actual
           editors moved out of System: Display Name + Global Brief now live
@@ -581,7 +583,7 @@ export function MaintenancePanel() {
         <p
           style={{
             fontSize: 11,
-            color: 'rgba(232,232,232,0.45)',
+            color: 'rgb(var(--foreground-rgb) / 0.45)',
             margin: '4px 0 14px',
           }}
         >
@@ -591,17 +593,17 @@ export function MaintenancePanel() {
         <BooZeroBriefsPanel />
       </div>
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+      <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
 
       {/* Section 5: Agent Coordination */}
       <AgentCoordinationToggle />
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+      <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
 
       {/* Section 5: Command Approval */}
       <CommandApprovalDefault />
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+      <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
 
       {/* Section 6: System Info */}
       <div style={{ margin: '24px 0 28px' }}>
@@ -628,9 +630,13 @@ export function MaintenancePanel() {
               fontSize: 11,
               fontWeight: 600,
               borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.1)',
-              background: updating ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.06)',
-              color: updating ? 'rgba(232,232,232,0.4)' : 'rgba(232,232,232,0.7)',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
+              background: updating
+                ? 'rgb(var(--foreground-rgb) / 0.04)'
+                : 'rgb(var(--foreground-rgb) / 0.06)',
+              color: updating
+                ? 'rgb(var(--foreground-rgb) / 0.4)'
+                : 'rgb(var(--foreground-rgb) / 0.7)',
               cursor: updating ? 'default' : 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
@@ -650,8 +656,8 @@ export function MaintenancePanel() {
           <div
             style={{
               marginTop: 12,
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.06)',
+              background: 'rgb(var(--foreground-rgb) / 0.03)',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
               borderRadius: 8,
               padding: '10px 12px',
               maxHeight: 160,
@@ -659,7 +665,7 @@ export function MaintenancePanel() {
               fontFamily: 'var(--font-geist-mono, monospace)',
               fontSize: 11,
               lineHeight: 1.6,
-              color: 'rgba(232,232,232,0.55)',
+              color: 'rgb(var(--foreground-rgb) / 0.55)',
             }}
           >
             {updateLog.map((line, i) => (

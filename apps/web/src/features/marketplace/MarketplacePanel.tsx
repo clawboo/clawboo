@@ -37,11 +37,11 @@ import { AgentTemplateDetail } from './AgentTemplateDetail'
 // ─── Skill category colours (matches SkillNode.tsx) ─────────────────────────
 
 const CATEGORY_META: Record<SkillCategory | 'all', { color: string; label: string }> = {
-  all: { color: '#E8E8E8', label: 'All' },
+  all: { color: 'var(--foreground)', label: 'All' },
   code: { color: '#F97316', label: 'Code' },
-  file: { color: '#FBBF24', label: 'File' },
+  file: { color: 'var(--amber)', label: 'File' },
   web: { color: '#A855F7', label: 'Web' },
-  comm: { color: '#34D399', label: 'Comm' },
+  comm: { color: 'var(--mint)', label: 'Comm' },
   data: { color: '#3B82F6', label: 'Data' },
   other: { color: '#6B7280', label: 'Other' },
 }
@@ -49,14 +49,14 @@ const CATEGORY_META: Record<SkillCategory | 'all', { color: string; label: strin
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
   verified: { label: 'Verified', color: '#A855F7' },
   clawhub: { label: 'Clawboo Marketplace', color: '#3B82F6' },
-  'skill.sh': { label: 'skill.sh', color: '#34D399' },
+  'skill.sh': { label: 'skill.sh', color: 'var(--mint)' },
   local: { label: 'Local', color: '#6B7280' },
 }
 
 function trustColor(score: number): string {
-  if (score >= 80) return '#34D399'
-  if (score >= 50) return '#FBBF24'
-  return '#E94560'
+  if (score >= 80) return 'var(--mint)'
+  if (score >= 50) return 'var(--amber)'
+  return 'var(--primary)'
 }
 
 // ─── Install skill from marketplace ──────────────────────────────────────────
@@ -146,13 +146,13 @@ function EmptyState({ title, hint }: { title: string; hint: string }) {
       }}
     >
       <span style={{ fontSize: 28 }}>🔍</span>
-      <span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(232,232,232,0.38)' }}>
+      <span style={{ fontSize: 13, fontWeight: 500, color: 'rgb(var(--foreground-rgb) / 0.38)' }}>
         {title}
       </span>
       <span
         style={{
           fontSize: 12,
-          color: 'rgba(232,232,232,0.25)',
+          color: 'rgb(var(--foreground-rgb) / 0.25)',
           textAlign: 'center',
           maxWidth: 280,
           lineHeight: 1.6,
@@ -185,8 +185,8 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
       transition={{ duration: 0.18, delay: Math.min(index * 0.03, 0.5) }}
       style={{
         position: 'relative',
-        background: '#111827',
-        border: '1px solid rgba(255,255,255,0.05)',
+        background: 'var(--card)',
+        border: '1px solid rgb(var(--foreground-rgb) / 0.05)',
         borderRadius: 10,
         padding: '14px 16px',
         transition: 'border-color 0.15s',
@@ -195,10 +195,10 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
         gap: 8,
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'
+        e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.12)'
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'
+        e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.05)'
       }}
     >
       {/* Top row: dot + name + source badge */}
@@ -212,7 +212,15 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
             flexShrink: 0,
           }}
         />
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#E8E8E8', flex: 1, minWidth: 0 }}>
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--foreground)',
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
           {skill.name}
         </span>
         <span
@@ -236,7 +244,7 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
       <div
         style={{
           fontSize: 12,
-          color: 'rgba(232,232,232,0.55)',
+          color: 'rgb(var(--foreground-rgb) / 0.55)',
           lineHeight: 1.5,
           display: '-webkit-box',
           WebkitLineClamp: 2,
@@ -254,7 +262,7 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
             flex: 1,
             height: 3,
             borderRadius: 2,
-            background: 'rgba(255,255,255,0.06)',
+            background: 'rgb(var(--foreground-rgb) / 0.06)',
             overflow: 'hidden',
           }}
         >
@@ -268,7 +276,9 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
             }}
           />
         </div>
-        <span style={{ fontSize: 10, color: 'rgba(232,232,232,0.35)', whiteSpace: 'nowrap' }}>
+        <span
+          style={{ fontSize: 10, color: 'rgb(var(--foreground-rgb) / 0.35)', whiteSpace: 'nowrap' }}
+        >
           {skill.trustScore}%
         </span>
       </div>
@@ -278,7 +288,7 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
         <span
           style={{
             fontSize: 10,
-            color: 'rgba(232,232,232,0.35)',
+            color: 'rgb(var(--foreground-rgb) / 0.35)',
             flex: 1,
             minWidth: 0,
             overflow: 'hidden',
@@ -288,7 +298,9 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
         >
           {skill.author}
           {skill.version && (
-            <span style={{ marginLeft: 6, color: 'rgba(232,232,232,0.25)' }}>v{skill.version}</span>
+            <span style={{ marginLeft: 6, color: 'rgb(var(--foreground-rgb) / 0.25)' }}>
+              v{skill.version}
+            </span>
           )}
         </span>
         {agentCount > 0 && (
@@ -300,18 +312,18 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
               border: 'none',
               padding: 0,
               fontSize: 10,
-              color: 'rgba(52,211,153,0.65)',
+              color: 'rgb(var(--mint-rgb) / 0.65)',
               cursor: 'pointer',
               whiteSpace: 'nowrap',
               textDecoration: 'none',
               transition: 'color 0.15s',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'rgba(52,211,153,0.95)'
+              e.currentTarget.style.color = 'rgb(var(--mint-rgb) / 0.95)'
               e.currentTarget.style.textDecoration = 'underline'
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'rgba(52,211,153,0.65)'
+              e.currentTarget.style.color = 'rgb(var(--mint-rgb) / 0.65)'
               e.currentTarget.style.textDecoration = 'none'
             }}
           >
@@ -324,9 +336,9 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
             setShowPicker((v) => !v)
           }}
           style={{
-            background: 'rgba(52,211,153,0.15)',
-            border: '1px solid rgba(52,211,153,0.35)',
-            color: '#34D399',
+            background: 'rgb(var(--mint-rgb) / 0.15)',
+            border: '1px solid rgb(var(--mint-rgb) / 0.35)',
+            color: 'var(--mint)',
             fontSize: 11,
             fontWeight: 600,
             padding: '4px 12px',
@@ -336,10 +348,10 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
             whiteSpace: 'nowrap',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(52,211,153,0.25)'
+            e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.25)'
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(52,211,153,0.15)'
+            e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.15)'
           }}
         >
           Install
@@ -363,7 +375,7 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
 // ─── Source filter entries ───────────────────────────────────────────────────
 
 const SOURCE_ENTRIES: { key: TemplateSource | 'all'; label: string; color: string }[] = [
-  { key: 'all', label: 'All', color: '#E8E8E8' },
+  { key: 'all', label: 'All', color: 'var(--foreground)' },
   { key: 'clawboo', label: SOURCE_META.clawboo.label, color: SOURCE_META.clawboo.color },
   {
     key: 'agency-agents',
@@ -393,8 +405,8 @@ const AGENT_DOMAIN_META: Record<AgentDomain, { label: string; color: string }> =
   specialized: { label: 'Specialized', color: '#64748B' },
   support: { label: 'Support', color: '#14B8A6' },
   testing: { label: 'Testing', color: '#EAB308' },
-  openclaw: { label: 'OpenClaw', color: '#E94560' },
-  clawboo: { label: 'Clawboo', color: '#34D399' },
+  openclaw: { label: 'OpenClaw', color: 'var(--primary)' },
+  clawboo: { label: 'Clawboo', color: 'var(--mint)' },
 }
 
 // ─── MarketplacePanel ────────────────────────────────────────────────────────
@@ -530,9 +542,11 @@ export function MarketplacePanel() {
         key={tab}
         onClick={() => setMarketplaceTab(tab)}
         style={{
-          background: active ? 'rgba(52,211,153,0.15)' : 'transparent',
-          border: active ? '1px solid rgba(52,211,153,0.35)' : '1px solid rgba(255,255,255,0.06)',
-          color: active ? '#34D399' : 'rgba(232,232,232,0.45)',
+          background: active ? 'rgb(var(--mint-rgb) / 0.15)' : 'transparent',
+          border: active
+            ? '1px solid rgb(var(--mint-rgb) / 0.35)'
+            : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+          color: active ? 'var(--mint)' : 'rgb(var(--foreground-rgb) / 0.45)',
           borderRadius: 12,
           padding: '2px 10px',
           fontSize: 11,
@@ -549,7 +563,12 @@ export function MarketplacePanel() {
 
   return (
     <div
-      style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#0A0E1A' }}
+      style={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--background)',
+      }}
     >
       {/* Toolbar */}
       <div
@@ -560,11 +579,13 @@ export function MarketplacePanel() {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '0 12px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#E8E8E8' }}>Marketplace</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>
+            Marketplace
+          </span>
 
           {/* Tab toggle */}
           <div style={{ display: 'flex', gap: 4 }}>
@@ -580,10 +601,10 @@ export function MarketplacePanel() {
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as 'name' | 'trust' | 'category')}
             style={{
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgb(var(--foreground-rgb) / 0.04)',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
               borderRadius: 6,
-              color: 'rgba(232,232,232,0.6)',
+              color: 'rgb(var(--foreground-rgb) / 0.6)',
               fontSize: 11,
               padding: '3px 8px',
               cursor: 'pointer',
@@ -605,7 +626,7 @@ export function MarketplacePanel() {
           display: 'flex',
           flexDirection: 'column',
           gap: 8,
-          borderBottom: '1px solid rgba(255,255,255,0.04)',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.04)',
         }}
       >
         {isTeamsTab && (
@@ -619,7 +640,7 @@ export function MarketplacePanel() {
                   left: 10,
                   top: '50%',
                   transform: 'translateY(-50%)',
-                  color: 'rgba(232,232,232,0.3)',
+                  color: 'rgb(var(--foreground-rgb) / 0.3)',
                   pointerEvents: 'none',
                 }}
               />
@@ -631,10 +652,10 @@ export function MarketplacePanel() {
                 style={{
                   width: '100%',
                   padding: '6px 10px 6px 32px',
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  background: 'rgb(var(--foreground-rgb) / 0.04)',
+                  border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
                   borderRadius: 6,
-                  color: '#E8E8E8',
+                  color: 'var(--foreground)',
                   fontSize: 12,
                   outline: 'none',
                 }}
@@ -647,12 +668,17 @@ export function MarketplacePanel() {
                 onClick={() => setTeamCategoryFilter('all')}
                 style={{
                   background:
-                    teamCategoryFilter === 'all' ? 'rgba(232,232,232,0.12)' : 'transparent',
+                    teamCategoryFilter === 'all'
+                      ? 'rgb(var(--foreground-rgb) / 0.12)'
+                      : 'transparent',
                   border:
                     teamCategoryFilter === 'all'
-                      ? '1px solid rgba(232,232,232,0.3)'
-                      : '1px solid rgba(255,255,255,0.06)',
-                  color: teamCategoryFilter === 'all' ? '#E8E8E8' : 'rgba(232,232,232,0.45)',
+                      ? '1px solid rgb(var(--foreground-rgb) / 0.3)'
+                      : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                  color:
+                    teamCategoryFilter === 'all'
+                      ? 'var(--foreground)'
+                      : 'rgb(var(--foreground-rgb) / 0.45)',
                   borderRadius: 12,
                   padding: '3px 10px',
                   fontSize: 11,
@@ -674,8 +700,8 @@ export function MarketplacePanel() {
                       background: isActive ? `${cat.color}20` : 'transparent',
                       border: isActive
                         ? `1px solid ${cat.color}55`
-                        : '1px solid rgba(255,255,255,0.06)',
-                      color: isActive ? cat.color : 'rgba(232,232,232,0.45)',
+                        : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                      color: isActive ? cat.color : 'rgb(var(--foreground-rgb) / 0.45)',
                       borderRadius: 12,
                       padding: '3px 10px',
                       fontSize: 11,
@@ -706,8 +732,8 @@ export function MarketplacePanel() {
                       background: isActive ? `${src.color}20` : 'transparent',
                       border: isActive
                         ? `1px solid ${src.color}55`
-                        : '1px solid rgba(255,255,255,0.06)',
-                      color: isActive ? src.color : 'rgba(232,232,232,0.45)',
+                        : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                      color: isActive ? src.color : 'rgb(var(--foreground-rgb) / 0.45)',
                       borderRadius: 12,
                       padding: '3px 10px',
                       fontSize: 11,
@@ -747,7 +773,7 @@ export function MarketplacePanel() {
                   left: 10,
                   top: '50%',
                   transform: 'translateY(-50%)',
-                  color: 'rgba(232,232,232,0.3)',
+                  color: 'rgb(var(--foreground-rgb) / 0.3)',
                   pointerEvents: 'none',
                 }}
               />
@@ -759,10 +785,10 @@ export function MarketplacePanel() {
                 style={{
                   width: '100%',
                   padding: '6px 10px 6px 32px',
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  background: 'rgb(var(--foreground-rgb) / 0.04)',
+                  border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
                   borderRadius: 6,
-                  color: '#E8E8E8',
+                  color: 'var(--foreground)',
                   fontSize: 12,
                   outline: 'none',
                 }}
@@ -775,12 +801,17 @@ export function MarketplacePanel() {
                 onClick={() => setAgentDomainFilter('all')}
                 style={{
                   background:
-                    agentDomainFilter === 'all' ? 'rgba(232,232,232,0.12)' : 'transparent',
+                    agentDomainFilter === 'all'
+                      ? 'rgb(var(--foreground-rgb) / 0.12)'
+                      : 'transparent',
                   border:
                     agentDomainFilter === 'all'
-                      ? '1px solid rgba(232,232,232,0.3)'
-                      : '1px solid rgba(255,255,255,0.06)',
-                  color: agentDomainFilter === 'all' ? '#E8E8E8' : 'rgba(232,232,232,0.45)',
+                      ? '1px solid rgb(var(--foreground-rgb) / 0.3)'
+                      : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                  color:
+                    agentDomainFilter === 'all'
+                      ? 'var(--foreground)'
+                      : 'rgb(var(--foreground-rgb) / 0.45)',
                   borderRadius: 12,
                   padding: '3px 10px',
                   fontSize: 11,
@@ -803,8 +834,8 @@ export function MarketplacePanel() {
                       background: isActive ? `${meta.color}20` : 'transparent',
                       border: isActive
                         ? `1px solid ${meta.color}55`
-                        : '1px solid rgba(255,255,255,0.06)',
-                      color: isActive ? meta.color : 'rgba(232,232,232,0.45)',
+                        : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                      color: isActive ? meta.color : 'rgb(var(--foreground-rgb) / 0.45)',
                       borderRadius: 12,
                       padding: '3px 10px',
                       fontSize: 11,
@@ -835,8 +866,8 @@ export function MarketplacePanel() {
                       background: isActive ? `${src.color}20` : 'transparent',
                       border: isActive
                         ? `1px solid ${src.color}55`
-                        : '1px solid rgba(255,255,255,0.06)',
-                      color: isActive ? src.color : 'rgba(232,232,232,0.45)',
+                        : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                      color: isActive ? src.color : 'rgb(var(--foreground-rgb) / 0.45)',
                       borderRadius: 12,
                       padding: '3px 10px',
                       fontSize: 11,
@@ -876,7 +907,7 @@ export function MarketplacePanel() {
                   left: 10,
                   top: '50%',
                   transform: 'translateY(-50%)',
-                  color: 'rgba(232,232,232,0.3)',
+                  color: 'rgb(var(--foreground-rgb) / 0.3)',
                   pointerEvents: 'none',
                 }}
               />
@@ -888,10 +919,10 @@ export function MarketplacePanel() {
                 style={{
                   width: '100%',
                   padding: '6px 10px 6px 32px',
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  background: 'rgb(var(--foreground-rgb) / 0.04)',
+                  border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
                   borderRadius: 6,
-                  color: '#E8E8E8',
+                  color: 'var(--foreground)',
                   fontSize: 12,
                   outline: 'none',
                 }}
@@ -911,8 +942,8 @@ export function MarketplacePanel() {
                       background: isActive ? `${color}20` : 'transparent',
                       border: isActive
                         ? `1px solid ${color}55`
-                        : '1px solid rgba(255,255,255,0.06)',
-                      color: isActive ? color : 'rgba(232,232,232,0.45)',
+                        : '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                      color: isActive ? color : 'rgb(var(--foreground-rgb) / 0.45)',
                       borderRadius: 12,
                       padding: '3px 10px',
                       fontSize: 11,

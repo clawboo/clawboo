@@ -35,8 +35,8 @@ export function AgentPickerDropdown({ onSelect, onClose, style }: AgentPickerDro
       style={{
         position: 'absolute',
         zIndex: 50,
-        background: '#111827',
-        border: '1px solid rgba(255,255,255,0.1)',
+        background: 'var(--card)',
+        border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
         borderRadius: 8,
         padding: '4px 0',
         minWidth: 140,
@@ -45,7 +45,9 @@ export function AgentPickerDropdown({ onSelect, onClose, style }: AgentPickerDro
       }}
     >
       {agents.length === 0 ? (
-        <div style={{ padding: '6px 12px', fontSize: 11, color: 'rgba(232,232,232,0.4)' }}>
+        <div
+          style={{ padding: '6px 12px', fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.4)' }}
+        >
           No agents
         </div>
       ) : (
@@ -62,14 +64,14 @@ export function AgentPickerDropdown({ onSelect, onClose, style }: AgentPickerDro
               padding: '6px 12px',
               background: 'transparent',
               border: 'none',
-              color: '#E8E8E8',
+              color: 'var(--foreground)',
               fontSize: 12,
               cursor: 'pointer',
               textAlign: 'left',
               whiteSpace: 'nowrap',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+              e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent'

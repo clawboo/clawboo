@@ -149,7 +149,7 @@ export function DetectStep({
       ]
 
   return (
-    <div className="w-full max-w-[420px] rounded-2xl border border-white/8 bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
+    <div className="w-full max-w-[420px] rounded-2xl border border-border bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
       <div className="p-8">
         <StepIndicator current="setup" />
 
@@ -181,7 +181,7 @@ export function DetectStep({
                 className="flex items-center gap-3"
               >
                 {/* Icon */}
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/5">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-foreground/5">
                   <AnimatePresence mode="wait">
                     {showLoader ? (
                       <motion.div
@@ -304,7 +304,7 @@ export function DetectStep({
               <button
                 type="button"
                 onClick={handleCta}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-white shadow-sm transition hover:brightness-110 active:scale-[0.98]"
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98]"
               >
                 {ctaLabel}
               </button>

@@ -13,9 +13,9 @@ import type { SkillNodeData, SkillCategory } from '../types'
 
 const CATEGORY: Record<SkillCategory, { color: string; icon: string }> = {
   data: { color: '#3B82F6', icon: '📊' },
-  comm: { color: '#34D399', icon: '💬' },
+  comm: { color: 'var(--mint)', icon: '💬' },
   code: { color: '#F97316', icon: '⚡' },
-  file: { color: '#FBBF24', icon: '📄' },
+  file: { color: 'var(--amber)', icon: '📄' },
   web: { color: '#A855F7', icon: '🌐' },
   other: { color: '#6B7280', icon: '🔧' },
 }
@@ -26,7 +26,7 @@ const CATEGORY: Record<SkillCategory, { color: string; icon: string }> = {
 // signals elevated status while staying clearly distinct from any of the
 // regular category colors. Reused by `Description tooltip` and the
 // `name` color below.
-const LEADERSHIP_VISUAL = { color: '#FBBF24', icon: '🧭' } as const
+const LEADERSHIP_VISUAL = { color: 'var(--amber)', icon: '🧭' } as const
 
 const CIRCLE = 38 // circle diameter in px (reduced from 52 — skills feel subordinate to Boo nodes)
 
@@ -34,7 +34,7 @@ const CIRCLE = 38 // circle diameter in px (reduced from 52 — skills feel subo
 
 const handleStyle = {
   background: 'transparent',
-  border: '1.5px solid rgba(255,255,255,0.2)',
+  border: '1.5px solid rgb(var(--foreground-rgb) / 0.2)',
   width: 7,
   height: 7,
 }
@@ -119,7 +119,7 @@ export const SkillNode = memo(function SkillNode({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: `0 0 14px ${color}28, inset 0 1px 0 rgba(255,255,255,0.06)`,
+              boxShadow: `0 0 14px ${color}28, inset 0 1px 0 rgb(var(--foreground-rgb) / 0.06)`,
             }}
           >
             <span style={{ fontSize: 16, lineHeight: 1, userSelect: 'none' }}>{icon}</span>
@@ -141,8 +141,8 @@ export const SkillNode = memo(function SkillNode({
                 position: 'absolute',
                 top: -6,
                 right: -14,
-                background: '#34D399',
-                color: '#0A0E1A',
+                background: 'var(--mint)',
+                color: 'var(--background)',
                 border: 'none',
                 borderRadius: 4,
                 fontSize: 9,

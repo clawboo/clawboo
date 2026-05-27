@@ -66,7 +66,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
         style={{
           position: 'fixed',
           inset: 0,
-          background: 'rgba(0,0,0,0.6)',
+          background: 'rgb(0 0 0 / 0.6)',
           zIndex: 60,
           display: 'flex',
           alignItems: 'center',
@@ -85,8 +85,8 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
             maxWidth: 520,
             maxHeight: '80vh',
             overflowY: 'auto',
-            background: '#111827',
-            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'var(--card)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
             borderRadius: 12,
             padding: 24,
             position: 'relative',
@@ -101,7 +101,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
               right: 16,
               background: 'transparent',
               border: 'none',
-              color: 'rgba(232,232,232,0.45)',
+              color: 'rgb(var(--foreground-rgb) / 0.45)',
               cursor: 'pointer',
               padding: 4,
             }}
@@ -127,7 +127,9 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
               {template.emoji}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: '#E8E8E8' }}>{template.name}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--foreground)' }}>
+                {template.name}
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
                 <span
                   style={{
@@ -143,7 +145,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                 >
                   {sourceMeta.label}
                 </span>
-                <span style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)' }}>
+                <span style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
                   {getCategoryLabel(template.category)}
                 </span>
               </div>
@@ -154,7 +156,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
           <div
             style={{
               fontSize: 13,
-              color: 'rgba(232,232,232,0.65)',
+              color: 'rgb(var(--foreground-rgb) / 0.65)',
               lineHeight: 1.6,
               marginBottom: 16,
             }}
@@ -171,7 +173,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                 rel="noopener noreferrer"
                 style={{
                   fontSize: 11,
-                  color: 'rgba(52,211,153,0.7)',
+                  color: 'rgb(var(--mint-rgb) / 0.7)',
                   textDecoration: 'none',
                 }}
               >
@@ -187,7 +189,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                 style={{
                   fontSize: 12,
                   fontWeight: 600,
-                  color: 'rgba(232,232,232,0.55)',
+                  color: 'rgb(var(--foreground-rgb) / 0.55)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                   marginBottom: 8,
@@ -198,11 +200,11 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
               <div
                 style={{
                   fontSize: 12,
-                  color: 'rgba(232,232,232,0.6)',
+                  color: 'rgb(var(--foreground-rgb) / 0.6)',
                   lineHeight: 1.6,
                   whiteSpace: 'pre-wrap',
-                  background: 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.04)',
+                  background: 'rgb(var(--foreground-rgb) / 0.02)',
+                  border: '1px solid rgb(var(--foreground-rgb) / 0.04)',
                   borderRadius: 8,
                   padding: '10px 12px',
                 }}
@@ -218,7 +220,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                       marginTop: 6,
                       background: 'transparent',
                       border: 'none',
-                      color: 'rgba(52,211,153,0.75)',
+                      color: 'rgb(var(--mint-rgb) / 0.75)',
                       fontSize: 11,
                       cursor: 'pointer',
                       padding: 0,
@@ -237,7 +239,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
               style={{
                 fontSize: 12,
                 fontWeight: 600,
-                color: 'rgba(232,232,232,0.55)',
+                color: 'rgb(var(--foreground-rgb) / 0.55)',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em',
                 marginBottom: 10,
@@ -256,8 +258,8 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                   <div
                     key={agent.id}
                     style={{
-                      background: 'rgba(255,255,255,0.02)',
-                      border: '1px solid rgba(255,255,255,0.04)',
+                      background: 'rgb(var(--foreground-rgb) / 0.02)',
+                      border: '1px solid rgb(var(--foreground-rgb) / 0.04)',
                       borderRadius: 8,
                       padding: '10px 12px',
                     }}
@@ -266,10 +268,10 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <BooAvatar seed={agent.name} size={32} />
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#E8E8E8' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
                           {agent.name}
                         </div>
-                        <div style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)' }}>
+                        <div style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.45)' }}>
                           {agent.role}
                         </div>
                       </div>
@@ -281,7 +283,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                         <div
                           style={{
                             fontSize: 10,
-                            color: 'rgba(232,232,232,0.35)',
+                            color: 'rgb(var(--foreground-rgb) / 0.35)',
                             marginBottom: 4,
                           }}
                         >
@@ -295,9 +297,9 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                                 fontSize: 9,
                                 padding: '1px 6px',
                                 borderRadius: 10,
-                                background: 'rgba(52,211,153,0.08)',
-                                border: '1px solid rgba(52,211,153,0.15)',
-                                color: 'rgba(52,211,153,0.65)',
+                                background: 'rgb(var(--mint-rgb) / 0.08)',
+                                border: '1px solid rgb(var(--mint-rgb) / 0.15)',
+                                color: 'rgb(var(--mint-rgb) / 0.65)',
                                 whiteSpace: 'nowrap',
                               }}
                             >
@@ -311,11 +313,11 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                     {/* Routing */}
                     {mentions.length > 0 && (
                       <div style={{ marginTop: 6 }}>
-                        <div style={{ fontSize: 10, color: 'rgba(232,232,232,0.35)' }}>
+                        <div style={{ fontSize: 10, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
                           Routes to:{' '}
                           {mentions.map((m, i) => (
                             <span key={m}>
-                              <span style={{ color: 'rgba(233,69,96,0.65)' }}>@{m}</span>
+                              <span style={{ color: 'rgb(var(--primary-rgb) / 0.65)' }}>@{m}</span>
                               {i < mentions.length - 1 ? ', ' : ''}
                             </span>
                           ))}
@@ -338,9 +340,9 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                     fontSize: 9,
                     padding: '1px 6px',
                     borderRadius: 10,
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                    color: 'rgba(232,232,232,0.35)',
+                    background: 'rgb(var(--foreground-rgb) / 0.04)',
+                    border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                    color: 'rgb(var(--foreground-rgb) / 0.35)',
                     whiteSpace: 'nowrap',
                   }}
                 >
@@ -353,7 +355,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
           {/* Footer */}
           <div
             style={{
-              borderTop: '1px solid rgba(255,255,255,0.06)',
+              borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)',
               paddingTop: 16,
               display: 'flex',
               justifyContent: 'flex-end',
@@ -364,8 +366,8 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
               onClick={onClose}
               style={{
                 background: 'transparent',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: 'rgba(232,232,232,0.55)',
+                border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+                color: 'rgb(var(--foreground-rgb) / 0.55)',
                 fontSize: 12,
                 fontWeight: 500,
                 padding: '6px 16px',
@@ -374,10 +376,10 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                 transition: 'all 0.15s',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)'
+                e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.18)'
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
+                e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.08)'
               }}
             >
               Close

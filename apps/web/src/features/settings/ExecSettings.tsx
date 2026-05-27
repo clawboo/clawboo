@@ -119,12 +119,12 @@ export function ExecSettings({ agentId }: { agentId: string }) {
           marginBottom: 12,
         }}
       >
-        <Shield style={{ width: 14, height: 14, color: '#FBBF24' }} strokeWidth={2} />
+        <Shield style={{ width: 14, height: 14, color: 'var(--amber)' }} strokeWidth={2} />
         <span
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: '#E8E8E8',
+            color: 'var(--foreground)',
           }}
         >
           Execution Permissions
@@ -134,7 +134,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
       <p
         style={{
           fontSize: 10,
-          color: 'rgba(232,232,232,0.35)',
+          color: 'rgb(var(--foreground-rgb) / 0.35)',
           lineHeight: 1.5,
           marginBottom: 14,
         }}
@@ -149,7 +149,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
             display: 'block',
             fontSize: 11,
             fontWeight: 500,
-            color: 'rgba(232,232,232,0.55)',
+            color: 'rgb(var(--foreground-rgb) / 0.55)',
             marginBottom: 6,
           }}
         >
@@ -163,9 +163,9 @@ export function ExecSettings({ agentId }: { agentId: string }) {
               width: '100%',
               padding: '8px 32px 8px 10px',
               borderRadius: 6,
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: '#0A0E1A',
-              color: '#E8E8E8',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+              background: 'var(--background)',
+              color: 'var(--foreground)',
               fontSize: 12,
               fontWeight: 500,
               fontFamily: 'inherit',
@@ -188,7 +188,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
               transform: 'translateY(-50%)',
               width: 14,
               height: 14,
-              color: 'rgba(232,232,232,0.4)',
+              color: 'rgb(var(--foreground-rgb) / 0.4)',
               pointerEvents: 'none',
             }}
             strokeWidth={2}
@@ -198,7 +198,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
           style={{
             marginTop: 4,
             fontSize: 10,
-            color: 'rgba(232,232,232,0.3)',
+            color: 'rgb(var(--foreground-rgb) / 0.3)',
             lineHeight: 1.4,
           }}
         >

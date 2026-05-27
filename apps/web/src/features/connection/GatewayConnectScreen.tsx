@@ -177,7 +177,7 @@ export function GatewayConnectScreen({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 8, scale: 0.97 }}
         transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-        className="w-full max-w-[360px] rounded-2xl border border-white/8 bg-surface p-8 shadow-[0_24px_80px_rgba(0,0,0,0.6)]"
+        className="w-full max-w-[360px] rounded-2xl border border-border bg-surface p-8 shadow-[0_24px_80px_rgba(0,0,0,0.6)]"
       >
         {/* ── Logo / header ── */}
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
@@ -222,7 +222,7 @@ export function GatewayConnectScreen({
                 autoComplete="off"
                 disabled={connecting}
                 data-testid="gateway-url-input"
-                className="h-10 rounded-lg border border-white/10 bg-background px-3 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
+                className="h-10 rounded-lg border border-border bg-background px-3 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
               />
               {isLocal && (
                 <p className="font-mono text-[10px] text-mint/60">Local gateway detected</p>
@@ -255,7 +255,7 @@ export function GatewayConnectScreen({
                   autoComplete="current-password"
                   disabled={connecting}
                   data-testid="gateway-token-input"
-                  className="h-10 w-full rounded-lg border border-white/10 bg-background px-3 pr-10 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
+                  className="h-10 w-full rounded-lg border border-border bg-background px-3 pr-10 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
                 />
                 <button
                   type="button"
@@ -304,7 +304,7 @@ export function GatewayConnectScreen({
               onClick={() => void handleConnect()}
               disabled={connectDisabled}
               data-testid="gateway-connect-button"
-              className="mt-1 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-1 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {connecting ? (
                 <>

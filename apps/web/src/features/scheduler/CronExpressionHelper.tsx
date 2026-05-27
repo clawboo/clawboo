@@ -19,14 +19,15 @@ export function CronExpressionHelper({ expression, className }: CronExpressionHe
         className={className}
         style={{
           fontSize: 11,
-          color: 'rgba(232,232,232,0.35)',
+          color: 'rgb(var(--foreground-rgb) / 0.35)',
           marginTop: 4,
           fontFamily: 'var(--font-geist-mono, monospace)',
         }}
       >
-        e.g. <span style={{ color: 'rgba(232,232,232,0.55)' }}>*/5 * * * *</span> = every 5 minutes
-        &nbsp;·&nbsp;
-        <span style={{ color: 'rgba(232,232,232,0.55)' }}>0 9 * * 1-5</span> = weekdays at 09:00
+        e.g. <span style={{ color: 'rgb(var(--foreground-rgb) / 0.55)' }}>*/5 * * * *</span> = every
+        5 minutes &nbsp;·&nbsp;
+        <span style={{ color: 'rgb(var(--foreground-rgb) / 0.55)' }}>0 9 * * 1-5</span> = weekdays
+        at 09:00
       </p>
     )
   }
@@ -38,7 +39,7 @@ export function CronExpressionHelper({ expression, className }: CronExpressionHe
         fontSize: 11,
         marginTop: 4,
         fontFamily: 'var(--font-geist-mono, monospace)',
-        color: result.isValid ? '#34D399' : '#E94560',
+        color: result.isValid ? 'var(--mint)' : 'var(--primary)',
         display: 'flex',
         alignItems: 'center',
         gap: 5,
@@ -50,7 +51,7 @@ export function CronExpressionHelper({ expression, className }: CronExpressionHe
           width: 6,
           height: 6,
           borderRadius: '50%',
-          background: result.isValid ? '#34D399' : '#E94560',
+          background: result.isValid ? 'var(--mint)' : 'var(--primary)',
           flexShrink: 0,
         }}
       />

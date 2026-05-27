@@ -614,7 +614,7 @@ export function GroupChatPanel({
     <div data-testid="group-chat-panel" className="flex h-full flex-col">
       {/* Header is owned by `GroupChatViewHeader` when embedded. */}
       {!embedded && (
-        <div className="flex items-center gap-3 border-b border-white/8 px-4 py-3">
+        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
           {team && (
             <span
               className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-[16px]"

@@ -10,6 +10,7 @@ import { useApprovalsStore } from '@/stores/approvals'
 import { CreateBooModal } from '@/features/fleet/CreateBooModal'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
+import { ThemeToggle } from '@/features/theme/ThemeToggle'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -29,14 +30,11 @@ function AgentAvatar({ agent, selected }: { agent: AgentState; selected: boolean
   return (
     <span
       aria-hidden
-      className="shrink-0 transition-all duration-200"
+      className="inline-flex shrink-0 rounded-lg bg-background transition-all duration-200"
       style={{
-        display: 'inline-flex',
-        borderRadius: 8,
         boxShadow: selected
-          ? '0 0 0 2px rgba(233,69,96,0.55)'
-          : '0 0 0 1.5px rgba(255,255,255,0.06)',
-        background: '#0A0E1A',
+          ? '0 0 0 2px rgb(var(--primary-rgb) / 0.55)'
+          : '0 0 0 1.5px var(--border)',
       }}
     >
       <AgentBooAvatar agentId={agent.id} size={32} />
@@ -53,7 +51,7 @@ const STATUS_CONFIG: Record<
   idle: {
     label: 'Idle',
     dot: 'bg-secondary',
-    badge: 'bg-surface text-secondary border border-white/5',
+    badge: 'bg-surface text-secondary border border-border',
     pulse: false,
   },
   running: {
@@ -71,7 +69,7 @@ const STATUS_CONFIG: Record<
   sleeping: {
     label: 'Sleeping',
     dot: 'bg-secondary/40',
-    badge: 'bg-surface text-secondary/50 border border-white/5',
+    badge: 'bg-surface text-secondary/50 border border-border',
     pulse: false,
   },
 }
@@ -124,7 +122,7 @@ function AgentRow({
       className={[
         'group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2',
         'transition-colors duration-150',
-        selected ? 'bg-white/6 shadow-sm' : 'hover:bg-white/4',
+        selected ? 'bg-foreground/[0.06] shadow-sm' : 'hover:bg-foreground/[0.04]',
       ].join(' ')}
     >
       <button
@@ -281,10 +279,9 @@ function GroupChatRow({
   const visibleCount = willOverflow ? GROUP_CHAT_MAX_VISIBLE_WITH_OVERFLOW : ordered.length
   const visible = ordered.slice(0, visibleCount)
   const overflow = Math.max(0, ordered.length - visibleCount)
-  // Ring color is fixed in the surface color so it acts purely as a
-  // separator between overlapping avatars (visually invisible against the
-  // surface). It does NOT switch to the team accent on selection.
-  const ringColor = '#111827'
+  // Ring color reads from the live `--surface` CSS variable so it stays
+  // invisible against the column background in both light and dark modes.
+  const ringColor = 'var(--surface)'
 
   const aggregateStatus = aggregateTeamStatus(ordered)
 
@@ -300,7 +297,7 @@ function GroupChatRow({
         // same internal vertical rhythm.
         'group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2',
         'transition-colors duration-150',
-        isActive ? 'bg-white/8 shadow-sm' : 'hover:bg-white/4',
+        isActive ? 'bg-foreground/[0.08] shadow-sm' : 'hover:bg-foreground/[0.04]',
       ].join(' ')}
     >
       {/* Team photo — overlapping Boo avatars on the left. The container
@@ -323,8 +320,8 @@ function GroupChatRow({
               // Earlier (leftmost) avatars sit ON TOP — the leader is at
               // index 0, so they dominate the front of the team photo.
               zIndex: visible.length - i,
-              boxShadow: '0 1px 2px rgba(0,0,0,0.4)',
-              background: '#0A0E1A',
+              boxShadow: '0 1px 2px rgb(0 0 0 / 0.25)',
+              background: 'var(--background)',
             }}
           >
             <AgentBooAvatar agentId={agent.id} size={GROUP_CHAT_AVATAR_SIZE} />
@@ -333,20 +330,13 @@ function GroupChatRow({
         {overflow > 0 && (
           <div
             title={`${overflow} more ${overflow === 1 ? 'agent' : 'agents'}`}
+            className="flex shrink-0 items-center justify-center bg-muted text-[11px] font-bold text-foreground/75"
             style={{
               marginLeft: -(GROUP_CHAT_AVATAR_SIZE - GROUP_CHAT_STRIDE),
               width: GROUP_CHAT_AVATAR_SIZE,
               height: GROUP_CHAT_AVATAR_SIZE,
               borderRadius: '50%',
               border: `2px solid ${ringColor}`,
-              background: '#1f2937',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'rgba(232,232,232,0.75)',
-              flexShrink: 0,
               zIndex: 0,
               fontFamily: 'var(--font-mono)',
               letterSpacing: '0.02em',
@@ -498,7 +488,7 @@ export function AgentListColumn() {
 
       {/* Search */}
       <div className="px-3 pb-2">
-        <label className="flex items-center gap-2 rounded-md border border-white/8 bg-surface px-2.5 py-1.5 focus-within:border-white/20 focus-within:ring-1 focus-within:ring-ring/30">
+        <label className="flex items-center gap-2 rounded-md border border-border bg-input px-2.5 py-1.5 focus-within:border-foreground/20 focus-within:ring-1 focus-within:ring-ring/30">
           <Search className="h-3.5 w-3.5 shrink-0 text-secondary" strokeWidth={2} />
           <input
             type="search"
@@ -527,7 +517,7 @@ export function AgentListColumn() {
               isActive={viewMode.type === 'groupChat' && viewMode.teamId === selectedTeam.id}
               onClick={() => useViewStore.getState().openGroupChat(selectedTeam.id)}
             />
-            <div className="mx-2.5 my-1 border-t border-white/6" />
+            <div className="mx-2.5 my-1 border-t border-border" />
           </>
         )}
         <AnimatePresence initial={false}>
@@ -595,7 +585,7 @@ export function AgentListColumn() {
             type="button"
             data-testid="fleet-create-boo"
             onClick={() => setShowCreateModal(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-white/12 px-2 py-1.5 text-[11px] font-medium text-secondary/60 transition-colors hover:border-accent/30 hover:text-accent/60"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-2 py-1.5 text-[11px] font-medium text-secondary/60 transition-colors hover:border-accent/40 hover:text-accent/70"
           >
             <Plus className="h-3.5 w-3.5" strokeWidth={2} />
             Create Boo
@@ -604,7 +594,7 @@ export function AgentListColumn() {
       )}
 
       {/* Divider between Create Boo and nav */}
-      <div className="mx-3 my-2 border-t border-white/6" />
+      <div className="mx-3 my-2 border-t border-border" />
 
       {/* Primary nav — Atlas & Marketplace */}
       <div className="px-2 flex flex-col gap-0.5">
@@ -619,7 +609,7 @@ export function AgentListColumn() {
                 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] font-semibold transition-all duration-150',
                 isActive
                   ? 'bg-accent/12 text-accent'
-                  : 'text-text/85 hover:bg-white/4 hover:text-text',
+                  : 'text-text/85 hover:bg-foreground/[0.04] hover:text-text',
               ].join(' ')}
             >
               <span className="text-[14px]">{item.emoji}</span>
@@ -633,10 +623,10 @@ export function AgentListColumn() {
       </div>
 
       {/* Divider */}
-      <div className="mx-3 my-1.5 border-t border-white/6" />
+      <div className="mx-3 my-1.5 border-t border-border" />
 
       {/* Secondary nav — Approvals, Scheduler, Cost, System */}
-      <div className="px-2 pb-3 flex flex-col gap-0.5">
+      <div className="px-2 flex flex-col gap-0.5">
         {SECONDARY_NAV.map((item) => {
           const isActive = viewMode.type === 'nav' && viewMode.view === item.id
           const badge = item.id === 'approvals' ? pendingApprovals.size : 0
@@ -649,7 +639,7 @@ export function AgentListColumn() {
                 'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150',
                 isActive
                   ? 'bg-accent/12 text-accent'
-                  : 'text-text/70 hover:bg-white/4 hover:text-text/90',
+                  : 'text-text/70 hover:bg-foreground/5 hover:text-text/90',
               ].join(' ')}
             >
               <span className="text-[12px]">{item.emoji}</span>
@@ -662,6 +652,12 @@ export function AgentListColumn() {
             </button>
           )
         })}
+      </div>
+
+      {/* Theme toggle — bottom of nav */}
+      <div className="mx-3 my-1.5 border-t border-border" />
+      <div className="px-2 pb-3">
+        <ThemeToggle />
       </div>
 
       <CreateBooModal

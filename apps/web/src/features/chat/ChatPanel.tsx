@@ -221,7 +221,7 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
   return (
     <div className="flex h-full flex-col" data-testid="chat-panel">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2.5">
           <AgentBooAvatar agentId={agent.id} size={30} />
           <h2
