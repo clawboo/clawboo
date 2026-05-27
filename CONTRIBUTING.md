@@ -135,7 +135,7 @@ No manual `npm publish` needed.
 - **TypeScript strict** — no `any`, no `@ts-ignore`
 - **No breaking changes to migrations** — `drizzle/` files are append-only
 - **Pure policy functions** — `packages/events/src/policy/` must remain side-effect-free and fully unit-testable
-- **Architecture invariants** — see `CLAUDE.md` for the full list (same-origin WS, Bridge→Policy→Handler pipeline, etc.)
+- **Architecture invariants** — Gateway is source of truth (never duplicate locally), same-origin WS proxy, Bridge → Policy → Handler pipeline stays pure, every graph edge maps to real OpenClaw config
 
 ---
 

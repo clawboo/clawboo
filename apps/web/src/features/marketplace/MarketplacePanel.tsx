@@ -48,7 +48,7 @@ const CATEGORY_META: Record<SkillCategory | 'all', { color: string; label: strin
 
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
   verified: { label: 'Verified', color: '#A855F7' },
-  clawhub: { label: 'ClawHub', color: '#3B82F6' },
+  clawhub: { label: 'Clawboo Marketplace', color: '#3B82F6' },
   'skill.sh': { label: 'skill.sh', color: '#34D399' },
   local: { label: 'Local', color: '#6B7280' },
 }

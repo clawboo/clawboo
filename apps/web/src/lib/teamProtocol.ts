@@ -71,7 +71,7 @@ export type BuildTeamContextPreambleParams = {
    * BEFORE the conversation history so the agent always knows who they're
    * talking to. This is the primary delivery mechanism for the user intro
    * because Gateway `agents.files.set('SOUL.md')` is unreliable for
-   * persistence (per CLAUDE.md).
+   * persistence in older runtimes.
    */
   userIntroText?: string
 }
@@ -314,8 +314,9 @@ ${rules}
  * The OLD wake body (`buildTeamWakeMessage` below) asked agents to
  * introduce themselves AND listed teammates as `@AgentName` — both of
  * those triggered a cascade of intros and false-positive delegations
- * (the 11-message "Welcome aboard X" flood in production, CLAUDE.md
- * §"Group Chat Onboarding Gate — Cascade Fix").
+ * (the 11-message "Welcome aboard X" flood seen in production — see
+ * the "Group Chat Onboarding Gate — Cascade Fix" notes in the internal
+ * architecture docs).
  *
  * This replacement says "you're resuming, stay quiet, the next message
  * is the real one". It pairs with the new `### Resuming sessions` rule

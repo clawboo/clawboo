@@ -96,8 +96,8 @@ export async function createAgent(
   // USER/HEARTBEAT/MEMORY) with INVALID_REQUEST `unsupported file ...`. The
   // workspace-resident reference is a "nice-to-have" delivery channel — the
   // actual delivery of team protocol facts happens via the team-context
-  // preamble injected on every group-chat message (see CLAUDE.md → "Hybrid
-  // Agent Knowledge Delivery"). Catching the error here prevents one
+  // preamble injected on every group-chat message (the "Hybrid Agent
+  // Knowledge Delivery" pattern). Catching the error here prevents one
   // rejected file write from aborting the whole team-deploy loop.
   if (files?.clawboo) {
     try {
