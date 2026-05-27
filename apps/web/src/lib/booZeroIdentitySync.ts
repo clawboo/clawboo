@@ -25,8 +25,8 @@
 //      and clicks "Continue to Team Chat", that approval also triggers
 //      the sync (per-team onboarding moment of approval).
 //
-// Best-effort. Gateway `agents.files.set('SOUL.md')` is documented as
-// unreliable for persistence (see CLAUDE.md). When it works, great; when
+// Best-effort. Gateway `agents.files.set('SOUL.md')` is known to be
+// unreliable for persistence in older runtimes. When it works, great; when
 // it doesn't, the per-turn rules block keeps the identity anchored anyway.
 
 import type { GatewayClientLike } from '@clawboo/gateway-client'
