@@ -151,30 +151,48 @@ export function WelcomeState() {
           'radial-gradient(ellipse 80% 60% at 50% 40%, var(--welcome-glow) 0%, transparent 70%)',
       }}
     >
-      <motion.img
-        src="/logo.svg"
-        alt="Clawboo"
-        width={72}
-        height={66}
-        className="opacity-40"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 0.4, y: 0 }}
-        transition={{ duration: 0.4 }}
-      />
+      <motion.div
+        initial={{ opacity: 0, y: 12, scale: 0.92 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ type: 'spring', stiffness: 200, damping: 22 }}
+      >
+        <motion.img
+          src="/logo.svg"
+          alt="Clawboo"
+          width={96}
+          height={88}
+          animate={{ y: [0, -4, 0] }}
+          transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+          style={{
+            opacity: 0.85,
+            filter: 'drop-shadow(0 12px 32px rgb(var(--primary-rgb) / 0.25))',
+          }}
+        />
+      </motion.div>
 
-      <div>
-        <h2
-          className="m-0 text-[18px] font-bold text-foreground/80"
-          style={{ fontFamily: 'var(--font-display)' }}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1, duration: 0.4, ease: 'easeOut' }}
+      >
+        <h1
+          className="m-0 text-foreground"
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: 36,
+            fontWeight: 700,
+            letterSpacing: '-0.02em',
+            lineHeight: 1.1,
+          }}
         >
           Welcome to Clawboo
-        </h2>
-        <p className="mx-auto mt-2 max-w-[360px] text-[13px] leading-relaxed text-foreground/50">
+        </h1>
+        <p className="mx-auto mt-3 max-w-[400px] text-[14px] leading-relaxed text-foreground/55">
           Deploy, orchestrate, and observe your AI agent fleet.
         </p>
 
         <SystemHint isConnected={isConnected} />
-      </div>
+      </motion.div>
 
       {/* Quick-start steps */}
       {isConnected && (
@@ -202,12 +220,22 @@ export function WelcomeState() {
 
       {/* Primary CTA when no teams */}
       {isConnected && !hasTeams && (
-        <button
+        <motion.button
           onClick={() => setShowCreateModal(true)}
-          className="mt-2 rounded-lg border-none bg-primary px-6 py-2.5 text-[13px] font-semibold text-primary-foreground transition-all duration-150 hover:bg-primary/90"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.3, ease: 'easeOut' }}
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.98 }}
+          className="mt-2 rounded-xl border-none bg-primary px-6 py-3 text-[14px] font-semibold text-primary-foreground"
+          style={{
+            boxShadow:
+              '0 8px 24px rgb(var(--primary-rgb) / 0.3), 0 0 0 1px rgb(var(--primary-rgb) / 0.15)',
+            transition: 'box-shadow var(--motion-base)',
+          }}
         >
           Create your first team
-        </button>
+        </motion.button>
       )}
 
       {/* Nav shortcuts when teams exist */}

@@ -152,15 +152,13 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
         >
           {/* Level 1: Provider list */}
           <div
+            className="surface-floating-tier"
             style={{
               minWidth: 190,
               maxHeight: 420,
               overflowY: 'auto',
-              background: 'var(--card)',
-              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
               borderRadius: 10,
               padding: '6px 0',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
             }}
           >
             {/* Current custom model (pinned) */}
@@ -320,15 +318,13 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
           {/* Level 2: Model list or Custom input */}
           {(activeGroup || showCustom) && (
             <div
+              className="surface-floating-tier"
               style={{
                 minWidth: 230,
                 maxHeight: 380,
                 overflowY: 'auto',
-                background: 'var(--card)',
-                border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
                 borderRadius: 10,
                 padding: '6px 0',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
                 marginLeft: 4,
               }}
             >

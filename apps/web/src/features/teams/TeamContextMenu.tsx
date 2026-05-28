@@ -49,17 +49,15 @@ export function TeamContextMenu({
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.1 }}
+      className="surface-floating-tier"
       style={{
         position: 'fixed',
         left: x,
         top: y,
         zIndex: 100,
-        background: 'var(--card)',
-        border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-        borderRadius: 8,
+        borderRadius: 10,
         padding: '4px 0',
         minWidth: 160,
-        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
       }}
     >
       {/* Team name header */}

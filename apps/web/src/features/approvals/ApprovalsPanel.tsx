@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { CheckCircle2 } from 'lucide-react'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -85,7 +86,7 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
       {/* Command preview */}
       <div
         style={{
-          background: 'rgb(0 0 0 / 0.32)',
+          background: 'var(--code-block-bg)',
           borderRadius: 6,
           padding: '8px 10px',
           fontFamily: 'var(--font-geist-mono, monospace)',
@@ -299,13 +300,28 @@ export function ApprovalsPanel() {
                 paddingRight: 24,
               }}
             >
-              <span style={{ fontSize: 28 }}>✅</span>
+              <div
+                style={{
+                  display: 'flex',
+                  width: 56,
+                  height: 56,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 999,
+                  background: 'rgb(var(--mint-rgb) / 0.1)',
+                  border: '1px solid rgb(var(--mint-rgb) / 0.2)',
+                }}
+              >
+                <CheckCircle2 size={26} strokeWidth={1.75} color="var(--mint)" />
+              </div>
               <span
                 style={{
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: 600,
-                  color: 'rgb(var(--foreground-rgb) / 0.45)',
+                  color: 'rgb(var(--foreground-rgb) / 0.65)',
                   textAlign: 'center',
+                  fontFamily: 'var(--font-display)',
+                  letterSpacing: '-0.01em',
                 }}
               >
                 No pending approvals

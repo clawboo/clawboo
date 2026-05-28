@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Search } from 'lucide-react'
+import { Search, SearchX } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
@@ -134,7 +134,15 @@ async function installSkillFromMarketplace(
 
 // ─── EmptyState ─────────────────────────────────────────────────────────────
 
-function EmptyState({ title, hint }: { title: string; hint: string }) {
+function EmptyState({
+  title,
+  hint,
+  onClear,
+}: {
+  title: string
+  hint: string
+  onClear?: () => void
+}) {
   return (
     <div
       style={{
@@ -143,17 +151,37 @@ function EmptyState({ title, hint }: { title: string; hint: string }) {
         alignItems: 'center',
         justifyContent: 'center',
         paddingTop: 60,
-        gap: 8,
+        gap: 12,
       }}
     >
-      <span style={{ fontSize: 28 }}>🔍</span>
-      <span style={{ fontSize: 13, fontWeight: 500, color: 'rgb(var(--foreground-rgb) / 0.38)' }}>
+      <div
+        style={{
+          display: 'flex',
+          width: 56,
+          height: 56,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 999,
+          background: 'rgb(var(--foreground-rgb) / 0.04)',
+        }}
+      >
+        <SearchX size={26} strokeWidth={1.5} color="rgb(var(--foreground-rgb) / 0.35)" />
+      </div>
+      <span
+        style={{
+          fontSize: 14,
+          fontWeight: 600,
+          color: 'rgb(var(--foreground-rgb) / 0.6)',
+          fontFamily: 'var(--font-display)',
+          letterSpacing: '-0.01em',
+        }}
+      >
         {title}
       </span>
       <span
         style={{
           fontSize: 12,
-          color: 'rgb(var(--foreground-rgb) / 0.25)',
+          color: 'rgb(var(--foreground-rgb) / 0.4)',
           textAlign: 'center',
           maxWidth: 280,
           lineHeight: 1.6,
@@ -161,6 +189,32 @@ function EmptyState({ title, hint }: { title: string; hint: string }) {
       >
         {hint}
       </span>
+      {onClear && (
+        <button
+          type="button"
+          onClick={onClear}
+          style={{
+            marginTop: 4,
+            padding: '6px 14px',
+            fontSize: 12,
+            fontWeight: 500,
+            color: 'rgb(var(--foreground-rgb) / 0.75)',
+            background: 'rgb(var(--foreground-rgb) / 0.06)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
+            borderRadius: 8,
+            cursor: 'pointer',
+            transition: 'var(--motion-fast)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.1)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.06)'
+          }}
+        >
+          Clear filters
+        </button>
+      )}
     </div>
   )
 }
@@ -986,6 +1040,11 @@ export function MarketplacePanel() {
             <EmptyState
               title="No teams match your search"
               hint="Try a different keyword or clear the filters."
+              onClear={() => {
+                setTeamSearchQuery('')
+                setTeamCategoryFilter('all')
+                setTeamSourceFilter('all')
+              }}
             />
           ) : (
             <div
@@ -1014,6 +1073,11 @@ export function MarketplacePanel() {
             <EmptyState
               title="No agents match your search"
               hint="Try a different keyword or clear the filters."
+              onClear={() => {
+                setAgentSearchQuery('')
+                setAgentDomainFilter('all')
+                setAgentSourceFilter('all')
+              }}
             />
           ) : (
             <div
@@ -1040,6 +1104,10 @@ export function MarketplacePanel() {
             <EmptyState
               title="No skills match your search"
               hint="Try a different keyword or clear the category filter."
+              onClear={() => {
+                setSearchQuery('')
+                setCategoryFilter('all')
+              }}
             />
           ) : (
             <div

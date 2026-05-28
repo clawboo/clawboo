@@ -180,15 +180,13 @@ export function AgentModelSelector({
         >
           {/* Level 1: Provider list */}
           <div
+            className="surface-floating-tier"
             style={{
               minWidth: 175,
               maxHeight: 420,
               overflowY: 'auto',
-              background: 'var(--card)',
-              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
               borderRadius: 10,
               padding: '6px 0',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
             }}
           >
             {/* Default option */}
@@ -381,15 +379,13 @@ export function AgentModelSelector({
           {/* Level 2: Model list or Custom input — opens to the LEFT */}
           {(activeGroup || showCustom) && (
             <div
+              className="surface-floating-tier"
               style={{
                 minWidth: 210,
                 maxHeight: 360,
                 overflowY: 'auto',
-                background: 'var(--card)',
-                border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
                 borderRadius: 10,
                 padding: '6px 0',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
                 marginRight: 4,
               }}
             >

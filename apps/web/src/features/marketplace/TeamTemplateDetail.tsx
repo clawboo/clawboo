@@ -66,7 +66,7 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
         style={{
           position: 'fixed',
           inset: 0,
-          background: 'rgb(0 0 0 / 0.6)',
+          background: 'var(--overlay-scrim)',
           zIndex: 60,
           display: 'flex',
           alignItems: 'center',
@@ -85,11 +85,14 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
             maxWidth: 520,
             maxHeight: '80vh',
             overflowY: 'auto',
-            background: 'var(--card)',
-            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-            borderRadius: 12,
+            background: 'var(--surface-overlay)',
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+            border: '1px solid var(--border-overlay)',
+            borderRadius: 14,
             padding: 24,
             position: 'relative',
+            boxShadow: 'var(--shadow-overlay)',
           }}
         >
           {/* Close button */}
@@ -127,7 +130,15 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
               {template.emoji}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--foreground)' }}>
+              <div
+                style={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: 'var(--foreground)',
+                  fontFamily: 'var(--font-display)',
+                  letterSpacing: '-0.01em',
+                }}
+              >
                 {template.name}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>

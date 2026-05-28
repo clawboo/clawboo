@@ -34,20 +34,25 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
       style={{
-        background: 'var(--card)',
+        background: 'var(--surface-raised)',
         border: `1px solid ${profile.color}25`,
         borderRadius: 10,
         padding: '14px 16px',
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-        transition: 'border-color 0.15s',
+        boxShadow: 'var(--shadow-raised)',
+        transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s',
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = `${profile.color}45`
+        e.currentTarget.style.boxShadow = 'var(--shadow-floating)'
+        e.currentTarget.style.transform = 'translateY(-1px)'
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.borderColor = `${profile.color}25`
+        e.currentTarget.style.boxShadow = 'var(--shadow-raised)'
+        e.currentTarget.style.transform = 'translateY(0)'
       }}
     >
       {/* Top row: emoji + name + agent count */}

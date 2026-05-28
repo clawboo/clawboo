@@ -141,7 +141,7 @@ function AgentRow({
           <div className="mt-1 flex items-center gap-2">
             <StatusBadge status={agent.status} />
             {agent.status !== 'running' && formatLastSeen(agent.lastSeenAt) && (
-              <span className="text-[9px] text-secondary/40">
+              <span className="text-[9px] tabular-nums text-secondary/40">
                 {formatLastSeen(agent.lastSeenAt)}
               </span>
             )}

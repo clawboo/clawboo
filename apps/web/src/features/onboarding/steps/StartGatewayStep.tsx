@@ -160,7 +160,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
   const isRunning = phase === 'starting' || phase === 'connecting'
 
   return (
-    <div className="w-full max-w-[420px] rounded-2xl border border-border bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
+    <div className="surface-overlay-tier w-full max-w-[420px] rounded-2xl">
       <div className="flex flex-col items-center p-8">
         <StepIndicator current="setup" />
 

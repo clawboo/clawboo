@@ -45,20 +45,25 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18, delay: Math.min(index * 0.02, 0.4) }}
       style={{
-        background: 'var(--card)',
+        background: 'var(--surface-raised)',
         border: `1px solid ${agent.color}25`,
         borderRadius: 10,
         padding: '14px 16px',
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-        transition: 'border-color 0.15s',
+        boxShadow: 'var(--shadow-raised)',
+        transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s',
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = `${agent.color}45`
+        e.currentTarget.style.boxShadow = 'var(--shadow-floating)'
+        e.currentTarget.style.transform = 'translateY(-1px)'
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.borderColor = `${agent.color}25`
+        e.currentTarget.style.boxShadow = 'var(--shadow-raised)'
+        e.currentTarget.style.transform = 'translateY(0)'
       }}
     >
       {/* Top row: avatar + name + role */}

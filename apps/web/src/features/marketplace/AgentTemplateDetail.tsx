@@ -76,7 +76,7 @@ export function AgentTemplateDetail({
         style={{
           position: 'fixed',
           inset: 0,
-          background: 'rgb(0 0 0 / 0.6)',
+          background: 'var(--overlay-scrim)',
           zIndex: 60,
           display: 'flex',
           alignItems: 'center',
@@ -95,11 +95,14 @@ export function AgentTemplateDetail({
             maxWidth: 640,
             maxHeight: '85vh',
             overflowY: 'auto',
-            background: 'var(--card)',
-            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-            borderRadius: 12,
+            background: 'var(--surface-overlay)',
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+            border: '1px solid var(--border-overlay)',
+            borderRadius: 14,
             padding: 24,
             position: 'relative',
+            boxShadow: 'var(--shadow-overlay)',
           }}
         >
           {/* Close button */}
@@ -126,7 +129,15 @@ export function AgentTemplateDetail({
               <BooAvatar seed={agent.name} size={48} />
             </div>
             <div style={{ flex: 1, minWidth: 0, paddingRight: 28 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--foreground)' }}>
+              <div
+                style={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: 'var(--foreground)',
+                  fontFamily: 'var(--font-display)',
+                  letterSpacing: '-0.01em',
+                }}
+              >
                 {agent.name}
               </div>
               <div

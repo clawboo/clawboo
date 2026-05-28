@@ -773,7 +773,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           <button
             onClick={resetLayout}
             title="Re-layout"
-            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-canvas-control-border bg-canvas-control px-3 py-1.5 text-[12px] font-semibold text-foreground/50 transition-all duration-150 hover:text-foreground/85"
+            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-canvas-control-border bg-canvas-control px-3 py-1.5 text-[12px] font-semibold text-foreground/55 shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:text-foreground/90 hover:shadow-[var(--shadow-floating)]"
           >
             <RefreshCw size={14} />
             Re-layout
@@ -788,10 +788,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
             onClick={() => setShowTeamHalos(!showTeamHalos)}
             title="Toggle colored team hulls behind agents"
             className={[
-              'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all duration-150',
+              'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
               showTeamHalos
                 ? 'border-mint/40 bg-mint/[0.18] text-mint'
-                : 'border-canvas-control-border bg-canvas-control text-foreground/50',
+                : 'border-canvas-control-border bg-canvas-control text-foreground/55 hover:text-foreground/90',
             ].join(' ')}
           >
             <Pin size={14} />
@@ -803,10 +803,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         <button
           onClick={() => setConnectMode(!connectMode)}
           className={[
-            'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all duration-150',
+            'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
             connectMode
               ? 'border-primary/40 bg-primary/20 text-primary'
-              : 'border-canvas-control-border bg-canvas-control text-foreground/50',
+              : 'border-canvas-control-border bg-canvas-control text-foreground/55 hover:text-foreground/90',
           ].join(' ')}
         >
           <GitBranch size={14} />
@@ -823,8 +823,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         title={showMiniMap ? 'Hide minimap' : 'Show minimap'}
         aria-label={showMiniMap ? 'Hide minimap' : 'Show minimap'}
         className={[
-          'absolute z-20 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-canvas-control-border bg-canvas-control transition-all duration-150',
-          showMiniMap ? 'text-primary' : 'text-foreground/50 hover:text-foreground/80',
+          'absolute z-20 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-canvas-control-border bg-canvas-control shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
+          showMiniMap ? 'text-primary' : 'text-foreground/55 hover:text-foreground/90',
         ].join(' ')}
         style={{
           bottom: 12,

@@ -29,6 +29,7 @@ import {
   type MessageComposerHandle,
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
+import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 
 // ─── GroupChatPanel ──────────────────────────────────────────────────────────
@@ -643,10 +644,49 @@ export function GroupChatPanel({
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4" onScroll={handleScroll}>
         {isEmpty ? (
-          <div className="flex h-full items-center justify-center">
-            <p className="font-mono text-[12px] text-secondary/40">
-              No messages yet. Send a message to the team.
-            </p>
+          <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
+            {/* Team mascot stack — up to 4 avatars overlapping, mirroring
+                the GroupChatRow visual so the empty state visually anchors
+                to the same team identity the user clicked to get here. */}
+            {participants.length > 0 && (
+              <div className="flex items-center">
+                {participants.slice(0, 4).map((agent, idx) => (
+                  <div
+                    key={agent.id}
+                    className="rounded-full ring-2 ring-background"
+                    style={{
+                      marginLeft: idx === 0 ? 0 : -10,
+                      zIndex: participants.length - idx,
+                    }}
+                  >
+                    <AgentBooAvatar agentId={agent.id} size={42} />
+                  </div>
+                ))}
+                {participants.length > 4 && (
+                  <div
+                    className="flex h-[42px] w-[42px] items-center justify-center rounded-full bg-foreground/10 font-mono text-[11px] font-semibold text-foreground/60 ring-2 ring-background"
+                    style={{ marginLeft: -10 }}
+                  >
+                    +{participants.length - 4}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="flex flex-col gap-1.5">
+              <p
+                className="text-[16px] font-semibold text-foreground/85"
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                {team?.name ? `Welcome to ${team.name}` : 'Welcome to the team'}
+              </p>
+              <p className="max-w-[300px] text-[12px] leading-relaxed text-foreground/45">
+                Send a message to start, or ping a teammate with{' '}
+                <span className="font-mono text-foreground/55">@</span>.
+              </p>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col pb-2">

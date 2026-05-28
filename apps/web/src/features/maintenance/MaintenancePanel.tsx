@@ -45,11 +45,12 @@ function SectionHeading({ children }: { children: string }) {
   return (
     <h2
       style={{
-        fontSize: 14,
+        fontSize: 15,
         fontWeight: 600,
         color: 'var(--foreground)',
         margin: 0,
-        fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+        fontFamily: 'var(--font-display)',
+        letterSpacing: '-0.01em',
       }}
     >
       {children}

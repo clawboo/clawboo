@@ -83,8 +83,7 @@ function WizardCard({
   return (
     <div
       className={[
-        'w-full rounded-2xl border border-border bg-surface',
-        'shadow-[0_32px_80px_rgba(0,0,0,0.65)]',
+        'surface-overlay-tier w-full rounded-2xl',
         wide ? 'max-w-4xl' : 'max-w-[420px]',
         className,
       ].join(' ')}
@@ -410,7 +409,7 @@ function TeamStep({
 }) {
   return (
     <div className="w-full max-w-4xl">
-      <div className="rounded-2xl border border-border bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)] p-8">
+      <div className="surface-overlay-tier rounded-2xl p-8">
         {/* Step indicator — centered */}
         <div className="flex justify-center mb-6">
           <StepIndicator current="team" />

@@ -501,7 +501,7 @@ export function CreateTeamModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-            className={`relative w-full ${step === 'pick' ? 'max-w-2xl' : 'max-w-lg'} rounded-2xl border border-border bg-surface shadow-[0_16px_64px_rgba(0,0,0,0.6)] transition-all duration-200`}
+            className={`surface-overlay-tier relative w-full ${step === 'pick' ? 'max-w-2xl' : 'max-w-lg'} rounded-2xl transition-all duration-200`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close button */}

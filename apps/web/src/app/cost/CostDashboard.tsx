@@ -435,13 +435,21 @@ function SummaryCard({ label, tokens }: { label: string; tokens: number }) {
   const color = tokenColor(tokens)
   return (
     <div
+      className="surface-raised-tier"
       style={{
         flex: 1,
         minWidth: 140,
-        background: 'var(--card)',
         borderRadius: 12,
-        border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
         padding: '16px 20px',
+        transition: 'transform var(--motion-fast), box-shadow var(--motion-fast)',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.boxShadow = 'var(--shadow-floating)'
+        e.currentTarget.style.transform = 'translateY(-1px)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = 'var(--shadow-raised)'
+        e.currentTarget.style.transform = 'translateY(0)'
       }}
     >
       <div
@@ -457,7 +465,18 @@ function SummaryCard({ label, tokens }: { label: string; tokens: number }) {
       >
         {label}
       </div>
-      <div style={{ fontSize: 26, fontWeight: 700, color, lineHeight: 1, marginBottom: 4 }}>
+      <div
+        style={{
+          fontSize: 26,
+          fontWeight: 700,
+          color,
+          lineHeight: 1,
+          marginBottom: 4,
+          fontFamily: 'var(--font-display)',
+          fontVariantNumeric: 'tabular-nums',
+          letterSpacing: '-0.02em',
+        }}
+      >
         {formatTokens(tokens)}
       </div>
       <div style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>tokens</div>

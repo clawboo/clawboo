@@ -101,7 +101,7 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
   const isEacces = errorCode === 'EACCES'
 
   return (
-    <div className="w-full max-w-lg rounded-2xl border border-border bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
+    <div className="surface-overlay-tier w-full max-w-lg rounded-2xl">
       <div className="p-8">
         <StepIndicator current="setup" />
 

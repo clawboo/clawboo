@@ -581,7 +581,7 @@ export function GatewayBootstrap() {
               initial={{ opacity: 0, y: 20, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-              className="w-full max-w-[340px] rounded-2xl border border-border bg-surface p-8 shadow-[0_24px_80px_rgba(0,0,0,0.6)]"
+              className="surface-overlay-tier w-full max-w-[340px] rounded-2xl p-8"
             >
               <div className="flex flex-col items-center gap-4 text-center">
                 <img src="/logo.svg" alt="Clawboo" width={48} height={44} className="opacity-40" />
@@ -667,7 +667,7 @@ export function GatewayBootstrap() {
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm"
           >
-            <div className="w-full max-w-[360px] rounded-2xl border border-border bg-surface p-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.6)]">
+            <div className="surface-overlay-tier w-full max-w-[360px] rounded-2xl p-8 text-center">
               <p className="mb-4 text-[14px] font-medium text-destructive">{fleetError}</p>
               <div className="flex justify-center gap-3">
                 <button

@@ -242,20 +242,22 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
-                padding: '6px 10px',
+                gap: 5,
+                padding: '7px 11px',
                 border: 'none',
                 borderBottom: isActive ? '2px solid var(--primary)' : '2px solid transparent',
                 background: 'transparent',
                 color: isActive ? 'var(--foreground)' : 'rgb(var(--foreground-rgb) / 0.45)',
-                fontSize: 10,
-                fontWeight: isActive ? 600 : 400,
+                fontSize: 11,
+                fontWeight: isActive ? 600 : 500,
                 fontFamily: 'var(--font-mono)',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
                 cursor: 'pointer',
-                transition: 'all 0.15s',
+                transition: 'color var(--motion-fast), border-color var(--motion-fast)',
               }}
               onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.7)'
+                if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.8)'
               }}
               onMouseLeave={(e) => {
                 if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.45)'
@@ -287,17 +289,19 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
               marginLeft: 'auto',
               display: 'flex',
               alignItems: 'center',
-              gap: 4,
-              padding: '4px 8px',
-              borderRadius: 4,
+              gap: 5,
+              padding: '5px 10px',
+              borderRadius: 6,
               border: 'none',
               background: isFileDirty ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.06)',
               color: isFileDirty ? '#fff' : 'rgb(var(--foreground-rgb) / 0.4)',
-              fontSize: 10,
+              boxShadow: isFileDirty ? '0 4px 12px rgb(var(--primary-rgb) / 0.25)' : 'none',
+              fontSize: 11,
               fontWeight: 500,
+              letterSpacing: '0.03em',
               cursor: isFileDirty ? 'pointer' : 'default',
               opacity: saving ? 0.6 : 1,
-              transition: 'all 0.15s',
+              transition: 'background var(--motion-fast), box-shadow var(--motion-fast)',
               fontFamily: 'var(--font-mono)',
             }}
           >
