@@ -83,6 +83,7 @@ function InfoRow({ label, value }: { label: string; value: string | null }) {
           fontSize: 13,
           color: 'var(--foreground)',
           fontFamily: 'var(--font-geist-mono, monospace)',
+          fontVariantNumeric: 'tabular-nums',
           wordBreak: 'break-all',
         }}
       >

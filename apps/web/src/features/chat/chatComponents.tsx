@@ -13,7 +13,15 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronRight, Clock, SendHorizontal, Square, Wrench } from 'lucide-react'
+import {
+  ChevronRight,
+  Clock,
+  Network,
+  SendHorizontal,
+  Square,
+  Workflow,
+  Wrench,
+} from 'lucide-react'
 import { BooAvatar, resolveBooTint } from '@clawboo/ui'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
@@ -1290,9 +1298,7 @@ export const PlanCard = memo(function PlanCard({
       data-plan-id={planId}
     >
       <div className="flex items-center gap-2 border-b border-border/60 pb-2.5">
-        <span aria-hidden className="text-[15px]">
-          📋
-        </span>
+        <Workflow size={14} strokeWidth={1.75} aria-hidden className="text-secondary" />
         <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary">
           Plan
         </span>
@@ -1436,9 +1442,7 @@ export const WorkstreamCard = memo(function WorkstreamCard({
       data-workstream-id={workstreamId}
     >
       <div className="flex items-center gap-2 border-b border-border/60 pb-2.5">
-        <span aria-hidden className="text-[15px]">
-          📡
-        </span>
+        <Network size={14} strokeWidth={1.75} aria-hidden className="text-secondary" />
         <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary">
           Workstreams
         </span>

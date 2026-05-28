@@ -1,7 +1,20 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Plus, Search, Trash2 } from 'lucide-react'
+import {
+  BarChart3,
+  Clock,
+  Ghost,
+  Globe,
+  Lock,
+  Plus,
+  Search,
+  Settings,
+  ShoppingCart,
+  Trash2,
+  type LucideIcon,
+} from 'lucide-react'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
+import { EmptyState } from '@/features/shared/EmptyState'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useTeamStore, type Team } from '@/stores/team'
 import { useConnectionStore } from '@/stores/connection'
@@ -193,7 +206,7 @@ function AgentRow({
 interface NavItem {
   id: NavView
   label: string
-  emoji: string
+  icon: LucideIcon
   /** Optional smaller, dimmer hint rendered beside the main label. */
   subtitle?: string
 }
@@ -204,15 +217,15 @@ const PRIMARY_NAV: NavItem[] = [
   // team-scoped Ghost Graph still lives inside Group Chat; this slot is
   // now specifically the org-wide map. Subtitle clarifies that Atlas is
   // cross-team (vs. the per-team Ghost Graph users see inside Group Chat).
-  { id: 'graph', label: 'Atlas', emoji: '🌐', subtitle: '(All Teams)' },
-  { id: 'marketplace', label: 'Marketplace', emoji: '🛒' },
+  { id: 'graph', label: 'Atlas', icon: Globe, subtitle: '(All Teams)' },
+  { id: 'marketplace', label: 'Marketplace', icon: ShoppingCart },
 ]
 
 const SECONDARY_NAV: NavItem[] = [
-  { id: 'approvals', label: 'Approvals', emoji: '🔐' },
-  { id: 'scheduler', label: 'Scheduler', emoji: '⏰' },
-  { id: 'cost', label: 'Tokens Used', emoji: '📊' },
-  { id: 'system', label: 'System', emoji: '⚙️' },
+  { id: 'approvals', label: 'Approvals', icon: Lock },
+  { id: 'scheduler', label: 'Scheduler', icon: Clock },
+  { id: 'cost', label: 'Tokens Used', icon: BarChart3 },
+  { id: 'system', label: 'System', icon: Settings },
 ]
 
 // ─── Group chat row ─────────────────────────────────────────────────────────
@@ -544,17 +557,21 @@ export function AgentListColumn() {
               {query ? (
                 <p className="text-[12px] text-secondary/50">No agents match.</p>
               ) : showEmpty ? (
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-2xl">👻</span>
-                  <p className="text-[12px] text-secondary/50">No Boos yet</p>
-                  <button
-                    type="button"
-                    onClick={() => useViewStore.getState().navigateTo('graph')}
-                    className="text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
-                  >
-                    Deploy a team →
-                  </button>
-                </div>
+                <EmptyState
+                  icon={Ghost}
+                  title="No Boos yet"
+                  helper="Deploy a team from the Marketplace to get started."
+                  paddingTop={16}
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => useViewStore.getState().navigateTo('graph')}
+                      className="text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
+                    >
+                      Deploy a team →
+                    </button>
+                  }
+                />
               ) : (
                 <p className="text-[12px] text-secondary/50">No agents connected.</p>
               )}
@@ -612,19 +629,20 @@ export function AgentListColumn() {
       <div className="px-2 flex flex-col gap-0.5">
         {PRIMARY_NAV.map((item) => {
           const isActive = viewMode.type === 'nav' && viewMode.view === item.id
+          const Icon = item.icon
           return (
             <button
               key={item.id}
               type="button"
               onClick={() => useViewStore.getState().navigateTo(item.id)}
               className={[
-                'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] font-semibold transition-all duration-150',
+                'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-semibold transition-all duration-150',
                 isActive
                   ? 'bg-accent/12 text-accent'
                   : 'text-text/85 hover:bg-foreground/[0.04] hover:text-text',
               ].join(' ')}
             >
-              <span className="text-[14px]">{item.emoji}</span>
+              <Icon size={14} strokeWidth={2} aria-hidden />
               <span>{item.label}</span>
               {item.subtitle && (
                 <span className="text-[10px] font-normal text-text/45">{item.subtitle}</span>
@@ -642,19 +660,20 @@ export function AgentListColumn() {
         {SECONDARY_NAV.map((item) => {
           const isActive = viewMode.type === 'nav' && viewMode.view === item.id
           const badge = item.id === 'approvals' ? pendingApprovals.size : 0
+          const Icon = item.icon
           return (
             <button
               key={item.id}
               type="button"
               onClick={() => useViewStore.getState().navigateTo(item.id)}
               className={[
-                'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150',
+                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150',
                 isActive
                   ? 'bg-accent/12 text-accent'
                   : 'text-text/70 hover:bg-foreground/5 hover:text-text/90',
               ].join(' ')}
             >
-              <span className="text-[12px]">{item.emoji}</span>
+              <Icon size={13} strokeWidth={1.75} aria-hidden />
               <span>{item.label}</span>
               {badge > 0 && (
                 <span className="ml-auto rounded-full bg-amber px-1.5 py-px text-[9px] font-bold leading-snug text-background">

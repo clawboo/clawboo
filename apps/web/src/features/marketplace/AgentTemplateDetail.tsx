@@ -353,7 +353,9 @@ export function AgentTemplateDetail({
                 fontSize: 10,
                 color: 'rgb(var(--foreground-rgb) / 0.35)',
                 marginBottom: 8,
-                fontStyle: 'italic',
+                fontFamily: 'var(--font-mono)',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
               }}
             >
               Full source from {sourceMeta?.label ?? agent.source} — preserved verbatim

@@ -188,6 +188,7 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
             fontSize: 12,
             color: 'var(--amber)',
             fontFamily: 'var(--font-geist-mono, monospace)',
+            fontVariantNumeric: 'tabular-nums',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',

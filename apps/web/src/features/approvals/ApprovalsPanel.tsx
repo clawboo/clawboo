@@ -66,7 +66,8 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
               fontSize: 12,
               fontWeight: 600,
               color: 'var(--amber)',
-              fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+              fontFamily: 'var(--font-display)',
+              letterSpacing: '-0.01em',
             }}
           >
             Exec Approval

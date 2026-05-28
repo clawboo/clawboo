@@ -305,22 +305,30 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     // Reset when layoutKey bumps (user pressed "Re-layout"). We also CLEAR
     // saved positions here so the re-layout produces a fresh ELK result
     // (not constrained by the old user-dragged positions).
-    const reLayoutRequested = layoutKey !== prevLayoutKeyRef.current
-    if (reLayoutRequested) {
+    const reLayoutTriggered = layoutKey !== prevLayoutKeyRef.current
+    if (reLayoutTriggered) {
       prevLayoutKeyRef.current = layoutKey
       layoutRanRef.current = false
       prevNodeLengthRef.current = 0
     }
 
     // Phase 19 — atlasLayout flip is a re-layout trigger of the same kind as
-    // pressing "Re-layout". Saved positions are intentionally preserved so a
-    // user's manual drags survive the flip; they sit on top of the new
-    // computed positions exactly like the top-down path treats them.
-    if (atlasLayout !== prevAtlasLayoutRef.current) {
+    // pressing "Re-layout". CRITICAL: it must also DROP saved positions, not
+    // just invalidate `layoutRanRef`. Without dropping, the new layout
+    // function (e.g. Tree's `computeAtlasLayout`) reuses saved coordinates
+    // that were computed for the OTHER mode (Radial), producing the visually
+    // broken result where teams scatter at radial spots inside a tree layout.
+    const atlasLayoutFlipped = atlasLayout !== prevAtlasLayoutRef.current
+    if (atlasLayoutFlipped) {
       prevAtlasLayoutRef.current = atlasLayout
       layoutRanRef.current = false
       prevNodeLengthRef.current = 0
     }
+
+    // Either trigger forces a fresh layout AND drops saved positions for any
+    // node whose mode is changing. This is the variable consulted by
+    // `effectiveSavedPositions` below.
+    const reLayoutRequested = reLayoutTriggered || atlasLayoutFlipped
 
     if (!nodesInitialized || nodes.length === 0 || !isLoaded) return
 

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Search, SearchX } from 'lucide-react'
+import { Select } from '@/features/shared/Select'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
@@ -35,23 +36,24 @@ import { AgentCard } from './AgentCard'
 import { AgentTemplateDetail } from './AgentTemplateDetail'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 
-// ─── Skill category colours (matches SkillNode.tsx) ─────────────────────────
+// ─── Skill category colours ─────────────────────────────────────────────────
+// Token-driven palette shared with SkillNode.tsx via `--category-*` (Phase 20).
 
 const CATEGORY_META: Record<SkillCategory | 'all', { color: string; label: string }> = {
   all: { color: 'var(--foreground)', label: 'All' },
-  code: { color: '#F97316', label: 'Code' },
-  file: { color: 'var(--amber)', label: 'File' },
-  web: { color: '#A855F7', label: 'Web' },
-  comm: { color: 'var(--mint)', label: 'Comm' },
-  data: { color: '#3B82F6', label: 'Data' },
-  other: { color: '#6B7280', label: 'Other' },
+  code: { color: 'var(--category-code)', label: 'Code' },
+  file: { color: 'var(--category-file)', label: 'File' },
+  web: { color: 'var(--category-web)', label: 'Web' },
+  comm: { color: 'var(--category-comm)', label: 'Comm' },
+  data: { color: 'var(--category-data)', label: 'Data' },
+  other: { color: 'var(--category-other)', label: 'Other' },
 }
 
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
-  verified: { label: 'Verified', color: '#A855F7' },
-  clawhub: { label: 'Clawboo Marketplace', color: '#3B82F6' },
-  'skill.sh': { label: 'skill.sh', color: 'var(--mint)' },
-  local: { label: 'Local', color: '#6B7280' },
+  verified: { label: 'Verified', color: 'var(--category-web)' },
+  clawhub: { label: 'Clawboo Marketplace', color: 'var(--category-data)' },
+  'skill.sh': { label: 'skill.sh', color: 'var(--category-comm)' },
+  local: { label: 'Local', color: 'var(--category-other)' },
 }
 
 function trustColor(score: number): string {
@@ -315,8 +317,8 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
         <div
           style={{
             flex: 1,
-            height: 3,
-            borderRadius: 2,
+            height: 4,
+            borderRadius: 999,
             background: 'rgb(var(--foreground-rgb) / 0.06)',
             overflow: 'hidden',
           }}
@@ -325,9 +327,9 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
             style={{
               width: `${skill.trustScore}%`,
               height: '100%',
-              borderRadius: 2,
+              borderRadius: 999,
               background: trustColor(skill.trustScore),
-              transition: 'width 0.3s',
+              transition: 'width var(--motion-base)',
             }}
           />
         </div>
@@ -642,7 +644,15 @@ export function MarketplacePanel() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--foreground)',
+              fontFamily: 'var(--font-display)',
+              letterSpacing: '-0.01em',
+            }}
+          >
             Marketplace
           </span>
 
@@ -657,24 +667,17 @@ export function MarketplacePanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* Sort (skills tab only) */}
           {isSkillsTab && (
-            <select
+            <Select
+              size="sm"
+              aria-label="Sort skills"
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'name' | 'trust' | 'category')}
-              style={{
-                background: 'rgb(var(--foreground-rgb) / 0.04)',
-                border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-                borderRadius: 6,
-                color: 'rgb(var(--foreground-rgb) / 0.6)',
-                fontSize: 11,
-                padding: '3px 8px',
-                cursor: 'pointer',
-                outline: 'none',
-              }}
-            >
-              <option value="name">Name A–Z</option>
-              <option value="trust">Trust Score</option>
-              <option value="category">Category</option>
-            </select>
+              onChange={(v) => setSortBy(v as 'name' | 'trust' | 'category')}
+              options={[
+                { value: 'name', label: 'Name A–Z' },
+                { value: 'trust', label: 'Trust Score' },
+                { value: 'category', label: 'Category' },
+              ]}
+            />
           )}
           {/* GitHub Star CTA — integrated into the toolbar so this view
               doesn't need the global AppTopBar (which is hidden for

@@ -168,11 +168,15 @@ export const useGraphStore = create<GraphStore>((set) => ({
   showTeamHalos: false,
   setShowTeamHalos: (v) => set({ showTeamHalos: v }),
 
+  // Atlas defaults to **Radial** — Boo Zero at the center with teams
+  // distributed on a circle around it. The `'top-down'` (Tree) variant is
+  // still available via the canvas toolbar pill; an explicit user choice
+  // persists in localStorage and overrides the default.
   atlasLayout:
     typeof window !== 'undefined' &&
-    window.localStorage.getItem('clawboo.atlas.layout') === 'radial'
-      ? 'radial'
-      : 'top-down',
+    window.localStorage.getItem('clawboo.atlas.layout') === 'top-down'
+      ? 'top-down'
+      : 'radial',
   setAtlasLayout: (v) => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('clawboo.atlas.layout', v)

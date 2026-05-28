@@ -22,6 +22,16 @@
   --color-mint: var(--mint);
   --color-amber: var(--amber);
 
+  /* Category palette — Phase 20 shared color system for skill / cron / source
+     classification. Comm/file alias to mint/amber so the visual language stays
+     consistent. */
+  --color-category-data: var(--category-data);
+  --color-category-comm: var(--category-comm);
+  --color-category-code: var(--category-code);
+  --color-category-file: var(--category-file);
+  --color-category-web: var(--category-web);
+  --color-category-other: var(--category-other);
+
   /* ── shadcn/ui semantic aliases ── */
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -128,6 +138,15 @@
   --amber-rgb: 217 119 6;
   --blue: #1e3a8a;
 
+  /* Category palette — Phase 20. Light values deepened one step for AA
+     contrast on white surface (matches the primary/mint/amber deepening). */
+  --category-data: #2563eb; /* blue-600 */
+  --category-comm: var(--mint); /* mint */
+  --category-code: #ea580c; /* orange-600 */
+  --category-file: var(--amber); /* amber */
+  --category-web: #9333ea; /* purple-600 */
+  --category-other: #64748b; /* slate-500 */
+
   --canvas: #fafbfc;
   --canvas-rgb: 250 251 252;
   --canvas-dot: rgb(15 23 42 / 0.07);
@@ -220,6 +239,16 @@
   --amber: #fbbf24;
   --amber-rgb: 251 191 36;
   --blue: #0f3460;
+
+  /* Category palette — Phase 20. Dark values match the previously-hardcoded
+     hex strewn across MarketplacePanel / SkillNode / CronTimeline so dark-mode
+     appearance is byte-identical pre/post token migration. */
+  --category-data: #3b82f6; /* blue-500 */
+  --category-comm: var(--mint); /* mint */
+  --category-code: #f97316; /* orange-500 */
+  --category-file: var(--amber); /* amber */
+  --category-web: #a855f7; /* purple-500 */
+  --category-other: #6b7280; /* gray-500 */
 
   --canvas: #0a0e1a;
   --canvas-rgb: 10 14 26;
@@ -399,6 +428,19 @@ body {
   50% {
     opacity: 1;
     r: 4.5;
+  }
+}
+
+/* Phase 20 — StatusPill working-state dot pulse. */
+@keyframes clawboo-status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.7);
   }
 }
 

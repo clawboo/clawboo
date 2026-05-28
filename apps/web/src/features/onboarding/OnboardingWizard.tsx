@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowRight, Check, Eye, EyeOff, Loader2, X } from 'lucide-react'
+import { ArrowRight, Check, CheckCircle2, Eye, EyeOff, Loader2, X } from 'lucide-react'
 import {
   GatewayClient,
   formatGatewayError,
@@ -28,6 +28,7 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
+import { ShaderAtmosphere } from '@/features/atmosphere'
 import { STARTER_TEMPLATES, resolveTeamAgents } from '@/features/marketplace/teamCatalog'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -98,10 +99,12 @@ function WizardCard({
 function WelcomeStep({ onContinue }: { onContinue: () => void }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center bg-background overflow-hidden">
-      {/* Radial glow */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgb(var(--primary-rgb) / 0.10)_0%,transparent_70%)]" />
+      {/* Atmosphere — subtle organic gradient behind the hero. Lazy-loaded
+          WebGL when available, CSS radial fallback otherwise. Honours the
+          opt-out toggle + prefers-reduced-motion. */}
+      <ShaderAtmosphere variant="subtle" />
 
-      {/* Subtle grid */}
+      {/* Subtle grid — sits above the atmosphere for tactile depth. */}
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.03]"
         style={{
@@ -254,7 +257,7 @@ function ConnectStep({
 
         <h2
           className="text-[20px] font-bold text-text mb-1"
-          style={{ fontFamily: 'var(--font-display)' }}
+          style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
         >
           Connect to Gateway
         </h2>
@@ -417,7 +420,7 @@ function TeamStep({
 
         <h2
           className="text-[20px] font-bold text-text text-center mb-1"
-          style={{ fontFamily: 'var(--font-display)' }}
+          style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
         >
           Choose your team
         </h2>
@@ -802,11 +805,11 @@ function DeployStep({
           <div>
             <h2
               className="text-[18px] font-bold text-text"
-              style={{ fontFamily: 'var(--font-display)' }}
+              style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
             >
               {allDone ? (
                 <>
-                  {profile.emoji} {profile.name} deployed!
+                  {profile.emoji} {profile.name} deployed
                 </>
               ) : (
                 <>
@@ -845,7 +848,10 @@ function DeployStep({
             <motion.div
               className="h-full rounded-full bg-accent"
               animate={{ width: `${pct}%` }}
-              transition={{ duration: 0.38, ease: 'easeOut' }}
+              // 200 ms / standard easing — matches `--motion-base` token so
+              // the progress reads with the same rhythm as state-change
+              // transitions elsewhere in the app.
+              transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
             />
           </div>
 
@@ -888,23 +894,38 @@ function DoneStep({
   }, [onViewGraph])
 
   return (
-    <WizardCard>
-      <div className="p-8 flex flex-col items-center text-center gap-5">
+    <WizardCard className="relative overflow-hidden">
+      {/* Atmosphere — subtle behind the completion mascot. Inherits the same
+          opt-out + reduced-motion gates as the WelcomeStep atmosphere. */}
+      <ShaderAtmosphere variant="subtle" />
+      <div className="relative z-10 p-8 flex flex-col items-center text-center gap-5">
         <motion.div
           initial={{ scale: 0.4, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ type: 'spring', stiffness: 380, damping: 22 }}
-          className="text-[62px] leading-none select-none"
+          aria-hidden
+          style={{
+            display: 'flex',
+            width: 72,
+            height: 72,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 999,
+            background: 'rgb(var(--mint-rgb) / 0.12)',
+            border: '1px solid rgb(var(--mint-rgb) / 0.28)',
+            boxShadow:
+              '0 0 0 6px rgb(var(--mint-rgb) / 0.06), 0 8px 24px rgb(var(--mint-rgb) / 0.18)',
+          }}
         >
-          🎉
+          <CheckCircle2 size={34} strokeWidth={1.75} color="var(--mint)" />
         </motion.div>
 
         <div>
           <h2
             className="text-[22px] font-bold text-text"
-            style={{ fontFamily: 'var(--font-display)' }}
+            style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
           >
-            Your Ghost Graph is ready!
+            Your Ghost Graph is ready
           </h2>
           <p className="mt-1.5 text-[13px] text-secondary/70">
             {profile

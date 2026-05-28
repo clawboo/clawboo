@@ -9,6 +9,7 @@ import {
   CartesianGrid,
 } from 'recharts'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { formatTokens } from '@/features/cost/costUtils'
 import { useCostStore } from '@/stores/cost'
 import { useConnectionStore } from '@/stores/connection'
@@ -84,7 +85,16 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
         marginBottom: 20,
       }}
     >
-      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--amber)', marginBottom: 4 }}>
+      <div
+        style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color: 'var(--amber)',
+          marginBottom: 4,
+          fontFamily: 'var(--font-display)',
+          letterSpacing: '-0.01em',
+        }}
+      >
         Ollama not detected
       </div>
       <div style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.5)', marginBottom: 16 }}>
@@ -247,7 +257,16 @@ function ModelPickerPanel({
         marginBottom: 20,
       }}
     >
-      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--mint)', marginBottom: 4 }}>
+      <div
+        style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color: 'var(--mint)',
+          marginBottom: 4,
+          fontFamily: 'var(--font-display)',
+          letterSpacing: '-0.01em',
+        }}
+      >
         Select a model
       </div>
       <div style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.5)', marginBottom: 14 }}>
@@ -826,25 +845,11 @@ export function CostDashboard() {
           />
         )}
 
-        {/* Frugal mode banner */}
+        {/* Frugal mode banner — uses shared FormattedAlert primitive (Phase 20). */}
         {frugalMode && (
-          <div
-            style={{
-              background: 'rgb(var(--amber-rgb) / 0.08)',
-              border: '1px solid rgb(var(--amber-rgb) / 0.3)',
-              borderRadius: 8,
-              padding: '10px 16px',
-              marginBottom: 20,
-              fontSize: 13,
-              color: 'var(--amber)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            <span style={{ fontSize: 16 }}>!</span>
-            Frugal mode active — routing basic tasks to local LLM
-          </div>
+          <FormattedAlert tone="warning" style={{ marginBottom: 20 }}>
+            Frugal mode active — routing basic tasks to local LLM.
+          </FormattedAlert>
         )}
 
         {loading && (
@@ -953,14 +958,22 @@ export function CostDashboard() {
                   <CartesianGrid strokeDasharray="3 4" stroke="rgb(var(--foreground-rgb) / 0.05)" />
                   <XAxis
                     dataKey="date"
-                    tick={{ fill: 'rgb(var(--foreground-rgb) / 0.4)', fontSize: 10 }}
+                    tick={{
+                      fill: 'rgb(var(--foreground-rgb) / 0.4)',
+                      fontSize: 10,
+                      style: { fontVariantNumeric: 'tabular-nums' },
+                    }}
                     axisLine={false}
                     tickLine={false}
                     interval="preserveStartEnd"
                   />
                   <YAxis
                     tickFormatter={(v: number) => formatTokens(v)}
-                    tick={{ fill: 'rgb(var(--foreground-rgb) / 0.4)', fontSize: 10 }}
+                    tick={{
+                      fill: 'rgb(var(--foreground-rgb) / 0.4)',
+                      fontSize: 10,
+                      style: { fontVariantNumeric: 'tabular-nums' },
+                    }}
                     axisLine={false}
                     tickLine={false}
                     width={55}

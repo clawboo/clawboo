@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Loader2 } from 'lucide-react'
+import { BarChart3, Globe, Loader2, ShoppingCart, type LucideIcon } from 'lucide-react'
 import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
@@ -244,20 +244,26 @@ export function WelcomeState() {
         <div className="mt-1 flex gap-2">
           {(
             [
-              { label: 'Atlas', emoji: '🌐', view: 'graph' as const },
-              { label: 'Marketplace', emoji: '🛒', view: 'marketplace' as const },
-              { label: 'Cost', emoji: '💰', view: 'cost' as const },
-            ] as const
-          ).map((item) => (
-            <button
-              key={item.view}
-              onClick={() => useViewStore.getState().navigateTo(item.view)}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-foreground/[0.04] px-3.5 py-1.5 text-[12px] text-foreground/55 transition-all duration-150 hover:border-foreground/15 hover:text-foreground/80"
-            >
-              <span>{item.emoji}</span>
-              {item.label}
-            </button>
-          ))}
+              { label: 'Atlas', icon: Globe, view: 'graph' as const },
+              { label: 'Marketplace', icon: ShoppingCart, view: 'marketplace' as const },
+              { label: 'Cost', icon: BarChart3, view: 'cost' as const },
+            ] as { label: string; icon: LucideIcon; view: 'graph' | 'marketplace' | 'cost' }[]
+          ).map((item) => {
+            const Icon = item.icon
+            return (
+              <button
+                key={item.view}
+                onClick={() => useViewStore.getState().navigateTo(item.view)}
+                className="flex items-center gap-2 rounded-lg border border-border bg-foreground/[0.04] px-3.5 py-1.5 text-[12px] text-foreground/55 transition-all duration-150 hover:border-foreground/15 hover:text-foreground/80"
+                style={{
+                  transitionTimingFunction: 'var(--motion-easing-standard)',
+                }}
+              >
+                <Icon size={13} strokeWidth={1.75} aria-hidden />
+                {item.label}
+              </button>
+            )
+          })}
         </div>
       )}
 
