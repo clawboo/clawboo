@@ -23,7 +23,10 @@ import { TeamChips } from './TeamChips'
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
 
-export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
+export function ChatPanel({
+  agentId: propAgentId,
+  hideHeader = false,
+}: { agentId?: string; hideHeader?: boolean } = {}) {
   const storeAgentId = useFleetStore((s) => s.selectedAgentId)
   const resolvedAgentId = propAgentId ?? storeAgentId
   const agents = useFleetStore((s) => s.agents)
@@ -220,24 +223,28 @@ export function ChatPanel({ agentId: propAgentId }: { agentId?: string } = {}) {
   // ── Chat view ───────────────────────────────────────────────────────────────
   return (
     <div className="flex h-full flex-col" data-testid="chat-panel">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <AgentBooAvatar agentId={agent.id} size={30} />
-          <h2
-            className="text-[14px] font-semibold text-text"
-            style={{ fontFamily: 'var(--font-body)' }}
-          >
-            {agent.name}
-          </h2>
-          {!sessionKey && <span className="font-mono text-[10px] text-amber/60">No session</span>}
+      {/* Header — skipped when the parent provides a shared header above us
+          (e.g. `AgentDetailView` extends the agent identity row across all
+          three panels, so this panel's own header would duplicate it). */}
+      {!hideHeader && (
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div className="flex items-center gap-2.5">
+            <AgentBooAvatar agentId={agent.id} size={30} />
+            <h2
+              className="text-[14px] font-semibold text-text"
+              style={{ fontFamily: 'var(--font-body)' }}
+            >
+              {agent.name}
+            </h2>
+            {!sessionKey && <span className="font-mono text-[10px] text-amber/60">No session</span>}
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-[10px] text-secondary/40">
+              {connectionStatus === 'connected' ? 'Connected' : connectionStatus}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-[10px] text-secondary/40">
-            {connectionStatus === 'connected' ? 'Connected' : connectionStatus}
-          </span>
-        </div>
-      </div>
+      )}
 
       {/* Messages */}
       <MessageList

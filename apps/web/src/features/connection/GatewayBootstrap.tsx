@@ -79,7 +79,7 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
       const res = await fetch('/api/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Default', icon: '👻', color: '#E94560' }),
+        body: JSON.stringify({ name: 'Default', icon: '👻', color: 'var(--primary)' }),
       })
       if (!res.ok) return
       const { team } = (await res.json()) as {
@@ -581,7 +581,7 @@ export function GatewayBootstrap() {
               initial={{ opacity: 0, y: 20, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-              className="w-full max-w-[340px] rounded-2xl border border-white/8 bg-surface p-8 shadow-[0_24px_80px_rgba(0,0,0,0.6)]"
+              className="w-full max-w-[340px] rounded-2xl border border-border bg-surface p-8 shadow-[0_24px_80px_rgba(0,0,0,0.6)]"
             >
               <div className="flex flex-col items-center gap-4 text-center">
                 <img src="/logo.svg" alt="Clawboo" width={48} height={44} className="opacity-40" />
@@ -622,7 +622,7 @@ export function GatewayBootstrap() {
                   type="button"
                   onClick={handleStartGateway}
                   disabled={startingGateway}
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {startingGateway ? (
                     <>
@@ -667,7 +667,7 @@ export function GatewayBootstrap() {
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm"
           >
-            <div className="w-full max-w-[360px] rounded-2xl border border-white/8 bg-surface p-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.6)]">
+            <div className="w-full max-w-[360px] rounded-2xl border border-border bg-surface p-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.6)]">
               <p className="mb-4 text-[14px] font-medium text-destructive">{fleetError}</p>
               <div className="flex justify-center gap-3">
                 <button
@@ -676,7 +676,7 @@ export function GatewayBootstrap() {
                     setFleetError(null)
                     if (client) void hydrateFleet(client)
                   }}
-                  className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white"
+                  className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-primary-foreground"
                 >
                   Retry
                 </button>
@@ -687,7 +687,7 @@ export function GatewayBootstrap() {
                     client?.disconnect()
                     setStatus('disconnected')
                   }}
-                  className="rounded-lg border border-white/10 px-4 py-2 text-[13px] text-secondary"
+                  className="rounded-lg border border-border px-4 py-2 text-[13px] text-secondary"
                 >
                   Reconnect
                 </button>

@@ -10,7 +10,7 @@ import type { ResourceNodeData } from '../types'
 
 const handleStyle = {
   background: 'transparent',
-  border: '1.5px solid rgba(251,191,36,0.45)',
+  border: '1.5px solid rgb(var(--amber-rgb) / 0.45)',
   width: 7,
   height: 7,
 }
@@ -70,14 +70,15 @@ export const ResourceNode = memo(function ResourceNode({
           width: 64,
           height: 70,
           borderRadius: 14,
-          background: 'rgba(251,191,36,0.05)',
-          border: '1.5px solid rgba(251,191,36,0.32)',
+          background: 'rgb(var(--amber-rgb) / 0.05)',
+          border: '1.5px solid rgb(var(--amber-rgb) / 0.32)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
           gap: 5,
-          boxShadow: '0 0 18px rgba(251,191,36,0.1), inset 0 1px 0 rgba(255,255,255,0.04)',
+          boxShadow:
+            '0 0 18px rgb(var(--amber-rgb) / 0.1), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.04)',
         }}
       >
         {/* Service icon */}
@@ -88,7 +89,7 @@ export const ResourceNode = memo(function ResourceNode({
           style={{
             fontSize: 10,
             fontWeight: 600,
-            color: 'rgba(251,191,36,0.8)',
+            color: 'rgb(var(--amber-rgb) / 0.8)',
             letterSpacing: '0.05em',
             textTransform: 'uppercase',
             whiteSpace: 'nowrap',

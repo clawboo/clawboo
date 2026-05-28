@@ -2,9 +2,9 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useToastStore, type ToastType } from '@/stores/toast'
 
 const bgByType: Record<ToastType, string> = {
-  success: 'bg-[#34D399] text-[#0A0E1A]',
-  error: 'bg-[#E94560] text-white',
-  info: 'bg-[#111827] text-white border border-white/10',
+  success: 'bg-mint text-primary-foreground',
+  error: 'bg-primary text-primary-foreground',
+  info: 'bg-surface text-foreground border border-border',
 }
 
 export function ToastContainer() {

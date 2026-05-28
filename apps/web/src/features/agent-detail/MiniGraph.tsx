@@ -533,18 +533,7 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
 
   if (isLoading) {
     return (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#0A0E1A',
-          color: 'rgba(232,232,232,0.4)',
-          fontSize: 12,
-        }}
-      >
+      <div className="flex h-full w-full items-center justify-center bg-canvas text-[12px] text-foreground/40">
         Loading graph…
       </div>
     )
@@ -552,18 +541,7 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
 
   if (nodes.length === 0) {
     return (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#0A0E1A',
-          color: 'rgba(232,232,232,0.3)',
-          fontSize: 12,
-        }}
-      >
+      <div className="flex h-full w-full items-center justify-center bg-canvas text-[12px] text-foreground/30">
         No skills or resources
       </div>
     )
@@ -588,17 +566,12 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
       edgeTypes={edgeTypes}
       fitView
       proOptions={{ hideAttribution: true }}
-      style={{ background: '#0A0E1A' }}
+      style={{ background: 'var(--canvas)' }}
       minZoom={0.3}
       maxZoom={2}
       defaultEdgeOptions={{ animated: false }}
     >
-      <Background
-        variant={BackgroundVariant.Dots}
-        gap={32}
-        size={1}
-        color="rgba(255,255,255,0.03)"
-      />
+      <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="var(--canvas-dot)" />
     </ReactFlow>
   )
 }

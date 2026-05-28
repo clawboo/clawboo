@@ -22,7 +22,7 @@ export const AgentChips = memo(function AgentChips({ agents, onTag }: AgentChips
           key={agent.id}
           type="button"
           onClick={() => onTag(agent.name)}
-          className="flex shrink-0 items-center gap-1.5 rounded-full bg-white/6 px-2 py-1 transition-colors hover:bg-white/10"
+          className="flex shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.06] px-2 py-1 transition-colors hover:bg-foreground/10"
           title={`Tag @${agent.name}`}
         >
           <AgentBooAvatar agentId={agent.id} size={18} />

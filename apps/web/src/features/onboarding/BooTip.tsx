@@ -40,7 +40,7 @@ export function BooTip({ onDismiss }: BooTipProps) {
           height: 0,
           borderTop: '5px solid transparent',
           borderBottom: '5px solid transparent',
-          borderRight: '7px solid rgba(233, 69, 96, 0.30)',
+          borderRight: '7px solid rgb(var(--primary-rgb) / 0.30)',
         }}
       />
 

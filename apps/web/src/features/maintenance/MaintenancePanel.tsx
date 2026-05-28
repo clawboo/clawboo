@@ -7,6 +7,7 @@ import { BooZeroBriefsPanel } from './BooZeroBriefsPanel'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { consumeSSE } from '@/lib/sseClient'
+import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ function SectionHeading({ children }: { children: string }) {
       style={{
         fontSize: 14,
         fontWeight: 600,
-        color: '#E8E8E8',
+        color: 'var(--foreground)',
         margin: 0,
         fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
       }}
@@ -64,7 +65,7 @@ function InfoRow({ label, value }: { label: string; value: string | null }) {
       <span
         style={{
           fontSize: 11,
-          color: 'rgba(232,232,232,0.4)',
+          color: 'rgb(var(--foreground-rgb) / 0.4)',
           fontWeight: 500,
           minWidth: 100,
           flexShrink: 0,
@@ -75,7 +76,7 @@ function InfoRow({ label, value }: { label: string; value: string | null }) {
       <span
         style={{
           fontSize: 13,
-          color: '#E8E8E8',
+          color: 'var(--foreground)',
           fontFamily: 'var(--font-geist-mono, monospace)',
           wordBreak: 'break-all',
         }}
@@ -92,7 +93,7 @@ const toggleTrack: CSSProperties = {
   width: 36,
   height: 20,
   borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.1)',
+  border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
   cursor: 'pointer',
   position: 'relative',
   transition: 'background 0.15s',
@@ -103,7 +104,7 @@ const toggleThumb: CSSProperties = {
   width: 14,
   height: 14,
   borderRadius: 7,
-  background: '#E8E8E8',
+  background: 'var(--foreground)',
   position: 'absolute',
   top: 2,
   transition: 'left 0.15s',
@@ -181,12 +182,14 @@ function AgentCoordinationToggle() {
           aria-label="Toggle agent-to-agent coordination"
           style={{
             ...toggleTrack,
-            background: enabled ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.04)',
+            background: enabled
+              ? 'rgb(var(--mint-rgb) / 0.25)'
+              : 'rgb(var(--foreground-rgb) / 0.04)',
           }}
         >
           <div style={{ ...toggleThumb, left: enabled ? 18 : 2 }} />
         </button>
-        <span style={{ fontSize: 12, color: 'rgba(232,232,232,0.6)' }}>
+        <span style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.6)' }}>
           {enabled
             ? 'Agents can delegate tasks to each other'
             : 'Agent-to-agent messaging disabled'}
@@ -196,7 +199,7 @@ function AgentCoordinationToggle() {
         style={{
           marginTop: 8,
           fontSize: 11,
-          color: 'rgba(232,232,232,0.3)',
+          color: 'rgb(var(--foreground-rgb) / 0.3)',
           lineHeight: 1.5,
         }}
       >
@@ -286,7 +289,7 @@ function CommandApprovalDefault() {
           gap: 12,
         }}
       >
-        <span style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)' }}>Default:</span>
+        <span style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.5)' }}>Default:</span>
         <div style={{ position: 'relative', flex: 1, maxWidth: 220 }}>
           <select
             value={execAsk}
@@ -296,9 +299,9 @@ function CommandApprovalDefault() {
               width: '100%',
               padding: '7px 32px 7px 10px',
               borderRadius: 6,
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: '#0A0E1A',
-              color: '#E8E8E8',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+              background: 'var(--background)',
+              color: 'var(--foreground)',
               fontSize: 12,
               fontWeight: 500,
               fontFamily: 'inherit',
@@ -322,7 +325,7 @@ function CommandApprovalDefault() {
               transform: 'translateY(-50%)',
               width: 14,
               height: 14,
-              color: 'rgba(232,232,232,0.4)',
+              color: 'rgb(var(--foreground-rgb) / 0.4)',
               pointerEvents: 'none',
             }}
             strokeWidth={2}
@@ -333,7 +336,7 @@ function CommandApprovalDefault() {
         style={{
           marginTop: 6,
           fontSize: 10,
-          color: 'rgba(232,232,232,0.3)',
+          color: 'rgb(var(--foreground-rgb) / 0.3)',
           lineHeight: 1.4,
         }}
       >
@@ -343,7 +346,7 @@ function CommandApprovalDefault() {
         style={{
           marginTop: 8,
           fontSize: 11,
-          color: 'rgba(232,232,232,0.3)',
+          color: 'rgb(var(--foreground-rgb) / 0.3)',
           lineHeight: 1.5,
         }}
       >
@@ -493,8 +496,8 @@ export function MaintenancePanel() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: '#0A0E1A',
-          color: 'rgba(232,232,232,0.4)',
+          background: 'var(--background)',
+          color: 'rgb(var(--foreground-rgb) / 0.4)',
         }}
       >
         <Loader2
@@ -509,166 +512,186 @@ export function MaintenancePanel() {
     <div
       style={{
         height: '100%',
-        overflowY: 'auto',
-        background: '#0A0E1A',
-        padding: '24px 28px',
-        color: '#E8E8E8',
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--background)',
+        color: 'var(--foreground)',
       }}
     >
-      {/* Header */}
-      <div style={{ marginBottom: 28 }}>
-        <h1
+      {/* Fixed top toolbar — same shape as Atlas / Marketplace / Approvals /
+          Scheduler / Cost (44 px, padding 0 12 px). The Star pill at
+          right:12 top:6 matches the rest of the app. */}
+      <div
+        style={{
+          height: 44,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 12px',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'rgb(var(--foreground-rgb) / 0.5)' }}>
+          System
+        </span>
+        <GitHubStarButton />
+      </div>
+
+      {/* Scrollable body */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+        <p
           style={{
-            fontSize: 22,
-            fontWeight: 700,
-            color: '#E8E8E8',
-            margin: 0,
-            fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+            fontSize: 12,
+            color: 'rgb(var(--foreground-rgb) / 0.45)',
+            margin: '0 0 24px',
           }}
         >
-          System
-        </h1>
-        <p style={{ fontSize: 12, color: 'rgba(232,232,232,0.45)', margin: '4px 0 0' }}>
           Manage your OpenClaw installation
         </p>
-      </div>
 
-      {/* Section 1: Gateway */}
-      <div style={{ marginBottom: 28 }}>
-        <SectionHeading>Gateway</SectionHeading>
-        <div style={{ marginTop: 14 }}>
-          <GatewayControls />
+        {/* Section 1: Gateway */}
+        <div style={{ marginBottom: 28 }}>
+          <SectionHeading>Gateway</SectionHeading>
+          <div style={{ marginTop: 14 }}>
+            <GatewayControls />
+          </div>
         </div>
-      </div>
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+        <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
 
-      {/* Section 2: Default Model */}
-      <div style={{ margin: '24px 0 28px' }}>
-        <SectionHeading>Default Model</SectionHeading>
-        <div
-          style={{
-            marginTop: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-          }}
-        >
-          <span style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)' }}>Current:</span>
-          <ModelSelector currentModel={currentModel} onModelChange={handleModelChange} />
+        {/* Section 2: Default Model */}
+        <div style={{ margin: '24px 0 28px' }}>
+          <SectionHeading>Default Model</SectionHeading>
+          <div
+            style={{
+              marginTop: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            <span style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.5)' }}>
+              Current:
+            </span>
+            <ModelSelector currentModel={currentModel} onModelChange={handleModelChange} />
+          </div>
         </div>
-      </div>
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+        <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
 
-      {/* Section 3: API Keys */}
-      <div style={{ margin: '24px 0 28px' }}>
-        <SectionHeading>API Keys</SectionHeading>
-        <div style={{ marginTop: 10 }}>
-          <ApiKeyManager />
+        {/* Section 3: API Keys */}
+        <div style={{ margin: '24px 0 28px' }}>
+          <SectionHeading>API Keys</SectionHeading>
+          <div style={{ marginTop: 10 }}>
+            <ApiKeyManager />
+          </div>
         </div>
-      </div>
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
+        <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
 
-      {/* Section 4: Boo Zero — universal team leader context. The actual
+        {/* Section 4: Boo Zero — universal team leader context. The actual
           editors moved out of System: Display Name + Global Brief now live
           in Boo Zero's agent "Brief" tab, and per-team brief + rules live in
           each team's settings sheet (gear icon on the team-chat header).
           This section is a breadcrumb to the new homes. */}
-      <div style={{ margin: '24px 0 28px' }} data-testid="boo-zero-briefs-section">
-        <SectionHeading>Boo Zero</SectionHeading>
-        <p
-          style={{
-            fontSize: 11,
-            color: 'rgba(232,232,232,0.45)',
-            margin: '4px 0 14px',
-          }}
-        >
-          Manage Boo Zero in the Boo Zero agent view, and per-team settings in each team&apos;s chat
-          header.
-        </p>
-        <BooZeroBriefsPanel />
-      </div>
-
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
-
-      {/* Section 5: Agent Coordination */}
-      <AgentCoordinationToggle />
-
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
-
-      {/* Section 5: Command Approval */}
-      <CommandApprovalDefault />
-
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }} />
-
-      {/* Section 6: System Info */}
-      <div style={{ margin: '24px 0 28px' }}>
-        <SectionHeading>System</SectionHeading>
-        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <InfoRow label="OpenClaw" value={status?.openclaw.version ?? 'Not installed'} />
-          <InfoRow label="Node.js" value={status?.node.version ?? null} />
-          <InfoRow label="State Dir" value={status?.openclaw.stateDir ?? null} />
-          <InfoRow
-            label="Config"
-            value={status?.openclaw.configExists ? 'openclaw.json' : 'Not found'}
-          />
-        </div>
-
-        {/* Check for updates */}
-        <div style={{ marginTop: 16 }}>
-          <button
-            type="button"
-            disabled={updating}
-            onClick={handleCheckUpdates}
+        <div style={{ margin: '24px 0 28px' }} data-testid="boo-zero-briefs-section">
+          <SectionHeading>Boo Zero</SectionHeading>
+          <p
             style={{
-              height: 32,
-              padding: '0 14px',
               fontSize: 11,
-              fontWeight: 600,
-              borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.1)',
-              background: updating ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.06)',
-              color: updating ? 'rgba(232,232,232,0.4)' : 'rgba(232,232,232,0.7)',
-              cursor: updating ? 'default' : 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              transition: 'all 0.15s',
+              color: 'rgb(var(--foreground-rgb) / 0.45)',
+              margin: '4px 0 14px',
             }}
           >
-            {updating && (
-              <Loader2 style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
-            )}
-            {updating ? 'Updating...' : 'Check for Updates'}
-          </button>
+            Manage Boo Zero in the Boo Zero agent view, and per-team settings in each team&apos;s
+            chat header.
+          </p>
+          <BooZeroBriefsPanel />
         </div>
 
-        {/* Update log */}
-        {updateLog.length > 0 && (
-          <div
-            style={{
-              marginTop: 12,
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.06)',
-              borderRadius: 8,
-              padding: '10px 12px',
-              maxHeight: 160,
-              overflowY: 'auto',
-              fontFamily: 'var(--font-geist-mono, monospace)',
-              fontSize: 11,
-              lineHeight: 1.6,
-              color: 'rgba(232,232,232,0.55)',
-            }}
-          >
-            {updateLog.map((line, i) => (
-              <div key={i}>{line}</div>
-            ))}
+        <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
+
+        {/* Section 5: Agent Coordination */}
+        <AgentCoordinationToggle />
+
+        <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
+
+        {/* Section 5: Command Approval */}
+        <CommandApprovalDefault />
+
+        <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
+
+        {/* Section 6: System Info */}
+        <div style={{ margin: '24px 0 28px' }}>
+          <SectionHeading>System</SectionHeading>
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <InfoRow label="OpenClaw" value={status?.openclaw.version ?? 'Not installed'} />
+            <InfoRow label="Node.js" value={status?.node.version ?? null} />
+            <InfoRow label="State Dir" value={status?.openclaw.stateDir ?? null} />
+            <InfoRow
+              label="Config"
+              value={status?.openclaw.configExists ? 'openclaw.json' : 'Not found'}
+            />
           </div>
-        )}
-      </div>
 
+          {/* Check for updates */}
+          <div style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              disabled={updating}
+              onClick={handleCheckUpdates}
+              style={{
+                height: 32,
+                padding: '0 14px',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 8,
+                border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
+                background: updating
+                  ? 'rgb(var(--foreground-rgb) / 0.04)'
+                  : 'rgb(var(--foreground-rgb) / 0.06)',
+                color: updating
+                  ? 'rgb(var(--foreground-rgb) / 0.4)'
+                  : 'rgb(var(--foreground-rgb) / 0.7)',
+                cursor: updating ? 'default' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                transition: 'all 0.15s',
+              }}
+            >
+              {updating && (
+                <Loader2 style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
+              )}
+              {updating ? 'Updating...' : 'Check for Updates'}
+            </button>
+          </div>
+
+          {/* Update log */}
+          {updateLog.length > 0 && (
+            <div
+              style={{
+                marginTop: 12,
+                background: 'rgb(var(--foreground-rgb) / 0.03)',
+                border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                borderRadius: 8,
+                padding: '10px 12px',
+                maxHeight: 160,
+                overflowY: 'auto',
+                fontFamily: 'var(--font-geist-mono, monospace)',
+                fontSize: 11,
+                lineHeight: 1.6,
+                color: 'rgb(var(--foreground-rgb) / 0.55)',
+              }}
+            >
+              {updateLog.map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
       {/* CSS for Loader2 spin */}
       <style>{`
         @keyframes spin {

@@ -194,7 +194,7 @@ export const MD_COMPONENTS: React.ComponentProps<typeof ReactMarkdown>['componen
     const isBlock = /language-/.test(className ?? '')
     if (isBlock) {
       return (
-        <pre className="my-2 overflow-x-auto rounded-md bg-black/30 p-3 text-[12px]">
+        <pre className="my-2 overflow-x-auto rounded-md bg-foreground/[0.05] p-3 text-[12px] dark:bg-black/30">
           <code className={`font-mono ${className ?? ''}`} {...rest}>
             {children}
           </code>
@@ -202,7 +202,10 @@ export const MD_COMPONENTS: React.ComponentProps<typeof ReactMarkdown>['componen
       )
     }
     return (
-      <code className="rounded bg-white/8 px-1 py-0.5 font-mono text-[0.875em] text-mint" {...rest}>
+      <code
+        className="rounded bg-foreground/[0.08] px-1 py-0.5 font-mono text-[0.875em] text-mint"
+        {...rest}
+      >
         {children}
       </code>
     )
@@ -259,7 +262,7 @@ export const ToolCallCard = memo(function ToolCallCard({ entry }: { entry: Trans
   const hasBody = Boolean(parsed.body)
 
   return (
-    <div className="rounded-md border border-white/8 bg-black/20 text-[11px]">
+    <div className="rounded-md border border-border bg-foreground/[0.03] text-[11px] dark:bg-black/20">
       <button
         type="button"
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left"
@@ -284,7 +287,7 @@ export const ToolCallCard = memo(function ToolCallCard({ entry }: { entry: Trans
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <pre className="overflow-x-auto border-t border-white/8 px-3 py-2 font-mono text-[11px] text-secondary">
+            <pre className="overflow-x-auto border-t border-border px-3 py-2 font-mono text-[11px] text-secondary">
               {parsed.body}
             </pre>
           </motion.div>
@@ -392,7 +395,7 @@ export const UserMessageCard = memo(function UserMessageCard({
   return (
     <div className="flex justify-end">
       <div className="max-w-[70ch] overflow-hidden rounded-xl rounded-br-sm bg-blue/60 shadow-sm">
-        <div className="flex items-center justify-between gap-4 border-b border-white/8 px-3 py-1.5">
+        <div className="flex items-center justify-between gap-4 border-b border-border px-3 py-1.5">
           <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-text/70">
             {targetAgentName ? `You → ${targetAgentName}` : 'You'}
           </span>
@@ -812,10 +815,10 @@ export const DelegationCard = memo(function DelegationCard({
                 opacity: 1,
                 y: 0,
                 boxShadow: [
-                  `inset 0 1px 0 ${tint}20, 0 0 0 0 #34d39900`,
-                  `inset 0 1px 0 ${tint}20, 0 0 32px -6px #34d399cc`,
-                  `inset 0 1px 0 ${tint}20, 0 0 16px -8px #34d39966`,
-                  `inset 0 1px 0 ${tint}20, 0 0 0 0 #34d39900`,
+                  `inset 0 1px 0 ${tint}20, 0 0 0 0 rgb(var(--mint-rgb) / 0)`,
+                  `inset 0 1px 0 ${tint}20, 0 0 32px -6px rgb(var(--mint-rgb) / 0.8)`,
+                  `inset 0 1px 0 ${tint}20, 0 0 16px -8px rgb(var(--mint-rgb) / 0.4)`,
+                  `inset 0 1px 0 ${tint}20, 0 0 0 0 rgb(var(--mint-rgb) / 0)`,
                 ],
               }
             : { opacity: 1, y: 0 }
@@ -881,8 +884,8 @@ export const DelegationCard = memo(function DelegationCard({
                   <span
                     className="rounded-full px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider"
                     style={{
-                      color: 'rgba(232,232,232,0.55)',
-                      background: 'rgba(255,255,255,0.06)',
+                      color: 'var(--muted-foreground)',
+                      background: 'rgb(var(--mint-rgb) / 0.06)',
                     }}
                     title="Clawboo forwarded the source's response to this teammate as a [Team Update]"
                   >
@@ -930,7 +933,7 @@ export const DelegationCard = memo(function DelegationCard({
             </span>
           ) : hasContent ? (
             <span
-              className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-emerald-300"
+              className="rounded-full bg-mint/20 px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-wider text-mint"
               title="Reply delivered"
             >
               Done
@@ -938,8 +941,7 @@ export const DelegationCard = memo(function DelegationCard({
           ) : (
             <span
               aria-hidden
-              className="h-2 w-2 rounded-full"
-              style={{ background: 'rgba(255,255,255,0.15)' }}
+              className="h-2 w-2 rounded-full bg-foreground/15"
               title="Awaiting response"
             />
           )}
@@ -947,7 +949,7 @@ export const DelegationCard = memo(function DelegationCard({
             <button
               type="button"
               onClick={() => setExpandedOverride(expanded ? false : true)}
-              className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-white/5"
+              className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-foreground/5"
               aria-label={expanded ? 'Collapse response' : 'Expand response'}
               data-testid="delegation-toggle"
             >
@@ -1280,11 +1282,11 @@ export const PlanCard = memo(function PlanCard({
 
   return (
     <div
-      className="@container flex flex-col gap-3 rounded-xl border border-white/8 bg-gradient-to-b from-white/[0.025] to-white/[0.005] p-4"
+      className="@container flex flex-col gap-3 rounded-xl border border-border bg-gradient-to-b from-foreground/[0.025] to-foreground/[0.008] p-4"
       data-testid="plan-card"
       data-plan-id={planId}
     >
-      <div className="flex items-center gap-2 border-b border-white/5 pb-2.5">
+      <div className="flex items-center gap-2 border-b border-border/60 pb-2.5">
         <span aria-hidden className="text-[15px]">
           📋
         </span>
@@ -1426,11 +1428,11 @@ export const WorkstreamCard = memo(function WorkstreamCard({
 
   return (
     <div
-      className="@container flex flex-col gap-3 rounded-xl border border-white/8 bg-gradient-to-b from-white/[0.025] to-white/[0.005] p-4"
+      className="@container flex flex-col gap-3 rounded-xl border border-border bg-gradient-to-b from-foreground/[0.025] to-foreground/[0.008] p-4"
       data-testid="workstream-card"
       data-workstream-id={workstreamId}
     >
-      <div className="flex items-center gap-2 border-b border-white/5 pb-2.5">
+      <div className="flex items-center gap-2 border-b border-border/60 pb-2.5">
         <span aria-hidden className="text-[15px]">
           📡
         </span>
@@ -2253,7 +2255,7 @@ export const MessageComposer = memo(
     const sendDisabled = disabled || !draft.trim()
 
     return (
-      <div className="border-t border-white/8 px-4 py-3">
+      <div className="border-t border-border px-4 py-3">
         <div className="relative flex items-end gap-2">
           {/* Mention autocomplete dropdown (positioned above textarea) */}
           {mentionOpen && filteredMentionAgents.length > 0 && (
@@ -2273,7 +2275,7 @@ export const MessageComposer = memo(
             placeholder={placeholder ?? 'Message…'}
             disabled={disabled}
             data-testid="chat-composer-input"
-            className="flex-1 resize-none overflow-hidden rounded-lg border border-white/10 bg-surface px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex-1 resize-none overflow-hidden rounded-lg border border-border bg-input px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-40"
             style={{ fontFamily: 'var(--font-body)', minHeight: '38px' }}
           />
           {showStop ? (
@@ -2289,7 +2291,7 @@ export const MessageComposer = memo(
               data-testid="chat-stop-button"
               aria-label="Stop"
               title="Stop"
-              className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-white transition hover:brightness-110"
+              className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-primary-foreground transition hover:brightness-110"
             >
               <Square className="h-3.5 w-3.5" strokeWidth={2} fill="currentColor" />
             </button>
@@ -2300,7 +2302,7 @@ export const MessageComposer = memo(
               disabled={sendDisabled}
               data-testid="chat-send-button"
               aria-label="Send message"
-              className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-muted disabled:text-secondary"
+              className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-muted disabled:text-secondary"
             >
               <SendHorizontal className="h-4 w-4" strokeWidth={2} />
             </button>
@@ -2352,21 +2354,7 @@ const MentionDropdownInline = memo(function MentionDropdownInline({
     <div
       ref={listRef}
       data-testid="mention-dropdown"
-      style={{
-        position: 'absolute',
-        bottom: '100%',
-        left: 0,
-        marginBottom: 4,
-        zIndex: 50,
-        background: '#111827',
-        border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 8,
-        padding: '4px 0',
-        minWidth: 180,
-        maxHeight: 200,
-        overflowY: 'auto',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-      }}
+      className="absolute bottom-full left-0 z-50 mb-1 max-h-[200px] min-w-[180px] overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-lg"
     >
       {agents.map((agent, i) => (
         <button
@@ -2377,20 +2365,10 @@ const MentionDropdownInline = memo(function MentionDropdownInline({
             e.preventDefault()
             onSelect(agent.name)
           }}
-          className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors"
-          style={{
-            background: i === selectedIndex ? 'rgba(255,255,255,0.08)' : 'transparent',
-            fontSize: 12,
-            color: '#E8E8E8',
-          }}
-          onMouseEnter={(e) => {
-            if (i !== selectedIndex)
-              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)'
-          }}
-          onMouseLeave={(e) => {
-            if (i !== selectedIndex)
-              (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-          }}
+          className={[
+            'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-popover-foreground transition-colors',
+            i === selectedIndex ? 'bg-foreground/[0.08]' : 'hover:bg-foreground/[0.04]',
+          ].join(' ')}
         >
           {agent.icon ? (
             // Team candidate — render emoji on a colored disc matching the
@@ -2405,7 +2383,7 @@ const MentionDropdownInline = memo(function MentionDropdownInline({
                 width: 20,
                 height: 20,
                 borderRadius: '50%',
-                background: `${agent.color ?? '#E94560'}33`,
+                background: `${agent.color ?? 'var(--primary)'}33`,
                 fontSize: 12,
                 flexShrink: 0,
               }}

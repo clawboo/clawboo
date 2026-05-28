@@ -101,7 +101,7 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
   const isEacces = errorCode === 'EACCES'
 
   return (
-    <div className="w-full max-w-lg rounded-2xl border border-white/8 bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
+    <div className="w-full max-w-lg rounded-2xl border border-border bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
       <div className="p-8">
         <StepIndicator current="setup" />
 
@@ -131,7 +131,7 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
         </p>
 
         {/* ── Terminal log ──────────────────────────────────────── */}
-        <div className="mb-4 max-h-[240px] overflow-y-auto rounded-lg border border-white/8 bg-[#0d1117] p-3">
+        <div className="mb-4 max-h-[240px] overflow-y-auto rounded-lg border border-border bg-[#0d1117] p-3">
           {installLog.map((line, i) => (
             <div key={i} className="font-mono text-[11px] leading-relaxed text-secondary/60">
               {line}
@@ -185,13 +185,13 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
                         </li>
                         <li>
                           <strong>Homebrew:</strong> Run{' '}
-                          <code className="rounded bg-white/5 px-1 py-0.5 font-mono text-[10px]">
+                          <code className="rounded bg-foreground/5 px-1 py-0.5 font-mono text-[10px]">
                             brew postinstall node
                           </code>
                         </li>
                         <li>
                           <strong>Otherwise:</strong> Run{' '}
-                          <code className="rounded bg-white/5 px-1 py-0.5 font-mono text-[10px]">
+                          <code className="rounded bg-foreground/5 px-1 py-0.5 font-mono text-[10px]">
                             sudo npm install -g openclaw@latest
                           </code>{' '}
                           in your terminal
@@ -232,7 +232,7 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
             <button
               type="button"
               onClick={handleRetry}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-white shadow-sm transition hover:brightness-110 active:scale-[0.98]"
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98]"
             >
               <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.5} />
               Retry

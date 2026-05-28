@@ -54,8 +54,8 @@ interface DependencyEdgeData extends Record<string, unknown> {
   siblingTargetIds?: string[]
 }
 
-const STROKE = 'rgba(233,69,96,0.65)'
-const STROKE_SELECTED = '#E94560'
+const STROKE = 'rgb(var(--primary-rgb) / 0.65)'
+const STROKE_SELECTED = 'var(--primary)'
 const STROKE_WIDTH = 1.5
 const STROKE_WIDTH_SELECTED = 2.5
 const TRUNK_CORNER_RADIUS = 12

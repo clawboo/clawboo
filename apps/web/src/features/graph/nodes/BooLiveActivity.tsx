@@ -35,7 +35,7 @@ export const BooLiveActivity = memo(function BooLiveActivity({ agentId }: { agen
         fontFamily: 'var(--font-mono, "Geist Mono", ui-monospace, monospace)',
         fontSize: 11,
         lineHeight: 1.35,
-        color: 'rgba(232,232,232,0.6)',
+        color: 'rgb(var(--foreground-rgb) / 0.6)',
         display: '-webkit-box',
         WebkitLineClamp: 2,
         WebkitBoxOrient: 'vertical',
@@ -57,7 +57,7 @@ export const BooLiveActivity = memo(function BooLiveActivity({ agentId }: { agen
             width: 4,
             height: 4,
             borderRadius: '50%',
-            background: '#34D399',
+            background: 'var(--mint)',
             marginRight: 6,
             verticalAlign: 'middle',
           }}
@@ -78,7 +78,7 @@ function InlineTyping() {
             width: 4,
             height: 4,
             borderRadius: '50%',
-            background: '#34D399',
+            background: 'var(--mint)',
             display: 'inline-block',
           }}
           animate={{ opacity: [0.3, 1, 0.3] }}

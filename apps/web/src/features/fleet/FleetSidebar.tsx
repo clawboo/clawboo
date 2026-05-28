@@ -34,9 +34,9 @@ function AgentAvatar({ agent, selected }: { agent: AgentState; selected: boolean
         display: 'inline-flex',
         borderRadius: 8,
         boxShadow: selected
-          ? '0 0 0 2px rgba(233,69,96,0.55)'
-          : '0 0 0 1.5px rgba(255,255,255,0.06)',
-        background: '#0A0E1A',
+          ? '0 0 0 2px rgb(var(--primary-rgb) / 0.55)'
+          : '0 0 0 1.5px rgb(var(--foreground-rgb) / 0.06)',
+        background: 'var(--background)',
       }}
     >
       <AgentBooAvatar agentId={agent.id} size={36} />
@@ -53,7 +53,7 @@ const STATUS_CONFIG: Record<
   idle: {
     label: 'Idle',
     dot: 'bg-secondary',
-    badge: 'bg-surface text-secondary border border-white/5',
+    badge: 'bg-surface text-secondary border border-border',
     pulse: false,
   },
   running: {
@@ -71,7 +71,7 @@ const STATUS_CONFIG: Record<
   sleeping: {
     label: 'Sleeping',
     dot: 'bg-secondary/40',
-    badge: 'bg-surface text-secondary/50 border border-white/5',
+    badge: 'bg-surface text-secondary/50 border border-border',
     pulse: false,
   },
 }
@@ -125,7 +125,7 @@ function AgentRow({
       className={[
         'group flex w-full items-center gap-3 rounded-lg px-3 py-2.5',
         'transition-colors duration-150',
-        selected ? 'bg-white/6 shadow-sm' : 'hover:bg-white/4',
+        selected ? 'bg-foreground/[0.06] shadow-sm' : 'hover:bg-foreground/[0.04]',
       ].join(' ')}
     >
       <button
@@ -253,7 +253,7 @@ export function FleetSidebar() {
 
       {/* Search */}
       <div className="px-3 pb-2">
-        <label className="flex items-center gap-2 rounded-md border border-white/8 bg-surface px-2.5 py-1.5 focus-within:border-white/20 focus-within:ring-1 focus-within:ring-ring/30">
+        <label className="flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 focus-within:border-foreground/20 focus-within:ring-1 focus-within:ring-ring/30">
           <Search className="h-3.5 w-3.5 shrink-0 text-secondary" strokeWidth={2} />
           <input
             type="search"
@@ -321,14 +321,14 @@ export function FleetSidebar() {
 
       {/* Edit files — shown when an agent is selected */}
       {selectedAgentId && client && (
-        <div className="border-t border-white/8 px-4 py-2">
+        <div className="border-t border-border px-4 py-2">
           <button
             type="button"
             onClick={() => {
               const agent = agents.find((a) => a.id === selectedAgentId)
               if (agent) useEditorStore.getState().openEditor(agent.id, agent.name)
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium text-secondary/70 transition-colors hover:bg-white/4 hover:text-text"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium text-secondary/70 transition-colors hover:bg-foreground/[0.04] hover:text-text"
             style={{ fontFamily: 'var(--font-mono)' }}
           >
             <FileEdit className="h-3.5 w-3.5" strokeWidth={2} />
@@ -339,12 +339,12 @@ export function FleetSidebar() {
 
       {/* Personality settings — shown when an agent is selected */}
       {selectedAgentId && (
-        <div className="border-t border-white/8">
+        <div className="border-t border-border">
           {/* Collapsible header */}
           <button
             type="button"
             onClick={() => setPersonalityOpen((o) => !o)}
-            className="flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors hover:bg-white/4"
+            className="flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors hover:bg-foreground/[0.04]"
           >
             <span
               className="text-[10px] font-semibold uppercase tracking-widest text-secondary"
@@ -370,12 +370,12 @@ export function FleetSidebar() {
 
       {/* Create Boo */}
       {client && (
-        <div className="border-t border-white/8 p-3">
+        <div className="border-t border-border p-3">
           <button
             type="button"
             data-testid="fleet-create-boo"
             onClick={() => setShowCreateModal(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-white/12 px-3 py-2 text-[12px] font-medium text-secondary/60 transition-colors hover:border-accent/30 hover:text-accent/60"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-[12px] font-medium text-secondary/60 transition-colors hover:border-accent/30 hover:text-accent/60"
           >
             <Plus className="h-3.5 w-3.5" strokeWidth={2} />
             Create Boo

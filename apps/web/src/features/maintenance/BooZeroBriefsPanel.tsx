@@ -53,8 +53,8 @@ function RedirectLink({
         alignItems: 'center',
         gap: 12,
         padding: 12,
-        background: 'rgba(255,255,255,0.03)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgb(var(--foreground-rgb) / 0.03)',
+        border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
         borderRadius: 8,
         textAlign: 'left',
         cursor: disabled ? 'default' : 'pointer',
@@ -63,13 +63,13 @@ function RedirectLink({
       }}
       onMouseEnter={(e) => {
         if (!disabled) {
-          e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
-          e.currentTarget.style.borderColor = 'rgba(233,69,96,0.4)'
+          e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
+          e.currentTarget.style.borderColor = 'rgb(var(--primary-rgb) / 0.4)'
         }
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
-        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
+        e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.03)'
+        e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.08)'
       }}
     >
       <span
@@ -80,8 +80,8 @@ function RedirectLink({
           width: 32,
           height: 32,
           borderRadius: 8,
-          background: iconTinted ? 'rgba(233,69,96,0.12)' : 'transparent',
-          color: iconTinted ? '#E94560' : 'inherit',
+          background: iconTinted ? 'rgb(var(--primary-rgb) / 0.12)' : 'transparent',
+          color: iconTinted ? 'var(--primary)' : 'inherit',
           flexShrink: 0,
         }}
       >
@@ -92,17 +92,17 @@ function RedirectLink({
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: '#E8E8E8',
+            color: 'var(--foreground)',
             marginBottom: 2,
           }}
         >
           {title}
         </div>
-        <div style={{ fontSize: 11, color: 'rgba(232,232,232,0.55)', lineHeight: 1.45 }}>
+        <div style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.55)', lineHeight: 1.45 }}>
           {description}
         </div>
         {disabled && disabledReason && (
-          <div style={{ fontSize: 10, color: '#FBBF24', marginTop: 4 }}>{disabledReason}</div>
+          <div style={{ fontSize: 10, color: 'var(--amber)', marginTop: 4 }}>{disabledReason}</div>
         )}
       </div>
       <span
@@ -112,7 +112,9 @@ function RedirectLink({
           gap: 4,
           fontSize: 11,
           fontWeight: 500,
-          color: disabled ? 'rgba(232,232,232,0.35)' : 'rgba(232,232,232,0.7)',
+          color: disabled
+            ? 'rgb(var(--foreground-rgb) / 0.35)'
+            : 'rgb(var(--foreground-rgb) / 0.7)',
           flexShrink: 0,
         }}
       >

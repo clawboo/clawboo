@@ -23,13 +23,17 @@ function RelativeTime({ timestampMs }: { timestampMs: number | null }) {
     return () => clearInterval(id)
   }, [])
 
-  if (timestampMs === null) return <span style={{ color: 'rgba(232,232,232,0.25)' }}>—</span>
+  if (timestampMs === null)
+    return <span style={{ color: 'rgb(var(--foreground-rgb) / 0.25)' }}>—</span>
 
   const date = new Date(timestampMs)
   const rel = formatRelativeTime(date)
 
   return (
-    <span title={date.toLocaleString()} style={{ color: 'rgba(232,232,232,0.6)', fontSize: 12 }}>
+    <span
+      title={date.toLocaleString()}
+      style={{ color: 'rgb(var(--foreground-rgb) / 0.6)', fontSize: 12 }}
+    >
       {rel}
     </span>
   )
@@ -45,10 +49,11 @@ function LastRunCell({
   lastStatus: CronJob['lastStatus']
 }) {
   if (lastExecution === null) {
-    return <span style={{ color: 'rgba(232,232,232,0.25)', fontSize: 12 }}>Never</span>
+    return <span style={{ color: 'rgb(var(--foreground-rgb) / 0.25)', fontSize: 12 }}>Never</span>
   }
 
-  const color = lastStatus === 'ok' ? '#34D399' : lastStatus === 'error' ? '#E94560' : '#FBBF24'
+  const color =
+    lastStatus === 'ok' ? 'var(--mint)' : lastStatus === 'error' ? 'var(--primary)' : 'var(--amber)'
 
   const label = lastStatus === 'ok' ? 'Success' : lastStatus === 'error' ? 'Error' : 'Skipped'
 
@@ -64,7 +69,7 @@ function LastRunCell({
           flexShrink: 0,
         }}
       />
-      <span style={{ color: 'rgba(232,232,232,0.6)', fontSize: 12 }}>
+      <span style={{ color: 'rgb(var(--foreground-rgb) / 0.6)', fontSize: 12 }}>
         {label} · <RelativeTime timestampMs={lastExecution} />
       </span>
     </span>
@@ -131,7 +136,7 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
         gap: 12,
         alignItems: 'center',
         padding: '10px 16px',
-        borderBottom: '1px solid rgba(255,255,255,0.05)',
+        borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.05)',
         opacity: job.active ? 1 : 0.5,
         transition: 'opacity 0.2s',
       }}
@@ -143,8 +148,8 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
             flexShrink: 0,
             display: 'inline-flex',
             borderRadius: 6,
-            boxShadow: '0 0 0 1.5px rgba(255,255,255,0.06)',
-            background: '#0A0E1A',
+            boxShadow: '0 0 0 1.5px rgb(var(--foreground-rgb) / 0.06)',
+            background: 'var(--background)',
           }}
         >
           <AgentBooAvatar agentId={job.agentId} size={28} />
@@ -154,7 +159,7 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
             style={{
               fontSize: 12,
               fontWeight: 600,
-              color: '#E8E8E8',
+              color: 'var(--foreground)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -165,7 +170,7 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
           <p
             style={{
               fontSize: 11,
-              color: 'rgba(232,232,232,0.45)',
+              color: 'rgb(var(--foreground-rgb) / 0.45)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -181,7 +186,7 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
         <p
           style={{
             fontSize: 12,
-            color: '#FBBF24',
+            color: 'var(--amber)',
             fontFamily: 'var(--font-geist-mono, monospace)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -194,7 +199,7 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
         <p
           style={{
             fontSize: 11,
-            color: 'rgba(232,232,232,0.4)',
+            color: 'rgb(var(--foreground-rgb) / 0.4)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -208,13 +213,17 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
 
       {/* Next run column */}
       <div>
-        <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)', marginBottom: 2 }}>Next</p>
+        <p style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.35)', marginBottom: 2 }}>
+          Next
+        </p>
         <RelativeTime timestampMs={job.nextExecution} />
       </div>
 
       {/* Last run column */}
       <div>
-        <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)', marginBottom: 2 }}>Last</p>
+        <p style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.35)', marginBottom: 2 }}>
+          Last
+        </p>
         <LastRunCell lastExecution={job.lastExecution} lastStatus={job.lastStatus} />
       </div>
 
@@ -231,10 +240,12 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
             width: 32,
             height: 18,
             borderRadius: 9,
-            background: job.active ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.08)',
+            background: job.active
+              ? 'rgb(var(--mint-rgb) / 0.25)'
+              : 'rgb(var(--foreground-rgb) / 0.08)',
             border: job.active
-              ? '1px solid rgba(52,211,153,0.4)'
-              : '1px solid rgba(255,255,255,0.1)',
+              ? '1px solid rgb(var(--mint-rgb) / 0.4)'
+              : '1px solid rgb(var(--foreground-rgb) / 0.1)',
             cursor: toggleBusy ? 'not-allowed' : 'pointer',
             transition: 'all 0.2s',
             flexShrink: 0,
@@ -249,7 +260,7 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
               width: 12,
               height: 12,
               borderRadius: '50%',
-              background: job.active ? '#34D399' : 'rgba(232,232,232,0.35)',
+              background: job.active ? 'var(--mint)' : 'rgb(var(--foreground-rgb) / 0.35)',
               transition: 'all 0.2s',
             }}
           />
@@ -267,9 +278,9 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
             width: 28,
             height: 28,
             borderRadius: 6,
-            background: runBusy ? 'rgba(52,211,153,0.08)' : 'rgba(52,211,153,0.1)',
-            border: '1px solid rgba(52,211,153,0.2)',
-            color: '#34D399',
+            background: runBusy ? 'rgb(var(--mint-rgb) / 0.08)' : 'rgb(var(--mint-rgb) / 0.1)',
+            border: '1px solid rgb(var(--mint-rgb) / 0.2)',
+            color: 'var(--mint)',
             cursor: runBusy ? 'not-allowed' : 'pointer',
             transition: 'all 0.15s',
             flexShrink: 0,
@@ -278,7 +289,7 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
           {runBusy ? (
             <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
           ) : (
-            <Play size={11} fill="#34D399" />
+            <Play size={11} fill="var(--mint)" />
           )}
         </button>
 
@@ -295,8 +306,10 @@ export function CronJobRow({ job, onToggle, onDelete, onRunNow }: CronJobRowProp
             height: 28,
             borderRadius: 6,
             background: 'transparent',
-            border: '1px solid rgba(255,255,255,0.08)',
-            color: deleteBusy ? 'rgba(233,69,96,0.4)' : 'rgba(232,232,232,0.35)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+            color: deleteBusy
+              ? 'rgb(var(--primary-rgb) / 0.4)'
+              : 'rgb(var(--foreground-rgb) / 0.35)',
             cursor: deleteBusy ? 'not-allowed' : 'pointer',
             transition: 'all 0.15s',
             flexShrink: 0,

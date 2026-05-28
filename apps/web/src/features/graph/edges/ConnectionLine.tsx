@@ -2,11 +2,11 @@ import { getSmoothStepPath, getBezierPath } from '@xyflow/react'
 import type { ConnectionLineComponentProps } from '@xyflow/react'
 
 // Color the in-progress connection line based on source node type:
-//   boo   → accent red (#E94560) — boo-to-boo routing
-//   skill → mint (#34D399) — skill install
+//   boo   → accent red (var(--primary)) — boo-to-boo routing
+//   skill → mint (var(--mint)) — skill install
 const NODE_TYPE_COLOR: Record<string, string> = {
-  boo: '#E94560',
-  skill: '#34D399',
+  boo: 'var(--primary)',
+  skill: 'var(--mint)',
 }
 
 export function ConnectionLine({
@@ -41,7 +41,7 @@ export function ConnectionLine({
         targetPosition: toPosition,
       })
 
-  const color = NODE_TYPE_COLOR[fromNode?.type ?? ''] ?? 'rgba(255,255,255,0.5)'
+  const color = NODE_TYPE_COLOR[fromNode?.type ?? ''] ?? 'rgb(var(--foreground-rgb) / 0.5)'
 
   return (
     <g>

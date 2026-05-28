@@ -481,9 +481,9 @@ export function TeamOnboardingGate({
               ) : (
                 <div
                   className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
-                  style={{ background: `${team?.color ?? '#34D399'}22` }}
+                  style={{ background: `${team?.color ?? 'var(--mint)'}22` }}
                 >
-                  <Sparkles size={22} style={{ color: team?.color ?? '#34D399' }} />
+                  <Sparkles size={22} style={{ color: team?.color ?? 'var(--mint)' }} />
                 </div>
               )}
               <h3
@@ -519,7 +519,7 @@ export function TeamOnboardingGate({
                   though it doesn't appear in the team's sidebar agent list. */}
               {booZeroAgent && (
                 <div
-                  className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/8 bg-surface/60 px-3 py-1.5 text-[11px] text-secondary"
+                  className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-surface/60 px-3 py-1.5 text-[11px] text-secondary"
                   data-testid="led-by-boo-zero-badge"
                 >
                   <BooAvatar seed={booZeroAgent.id} size={20} />
@@ -535,7 +535,7 @@ export function TeamOnboardingGate({
                 onClick={handleStartIntros}
                 disabled={!client || teamAgents.length === 0}
                 className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ background: '#E94560', color: '#fff' }}
+                style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
                 data-testid="know-your-team-button"
               >
                 Know Your Team
@@ -574,7 +574,7 @@ export function TeamOnboardingGate({
                       initial={{ opacity: 0, x: -8 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ duration: 0.2 }}
-                      className="flex items-start gap-3 rounded-lg border border-white/8 bg-surface/50 p-3"
+                      className="flex items-start gap-3 rounded-lg border border-border bg-surface/50 p-3"
                       style={{
                         opacity: isDone ? 1 : isStarted ? 0.85 : 0.5,
                       }}
@@ -584,7 +584,7 @@ export function TeamOnboardingGate({
                         <div className="mb-1 flex items-center gap-2">
                           <span className="text-[12px] font-semibold text-text">{agent.name}</span>
                           {isDone ? (
-                            <Check size={12} style={{ color: '#34D399' }} />
+                            <Check size={12} className="text-mint" />
                           ) : (
                             <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-mint" />
                           )}
@@ -630,7 +630,7 @@ export function TeamOnboardingGate({
                   weight type (13px) at higher contrast (~85% opacity)
                   with relaxed line-height. */}
               {agentIntros.size > 0 && (
-                <details open className="mb-4 rounded-lg border border-white/8 bg-surface/30 p-4">
+                <details open className="mb-4 rounded-lg border border-border bg-surface/30 p-4">
                   <summary className="cursor-pointer text-[12px] font-semibold text-secondary/90">
                     Recap: who&rsquo;s on the team
                   </summary>
@@ -662,7 +662,7 @@ export function TeamOnboardingGate({
                 placeholder="Hi team! I'm working on…"
                 rows={5}
                 disabled={submittingUserIntro}
-                className="mb-3 w-full rounded-lg border border-white/10 bg-surface/60 px-3 py-2.5 text-[12px] text-text outline-none transition-colors focus:border-accent/60 disabled:opacity-50"
+                className="mb-3 w-full rounded-lg border border-border bg-surface/60 px-3 py-2.5 text-[12px] text-text outline-none transition-colors focus:border-accent/60 disabled:opacity-50"
                 style={{ resize: 'vertical', minHeight: 100 }}
                 data-testid="user-intro-textarea"
               />
@@ -674,7 +674,7 @@ export function TeamOnboardingGate({
                 onClick={handleSubmitUserIntro}
                 disabled={submittingUserIntro || !client}
                 className="inline-flex items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ background: '#E94560', color: '#fff' }}
+                style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
                 data-testid="submit-user-intro"
               >
                 {submittingUserIntro ? 'Saving…' : 'Continue to Team Chat'}

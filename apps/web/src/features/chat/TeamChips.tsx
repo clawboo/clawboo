@@ -24,7 +24,7 @@ export const TeamChips = memo(function TeamChips({ teams, onTag }: TeamChipsProp
           key={team.id}
           type="button"
           onClick={() => onTag(team.name)}
-          className="ml-1 flex shrink-0 items-center gap-1 rounded-full bg-white/5 px-1.5 py-0.5 transition-colors hover:bg-white/10"
+          className="ml-1 flex shrink-0 items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5 transition-colors hover:bg-foreground/10"
           title={`Tag @${team.name}`}
         >
           <span

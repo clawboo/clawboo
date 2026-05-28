@@ -83,7 +83,7 @@ function WizardCard({
   return (
     <div
       className={[
-        'w-full rounded-2xl border border-white/8 bg-surface',
+        'w-full rounded-2xl border border-border bg-surface',
         'shadow-[0_32px_80px_rgba(0,0,0,0.65)]',
         wide ? 'max-w-4xl' : 'max-w-[420px]',
         className,
@@ -100,7 +100,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center bg-background overflow-hidden">
       {/* Radial glow */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(233,69,96,0.10)_0%,transparent_70%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgb(var(--primary-rgb) / 0.10)_0%,transparent_70%)]" />
 
       {/* Subtle grid */}
       <div
@@ -117,7 +117,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
         <div className="relative">
           <motion.div
             className="pointer-events-none absolute inset-0 rounded-full blur-3xl"
-            style={{ background: 'rgba(233,69,96,0.18)' }}
+            style={{ background: 'rgb(var(--primary-rgb) / 0.18)' }}
             animate={{ opacity: [0.5, 0.9, 0.5], scale: [0.9, 1.1, 0.9] }}
             transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
           />
@@ -154,7 +154,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
           onClick={onContinue}
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.97 }}
-          className="flex items-center gap-2.5 h-[52px] px-9 rounded-xl bg-accent font-semibold text-[15px] text-white shadow-[0_0_36px_rgba(233,69,96,0.45)] transition hover:brightness-110 active:scale-[0.98]"
+          className="flex items-center gap-2.5 h-[52px] px-9 rounded-xl bg-accent font-semibold text-[15px] text-primary-foreground shadow-[0_0_36px_rgb(var(--primary-rgb) / 0.45)] transition hover:brightness-110 active:scale-[0.98]"
         >
           Get Started
           <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
@@ -286,7 +286,7 @@ function ConnectStep({
               spellCheck={false}
               autoComplete="off"
               disabled={connecting}
-              className="h-10 rounded-lg border border-white/10 bg-background px-3 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
+              className="h-10 rounded-lg border border-border bg-background px-3 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
             />
             <AnimatePresence initial={false}>
               {isLocal && (
@@ -319,7 +319,7 @@ function ConnectStep({
                 spellCheck={false}
                 autoComplete="current-password"
                 disabled={connecting}
-                className="h-10 w-full rounded-lg border border-white/10 bg-background px-3 pr-10 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 pr-10 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
               />
               <button
                 type="button"
@@ -366,7 +366,7 @@ function ConnectStep({
             type="button"
             onClick={() => void handleConnect()}
             disabled={connecting || !url.trim()}
-            className="mt-1 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-1 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {connecting ? (
               <>
@@ -410,7 +410,7 @@ function TeamStep({
 }) {
   return (
     <div className="w-full max-w-4xl">
-      <div className="rounded-2xl border border-white/8 bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)] p-8">
+      <div className="rounded-2xl border border-border bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)] p-8">
         {/* Step indicator — centered */}
         <div className="flex justify-center mb-6">
           <StepIndicator current="team" />
@@ -435,7 +435,7 @@ function TeamStep({
                 key={profile.id}
                 type="button"
                 onClick={() => onPickTeam(profile)}
-                className="group flex flex-col text-left rounded-xl border border-white/8 bg-background/50 p-4 transition-all duration-150 hover:border-white/16 hover:bg-background/80 hover:shadow-lg active:scale-[0.99]"
+                className="group flex flex-col text-left rounded-xl border border-border bg-background/50 p-4 transition-all duration-150 hover:border-foreground/15 hover:bg-background/80 hover:shadow-lg active:scale-[0.99]"
               >
                 {/* Header */}
                 <div className="mb-2.5 flex items-center gap-3">
@@ -481,14 +481,14 @@ function TeamStep({
                     .map((tag) => (
                       <span
                         key={tag}
-                        className="rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-mono text-[9px] text-secondary/60"
+                        className="rounded-full border border-border bg-foreground/[0.04] px-2 py-0.5 font-mono text-[9px] text-secondary/60"
                       >
                         {tag}
                       </span>
                     ))}
                   {('tags' in profile ? profile.tags : (profile as TeamProfile).skills).length >
                     3 && (
-                    <span className="rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-mono text-[9px] text-secondary/40">
+                    <span className="rounded-full border border-border bg-foreground/[0.04] px-2 py-0.5 font-mono text-[9px] text-secondary/40">
                       +
                       {('tags' in profile ? profile.tags : (profile as TeamProfile).skills).length -
                         3}
@@ -842,7 +842,7 @@ function DeployStep({
           </div>
 
           {/* Progress bar */}
-          <div className="w-[220px] h-1.5 rounded-full bg-white/8 overflow-hidden">
+          <div className="w-[220px] h-1.5 rounded-full bg-foreground/[0.08] overflow-hidden">
             <motion.div
               className="h-full rounded-full bg-accent"
               animate={{ width: `${pct}%` }}
@@ -919,7 +919,7 @@ function DoneStep({
           onClick={onViewGraph}
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.97 }}
-          className="flex items-center gap-2 h-11 px-6 rounded-xl bg-accent font-semibold text-[14px] text-white transition hover:brightness-110"
+          className="flex items-center gap-2 h-11 px-6 rounded-xl bg-accent font-semibold text-[14px] text-primary-foreground transition hover:brightness-110"
         >
           View Ghost Graph
           <ArrowRight className="h-4 w-4" strokeWidth={2.5} />

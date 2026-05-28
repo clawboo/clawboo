@@ -5,10 +5,6 @@
 // when working in this team) and `TeamRulesEditor` (durable user-set rules
 // injected into every team-agent preamble + every Boo Zero turn in this
 // team).
-//
-// Before this sheet existed, both editors lived inside the System-panel
-// Boo Zero section — semantically wrong (team-scoped data under a
-// system/agent surface) and hard to discover. Now they live with the team.
 
 import { useCallback, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -23,7 +19,6 @@ interface TeamSettingsSheetProps {
 }
 
 export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
-  // Esc closes the sheet.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -32,7 +27,6 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // Click on the dark backdrop closes; clicks inside the panel don't bubble.
   const onBackdropClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.target === e.currentTarget) onClose()
@@ -50,16 +44,7 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
         transition={{ duration: 0.15 }}
         onClick={onBackdropClick}
         data-testid="team-settings-backdrop"
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.55)',
-          zIndex: 60,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 24,
-        }}
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-foreground/55 p-6 backdrop-blur-sm"
       >
         <motion.div
           key="team-settings-panel"
@@ -68,60 +53,24 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
           exit={{ opacity: 0, y: 8, scale: 0.98 }}
           transition={{ duration: 0.18 }}
           data-testid="team-settings-sheet"
-          style={{
-            width: 'min(720px, 100%)',
-            maxHeight: '85vh',
-            background: '#0d1117',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 12,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }}
+          className="flex max-h-[85vh] w-[min(720px,100%)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
         >
           {/* Header */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '14px 16px',
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
-            }}
-          >
+          <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">
             <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                background: `${team.color}22`,
-                fontSize: 15,
-              }}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-[15px]"
+              style={{ background: `${team.color}22` }}
             >
               {team.icon}
             </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="min-w-0 flex-1">
               <h2
-                style={{
-                  margin: 0,
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: '#E8E8E8',
-                  fontFamily: 'var(--font-body, sans-serif)',
-                }}
+                className="m-0 text-[14px] font-semibold text-foreground"
+                style={{ fontFamily: 'var(--font-body, sans-serif)' }}
               >
                 {team.name} — Settings
               </h2>
-              <p
-                style={{
-                  margin: '2px 0 0',
-                  fontSize: 10,
-                  color: 'rgba(232,232,232,0.45)',
-                }}
-              >
+              <p className="m-0 mt-0.5 text-[10px] text-foreground/45">
                 Brief + rules read on every turn by team agents and Boo Zero.
               </p>
             </div>
@@ -130,45 +79,16 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
               onClick={onClose}
               aria-label="Close team settings"
               data-testid="team-settings-close"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 28,
-                height: 28,
-                borderRadius: 6,
-                border: 'none',
-                background: 'transparent',
-                color: 'rgba(232,232,232,0.6)',
-                cursor: 'pointer',
-              }}
+              className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border-none bg-transparent text-foreground/60 hover:bg-foreground/[0.06]"
             >
               <X size={16} />
             </button>
           </div>
 
           {/* Body — scrollable */}
-          <div
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              padding: 18,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 24,
-            }}
-          >
-            <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <h3
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'rgba(232,232,232,0.85)',
-                }}
-              >
-                Brief
-              </h3>
+          <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-[18px]">
+            <section className="flex flex-col gap-2">
+              <h3 className="m-0 text-[12px] font-semibold text-foreground/85">Brief</h3>
               <TeamBriefForm
                 teamId={team.id}
                 teamName={team.name}
@@ -177,17 +97,8 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
               />
             </section>
 
-            <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <h3
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'rgba(232,232,232,0.85)',
-                }}
-              >
-                Rules
-              </h3>
+            <section className="flex flex-col gap-2">
+              <h3 className="m-0 text-[12px] font-semibold text-foreground/85">Rules</h3>
               <TeamRulesEditor teamId={team.id} />
             </section>
           </div>

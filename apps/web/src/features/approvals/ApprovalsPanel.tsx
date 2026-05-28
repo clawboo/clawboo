@@ -5,6 +5,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useApprovalActions } from './useApprovalActions'
 import type { ApprovalRequest } from '@/stores/approvals'
+import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 
 // ─── ApprovalCard ─────────────────────────────────────────────────────────────
 
@@ -33,8 +34,8 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
       exit={{ opacity: 0, x: 40, scale: 0.95 }}
       transition={{ duration: 0.22, ease: 'easeOut' }}
       style={{
-        background: '#111827',
-        border: '1px solid rgba(251,191,36,0.25)',
+        background: 'var(--card)',
+        border: '1px solid rgb(var(--amber-rgb) / 0.25)',
         borderRadius: 10,
         padding: '14px 16px',
         display: 'flex',
@@ -55,7 +56,7 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
               width: 7,
               height: 7,
               borderRadius: '50%',
-              background: '#FBBF24',
+              background: 'var(--amber)',
               flexShrink: 0,
             }}
           />
@@ -63,7 +64,7 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
             style={{
               fontSize: 12,
               fontWeight: 600,
-              color: '#FBBF24',
+              color: 'var(--amber)',
               fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
             }}
           >
@@ -73,7 +74,7 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
         <span
           style={{
             fontSize: 10,
-            color: 'rgba(232,232,232,0.35)',
+            color: 'rgb(var(--foreground-rgb) / 0.35)',
             letterSpacing: '0.04em',
           }}
         >
@@ -84,12 +85,12 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
       {/* Command preview */}
       <div
         style={{
-          background: 'rgba(0,0,0,0.32)',
+          background: 'rgb(0 0 0 / 0.32)',
           borderRadius: 6,
           padding: '8px 10px',
           fontFamily: 'var(--font-geist-mono, monospace)',
           fontSize: 12,
-          color: '#E8E8E8',
+          color: 'var(--foreground)',
           wordBreak: 'break-all',
           lineHeight: 1.5,
         }}
@@ -102,10 +103,10 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
         .filter(([k]) => k !== 'command')
         .map(([key, val]) => (
           <div key={key} style={{ display: 'flex', gap: 6, fontSize: 11 }}>
-            <span style={{ color: 'rgba(232,232,232,0.38)', minWidth: 56 }}>{key}</span>
+            <span style={{ color: 'rgb(var(--foreground-rgb) / 0.38)', minWidth: 56 }}>{key}</span>
             <span
               style={{
-                color: 'rgba(232,232,232,0.7)',
+                color: 'rgb(var(--foreground-rgb) / 0.7)',
                 fontFamily: 'var(--font-geist-mono, monospace)',
                 wordBreak: 'break-all',
               }}
@@ -120,8 +121,8 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
         <div
           style={{
             fontSize: 11,
-            color: '#E94560',
-            background: 'rgba(233,69,96,0.08)',
+            color: 'var(--primary)',
+            background: 'rgb(var(--primary-rgb) / 0.08)',
             borderRadius: 4,
             padding: '4px 8px',
           }}
@@ -137,10 +138,12 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
           onClick={() => void handleApproval(approval.id, 'allow-once')}
           style={{
             flex: 1,
-            background: approval.resolving ? 'rgba(52,211,153,0.08)' : 'rgba(52,211,153,0.15)',
-            border: '1px solid rgba(52,211,153,0.35)',
+            background: approval.resolving
+              ? 'rgb(var(--mint-rgb) / 0.08)'
+              : 'rgb(var(--mint-rgb) / 0.15)',
+            border: '1px solid rgb(var(--mint-rgb) / 0.35)',
             borderRadius: 6,
-            color: '#34D399',
+            color: 'var(--mint)',
             cursor: approval.resolving ? 'not-allowed' : 'pointer',
             fontSize: 11,
             fontWeight: 600,
@@ -156,10 +159,12 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
           onClick={() => void handleApproval(approval.id, 'allow-always')}
           style={{
             flex: 1,
-            background: approval.resolving ? 'rgba(251,191,36,0.08)' : 'rgba(251,191,36,0.15)',
-            border: '1px solid rgba(251,191,36,0.35)',
+            background: approval.resolving
+              ? 'rgb(var(--amber-rgb) / 0.08)'
+              : 'rgb(var(--amber-rgb) / 0.15)',
+            border: '1px solid rgb(var(--amber-rgb) / 0.35)',
             borderRadius: 6,
-            color: '#FBBF24',
+            color: 'var(--amber)',
             cursor: approval.resolving ? 'not-allowed' : 'pointer',
             fontSize: 11,
             fontWeight: 600,
@@ -175,10 +180,12 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
           onClick={() => void handleApproval(approval.id, 'deny')}
           style={{
             flex: 1,
-            background: approval.resolving ? 'rgba(233,69,96,0.08)' : 'rgba(233,69,96,0.15)',
-            border: '1px solid rgba(233,69,96,0.35)',
+            background: approval.resolving
+              ? 'rgb(var(--primary-rgb) / 0.08)'
+              : 'rgb(var(--primary-rgb) / 0.15)',
+            border: '1px solid rgb(var(--primary-rgb) / 0.35)',
             borderRadius: 6,
-            color: '#E94560',
+            color: 'var(--primary)',
             cursor: approval.resolving ? 'not-allowed' : 'pointer',
             fontSize: 11,
             fontWeight: 600,
@@ -224,33 +231,42 @@ export function ApprovalsPanel() {
         overflow: 'hidden',
       }}
     >
-      {/* Panel header */}
+      {/* Panel header — same shape as Atlas / Marketplace / Scheduler /
+          Cost / System (44 px fixed height, padding 0 12 px, border-b).
+          Star pill at right:12 top:6 matches every other view. */}
       <div
         style={{
-          padding: '12px 16px 10px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          height: 44,
+          padding: '0 12px',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
           gap: 8,
           flexShrink: 0,
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#E8E8E8' }}>Exec Approvals</span>
-        {approvals.length > 0 && (
-          <span
-            style={{
-              background: '#FBBF24',
-              color: '#0A0E1A',
-              fontSize: 10,
-              fontWeight: 700,
-              borderRadius: 10,
-              padding: '1px 6px',
-              lineHeight: 1.6,
-            }}
-          >
-            {approvals.length}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
+            Exec Approvals
           </span>
-        )}
+          {approvals.length > 0 && (
+            <span
+              style={{
+                background: 'var(--amber)',
+                color: 'var(--background)',
+                fontSize: 10,
+                fontWeight: 700,
+                borderRadius: 10,
+                padding: '1px 6px',
+                lineHeight: 1.6,
+              }}
+            >
+              {approvals.length}
+            </span>
+          )}
+        </div>
+        <GitHubStarButton />
       </div>
 
       {/* Approval list */}
@@ -288,7 +304,7 @@ export function ApprovalsPanel() {
                 style={{
                   fontSize: 13,
                   fontWeight: 600,
-                  color: 'rgba(232,232,232,0.45)',
+                  color: 'rgb(var(--foreground-rgb) / 0.45)',
                   textAlign: 'center',
                 }}
               >
@@ -298,7 +314,7 @@ export function ApprovalsPanel() {
                 style={{
                   marginTop: 4,
                   fontSize: 11,
-                  color: 'rgba(232,232,232,0.3)',
+                  color: 'rgb(var(--foreground-rgb) / 0.3)',
                   textAlign: 'center',
                   lineHeight: 1.7,
                   maxWidth: 280,
@@ -314,20 +330,31 @@ export function ApprovalsPanel() {
                 >
                   <li style={{ marginBottom: 4 }}>
                     Open an agent → Personality tab →{' '}
-                    <strong style={{ color: 'rgba(232,232,232,0.45)' }}>
+                    <strong style={{ color: 'rgb(var(--foreground-rgb) / 0.45)' }}>
                       Execution Permissions
                     </strong>
                   </li>
                   <li style={{ marginBottom: 4 }}>
                     Set &quot;Command Execution&quot; to{' '}
-                    <strong style={{ color: 'rgba(232,232,232,0.45)' }}>Always Ask</strong> or{' '}
-                    <strong style={{ color: 'rgba(232,232,232,0.45)' }}>Ask for Unknown</strong>
+                    <strong style={{ color: 'rgb(var(--foreground-rgb) / 0.45)' }}>
+                      Always Ask
+                    </strong>{' '}
+                    or{' '}
+                    <strong style={{ color: 'rgb(var(--foreground-rgb) / 0.45)' }}>
+                      Ask for Unknown
+                    </strong>
                   </li>
                   <li>
                     Ask the agent to run a command (e.g., &quot;List files in this directory&quot;)
                   </li>
                 </ol>
-                <p style={{ margin: '10px 0 0', fontSize: 10, color: 'rgba(232,232,232,0.22)' }}>
+                <p
+                  style={{
+                    margin: '10px 0 0',
+                    fontSize: 10,
+                    color: 'rgb(var(--foreground-rgb) / 0.22)',
+                  }}
+                >
                   The agent will pause and ask for your approval before executing.
                 </p>
               </div>

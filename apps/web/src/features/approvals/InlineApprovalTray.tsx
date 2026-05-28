@@ -55,7 +55,7 @@ export function InlineApprovalTray({ agentId, teamId }: InlineApprovalTrayProps)
   return (
     <div
       style={{
-        borderTop: '1px solid rgba(251,191,36,0.15)',
+        borderTop: '1px solid rgb(var(--amber-rgb) / 0.15)',
         padding: '8px 16px',
         display: 'flex',
         flexDirection: 'column',
@@ -75,7 +75,7 @@ export function InlineApprovalTray({ agentId, teamId }: InlineApprovalTrayProps)
           style={{
             background: 'none',
             border: 'none',
-            color: 'rgba(251,191,36,0.5)',
+            color: 'rgb(var(--amber-rgb) / 0.5)',
             fontSize: 10,
             fontWeight: 500,
             cursor: 'pointer',
@@ -84,10 +84,10 @@ export function InlineApprovalTray({ agentId, teamId }: InlineApprovalTrayProps)
             transition: 'color 0.15s',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.color = '#FBBF24'
+            e.currentTarget.style.color = 'var(--amber)'
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.color = 'rgba(251,191,36,0.5)'
+            e.currentTarget.style.color = 'rgb(var(--amber-rgb) / 0.5)'
           }}
         >
           +{overflowCount} more — view all

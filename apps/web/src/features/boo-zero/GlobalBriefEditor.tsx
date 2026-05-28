@@ -110,7 +110,7 @@ export function GlobalBriefEditor() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)', margin: 0 }}>
+      <p style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.45)', margin: 0 }}>
         Boo Zero&apos;s overall responsibilities + the list of teams it leads. Injected into Boo
         Zero&apos;s context preamble on every interaction.
       </p>
@@ -127,9 +127,9 @@ export function GlobalBriefEditor() {
           fontSize: 12,
           fontFamily: 'var(--font-geist-mono, monospace)',
           lineHeight: 1.55,
-          background: 'rgba(13,17,23,0.85)',
-          color: '#E8E8E8',
-          border: '1px solid rgba(255,255,255,0.08)',
+          background: 'var(--input)',
+          color: 'var(--foreground)',
+          border: '1px solid var(--border)',
           borderRadius: 8,
           resize: 'vertical',
         }}
@@ -145,9 +145,9 @@ export function GlobalBriefEditor() {
             fontSize: 11,
             fontWeight: 600,
             borderRadius: 8,
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: isDirty ? '#E94560' : 'rgba(255,255,255,0.06)',
-            color: isDirty ? '#fff' : 'rgba(232,232,232,0.5)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
+            background: isDirty ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.06)',
+            color: isDirty ? '#fff' : 'rgb(var(--foreground-rgb) / 0.5)',
             cursor: !isDirty || saving || loading ? 'default' : 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
@@ -167,9 +167,9 @@ export function GlobalBriefEditor() {
             fontSize: 11,
             fontWeight: 600,
             borderRadius: 8,
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: 'rgba(255,255,255,0.04)',
-            color: 'rgba(232,232,232,0.7)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
+            background: 'rgb(var(--foreground-rgb) / 0.04)',
+            color: 'rgb(var(--foreground-rgb) / 0.7)',
             cursor: loading || saving ? 'default' : 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
@@ -180,7 +180,7 @@ export function GlobalBriefEditor() {
           <RefreshCw size={12} />
           Regenerate from teams
         </button>
-        {isDirty && <span style={{ fontSize: 10, color: '#FBBF24' }}>Unsaved changes</span>}
+        {isDirty && <span style={{ fontSize: 10, color: 'var(--amber)' }}>Unsaved changes</span>}
       </div>
     </div>
   )

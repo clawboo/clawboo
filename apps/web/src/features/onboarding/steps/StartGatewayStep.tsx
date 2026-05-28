@@ -160,14 +160,14 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
   const isRunning = phase === 'starting' || phase === 'connecting'
 
   return (
-    <div className="w-full max-w-[420px] rounded-2xl border border-white/8 bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
+    <div className="w-full max-w-[420px] rounded-2xl border border-border bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
       <div className="flex flex-col items-center p-8">
         <StepIndicator current="setup" />
 
         {/* ── Pulsing mascot ────────────────────────────────── */}
         <div className="relative mb-6">
           {/* Glow */}
-          <div className="pointer-events-none absolute -inset-8 bg-[radial-gradient(circle,rgba(233,69,96,0.15),transparent)]" />
+          <div className="pointer-events-none absolute -inset-8 bg-[radial-gradient(circle,rgb(var(--primary-rgb) / 0.15),transparent)]" />
           <motion.img
             src="/logo.svg"
             alt="Clawboo"
@@ -267,7 +267,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
               transition={{ duration: 0.15 }}
               className="mb-4 w-full overflow-hidden"
             >
-              <div className="max-h-[180px] overflow-y-auto rounded-lg border border-white/8 bg-[#0d1117] p-3">
+              <div className="max-h-[180px] overflow-y-auto rounded-lg border border-border bg-[#0d1117] p-3">
                 {gatewayLog.map((line, i) => (
                   <div key={i} className="font-mono text-[11px] leading-relaxed text-secondary/60">
                     {line}
@@ -306,7 +306,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
             <button
               type="button"
               onClick={handleRetry}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-white shadow-sm transition hover:brightness-110 active:scale-[0.98]"
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98]"
             >
               <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.5} />
               Retry
