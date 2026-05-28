@@ -7,6 +7,7 @@ import { useSchedulerStore, type CronJob } from '@/stores/scheduler'
 import type { GatewayClient } from '@clawboo/gateway-client'
 import { CronJobRow } from './CronJobRow'
 import { CronTimeline } from './CronTimeline'
+import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import {
   CreateJobForm,
   mapGatewayJobToCronJob,
@@ -307,7 +308,10 @@ export function SchedulerPanel() {
       {/* Panel toolbar */}
       <div
         style={{
-          height: 36,
+          // 36 → 44 px to fit the integrated GitHub Star pill (32 px)
+          // comfortably alongside Refresh. AppTopBar is hidden for
+          // nav:'scheduler' so this is the only top chrome.
+          height: 44,
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
@@ -338,33 +342,38 @@ export function SchedulerPanel() {
           )}
         </div>
 
-        {/* Refresh button */}
-        <button
-          onClick={() => void loadJobs()}
-          disabled={isLoading || !isConnected}
-          title="Refresh jobs"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            padding: '3px 10px',
-            borderRadius: 6,
-            background: 'transparent',
-            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-            color: 'rgb(var(--foreground-rgb) / 0.4)',
-            fontSize: 11,
-            cursor: isLoading || !isConnected ? 'not-allowed' : 'pointer',
-            opacity: !isConnected ? 0.4 : 1,
-            transition: 'all 0.15s',
-          }}
-        >
-          {isLoading ? (
-            <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
-          ) : (
-            <RefreshCw size={11} />
-          )}
-          Refresh
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* Refresh button */}
+          <button
+            onClick={() => void loadJobs()}
+            disabled={isLoading || !isConnected}
+            title="Refresh jobs"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '3px 10px',
+              borderRadius: 6,
+              background: 'transparent',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+              color: 'rgb(var(--foreground-rgb) / 0.4)',
+              fontSize: 11,
+              cursor: isLoading || !isConnected ? 'not-allowed' : 'pointer',
+              opacity: !isConnected ? 0.4 : 1,
+              transition: 'all 0.15s',
+            }}
+          >
+            {isLoading ? (
+              <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
+            ) : (
+              <RefreshCw size={11} />
+            )}
+            Refresh
+          </button>
+          {/* GitHub Star CTA — integrated so this view doesn't need the
+              global AppTopBar (hidden for nav:'scheduler'). */}
+          <GitHubStarButton />
+        </div>
       </div>
 
       {/* Not connected state */}

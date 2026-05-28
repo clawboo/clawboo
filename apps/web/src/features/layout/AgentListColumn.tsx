@@ -654,7 +654,9 @@ export function AgentListColumn() {
         })}
       </div>
 
-      {/* Theme toggle — bottom of nav */}
+      {/* Theme toggle — bottom of nav. The GitHub Star CTA lives in the
+          fixed top-right `AppTopBar` (dograh-style outline pill) so the
+          sidebar footer is reserved for in-app preferences only. */}
       <div className="mx-3 my-1.5 border-t border-border" />
       <div className="px-2 pb-3">
         <ThemeToggle />

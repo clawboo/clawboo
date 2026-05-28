@@ -3,6 +3,7 @@ import { ReactFlowProvider } from '@xyflow/react'
 import { GhostGraph } from './GhostGraph'
 import { useGraphStore } from './store'
 import { useTeamStore } from '@/stores/team'
+import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import type { GhostGraphScope } from './types'
 
 export type { GhostGraphScope }
@@ -39,7 +40,7 @@ export function GhostGraphPanel({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-canvas">
       {!embedded && (
-        <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-3">
+        <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-3">
           <div className="flex items-center gap-2">
             <span className="text-[12px] font-semibold text-foreground/50">
               {scope === 'atlas'
@@ -55,6 +56,10 @@ export function GhostGraphPanel({
               </span>
             )}
           </div>
+          {/* GitHub Star CTA — integrated into the toolbar so this view
+              doesn't need the global AppTopBar (which is hidden for
+              nav:'graph'). Saves 44 px by reusing the existing toolbar. */}
+          <GitHubStarButton />
         </div>
       )}
 

@@ -33,6 +33,7 @@ import { TeamTemplateCard } from './TeamTemplateCard'
 import { TeamTemplateDetail } from './TeamTemplateDetail'
 import { AgentCard } from './AgentCard'
 import { AgentTemplateDetail } from './AgentTemplateDetail'
+import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 
 // ─── Skill category colours (matches SkillNode.tsx) ─────────────────────────
 
@@ -573,7 +574,11 @@ export function MarketplacePanel() {
       {/* Toolbar */}
       <div
         style={{
-          height: 36,
+          // Height bumped from 36 → 44 to give the integrated GitHub Star
+          // pill (32 px) comfortable breathing room. The AppTopBar is
+          // hidden for `nav: 'marketplace'` so this row is the only top
+          // chrome; consistent height with Atlas/Agent Detail headers.
+          height: 44,
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
@@ -595,27 +600,33 @@ export function MarketplacePanel() {
           </div>
         </div>
 
-        {/* Sort (skills tab only) */}
-        {isSkillsTab && (
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as 'name' | 'trust' | 'category')}
-            style={{
-              background: 'rgb(var(--foreground-rgb) / 0.04)',
-              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-              borderRadius: 6,
-              color: 'rgb(var(--foreground-rgb) / 0.6)',
-              fontSize: 11,
-              padding: '3px 8px',
-              cursor: 'pointer',
-              outline: 'none',
-            }}
-          >
-            <option value="name">Name A–Z</option>
-            <option value="trust">Trust Score</option>
-            <option value="category">Category</option>
-          </select>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* Sort (skills tab only) */}
+          {isSkillsTab && (
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'name' | 'trust' | 'category')}
+              style={{
+                background: 'rgb(var(--foreground-rgb) / 0.04)',
+                border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+                borderRadius: 6,
+                color: 'rgb(var(--foreground-rgb) / 0.6)',
+                fontSize: 11,
+                padding: '3px 8px',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              <option value="name">Name A–Z</option>
+              <option value="trust">Trust Score</option>
+              <option value="category">Category</option>
+            </select>
+          )}
+          {/* GitHub Star CTA — integrated into the toolbar so this view
+              doesn't need the global AppTopBar (which is hidden for
+              nav:'marketplace'). */}
+          <GitHubStarButton />
+        </div>
       </div>
 
       {/* Filter bar */}

@@ -5,6 +5,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useApprovalActions } from './useApprovalActions'
 import type { ApprovalRequest } from '@/stores/approvals'
+import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 
 // ─── ApprovalCard ─────────────────────────────────────────────────────────────
 
@@ -230,35 +231,42 @@ export function ApprovalsPanel() {
         overflow: 'hidden',
       }}
     >
-      {/* Panel header */}
+      {/* Panel header — same shape as Atlas / Marketplace / Scheduler /
+          Cost / System (44 px fixed height, padding 0 12 px, border-b).
+          Star pill at right:12 top:6 matches every other view. */}
       <div
         style={{
-          padding: '12px 16px 10px',
+          height: 44,
+          padding: '0 12px',
           borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
           gap: 8,
           flexShrink: 0,
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
-          Exec Approvals
-        </span>
-        {approvals.length > 0 && (
-          <span
-            style={{
-              background: 'var(--amber)',
-              color: 'var(--background)',
-              fontSize: 10,
-              fontWeight: 700,
-              borderRadius: 10,
-              padding: '1px 6px',
-              lineHeight: 1.6,
-            }}
-          >
-            {approvals.length}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
+            Exec Approvals
           </span>
-        )}
+          {approvals.length > 0 && (
+            <span
+              style={{
+                background: 'var(--amber)',
+                color: 'var(--background)',
+                fontSize: 10,
+                fontWeight: 700,
+                borderRadius: 10,
+                padding: '1px 6px',
+                lineHeight: 1.6,
+              }}
+            >
+              {approvals.length}
+            </span>
+          )}
+        </div>
+        <GitHubStarButton />
       </div>
 
       {/* Approval list */}

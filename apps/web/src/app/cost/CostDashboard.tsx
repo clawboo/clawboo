@@ -15,6 +15,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
+import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 
 // ─── API response types ─────────────────────────────────────────────────────
 
@@ -746,212 +747,225 @@ export function CostDashboard() {
     <div
       style={{
         height: '100%',
-        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
         background: 'var(--background)',
-        padding: '24px 28px',
         color: 'var(--foreground)',
       }}
     >
-      {/* Header */}
+      {/* Fixed top toolbar — matches Atlas / Marketplace / Approvals /
+          Scheduler patterns. 44 px height, padding 0 12 px, border-b. The
+          GitHub Star pill sits at right:12 top:6 within this toolbar — same
+          coordinates as every other view. The big "page heading" treatment
+          this view used to have (h1 + subtitle) is folded into the toolbar
+          as a compact title (the subtitle moves into the body as a kicker). */}
       <div
         style={{
+          height: 44,
+          flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginBottom: 24,
-          flexWrap: 'wrap',
-          gap: 12,
+          padding: '0 12px',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
         }}
       >
-        <div>
-          <h1
-            style={{
-              fontSize: 22,
-              fontWeight: 700,
-              color: 'var(--foreground)',
-              margin: 0,
-              fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
-            }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            style={{ fontSize: 12, fontWeight: 600, color: 'rgb(var(--foreground-rgb) / 0.5)' }}
           >
             Tokens Used
-          </h1>
-          <p
-            style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.45)', margin: '4px 0 0' }}
-          >
-            Token usage by team and agent
-          </p>
+          </span>
         </div>
-        <FrugalToggleButton frugalMode={frugalMode} onToggle={() => void handleToggle()} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <FrugalToggleButton frugalMode={frugalMode} onToggle={() => void handleToggle()} />
+          <GitHubStarButton />
+        </div>
       </div>
 
-      {/* Ollama panels */}
-      {panel?.kind === 'setup' && (
-        <OllamaSetupPanel onCancel={() => setPanel(null)} onRetry={handleRetry} />
-      )}
-      {panel?.kind === 'picker' && (
-        <ModelPickerPanel
-          models={panel.models}
-          onSelect={(m) => void activateWithModel(m)}
-          onCancel={() => setPanel(null)}
-        />
-      )}
-
-      {/* Frugal mode banner */}
-      {frugalMode && (
-        <div
+      {/* Scrollable body */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+        <p
           style={{
-            background: 'rgb(var(--amber-rgb) / 0.08)',
-            border: '1px solid rgb(var(--amber-rgb) / 0.3)',
-            borderRadius: 8,
-            padding: '10px 16px',
-            marginBottom: 20,
-            fontSize: 13,
-            color: 'var(--amber)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
+            fontSize: 12,
+            color: 'rgb(var(--foreground-rgb) / 0.45)',
+            margin: '0 0 20px',
           }}
         >
-          <span style={{ fontSize: 16 }}>!</span>
-          Frugal mode active — routing basic tasks to local LLM
-        </div>
-      )}
+          Token usage by team and agent
+        </p>
 
-      {loading && (
-        <div
-          style={{
-            textAlign: 'center',
-            padding: '60px 0',
-            color: 'rgb(var(--foreground-rgb) / 0.4)',
-          }}
-        >
-          Loading token data...
-        </div>
-      )}
+        {/* Ollama panels */}
+        {panel?.kind === 'setup' && (
+          <OllamaSetupPanel onCancel={() => setPanel(null)} onRetry={handleRetry} />
+        )}
+        {panel?.kind === 'picker' && (
+          <ModelPickerPanel
+            models={panel.models}
+            onSelect={(m) => void activateWithModel(m)}
+            onCancel={() => setPanel(null)}
+          />
+        )}
 
-      {error && (
-        <div
-          style={{
-            background: 'rgb(var(--primary-rgb) / 0.08)',
-            border: '1px solid rgb(var(--primary-rgb) / 0.3)',
-            borderRadius: 8,
-            padding: '12px 16px',
-            color: 'var(--primary)',
-            fontSize: 13,
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      {!loading && !error && data && (
-        <>
-          {/* Summary cards — tokens as primary, cost as secondary */}
-          <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
-            <SummaryCard label="Today" tokens={data.tokensToday} />
-            <SummaryCard label="This Week" tokens={data.tokensWeek} />
-            <SummaryCard label="This Month" tokens={data.tokensMonth} />
-          </div>
-
-          {/* Team Breakdown */}
+        {/* Frugal mode banner */}
+        {frugalMode && (
           <div
             style={{
-              background: 'var(--card)',
-              borderRadius: 12,
-              border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-              padding: '20px 20px 12px',
+              background: 'rgb(var(--amber-rgb) / 0.08)',
+              border: '1px solid rgb(var(--amber-rgb) / 0.3)',
+              borderRadius: 8,
+              padding: '10px 16px',
               marginBottom: 20,
+              fontSize: 13,
+              color: 'var(--amber)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
             }}
           >
-            <h2
+            <span style={{ fontSize: 16 }}>!</span>
+            Frugal mode active — routing basic tasks to local LLM
+          </div>
+        )}
+
+        {loading && (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '60px 0',
+              color: 'rgb(var(--foreground-rgb) / 0.4)',
+            }}
+          >
+            Loading token data...
+          </div>
+        )}
+
+        {error && (
+          <div
+            style={{
+              background: 'rgb(var(--primary-rgb) / 0.08)',
+              border: '1px solid rgb(var(--primary-rgb) / 0.3)',
+              borderRadius: 8,
+              padding: '12px 16px',
+              color: 'var(--primary)',
+              fontSize: 13,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {!loading && !error && data && (
+          <>
+            {/* Summary cards — tokens as primary, cost as secondary */}
+            <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
+              <SummaryCard label="Today" tokens={data.tokensToday} />
+              <SummaryCard label="This Week" tokens={data.tokensWeek} />
+              <SummaryCard label="This Month" tokens={data.tokensMonth} />
+            </div>
+
+            {/* Team Breakdown */}
+            <div
               style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: 'rgb(var(--foreground-rgb) / 0.65)',
-                margin: '0 0 12px',
-                fontFamily: 'var(--font-geist-mono, monospace)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
+                background: 'var(--card)',
+                borderRadius: 12,
+                border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                padding: '20px 20px 12px',
+                marginBottom: 20,
               }}
             >
-              Tokens by Team
-            </h2>
-
-            {teamGroups.length === 0 ? (
-              <div
+              <h2
                 style={{
-                  textAlign: 'center',
-                  padding: '32px 0',
-                  color: 'rgb(var(--foreground-rgb) / 0.3)',
                   fontSize: 13,
+                  fontWeight: 600,
+                  color: 'rgb(var(--foreground-rgb) / 0.65)',
+                  margin: '0 0 12px',
+                  fontFamily: 'var(--font-geist-mono, monospace)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
                 }}
               >
-                No token records yet. Start chatting with your Boos to track usage.
-              </div>
-            ) : (
-              teamGroups.map((group) => <TeamSection key={group.teamId ?? 'none'} group={group} />)
-            )}
-          </div>
+                Tokens by Team
+              </h2>
 
-          {/* Token Trend — 30 day line chart */}
-          <div
-            style={{
-              background: 'var(--card)',
-              borderRadius: 12,
-              border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-              padding: '20px 20px 12px',
-            }}
-          >
-            <h2
+              {teamGroups.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    padding: '32px 0',
+                    color: 'rgb(var(--foreground-rgb) / 0.3)',
+                    fontSize: 13,
+                  }}
+                >
+                  No token records yet. Start chatting with your Boos to track usage.
+                </div>
+              ) : (
+                teamGroups.map((group) => (
+                  <TeamSection key={group.teamId ?? 'none'} group={group} />
+                ))
+              )}
+            </div>
+
+            {/* Token Trend — 30 day line chart */}
+            <div
               style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: 'rgb(var(--foreground-rgb) / 0.65)',
-                margin: '0 0 16px',
-                fontFamily: 'var(--font-geist-mono, monospace)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
+                background: 'var(--card)',
+                borderRadius: 12,
+                border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                padding: '20px 20px 12px',
               }}
             >
-              Token Usage — Last 30 Days
-            </h2>
+              <h2
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: 'rgb(var(--foreground-rgb) / 0.65)',
+                  margin: '0 0 16px',
+                  fontFamily: 'var(--font-geist-mono, monospace)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                }}
+              >
+                Token Usage — Last 30 Days
+              </h2>
 
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={lineData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 4" stroke="rgb(var(--foreground-rgb) / 0.05)" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: 'rgb(var(--foreground-rgb) / 0.4)', fontSize: 10 }}
-                  axisLine={false}
-                  tickLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tickFormatter={(v: number) => formatTokens(v)}
-                  tick={{ fill: 'rgb(var(--foreground-rgb) / 0.4)', fontSize: 10 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={55}
-                />
-                <Tooltip content={<TokenLineTooltip />} />
-                <Line
-                  type="monotone"
-                  dataKey="tokens"
-                  stroke="var(--mint)"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{
-                    r: 4,
-                    fill: 'var(--mint)',
-                    stroke: 'var(--background)',
-                    strokeWidth: 2,
-                  }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </>
-      )}
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={lineData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 4" stroke="rgb(var(--foreground-rgb) / 0.05)" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: 'rgb(var(--foreground-rgb) / 0.4)', fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tickFormatter={(v: number) => formatTokens(v)}
+                    tick={{ fill: 'rgb(var(--foreground-rgb) / 0.4)', fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={55}
+                  />
+                  <Tooltip content={<TokenLineTooltip />} />
+                  <Line
+                    type="monotone"
+                    dataKey="tokens"
+                    stroke="var(--mint)"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{
+                      r: 4,
+                      fill: 'var(--mint)',
+                      stroke: 'var(--background)',
+                      strokeWidth: 2,
+                    }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
