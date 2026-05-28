@@ -6,9 +6,11 @@
  * openclaw.json, .env, and auto-saves Clawboo settings.
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { MODEL_GROUPS } from '@/lib/modelCatalog'
+import { Select } from '@/features/shared/Select'
 import { StepIndicator } from '../StepIndicator'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -222,17 +224,72 @@ const MORE_PROVIDERS: ProviderOption[] = [
 
 const ALL_PROVIDERS: ProviderOption[] = [...PRIMARY_PROVIDERS, ...MORE_PROVIDERS]
 
+// ─── Provider → model-catalog mapping ────────────────────────────────────────
+//
+// `ProviderId` values are lowercase tokens used in the API. `MODEL_GROUPS`
+// in `lib/modelCatalog.ts` uses display-case provider names. This bridges
+// the two so the picker can find the right model list for the selected
+// provider card.
+
+const PROVIDER_TO_CATALOG_NAME: Record<ProviderId, string> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  google: 'Google',
+  ollama: 'Ollama (Local)',
+  openrouter: 'OpenRouter',
+  xai: 'xAI',
+  groq: 'Groq',
+  mistral: 'Mistral',
+  moonshot: 'Moonshot',
+  minimax: 'MiniMax',
+  together: 'Together',
+  nvidia: 'NVIDIA',
+  huggingface: 'Hugging Face',
+  cerebras: 'Cerebras',
+  venice: 'Venice',
+}
+
+/** Returns the models available for a provider, or null if no catalog entry exists. */
+function getModelsForProvider(provider: ProviderId): { id: string; label: string }[] | null {
+  const catalogName = PROVIDER_TO_CATALOG_NAME[provider]
+  const group = MODEL_GROUPS.find((g) => g.provider === catalogName)
+  return group?.models ?? null
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
   const [provider, setProvider] = useState<ProviderId | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [showApiKey, setShowApiKey] = useState(false)
+  const [model, setModel] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const selected = ALL_PROVIDERS.find((p) => p.id === provider) ?? null
+  const availableModels = useMemo(
+    () => (provider ? getModelsForProvider(provider) : null),
+    [provider],
+  )
   const canSubmit = provider !== null && (provider === 'ollama' || apiKey.trim().length > 0)
+
+  // Default to the first (recommended) model in the catalog whenever the
+  // provider changes. The catalog is ordered with the most capable / most
+  // common model first, which makes the right choice for an onboarding
+  // user — they can still pick a smaller / faster variant from the
+  // dropdown before submitting.
+  useEffect(() => {
+    if (!provider) {
+      setModel('')
+      return
+    }
+    const models = getModelsForProvider(provider)
+    if (models && models.length > 0) {
+      setModel(models[0]!.id)
+    } else {
+      setModel('')
+    }
+  }, [provider])
 
   const handleSubmit = useCallback(async () => {
     if (!provider || submitting || !canSubmit) return
@@ -247,6 +304,10 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
         body: JSON.stringify({
           provider,
           apiKey: provider === 'ollama' ? undefined : apiKey.trim(),
+          // Send the user-chosen default model. The server falls back to its
+          // own MODEL_MAP if `model` is empty / unrecognised — so this is
+          // an additive change, never a breaking one.
+          model: model.trim() || undefined,
         }),
       })
 
@@ -268,7 +329,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
     } finally {
       setSubmitting(false)
     }
-  }, [provider, apiKey, submitting, canSubmit, onConfigured])
+  }, [provider, apiKey, model, submitting, canSubmit, onConfigured])
 
   return (
     <div className="surface-overlay-tier w-full max-w-xl rounded-2xl">
@@ -409,6 +470,43 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
                     )}
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Model picker ───────────────────────────────────── */}
+        <AnimatePresence initial={false}>
+          {selected && availableModels && availableModels.length > 0 && (
+            <motion.div
+              key="model-picker"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.15 }}
+              className="mb-5 overflow-hidden"
+            >
+              <div className="flex flex-col gap-1.5">
+                <label className="flex items-center justify-between font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary">
+                  <span>Default Model</span>
+                  <span className="font-mono text-[9px] font-normal text-secondary/50 normal-case tracking-wider">
+                    used for new agents
+                  </span>
+                </label>
+                <Select
+                  aria-label="Default model"
+                  value={model}
+                  onChange={setModel}
+                  disabled={submitting}
+                  options={availableModels.map((m, idx) => ({
+                    value: m.id,
+                    label: idx === 0 ? `${m.label}  ·  Recommended` : m.label,
+                  }))}
+                  style={{ width: '100%' }}
+                />
+                <p className="font-mono text-[10px] text-secondary/40">
+                  You can change this anytime from System → Default Model.
+                </p>
               </div>
             </motion.div>
           )}

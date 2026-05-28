@@ -1,5 +1,13 @@
 import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
+import {
+  Eye,
+  FileText,
+  MessageSquare,
+  SlidersHorizontal,
+  Trash2,
+  type LucideIcon,
+} from 'lucide-react'
 
 interface GraphContextMenuProps {
   x: number
@@ -17,13 +25,22 @@ interface GraphContextMenuProps {
   onDelete: () => void
 }
 
-const items = [
-  { label: 'Chat', emoji: '\uD83D\uDCAC', action: 'chat' },
-  { label: 'Edit personality', emoji: '\u2699\uFE0F', action: 'editPersonality' },
-  { label: 'Edit files', emoji: '\uD83D\uDCDD', action: 'editFiles' },
-  { label: 'Select in sidebar', emoji: '\uD83D\uDC41\uFE0F', action: 'selectInSidebar' },
-  { label: 'Delete', emoji: '\uD83D\uDDD1', action: 'delete' },
-] as const
+interface MenuItemConfig {
+  label: string
+  icon: LucideIcon
+  action: 'chat' | 'editPersonality' | 'editFiles' | 'selectInSidebar' | 'delete'
+}
+
+// Phase 20 audit follow-up — emoji glyphs replaced with Lucide icons to
+// match TeamContextMenu / sidebar nav. The pattern is now consistent
+// across every menu surface in the app.
+const items: MenuItemConfig[] = [
+  { label: 'Chat', icon: MessageSquare, action: 'chat' },
+  { label: 'Edit personality', icon: SlidersHorizontal, action: 'editPersonality' },
+  { label: 'Edit files', icon: FileText, action: 'editFiles' },
+  { label: 'Select in sidebar', icon: Eye, action: 'selectInSidebar' },
+  { label: 'Delete', icon: Trash2, action: 'delete' },
+]
 
 export function GraphContextMenu({
   x,
@@ -54,7 +71,7 @@ export function GraphContextMenu({
     }
   }, [onClose])
 
-  const handlers: Record<string, () => void> = {
+  const handlers: Record<MenuItemConfig['action'], () => void> = {
     chat: onChat,
     editPersonality: onEditPersonality,
     editFiles: onEditFiles,
@@ -67,46 +84,30 @@ export function GraphContextMenu({
       ref={ref}
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.1 }}
-      className="surface-floating-tier"
-      style={{
-        position: 'fixed',
-        left: x,
-        top: y,
-        zIndex: 100,
-        borderRadius: 10,
-        padding: '4px 0',
-        minWidth: 180,
-      }}
+      transition={{ duration: 0.12, ease: 'easeOut' }}
+      className="surface-floating-tier fixed z-[100] min-w-[180px] overflow-hidden rounded-[10px] py-1"
+      style={{ left: x, top: y }}
     >
-      {items.map((item) => (
-        <button
-          key={item.action}
-          onClick={() => handlers[item.action]()}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            width: '100%',
-            padding: '8px 14px',
-            background: 'transparent',
-            border: 'none',
-            color: item.action === 'delete' ? 'var(--primary)' : 'var(--foreground)',
-            fontSize: 13,
-            cursor: 'pointer',
-            textAlign: 'left',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent'
-          }}
-        >
-          <span>{item.emoji}</span>
-          <span>{item.label}</span>
-        </button>
-      ))}
+      {items.map((item, index) => {
+        const Icon = item.icon
+        const isDestructive = item.action === 'delete'
+        const showDivider = isDestructive && index > 0
+        return (
+          <div key={item.action}>
+            {showDivider && <div className="my-1 mx-3.5 border-t border-foreground/[0.06]" />}
+            <button
+              type="button"
+              onClick={() => handlers[item.action]()}
+              className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors duration-150 hover:bg-foreground/[0.05] ${
+                isDestructive ? 'text-primary' : 'text-foreground'
+              }`}
+            >
+              <Icon size={14} strokeWidth={1.75} aria-hidden />
+              <span>{item.label}</span>
+            </button>
+          </div>
+        )
+      })}
     </motion.div>
   )
 }

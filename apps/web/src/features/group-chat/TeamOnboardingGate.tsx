@@ -594,7 +594,9 @@ export function TeamOnboardingGate({
                             {introText}
                           </p>
                         ) : (
-                          <p className="text-[10px] italic text-secondary/40">Thinking…</p>
+                          <p className="font-mono text-[10px] font-medium uppercase tracking-wider text-secondary/55">
+                            Thinking…
+                          </p>
                         )}
                       </div>
                     </motion.div>

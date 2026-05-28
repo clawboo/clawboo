@@ -32,48 +32,21 @@ export function AgentPickerDropdown({ onSelect, onClose, style }: AgentPickerDro
   return (
     <div
       ref={ref}
-      className="surface-floating-tier"
-      style={{
-        position: 'absolute',
-        zIndex: 50,
-        borderRadius: 10,
-        padding: '4px 0',
-        minWidth: 140,
-        ...style,
-      }}
+      className="surface-floating-tier absolute z-50 min-w-[160px] overflow-hidden rounded-[10px] py-1"
+      style={style}
     >
       {agents.length === 0 ? (
-        <div
-          style={{ padding: '6px 12px', fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.4)' }}
-        >
-          No agents
-        </div>
+        <div className="px-3 py-2 text-[11px] text-foreground/55">No agents</div>
       ) : (
         agents.map((agent) => (
           <button
+            type="button"
             key={agent.id}
             onClick={() => {
               onSelect(agent.id, agent.name)
               onClose()
             }}
-            style={{
-              display: 'block',
-              width: '100%',
-              padding: '6px 12px',
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--foreground)',
-              fontSize: 12,
-              cursor: 'pointer',
-              textAlign: 'left',
-              whiteSpace: 'nowrap',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-            }}
+            className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-[12px] text-foreground transition-colors duration-150 hover:bg-foreground/[0.05]"
           >
             {agent.name}
           </button>

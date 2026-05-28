@@ -1123,10 +1123,28 @@ export async function systemModelsGET(_req: Request, res: Response): Promise<voi
     // Only include providers that are in our known API keys list + local
     const knownProviders = new Set([...Object.values(AUTH_PROFILE_PROVIDERS), 'ollama'])
 
+    // Normalize provider names to the static catalog's TitleCase form. The
+    // CLI returns lowercase ('anthropic', 'cerebras', etc.) while the static
+    // catalog uses display-case ('Anthropic', 'Cerebras', etc.). Mixing them
+    // in one dropdown looks unfinished, so we rewrite each CLI group's
+    // `provider` field to the canonical static-catalog spelling when one
+    // exists. Falls through to the CLI name if no match — preferable to an
+    // ad-hoc capitalisation.
+    const CANONICAL_NAMES: Record<string, string> = {}
+    for (const staticGroup of STATIC_MODEL_GROUPS) {
+      CANONICAL_NAMES[staticGroup.provider.toLowerCase()] = staticGroup.provider
+    }
+    function canonicalize<T extends { provider: string }>(group: T): T {
+      const canonical = CANONICAL_NAMES[group.provider.toLowerCase()]
+      return canonical && canonical !== group.provider ? { ...group, provider: canonical } : group
+    }
+
     let resultGroups
     if (groups) {
-      // Start with CLI groups, filtered to known providers
-      resultGroups = groups.filter((g) => knownProviders.has(g.provider.toLowerCase()))
+      // Start with CLI groups, filtered to known providers, with canonical names.
+      resultGroups = groups
+        .filter((g) => knownProviders.has(g.provider.toLowerCase()))
+        .map(canonicalize)
       // Supplement with static catalog entries for any known providers missing from CLI
       const cliProviders = new Set(resultGroups.map((g) => g.provider.toLowerCase()))
       for (const staticGroup of STATIC_MODEL_GROUPS) {

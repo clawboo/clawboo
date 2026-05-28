@@ -634,6 +634,7 @@ export function AgentListColumn() {
             <button
               key={item.id}
               type="button"
+              data-testid={`nav-${item.id}`}
               onClick={() => useViewStore.getState().navigateTo(item.id)}
               className={[
                 'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-semibold transition-all duration-150',
@@ -665,6 +666,7 @@ export function AgentListColumn() {
             <button
               key={item.id}
               type="button"
+              data-testid={`nav-${item.id}`}
               onClick={() => useViewStore.getState().navigateTo(item.id)}
               className={[
                 'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150',
