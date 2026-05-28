@@ -1,21 +1,31 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Github, Star } from 'lucide-react'
 
-// GitHub star button — dograh-style outline pill rendered at the top-right
-// of the app via `AppTopBar`. Drives traffic to the repo for stars.
+// GitHub star button — dograh-style outline pill rendered in each view's
+// header. Drives traffic to the repo for stars.
 //
-// Visual: white/surface pill with thin outline, GitHub octocat icon on the
-// left, "Star" text, and a divider + live star count on the right (amber).
-// Subtle hover lift. Opens GitHub in a new tab.
+// Live count update strategy (balances freshness against GitHub's rate limit
+// of 60 requests/hour per IP for unauthenticated API calls):
 //
-// Live count: single GitHub API fetch on mount, cached in localStorage with
-// a 1-hour TTL. Falls back to a static "★" glyph when the API is unreachable
-// (offline, rate-limited at 60 req/hr/IP for unauthenticated requests).
+//   1. Fetch on mount if cache > 10 min old. Cache the result in localStorage
+//      so multiple `GitHubStarButton` instances share one fetch.
+//   2. Refetch on window focus (also cache-gated). Catches the common
+//      "user starred on GitHub then came back to the tab" flow without
+//      spamming the API.
+//   3. Optimistic update on click: bump the displayed count by 1 immediately
+//      (assumes the user is starring), then trigger a refetch after 3 s so
+//      the number reconciles with the real count regardless of whether the
+//      user actually starred.
+//
+// Net effect: at most ~6 API calls / hour / install (the TTL ceiling), well
+// under the 60 req/hr rate limit. Falls back to a "·" glyph when the API is
+// unreachable (offline, rate-limited, corporate firewall).
 
 const REPO_URL = 'https://github.com/clawboo/clawboo'
 const API_URL = 'https://api.github.com/repos/clawboo/clawboo'
 const CACHE_KEY = 'clawboo.github.stars'
-const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
+const CACHE_TTL_MS = 10 * 60 * 1000 // 10 min
+const POST_CLICK_REFETCH_DELAY_MS = 3000
 
 interface CachedStars {
   count: number
@@ -54,33 +64,69 @@ function formatCount(count: number): string {
 
 export function GitHubStarButton() {
   const [stars, setStars] = useState<number | null>(() => readCache()?.count ?? null)
+  // `inflight` prevents multiple concurrent fetches when mount + focus +
+  // click-refetch all race.
+  const inflight = useRef(false)
 
-  useEffect(() => {
-    const cached = readCache()
-    if (cached) return
-
-    let cancelled = false
-    fetch(API_URL, { headers: { Accept: 'application/vnd.github+json' } })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { stargazers_count?: number } | null) => {
-        if (cancelled || !data || typeof data.stargazers_count !== 'number') return
-        setStars(data.stargazers_count)
-        writeCache(data.stargazers_count)
-      })
-      .catch(() => {
-        /* offline / rate-limited — render without the count */
-      })
-
-    return () => {
-      cancelled = true
+  const fetchStars = useCallback(async (force = false) => {
+    if (inflight.current) return
+    if (!force) {
+      const cached = readCache()
+      if (cached) return // fresh enough
+    }
+    inflight.current = true
+    try {
+      const res = await fetch(API_URL, { headers: { Accept: 'application/vnd.github+json' } })
+      if (!res.ok) return
+      const data = (await res.json()) as { stargazers_count?: number }
+      if (typeof data.stargazers_count !== 'number') return
+      setStars(data.stargazers_count)
+      writeCache(data.stargazers_count)
+    } catch {
+      /* offline / rate-limited / blocked — keep whatever we have */
+    } finally {
+      inflight.current = false
     }
   }, [])
+
+  // Initial fetch on mount (cache-gated)
+  useEffect(() => {
+    void fetchStars()
+  }, [fetchStars])
+
+  // Refetch when the window regains focus — catches "user just starred on
+  // GitHub and came back to the tab". Still cache-gated so rapid tab
+  // switching doesn't hit the API repeatedly.
+  useEffect(() => {
+    const onFocus = () => {
+      void fetchStars()
+    }
+    const onVisibilityChange = () => {
+      if (!document.hidden) void fetchStars()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [fetchStars])
+
+  // Click handler: optimistic +1, then forced refetch after the user has
+  // had time to click Star on GitHub in the new tab.
+  const handleClick = useCallback(() => {
+    setStars((prev) => (prev !== null ? prev + 1 : prev))
+    window.setTimeout(() => {
+      void fetchStars(true)
+    }, POST_CLICK_REFETCH_DELAY_MS)
+  }, [fetchStars])
 
   return (
     <a
       href={REPO_URL}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={handleClick}
       data-testid="github-star-button"
       title="Star Clawboo on GitHub — it really helps!"
       // Sized to match the surrounding view chrome — Atlas's Re-layout /
