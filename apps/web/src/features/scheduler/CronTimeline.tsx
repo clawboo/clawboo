@@ -5,7 +5,14 @@ import { formatRelativeTime } from './cronUtils'
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Stable color per agent from a small palette. */
-const AGENT_COLORS = ['#34D399', '#E94560', '#FBBF24', '#60A5FA', '#A78BFA', '#F472B6']
+const AGENT_COLORS = [
+  'var(--mint)',
+  'var(--primary)',
+  'var(--amber)',
+  '#60A5FA',
+  '#A78BFA',
+  '#F472B6',
+]
 
 function agentColor(agentId: string): string {
   let hash = 0
@@ -100,7 +107,7 @@ export function CronTimeline({ jobs, timeWindowHours = 48 }: CronTimelineProps) 
         raw.push({
           key: `${job.id}-last`,
           x,
-          color: '#34D399',
+          color: 'var(--mint)',
           pulse: false,
           label: `${job.agentName} — ${job.name} — ${rel}`,
         })
@@ -138,9 +145,9 @@ export function CronTimeline({ jobs, timeWindowHours = 48 }: CronTimelineProps) 
         position: 'relative',
         height: 80,
         width: '100%',
-        background: '#111827',
+        background: 'var(--card)',
         borderRadius: 8,
-        border: '1px solid rgba(255,255,255,0.06)',
+        border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
         overflow: 'hidden',
       }}
     >
@@ -152,7 +159,7 @@ export function CronTimeline({ jobs, timeWindowHours = 48 }: CronTimelineProps) 
           left: 0,
           right: 0,
           height: 1,
-          background: 'rgba(255,255,255,0.06)',
+          background: 'rgb(var(--foreground-rgb) / 0.06)',
         }}
       />
 
@@ -167,7 +174,7 @@ export function CronTimeline({ jobs, timeWindowHours = 48 }: CronTimelineProps) 
           borderRadius: 1,
           opacity: 0.7,
           background:
-            'repeating-linear-gradient(to bottom, #E94560 0px, #E94560 4px, transparent 4px, transparent 8px)',
+            'repeating-linear-gradient(to bottom, var(--primary) 0px, var(--primary) 4px, transparent 4px, transparent 8px)',
         }}
       />
 
@@ -181,7 +188,7 @@ export function CronTimeline({ jobs, timeWindowHours = 48 }: CronTimelineProps) 
             left: `${pct}%`,
             transform: 'translateX(-50%)',
             fontSize: 9,
-            color: text === 'Now' ? '#E94560' : 'rgba(232,232,232,0.3)',
+            color: text === 'Now' ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.3)',
             fontFamily: 'var(--font-geist-mono, monospace)',
             fontWeight: text === 'Now' ? 600 : 400,
             whiteSpace: 'nowrap',

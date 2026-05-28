@@ -28,20 +28,12 @@ function MascotIcon({
       onClick={onClick}
       onContextMenu={onContextMenu}
       title="All Agents"
-      style={{
-        width: 40,
-        height: 40,
-        borderRadius: 12,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        border: selected ? '2px solid #E94560' : '2px solid transparent',
-        background: selected ? 'rgba(233,69,96,0.12)' : 'rgba(255,255,255,0.04)',
-        cursor: 'pointer',
-        transition: 'all 0.15s',
-        padding: 0,
-        flexShrink: 0,
-      }}
+      className={[
+        'flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] p-0 transition-all duration-150',
+        selected
+          ? 'border-2 border-primary bg-primary/12'
+          : 'border-2 border-transparent bg-foreground/[0.04] hover:bg-foreground/[0.07]',
+      ].join(' ')}
     >
       <img src="/logo.svg" width={26} height={24} alt="All teams" />
     </button>
@@ -62,48 +54,21 @@ function TeamIcon({
   onContextMenu: (e: React.MouseEvent) => void
 }) {
   return (
-    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+    <div className="relative flex items-center">
       {/* Discord-style selected pill on left edge */}
       {selected && (
-        <div
-          style={{
-            position: 'absolute',
-            left: -8,
-            width: 4,
-            height: 20,
-            borderRadius: '0 4px 4px 0',
-            background: '#E8E8E8',
-          }}
-        />
+        <div className="absolute h-5 w-1 rounded-r bg-foreground" style={{ left: -8 }} />
       )}
       <button
         onClick={onClick}
         onContextMenu={onContextMenu}
         title={team.name}
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: selected ? 12 : 20,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: 'none',
-          background: team.color || 'rgba(255,255,255,0.06)',
-          cursor: 'pointer',
-          transition: 'all 0.15s',
-          padding: 0,
-          flexShrink: 0,
-          fontSize: 20,
-          lineHeight: 1,
-        }}
-        onMouseOver={(e) => {
-          ;(e.currentTarget as HTMLButtonElement).style.borderRadius = '12px'
-        }}
-        onMouseOut={(e) => {
-          if (!selected) {
-            ;(e.currentTarget as HTMLButtonElement).style.borderRadius = '20px'
-          }
-        }}
+        className={[
+          'flex h-10 w-10 shrink-0 items-center justify-center border-none p-0 text-xl leading-none transition-all duration-150',
+          selected ? 'rounded-[12px]' : 'rounded-[20px] hover:rounded-[12px]',
+          team.color ? '' : 'bg-foreground/[0.06]',
+        ].join(' ')}
+        style={team.color ? { background: team.color } : undefined}
       >
         {team.icon}
       </button>
@@ -128,13 +93,6 @@ export function TeamSidebar() {
     setShowCreateModal(false)
     await hydrateTeams()
     useGraphStore.getState().triggerRefresh()
-    // `CreateTeamModal` calls `useTeamStore.selectTeam(team.id)` right before
-    // firing `onCreated`, so by this point the newly-created team is the
-    // selected one. Open its group chat directly — that's where the user
-    // expects to land after deploying a team (chat with the new agents,
-    // or run through onboarding if it's a template team with no history).
-    // Fall back to Atlas defensively if selection didn't stick for some
-    // reason (e.g. an upstream rejection deselected the team).
     const newTeamId = useTeamStore.getState().selectedTeamId
     if (newTeamId) {
       useViewStore.getState().openGroupChat(newTeamId)
@@ -159,7 +117,6 @@ export function TeamSidebar() {
         useTeamStore.getState().unarchiveTeam(team.id)
       } else {
         useTeamStore.getState().archiveTeam(team.id)
-        // If archived team was selected, navigate away
         if (useTeamStore.getState().selectedTeamId === null) {
           useViewStore.getState().openBooZero()
         }
@@ -195,12 +152,10 @@ export function TeamSidebar() {
       await fetch(`/api/teams/${team.id}`, { method: 'DELETE' })
       useTeamStore.getState().removeTeam(team.id)
 
-      // Orphan agents in fleet store
       useFleetStore.setState((s) => ({
         agents: s.agents.map((a) => (a.teamId === team.id ? { ...a, teamId: null } : a)),
       }))
 
-      // If the deleted team was selected, go to Boo Zero
       if (useTeamStore.getState().selectedTeamId === null) {
         useViewStore.getState().openBooZero()
       }
@@ -238,23 +193,20 @@ export function TeamSidebar() {
 
     let deletedCount = 0
     try {
-      // Delete each agent from Gateway
       if (client) {
         for (const agent of teamAgents) {
           try {
             await deleteAgentOperation(agent.id, agent.sessionKey, client)
             deletedCount++
           } catch {
-            // Continue deleting remaining agents
+            // Continue
           }
         }
       }
 
-      // Delete the team from SQLite
       await fetch(`/api/teams/${team.id}`, { method: 'DELETE' })
       useTeamStore.getState().removeTeam(team.id)
 
-      // If the deleted team was selected, go to Boo Zero
       if (useTeamStore.getState().selectedTeamId === null) {
         useViewStore.getState().openBooZero()
       }
@@ -317,7 +269,7 @@ export function TeamSidebar() {
         })
         successCount++
       } catch {
-        // Best-effort — continue with remaining agents
+        // Best-effort
       }
     }
 
@@ -330,7 +282,6 @@ export function TeamSidebar() {
     })
   }, [contextMenu])
 
-  // ── Mascot right-click menu ─────────────────────────────────────────────────
   const [mascotMenu, setMascotMenu] = useState<{ x: number; y: number } | null>(null)
   const mascotMenuRef = useRef<HTMLDivElement>(null)
 
@@ -360,21 +311,8 @@ export function TeamSidebar() {
   return (
     <div
       data-testid="team-sidebar"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        width: 60,
-        height: '100%',
-        borderRight: '1px solid rgba(255,255,255,0.06)',
-        background: '#080B14',
-        paddingTop: 12,
-        paddingBottom: 12,
-        gap: 8,
-        flexShrink: 0,
-      }}
+      className="flex h-full w-[60px] shrink-0 flex-col items-center gap-2 border-r border-border bg-muted/60 pb-3 pt-3 dark:bg-[#080B14]"
     >
-      {/* Mascot — left click: Boo Zero view; right click: show all agents */}
       <MascotIcon
         selected={selectedTeamId === null}
         onClick={() => {
@@ -388,40 +326,16 @@ export function TeamSidebar() {
       />
 
       {/* Divider */}
-      <div
-        style={{
-          width: 32,
-          borderTop: '1px solid rgba(255,255,255,0.08)',
-          marginTop: 2,
-          marginBottom: 2,
-          flexShrink: 0,
-        }}
-      />
+      <div className="w-8 shrink-0 border-t border-border" />
 
       {/* Team icons */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 8,
-          width: '100%',
-          paddingLeft: 10,
-          paddingRight: 10,
-        }}
-      >
+      <div className="flex w-full flex-1 flex-col items-center gap-2 overflow-y-auto px-2.5">
         {activeTeams.map((team) => (
           <TeamIcon
             key={team.id}
             team={team}
             selected={team.id === selectedTeamId}
             onClick={() => {
-              // Clicking a team icon opens that team's Group Chat — the
-              // primary view for working WITH the team. (Atlas is the
-              // cross-team org-wide view, reachable from the nav slot
-              // labelled "🌐 Atlas" in the agent-list column.)
               selectTeam(team.id)
               useViewStore.getState().openGroupChat(team.id)
             }}
@@ -437,38 +351,15 @@ export function TeamSidebar() {
       <button
         title="Create team"
         onClick={() => setShowCreateModal(true)}
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 20,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: '1px dashed rgba(255,255,255,0.12)',
-          background: 'transparent',
-          color: 'rgba(232,232,232,0.3)',
-          cursor: 'pointer',
-          padding: 0,
-          flexShrink: 0,
-          transition: 'all 0.15s',
-        }}
-        onMouseOver={(e) => {
-          ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(233,69,96,0.4)'
-          ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(233,69,96,0.7)'
-        }}
-        onMouseOut={(e) => {
-          ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.12)'
-          ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.3)'
-        }}
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-dashed border-border bg-transparent p-0 text-secondary/40 transition-all duration-150 hover:border-primary/40 hover:text-primary/70"
       >
         <Plus size={16} strokeWidth={2} />
       </button>
 
-      {/* Column 2 collapse/expand toggle — always visible */}
+      {/* Column 2 collapse/expand toggle */}
       <button
         title={columnCollapsed || isBooZero ? 'Expand sidebar' : 'Collapse sidebar'}
         onClick={() => {
-          // If in Boo Zero view, exit to graph with column visible
           if (isBooZero) {
             useViewStore.getState().navigateTo('graph')
             if (useViewStore.getState().columnCollapsed) {
@@ -478,27 +369,7 @@ export function TeamSidebar() {
             useViewStore.getState().toggleColumnCollapsed()
           }
         }}
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 12,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: 'none',
-          background: 'transparent',
-          color: 'rgba(232,232,232,0.3)',
-          cursor: 'pointer',
-          padding: 0,
-          flexShrink: 0,
-          transition: 'all 0.15s',
-        }}
-        onMouseOver={(e) => {
-          ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.7)'
-        }}
-        onMouseOut={(e) => {
-          ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.3)'
-        }}
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border-none bg-transparent p-0 text-secondary/40 transition-all duration-150 hover:text-foreground/70"
       >
         {columnCollapsed || isBooZero ? (
           <PanelLeftOpen size={16} strokeWidth={2} />
@@ -511,49 +382,20 @@ export function TeamSidebar() {
       {mascotMenu && (
         <div
           ref={mascotMenuRef}
-          style={{
-            position: 'fixed',
-            left: mascotMenu.x,
-            top: mascotMenu.y,
-            zIndex: 60,
-            background: '#111827',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 8,
-            padding: '4px 0',
-            minWidth: 160,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-          }}
+          className="fixed z-[60] min-w-[160px] rounded-lg border border-border bg-popover py-1 shadow-lg"
+          style={{ left: mascotMenu.x, top: mascotMenu.y }}
         >
           <button
             type="button"
             onClick={() => {
               selectTeam(null)
               useViewStore.getState().navigateTo('graph')
-              // Ensure column is visible
               if (useViewStore.getState().columnCollapsed) {
                 useViewStore.getState().toggleColumnCollapsed()
               }
               setMascotMenu(null)
             }}
-            style={{
-              display: 'block',
-              width: '100%',
-              padding: '8px 14px',
-              background: 'transparent',
-              border: 'none',
-              color: '#E8E8E8',
-              fontSize: 12,
-              textAlign: 'left',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              transition: 'background 0.1s',
-            }}
-            onMouseOver={(e) => {
-              ;(e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)'
-            }}
-            onMouseOut={(e) => {
-              ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-            }}
+            className="block w-full whitespace-nowrap border-none bg-transparent px-3.5 py-2 text-left text-xs text-popover-foreground transition-colors hover:bg-foreground/5"
           >
             Show all agents
           </button>

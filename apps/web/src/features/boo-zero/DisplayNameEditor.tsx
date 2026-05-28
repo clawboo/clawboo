@@ -63,7 +63,7 @@ export function DisplayNameEditor({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)', margin: 0 }}>
+      <p style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.45)', margin: 0 }}>
         How Boo Zero refers to itself in chats. Defaults to <code>Boo Zero</code>. Stored in
         Clawboo&apos;s SQLite. Saving automatically syncs the heading of Boo Zero&apos;s
         <code> SOUL.md</code> too (best-effort — the per-turn rules block stays authoritative either
@@ -83,9 +83,9 @@ export function DisplayNameEditor({
             padding: '0 10px',
             fontSize: 12,
             fontFamily: 'var(--font-body, sans-serif)',
-            background: 'rgba(13,17,23,0.85)',
-            color: '#E8E8E8',
-            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'var(--input)',
+            color: 'var(--foreground)',
+            border: '1px solid var(--border)',
             borderRadius: 6,
           }}
         />
@@ -99,9 +99,12 @@ export function DisplayNameEditor({
             fontSize: 11,
             fontWeight: 600,
             borderRadius: 8,
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: isDirty && value.trim().length > 0 ? '#E94560' : 'rgba(255,255,255,0.06)',
-            color: isDirty && value.trim().length > 0 ? '#fff' : 'rgba(232,232,232,0.5)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
+            background:
+              isDirty && value.trim().length > 0
+                ? 'var(--primary)'
+                : 'rgb(var(--foreground-rgb) / 0.06)',
+            color: isDirty && value.trim().length > 0 ? '#fff' : 'rgb(var(--foreground-rgb) / 0.5)',
             cursor: !isDirty || saving || value.trim().length === 0 ? 'default' : 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
@@ -113,7 +116,9 @@ export function DisplayNameEditor({
         </button>
       </div>
       {isDirty && (
-        <span style={{ fontSize: 10, color: '#FBBF24' }}>Unsaved — save and reload to apply.</span>
+        <span style={{ fontSize: 10, color: 'var(--amber)' }}>
+          Unsaved — save and reload to apply.
+        </span>
       )}
     </div>
   )

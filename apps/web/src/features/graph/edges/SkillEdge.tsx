@@ -40,7 +40,7 @@ export const SkillEdge = memo(function SkillEdge({
       id={id}
       path={edgePath}
       style={{
-        stroke: selected ? '#34D399' : 'rgba(52,211,153,0.4)',
+        stroke: selected ? 'var(--mint)' : 'rgb(var(--mint-rgb) / 0.4)',
         strokeWidth: selected ? 2 : 1.5,
         // No strokeDasharray, no animation — solid static line.
         transition: 'stroke 0.15s, stroke-width 0.15s, opacity 0.2s ease',

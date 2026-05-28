@@ -115,9 +115,9 @@ const MORE_PROVIDERS: ProviderOption[] = [
     description: 'Grok models',
     placeholder: 'xai-...',
     needsKey: true,
-    tint: 'text-zinc-300',
-    tintBorder: 'border-zinc-300/40',
-    tintBg: 'bg-zinc-300/8',
+    tint: 'text-foreground/75',
+    tintBorder: 'border-foreground/30',
+    tintBg: 'bg-foreground/[0.08]',
   },
   {
     id: 'groq',
@@ -271,7 +271,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
   }, [provider, apiKey, submitting, canSubmit, onConfigured])
 
   return (
-    <div className="w-full max-w-xl rounded-2xl border border-white/8 bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
+    <div className="w-full max-w-xl rounded-2xl border border-border bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
       <div className="p-8">
         <StepIndicator current="setup" />
 
@@ -304,7 +304,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
                   'flex flex-col items-start rounded-xl p-4 text-left transition',
                   isSelected
                     ? `${p.tintBorder} ${p.tintBg} ring-2 ring-white/40`
-                    : 'border border-white/8 bg-background/50 hover:border-white/16 hover:bg-background/80',
+                    : 'border border-border bg-background/50 hover:border-foreground/15 hover:bg-background/80',
                   submitting ? 'opacity-50 cursor-not-allowed' : '',
                 ].join(' ')}
               >
@@ -346,7 +346,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
                   'flex items-center gap-2 rounded-lg px-3 py-2 text-left transition',
                   isSelected
                     ? `${p.tintBorder} ${p.tintBg} ring-1 ring-white/30`
-                    : 'border border-white/6 bg-background/30 hover:border-white/12 hover:bg-background/60',
+                    : 'border border-border bg-background/30 hover:border-border hover:bg-background/60',
                   submitting ? 'opacity-50 cursor-not-allowed' : '',
                 ].join(' ')}
               >
@@ -393,7 +393,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
                         void handleSubmit()
                       }
                     }}
-                    className="h-10 w-full rounded-lg border border-white/10 bg-background px-3 pr-10 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-white/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
+                    className="h-10 w-full rounded-lg border border-border bg-background px-3 pr-10 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
                   />
                   <button
                     type="button"
@@ -456,7 +456,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
           type="button"
           onClick={() => void handleSubmit()}
           disabled={!canSubmit || submitting}
-          className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? (
             <>

@@ -33,8 +33,8 @@ export function StepIndicator({ current }: { current: IndicatorId }) {
                   done
                     ? 'bg-mint text-background'
                     : active
-                      ? 'bg-accent text-white ring-4 ring-accent/20'
-                      : 'bg-white/10 text-secondary/50',
+                      ? 'bg-accent text-primary-foreground ring-4 ring-accent/20'
+                      : 'bg-foreground/10 text-secondary/50',
                 ].join(' ')}
               >
                 {done ? <Check className="h-3.5 w-3.5" strokeWidth={2.5} /> : i + 1}
@@ -52,7 +52,7 @@ export function StepIndicator({ current }: { current: IndicatorId }) {
               <div
                 className={[
                   'h-px w-14 mx-1 mb-5 transition-colors duration-500',
-                  done ? 'bg-mint/35' : 'bg-white/8',
+                  done ? 'bg-mint/35' : 'bg-foreground/[0.08]',
                 ].join(' ')}
               />
             )}

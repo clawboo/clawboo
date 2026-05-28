@@ -15,6 +15,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
+import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 
 // ─── API response types ─────────────────────────────────────────────────────
 
@@ -76,23 +77,25 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
   return (
     <div
       style={{
-        background: '#111827',
-        border: '1px solid rgba(251,191,36,0.3)',
+        background: 'var(--card)',
+        border: '1px solid rgb(var(--amber-rgb) / 0.3)',
         borderRadius: 12,
         padding: '20px 24px',
         marginBottom: 20,
       }}
     >
-      <div style={{ fontSize: 15, fontWeight: 700, color: '#FBBF24', marginBottom: 4 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--amber)', marginBottom: 4 }}>
         Ollama not detected
       </div>
-      <div style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)', marginBottom: 16 }}>
+      <div style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.5)', marginBottom: 16 }}>
         Frugal mode requires Ollama running locally. Follow these steps:
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {steps.map((step, i) => (
           <div key={i}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#E8E8E8', marginBottom: 6 }}>
+            <div
+              style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)', marginBottom: 6 }}
+            >
               {i + 1}. {step.label}
             </div>
             {'cmd' in step && step.cmd ? (
@@ -100,12 +103,12 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
                 <code
                   style={{
                     flex: 1,
-                    background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.08)',
+                    background: 'rgb(var(--foreground-rgb) / 0.05)',
+                    border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
                     borderRadius: 6,
                     padding: '6px 10px',
                     fontSize: 12,
-                    color: '#34D399',
+                    color: 'var(--mint)',
                     fontFamily: 'var(--font-geist-mono, monospace)',
                   }}
                 >
@@ -116,12 +119,12 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
                   onClick={() => copyToClipboard(step.cmd!)}
                   title="Copy"
                   style={{
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'rgb(var(--foreground-rgb) / 0.06)',
+                    border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
                     borderRadius: 6,
                     padding: '6px 8px',
                     cursor: 'pointer',
-                    color: 'rgba(232,232,232,0.6)',
+                    color: 'rgb(var(--foreground-rgb) / 0.6)',
                     fontSize: 11,
                     flexShrink: 0,
                   }}
@@ -139,7 +142,7 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
                     <span
                       style={{
                         fontSize: 11,
-                        color: 'rgba(232,232,232,0.4)',
+                        color: 'rgb(var(--foreground-rgb) / 0.4)',
                         width: 48,
                         flexShrink: 0,
                       }}
@@ -149,12 +152,12 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
                     <code
                       style={{
                         flex: 1,
-                        background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid rgba(255,255,255,0.08)',
+                        background: 'rgb(var(--foreground-rgb) / 0.05)',
+                        border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
                         borderRadius: 6,
                         padding: '6px 10px',
                         fontSize: 12,
-                        color: '#34D399',
+                        color: 'var(--mint)',
                         fontFamily: 'var(--font-geist-mono, monospace)',
                       }}
                     >
@@ -165,12 +168,12 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
                       onClick={() => copyToClipboard(cmd)}
                       title="Copy"
                       style={{
-                        background: 'rgba(255,255,255,0.06)',
-                        border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'rgb(var(--foreground-rgb) / 0.06)',
+                        border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
                         borderRadius: 6,
                         padding: '6px 8px',
                         cursor: 'pointer',
-                        color: 'rgba(232,232,232,0.6)',
+                        color: 'rgb(var(--foreground-rgb) / 0.6)',
                         fontSize: 11,
                         flexShrink: 0,
                       }}
@@ -190,8 +193,8 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
           onClick={() => void handleRetry()}
           disabled={checking}
           style={{
-            background: '#FBBF24',
-            color: '#0A0E1A',
+            background: 'var(--amber)',
+            color: 'var(--background)',
             border: 'none',
             borderRadius: 8,
             padding: '8px 16px',
@@ -208,8 +211,8 @@ function OllamaSetupPanel({ onCancel, onRetry }: { onCancel: () => void; onRetry
           onClick={onCancel}
           style={{
             background: 'transparent',
-            color: 'rgba(232,232,232,0.5)',
-            border: '1px solid rgba(255,255,255,0.1)',
+            color: 'rgb(var(--foreground-rgb) / 0.5)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
             borderRadius: 8,
             padding: '8px 16px',
             fontSize: 13,
@@ -237,17 +240,17 @@ function ModelPickerPanel({
   return (
     <div
       style={{
-        background: '#111827',
-        border: '1px solid rgba(52,211,153,0.3)',
+        background: 'var(--card)',
+        border: '1px solid rgb(var(--mint-rgb) / 0.3)',
         borderRadius: 12,
         padding: '20px 24px',
         marginBottom: 20,
       }}
     >
-      <div style={{ fontSize: 15, fontWeight: 700, color: '#34D399', marginBottom: 4 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--mint)', marginBottom: 4 }}>
         Select a model
       </div>
-      <div style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)', marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.5)', marginBottom: 14 }}>
         llama3.2 not found. Pick an available model or pull llama3.2 first.
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
@@ -257,12 +260,12 @@ function ModelPickerPanel({
             type="button"
             onClick={() => onSelect(m)}
             style={{
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.1)',
+              background: 'rgb(var(--foreground-rgb) / 0.05)',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
               borderRadius: 8,
               padding: '6px 14px',
               fontSize: 12,
-              color: '#E8E8E8',
+              color: 'var(--foreground)',
               cursor: 'pointer',
               fontFamily: 'var(--font-geist-mono, monospace)',
             }}
@@ -276,8 +279,8 @@ function ModelPickerPanel({
         onClick={onCancel}
         style={{
           background: 'transparent',
-          color: 'rgba(232,232,232,0.5)',
-          border: '1px solid rgba(255,255,255,0.1)',
+          color: 'rgb(var(--foreground-rgb) / 0.5)',
+          border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
           borderRadius: 8,
           padding: '8px 16px',
           fontSize: 13,
@@ -374,10 +377,15 @@ function FrugalToggleButton({
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
       <div style={{ textAlign: 'right' }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: '#E8E8E8', marginBottom: 2 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)', marginBottom: 2 }}>
           Frugal Mode
         </div>
-        <div style={{ fontSize: 11, color: frugalMode ? '#FBBF24' : 'rgba(232,232,232,0.45)' }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: frugalMode ? 'var(--amber)' : 'rgb(var(--foreground-rgb) / 0.45)',
+          }}
+        >
           {frugalMode ? 'Using local LLM (Ollama / LM Studio)' : 'Using cloud LLM'}
         </div>
       </div>
@@ -391,7 +399,7 @@ function FrugalToggleButton({
           height: 26,
           borderRadius: 13,
           border: 'none',
-          background: frugalMode ? '#FBBF24' : 'rgba(255,255,255,0.12)',
+          background: frugalMode ? 'var(--amber)' : 'rgb(var(--foreground-rgb) / 0.12)',
           cursor: 'pointer',
           position: 'relative',
           transition: 'background 0.2s',
@@ -418,9 +426,9 @@ function FrugalToggleButton({
 // ─── Summary card (token-first design) ──────────────────────────────────────
 
 function tokenColor(tokens: number): string {
-  if (tokens < 10_000) return '#34D399' // mint
-  if (tokens < 100_000) return '#FBBF24' // amber
-  return '#E94560' // accent
+  if (tokens < 10_000) return 'var(--mint)' // mint
+  if (tokens < 100_000) return 'var(--amber)' // amber
+  return 'var(--primary)' // accent
 }
 
 function SummaryCard({ label, tokens }: { label: string; tokens: number }) {
@@ -430,9 +438,9 @@ function SummaryCard({ label, tokens }: { label: string; tokens: number }) {
       style={{
         flex: 1,
         minWidth: 140,
-        background: '#111827',
+        background: 'var(--card)',
         borderRadius: 12,
-        border: '1px solid rgba(255,255,255,0.06)',
+        border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
         padding: '16px 20px',
       }}
     >
@@ -442,7 +450,7 @@ function SummaryCard({ label, tokens }: { label: string; tokens: number }) {
           fontWeight: 600,
           textTransform: 'uppercase',
           letterSpacing: '0.08em',
-          color: 'rgba(232,232,232,0.45)',
+          color: 'rgb(var(--foreground-rgb) / 0.45)',
           marginBottom: 8,
           fontFamily: 'var(--font-geist-mono, monospace)',
         }}
@@ -452,7 +460,7 @@ function SummaryCard({ label, tokens }: { label: string; tokens: number }) {
       <div style={{ fontSize: 26, fontWeight: 700, color, lineHeight: 1, marginBottom: 4 }}>
         {formatTokens(tokens)}
       </div>
-      <div style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)' }}>tokens</div>
+      <div style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>tokens</div>
     </div>
   )
 }
@@ -487,13 +495,19 @@ function TeamSection({ group }: { group: TeamGroup }) {
           border: 'none',
           cursor: 'pointer',
           padding: '8px 4px',
-          color: '#E8E8E8',
+          color: 'var(--foreground)',
         }}
       >
         {open ? (
-          <ChevronDown size={14} style={{ color: 'rgba(232,232,232,0.4)', flexShrink: 0 }} />
+          <ChevronDown
+            size={14}
+            style={{ color: 'rgb(var(--foreground-rgb) / 0.4)', flexShrink: 0 }}
+          />
         ) : (
-          <ChevronRight size={14} style={{ color: 'rgba(232,232,232,0.4)', flexShrink: 0 }} />
+          <ChevronRight
+            size={14}
+            style={{ color: 'rgb(var(--foreground-rgb) / 0.4)', flexShrink: 0 }}
+          />
         )}
         <span
           style={{
@@ -534,7 +548,7 @@ function TeamSection({ group }: { group: TeamGroup }) {
               <span
                 style={{
                   fontSize: 12,
-                  color: 'rgba(232,232,232,0.7)',
+                  color: 'rgb(var(--foreground-rgb) / 0.7)',
                   width: 120,
                   flexShrink: 0,
                   overflow: 'hidden',
@@ -550,7 +564,7 @@ function TeamSection({ group }: { group: TeamGroup }) {
                   flex: 1,
                   height: 8,
                   borderRadius: 4,
-                  background: 'rgba(255,255,255,0.04)',
+                  background: 'rgb(var(--foreground-rgb) / 0.04)',
                   overflow: 'hidden',
                 }}
               >
@@ -562,7 +576,7 @@ function TeamSection({ group }: { group: TeamGroup }) {
                         : '0%',
                     height: '100%',
                     borderRadius: 4,
-                    background: '#34D399',
+                    background: 'var(--mint)',
                     transition: 'width 0.3s ease',
                   }}
                 />
@@ -570,7 +584,7 @@ function TeamSection({ group }: { group: TeamGroup }) {
               <span
                 style={{
                   fontSize: 11,
-                  color: 'rgba(232,232,232,0.5)',
+                  color: 'rgb(var(--foreground-rgb) / 0.5)',
                   fontFamily: 'var(--font-geist-mono, monospace)',
                   width: 90,
                   textAlign: 'right',
@@ -581,7 +595,7 @@ function TeamSection({ group }: { group: TeamGroup }) {
                 {agent.inputTokens > 0 ? (
                   <>
                     {formatTokens(agent.inputTokens)}
-                    <span style={{ color: 'rgba(232,232,232,0.25)' }}> / </span>
+                    <span style={{ color: 'rgb(var(--foreground-rgb) / 0.25)' }}> / </span>
                     {formatTokens(agent.outputTokens)}
                   </>
                 ) : (
@@ -616,16 +630,16 @@ function TokenLineTooltip({ active, payload, label }: TooltipProps) {
   return (
     <div
       style={{
-        background: '#111827',
-        border: '1px solid #34D399',
+        background: 'var(--card)',
+        border: '1px solid var(--mint)',
         borderRadius: 8,
         padding: '8px 12px',
         fontSize: 12,
-        color: '#E8E8E8',
+        color: 'var(--foreground)',
       }}
     >
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
-      <div style={{ color: '#34D399' }}>{formatTokens(item.value)} tokens</div>
+      <div style={{ color: 'var(--mint)' }}>{formatTokens(item.value)} tokens</div>
     </div>
   )
 }
@@ -733,199 +747,225 @@ export function CostDashboard() {
     <div
       style={{
         height: '100%',
-        overflowY: 'auto',
-        background: '#0A0E1A',
-        padding: '24px 28px',
-        color: '#E8E8E8',
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--background)',
+        color: 'var(--foreground)',
       }}
     >
-      {/* Header */}
+      {/* Fixed top toolbar — matches Atlas / Marketplace / Approvals /
+          Scheduler patterns. 44 px height, padding 0 12 px, border-b. The
+          GitHub Star pill sits at right:12 top:6 within this toolbar — same
+          coordinates as every other view. The big "page heading" treatment
+          this view used to have (h1 + subtitle) is folded into the toolbar
+          as a compact title (the subtitle moves into the body as a kicker). */}
       <div
         style={{
+          height: 44,
+          flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginBottom: 24,
-          flexWrap: 'wrap',
-          gap: 12,
+          padding: '0 12px',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
         }}
       >
-        <div>
-          <h1
-            style={{
-              fontSize: 22,
-              fontWeight: 700,
-              color: '#E8E8E8',
-              margin: 0,
-              fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
-            }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            style={{ fontSize: 12, fontWeight: 600, color: 'rgb(var(--foreground-rgb) / 0.5)' }}
           >
             Tokens Used
-          </h1>
-          <p style={{ fontSize: 12, color: 'rgba(232,232,232,0.45)', margin: '4px 0 0' }}>
-            Token usage by team and agent
-          </p>
+          </span>
         </div>
-        <FrugalToggleButton frugalMode={frugalMode} onToggle={() => void handleToggle()} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <FrugalToggleButton frugalMode={frugalMode} onToggle={() => void handleToggle()} />
+          <GitHubStarButton />
+        </div>
       </div>
 
-      {/* Ollama panels */}
-      {panel?.kind === 'setup' && (
-        <OllamaSetupPanel onCancel={() => setPanel(null)} onRetry={handleRetry} />
-      )}
-      {panel?.kind === 'picker' && (
-        <ModelPickerPanel
-          models={panel.models}
-          onSelect={(m) => void activateWithModel(m)}
-          onCancel={() => setPanel(null)}
-        />
-      )}
-
-      {/* Frugal mode banner */}
-      {frugalMode && (
-        <div
+      {/* Scrollable body */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+        <p
           style={{
-            background: 'rgba(251,191,36,0.08)',
-            border: '1px solid rgba(251,191,36,0.3)',
-            borderRadius: 8,
-            padding: '10px 16px',
-            marginBottom: 20,
-            fontSize: 13,
-            color: '#FBBF24',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
+            fontSize: 12,
+            color: 'rgb(var(--foreground-rgb) / 0.45)',
+            margin: '0 0 20px',
           }}
         >
-          <span style={{ fontSize: 16 }}>!</span>
-          Frugal mode active — routing basic tasks to local LLM
-        </div>
-      )}
+          Token usage by team and agent
+        </p>
 
-      {loading && (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: 'rgba(232,232,232,0.4)' }}>
-          Loading token data...
-        </div>
-      )}
+        {/* Ollama panels */}
+        {panel?.kind === 'setup' && (
+          <OllamaSetupPanel onCancel={() => setPanel(null)} onRetry={handleRetry} />
+        )}
+        {panel?.kind === 'picker' && (
+          <ModelPickerPanel
+            models={panel.models}
+            onSelect={(m) => void activateWithModel(m)}
+            onCancel={() => setPanel(null)}
+          />
+        )}
 
-      {error && (
-        <div
-          style={{
-            background: 'rgba(233,69,96,0.08)',
-            border: '1px solid rgba(233,69,96,0.3)',
-            borderRadius: 8,
-            padding: '12px 16px',
-            color: '#E94560',
-            fontSize: 13,
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      {!loading && !error && data && (
-        <>
-          {/* Summary cards — tokens as primary, cost as secondary */}
-          <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
-            <SummaryCard label="Today" tokens={data.tokensToday} />
-            <SummaryCard label="This Week" tokens={data.tokensWeek} />
-            <SummaryCard label="This Month" tokens={data.tokensMonth} />
-          </div>
-
-          {/* Team Breakdown */}
+        {/* Frugal mode banner */}
+        {frugalMode && (
           <div
             style={{
-              background: '#111827',
-              borderRadius: 12,
-              border: '1px solid rgba(255,255,255,0.06)',
-              padding: '20px 20px 12px',
+              background: 'rgb(var(--amber-rgb) / 0.08)',
+              border: '1px solid rgb(var(--amber-rgb) / 0.3)',
+              borderRadius: 8,
+              padding: '10px 16px',
               marginBottom: 20,
+              fontSize: 13,
+              color: 'var(--amber)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
             }}
           >
-            <h2
+            <span style={{ fontSize: 16 }}>!</span>
+            Frugal mode active — routing basic tasks to local LLM
+          </div>
+        )}
+
+        {loading && (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '60px 0',
+              color: 'rgb(var(--foreground-rgb) / 0.4)',
+            }}
+          >
+            Loading token data...
+          </div>
+        )}
+
+        {error && (
+          <div
+            style={{
+              background: 'rgb(var(--primary-rgb) / 0.08)',
+              border: '1px solid rgb(var(--primary-rgb) / 0.3)',
+              borderRadius: 8,
+              padding: '12px 16px',
+              color: 'var(--primary)',
+              fontSize: 13,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {!loading && !error && data && (
+          <>
+            {/* Summary cards — tokens as primary, cost as secondary */}
+            <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
+              <SummaryCard label="Today" tokens={data.tokensToday} />
+              <SummaryCard label="This Week" tokens={data.tokensWeek} />
+              <SummaryCard label="This Month" tokens={data.tokensMonth} />
+            </div>
+
+            {/* Team Breakdown */}
+            <div
               style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: 'rgba(232,232,232,0.65)',
-                margin: '0 0 12px',
-                fontFamily: 'var(--font-geist-mono, monospace)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
+                background: 'var(--card)',
+                borderRadius: 12,
+                border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                padding: '20px 20px 12px',
+                marginBottom: 20,
               }}
             >
-              Tokens by Team
-            </h2>
-
-            {teamGroups.length === 0 ? (
-              <div
+              <h2
                 style={{
-                  textAlign: 'center',
-                  padding: '32px 0',
-                  color: 'rgba(232,232,232,0.3)',
                   fontSize: 13,
+                  fontWeight: 600,
+                  color: 'rgb(var(--foreground-rgb) / 0.65)',
+                  margin: '0 0 12px',
+                  fontFamily: 'var(--font-geist-mono, monospace)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
                 }}
               >
-                No token records yet. Start chatting with your Boos to track usage.
-              </div>
-            ) : (
-              teamGroups.map((group) => <TeamSection key={group.teamId ?? 'none'} group={group} />)
-            )}
-          </div>
+                Tokens by Team
+              </h2>
 
-          {/* Token Trend — 30 day line chart */}
-          <div
-            style={{
-              background: '#111827',
-              borderRadius: 12,
-              border: '1px solid rgba(255,255,255,0.06)',
-              padding: '20px 20px 12px',
-            }}
-          >
-            <h2
+              {teamGroups.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    padding: '32px 0',
+                    color: 'rgb(var(--foreground-rgb) / 0.3)',
+                    fontSize: 13,
+                  }}
+                >
+                  No token records yet. Start chatting with your Boos to track usage.
+                </div>
+              ) : (
+                teamGroups.map((group) => (
+                  <TeamSection key={group.teamId ?? 'none'} group={group} />
+                ))
+              )}
+            </div>
+
+            {/* Token Trend — 30 day line chart */}
+            <div
               style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: 'rgba(232,232,232,0.65)',
-                margin: '0 0 16px',
-                fontFamily: 'var(--font-geist-mono, monospace)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
+                background: 'var(--card)',
+                borderRadius: 12,
+                border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                padding: '20px 20px 12px',
               }}
             >
-              Token Usage — Last 30 Days
-            </h2>
+              <h2
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: 'rgb(var(--foreground-rgb) / 0.65)',
+                  margin: '0 0 16px',
+                  fontFamily: 'var(--font-geist-mono, monospace)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                }}
+              >
+                Token Usage — Last 30 Days
+              </h2>
 
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={lineData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 4" stroke="rgba(255,255,255,0.05)" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: 'rgba(232,232,232,0.4)', fontSize: 10 }}
-                  axisLine={false}
-                  tickLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tickFormatter={(v: number) => formatTokens(v)}
-                  tick={{ fill: 'rgba(232,232,232,0.4)', fontSize: 10 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={55}
-                />
-                <Tooltip content={<TokenLineTooltip />} />
-                <Line
-                  type="monotone"
-                  dataKey="tokens"
-                  stroke="#34D399"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4, fill: '#34D399', stroke: '#0A0E1A', strokeWidth: 2 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </>
-      )}
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={lineData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 4" stroke="rgb(var(--foreground-rgb) / 0.05)" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: 'rgb(var(--foreground-rgb) / 0.4)', fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tickFormatter={(v: number) => formatTokens(v)}
+                    tick={{ fill: 'rgb(var(--foreground-rgb) / 0.4)', fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={55}
+                  />
+                  <Tooltip content={<TokenLineTooltip />} />
+                  <Line
+                    type="monotone"
+                    dataKey="tokens"
+                    stroke="var(--mint)"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{
+                      r: 4,
+                      fill: 'var(--mint)',
+                      stroke: 'var(--background)',
+                      strokeWidth: 2,
+                    }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

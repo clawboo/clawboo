@@ -45,7 +45,7 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18, delay: Math.min(index * 0.02, 0.4) }}
       style={{
-        background: '#111827',
+        background: 'var(--card)',
         border: `1px solid ${agent.color}25`,
         borderRadius: 10,
         padding: '14px 16px',
@@ -71,7 +71,7 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
             style={{
               fontSize: 13,
               fontWeight: 600,
-              color: '#E8E8E8',
+              color: 'var(--foreground)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -82,7 +82,7 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
           <div
             style={{
               fontSize: 11,
-              color: 'rgba(232,232,232,0.45)',
+              color: 'rgb(var(--foreground-rgb) / 0.45)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -127,7 +127,7 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
         >
           {formatDomain(agent.domain)}
         </span>
-        <span style={{ fontSize: 10, color: 'rgba(232,232,232,0.35)' }}>
+        <span style={{ fontSize: 10, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
           {getCategoryLabel(agent.category)}
         </span>
       </div>
@@ -136,7 +136,7 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
       <div
         style={{
           fontSize: 12,
-          color: 'rgba(232,232,232,0.5)',
+          color: 'rgb(var(--foreground-rgb) / 0.5)',
           lineHeight: 1.5,
           display: '-webkit-box',
           WebkitLineClamp: 2,
@@ -151,7 +151,7 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
       <div
         style={{
           fontSize: 10.5,
-          color: 'rgba(232,232,232,0.4)',
+          color: 'rgb(var(--foreground-rgb) / 0.4)',
           display: 'flex',
           gap: 10,
         }}
@@ -171,8 +171,8 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
           onClick={() => onDetails(agent)}
           style={{
             background: 'transparent',
-            border: '1px solid rgba(255,255,255,0.08)',
-            color: 'rgba(232,232,232,0.55)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+            color: 'rgb(var(--foreground-rgb) / 0.55)',
             fontSize: 11,
             fontWeight: 500,
             padding: '4px 10px',
@@ -182,12 +182,12 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
             whiteSpace: 'nowrap',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)'
-            e.currentTarget.style.color = 'rgba(232,232,232,0.75)'
+            e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.18)'
+            e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.75)'
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
-            e.currentTarget.style.color = 'rgba(232,232,232,0.55)'
+            e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.08)'
+            e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.55)'
           }}
         >
           Details

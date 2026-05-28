@@ -15,6 +15,7 @@ import { useState } from 'react'
 import { Settings } from 'lucide-react'
 import { useGraphStore } from '@/features/graph/store'
 import type { Team } from '@/stores/team'
+import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { TeamSettingsSheet } from './TeamSettingsSheet'
 
 interface GroupChatViewHeaderProps {
@@ -37,59 +38,38 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
   const hasGraph = booCount > 0
   return (
     <>
-      <div className="flex shrink-0 items-center gap-3 border-b border-white/8 px-4 py-3">
+      {/* 44 px fixed-height row + 12 px horizontal padding — matches the
+          rest of the app so the GitHub Star pill lands at exactly the same
+          screen coordinates (top:6 right:12) across every view. Team icon
+          shrunk 30→24 px and the count pill moved inline (no vertical stack)
+          to fit comfortably in 44 px. */}
+      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border px-3">
         {team && (
           <span
-            className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-[16px]"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[14px]"
             style={{ background: `${team.color}22` }}
           >
             {team.icon}
           </span>
         )}
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <h2
-            className="truncate text-[14px] font-semibold text-text"
+            className="truncate text-[13px] font-semibold text-text"
             style={{ fontFamily: 'var(--font-body)' }}
           >
             {team?.name ?? 'Group Chat'}
           </h2>
-          {/* Accent-red pill badge — same style as the old Ghost Graph
-              toolbar badge, so the boo/skill count keeps the same visual
-              prominence after being folded into the team header. While the
-              graph hydrates we render a dimmer placeholder pill instead of
-              "0 Boos · 0 skills" flashing in. */}
-          <div className="mt-1.5 flex">
-            {hasGraph ? (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: '#E94560',
-                  background: 'rgba(233,69,96,0.12)',
-                  borderRadius: 20,
-                  padding: '2px 10px',
-                  lineHeight: '16px',
-                }}
-              >
-                {booCount} Boo{booCount !== 1 ? 's' : ''}
-                {skillCount > 0 && ` · ${skillCount} skill${skillCount !== 1 ? 's' : ''}`}
-              </span>
-            ) : (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: 'rgba(232,232,232,0.35)',
-                  background: 'rgba(255,255,255,0.04)',
-                  borderRadius: 20,
-                  padding: '2px 10px',
-                  lineHeight: '16px',
-                }}
-              >
-                …
-              </span>
-            )}
-          </div>
+          {/* Accent-red pill badge — count of Boos + skills */}
+          {hasGraph ? (
+            <span className="shrink-0 rounded-full bg-primary/12 px-2 py-0.5 text-[10px] font-medium leading-4 text-primary">
+              {booCount} Boo{booCount !== 1 ? 's' : ''}
+              {skillCount > 0 && ` · ${skillCount} skill${skillCount !== 1 ? 's' : ''}`}
+            </span>
+          ) : (
+            <span className="shrink-0 rounded-full bg-foreground/[0.04] px-2 py-0.5 text-[10px] font-medium leading-4 text-foreground/35">
+              …
+            </span>
+          )}
         </div>
         {/* Team-settings entry point — opens TeamSettingsSheet (brief +
             rules). Icon + text label mirrors the canvas toolbar buttons
@@ -103,12 +83,17 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
             aria-label={`${team.name} — brief & rules`}
             title="Team brief & rules"
             data-testid="team-settings-button"
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-white/8 bg-surface/40 px-2.5 text-[11px] font-medium text-text/70 transition hover:bg-surface/70 hover:text-text"
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-foreground/[0.04] px-2.5 text-[11px] font-medium text-text/70 transition hover:bg-foreground/[0.08] hover:text-text"
           >
             <Settings size={13} strokeWidth={1.75} />
             Brief &amp; Rules
           </button>
         )}
+        {/* GitHub Star CTA — integrated into the team header so this view
+            doesn't need the global AppTopBar (which is hidden for groupChat
+            views). Saves 44 px of always-on chrome by reusing the team
+            header row. */}
+        <GitHubStarButton />
       </div>
       {settingsOpen && team && (
         <TeamSettingsSheet team={team} onClose={() => setSettingsOpen(false)} />

@@ -26,7 +26,7 @@ export function EdgeMarkers() {
           markerHeight="6"
           orient="auto-start-reverse"
         >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(233,69,96,0.85)" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgb(var(--primary-rgb) / 0.85)" />
         </marker>
       </defs>
     </svg>

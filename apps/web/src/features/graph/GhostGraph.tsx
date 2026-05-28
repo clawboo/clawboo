@@ -730,7 +730,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         position: 'relative',
         // Background moved here from <ReactFlow> so TeamHaloLayer can render
         // between the wrapper bg and ReactFlow's transparent canvas.
-        background: '#0A0E1A',
+        background: 'var(--canvas)',
         // Hide nodes until ELK has positioned them — prevents (0,0) pile-up flash on new teams
         opacity: hasRunLayout ? 1 : 0,
         transition: 'opacity 0.25s ease',
@@ -773,26 +773,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           <button
             onClick={resetLayout}
             title="Re-layout"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 12px',
-              borderRadius: 8,
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-              border: '1px solid rgba(255,255,255,0.1)',
-              background: '#111827',
-              color: 'rgba(232,232,232,0.5)',
-              transition: 'all 0.15s',
-            }}
-            onMouseOver={(e) =>
-              ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.85)')
-            }
-            onMouseOut={(e) =>
-              ((e.currentTarget as HTMLButtonElement).style.color = 'rgba(232,232,232,0.5)')
-            }
+            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-canvas-control-border bg-canvas-control px-3 py-1.5 text-[12px] font-semibold text-foreground/50 transition-all duration-150 hover:text-foreground/85"
           >
             <RefreshCw size={14} />
             Re-layout
@@ -806,22 +787,12 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           <button
             onClick={() => setShowTeamHalos(!showTeamHalos)}
             title="Toggle colored team hulls behind agents"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 12px',
-              borderRadius: 8,
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-              border: showTeamHalos
-                ? '1px solid rgba(52,211,153,0.4)'
-                : '1px solid rgba(255,255,255,0.1)',
-              background: showTeamHalos ? 'rgba(52,211,153,0.18)' : '#111827',
-              color: showTeamHalos ? '#34D399' : 'rgba(232,232,232,0.5)',
-              transition: 'all 0.15s',
-            }}
+            className={[
+              'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all duration-150',
+              showTeamHalos
+                ? 'border-mint/40 bg-mint/[0.18] text-mint'
+                : 'border-canvas-control-border bg-canvas-control text-foreground/50',
+            ].join(' ')}
           >
             <Pin size={14} />
             Team halos
@@ -831,22 +802,12 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         {/* Connect mode toggle */}
         <button
           onClick={() => setConnectMode(!connectMode)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 12px',
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            border: connectMode
-              ? '1px solid rgba(233,69,96,0.4)'
-              : '1px solid rgba(255,255,255,0.1)',
-            background: connectMode ? 'rgba(233,69,96,0.2)' : '#111827',
-            color: connectMode ? '#E94560' : 'rgba(232,232,232,0.5)',
-            transition: 'all 0.15s',
-          }}
+          className={[
+            'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all duration-150',
+            connectMode
+              ? 'border-primary/40 bg-primary/20 text-primary'
+              : 'border-canvas-control-border bg-canvas-control text-foreground/50',
+          ].join(' ')}
         >
           <GitBranch size={14} />
           {connectMode ? 'Drawing Edges' : 'Connect'}
@@ -861,23 +822,13 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         onClick={() => setShowMiniMap(!showMiniMap)}
         title={showMiniMap ? 'Hide minimap' : 'Show minimap'}
         aria-label={showMiniMap ? 'Hide minimap' : 'Show minimap'}
+        className={[
+          'absolute z-20 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-canvas-control-border bg-canvas-control transition-all duration-150',
+          showMiniMap ? 'text-primary' : 'text-foreground/50 hover:text-foreground/80',
+        ].join(' ')}
         style={{
-          position: 'absolute',
           bottom: 12,
           right: showMiniMap ? minimapDims.w + 24 : 12,
-          zIndex: 20,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 28,
-          height: 28,
-          padding: 0,
-          borderRadius: 8,
-          cursor: 'pointer',
-          border: '1px solid rgba(255,255,255,0.1)',
-          background: '#111827',
-          color: showMiniMap ? '#E94560' : 'rgba(232,232,232,0.5)',
-          transition: 'right 0.2s ease, color 0.15s, border-color 0.15s',
         }}
       >
         {showMiniMap ? <X size={14} /> : <Map size={14} />}
@@ -909,47 +860,37 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         maxZoom={2.5}
         defaultEdgeOptions={{ animated: false }}
       >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={32}
-          size={1}
-          color="rgba(255,255,255,0.03)"
-        />
+        <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="var(--canvas-dot)" />
         <Controls
           style={{
-            background: '#111827',
-            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'var(--canvas-control)',
+            border: '1px solid var(--canvas-control-border)',
             borderRadius: 8,
           }}
         />
         {showMiniMap && (
           <MiniMap
             style={{
-              background: '#111827',
-              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'var(--canvas-control)',
+              border: '1px solid var(--canvas-control-border)',
               borderRadius: 8,
               width: minimapDims.w,
               height: minimapDims.h,
             }}
             nodeColor={(node) => {
-              if (node.type === 'boo') return '#E94560'
+              if (node.type === 'boo') return 'var(--primary)'
               // Atlas team-root junctions are invisible — hide them in the
               // MiniMap too.
               if (node.type === 'team-root') return 'transparent'
               // Skill / resource nodes inherit visibility from their parent
               // Boo via `data.isVisible` (set by the visibleNodes memo).
-              // When the parent is collapsed, return 'transparent' so the
-              // MiniMap matches what the user sees in the main canvas.
-              // The `?? true` default keeps MiniMap behaviour correct in
-              // contexts that don't set the flag (e.g. MiniGraph) — but
-              // this MiniMap is only on the Ghost Graph anyway.
               const isVisible = (node.data as { isVisible?: boolean }).isVisible ?? true
-              if (node.type === 'skill') return isVisible ? '#34D399' : 'transparent'
-              if (node.type === 'resource') return isVisible ? '#FBBF24' : 'transparent'
-              return '#FBBF24'
+              if (node.type === 'skill') return isVisible ? 'var(--mint)' : 'transparent'
+              if (node.type === 'resource') return isVisible ? 'var(--amber)' : 'transparent'
+              return 'var(--amber)'
             }}
             nodeComponent={GhostGraphMiniMapNode}
-            maskColor="rgba(10,14,26,0.75)"
+            maskColor="var(--canvas-mask)"
           />
         )}
       </ReactFlow>
@@ -1017,19 +958,19 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
 const EDGE_META = {
   skill: {
     label: 'Skill Connection',
-    color: '#34D399',
+    color: 'var(--mint)',
     desc: 'This agent has access to this tool.',
     file: 'TOOLS.md',
   },
   dependency: {
     label: 'Agent Dependency',
-    color: '#E94560',
+    color: 'var(--primary)',
     desc: 'This agent routes work to the target agent.',
     file: 'AGENTS.md',
   },
   resource: {
     label: 'Resource Connection',
-    color: '#FBBF24',
+    color: 'var(--amber)',
     desc: 'This agent uses this external service.',
     file: 'TOOLS.md',
   },
@@ -1067,98 +1008,40 @@ function EdgeExplainPanel({
       animate={{ y: 0, opacity: 1 }}
       exit={{ y: 48, opacity: 0 }}
       transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+      className="absolute bottom-4 left-1/2 z-10 w-[340px] -translate-x-1/2 rounded-xl border bg-canvas-control px-4 py-3.5 shadow-2xl"
       style={{
-        position: 'absolute',
-        bottom: 16,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: 340,
-        background: '#111827',
-        border: `1px solid ${meta.color}40`,
-        borderRadius: 12,
-        padding: '14px 16px',
-        zIndex: 10,
-        boxShadow: `0 8px 32px rgba(0,0,0,0.5), 0 0 0 0.5px ${meta.color}30`,
+        borderColor: `${meta.color}40`,
+        boxShadow: `0 8px 32px rgb(0 0 0 / 0.25), 0 0 0 0.5px ${meta.color}30`,
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 8,
-        }}
-      >
-        <span style={{ fontSize: 12, fontWeight: 600, color: meta.color }}>{meta.label}</span>
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[12px] font-semibold" style={{ color: meta.color }}>
+          {meta.label}
+        </span>
         <button
           onClick={onClose}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'rgba(232,232,232,0.4)',
-            cursor: 'pointer',
-            fontSize: 14,
-            lineHeight: 1,
-            padding: 0,
-          }}
+          className="cursor-pointer border-none bg-transparent p-0 text-[14px] leading-none text-foreground/40 hover:text-foreground/70"
         >
           ✕
         </button>
       </div>
-      <p style={{ fontSize: 12, color: 'rgba(232,232,232,0.55)', margin: '0 0 8px' }}>
-        {meta.desc}
-      </p>
+      <p className="m-0 mb-2 text-[12px] text-foreground/55">{meta.desc}</p>
       {sourceAgent && (
-        <div
-          style={{
-            background: 'rgba(255,255,255,0.04)',
-            borderRadius: 6,
-            padding: '6px 10px',
-            fontSize: 12,
-          }}
-        >
-          <span style={{ color: 'rgba(232,232,232,0.4)' }}>Source: </span>
-          <span style={{ color: '#E8E8E8', fontWeight: 500 }}>{sourceAgent.name}</span>
-          <span style={{ color: 'rgba(232,232,232,0.4)' }}> · via {meta.file}</span>
+        <div className="rounded-md bg-foreground/[0.04] px-2.5 py-1.5 text-[12px]">
+          <span className="text-foreground/40">Source: </span>
+          <span className="font-medium text-foreground">{sourceAgent.name}</span>
+          <span className="text-foreground/40"> · via {meta.file}</span>
         </div>
       )}
       {excerpt && (
-        <p
-          style={{
-            fontSize: 11,
-            color: 'rgba(232,232,232,0.3)',
-            marginTop: 8,
-            marginBottom: 0,
-            overflow: 'hidden',
-            whiteSpace: 'nowrap',
-            textOverflow: 'ellipsis',
-          }}
-        >
+        <p className="mt-2 mb-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-foreground/30">
           {excerpt}
         </p>
       )}
       {onDelete && (
         <button
           onClick={() => onDelete(edge.id)}
-          style={{
-            marginTop: 10,
-            width: '100%',
-            padding: '7px 0',
-            border: '1px solid rgba(233,69,96,0.3)',
-            borderRadius: 6,
-            background: 'rgba(233,69,96,0.08)',
-            color: '#E94560',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'background 0.15s',
-          }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.background = 'rgba(233,69,96,0.18)'
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.background = 'rgba(233,69,96,0.08)'
-          }}
+          className="mt-2.5 w-full cursor-pointer rounded-md border border-primary/30 bg-primary/[0.08] py-1.5 text-[12px] font-semibold text-primary transition-colors hover:bg-primary/[0.18]"
         >
           Remove Connection
         </button>

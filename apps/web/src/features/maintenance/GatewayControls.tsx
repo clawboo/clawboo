@@ -142,7 +142,7 @@ export function GatewayControls() {
                 position: 'absolute',
                 inset: 0,
                 borderRadius: '50%',
-                background: '#34D399',
+                background: 'var(--mint)',
                 animation: 'pulse 1.4s ease-out infinite',
                 opacity: 0.5,
               }}
@@ -154,12 +154,12 @@ export function GatewayControls() {
               width: 10,
               height: 10,
               borderRadius: '50%',
-              background: isRunning ? '#34D399' : 'rgba(233,69,96,0.7)',
+              background: isRunning ? 'var(--mint)' : 'rgb(var(--primary-rgb) / 0.7)',
             }}
           />
         </span>
 
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#E8E8E8' }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)' }}>
           {isRunning ? 'Running' : 'Stopped'}
         </span>
 
@@ -167,7 +167,7 @@ export function GatewayControls() {
           <span
             style={{
               fontSize: 11,
-              color: 'rgba(232,232,232,0.4)',
+              color: 'rgb(var(--foreground-rgb) / 0.4)',
               fontFamily: 'var(--font-geist-mono, monospace)',
             }}
           >
@@ -176,7 +176,7 @@ export function GatewayControls() {
         )}
 
         {isRunning && formatUptime(info?.gateway.uptimeMs ?? null) && (
-          <span style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)' }}>
+          <span style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
             uptime {formatUptime(info?.gateway.uptimeMs ?? null)}
           </span>
         )}
@@ -196,8 +196,8 @@ export function GatewayControls() {
             borderRadius: 8,
             border: 'none',
             cursor: isRunning || isBusy ? 'default' : 'pointer',
-            background: isRunning || isBusy ? 'rgba(52,211,153,0.15)' : '#34D399',
-            color: isRunning || isBusy ? 'rgba(52,211,153,0.4)' : '#0A0E1A',
+            background: isRunning || isBusy ? 'rgb(var(--mint-rgb) / 0.15)' : 'var(--mint)',
+            color: isRunning || isBusy ? 'rgb(var(--mint-rgb) / 0.4)' : 'var(--background)',
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
@@ -222,8 +222,8 @@ export function GatewayControls() {
             borderRadius: 8,
             border: 'none',
             cursor: !isRunning || isBusy ? 'default' : 'pointer',
-            background: !isRunning || isBusy ? 'rgba(251,191,36,0.15)' : '#FBBF24',
-            color: !isRunning || isBusy ? 'rgba(251,191,36,0.4)' : '#0A0E1A',
+            background: !isRunning || isBusy ? 'rgb(var(--amber-rgb) / 0.15)' : 'var(--amber)',
+            color: !isRunning || isBusy ? 'rgb(var(--amber-rgb) / 0.4)' : 'var(--background)',
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
@@ -248,8 +248,8 @@ export function GatewayControls() {
             borderRadius: 8,
             border: 'none',
             cursor: !isRunning || isBusy ? 'default' : 'pointer',
-            background: !isRunning || isBusy ? 'rgba(233,69,96,0.15)' : '#E94560',
-            color: !isRunning || isBusy ? 'rgba(233,69,96,0.4)' : '#fff',
+            background: !isRunning || isBusy ? 'rgb(var(--primary-rgb) / 0.15)' : 'var(--primary)',
+            color: !isRunning || isBusy ? 'rgb(var(--primary-rgb) / 0.4)' : '#fff',
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
@@ -274,7 +274,7 @@ export function GatewayControls() {
               border: 'none',
               cursor: 'pointer',
               fontSize: 11,
-              color: 'rgba(232,232,232,0.4)',
+              color: 'rgb(var(--foreground-rgb) / 0.4)',
               padding: 0,
             }}
           >
@@ -290,8 +290,8 @@ export function GatewayControls() {
             <div
               style={{
                 marginTop: 8,
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.06)',
+                background: 'rgb(var(--foreground-rgb) / 0.03)',
+                border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
                 borderRadius: 8,
                 padding: '10px 12px',
                 maxHeight: 180,
@@ -299,7 +299,7 @@ export function GatewayControls() {
                 fontFamily: 'var(--font-geist-mono, monospace)',
                 fontSize: 11,
                 lineHeight: 1.6,
-                color: 'rgba(232,232,232,0.55)',
+                color: 'rgb(var(--foreground-rgb) / 0.55)',
               }}
             >
               {gatewayLog.map((line, i) => (

@@ -51,29 +51,14 @@ export function TeamRulesEditor({ teamId }: { teamId: string }) {
   }, [content, teamId])
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}
-    >
-      <p style={{ fontSize: 11, color: 'rgba(232,232,232,0.45)', margin: 0 }}>
+    <div className="flex flex-col gap-2">
+      <p className="m-0 text-[11px] text-foreground/45">
         Durable rules injected into every team agent&apos;s preamble + every Boo Zero turn in this
         team. One rule per line. Also writable via <code>/rule &lt;text&gt;</code> in the team chat
         composer.
       </p>
       {loading ? (
-        <div
-          style={{
-            padding: 10,
-            fontSize: 11,
-            color: 'rgba(232,232,232,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
+        <div className="flex items-center gap-2 p-2.5 text-[11px] text-foreground/50">
           <Loader2 size={12} className="animate-spin" /> Loading rules…
         </div>
       ) : (
@@ -84,45 +69,29 @@ export function TeamRulesEditor({ teamId }: { teamId: string }) {
             disabled={saving}
             spellCheck={false}
             placeholder="No rules yet. Type one per line — they'll be injected into every team agent's preamble."
+            className="w-full resize-y rounded-md border border-border bg-input p-2 font-mono text-[12px] leading-relaxed text-foreground"
             style={{
-              width: '100%',
               minHeight: 120,
               maxHeight: 320,
-              padding: 8,
-              fontSize: 12,
               fontFamily: 'var(--font-geist-mono, monospace)',
-              lineHeight: 1.55,
-              background: 'rgba(13,17,23,0.85)',
-              color: '#E8E8E8',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 6,
-              resize: 'vertical',
             }}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleSave}
               disabled={!isDirty || saving}
-              style={{
-                height: 26,
-                padding: '0 10px',
-                fontSize: 11,
-                fontWeight: 600,
-                borderRadius: 6,
-                border: '1px solid rgba(255,255,255,0.1)',
-                background: isDirty ? '#E94560' : 'rgba(255,255,255,0.06)',
-                color: isDirty ? '#fff' : 'rgba(232,232,232,0.5)',
-                cursor: !isDirty || saving ? 'default' : 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
+              className={[
+                'inline-flex h-[26px] items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-semibold',
+                isDirty
+                  ? 'cursor-pointer border-primary/30 bg-primary text-primary-foreground'
+                  : 'cursor-default border-border bg-foreground/[0.06] text-foreground/50',
+              ].join(' ')}
             >
               {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
               Save rules
             </button>
-            {isDirty && <span style={{ fontSize: 10, color: '#FBBF24' }}>Unsaved changes</span>}
+            {isDirty && <span className="text-[10px] text-amber">Unsaved changes</span>}
           </div>
         </>
       )}

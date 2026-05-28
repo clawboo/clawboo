@@ -24,12 +24,10 @@ export const MentionDropdown = memo(function MentionDropdown({
   const listRef = useRef<HTMLDivElement>(null)
   const selectedRef = useRef<HTMLButtonElement>(null)
 
-  // Scroll selected item into view
   useEffect(() => {
     selectedRef.current?.scrollIntoView({ block: 'nearest' })
   }, [selectedIndex])
 
-  // Click-outside to close
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (listRef.current && !listRef.current.contains(e.target as Node)) {
@@ -44,19 +42,7 @@ export const MentionDropdown = memo(function MentionDropdown({
     return (
       <div
         ref={listRef}
-        style={{
-          position: 'absolute',
-          bottom: '100%',
-          left: 0,
-          marginBottom: 4,
-          zIndex: 50,
-          background: '#111827',
-          border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: 8,
-          padding: '8px 12px',
-          minWidth: 160,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-        }}
+        className="absolute bottom-full left-0 z-50 mb-1 min-w-[160px] rounded-lg border border-border bg-popover px-3 py-2 shadow-lg"
       >
         <span className="text-[11px] text-secondary/50">No matching agents</span>
       </div>
@@ -66,21 +52,7 @@ export const MentionDropdown = memo(function MentionDropdown({
   return (
     <div
       ref={listRef}
-      style={{
-        position: 'absolute',
-        bottom: '100%',
-        left: 0,
-        marginBottom: 4,
-        zIndex: 50,
-        background: '#111827',
-        border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 8,
-        padding: '4px 0',
-        minWidth: 180,
-        maxHeight: 200,
-        overflowY: 'auto',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-      }}
+      className="absolute bottom-full left-0 z-50 mb-1 max-h-[200px] min-w-[180px] overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-lg"
     >
       {agents.map((agent, i) => (
         <button
@@ -88,25 +60,13 @@ export const MentionDropdown = memo(function MentionDropdown({
           ref={i === selectedIndex ? selectedRef : undefined}
           type="button"
           onMouseDown={(e) => {
-            e.preventDefault() // prevent textarea blur
+            e.preventDefault()
             onSelect(agent.name)
           }}
-          className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors"
-          style={{
-            background: i === selectedIndex ? 'rgba(255,255,255,0.08)' : 'transparent',
-            fontSize: 12,
-            color: '#E8E8E8',
-          }}
-          onMouseEnter={(e) => {
-            if (i !== selectedIndex) {
-              ;(e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)'
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (i !== selectedIndex) {
-              ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-            }
-          }}
+          className={[
+            'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-popover-foreground transition-colors',
+            i === selectedIndex ? 'bg-foreground/[0.08]' : 'hover:bg-foreground/[0.04]',
+          ].join(' ')}
         >
           <AgentBooAvatar agentId={agent.id} size={20} />
           <span className="truncate">{agent.name}</span>

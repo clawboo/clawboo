@@ -2,7 +2,8 @@ import { EditorView } from '@codemirror/view'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 
-const editorChrome = EditorView.theme(
+// Dark theme — original Clawboo editor chrome. Used when resolved theme is 'dark'.
+const editorChromeDark = EditorView.theme(
   {
     '&': {
       height: '100%',
@@ -73,7 +74,7 @@ const editorChrome = EditorView.theme(
   { dark: true },
 )
 
-const markdownHighlight = syntaxHighlighting(
+const markdownHighlightDark = syntaxHighlighting(
   HighlightStyle.define([
     { tag: tags.heading1, color: '#E94560', fontWeight: '700', fontSize: '1.3em' },
     { tag: tags.heading2, color: '#E94560', fontWeight: '600', fontSize: '1.15em' },
@@ -93,4 +94,102 @@ const markdownHighlight = syntaxHighlighting(
   ]),
 )
 
-export const clawbooEditorTheme = [editorChrome, markdownHighlight]
+// Light theme — paper-white chrome, deepened brand colors for AA contrast.
+const editorChromeLight = EditorView.theme(
+  {
+    '&': {
+      height: '100%',
+      fontSize: '13px',
+      background: '#ffffff',
+    },
+    '.cm-content': {
+      fontFamily: 'var(--font-mono)',
+      padding: '12px 0',
+      caretColor: '#dc2a48',
+    },
+    '.cm-cursor, .cm-dropCursor': {
+      borderLeftColor: '#dc2a48',
+      borderLeftWidth: '2px',
+    },
+    '.cm-gutters': {
+      background: '#f8fafc',
+      borderRight: '1px solid rgba(15,23,42,0.08)',
+      color: 'rgba(100,116,139,0.7)',
+    },
+    '.cm-activeLineGutter': {
+      background: 'rgba(15,23,42,0.04)',
+      color: 'rgba(15,23,42,0.65)',
+    },
+    '.cm-activeLine': {
+      background: 'rgba(15,23,42,0.03)',
+    },
+    '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
+      background: 'rgba(220,42,72,0.18) !important',
+    },
+    '.cm-matchingBracket': {
+      background: 'rgba(5,150,105,0.22)',
+      outline: 'none',
+    },
+    '.cm-searchMatch': {
+      background: 'rgba(217,119,6,0.25)',
+    },
+    '.cm-searchMatch.cm-searchMatch-selected': {
+      background: 'rgba(217,119,6,0.4)',
+    },
+    '.cm-selectionMatch': {
+      background: 'rgba(220,42,72,0.1)',
+    },
+    '.cm-foldPlaceholder': {
+      background: 'rgba(15,23,42,0.08)',
+      border: 'none',
+      color: 'rgba(15,23,42,0.5)',
+    },
+    '.cm-tooltip': {
+      background: '#ffffff',
+      border: '1px solid rgba(15,23,42,0.12)',
+      color: '#0f172a',
+    },
+    '.cm-panels': {
+      background: '#ffffff',
+      color: '#0f172a',
+    },
+    '.cm-panels.cm-panels-top': {
+      borderBottom: '1px solid rgba(15,23,42,0.08)',
+    },
+    '.cm-panels.cm-panels-bottom': {
+      borderTop: '1px solid rgba(15,23,42,0.08)',
+    },
+    '.cm-placeholder': {
+      color: 'rgba(100,116,139,0.55)',
+      fontStyle: 'italic',
+    },
+  },
+  { dark: false },
+)
+
+const markdownHighlightLight = syntaxHighlighting(
+  HighlightStyle.define([
+    { tag: tags.heading1, color: '#dc2a48', fontWeight: '700', fontSize: '1.3em' },
+    { tag: tags.heading2, color: '#dc2a48', fontWeight: '600', fontSize: '1.15em' },
+    { tag: tags.heading3, color: '#dc2a48', fontWeight: '600' },
+    { tag: [tags.heading4, tags.heading5, tags.heading6], color: '#dc2a48', fontWeight: '500' },
+    { tag: tags.strong, color: '#0f172a', fontWeight: '700' },
+    { tag: tags.emphasis, color: '#059669', fontStyle: 'italic' },
+    { tag: [tags.monospace, tags.processingInstruction], color: '#d97706' },
+    { tag: tags.link, color: '#1d4ed8', textDecoration: 'underline' },
+    { tag: tags.url, color: '#1d4ed8' },
+    { tag: tags.quote, color: 'rgba(15,23,42,0.65)', fontStyle: 'italic' },
+    { tag: tags.list, color: 'rgba(15,23,42,0.5)' },
+    { tag: tags.meta, color: 'rgba(100,116,139,0.75)' },
+    { tag: tags.comment, color: 'rgba(100,116,139,0.6)' },
+    { tag: tags.content, color: '#0f172a' },
+    { tag: tags.separator, color: 'rgba(15,23,42,0.18)' },
+  ]),
+)
+
+// Default export remains the dark theme for backward compatibility — callers
+// that want light should import `clawbooEditorThemeLight` and pick based on
+// `useTheme().resolvedTheme`.
+export const clawbooEditorTheme = [editorChromeDark, markdownHighlightDark]
+export const clawbooEditorThemeDark = clawbooEditorTheme
+export const clawbooEditorThemeLight = [editorChromeLight, markdownHighlightLight]

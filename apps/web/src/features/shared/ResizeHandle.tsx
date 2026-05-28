@@ -14,11 +14,14 @@ import { Separator } from 'react-resizable-panels'
 // fills with the accent red so the seam reads as "lit up" rather than "just a
 // different colored bar."
 
-const SHADOW_COLOR = 'rgba(0,0,0,0.55)'
-const HIGHLIGHT_COLOR = 'rgba(255,255,255,0.06)'
-const GRIP_COLOR = 'rgba(232,232,232,0.32)'
-const GRIP_COLOR_HOVER = 'rgba(232,232,232,0.7)'
-const ACCENT_FILL = 'rgba(233,69,96,0.35)'
+// Token-driven seam colors — light/dark aware via CSS vars. The shadow edge
+// uses `--foreground` at low alpha so it darkens the panel above; the highlight
+// edge uses an opposite tone so the gap reads as a lit edge below the seam.
+const SHADOW_COLOR = 'rgb(var(--foreground-rgb, 0 0 0) / 0.18)'
+const HIGHLIGHT_COLOR = 'rgb(var(--surface-rgb, 255 255 255) / 0.6)'
+const GRIP_COLOR = 'rgb(var(--foreground-rgb, 232 232 232) / 0.32)'
+const GRIP_COLOR_HOVER = 'rgb(var(--foreground-rgb, 232 232 232) / 0.7)'
+const ACCENT_FILL = 'rgb(var(--primary-rgb) / 0.35)'
 const HANDLE_THICKNESS = 5
 
 export function ResizeHandle({ direction }: { direction: 'horizontal' | 'vertical' }) {

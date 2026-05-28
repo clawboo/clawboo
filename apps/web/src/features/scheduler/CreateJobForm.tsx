@@ -212,10 +212,10 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
 
   const inputStyle: React.CSSProperties = {
     width: '100%',
-    background: 'rgba(255,255,255,0.04)',
-    border: '1px solid rgba(255,255,255,0.1)',
+    background: 'rgb(var(--foreground-rgb) / 0.04)',
+    border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
     borderRadius: 8,
-    color: '#E8E8E8',
+    color: 'var(--foreground)',
     fontSize: 13,
     padding: '8px 10px',
     outline: 'none',
@@ -226,7 +226,7 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
   const labelStyle: React.CSSProperties = {
     fontSize: 11,
     fontWeight: 600,
-    color: 'rgba(232,232,232,0.5)',
+    color: 'rgb(var(--foreground-rgb) / 0.5)',
     letterSpacing: '0.05em',
     textTransform: 'uppercase',
     marginBottom: 4,
@@ -236,9 +236,11 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
   const tabStyle = (active: boolean): React.CSSProperties => ({
     padding: '4px 12px',
     borderRadius: 6,
-    border: active ? '1px solid rgba(233,69,96,0.3)' : '1px solid rgba(255,255,255,0.08)',
-    background: active ? 'rgba(233,69,96,0.1)' : 'transparent',
-    color: active ? '#E94560' : 'rgba(232,232,232,0.45)',
+    border: active
+      ? '1px solid rgb(var(--primary-rgb) / 0.3)'
+      : '1px solid rgb(var(--foreground-rgb) / 0.08)',
+    background: active ? 'rgb(var(--primary-rgb) / 0.1)' : 'transparent',
+    color: active ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.45)',
     fontSize: 12,
     fontWeight: 500,
     cursor: 'pointer',
@@ -249,21 +251,21 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
     <div
       style={{
         padding: '20px 20px 16px',
-        borderTop: '1px solid rgba(255,255,255,0.06)',
+        borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)',
       }}
     >
       <p
         style={{
           fontSize: 13,
           fontWeight: 700,
-          color: '#E8E8E8',
+          color: 'var(--foreground)',
           marginBottom: 16,
           display: 'flex',
           alignItems: 'center',
           gap: 6,
         }}
       >
-        <Plus size={14} style={{ color: '#E94560' }} />
+        <Plus size={14} style={{ color: 'var(--primary)' }} />
         Create Schedule
       </p>
 
@@ -352,11 +354,14 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
                   borderRadius: 6,
                   border:
                     selectedPresetIndex === i
-                      ? '1px solid rgba(251,191,36,0.4)'
-                      : '1px solid rgba(255,255,255,0.08)',
+                      ? '1px solid rgb(var(--amber-rgb) / 0.4)'
+                      : '1px solid rgb(var(--foreground-rgb) / 0.08)',
                   background:
-                    selectedPresetIndex === i ? 'rgba(251,191,36,0.1)' : 'rgba(255,255,255,0.03)',
-                  color: selectedPresetIndex === i ? '#FBBF24' : 'rgba(232,232,232,0.5)',
+                    selectedPresetIndex === i
+                      ? 'rgb(var(--amber-rgb) / 0.1)'
+                      : 'rgb(var(--foreground-rgb) / 0.03)',
+                  color:
+                    selectedPresetIndex === i ? 'var(--amber)' : 'rgb(var(--foreground-rgb) / 0.5)',
                   fontSize: 12,
                   cursor: 'pointer',
                   fontFamily: 'var(--font-geist-mono, monospace)',
@@ -372,7 +377,7 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
         {/* Every-custom fields */}
         {scheduleMode === 'every-custom' && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: 'rgba(232,232,232,0.5)' }}>Every</span>
+            <span style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.5)' }}>Every</span>
             <input
               type="number"
               min={1}
@@ -428,7 +433,7 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
             style={{
               marginTop: 8,
               fontSize: 11,
-              color: '#FBBF24',
+              color: 'var(--amber)',
               fontFamily: 'var(--font-geist-mono, monospace)',
             }}
           >
@@ -438,8 +443,10 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
       </div>
 
       {/* Error / success */}
-      {error && <p style={{ fontSize: 12, color: '#E94560', marginTop: 10 }}>{error}</p>}
-      {successMsg && <p style={{ fontSize: 12, color: '#34D399', marginTop: 10 }}>{successMsg}</p>}
+      {error && <p style={{ fontSize: 12, color: 'var(--primary)', marginTop: 10 }}>{error}</p>}
+      {successMsg && (
+        <p style={{ fontSize: 12, color: 'var(--mint)', marginTop: 10 }}>{successMsg}</p>
+      )}
 
       {/* Submit */}
       <div style={{ marginTop: 14 }}>
@@ -452,9 +459,11 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
             gap: 6,
             padding: '8px 18px',
             borderRadius: 8,
-            background: isBusy ? 'rgba(233,69,96,0.15)' : 'rgba(233,69,96,0.18)',
-            border: '1px solid rgba(233,69,96,0.35)',
-            color: '#E94560',
+            background: isBusy
+              ? 'rgb(var(--primary-rgb) / 0.15)'
+              : 'rgb(var(--primary-rgb) / 0.18)',
+            border: '1px solid rgb(var(--primary-rgb) / 0.35)',
+            color: 'var(--primary)',
             fontSize: 13,
             fontWeight: 600,
             cursor: isBusy || agents.length === 0 ? 'not-allowed' : 'pointer',

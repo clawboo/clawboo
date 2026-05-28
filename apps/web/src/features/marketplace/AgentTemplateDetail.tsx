@@ -76,7 +76,7 @@ export function AgentTemplateDetail({
         style={{
           position: 'fixed',
           inset: 0,
-          background: 'rgba(0,0,0,0.6)',
+          background: 'rgb(0 0 0 / 0.6)',
           zIndex: 60,
           display: 'flex',
           alignItems: 'center',
@@ -95,8 +95,8 @@ export function AgentTemplateDetail({
             maxWidth: 640,
             maxHeight: '85vh',
             overflowY: 'auto',
-            background: '#111827',
-            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'var(--card)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
             borderRadius: 12,
             padding: 24,
             position: 'relative',
@@ -111,7 +111,7 @@ export function AgentTemplateDetail({
               right: 16,
               background: 'transparent',
               border: 'none',
-              color: 'rgba(232,232,232,0.45)',
+              color: 'rgb(var(--foreground-rgb) / 0.45)',
               cursor: 'pointer',
               padding: 4,
               zIndex: 2,
@@ -126,8 +126,12 @@ export function AgentTemplateDetail({
               <BooAvatar seed={agent.name} size={48} />
             </div>
             <div style={{ flex: 1, minWidth: 0, paddingRight: 28 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: '#E8E8E8' }}>{agent.name}</div>
-              <div style={{ fontSize: 12, color: 'rgba(232,232,232,0.55)', marginTop: 2 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--foreground)' }}>
+                {agent.name}
+              </div>
+              <div
+                style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.55)', marginTop: 2 }}
+              >
                 {agent.role}
               </div>
               <div
@@ -169,7 +173,7 @@ export function AgentTemplateDetail({
                 >
                   {formatDomain(agent.domain)}
                 </span>
-                <span style={{ fontSize: 11, color: 'rgba(232,232,232,0.35)' }}>
+                <span style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
                   {getCategoryLabel(agent.category)}
                 </span>
               </div>
@@ -180,7 +184,7 @@ export function AgentTemplateDetail({
           <div
             style={{
               fontSize: 13,
-              color: 'rgba(232,232,232,0.65)',
+              color: 'rgb(var(--foreground-rgb) / 0.65)',
               lineHeight: 1.6,
               marginBottom: 14,
             }}
@@ -197,7 +201,7 @@ export function AgentTemplateDetail({
                 rel="noopener noreferrer"
                 style={{
                   fontSize: 11,
-                  color: 'rgba(52,211,153,0.7)',
+                  color: 'rgb(var(--mint-rgb) / 0.7)',
                   textDecoration: 'none',
                 }}
               >
@@ -213,7 +217,7 @@ export function AgentTemplateDetail({
                 style={{
                   fontSize: 10,
                   fontWeight: 600,
-                  color: 'rgba(232,232,232,0.55)',
+                  color: 'rgb(var(--foreground-rgb) / 0.55)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                   marginBottom: 6,
@@ -234,23 +238,23 @@ export function AgentTemplateDetail({
                         fontSize: 10,
                         padding: '3px 8px',
                         borderRadius: 10,
-                        background: 'rgba(52,211,153,0.1)',
-                        border: '1px solid rgba(52,211,153,0.22)',
-                        color: 'rgba(52,211,153,0.85)',
+                        background: 'rgb(var(--mint-rgb) / 0.1)',
+                        border: '1px solid rgb(var(--mint-rgb) / 0.22)',
+                        color: 'rgb(var(--mint-rgb) / 0.85)',
                         whiteSpace: 'nowrap',
                         cursor: clickable ? 'pointer' : 'default',
                         transition: 'all 0.15s',
                       }}
                       onMouseEnter={(e) => {
                         if (clickable) {
-                          e.currentTarget.style.background = 'rgba(52,211,153,0.2)'
-                          e.currentTarget.style.borderColor = 'rgba(52,211,153,0.4)'
+                          e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.2)'
+                          e.currentTarget.style.borderColor = 'rgb(var(--mint-rgb) / 0.4)'
                         }
                       }}
                       onMouseLeave={(e) => {
                         if (clickable) {
-                          e.currentTarget.style.background = 'rgba(52,211,153,0.1)'
-                          e.currentTarget.style.borderColor = 'rgba(52,211,153,0.22)'
+                          e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.1)'
+                          e.currentTarget.style.borderColor = 'rgb(var(--mint-rgb) / 0.22)'
                         }
                       }}
                     >
@@ -269,7 +273,7 @@ export function AgentTemplateDetail({
                 style={{
                   fontSize: 10,
                   fontWeight: 600,
-                  color: 'rgba(232,232,232,0.55)',
+                  color: 'rgb(var(--foreground-rgb) / 0.55)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                   marginBottom: 6,
@@ -325,7 +329,7 @@ export function AgentTemplateDetail({
               style={{
                 fontSize: 10,
                 fontWeight: 600,
-                color: 'rgba(232,232,232,0.55)',
+                color: 'rgb(var(--foreground-rgb) / 0.55)',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em',
                 marginBottom: 4,
@@ -336,7 +340,7 @@ export function AgentTemplateDetail({
             <div
               style={{
                 fontSize: 10,
-                color: 'rgba(232,232,232,0.35)',
+                color: 'rgb(var(--foreground-rgb) / 0.35)',
                 marginBottom: 8,
                 fontStyle: 'italic',
               }}
@@ -345,14 +349,14 @@ export function AgentTemplateDetail({
             </div>
             <div
               style={{
-                background: 'rgba(255,255,255,0.02)',
-                border: '1px solid rgba(255,255,255,0.04)',
+                background: 'rgb(var(--foreground-rgb) / 0.02)',
+                border: '1px solid rgb(var(--foreground-rgb) / 0.04)',
                 borderRadius: 8,
                 padding: '12px 16px',
                 maxHeight: '50vh',
                 overflowY: 'auto',
                 fontSize: 12,
-                color: 'rgba(232,232,232,0.75)',
+                color: 'rgb(var(--foreground-rgb) / 0.75)',
                 lineHeight: 1.6,
               }}
               className="markdown-body"
@@ -373,9 +377,9 @@ export function AgentTemplateDetail({
                     fontSize: 9,
                     padding: '1px 6px',
                     borderRadius: 10,
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                    color: 'rgba(232,232,232,0.35)',
+                    background: 'rgb(var(--foreground-rgb) / 0.04)',
+                    border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                    color: 'rgb(var(--foreground-rgb) / 0.35)',
                     whiteSpace: 'nowrap',
                   }}
                 >
@@ -388,7 +392,7 @@ export function AgentTemplateDetail({
           {/* Footer */}
           <div
             style={{
-              borderTop: '1px solid rgba(255,255,255,0.06)',
+              borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)',
               paddingTop: 14,
               display: 'flex',
               justifyContent: 'flex-end',
@@ -399,8 +403,8 @@ export function AgentTemplateDetail({
               onClick={onClose}
               style={{
                 background: 'transparent',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: 'rgba(232,232,232,0.55)',
+                border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+                color: 'rgb(var(--foreground-rgb) / 0.55)',
                 fontSize: 12,
                 fontWeight: 500,
                 padding: '6px 16px',
@@ -409,10 +413,10 @@ export function AgentTemplateDetail({
                 transition: 'all 0.15s',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)'
+                e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.18)'
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
+                e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.08)'
               }}
             >
               Close

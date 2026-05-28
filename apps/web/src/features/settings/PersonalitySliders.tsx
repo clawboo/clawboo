@@ -343,7 +343,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       </div>
 
       {/* Custom text override toggle */}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 12 }}>
+      <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)', paddingTop: 12 }}>
         <button
           type="button"
           onClick={toggleMode}
@@ -353,9 +353,9 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
             gap: 6,
             padding: '6px 10px',
             borderRadius: 6,
-            border: '1px solid rgba(255,255,255,0.08)',
-            background: customMode ? 'rgba(233,69,96,0.1)' : 'transparent',
-            color: customMode ? '#E94560' : 'rgba(232,232,232,0.5)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+            background: customMode ? 'rgb(var(--primary-rgb) / 0.1)' : 'transparent',
+            color: customMode ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.5)',
             fontSize: 11,
             fontWeight: 500,
             cursor: 'pointer',
@@ -380,7 +380,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
           <p
             style={{
               fontSize: 10,
-              color: 'rgba(232,232,232,0.35)',
+              color: 'rgb(var(--foreground-rgb) / 0.35)',
               lineHeight: 1.4,
               marginTop: 6,
               marginBottom: 8,
@@ -420,9 +420,9 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
               width: '100%',
               padding: '10px 12px',
               borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: '#0A0E1A',
-              color: '#E8E8E8',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+              background: 'var(--background)',
+              color: 'var(--foreground)',
               fontSize: 12,
               fontFamily: 'var(--font-mono)',
               lineHeight: 1.6,
@@ -434,7 +434,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
           <p
             style={{
               fontSize: 10,
-              color: 'rgba(232,232,232,0.25)',
+              color: 'rgb(var(--foreground-rgb) / 0.25)',
               marginTop: 4,
             }}
           >
@@ -444,7 +444,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       )}
 
       {/* Footer: preview toggle + save status */}
-      <div className="flex items-center justify-between border-t border-white/8 pt-3">
+      <div className="flex items-center justify-between border-t border-border pt-3">
         <button
           type="button"
           onClick={() => setShowPreview((p) => !p)}
@@ -468,7 +468,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
 
       {/* SOUL.md preview — shows merged content (role description + personality) */}
       {showPreview && (
-        <div className="max-h-64 overflow-y-auto rounded-lg border border-white/8 bg-surface p-3">
+        <div className="max-h-64 overflow-y-auto rounded-lg border border-border bg-surface p-3">
           <pre
             className="whitespace-pre-wrap text-[10px] leading-relaxed text-secondary/70"
             style={{ fontFamily: 'var(--font-mono)' }}

@@ -9,34 +9,45 @@
   font-display: swap;
 }
 
-@theme {
-  /* ── Core brand colors ── */
-  --color-background: #0a0e1a;
-  --color-surface: #111827;
-  --color-accent: #e94560;
-  --color-blue: #0f3460;
-  --color-mint: #34d399;
-  --color-amber: #fbbf24;
-  --color-text: #e8e8e8;
-  --color-secondary: #6b7280;
+/* Dark variant: class .dark applied to <html> by ThemeProvider. */
+@custom-variant dark (&:where(.dark, .dark *));
 
-  /* ── shadcn/ui semantic aliases (maps our tokens) ── */
-  --color-foreground: #e8e8e8;
-  --color-card: #111827;
-  --color-card-foreground: #e8e8e8;
-  --color-popover: #111827;
-  --color-popover-foreground: #e8e8e8;
-  --color-primary: #e94560;
-  --color-primary-foreground: #ffffff;
-  --color-muted: #1f2937;
-  --color-muted-foreground: #6b7280;
-  --color-border: rgb(255 255 255 / 0.08);
-  --color-input: #1f2937;
-  --color-ring: #e94560;
-  --color-destructive: #ef4444;
-  --color-destructive-foreground: #ffffff;
+@theme inline {
+  /* ── Core brand colors (resolved from CSS variables below) ── */
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-text: var(--foreground);
+  --color-secondary: var(--secondary);
+  --color-blue: var(--blue);
+  --color-mint: var(--mint);
+  --color-amber: var(--amber);
 
-  /* ── Fonts (CSS variable references let next/font override at runtime) ── */
+  /* ── shadcn/ui semantic aliases ── */
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--primary);
+  --color-accent-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  /* ── Canvas tokens (React Flow surfaces) ── */
+  --color-canvas: var(--canvas);
+  --color-canvas-dot: var(--canvas-dot);
+  --color-canvas-control: var(--canvas-control);
+  --color-canvas-control-border: var(--canvas-control-border);
+  --color-canvas-control-hover: var(--canvas-control-hover);
+
+  /* ── Fonts ── */
   --font-display: var(--font-cabinet-grotesk, 'Cabinet Grotesk', sans-serif);
   --font-body: var(--font-dm-sans, 'DM Sans', sans-serif);
   --font-mono: var(--font-geist-mono, ui-monospace, 'Geist Mono', monospace);
@@ -45,22 +56,137 @@
   --radius: 0.5rem;
 }
 
+/* ────────────────────────────────────────────────────────────────
+   LIGHT THEME (default — applied to :root)
+   Paper-white background, pure-white cards, slate text.
+   Brand colors deepened for AA contrast on light backgrounds.
+   ──────────────────────────────────────────────────────────────── */
+:root {
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --foreground: #0f172a;
+  --foreground-rgb: 15 23 42;
+  --surface-rgb: 255 255 255;
+  --secondary: #64748b;
+
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #dc2a48;
+  --primary-foreground: #ffffff;
+  --primary-rgb: 220 42 72;
+
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+
+  --border: rgb(15 23 42 / 0.1);
+  --input: #f1f5f9;
+  --ring: #dc2a48;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+
+  --mint: #059669;
+  --mint-rgb: 5 150 105;
+  --amber: #d97706;
+  --amber-rgb: 217 119 6;
+  --blue: #1e3a8a;
+
+  --canvas: #fafbfc;
+  --canvas-rgb: 250 251 252;
+  --canvas-dot: rgb(15 23 42 / 0.07);
+  --canvas-control: #ffffff;
+  --canvas-control-border: rgb(15 23 42 / 0.1);
+  --canvas-control-hover: rgb(15 23 42 / 0.06);
+  --canvas-mask: rgb(250 251 252 / 0.75);
+
+  /* Terminal/log windows always look like a terminal in both modes */
+  --terminal-bg: #0d1117;
+  --terminal-fg: #e8e8e8;
+
+  /* Scrollbar */
+  --scrollbar-thumb: rgb(15 23 42 / 0.18);
+  --scrollbar-thumb-hover: rgb(15 23 42 / 0.32);
+
+  /* Welcome screen radial glow */
+  --welcome-glow: rgb(220 42 72 / 0.06);
+
+  color-scheme: light;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   DARK THEME (current production values — applied via .dark class)
+   ──────────────────────────────────────────────────────────────── */
+.dark {
+  --background: #0a0e1a;
+  --surface: #111827;
+  --foreground: #e8e8e8;
+  --foreground-rgb: 232 232 232;
+  --surface-rgb: 17 24 39;
+  --secondary: #6b7280;
+
+  --card: #111827;
+  --card-foreground: #e8e8e8;
+  --popover: #111827;
+  --popover-foreground: #e8e8e8;
+
+  --primary: #e94560;
+  --primary-foreground: #ffffff;
+  --primary-rgb: 233 69 96;
+
+  --muted: #1f2937;
+  --muted-foreground: #6b7280;
+
+  --border: rgb(255 255 255 / 0.08);
+  --input: #1f2937;
+  --ring: #e94560;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+
+  --mint: #34d399;
+  --mint-rgb: 52 211 153;
+  --amber: #fbbf24;
+  --amber-rgb: 251 191 36;
+  --blue: #0f3460;
+
+  --canvas: #0a0e1a;
+  --canvas-rgb: 10 14 26;
+  --canvas-dot: rgb(255 255 255 / 0.03);
+  --canvas-control: #111827;
+  --canvas-control-border: rgb(255 255 255 / 0.08);
+  --canvas-control-hover: rgb(255 255 255 / 0.06);
+  --canvas-mask: rgb(10 14 26 / 0.75);
+
+  --terminal-bg: #0d1117;
+  --terminal-fg: #e8e8e8;
+
+  --scrollbar-thumb: rgb(255 255 255 / 0.12);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 0.22);
+
+  --welcome-glow: rgb(233 69 96 / 0.1);
+
+  color-scheme: dark;
+}
+
 html,
 body {
   --font-dm-sans: 'DM Sans';
   --font-geist-mono: 'Geist Mono';
-  background-color: #0a0e1a;
-  color: #e8e8e8;
+  background-color: var(--background);
+  color: var(--foreground);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 * {
-  border-color: rgb(255 255 255 / 0.08);
+  border-color: var(--border);
 }
 
-/* Scrollbars — blend with dark theme */
+/* Scrollbars — token-driven, mode-aware */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -69,22 +195,17 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* React Flow Boo nodes — restrict the hit area to the rendered Boo shape only.
    The Boo is centered inside a 340×340 envelope so its visual position aligns
    with where ELK plans edges. Without this rule, the empty area around the
-   visible Boo (up to ~265px wide of empty space when the Boo is in circle
-   mode) would still capture hover / click / drag events, making the Boo feel
-   like it's selecting from way too far. The `.group` selector matches the
-   morph wrapper inside BooNode, where the actual avatar / card is rendered.
-   `!important` is needed to override React Flow's default
-   `.react-flow__node { pointer-events: all }` which has equal specificity. */
+   visible Boo would still capture hover / click / drag events. */
 .react-flow__node-boo {
   pointer-events: none !important;
 }
@@ -92,16 +213,16 @@ body {
   pointer-events: auto !important;
 }
 
-/* React Flow controls — blend with dark theme */
+/* React Flow controls — token-driven, mode-aware */
 .react-flow__controls-button {
-  background: #111827 !important;
+  background: var(--canvas-control) !important;
   border: none !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
-  fill: rgba(255, 255, 255, 0.45) !important;
+  border-bottom: 1px solid var(--canvas-control-border) !important;
+  fill: var(--muted-foreground) !important;
 }
 .react-flow__controls-button:hover {
-  background: rgba(255, 255, 255, 0.06) !important;
-  fill: rgba(255, 255, 255, 0.7) !important;
+  background: var(--canvas-control-hover) !important;
+  fill: var(--foreground) !important;
 }
 .react-flow__controls-button:last-child {
   border-bottom: none !important;

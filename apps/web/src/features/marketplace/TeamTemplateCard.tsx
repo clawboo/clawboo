@@ -34,7 +34,7 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
       style={{
-        background: '#111827',
+        background: 'var(--card)',
         border: `1px solid ${profile.color}25`,
         borderRadius: 10,
         padding: '14px 16px',
@@ -68,8 +68,10 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
           {profile.emoji}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#E8E8E8' }}>{profile.name}</div>
-          <div style={{ fontSize: 10, color: 'rgba(232,232,232,0.45)' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
+            {profile.name}
+          </div>
+          <div style={{ fontSize: 10, color: 'rgb(var(--foreground-rgb) / 0.45)' }}>
             {resolved.length} agent{resolved.length !== 1 ? 's' : ''}
           </div>
         </div>
@@ -98,9 +100,9 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
               style={{
                 fontSize: 9,
                 fontWeight: 600,
-                color: '#FBBF24',
-                background: 'rgba(251,191,36,0.12)',
-                border: '1px solid rgba(251,191,36,0.35)',
+                color: 'var(--amber)',
+                background: 'rgb(var(--amber-rgb) / 0.12)',
+                border: '1px solid rgb(var(--amber-rgb) / 0.35)',
                 borderRadius: 4,
                 padding: '1px 6px',
                 whiteSpace: 'nowrap',
@@ -110,7 +112,7 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
               Synthetic
             </span>
           )}
-          <span style={{ fontSize: 10, color: 'rgba(232,232,232,0.35)' }}>
+          <span style={{ fontSize: 10, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
             {getCategoryLabel(profile.category)}
           </span>
         </div>
@@ -120,7 +122,7 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
       <div
         style={{
           fontSize: 12,
-          color: 'rgba(232,232,232,0.5)',
+          color: 'rgb(var(--foreground-rgb) / 0.5)',
           lineHeight: 1.5,
           display: '-webkit-box',
           WebkitLineClamp: 2,
@@ -135,7 +137,7 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
       <div
         style={{
           fontSize: 11,
-          color: 'rgba(232,232,232,0.35)',
+          color: 'rgb(var(--foreground-rgb) / 0.35)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -156,9 +158,9 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
                   fontSize: 9,
                   padding: '1px 6px',
                   borderRadius: 10,
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.06)',
-                  color: 'rgba(232,232,232,0.35)',
+                  background: 'rgb(var(--foreground-rgb) / 0.04)',
+                  border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
+                  color: 'rgb(var(--foreground-rgb) / 0.35)',
                   whiteSpace: 'nowrap',
                 }}
               >
@@ -175,8 +177,8 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
             onClick={() => onDetails(profile)}
             style={{
               background: 'transparent',
-              border: '1px solid rgba(255,255,255,0.08)',
-              color: 'rgba(232,232,232,0.55)',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+              color: 'rgb(var(--foreground-rgb) / 0.55)',
               fontSize: 11,
               fontWeight: 500,
               padding: '4px 10px',
@@ -186,12 +188,12 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
               whiteSpace: 'nowrap',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)'
-              e.currentTarget.style.color = 'rgba(232,232,232,0.75)'
+              e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.18)'
+              e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.75)'
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
-              e.currentTarget.style.color = 'rgba(232,232,232,0.55)'
+              e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.08)'
+              e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.55)'
             }}
           >
             Details

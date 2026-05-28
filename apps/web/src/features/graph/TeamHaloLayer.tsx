@@ -63,7 +63,7 @@ export function groupNodesByTeam(nodes: GraphNode[]): Map<string, TeamHaloGroup>
       groups.set(data.teamId, {
         teamId: data.teamId,
         teamName: data.teamName ?? 'Team',
-        teamColor: data.teamColor ?? '#E94560',
+        teamColor: data.teamColor ?? 'var(--primary)',
         teamEmoji: data.teamEmoji ?? '•',
         nodes: [node],
       })

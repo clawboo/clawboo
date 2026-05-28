@@ -167,7 +167,7 @@ function ProviderRow({
         flexDirection: 'column',
         gap: 8,
         padding: '10px 0',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
+        borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.04)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -177,19 +177,21 @@ function ProviderRow({
             width: 8,
             height: 8,
             borderRadius: '50%',
-            background: hasKey ? '#34D399' : 'rgba(255,255,255,0.2)',
+            background: hasKey ? 'var(--mint)' : 'rgb(var(--foreground-rgb) / 0.2)',
             flexShrink: 0,
           }}
         />
 
         {/* Provider info */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: '#E8E8E8' }}>{provider.label}</span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--foreground)' }}>
+            {provider.label}
+          </span>
           <span
             style={{
               marginLeft: 8,
               fontSize: 11,
-              color: 'rgba(232,232,232,0.3)',
+              color: 'rgb(var(--foreground-rgb) / 0.3)',
               fontFamily: 'var(--font-geist-mono, monospace)',
             }}
           >
@@ -201,7 +203,7 @@ function ProviderRow({
         <span
           style={{
             fontSize: 11,
-            color: hasKey ? 'rgba(52,211,153,0.7)' : 'rgba(232,232,232,0.3)',
+            color: hasKey ? 'rgb(var(--mint-rgb) / 0.7)' : 'rgb(var(--foreground-rgb) / 0.3)',
             marginRight: 8,
           }}
         >
@@ -217,9 +219,9 @@ function ProviderRow({
             fontSize: 11,
             fontWeight: 500,
             borderRadius: 6,
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: 'rgba(255,255,255,0.04)',
-            color: 'rgba(232,232,232,0.6)',
+            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
+            background: 'rgb(var(--foreground-rgb) / 0.04)',
+            color: 'rgb(var(--foreground-rgb) / 0.6)',
             cursor: 'pointer',
             transition: 'all 0.15s',
           }}
@@ -236,8 +238,8 @@ function ProviderRow({
               flex: 1,
               display: 'flex',
               alignItems: 'center',
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.1)',
+              background: 'rgb(var(--foreground-rgb) / 0.04)',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
               borderRadius: 6,
               overflow: 'hidden',
             }}
@@ -252,7 +254,7 @@ function ProviderRow({
                 flex: 1,
                 padding: '6px 10px',
                 fontSize: 12,
-                color: '#E8E8E8',
+                color: 'var(--foreground)',
                 background: 'transparent',
                 border: 'none',
                 outline: 'none',
@@ -267,7 +269,7 @@ function ProviderRow({
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
-                color: 'rgba(232,232,232,0.4)',
+                color: 'rgb(var(--foreground-rgb) / 0.4)',
                 display: 'flex',
                 alignItems: 'center',
               }}
@@ -291,8 +293,8 @@ function ProviderRow({
               fontWeight: 600,
               borderRadius: 6,
               border: 'none',
-              background: !apiKey.trim() || saving ? 'rgba(52,211,153,0.2)' : '#34D399',
-              color: !apiKey.trim() || saving ? 'rgba(52,211,153,0.4)' : '#0A0E1A',
+              background: !apiKey.trim() || saving ? 'rgb(var(--mint-rgb) / 0.2)' : 'var(--mint)',
+              color: !apiKey.trim() || saving ? 'rgb(var(--mint-rgb) / 0.4)' : 'var(--background)',
               cursor: !apiKey.trim() || saving ? 'default' : 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
@@ -352,18 +354,18 @@ export function ApiKeyManager() {
           padding: '14px 0 6px',
         }}
       >
-        <div style={{ flex: 1, borderTop: '1px solid rgba(255,255,255,0.06)' }} />
+        <div style={{ flex: 1, borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)' }} />
         <span
           style={{
             fontSize: 10,
-            color: 'rgba(232,232,232,0.3)',
+            color: 'rgb(var(--foreground-rgb) / 0.3)',
             fontWeight: 500,
             letterSpacing: '0.04em',
           }}
         >
           Additional Providers
         </span>
-        <div style={{ flex: 1, borderTop: '1px solid rgba(255,255,255,0.06)' }} />
+        <div style={{ flex: 1, borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)' }} />
       </div>
 
       {ADDITIONAL_PROVIDERS.map((provider) => (

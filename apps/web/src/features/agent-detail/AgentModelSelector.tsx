@@ -132,9 +132,9 @@ export function AgentModelSelector({
           fontSize: 11,
           fontWeight: 500,
           borderRadius: 6,
-          border: '1px solid rgba(255,255,255,0.08)',
-          background: 'rgba(255,255,255,0.03)',
-          color: isUsingDefault ? 'rgba(232,232,232,0.45)' : '#34D399',
+          border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+          background: 'rgb(var(--foreground-rgb) / 0.03)',
+          color: isUsingDefault ? 'rgb(var(--foreground-rgb) / 0.45)' : 'var(--mint)',
           cursor: 'pointer',
           transition: 'all 0.15s',
           fontFamily: 'var(--font-body)',
@@ -184,8 +184,8 @@ export function AgentModelSelector({
               minWidth: 175,
               maxHeight: 420,
               overflowY: 'auto',
-              background: '#111827',
-              border: '1px solid rgba(255,255,255,0.1)',
+              background: 'var(--card)',
+              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
               borderRadius: 10,
               padding: '6px 0',
               boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
@@ -206,15 +206,16 @@ export function AgentModelSelector({
                 width: '100%',
                 padding: '7px 12px',
                 fontSize: 12,
-                color: isUsingDefault ? '#34D399' : 'rgba(232,232,232,0.5)',
-                background: isUsingDefault ? 'rgba(52,211,153,0.08)' : 'transparent',
+                color: isUsingDefault ? 'var(--mint)' : 'rgb(var(--foreground-rgb) / 0.5)',
+                background: isUsingDefault ? 'rgb(var(--mint-rgb) / 0.08)' : 'transparent',
                 border: 'none',
                 cursor: 'pointer',
                 textAlign: 'left',
-                borderBottom: '1px solid rgba(255,255,255,0.06)',
+                borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
               }}
               onMouseOver={(e) => {
-                if (!isUsingDefault) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+                if (!isUsingDefault)
+                  e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.04)'
               }}
               onMouseOut={(e) => {
                 if (!isUsingDefault) e.currentTarget.style.background = 'transparent'
@@ -222,7 +223,7 @@ export function AgentModelSelector({
             >
               <span style={{ flex: 1, fontSize: 11 }}>Default ({defaultLabel})</span>
               {isUsingDefault && (
-                <Check style={{ width: 12, height: 12, color: '#34D399', flexShrink: 0 }} />
+                <Check style={{ width: 12, height: 12, color: 'var(--mint)', flexShrink: 0 }} />
               )}
             </button>
 
@@ -243,13 +244,13 @@ export function AgentModelSelector({
                     width: '100%',
                     padding: '6px 12px',
                     fontSize: 10,
-                    color: '#34D399',
-                    background: 'rgba(52,211,153,0.08)',
+                    color: 'var(--mint)',
+                    background: 'rgb(var(--mint-rgb) / 0.08)',
                     border: 'none',
                     cursor: 'pointer',
                     textAlign: 'left',
                     fontFamily: 'var(--font-geist-mono, monospace)',
-                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
                   }}
                 >
                   <span
@@ -262,7 +263,7 @@ export function AgentModelSelector({
                   >
                     {currentModel}
                   </span>
-                  <Check style={{ width: 11, height: 11, color: '#34D399', flexShrink: 0 }} />
+                  <Check style={{ width: 11, height: 11, color: 'var(--mint)', flexShrink: 0 }} />
                 </button>
               </>
             )}
@@ -279,9 +280,9 @@ export function AgentModelSelector({
                   width: '100%',
                   padding: '4px 8px',
                   fontSize: 11,
-                  color: '#E8E8E8',
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.08)',
+                  color: 'var(--foreground)',
+                  background: 'rgb(var(--foreground-rgb) / 0.04)',
+                  border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
                   borderRadius: 6,
                   outline: 'none',
                   fontFamily: 'var(--font-geist-mono, monospace)',
@@ -312,13 +313,13 @@ export function AgentModelSelector({
                     padding: '5px 12px',
                     fontSize: 11,
                     color: hasSelectedModel
-                      ? '#34D399'
+                      ? 'var(--mint)'
                       : !hasKey
-                        ? 'rgba(232,232,232,0.25)'
+                        ? 'rgb(var(--foreground-rgb) / 0.25)'
                         : isActive
-                          ? '#E8E8E8'
-                          : 'rgba(232,232,232,0.7)',
-                    background: isActive ? 'rgba(255,255,255,0.06)' : 'transparent',
+                          ? 'var(--foreground)'
+                          : 'rgb(var(--foreground-rgb) / 0.7)',
+                    background: isActive ? 'rgb(var(--foreground-rgb) / 0.06)' : 'transparent',
                     border: 'none',
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -337,14 +338,16 @@ export function AgentModelSelector({
                     )}
                   </span>
                   {hasSelectedModel && (
-                    <Check style={{ width: 11, height: 11, color: '#34D399', flexShrink: 0 }} />
+                    <Check style={{ width: 11, height: 11, color: 'var(--mint)', flexShrink: 0 }} />
                   )}
                 </button>
               )
             })}
 
             {/* Divider + Custom */}
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', margin: '4px 0' }} />
+            <div
+              style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)', margin: '4px 0' }}
+            />
             <button
               type="button"
               onMouseEnter={() => {
@@ -362,8 +365,8 @@ export function AgentModelSelector({
                 width: '100%',
                 padding: '5px 12px',
                 fontSize: 11,
-                color: showCustom ? '#E8E8E8' : 'rgba(232,232,232,0.5)',
-                background: showCustom ? 'rgba(255,255,255,0.06)' : 'transparent',
+                color: showCustom ? 'var(--foreground)' : 'rgb(var(--foreground-rgb) / 0.5)',
+                background: showCustom ? 'rgb(var(--foreground-rgb) / 0.06)' : 'transparent',
                 border: 'none',
                 cursor: 'pointer',
                 textAlign: 'left',
@@ -382,8 +385,8 @@ export function AgentModelSelector({
                 minWidth: 210,
                 maxHeight: 360,
                 overflowY: 'auto',
-                background: '#111827',
-                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'var(--card)',
+                border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
                 borderRadius: 10,
                 padding: '6px 0',
                 boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
@@ -398,7 +401,7 @@ export function AgentModelSelector({
                       fontWeight: 600,
                       textTransform: 'uppercase',
                       letterSpacing: '0.08em',
-                      color: 'rgba(232,232,232,0.35)',
+                      color: 'rgb(var(--foreground-rgb) / 0.35)',
                       padding: '6px 14px 4px',
                       fontFamily: 'var(--font-geist-mono, monospace)',
                     }}
@@ -409,7 +412,7 @@ export function AgentModelSelector({
                     <div
                       style={{
                         fontSize: 10,
-                        color: 'rgba(251,191,36,0.5)',
+                        color: 'rgb(var(--amber-rgb) / 0.5)',
                         padding: '2px 14px 6px',
                         fontStyle: 'italic',
                       }}
@@ -434,11 +437,11 @@ export function AgentModelSelector({
                           padding: '6px 14px',
                           fontSize: 12,
                           color: !activeGroupConfigured
-                            ? 'rgba(232,232,232,0.25)'
+                            ? 'rgb(var(--foreground-rgb) / 0.25)'
                             : isSelected
-                              ? '#34D399'
-                              : '#E8E8E8',
-                          background: isSelected ? 'rgba(52,211,153,0.08)' : 'transparent',
+                              ? 'var(--mint)'
+                              : 'var(--foreground)',
+                          background: isSelected ? 'rgb(var(--mint-rgb) / 0.08)' : 'transparent',
                           border: 'none',
                           cursor: activeGroupConfigured ? 'pointer' : 'default',
                           textAlign: 'left',
@@ -447,7 +450,7 @@ export function AgentModelSelector({
                         }}
                         onMouseEnter={(e) => {
                           if (activeGroupConfigured && !isSelected)
-                            e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+                            e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.04)'
                         }}
                         onMouseLeave={(e) => {
                           if (activeGroupConfigured && !isSelected)
@@ -456,7 +459,7 @@ export function AgentModelSelector({
                       >
                         <span style={{ flex: 1 }}>{model.label}</span>
                         {isSelected && (
-                          <Check style={{ width: 13, height: 13, color: '#34D399' }} />
+                          <Check style={{ width: 13, height: 13, color: 'var(--mint)' }} />
                         )}
                       </button>
                     )
@@ -472,7 +475,7 @@ export function AgentModelSelector({
                       fontWeight: 600,
                       textTransform: 'uppercase',
                       letterSpacing: '0.08em',
-                      color: 'rgba(232,232,232,0.35)',
+                      color: 'rgb(var(--foreground-rgb) / 0.35)',
                       marginBottom: 8,
                       fontFamily: 'var(--font-geist-mono, monospace)',
                     }}
@@ -493,9 +496,9 @@ export function AgentModelSelector({
                         flex: 1,
                         padding: '5px 8px',
                         fontSize: 11,
-                        color: '#E8E8E8',
-                        background: 'rgba(255,255,255,0.04)',
-                        border: '1px solid rgba(255,255,255,0.1)',
+                        color: 'var(--foreground)',
+                        background: 'rgb(var(--foreground-rgb) / 0.04)',
+                        border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
                         borderRadius: 6,
                         outline: 'none',
                         fontFamily: 'var(--font-geist-mono, monospace)',
@@ -513,12 +516,12 @@ export function AgentModelSelector({
                         border: 'none',
                         background:
                           !customInput.trim() || !customInput.includes('/')
-                            ? 'rgba(52,211,153,0.15)'
-                            : '#34D399',
+                            ? 'rgb(var(--mint-rgb) / 0.15)'
+                            : 'var(--mint)',
                         color:
                           !customInput.trim() || !customInput.includes('/')
-                            ? 'rgba(52,211,153,0.4)'
-                            : '#0A0E1A',
+                            ? 'rgb(var(--mint-rgb) / 0.4)'
+                            : 'var(--background)',
                         cursor:
                           !customInput.trim() || !customInput.includes('/') ? 'default' : 'pointer',
                       }}
@@ -529,7 +532,7 @@ export function AgentModelSelector({
                   <div
                     style={{
                       fontSize: 10,
-                      color: 'rgba(232,232,232,0.25)',
+                      color: 'rgb(var(--foreground-rgb) / 0.25)',
                       marginTop: 6,
                       fontFamily: 'var(--font-geist-mono, monospace)',
                     }}

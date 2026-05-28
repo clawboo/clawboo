@@ -112,7 +112,7 @@ export function CreateBooModal({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 backdrop-blur-sm"
           onKeyDown={handleKeyDown}
           onClick={(e) => {
             if (e.target === e.currentTarget) onClose()
@@ -123,7 +123,7 @@ export function CreateBooModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.92, y: 20 }}
             transition={{ type: 'spring', damping: 28, stiffness: 360 }}
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-background p-6 shadow-2xl"
+            className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl"
           >
             <h2
               className="mb-5 text-[16px] font-semibold text-text"
@@ -145,7 +145,7 @@ export function CreateBooModal({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void handleSubmit()
               }}
-              className="mb-4 w-full rounded-lg border border-white/10 bg-surface px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-white/20 focus:ring-1 focus:ring-ring/30"
+              className="mb-4 w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
               style={{ fontFamily: 'var(--font-body)' }}
             />
 
@@ -158,7 +158,7 @@ export function CreateBooModal({
               onChange={(e) => setRole(e.target.value)}
               rows={4}
               placeholder="What should this Boo do?"
-              className="mb-4 w-full resize-none rounded-lg border border-white/10 bg-surface px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-white/20 focus:ring-1 focus:ring-ring/30"
+              className="mb-4 w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
               style={{ fontFamily: 'var(--font-body)' }}
             />
 
@@ -179,7 +179,7 @@ export function CreateBooModal({
                 type="button"
                 onClick={() => void handleSubmit()}
                 disabled={!name.trim() || creating}
-                className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-[13px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-[13px] font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {creating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 Create Boo
