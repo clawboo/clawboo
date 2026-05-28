@@ -174,6 +174,14 @@
   /* Welcome screen radial glow */
   --welcome-glow: rgb(220 42 72 / 0.06);
 
+  /* Atmosphere palette — Phase 15 ShaderGradient backdrop on hero surfaces.
+     Decoupled from brand vars so the atmosphere can be tuned independently
+     (e.g. softer hue on light theme without dropping brand saturation). */
+  --atmosphere-1: #dc2a48; /* OpenClaw Red (brand-faithful) */
+  --atmosphere-2: #059669; /* Mint */
+  --atmosphere-3: #d97706; /* Amber */
+  --atmosphere-intensity: 0.22; /* multiplier for both shader & static fallback opacity */
+
   color-scheme: light;
 }
 
@@ -248,6 +256,14 @@
   --scrollbar-thumb-hover: rgb(255 255 255 / 0.22);
 
   --welcome-glow: rgb(233 69 96 / 0.1);
+
+  /* Atmosphere palette — Phase 15 ShaderGradient backdrop on hero surfaces.
+     Dark theme runs the atmosphere more dramatic (deeper saturation + higher
+     intensity) since the surface is dark; light theme keeps it quiet. */
+  --atmosphere-1: #e94560; /* OpenClaw Red (production dark hue) */
+  --atmosphere-2: #34d399; /* Mint */
+  --atmosphere-3: #fbbf24; /* Amber */
+  --atmosphere-intensity: 0.42; /* multiplier for both shader & static fallback opacity */
 
   color-scheme: dark;
 }
@@ -370,6 +386,19 @@ body {
   }
   100% {
     background-position: -200% 0;
+  }
+}
+
+/* Phase 17 — Atlas team-status cluster dot pulse (running bucket). */
+@keyframes clawboo-cluster-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    r: 3.5;
+  }
+  50% {
+    opacity: 1;
+    r: 4.5;
   }
 }
 

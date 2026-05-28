@@ -11,6 +11,9 @@ import { CreateBooModal } from '@/features/fleet/CreateBooModal'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { ThemeToggle } from '@/features/theme/ThemeToggle'
+import { aggregateTeamStatus } from '@/lib/teamStatus'
+import { getActivityVerb } from '@/lib/agentActivityVerb'
+import { useChatStore } from '@/stores/chat'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -74,17 +77,24 @@ const STATUS_CONFIG: Record<
   },
 }
 
-function StatusBadge({ status }: { status: AgentStatus }) {
+function StatusBadge({ status, label }: { status: AgentStatus; label?: string }) {
   const cfg = STATUS_CONFIG[status]
+  // Phase 18 — `label` (when provided) is the fine-grained activity verb that
+  // describes WHAT the agent is doing ("Streaming reply", "Delegating to @X",
+  // "Just done"), replacing the coarse default ("Working", "Idle"). The dot
+  // colour + pulse still derive from the underlying status so the visual
+  // status semantics don't change.
+  const display = label ?? cfg.label
   return (
     <AnimatePresence mode="wait" initial={false}>
       <motion.span
-        key={status}
+        key={`${status}|${display}`}
         initial={{ opacity: 0, scale: 0.85 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.85 }}
         transition={{ duration: 0.15, ease: 'easeOut' }}
         className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide ${cfg.badge}`}
+        title={display}
       >
         <span className="relative flex h-1.5 w-1.5">
           {cfg.pulse && (
@@ -96,7 +106,7 @@ function StatusBadge({ status }: { status: AgentStatus }) {
           )}
           <span className={`relative inline-block h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
         </span>
-        {cfg.label}
+        {display}
       </motion.span>
     </AnimatePresence>
   )
@@ -115,6 +125,18 @@ function AgentRow({
   onSelect: () => void
   onDelete: () => void
 }) {
+  // Phase 18 — compute the live activity verb. Subscribe to the chat-store
+  // maps via single-value selectors keyed by sessionKey so unrelated agents'
+  // streams don't trigger this row's re-render (same precedent as
+  // BooLiveActivity.tsx and chatComponents.tsx token-count selectors).
+  const sk = agent.sessionKey
+  const streamingText = useChatStore((s) => (sk ? (s.streamingText.get(sk) ?? null) : null))
+  const transcripts = useChatStore((s) => s.transcripts)
+  const verb = getActivityVerb({
+    agent,
+    transcripts,
+    streamingTexts: sk ? new Map([[sk, streamingText ?? '']]) : null,
+  })
   return (
     <motion.div
       layout
@@ -139,12 +161,14 @@ function AgentRow({
             {agent.name}
           </p>
           <div className="mt-1 flex items-center gap-2">
-            <StatusBadge status={agent.status} />
-            {agent.status !== 'running' && formatLastSeen(agent.lastSeenAt) && (
-              <span className="text-[9px] tabular-nums text-secondary/40">
-                {formatLastSeen(agent.lastSeenAt)}
-              </span>
-            )}
+            <StatusBadge status={agent.status} label={verb} />
+            {agent.status !== 'running' &&
+              verb !== 'Just done' &&
+              formatLastSeen(agent.lastSeenAt) && (
+                <span className="text-[9px] tabular-nums text-secondary/40">
+                  {formatLastSeen(agent.lastSeenAt)}
+                </span>
+              )}
           </div>
         </div>
       </button>
@@ -247,18 +271,6 @@ function orderTeamAgentsForPhoto(team: Team, teamAgents: AgentState[]): AgentSta
   const [leader] = reordered.splice(leaderIndex, 1)
   if (leader) reordered.unshift(leader)
   return reordered
-}
-
-// Aggregate the team's overall status from its members. Mirrors the
-// status badge shown on individual agent rows so the Group Chat row
-// reads as a peer in the list. Priority: any running > any error >
-// any sleeping > idle.
-function aggregateTeamStatus(teamAgents: AgentState[]): AgentStatus {
-  if (teamAgents.length === 0) return 'idle'
-  if (teamAgents.some((a) => a.status === 'running')) return 'running'
-  if (teamAgents.some((a) => a.status === 'error')) return 'error'
-  if (teamAgents.some((a) => a.status === 'sleeping')) return 'sleeping'
-  return 'idle'
 }
 
 function GroupChatRow({

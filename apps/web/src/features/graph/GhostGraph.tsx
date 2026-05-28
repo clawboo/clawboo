@@ -20,17 +20,18 @@ import type {
   MiniMapNodeProps,
 } from '@xyflow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { GitBranch, Map, Pin, RefreshCw, X } from 'lucide-react'
+import { GitBranch, LayoutDashboard, Map, Pin, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
-import { computeElkLayout, computeAtlasLayout } from './useGraphLayout'
+import { computeElkLayout, computeAtlasLayout, computeAtlasRadialLayout } from './useGraphLayout'
 import { useTeamStore } from '@/stores/team'
 import { computeOrbitalPositions } from './computeOrbitalPositions'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
 import { ConnectionLine } from './edges/ConnectionLine'
 import { TeamHaloLayer } from './TeamHaloLayer'
+import { TeamStatusClusterLayer } from './TeamStatusClusterLayer'
 import { useFleetStore } from '@/stores/fleet'
 import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
@@ -172,6 +173,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     setConnectMode,
     showTeamHalos,
     setShowTeamHalos,
+    atlasLayout,
+    setAtlasLayout,
     setHoveredNodeId,
   } = useGraphStore()
 
@@ -200,6 +203,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   const prevNodeLengthRef = useRef(0)
   const elkGenerationRef = useRef(0)
   const prevLayoutKeyRef = useRef(layoutKey)
+  // Phase 19 — flipping atlasLayout requires a fresh layout dispatch even
+  // when node count + layoutKey haven't changed. Tracked separately so a
+  // toggle invalidates `layoutRanRef` exactly once per change.
+  const prevAtlasLayoutRef = useRef(atlasLayout)
 
   // Wire data fetching and persistence. The scope drives whether
   // `useGraphData` filters to `selectedTeamId` or shows every team at once,
@@ -305,6 +312,16 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       prevNodeLengthRef.current = 0
     }
 
+    // Phase 19 — atlasLayout flip is a re-layout trigger of the same kind as
+    // pressing "Re-layout". Saved positions are intentionally preserved so a
+    // user's manual drags survive the flip; they sit on top of the new
+    // computed positions exactly like the top-down path treats them.
+    if (atlasLayout !== prevAtlasLayoutRef.current) {
+      prevAtlasLayoutRef.current = atlasLayout
+      layoutRanRef.current = false
+      prevNodeLengthRef.current = 0
+    }
+
     if (!nodesInitialized || nodes.length === 0 || !isLoaded) return
 
     // Reset when node count changes (new agents added)
@@ -391,7 +408,14 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     const teamOrder = useTeamStore.getState().teams.map((t) => t.id)
     const layoutPromise =
       scope === 'atlas'
-        ? computeAtlasLayout(layoutBooNodes, primaryDepEdges, effectiveSavedPositions, teamOrder)
+        ? atlasLayout === 'radial'
+          ? computeAtlasRadialLayout(
+              layoutBooNodes,
+              primaryDepEdges,
+              effectiveSavedPositions,
+              teamOrder,
+            )
+          : computeAtlasLayout(layoutBooNodes, primaryDepEdges, effectiveSavedPositions, teamOrder)
         : computeElkLayout(layoutBooNodes, primaryDepEdges, effectiveSavedPositions, canvasAspect)
 
     void layoutPromise.then((layoutedNodes) => {
@@ -465,7 +489,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     // (via the `ReactFlowProvider` key in `GhostGraphPanel`) would also
     // pick up the new scope through the closure on the fresh mount —
     // keeping `scope` here is the defensive belt to that suspenders.
-  }, [nodesInitialized, nodes.length, layoutKey, isLoaded, scope])
+  }, [nodesInitialized, nodes.length, layoutKey, isLoaded, scope, atlasLayout])
 
   // ── Interaction handlers ─────────────────────────────────────────────────────
 
@@ -750,6 +774,13 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           doesn't leak into other views. */}
       {scope === 'atlas' && showTeamHalos && <TeamHaloLayer nodes={nodes} />}
 
+      {/* Phase 17 — Atlas team-status clusters. Compact ● N pills above each
+          team-root junction showing the breakdown of running / idle /
+          sleeping / error agents. Always on in Atlas scope (live activity is
+          a primary information signal). Pure rendering layer — does not
+          touch nodes, edges, physics, or ELK. */}
+      {scope === 'atlas' && <TeamStatusClusterLayer nodes={nodes} />}
+
       {/* Floating top-right toolbar — Re-layout / Team halos (Atlas only) /
           Connect. Wrapped in a single flex row so the buttons always sit
           adjacent regardless of which subset is visible. The previous
@@ -778,6 +809,53 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
             <RefreshCw size={14} />
             Re-layout
           </button>
+        )}
+
+        {/* Phase 19 — Atlas layout segmented pill (Tree | Radial). Two
+            adjacent buttons inside a single shell so it's obvious BOTH
+            options exist and which one is active. Mirrors the FAN | GRID
+            toggle in CreateTeamModal. Persisted via the store setter. */}
+        {scope === 'atlas' && (
+          <div
+            role="group"
+            aria-label="Atlas layout"
+            className="flex items-center gap-0.5 rounded-lg border border-canvas-control-border bg-canvas-control p-0.5 shadow-[var(--shadow-raised)]"
+          >
+            {[
+              {
+                key: 'top-down' as const,
+                label: 'Tree',
+                icon: <LayoutDashboard size={13} />,
+                title: 'Flat-row tree layout — Boo Zero at top, teams in a row',
+              },
+              {
+                key: 'radial' as const,
+                label: 'Radial',
+                icon: <Sparkles size={13} />,
+                title: 'Radial layout — Boo Zero at centre, teams as petals',
+              },
+            ].map((opt) => {
+              const active = atlasLayout === opt.key
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setAtlasLayout(opt.key)}
+                  aria-pressed={active}
+                  title={opt.title}
+                  className={[
+                    'flex cursor-pointer items-center gap-1 rounded-md px-2.5 py-1 text-[12px] font-semibold transition-colors duration-150',
+                    active
+                      ? 'bg-primary/[0.18] text-primary'
+                      : 'text-foreground/55 hover:text-foreground/90',
+                  ].join(' ')}
+                >
+                  {opt.icon}
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
         )}
 
         {/* Team halos toggle — Atlas-only. Hidden in team scope so the

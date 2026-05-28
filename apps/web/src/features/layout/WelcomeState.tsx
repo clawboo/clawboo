@@ -6,6 +6,7 @@ import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
 import { consumeSSE } from '@/lib/sseClient'
+import { ShaderAtmosphere } from '@/features/atmosphere'
 import type { SystemInfo } from '@/stores/system'
 
 // ─── System Status Hint ──────────────────────────────────────────────────────
@@ -144,14 +145,14 @@ export function WelcomeState() {
   ]
 
   return (
-    <div
-      className="relative flex h-full flex-col items-center justify-center gap-6 p-8 text-center"
-      style={{
-        background:
-          'radial-gradient(ellipse 80% 60% at 50% 40%, var(--welcome-glow) 0%, transparent 70%)',
-      }}
-    >
+    <div className="relative flex h-full flex-col items-center justify-center gap-6 overflow-hidden p-8 text-center">
+      {/* Phase 15 — ShaderGradient atmosphere. Falls back to a static
+          multi-radial CSS gradient under prefers-reduced-motion, the user
+          opt-out toggle, or while the WebGL chunk is still loading. */}
+      <ShaderAtmosphere variant="hero" />
+
       <motion.div
+        className="relative"
         initial={{ opacity: 0, y: 12, scale: 0.92 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: 'spring', stiffness: 200, damping: 22 }}
