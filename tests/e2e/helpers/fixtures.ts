@@ -1,4 +1,5 @@
 import { test as base, expect, type Page, type APIRequestContext } from '@playwright/test'
+import os from 'node:os'
 import { startMockGateway, type MockGateway } from './mockGateway'
 
 // Mirrors playwright.config.ts — keeps tests pinned to a known port so the
@@ -7,6 +8,66 @@ const API_PORT = parseInt(process.env.CLAWBOO_API_PORT ?? '19999', 10)
 export const API_BASE = `http://127.0.0.1:${API_PORT}`
 
 const SETTINGS_URL = `${API_BASE}/api/settings`
+
+/**
+ * Guard rail — throws when the test runner OR the running server isn't
+ * clearly in a sandboxed environment.
+ *
+ * Two checks:
+ *   1. **Test runner env**: `CLAWBOO_E2E_SANDBOX_HOME` must point at a
+ *      tmp dir. This is set by `playwright.config.ts` at config-load time
+ *      (mkdtemp + `webServer.env` overrides for HOME / OPENCLAW_STATE_DIR).
+ *   2. **Server state dir**: a GET to `/api/system/status` returns the
+ *      live server's `openclaw.stateDir`. If that isn't under the OS
+ *      tmpdir, the server is using the developer's real `~/.openclaw`
+ *      (e.g. `pnpm e2e` reused an existing unsandboxed server on the same
+ *      port). Refuse to touch it.
+ *
+ * Both checks together make the guard robust against the bad cases:
+ *   - misconfigured playwright.config.ts (check #1 catches it)
+ *   - playwright reusing a stale unsandboxed server (check #2 catches it)
+ *   - fixture imported by a non-playwright runner (check #1 catches it)
+ *
+ * Used by helpers that touch destructive endpoints (e.g. DELETE
+ * /api/teams) so a misconfigured run can't wipe a developer's real
+ * `~/.openclaw/clawboo/clawboo.db`.
+ */
+export async function assertSandboxed(request: APIRequestContext): Promise<void> {
+  const tmpRoot = os.tmpdir()
+
+  // Check #1 — test runner env
+  const sandboxHome = process.env.CLAWBOO_E2E_SANDBOX_HOME
+  if (!sandboxHome || !sandboxHome.startsWith(tmpRoot)) {
+    throw new Error(
+      `Refusing to run destructive e2e helpers: CLAWBOO_E2E_SANDBOX_HOME ` +
+        `is not set or doesn't live under ${tmpRoot}. This guards against ` +
+        `a misconfigured run wiping the developer's real ~/.openclaw/clawboo/clawboo.db. ` +
+        `Run via 'pnpm e2e' which configures the sandbox automatically.`,
+    )
+  }
+
+  // Check #2 — server state dir. Fetch the live server's identity.
+  let serverStateDir: string | null = null
+  try {
+    const resp = await request.get(`${API_BASE}/api/system/status`)
+    if (resp.ok()) {
+      const data = (await resp.json()) as { openclaw?: { stateDir?: string } }
+      serverStateDir = data.openclaw?.stateDir ?? null
+    }
+  } catch {
+    /* fall through to the guard below */
+  }
+  if (!serverStateDir || !serverStateDir.startsWith(tmpRoot)) {
+    throw new Error(
+      `Refusing to run destructive e2e helpers: the server at ${API_BASE} ` +
+        `reports stateDir=${serverStateDir ?? '<unknown>'} which isn't under ` +
+        `${tmpRoot}. This usually means playwright reused an unsandboxed ` +
+        `server (e.g. one started manually via 'pnpm dev' or 'pnpm start'). ` +
+        `Kill that server and re-run 'pnpm e2e' so playwright spawns a ` +
+        `fresh sandboxed one.`,
+    )
+  }
+}
 
 // ─── Shared fixture: mock gateway per worker ────────────────────────────────
 // Worker-scoped so all tests in the same worker share a single gateway,
@@ -77,6 +138,16 @@ export async function connectToMockGateway(
   request: APIRequestContext,
   gatewayUrl: string,
 ) {
+  // Safety: only DELETE teams in a sandboxed run. The server-side SQLite
+  // path is hardcoded to `os.homedir() + '/.openclaw/clawboo/clawboo.db'`,
+  // and without HOME being a sandbox dir, this loop would wipe the
+  // developer's real teams. `playwright.config.ts` mkdtemps a sandbox and
+  // overrides HOME on the spawned server; this assert refuses to run if
+  // that hasn't happened. Also verifies via HTTP that the live server's
+  // stateDir is actually under /tmp/ (catches the case where playwright
+  // reused a stale unsandboxed server on the same port).
+  await assertSandboxed(request)
+
   // Clean up stale teams from previous dev sessions so they don't
   // filter out mock gateway agents via auto-select in hydrateTeams.
   try {

@@ -48,14 +48,43 @@ function EmptyState() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 12,
-        color: 'rgb(var(--foreground-rgb) / 0.25)',
+        gap: 14,
         padding: 40,
       }}
     >
-      <CalendarClock size={36} strokeWidth={1.2} />
-      <p style={{ fontSize: 14, fontWeight: 500 }}>No scheduled jobs</p>
-      <p style={{ fontSize: 12, textAlign: 'center', maxWidth: 280, lineHeight: 1.6 }}>
+      <div
+        style={{
+          display: 'flex',
+          width: 56,
+          height: 56,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 999,
+          background: 'rgb(var(--foreground-rgb) / 0.04)',
+        }}
+      >
+        <CalendarClock size={26} strokeWidth={1.5} color="rgb(var(--foreground-rgb) / 0.35)" />
+      </div>
+      <p
+        style={{
+          fontSize: 14,
+          fontWeight: 600,
+          color: 'rgb(var(--foreground-rgb) / 0.6)',
+          fontFamily: 'var(--font-display)',
+          letterSpacing: '-0.01em',
+        }}
+      >
+        No scheduled jobs
+      </p>
+      <p
+        style={{
+          fontSize: 12,
+          textAlign: 'center',
+          maxWidth: 280,
+          lineHeight: 1.6,
+          color: 'rgb(var(--foreground-rgb) / 0.4)',
+        }}
+      >
         Create a schedule below to automate tasks for any Boo agent. Jobs run even while you are
         away.
       </p>

@@ -51,8 +51,8 @@ export function StepIndicator({ current }: { current: IndicatorId }) {
             {i < INDICATOR_STEPS.length - 1 && (
               <div
                 className={[
-                  'h-px w-14 mx-1 mb-5 transition-colors duration-500',
-                  done ? 'bg-mint/35' : 'bg-foreground/[0.08]',
+                  'mx-1 mb-5 h-0.5 w-14 rounded-full transition-colors duration-500',
+                  done ? 'bg-mint/45' : 'bg-foreground/[0.1]',
                 ].join(' ')}
               />
             )}

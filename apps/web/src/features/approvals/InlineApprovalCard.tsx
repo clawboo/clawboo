@@ -100,7 +100,7 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
         {/* Row 2: Command preview */}
         <div
           style={{
-            background: 'rgb(0 0 0 / 0.32)',
+            background: 'var(--code-block-bg)',
             borderRadius: 5,
             padding: '6px 8px',
             fontFamily: 'var(--font-geist-mono, monospace)',

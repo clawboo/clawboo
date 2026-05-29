@@ -10,6 +10,8 @@ import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 import { BooLiveActivity } from './BooLiveActivity'
 import { createFlipState, useFlipMorph, type FlipState } from './useFlipMorph'
+import { useChatStore } from '@/stores/chat'
+import { getActivityVerb } from '@/lib/agentActivityVerb'
 
 // ─── BooNode — dual-shape: idle = circle, active = card ──────────────────────
 //
@@ -180,10 +182,22 @@ export const BooNode = memo(function BooNode({
   const hasPendingApproval = Array.from(pendingApprovals.values()).some(
     (a) => a.agentId === agentId,
   )
-  const lastSeenAt = useFleetStore(
-    (s) => s.agents.find((a) => a.id === agentId)?.lastSeenAt ?? null,
-  )
+  const agent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
+  const lastSeenAt = agent?.lastSeenAt ?? null
   const lastSeenLabel = !showCard ? formatLastSeen(lastSeenAt) : null
+
+  // Phase 18 — fine-grained activity verb. Single-value subscriptions so we
+  // only re-render when this agent's stream or transcript ticks.
+  const sk = agent?.sessionKey ?? null
+  const streamingText = useChatStore((s) => (sk ? (s.streamingText.get(sk) ?? null) : null))
+  const transcripts = useChatStore((s) => s.transcripts)
+  const activityVerb = agent
+    ? getActivityVerb({
+        agent,
+        transcripts,
+        streamingTexts: sk ? new Map([[sk, streamingText ?? '']]) : null,
+      })
+    : (STATUS_LABEL[status] ?? 'idle')
 
   // Hover cascade — dim when another node is hovered
   const isHighlighted = useGraphStore(
@@ -312,6 +326,7 @@ export const BooNode = memo(function BooNode({
             name={name}
             selected={selected}
             status={status}
+            activityVerb={activityVerb}
             cardStatusColor={cardStatusColor}
             lastSeenLabel={lastSeenLabel}
             avatarFlip={avatarFlip}
@@ -324,6 +339,7 @@ export const BooNode = memo(function BooNode({
             name={name}
             selected={selected}
             status={status}
+            activityVerb={activityVerb}
             booW={booW}
             booH={booH}
             cardStatusColor={cardStatusColor}
@@ -395,6 +411,8 @@ interface ContentProps {
   name: string
   selected: boolean | undefined
   status: BooNodeData['status']
+  /** Phase 18 — fine-grained activity verb computed by the parent. */
+  activityVerb: string
   cardStatusColor: string
   lastSeenLabel: string | null
   avatarFlip: MutableRefObject<FlipState>
@@ -407,6 +425,7 @@ function CardContent({
   name,
   selected,
   status,
+  activityVerb,
   cardStatusColor,
   lastSeenLabel,
   avatarFlip,
@@ -461,7 +480,7 @@ function CardContent({
               textOverflow: 'ellipsis',
             }}
           >
-            {STATUS_LABEL[status] ?? 'idle'}
+            {activityVerb}
             {lastSeenLabel ? ` · seen ${lastSeenLabel}` : ''}
           </div>
         </div>
@@ -524,6 +543,7 @@ function CircleContent({
   name,
   selected,
   status,
+  activityVerb,
   booW,
   booH,
   cardStatusColor,
@@ -611,8 +631,11 @@ function CircleContent({
               style={{ width: 5, height: 5, borderRadius: '50%', background: cardStatusColor }}
             />
           )}
-          <span style={{ fontSize: 10, color: 'var(--muted-foreground)', letterSpacing: '0.05em' }}>
-            {STATUS_LABEL[status] ?? 'idle'}
+          <span
+            style={{ fontSize: 10, color: 'var(--muted-foreground)', letterSpacing: '0.05em' }}
+            title={activityVerb}
+          >
+            {activityVerb}
           </span>
         </div>
       </div>

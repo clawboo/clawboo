@@ -132,15 +132,18 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
   }, [appendGatewayLog, autoConnect, setGatewayControlStatus])
 
   // ── Mount: auto-start ────────────────────────────────────────────────────
+  // No abort-on-cleanup (same rationale as InstallStep): React StrictMode's
+  // mount → cleanup → mount double-invoke would abort the gateway-start SSE
+  // and the fire-once guard would block the re-fire, stranding the wizard on
+  // "Starting Gateway". The spawned gateway is detached (child.unref()) so it
+  // keeps running regardless; we just need the SSE stream to survive so its
+  // `complete` event fires and advances to the team step. Retry still aborts
+  // the prior controller before re-firing.
   useEffect(() => {
     if (firedRef.current) return
     firedRef.current = true
     clearGatewayLog()
     startGateway()
-
-    return () => {
-      controllerRef.current?.abort()
-    }
   }, [clearGatewayLog, startGateway])
 
   // ── Auto-scroll log ──────────────────────────────────────────────────────
@@ -160,7 +163,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
   const isRunning = phase === 'starting' || phase === 'connecting'
 
   return (
-    <div className="w-full max-w-[420px] rounded-2xl border border-border bg-surface shadow-[0_32px_80px_rgba(0,0,0,0.65)]">
+    <div className="surface-overlay-tier w-full max-w-[420px] rounded-2xl">
       <div className="flex flex-col items-center p-8">
         <StepIndicator current="setup" />
 

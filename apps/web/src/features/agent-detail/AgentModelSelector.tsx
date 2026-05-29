@@ -180,15 +180,13 @@ export function AgentModelSelector({
         >
           {/* Level 1: Provider list */}
           <div
+            className="surface-floating-tier"
             style={{
               minWidth: 175,
               maxHeight: 420,
               overflowY: 'auto',
-              background: 'var(--card)',
-              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
               borderRadius: 10,
               padding: '6px 0',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
             }}
           >
             {/* Default option */}
@@ -315,10 +313,10 @@ export function AgentModelSelector({
                     color: hasSelectedModel
                       ? 'var(--mint)'
                       : !hasKey
-                        ? 'rgb(var(--foreground-rgb) / 0.25)'
+                        ? 'rgb(var(--foreground-rgb) / 0.5)'
                         : isActive
                           ? 'var(--foreground)'
-                          : 'rgb(var(--foreground-rgb) / 0.7)',
+                          : 'rgb(var(--foreground-rgb) / 0.75)',
                     background: isActive ? 'rgb(var(--foreground-rgb) / 0.06)' : 'transparent',
                     border: 'none',
                     cursor: 'pointer',
@@ -327,13 +325,31 @@ export function AgentModelSelector({
                   }}
                 >
                   <ChevronLeft style={{ width: 10, height: 10, opacity: 0.3, flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontWeight: hasSelectedModel ? 600 : 400 }}>
-                    {group.provider}
+                  <span
+                    style={{
+                      flex: 1,
+                      fontWeight: hasSelectedModel ? 600 : 400,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <span>{group.provider}</span>
                     {!hasKey && (
                       <span
-                        style={{ fontSize: 9, fontStyle: 'italic', marginLeft: 6, opacity: 0.6 }}
+                        style={{
+                          fontSize: 9,
+                          fontFamily: 'var(--font-geist-mono, monospace)',
+                          fontWeight: 600,
+                          letterSpacing: '0.08em',
+                          textTransform: 'uppercase',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          background: 'rgb(var(--amber-rgb) / 0.12)',
+                          color: 'var(--amber)',
+                        }}
                       >
-                        No API key
+                        No key
                       </span>
                     )}
                   </span>
@@ -365,31 +381,28 @@ export function AgentModelSelector({
                 width: '100%',
                 padding: '5px 12px',
                 fontSize: 11,
-                color: showCustom ? 'var(--foreground)' : 'rgb(var(--foreground-rgb) / 0.5)',
+                color: showCustom ? 'var(--foreground)' : 'rgb(var(--foreground-rgb) / 0.7)',
                 background: showCustom ? 'rgb(var(--foreground-rgb) / 0.06)' : 'transparent',
                 border: 'none',
                 cursor: 'pointer',
                 textAlign: 'left',
-                fontStyle: 'italic',
               }}
             >
-              <ChevronLeft style={{ width: 10, height: 10, opacity: 0.3, flexShrink: 0 }} />
-              <span style={{ flex: 1 }}>Custom model...</span>
+              <ChevronLeft style={{ width: 10, height: 10, opacity: 0.4, flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>Custom model…</span>
             </button>
           </div>
 
           {/* Level 2: Model list or Custom input — opens to the LEFT */}
           {(activeGroup || showCustom) && (
             <div
+              className="surface-floating-tier"
               style={{
                 minWidth: 210,
                 maxHeight: 360,
                 overflowY: 'auto',
-                background: 'var(--card)',
-                border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
                 borderRadius: 10,
                 padding: '6px 0',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
                 marginRight: 4,
               }}
             >
@@ -412,9 +425,12 @@ export function AgentModelSelector({
                     <div
                       style={{
                         fontSize: 10,
-                        color: 'rgb(var(--amber-rgb) / 0.5)',
-                        padding: '2px 14px 6px',
-                        fontStyle: 'italic',
+                        color: 'var(--amber)',
+                        padding: '2px 14px 8px',
+                        fontFamily: 'var(--font-geist-mono, monospace)',
+                        fontWeight: 600,
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
                       }}
                     >
                       API key not configured
@@ -437,7 +453,7 @@ export function AgentModelSelector({
                           padding: '6px 14px',
                           fontSize: 12,
                           color: !activeGroupConfigured
-                            ? 'rgb(var(--foreground-rgb) / 0.25)'
+                            ? 'rgb(var(--foreground-rgb) / 0.45)'
                             : isSelected
                               ? 'var(--mint)'
                               : 'var(--foreground)',
@@ -532,7 +548,7 @@ export function AgentModelSelector({
                   <div
                     style={{
                       fontSize: 10,
-                      color: 'rgb(var(--foreground-rgb) / 0.25)',
+                      color: 'rgb(var(--foreground-rgb) / 0.45)',
                       marginTop: 6,
                       fontFamily: 'var(--font-geist-mono, monospace)',
                     }}

@@ -13,7 +13,15 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronRight, Clock, SendHorizontal, Square, Wrench } from 'lucide-react'
+import {
+  ChevronRight,
+  Clock,
+  Network,
+  SendHorizontal,
+  Square,
+  Workflow,
+  Wrench,
+} from 'lucide-react'
 import { BooAvatar, resolveBooTint } from '@clawboo/ui'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
@@ -241,8 +249,8 @@ export const TypingIndicator = memo(function TypingIndicator() {
         {[0, 1, 2].map((i) => (
           <motion.span
             key={i}
-            className="inline-block h-1 w-1 rounded-full bg-secondary"
-            animate={{ opacity: [0.3, 1, 0.3] }}
+            className="inline-block h-1.5 w-1.5 rounded-full bg-secondary"
+            animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1, 0.85] }}
             transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2 }}
           />
         ))}
@@ -262,7 +270,10 @@ export const ToolCallCard = memo(function ToolCallCard({ entry }: { entry: Trans
   const hasBody = Boolean(parsed.body)
 
   return (
-    <div className="rounded-md border border-border bg-foreground/[0.03] text-[11px] dark:bg-black/20">
+    <div
+      className="rounded-md border border-border text-[11px]"
+      style={{ background: 'var(--code-block-bg)' }}
+    >
       <button
         type="button"
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left"
@@ -1287,9 +1298,7 @@ export const PlanCard = memo(function PlanCard({
       data-plan-id={planId}
     >
       <div className="flex items-center gap-2 border-b border-border/60 pb-2.5">
-        <span aria-hidden className="text-[15px]">
-          📋
-        </span>
+        <Workflow size={14} strokeWidth={1.75} aria-hidden className="text-secondary" />
         <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary">
           Plan
         </span>
@@ -1433,9 +1442,7 @@ export const WorkstreamCard = memo(function WorkstreamCard({
       data-workstream-id={workstreamId}
     >
       <div className="flex items-center gap-2 border-b border-border/60 pb-2.5">
-        <span aria-hidden className="text-[15px]">
-          📡
-        </span>
+        <Network size={14} strokeWidth={1.75} aria-hidden className="text-secondary" />
         <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary">
           Workstreams
         </span>
@@ -1802,7 +1809,7 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
 
       {/* Token usage (real from Gateway) or estimated from char count */}
       {!streaming && hasText && (
-        <p className="font-mono text-[10px] text-secondary/40">
+        <p className="font-mono text-[10px] tabular-nums text-secondary/40">
           {tokenUsage
             ? `${tokenUsage.inputTokens.toLocaleString()} in · ${tokenUsage.outputTokens.toLocaleString()} out${costUsd !== null ? ` · ${formatCost(costUsd)}` : ''}`
             : `~${Math.ceil(charCount / 4).toLocaleString()} tokens`}
@@ -1979,8 +1986,21 @@ export const MessageList = memo(function MessageList({
       onScroll={handleScroll}
     >
       {isEmpty ? (
-        <div className="flex h-full items-center justify-center">
-          <p className="font-mono text-[12px] text-secondary/40">No messages yet.</p>
+        <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+          <div className="opacity-80">
+            <AgentBooAvatar agentId={agentId} size={56} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <p
+              className="text-[15px] font-semibold text-foreground/80"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              Say hi to {agentName}
+            </p>
+            <p className="max-w-[280px] text-[12px] leading-relaxed text-foreground/45">
+              Send a message below to start the conversation.
+            </p>
+          </div>
         </div>
       ) : (
         <div className="flex flex-col pb-2">

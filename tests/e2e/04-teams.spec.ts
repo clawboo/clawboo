@@ -33,16 +33,17 @@ test.describe('Teams', () => {
       timeout: 5_000,
     })
 
-    // Click Marketplace nav button
-    await agentList.locator('button:has-text("Marketplace")').click()
+    // Click Marketplace nav button — use testid because button text alone
+    // collides with surfaces like the theme-toggle title ("Theme: System ...").
+    await agentList.locator('[data-testid="nav-marketplace"]').click()
     await expect(page.getByRole('main').getByText('Marketplace')).toBeVisible({ timeout: 5_000 })
 
     // Click Tokens Used nav button
-    await agentList.locator('button:has-text("Tokens Used")').click()
+    await agentList.locator('[data-testid="nav-cost"]').click()
     await expect(page.getByText('Token usage by team and agent')).toBeVisible({ timeout: 5_000 })
 
     // Click back to Atlas
-    await agentList.locator('button:has-text("Atlas")').click()
+    await agentList.locator('[data-testid="nav-graph"]').click()
     await expect(page.locator('.react-flow')).toBeVisible({ timeout: 10_000 })
   })
 
@@ -51,8 +52,12 @@ test.describe('Teams', () => {
 
     const agentList = page.locator('[data-testid="agent-list-column"]')
 
-    // Click System nav button in secondary nav
-    await agentList.locator('button:has-text("System")').click()
+    // Click System nav button in secondary nav. We use the testid because
+    // `button:has-text("System")` strict-matches BOTH the nav button and the
+    // theme-toggle button (whose title attribute reads
+    // "Theme: System (light). Click for Light." when the theme preference is
+    // 'system' — the default for fresh sessions).
+    await agentList.locator('[data-testid="nav-system"]').click()
 
     // MaintenancePanel renders this subtitle
     await expect(page.getByText('Manage your OpenClaw installation')).toBeVisible({

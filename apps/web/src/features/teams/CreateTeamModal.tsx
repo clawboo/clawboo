@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowLeft, CheckCircle2, Info, Search, X } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Search, X } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
@@ -24,6 +24,8 @@ import {
   resolveTeamAgents,
 } from '@/features/marketplace/teamCatalog'
 import { TeamTemplateDetail } from '@/features/marketplace/TeamTemplateDetail'
+import { TemplateFanDeck } from './TemplateFanDeck'
+import { TemplateGrid } from './TemplateGrid'
 
 const PRESET_COLORS = [
   'var(--primary)',
@@ -107,6 +109,10 @@ export function CreateTeamModal({
   const [pickCategory, setPickCategory] = useState<TemplateCategory | 'all'>('all')
   const [pickSource, setPickSource] = useState<TemplateSource | 'all'>('all')
   const [detailTemplate, setDetailTemplate] = useState<TeamTemplate | null>(null)
+  // View-mode toggle (Phase 16 hybrid). `auto` flips based on count: ≤ 12
+  // templates → fan (signature), > 12 → grid (scan). User can lock the mode
+  // by tapping the toggle; that choice persists for the modal session.
+  const [viewMode, setViewMode] = useState<'auto' | 'fan' | 'grid'>('auto')
 
   const filteredTemplates = useMemo(() => {
     let results = pickSearch ? searchBrowsableCatalog(pickSearch) : [...BROWSABLE_TEAM_CATALOG]
@@ -114,6 +120,9 @@ export function CreateTeamModal({
     if (pickSource !== 'all') results = results.filter((t) => t.source === pickSource)
     return results
   }, [pickSearch, pickCategory, pickSource])
+
+  const resolvedViewMode: 'fan' | 'grid' =
+    viewMode === 'auto' ? (filteredTemplates.length > 12 ? 'grid' : 'fan') : viewMode
 
   const resolvedSelected = useMemo(
     () => (selectedProfile ? resolveTeamAgents(selectedProfile) : []),
@@ -501,7 +510,7 @@ export function CreateTeamModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-            className={`relative w-full ${step === 'pick' ? 'max-w-2xl' : 'max-w-lg'} rounded-2xl border border-border bg-surface shadow-[0_16px_64px_rgba(0,0,0,0.6)] transition-all duration-200`}
+            className={`surface-overlay-tier relative w-full ${step === 'pick' ? 'max-w-2xl' : 'max-w-lg'} rounded-2xl transition-all duration-200`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close button */}
@@ -647,89 +656,85 @@ export function CreateTeamModal({
                   })}
                 </div>
 
-                {/* Scrollable template list */}
-                <div
-                  style={{
-                    maxHeight: 380,
-                    overflowY: 'auto',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                  }}
-                >
-                  {filteredTemplates.length === 0 && (
-                    <div className="flex items-center justify-center py-10 text-[12px] text-secondary/40">
-                      No templates match your search.
-                    </div>
-                  )}
-                  {filteredTemplates.map((profile) => {
-                    const srcMeta = SOURCE_META[profile.source]
-                    const agentCount = resolveTeamAgents(profile).length
-                    return (
-                      <div
-                        key={profile.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => handlePickProfile(profile)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            handlePickProfile(profile)
-                          }
-                        }}
-                        className="flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-foreground/[0.02] px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.05] focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/20"
-                      >
-                        <div
-                          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-base"
-                          style={{
-                            backgroundColor: `${profile.color}22`,
-                            border: `1px solid ${profile.color}33`,
-                          }}
-                        >
-                          {profile.emoji}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[12px] font-semibold text-text">
-                              {profile.name}
-                            </span>
-                            <span className="text-[10px] text-secondary/40">
-                              {agentCount} agents
-                            </span>
-                            <span
-                              style={{
-                                color: srcMeta.color,
-                                background: `${srcMeta.color}18`,
-                                border: `1px solid ${srcMeta.color}35`,
-                                borderRadius: 4,
-                                padding: '0px 4px',
-                                fontSize: 9,
-                                fontWeight: 600,
-                                letterSpacing: '0.02em',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {srcMeta.label}
-                            </span>
-                          </div>
-                          <div className="mt-0.5 truncate text-[10px] leading-snug text-secondary/45">
-                            {profile.description}
-                          </div>
-                        </div>
+                {/* Phase 16 — View-mode toggle row + Fan/Grid renderer.
+                    Auto-mode flips based on filter count (≤ 12 → Fan, > 12 →
+                    Grid) so the user almost never has to think about it; an
+                    explicit Fan/Grid pill on the right lets power users
+                    override the choice for the rest of the modal session. */}
+                <div className="mb-2 mt-1 flex items-center justify-between gap-2">
+                  <div
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10,
+                      letterSpacing: '0.08em',
+                      color: 'rgb(var(--foreground-rgb) / 0.5)',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {resolvedViewMode === 'fan' ? 'Focus pick' : 'Browse all'}
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="View mode"
+                    style={{
+                      display: 'inline-flex',
+                      gap: 2,
+                      padding: 2,
+                      borderRadius: 10,
+                      background: 'rgb(var(--foreground-rgb) / 0.06)',
+                      border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+                    }}
+                  >
+                    {[
+                      { key: 'fan' as const, label: 'Fan' },
+                      { key: 'grid' as const, label: 'Grid' },
+                    ].map((opt) => {
+                      const isActive = resolvedViewMode === opt.key
+                      return (
                         <button
+                          key={opt.key}
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setDetailTemplate(profile)
+                          onClick={() => setViewMode(opt.key)}
+                          aria-pressed={isActive}
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            letterSpacing: '0.04em',
+                            textTransform: 'uppercase',
+                            padding: '4px 10px',
+                            borderRadius: 8,
+                            border: 'none',
+                            cursor: 'pointer',
+                            background: isActive ? 'var(--surface-overlay)' : 'transparent',
+                            color: isActive
+                              ? 'var(--foreground)'
+                              : 'rgb(var(--foreground-rgb) / 0.5)',
+                            boxShadow: isActive
+                              ? '0 1px 2px rgb(0 0 0 / 0.2), 0 0 0 1px rgb(var(--foreground-rgb) / 0.08)'
+                              : 'none',
+                            transition: 'all var(--motion-fast)',
                           }}
-                          className="flex-shrink-0 rounded p-1 text-secondary/25 transition-colors hover:text-secondary/60"
                         >
-                          <Info style={{ width: 14, height: 14 }} strokeWidth={2} />
+                          {opt.label}
                         </button>
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                  </div>
                 </div>
+
+                {resolvedViewMode === 'fan' ? (
+                  <TemplateFanDeck
+                    templates={filteredTemplates}
+                    onPick={handlePickProfile}
+                    onShowDetails={setDetailTemplate}
+                  />
+                ) : (
+                  <TemplateGrid
+                    templates={filteredTemplates}
+                    onPick={handlePickProfile}
+                    onShowDetails={setDetailTemplate}
+                  />
+                )}
 
                 {/* Start empty */}
                 <button

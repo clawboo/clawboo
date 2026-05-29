@@ -21,33 +21,54 @@ import type { LayoutData, GhostGraphScope } from './types'
 // in the team chat fixed it temporarily, but any subsequent Atlas visit
 // would overwrite the fix. Splitting the key by scope (atlas vs team)
 // keeps the two layouts independent.
+//
+// **Atlas mode-aware key (post-Phase-20)**: Atlas has two layout modes
+// (Tree / Radial) that produce geometrically incompatible positions. Saving
+// both under the single `'atlas'` key caused Tree positions to bleed into
+// Radial layout (and vice versa) on toggle / page reload. The fix splits
+// atlas storage by mode: `atlas-top-down` and `atlas-radial`. Each mode's
+// dragged positions persist independently; switching modes loads the
+// correct set or starts fresh.
 
 export function useGraphPersistence(scope: GhostGraphScope = 'team') {
   const { setSavedPositions } = useGraphStore()
   const gatewayUrl = useConnectionStore((s) => s.gatewayUrl)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
+  const atlasLayout = useGraphStore((s) => s.atlasLayout)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isLoaded, setIsLoaded] = useState(false)
 
+  // Atlas positions split by layout mode — Tree (top-down) and Radial have
+  // incompatible coordinate semantics; storing them under a shared key
+  // produced the "Radial layout uses Tree coordinates" bug.
   const layoutName =
-    scope === 'atlas' ? 'atlas' : selectedTeamId ? `team-${selectedTeamId}` : 'default'
+    scope === 'atlas'
+      ? `atlas-${atlasLayout}`
+      : selectedTeamId
+        ? `team-${selectedTeamId}`
+        : 'default'
 
-  // Load on mount / when connected gateway or team changes
+  // Load on mount / when connected gateway, team, or atlasLayout changes
   useEffect(() => {
     if (!gatewayUrl) return
-    setIsLoaded(false) // Reset on team switch — wait for fresh positions
+    setIsLoaded(false) // Reset on team / mode switch — wait for fresh positions
 
     const url = `/api/graph-layout?name=${encodeURIComponent(layoutName)}&url=${encodeURIComponent(gatewayUrl)}`
     void fetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: LayoutData | null) => {
-        if (data?.positions && Object.keys(data.positions).length > 0) {
-          setSavedPositions(data.positions)
-        }
+        // Always reset savedPositions to whatever the new key holds —
+        // including empty. Previously this path only updated when positions
+        // were non-empty, which leaked the OLD key's positions into the new
+        // mode when the new mode had nothing saved yet (the visible Atlas
+        // bug where switching to Radial kept Tree coordinates).
+        setSavedPositions(data?.positions ?? {})
         setIsLoaded(true)
       })
       .catch(() => {
-        // Non-fatal — first run has no saved layout
+        // Non-fatal — first run has no saved layout. Still reset so we don't
+        // strand the previous key's positions in store.
+        setSavedPositions({})
         setIsLoaded(true)
       })
   }, [gatewayUrl, selectedTeamId, layoutName, setSavedPositions])

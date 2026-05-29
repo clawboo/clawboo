@@ -29,7 +29,8 @@ export function BooTip({ onDismiss }: BooTipProps) {
       animate={{ opacity: 1, x: 0, scale: 1 }}
       exit={{ opacity: 0, x: -12, scale: 0.95 }}
       transition={{ type: 'spring', stiffness: 300, damping: 26, delay: 0.35 }}
-      className="fixed left-[269px] top-[92px] z-40 flex items-center gap-3 rounded-xl border border-accent/30 bg-surface px-4 py-3 text-left shadow-[0_8px_36px_rgba(0,0,0,0.55)] cursor-pointer hover:border-accent/50 transition-colors"
+      className="surface-floating-tier fixed left-[269px] top-[92px] z-40 flex items-center gap-3 rounded-xl px-4 py-3 text-left cursor-pointer transition-colors hover:!border-accent/50"
+      style={{ borderColor: 'rgb(var(--primary-rgb) / 0.3)' }}
       aria-label="Dismiss tip"
     >
       {/* Arrow pointing left toward the sidebar */}

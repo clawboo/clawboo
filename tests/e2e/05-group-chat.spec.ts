@@ -1,4 +1,4 @@
-import { test, expect, API_BASE } from './helpers/fixtures'
+import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
 
 /**
  * Custom connect helper for group chat tests.
@@ -17,6 +17,11 @@ async function connectWithTeam(
   options: { skipOnboarding?: boolean } = {},
 ): Promise<{ teamId: string }> {
   const { skipOnboarding = true } = options
+
+  // Safety: refuse to DELETE-all-teams unless the e2e sandbox is active.
+  // Without the sandbox the loop below would wipe the developer's real
+  // ~/.openclaw/clawboo/clawboo.db.
+  await assertSandboxed(request)
 
   // Clean up stale teams
   try {

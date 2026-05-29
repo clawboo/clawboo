@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Loader2, Plus } from 'lucide-react'
+import { Select } from '@/features/shared/Select'
 import type { GatewayClient } from '@clawboo/gateway-client'
 import type { AgentState } from '@/stores/fleet'
 import type { CronJob } from '@/stores/scheduler'
@@ -273,10 +274,11 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
         {/* Agent picker */}
         <div>
           <label style={labelStyle}>Agent</label>
-          <select
+          <Select
             value={agentId}
-            onChange={(e) => setAgentId(e.target.value)}
-            style={{ ...inputStyle, cursor: 'pointer' }}
+            onChange={setAgentId}
+            aria-label="Agent"
+            style={{ width: '100%' }}
           >
             {agents.length === 0 && <option value="">No agents connected</option>}
             {agents.map((a) => (
@@ -284,7 +286,7 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
                 {a.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
         {/* Job name */}
@@ -385,15 +387,17 @@ export function CreateJobForm({ client, agents, onCreated }: CreateJobFormProps)
               onChange={(e) => setCustomEveryAmount(e.target.value)}
               style={{ ...inputStyle, width: 72 }}
             />
-            <select
+            <Select
               value={customEveryUnit}
-              onChange={(e) => setCustomEveryUnit(e.target.value as 'minutes' | 'hours' | 'days')}
-              style={{ ...inputStyle, width: 100, cursor: 'pointer' }}
-            >
-              <option value="minutes">minutes</option>
-              <option value="hours">hours</option>
-              <option value="days">days</option>
-            </select>
+              onChange={(v) => setCustomEveryUnit(v as 'minutes' | 'hours' | 'days')}
+              aria-label="Interval unit"
+              options={[
+                { value: 'minutes', label: 'minutes' },
+                { value: 'hours', label: 'hours' },
+                { value: 'days', label: 'days' },
+              ]}
+              style={{ width: 110 }}
+            />
           </div>
         )}
 

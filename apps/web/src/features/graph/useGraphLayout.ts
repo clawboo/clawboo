@@ -370,3 +370,130 @@ export async function computeAtlasLayout(
   // Apply user-saved positions LAST (same precedence as computeElkLayout).
   return packed.map((n) => (savedPositions[n.id] ? { ...n, position: savedPositions[n.id]! } : n))
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase 19 — Atlas RADIAL topology.
+//
+//   Boo Zero sits at the centre. Team-roots are distributed equiangularly
+//   on a circle around BZ. Each team's members fan outward from their
+//   team-root in a small arc that opens AWAY from the centre — same
+//   "facing outward" math the orbital skill / resource ring uses for per-
+//   Boo expand.
+//
+//   Same call signature as computeAtlasLayout — the GhostGraph layout
+//   effect dispatches one or the other based on the `atlasLayout` store
+//   value. Saved-position respect identical to top-down.
+//
+//   Edge rendering: useGraphData reads the layout mode and SKIPS the
+//   trunk-and-branches attribution when radial; DependencyEdge falls back
+//   to a low-curvature bezier so primary edges flow naturally from BZ
+//   outward.
+// ──────────────────────────────────────────────────────────────────────────────
+
+const ATLAS_RADIAL_TEAM_RADIUS = 600 // distance from BZ centre to team-root centre
+const ATLAS_RADIAL_MEMBER_RADIUS = 320 // distance from team-root centre to each member centre
+const ATLAS_RADIAL_MAX_FAN_ARC = (Math.PI * 60) / 180 // cap each team's fan at 60°
+const ATLAS_RADIAL_PER_MEMBER_ARC = Math.PI / 9 // ≈ 20° per member, capped by the max above
+
+export async function computeAtlasRadialLayout(
+  nodes: GraphNode[],
+  _primaryDepEdges: GraphEdge[],
+  savedPositions: LayoutData['positions'],
+  teamOrder: string[],
+): Promise<GraphNode[]> {
+  if (nodes.length === 0) return nodes
+
+  // Partition nodes by role (same as top-down).
+  let booZero: GraphNode | undefined
+  const teamRoots: GraphNode[] = []
+  const teamBoos: GraphNode[] = []
+  for (const n of nodes) {
+    if (n.type === 'boo') {
+      const data = n.data as { isUniversalLeader?: boolean; teamId?: string | null }
+      if (data.isUniversalLeader) {
+        booZero = n
+      } else if (data.teamId) {
+        teamBoos.push(n)
+      }
+    } else if (n.type === 'team-root') {
+      teamRoots.push(n)
+    }
+  }
+
+  const boosByTeam = new Map<string, GraphNode[]>()
+  for (const n of teamBoos) {
+    const teamId = (n.data as { teamId?: string | null }).teamId
+    if (!teamId) continue
+    if (!boosByTeam.has(teamId)) boosByTeam.set(teamId, [])
+    boosByTeam.get(teamId)!.push(n)
+  }
+
+  const orderedTeamIds: string[] = []
+  for (const id of teamOrder) if (boosByTeam.has(id)) orderedTeamIds.push(id)
+  for (const id of boosByTeam.keys()) if (!orderedTeamIds.includes(id)) orderedTeamIds.push(id)
+
+  const packed: GraphNode[] = []
+  const numTeams = orderedTeamIds.length
+  const halfEnvW = BOO_ENVELOPE_WIDTH / 2
+  const halfEnvH = BOO_ENVELOPE_HEIGHT / 2
+
+  // Boo Zero centred at world (0, 0). Convert to top-left position.
+  if (booZero) {
+    packed.push({
+      ...booZero,
+      position: { x: -halfEnvW, y: -halfEnvH },
+    })
+  }
+
+  if (numTeams > 0) {
+    // Each team gets an equal angular slice. Cap each team's fan so adjacent
+    // teams don't overlap their member arcs.
+    const anglePerTeam = (2 * Math.PI) / numTeams
+    const fanArcCap = Math.min(ATLAS_RADIAL_MAX_FAN_ARC, anglePerTeam * 0.7)
+
+    for (let i = 0; i < numTeams; i++) {
+      const teamId = orderedTeamIds[i]!
+      // Start at -π/2 (12 o'clock); proceed clockwise.
+      const thetaTeam = -Math.PI / 2 + (2 * Math.PI * i) / numTeams
+      const teamRootCx = ATLAS_RADIAL_TEAM_RADIUS * Math.cos(thetaTeam)
+      const teamRootCy = ATLAS_RADIAL_TEAM_RADIUS * Math.sin(thetaTeam)
+
+      const members = boosByTeam.get(teamId)!
+      const sortedMembers = [...members].sort((a, b) => a.id.localeCompare(b.id))
+      const numMembers = sortedMembers.length
+
+      // Fan arc: small for singletons (direct outward), grows with member
+      // count, capped by per-team angular budget.
+      const fanArc =
+        numMembers <= 1 ? 0 : Math.min(fanArcCap, (numMembers - 1) * ATLAS_RADIAL_PER_MEMBER_ARC)
+
+      for (let j = 0; j < numMembers; j++) {
+        const member = sortedMembers[j]!
+        // offset_angle goes from -fanArc/2 (left of outward) to +fanArc/2.
+        const offset = numMembers === 1 ? 0 : -fanArc / 2 + (fanArc * j) / (numMembers - 1)
+        const memberAngle = thetaTeam + offset
+        const memberCx = teamRootCx + ATLAS_RADIAL_MEMBER_RADIUS * Math.cos(memberAngle)
+        const memberCy = teamRootCy + ATLAS_RADIAL_MEMBER_RADIUS * Math.sin(memberAngle)
+        packed.push({
+          ...member,
+          position: { x: memberCx - halfEnvW, y: memberCy - halfEnvH },
+        })
+      }
+
+      // Team-root is a 1px invisible junction — place its top-left exactly at
+      // the math-centre so BZ → team-root → member edges all converge.
+      const teamRootNode = teamRoots.find(
+        (tr) => (tr.data as { teamId?: string }).teamId === teamId,
+      )
+      if (teamRootNode) {
+        packed.push({
+          ...teamRootNode,
+          position: { x: teamRootCx, y: teamRootCy },
+        })
+      }
+    }
+  }
+
+  // Saved positions win over computed (same precedence as top-down + ELK).
+  return packed.map((n) => (savedPositions[n.id] ? { ...n, position: savedPositions[n.id]! } : n))
+}

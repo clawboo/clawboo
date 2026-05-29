@@ -1,5 +1,11 @@
 import { memo } from 'react'
-import { BaseEdge, getBezierPath, getSmoothStepPath, useStore } from '@xyflow/react'
+import {
+  BaseEdge,
+  getBezierPath,
+  getSmoothStepPath,
+  getStraightPath,
+  useStore,
+} from '@xyflow/react'
 import type { EdgeProps } from '@xyflow/react'
 import { useGraphStore } from '../store'
 
@@ -52,6 +58,8 @@ interface DependencyEdgeData extends Record<string, unknown> {
   isTrunkLeader?: boolean
   isTrunkFollower?: boolean
   siblingTargetIds?: string[]
+  /** Phase 19 — when 'radial', skip trunk-and-branches and render a bezier. */
+  layoutMode?: 'top-down' | 'radial'
 }
 
 const STROKE = 'rgb(var(--primary-rgb) / 0.65)'
@@ -123,8 +131,12 @@ export const DependencyEdge = memo(function DependencyEdge({
 }: EdgeProps) {
   const edgeData = data as DependencyEdgeData | undefined
   const isPrimary = edgeData?.isPrimary !== false
-  const isTrunkLeader = isPrimary && edgeData?.isTrunkLeader === true
-  const isTrunkFollower = isPrimary && edgeData?.isTrunkFollower === true
+  // Phase 19 — in radial Atlas, the trunk-and-branches optimisation
+  // (leftmost / middle / rightmost X-sort) doesn't apply. Suppressing the
+  // trunk flags here lets the regular primary-edge bezier branch render.
+  const isRadial = edgeData?.layoutMode === 'radial'
+  const isTrunkLeader = isPrimary && !isRadial && edgeData?.isTrunkLeader === true
+  const isTrunkFollower = isPrimary && !isRadial && edgeData?.isTrunkFollower === true
   const isTrunkParticipant = isTrunkLeader || isTrunkFollower
 
   // Pull sibling target positions from React Flow's internal node lookup.
@@ -250,6 +262,18 @@ export const DependencyEdge = memo(function DependencyEdge({
     const elbowY = (sourceY + sorted[0]!.y) / 2
     const middlePath = buildMiddleBranchPath(targetX, targetY, elbowY)
     return <BaseEdge id={id} path={middlePath} markerEnd={markerEnd} style={baseStyle} />
+  }
+
+  // ── Branch: radial Atlas — primary edges radiate from BZ outward and from
+  // each team-root outward to its members. Straight lines are the cleanest
+  // visual for radial topology: bezier curves at the team-root convergence
+  // make the joint look tangled, and smooth-step would route via orthogonal
+  // handles (which assumes top-down). Arrowheads are also suppressed because
+  // they all point at the invisible 1px team-root junction — they just add
+  // noise at the convergence point without conveying direction.
+  if (isRadial) {
+    const [straight] = getStraightPath({ sourceX, sourceY, targetX, targetY })
+    return <BaseEdge id={id} path={straight} style={baseStyle} />
   }
 
   // ── Branch: single-child primary edge — standard smooth-step (no

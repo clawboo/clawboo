@@ -20,17 +20,18 @@ import type {
   MiniMapNodeProps,
 } from '@xyflow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { GitBranch, Map, Pin, RefreshCw, X } from 'lucide-react'
+import { GitBranch, LayoutDashboard, Map, Pin, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
-import { computeElkLayout, computeAtlasLayout } from './useGraphLayout'
+import { computeElkLayout, computeAtlasLayout, computeAtlasRadialLayout } from './useGraphLayout'
 import { useTeamStore } from '@/stores/team'
 import { computeOrbitalPositions } from './computeOrbitalPositions'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
 import { ConnectionLine } from './edges/ConnectionLine'
 import { TeamHaloLayer } from './TeamHaloLayer'
+import { TeamStatusClusterLayer } from './TeamStatusClusterLayer'
 import { useFleetStore } from '@/stores/fleet'
 import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
@@ -172,6 +173,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     setConnectMode,
     showTeamHalos,
     setShowTeamHalos,
+    atlasLayout,
+    setAtlasLayout,
     setHoveredNodeId,
   } = useGraphStore()
 
@@ -200,6 +203,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   const prevNodeLengthRef = useRef(0)
   const elkGenerationRef = useRef(0)
   const prevLayoutKeyRef = useRef(layoutKey)
+  // Phase 19 — flipping atlasLayout requires a fresh layout dispatch even
+  // when node count + layoutKey haven't changed. Tracked separately so a
+  // toggle invalidates `layoutRanRef` exactly once per change.
+  const prevAtlasLayoutRef = useRef(atlasLayout)
 
   // Wire data fetching and persistence. The scope drives whether
   // `useGraphData` filters to `selectedTeamId` or shows every team at once,
@@ -298,12 +305,30 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     // Reset when layoutKey bumps (user pressed "Re-layout"). We also CLEAR
     // saved positions here so the re-layout produces a fresh ELK result
     // (not constrained by the old user-dragged positions).
-    const reLayoutRequested = layoutKey !== prevLayoutKeyRef.current
-    if (reLayoutRequested) {
+    const reLayoutTriggered = layoutKey !== prevLayoutKeyRef.current
+    if (reLayoutTriggered) {
       prevLayoutKeyRef.current = layoutKey
       layoutRanRef.current = false
       prevNodeLengthRef.current = 0
     }
+
+    // Phase 19 — atlasLayout flip is a re-layout trigger of the same kind as
+    // pressing "Re-layout". CRITICAL: it must also DROP saved positions, not
+    // just invalidate `layoutRanRef`. Without dropping, the new layout
+    // function (e.g. Tree's `computeAtlasLayout`) reuses saved coordinates
+    // that were computed for the OTHER mode (Radial), producing the visually
+    // broken result where teams scatter at radial spots inside a tree layout.
+    const atlasLayoutFlipped = atlasLayout !== prevAtlasLayoutRef.current
+    if (atlasLayoutFlipped) {
+      prevAtlasLayoutRef.current = atlasLayout
+      layoutRanRef.current = false
+      prevNodeLengthRef.current = 0
+    }
+
+    // Either trigger forces a fresh layout AND drops saved positions for any
+    // node whose mode is changing. This is the variable consulted by
+    // `effectiveSavedPositions` below.
+    const reLayoutRequested = reLayoutTriggered || atlasLayoutFlipped
 
     if (!nodesInitialized || nodes.length === 0 || !isLoaded) return
 
@@ -391,7 +416,14 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     const teamOrder = useTeamStore.getState().teams.map((t) => t.id)
     const layoutPromise =
       scope === 'atlas'
-        ? computeAtlasLayout(layoutBooNodes, primaryDepEdges, effectiveSavedPositions, teamOrder)
+        ? atlasLayout === 'radial'
+          ? computeAtlasRadialLayout(
+              layoutBooNodes,
+              primaryDepEdges,
+              effectiveSavedPositions,
+              teamOrder,
+            )
+          : computeAtlasLayout(layoutBooNodes, primaryDepEdges, effectiveSavedPositions, teamOrder)
         : computeElkLayout(layoutBooNodes, primaryDepEdges, effectiveSavedPositions, canvasAspect)
 
     void layoutPromise.then((layoutedNodes) => {
@@ -465,7 +497,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     // (via the `ReactFlowProvider` key in `GhostGraphPanel`) would also
     // pick up the new scope through the closure on the fresh mount —
     // keeping `scope` here is the defensive belt to that suspenders.
-  }, [nodesInitialized, nodes.length, layoutKey, isLoaded, scope])
+  }, [nodesInitialized, nodes.length, layoutKey, isLoaded, scope, atlasLayout])
 
   // ── Interaction handlers ─────────────────────────────────────────────────────
 
@@ -750,6 +782,13 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           doesn't leak into other views. */}
       {scope === 'atlas' && showTeamHalos && <TeamHaloLayer nodes={nodes} />}
 
+      {/* Phase 17 — Atlas team-status clusters. Compact ● N pills above each
+          team-root junction showing the breakdown of running / idle /
+          sleeping / error agents. Always on in Atlas scope (live activity is
+          a primary information signal). Pure rendering layer — does not
+          touch nodes, edges, physics, or ELK. */}
+      {scope === 'atlas' && <TeamStatusClusterLayer nodes={nodes} />}
+
       {/* Floating top-right toolbar — Re-layout / Team halos (Atlas only) /
           Connect. Wrapped in a single flex row so the buttons always sit
           adjacent regardless of which subset is visible. The previous
@@ -773,11 +812,58 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           <button
             onClick={resetLayout}
             title="Re-layout"
-            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-canvas-control-border bg-canvas-control px-3 py-1.5 text-[12px] font-semibold text-foreground/50 transition-all duration-150 hover:text-foreground/85"
+            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-canvas-control-border bg-canvas-control px-3 py-1.5 text-[12px] font-semibold text-foreground/55 shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:text-foreground/90 hover:shadow-[var(--shadow-floating)]"
           >
             <RefreshCw size={14} />
             Re-layout
           </button>
+        )}
+
+        {/* Phase 19 — Atlas layout segmented pill (Tree | Radial). Two
+            adjacent buttons inside a single shell so it's obvious BOTH
+            options exist and which one is active. Mirrors the FAN | GRID
+            toggle in CreateTeamModal. Persisted via the store setter. */}
+        {scope === 'atlas' && (
+          <div
+            role="group"
+            aria-label="Atlas layout"
+            className="flex items-center gap-0.5 rounded-lg border border-canvas-control-border bg-canvas-control p-0.5 shadow-[var(--shadow-raised)]"
+          >
+            {[
+              {
+                key: 'top-down' as const,
+                label: 'Tree',
+                icon: <LayoutDashboard size={13} />,
+                title: 'Flat-row tree layout — Boo Zero at top, teams in a row',
+              },
+              {
+                key: 'radial' as const,
+                label: 'Radial',
+                icon: <Sparkles size={13} />,
+                title: 'Radial layout — Boo Zero at centre, teams as petals',
+              },
+            ].map((opt) => {
+              const active = atlasLayout === opt.key
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setAtlasLayout(opt.key)}
+                  aria-pressed={active}
+                  title={opt.title}
+                  className={[
+                    'flex cursor-pointer items-center gap-1 rounded-md px-2.5 py-1 text-[12px] font-semibold transition-colors duration-150',
+                    active
+                      ? 'bg-primary/[0.18] text-primary'
+                      : 'text-foreground/55 hover:text-foreground/90',
+                  ].join(' ')}
+                >
+                  {opt.icon}
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
         )}
 
         {/* Team halos toggle — Atlas-only. Hidden in team scope so the
@@ -788,10 +874,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
             onClick={() => setShowTeamHalos(!showTeamHalos)}
             title="Toggle colored team hulls behind agents"
             className={[
-              'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all duration-150',
+              'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
               showTeamHalos
                 ? 'border-mint/40 bg-mint/[0.18] text-mint'
-                : 'border-canvas-control-border bg-canvas-control text-foreground/50',
+                : 'border-canvas-control-border bg-canvas-control text-foreground/55 hover:text-foreground/90',
             ].join(' ')}
           >
             <Pin size={14} />
@@ -803,10 +889,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         <button
           onClick={() => setConnectMode(!connectMode)}
           className={[
-            'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all duration-150',
+            'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
             connectMode
               ? 'border-primary/40 bg-primary/20 text-primary'
-              : 'border-canvas-control-border bg-canvas-control text-foreground/50',
+              : 'border-canvas-control-border bg-canvas-control text-foreground/55 hover:text-foreground/90',
           ].join(' ')}
         >
           <GitBranch size={14} />
@@ -823,8 +909,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         title={showMiniMap ? 'Hide minimap' : 'Show minimap'}
         aria-label={showMiniMap ? 'Hide minimap' : 'Show minimap'}
         className={[
-          'absolute z-20 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-canvas-control-border bg-canvas-control transition-all duration-150',
-          showMiniMap ? 'text-primary' : 'text-foreground/50 hover:text-foreground/80',
+          'absolute z-20 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-canvas-control-border bg-canvas-control shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
+          showMiniMap ? 'text-primary' : 'text-foreground/55 hover:text-foreground/90',
         ].join(' ')}
         style={{
           bottom: 12,

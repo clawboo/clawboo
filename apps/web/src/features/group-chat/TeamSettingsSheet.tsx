@@ -53,7 +53,7 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
           exit={{ opacity: 0, y: 8, scale: 0.98 }}
           transition={{ duration: 0.18 }}
           data-testid="team-settings-sheet"
-          className="flex max-h-[85vh] w-[min(720px,100%)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
+          className="surface-overlay-tier flex max-h-[85vh] w-[min(720px,100%)] flex-col overflow-hidden rounded-xl"
         >
           {/* Header */}
           <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">
