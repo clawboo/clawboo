@@ -2,6 +2,16 @@ import { memo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
+import {
+  BarChart3,
+  Compass,
+  FileText,
+  Globe,
+  MessageSquare,
+  Wrench,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
 import { AgentPickerDropdown } from '@/features/marketplace/AgentPickerDropdown'
 import { installSkillForAgent } from '../operations/installSkill'
 import { useGraphStore } from '../store'
@@ -10,23 +20,26 @@ import { usePeacockTransition } from '../usePeacockTransition'
 import type { SkillNodeData, SkillCategory } from '../types'
 
 // ─── Category → colour + icon ─────────────────────────────────────────────────
+//
+// Phase 20 — emoji glyphs replaced with Lucide icons; raw hex replaced with
+// the shared `--category-*` token palette (see globals.css). Both light and
+// dark modes inherit through the var() chain.
 
-const CATEGORY: Record<SkillCategory, { color: string; icon: string }> = {
-  data: { color: '#3B82F6', icon: '📊' },
-  comm: { color: 'var(--mint)', icon: '💬' },
-  code: { color: '#F97316', icon: '⚡' },
-  file: { color: 'var(--amber)', icon: '📄' },
-  web: { color: '#A855F7', icon: '🌐' },
-  other: { color: '#6B7280', icon: '🔧' },
+const CATEGORY: Record<SkillCategory, { color: string; Icon: LucideIcon }> = {
+  data: { color: 'var(--category-data)', Icon: BarChart3 },
+  comm: { color: 'var(--category-comm)', Icon: MessageSquare },
+  code: { color: 'var(--category-code)', Icon: Zap },
+  file: { color: 'var(--category-file)', Icon: FileText },
+  web: { color: 'var(--category-web)', Icon: Globe },
+  other: { color: 'var(--category-other)', Icon: Wrench },
 }
 
 // Visual overrides for Boo Zero's "Leadership" orbital — see
 // `SkillNodeData.isLeadership` for context. Compass icon picks up the
 // "guides the team" metaphor without the crown's heraldic vibe; amber
 // signals elevated status while staying clearly distinct from any of the
-// regular category colors. Reused by `Description tooltip` and the
-// `name` color below.
-const LEADERSHIP_VISUAL = { color: 'var(--amber)', icon: '🧭' } as const
+// regular category colors.
+const LEADERSHIP_VISUAL = { color: 'var(--amber)', Icon: Compass } as const
 
 const CIRCLE = 38 // circle diameter in px (reduced from 52 — skills feel subordinate to Boo nodes)
 
@@ -68,7 +81,7 @@ export const SkillNode = memo(function SkillNode({
   // `category` field is still set on the data (defaulted to `'other'` in
   // `useGraphData`) so any downstream consumer that hasn't been taught
   // about `isLeadership` falls back gracefully.
-  const { color, icon } = isLeadership ? LEADERSHIP_VISUAL : (CATEGORY[category] ?? CATEGORY.other)
+  const { color, Icon } = isLeadership ? LEADERSHIP_VISUAL : (CATEGORY[category] ?? CATEGORY.other)
   const [showPicker, setShowPicker] = useState(false)
 
   // Hover cascade — dim when another node is hovered
@@ -108,21 +121,23 @@ export const SkillNode = memo(function SkillNode({
             transition: 'opacity 0.2s ease',
           }}
         >
-          {/* Filled circle */}
+          {/* Filled circle. `color-mix(in srgb, ...)` lets us compose
+              opacity onto a CSS var (--category-*) the same way `${hex}18`
+              did with raw hex — supported in every modern engine since 2023. */}
           <div
             style={{
               width: CIRCLE,
               height: CIRCLE,
               borderRadius: '50%',
-              background: `${color}18`,
-              border: `2px solid ${color}55`,
+              background: `color-mix(in srgb, ${color} 9%, transparent)`,
+              border: `2px solid color-mix(in srgb, ${color} 33%, transparent)`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: `0 0 14px ${color}28, inset 0 1px 0 rgb(var(--foreground-rgb) / 0.06)`,
+              boxShadow: `0 0 14px color-mix(in srgb, ${color} 16%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.06)`,
             }}
           >
-            <span style={{ fontSize: 16, lineHeight: 1, userSelect: 'none' }}>{icon}</span>
+            <Icon size={16} strokeWidth={1.75} aria-hidden style={{ color, userSelect: 'none' }} />
           </div>
 
           {/* Install button — appears on hover. Hidden for the Leadership
@@ -194,14 +209,20 @@ export const SkillNode = memo(function SkillNode({
           <Handle
             type="target"
             position={Position.Left}
-            style={{ ...handleStyle, borderColor: `${color}55` }}
+            style={{
+              ...handleStyle,
+              borderColor: `color-mix(in srgb, ${color} 33%, transparent)`,
+            }}
           />
           {/* Right handle — source for drag-to-install onto BooNodes */}
           <Handle
             type="source"
             id="install"
             position={Position.Right}
-            style={{ ...handleStyle, borderColor: `${color}55` }}
+            style={{
+              ...handleStyle,
+              borderColor: `color-mix(in srgb, ${color} 33%, transparent)`,
+            }}
           />
 
           {/* Center handle — invisible, for edge path routing only */}

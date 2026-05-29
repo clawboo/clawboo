@@ -4,14 +4,14 @@ import { formatRelativeTime } from './cronUtils'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Stable color per agent from a small palette. */
+/** Stable colour per agent from a small palette — Phase 20 token-driven. */
 const AGENT_COLORS = [
   'var(--mint)',
   'var(--primary)',
   'var(--amber)',
-  '#60A5FA',
-  '#A78BFA',
-  '#F472B6',
+  'var(--category-data)',
+  'var(--category-web)',
+  'var(--category-code)',
 ]
 
 function agentColor(agentId: string): string {
@@ -190,6 +190,7 @@ export function CronTimeline({ jobs, timeWindowHours = 48 }: CronTimelineProps) 
             fontSize: 9,
             color: text === 'Now' ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.3)',
             fontFamily: 'var(--font-geist-mono, monospace)',
+            fontVariantNumeric: 'tabular-nums',
             fontWeight: text === 'Now' ? 600 : 400,
             whiteSpace: 'nowrap',
           }}

@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Loader2 } from 'lucide-react'
+import { BarChart3, Globe, Loader2, ShoppingCart, type LucideIcon } from 'lucide-react'
 import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
 import { consumeSSE } from '@/lib/sseClient'
+import { ShaderAtmosphere } from '@/features/atmosphere'
 import type { SystemInfo } from '@/stores/system'
 
 // ─── System Status Hint ──────────────────────────────────────────────────────
@@ -144,48 +145,81 @@ export function WelcomeState() {
   ]
 
   return (
-    <div
-      className="relative flex h-full flex-col items-center justify-center gap-6 p-8 text-center"
-      style={{
-        background:
-          'radial-gradient(ellipse 80% 60% at 50% 40%, var(--welcome-glow) 0%, transparent 70%)',
-      }}
-    >
-      <motion.img
-        src="/logo.svg"
-        alt="Clawboo"
-        width={72}
-        height={66}
-        className="opacity-40"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 0.4, y: 0 }}
-        transition={{ duration: 0.4 }}
-      />
+    <div className="relative flex h-full flex-col items-center justify-center gap-6 overflow-hidden p-8 text-center">
+      {/* Phase 15 — ShaderGradient atmosphere. Falls back to a static
+          multi-radial CSS gradient under prefers-reduced-motion, the user
+          opt-out toggle, or while the WebGL chunk is still loading. */}
+      <ShaderAtmosphere variant="hero" />
 
-      <div>
-        <h2
-          className="m-0 text-[18px] font-bold text-foreground/80"
-          style={{ fontFamily: 'var(--font-display)' }}
+      <motion.div
+        className="relative"
+        initial={{ opacity: 0, y: 12, scale: 0.92 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ type: 'spring', stiffness: 200, damping: 22 }}
+      >
+        <motion.img
+          src="/logo.svg"
+          alt="Clawboo"
+          width={96}
+          height={88}
+          animate={{ y: [0, -4, 0] }}
+          transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+          style={{
+            opacity: 0.85,
+            filter: 'drop-shadow(0 12px 32px rgb(var(--primary-rgb) / 0.25))',
+          }}
+        />
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1, duration: 0.4, ease: 'easeOut' }}
+      >
+        <h1
+          className="m-0 text-foreground"
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: 36,
+            fontWeight: 700,
+            letterSpacing: '-0.02em',
+            lineHeight: 1.1,
+            // Theme-aware halo lifts the text off the moving shader gradient.
+            // --canvas-rgb is near-black in dark / near-white in light, so the
+            // shadow always matches the page bg and reads as a soft plate,
+            // never a drop-shadow. Without it, the heading washes out wherever
+            // a bright gradient blob sits behind it.
+            textShadow:
+              '0 2px 24px rgb(var(--canvas-rgb) / 0.55), 0 1px 4px rgb(var(--canvas-rgb) / 0.45)',
+          }}
         >
           Welcome to Clawboo
-        </h2>
-        <p className="mx-auto mt-2 max-w-[360px] text-[13px] leading-relaxed text-foreground/50">
+        </h1>
+        <p
+          className="mx-auto mt-3 max-w-[400px] text-[14px] leading-relaxed text-foreground/80"
+          style={{ textShadow: '0 1px 12px rgb(var(--canvas-rgb) / 0.5)' }}
+        >
           Deploy, orchestrate, and observe your AI agent fleet.
         </p>
 
         <SystemHint isConnected={isConnected} />
-      </div>
+      </motion.div>
 
       {/* Quick-start steps */}
       {isConnected && (
         <div className="flex w-full max-w-[340px] flex-col gap-3 text-left">
           {steps.map((step) => (
             <div key={step.num} className="flex items-start gap-3">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/12 text-[12px] font-bold text-primary">
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[12px] font-bold text-primary">
                 {step.num}
               </div>
               <div className="flex-1 pt-0.5">
-                <span className="text-[13px] text-foreground/70">{step.text}</span>
+                <span
+                  className="text-[13px] text-foreground/85"
+                  style={{ textShadow: '0 1px 10px rgb(var(--canvas-rgb) / 0.5)' }}
+                >
+                  {step.text}
+                </span>
                 {step.action && (
                   <button
                     onClick={step.action}
@@ -202,12 +236,22 @@ export function WelcomeState() {
 
       {/* Primary CTA when no teams */}
       {isConnected && !hasTeams && (
-        <button
+        <motion.button
           onClick={() => setShowCreateModal(true)}
-          className="mt-2 rounded-lg border-none bg-primary px-6 py-2.5 text-[13px] font-semibold text-primary-foreground transition-all duration-150 hover:bg-primary/90"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.3, ease: 'easeOut' }}
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.98 }}
+          className="mt-2 rounded-xl border-none bg-primary px-6 py-3 text-[14px] font-semibold text-primary-foreground"
+          style={{
+            boxShadow:
+              '0 8px 24px rgb(var(--primary-rgb) / 0.3), 0 0 0 1px rgb(var(--primary-rgb) / 0.15)',
+            transition: 'box-shadow var(--motion-base)',
+          }}
         >
           Create your first team
-        </button>
+        </motion.button>
       )}
 
       {/* Nav shortcuts when teams exist */}
@@ -215,20 +259,26 @@ export function WelcomeState() {
         <div className="mt-1 flex gap-2">
           {(
             [
-              { label: 'Atlas', emoji: '🌐', view: 'graph' as const },
-              { label: 'Marketplace', emoji: '🛒', view: 'marketplace' as const },
-              { label: 'Cost', emoji: '💰', view: 'cost' as const },
-            ] as const
-          ).map((item) => (
-            <button
-              key={item.view}
-              onClick={() => useViewStore.getState().navigateTo(item.view)}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-foreground/[0.04] px-3.5 py-1.5 text-[12px] text-foreground/55 transition-all duration-150 hover:border-foreground/15 hover:text-foreground/80"
-            >
-              <span>{item.emoji}</span>
-              {item.label}
-            </button>
-          ))}
+              { label: 'Atlas', icon: Globe, view: 'graph' as const },
+              { label: 'Marketplace', icon: ShoppingCart, view: 'marketplace' as const },
+              { label: 'Cost', icon: BarChart3, view: 'cost' as const },
+            ] as { label: string; icon: LucideIcon; view: 'graph' | 'marketplace' | 'cost' }[]
+          ).map((item) => {
+            const Icon = item.icon
+            return (
+              <button
+                key={item.view}
+                onClick={() => useViewStore.getState().navigateTo(item.view)}
+                className="flex items-center gap-2 rounded-lg border border-border bg-foreground/[0.04] px-3.5 py-1.5 text-[12px] text-foreground/55 transition-all duration-150 hover:border-foreground/15 hover:text-foreground/80"
+                style={{
+                  transitionTimingFunction: 'var(--motion-easing-standard)',
+                }}
+              >
+                <Icon size={13} strokeWidth={1.75} aria-hidden />
+                {item.label}
+              </button>
+            )
+          })}
         </div>
       )}
 

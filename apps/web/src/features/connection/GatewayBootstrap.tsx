@@ -4,7 +4,10 @@
  * Top-level connection orchestrator. Determines which overlay to render:
  *
  *   First-time user (no 'clawboo.onboarded' in localStorage)
- *     → OnboardingWizard (welcome → connect → team → deploy → done)
+ *     → OnboardingWizard (welcome → detect → [install → configure →
+ *       startGateway] → team → deploy). When the wizard finishes with a
+ *       deployed team, we navigate the user into that team's group chat;
+ *       otherwise the user lands on the default view.
  *
  *   Returning user (key present), not connected
  *     → Auto-connect attempt using saved settings.
@@ -27,14 +30,16 @@ import {
 import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayConnectScreen } from './GatewayConnectScreen'
-import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard'
+import { OnboardingWizard, type WizardStep } from '@/features/onboarding/OnboardingWizard'
 import { BooTip } from '@/features/onboarding/BooTip'
+import { isWizardActive, markWizardActive, clearWizardActive } from '@/lib/onboardingProgress'
 import { useGatewayEvents } from './useGatewayEvents'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useApprovalsStore } from '@/stores/approvals'
 import { fetchExecConfigMap } from '@/lib/execConfigMap'
 import { useTeamStore } from '@/stores/team'
+import { useViewStore } from '@/stores/view'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { consumeSSE } from '@/lib/sseClient'
@@ -172,6 +177,9 @@ export function GatewayBootstrap() {
 
   // null = not yet determined (avoids SSR/client localStorage mismatch)
   const [showWizard, setShowWizard] = useState<boolean | null>(null)
+  // Step the wizard re-enters at. 'welcome' for a fresh run; 'detect' when
+  // resuming a mid-onboarding refresh (see the resume branch below).
+  const [wizardInitialStep, setWizardInitialStep] = useState<WizardStep>('welcome')
 
   useEffect(() => {
     // ALWAYS verify system state. The previous "fast path" trusted the
@@ -189,6 +197,23 @@ export function GatewayBootstrap() {
     // and skip the wizard. Otherwise clear the stale flag and show the
     // wizard so the user can re-install + reconfigure.
     void (async () => {
+      const onboarded = typeof window !== 'undefined' && localStorage.getItem(ONBOARDED_KEY) === '1'
+
+      // RESUME a mid-onboarding refresh. If the user started the wizard but
+      // never completed it (active marker set, not yet onboarded), re-enter
+      // the wizard rather than fast-pathing to the dashboard — even if
+      // OpenClaw is now configured. Without this, refreshing after the
+      // configure / start-gateway steps (when OpenClaw becomes 'configured')
+      // would skip the team-pick + deploy steps and dump the user on an empty
+      // dashboard. We resume at 'detect', which re-validates the environment
+      // and auto-advances to the team step when everything's already green.
+      if (isWizardActive() && !onboarded) {
+        markWizardActive() // idempotent — keep the marker through the resume
+        setWizardInitialStep('detect')
+        setShowWizard(true)
+        return
+      }
+
       try {
         const resp = await fetch('/api/system/status')
         if (resp.ok) {
@@ -197,6 +222,7 @@ export function GatewayBootstrap() {
             info.openclaw.installed && info.openclaw.configExists && info.openclaw.envExists
           if (configured) {
             markOnboarded()
+            clearWizardActive() // returning user — no wizard run in flight
             setShowWizard(false)
             return
           }
@@ -208,6 +234,9 @@ export function GatewayBootstrap() {
       // marked the user onboarded, the flag is now stale — clear it so a
       // future successful onboarding can re-set it cleanly.
       if (typeof window !== 'undefined') localStorage.removeItem(ONBOARDED_KEY)
+      // Entering a fresh wizard run — mark it active so a mid-flow refresh
+      // resumes here instead of fast-pathing to the dashboard.
+      markWizardActive()
       setShowWizard(true)
     })()
   }, [])
@@ -518,8 +547,11 @@ export function GatewayBootstrap() {
   // ── First-time onboarding complete handler ─────────────────────────────────
 
   const handleOnboardingComplete = useCallback(
-    async (newClient: GatewayClient, url: string) => {
+    async (newClient: GatewayClient, url: string, teamId: string | null) => {
       markOnboarded()
+      // Wizard run finished — drop the in-progress marker so future refreshes
+      // take the returning-user fast path instead of resuming the wizard.
+      clearWizardActive()
 
       // Disconnect old client before replacing to avoid leaked WS listeners
       const prev = useConnectionStore.getState().client
@@ -534,6 +566,28 @@ export function GatewayBootstrap() {
       await hydrateFleet(newClient)
       await hydrateTeams()
 
+      // Post-onboarding landing surface.
+      //
+      // When the user deployed a team, drop them straight into that team's
+      // group chat — that's where their work starts (chat with the new
+      // boos, walk through the onboarding gate). The default view store
+      // initializes to `{ type: 'nav', view: 'graph' }` (Atlas), and
+      // without this redirect a fresh-install user would land on an empty
+      // Atlas wondering what to do next.
+      //
+      // We also select the team in the team store so the sidebar
+      // highlights it and AgentListColumn shows its boos. If the team
+      // doesn't appear in the hydrated list (rare — race between the
+      // wizard's POST /api/teams and `hydrateTeams`), the welcome view
+      // takes over and the user can pick the team manually.
+      if (teamId) {
+        const exists = useTeamStore.getState().teams.some((t) => t.id === teamId)
+        if (exists) {
+          useTeamStore.getState().selectTeam(teamId)
+          useViewStore.getState().openGroupChat(teamId)
+        }
+      }
+
       // Show the "Click a Boo" tip after the wizard exits
       setShowBooTip(true)
     },
@@ -547,7 +601,11 @@ export function GatewayBootstrap() {
       <AnimatePresence>
         {/* First-time onboarding wizard */}
         {!isConnected && showWizard === true && (
-          <OnboardingWizard key="onboarding" onComplete={handleOnboardingComplete} />
+          <OnboardingWizard
+            key="onboarding"
+            onComplete={handleOnboardingComplete}
+            initialStep={wizardInitialStep}
+          />
         )}
 
         {/* Auto-connecting spinner — shown while we attempt a silent reconnect */}
@@ -581,7 +639,7 @@ export function GatewayBootstrap() {
               initial={{ opacity: 0, y: 20, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-              className="w-full max-w-[340px] rounded-2xl border border-border bg-surface p-8 shadow-[0_24px_80px_rgba(0,0,0,0.6)]"
+              className="surface-overlay-tier w-full max-w-[340px] rounded-2xl p-8"
             >
               <div className="flex flex-col items-center gap-4 text-center">
                 <img src="/logo.svg" alt="Clawboo" width={48} height={44} className="opacity-40" />
@@ -667,7 +725,7 @@ export function GatewayBootstrap() {
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm"
           >
-            <div className="w-full max-w-[360px] rounded-2xl border border-border bg-surface p-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.6)]">
+            <div className="surface-overlay-tier w-full max-w-[360px] rounded-2xl p-8 text-center">
               <p className="mb-4 text-[14px] font-medium text-destructive">{fleetError}</p>
               <div className="flex justify-center gap-3">
                 <button

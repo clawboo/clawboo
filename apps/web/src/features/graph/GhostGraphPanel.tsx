@@ -1,9 +1,11 @@
 import { useRef, useEffect } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
+import { Ghost } from 'lucide-react'
 import { GhostGraph } from './GhostGraph'
 import { useGraphStore } from './store'
 import { useTeamStore } from '@/stores/team'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { EmptyState } from '@/features/shared/EmptyState'
 import type { GhostGraphScope } from './types'
 
 export type { GhostGraphScope }
@@ -86,12 +88,13 @@ export function GhostGraphPanel({
 
         {/* Empty state */}
         {nodes.length === 0 && !isLoadingFiles && (
-          <div className="pointer-events-none absolute inset-0 z-[5] flex flex-col items-center justify-center gap-2.5">
-            <span className="text-[48px] leading-none">👻</span>
-            <p className="m-0 text-[14px] font-medium text-foreground/45">No agents yet</p>
-            <p className="m-0 text-[12px] text-foreground/25">
-              Connect to a Gateway to see your fleet
-            </p>
+          <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center">
+            <EmptyState
+              icon={Ghost}
+              title="No agents yet"
+              helper="Connect to a Gateway to see your fleet."
+              paddingTop={0}
+            />
           </div>
         )}
 

@@ -42,6 +42,12 @@ import type {
 // assumption holds even with two scopes in the codebase.
 
 export function useGraphData(scope: GhostGraphScope = 'team'): void {
+  // Phase 19 — atlas layout mode. Read at the top so the trunk-attribution
+  // loop can skip itself in radial mode (where leftmost/middle/rightmost
+  // detection by sorted X would be wrong) and every dep edge can be stamped
+  // with `layoutMode` so DependencyEdge picks the right path renderer.
+  const atlasLayout = useGraphStore((s) => s.atlasLayout)
+  const isAtlasRadial = scope === 'atlas' && atlasLayout === 'radial'
   const agents = useFleetStore((s) => s.agents)
   const client = useConnectionStore((s) => s.client)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
@@ -205,6 +211,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
         selectedTeamId,
         scope,
         teamInternalLeadByTeamId,
+        isAtlasRadial,
       ),
     [
       agentStructureKey,
@@ -215,6 +222,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
       selectedTeamId,
       scope,
       teamInternalLeadByTeamId,
+      isAtlasRadial,
     ], // intentional: string keys + scalars + maps
   )
 
@@ -303,6 +311,14 @@ export function buildGraphElements(
    * `null` in team scope.
    */
   teamInternalLeadByTeamId: Map<string, string | null> | null = null,
+  /**
+   * Phase 19 — when true (radial Atlas), skip the trunk-and-branches
+   * attribution that assumes top-down topology, and stamp every dependency
+   * edge with `layoutMode: 'radial'` so DependencyEdge renders a bezier
+   * instead of a smooth-step. Top-down Atlas + per-team scope pass `false`
+   * and the existing path renderers run unchanged.
+   */
+  isAtlasRadial: boolean = false,
 ): { rawNodes: GraphNode[]; rawEdges: GraphEdge[] } {
   const depEdges: GraphEdge[] = []
   const skillNodes: GraphNode[] = []
@@ -788,23 +804,35 @@ export function buildGraphElements(
     list.push(edge)
     primaryBySource.set(key, list)
   }
-  for (const [, siblings] of primaryBySource) {
-    if (siblings.length <= 1) continue // single child — normal smooth-step is fine
-    // Sort by edge id so the leader is deterministic across renders.
-    siblings.sort((a, b) => a.id.localeCompare(b.id))
-    const siblingTargetIds = siblings.map((e) => e.target)
-    siblings[0]!.data = {
-      ...siblings[0]!.data,
-      isTrunkLeader: true,
-      siblingTargetIds,
-    }
-    for (let i = 1; i < siblings.length; i++) {
-      siblings[i]!.data = {
-        ...siblings[i]!.data,
-        isTrunkFollower: true,
+  if (!isAtlasRadial) {
+    // Skip the trunk-and-branches attribution in radial Atlas — the
+    // leftmost/middle/rightmost X-sort assumes top-down topology and breaks
+    // when teams are distributed around a circle. DependencyEdge then falls
+    // through to the simple smooth-step / bezier branch based on layoutMode.
+    for (const [, siblings] of primaryBySource) {
+      if (siblings.length <= 1) continue // single child — normal smooth-step is fine
+      // Sort by edge id so the leader is deterministic across renders.
+      siblings.sort((a, b) => a.id.localeCompare(b.id))
+      const siblingTargetIds = siblings.map((e) => e.target)
+      siblings[0]!.data = {
+        ...siblings[0]!.data,
+        isTrunkLeader: true,
         siblingTargetIds,
       }
+      for (let i = 1; i < siblings.length; i++) {
+        siblings[i]!.data = {
+          ...siblings[i]!.data,
+          isTrunkFollower: true,
+          siblingTargetIds,
+        }
+      }
     }
+  }
+
+  // Stamp layoutMode on every dependency edge so DependencyEdge picks the
+  // right path renderer. Only the Atlas scope has a non-default value.
+  for (const edge of depEdges) {
+    edge.data = { ...edge.data, layoutMode: isAtlasRadial ? 'radial' : 'top-down' }
   }
 
   // Compute edge counts per boo node for degree-aware sizing.

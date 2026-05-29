@@ -61,6 +61,14 @@ interface GraphStore {
   setShowTeamHalos: (v: boolean) => void
 
   /**
+   * Phase 19 — Atlas topology. `top-down` (default) is the original flat-row
+   * org chart with BZ at top and team-roots in a horizontal line; `radial`
+   * puts BZ at the centre with teams as petals. Persisted to localStorage.
+   */
+  atlasLayout: 'top-down' | 'radial'
+  setAtlasLayout: (v: 'top-down' | 'radial') => void
+
+  /**
    * Set of Boo NODE IDs (e.g. `boo-<agentId>`) whose orbital children
    * (skill + resource nodes) are currently expanded in the Ghost Graph.
    * Default is empty — every Boo's orbital children are HIDDEN at rest,
@@ -159,6 +167,22 @@ export const useGraphStore = create<GraphStore>((set) => ({
 
   showTeamHalos: false,
   setShowTeamHalos: (v) => set({ showTeamHalos: v }),
+
+  // Atlas defaults to **Radial** — Boo Zero at the center with teams
+  // distributed on a circle around it. The `'top-down'` (Tree) variant is
+  // still available via the canvas toolbar pill; an explicit user choice
+  // persists in localStorage and overrides the default.
+  atlasLayout:
+    typeof window !== 'undefined' &&
+    window.localStorage.getItem('clawboo.atlas.layout') === 'top-down'
+      ? 'top-down'
+      : 'radial',
+  setAtlasLayout: (v) => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('clawboo.atlas.layout', v)
+    }
+    set({ atlasLayout: v })
+  },
 
   expandedBooNodeIds: new Set(),
   setExpandedBooNodeIds: (ids) => set({ expandedBooNodeIds: new Set(ids) }),

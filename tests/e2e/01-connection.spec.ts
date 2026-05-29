@@ -7,8 +7,17 @@ test.describe('Gateway Connection', () => {
       localStorage.setItem('clawboo.onboarded', '1')
     })
 
-    // Intercept system status — report OpenClaw as not installed so the
-    // "Gateway Offline" overlay condition (!running && installed && configExists) is false.
+    // GatewayBootstrap's wizard-gate logic:
+    //   - If openclaw.installed && configExists && envExists → showWizard=false
+    //     (returning-user path; falls through to auto-connect → connect screen)
+    //   - Otherwise → showWizard=true (the install wizard renders, NOT the
+    //     connect screen)
+    //
+    // To reach the connect screen we need to report a fully-configured
+    // OpenClaw with the Gateway already running (otherwise the "Gateway
+    // Offline" overlay catches us). The connect screen renders because the
+    // mocked /api/settings below returns no gatewayUrl, so auto-connect
+    // bails and the bootstrap falls through to GatewayConnectScreen.
     await page.route('**/api/system/status', async (route) => {
       await route.fulfill({
         status: 200,
@@ -16,15 +25,15 @@ test.describe('Gateway Connection', () => {
         body: JSON.stringify({
           node: { version: 'v22.0.0', major: 22, sufficient: true, path: '/usr/bin/node' },
           openclaw: {
-            installed: false,
-            version: null,
-            path: null,
-            stateDir: '/tmp',
-            configExists: false,
-            envExists: false,
+            installed: true,
+            version: '0.3.0',
+            path: '/usr/bin/openclaw',
+            stateDir: '/tmp/.openclaw',
+            configExists: true,
+            envExists: true,
           },
           gateway: {
-            running: false,
+            running: true,
             port: 18789,
             pid: null,
             managedByClawboo: false,
@@ -34,7 +43,9 @@ test.describe('Gateway Connection', () => {
       })
     })
 
-    // Intercept GET /api/settings to return empty — forces connect screen
+    // Intercept GET /api/settings to return empty — forces auto-connect to
+    // bail, which makes GatewayBootstrap render the connect screen as
+    // fallback.
     await page.route('**/api/settings', async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({

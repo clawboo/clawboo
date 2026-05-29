@@ -1,7 +1,20 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Plus, Search, Trash2 } from 'lucide-react'
+import {
+  BarChart3,
+  Clock,
+  Ghost,
+  Globe,
+  Lock,
+  Plus,
+  Search,
+  Settings,
+  ShoppingCart,
+  Trash2,
+  type LucideIcon,
+} from 'lucide-react'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
+import { EmptyState } from '@/features/shared/EmptyState'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useTeamStore, type Team } from '@/stores/team'
 import { useConnectionStore } from '@/stores/connection'
@@ -11,6 +24,9 @@ import { CreateBooModal } from '@/features/fleet/CreateBooModal'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { ThemeToggle } from '@/features/theme/ThemeToggle'
+import { aggregateTeamStatus } from '@/lib/teamStatus'
+import { getActivityVerb } from '@/lib/agentActivityVerb'
+import { useChatStore } from '@/stores/chat'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -74,17 +90,24 @@ const STATUS_CONFIG: Record<
   },
 }
 
-function StatusBadge({ status }: { status: AgentStatus }) {
+function StatusBadge({ status, label }: { status: AgentStatus; label?: string }) {
   const cfg = STATUS_CONFIG[status]
+  // Phase 18 — `label` (when provided) is the fine-grained activity verb that
+  // describes WHAT the agent is doing ("Streaming reply", "Delegating to @X",
+  // "Just done"), replacing the coarse default ("Working", "Idle"). The dot
+  // colour + pulse still derive from the underlying status so the visual
+  // status semantics don't change.
+  const display = label ?? cfg.label
   return (
     <AnimatePresence mode="wait" initial={false}>
       <motion.span
-        key={status}
+        key={`${status}|${display}`}
         initial={{ opacity: 0, scale: 0.85 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.85 }}
         transition={{ duration: 0.15, ease: 'easeOut' }}
         className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide ${cfg.badge}`}
+        title={display}
       >
         <span className="relative flex h-1.5 w-1.5">
           {cfg.pulse && (
@@ -96,7 +119,7 @@ function StatusBadge({ status }: { status: AgentStatus }) {
           )}
           <span className={`relative inline-block h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
         </span>
-        {cfg.label}
+        {display}
       </motion.span>
     </AnimatePresence>
   )
@@ -115,6 +138,18 @@ function AgentRow({
   onSelect: () => void
   onDelete: () => void
 }) {
+  // Phase 18 — compute the live activity verb. Subscribe to the chat-store
+  // maps via single-value selectors keyed by sessionKey so unrelated agents'
+  // streams don't trigger this row's re-render (same precedent as
+  // BooLiveActivity.tsx and chatComponents.tsx token-count selectors).
+  const sk = agent.sessionKey
+  const streamingText = useChatStore((s) => (sk ? (s.streamingText.get(sk) ?? null) : null))
+  const transcripts = useChatStore((s) => s.transcripts)
+  const verb = getActivityVerb({
+    agent,
+    transcripts,
+    streamingTexts: sk ? new Map([[sk, streamingText ?? '']]) : null,
+  })
   return (
     <motion.div
       layout
@@ -139,12 +174,14 @@ function AgentRow({
             {agent.name}
           </p>
           <div className="mt-1 flex items-center gap-2">
-            <StatusBadge status={agent.status} />
-            {agent.status !== 'running' && formatLastSeen(agent.lastSeenAt) && (
-              <span className="text-[9px] text-secondary/40">
-                {formatLastSeen(agent.lastSeenAt)}
-              </span>
-            )}
+            <StatusBadge status={agent.status} label={verb} />
+            {agent.status !== 'running' &&
+              verb !== 'Just done' &&
+              formatLastSeen(agent.lastSeenAt) && (
+                <span className="text-[9px] tabular-nums text-secondary/40">
+                  {formatLastSeen(agent.lastSeenAt)}
+                </span>
+              )}
           </div>
         </div>
       </button>
@@ -169,7 +206,7 @@ function AgentRow({
 interface NavItem {
   id: NavView
   label: string
-  emoji: string
+  icon: LucideIcon
   /** Optional smaller, dimmer hint rendered beside the main label. */
   subtitle?: string
 }
@@ -180,15 +217,15 @@ const PRIMARY_NAV: NavItem[] = [
   // team-scoped Ghost Graph still lives inside Group Chat; this slot is
   // now specifically the org-wide map. Subtitle clarifies that Atlas is
   // cross-team (vs. the per-team Ghost Graph users see inside Group Chat).
-  { id: 'graph', label: 'Atlas', emoji: '🌐', subtitle: '(All Teams)' },
-  { id: 'marketplace', label: 'Marketplace', emoji: '🛒' },
+  { id: 'graph', label: 'Atlas', icon: Globe, subtitle: '(All Teams)' },
+  { id: 'marketplace', label: 'Marketplace', icon: ShoppingCart },
 ]
 
 const SECONDARY_NAV: NavItem[] = [
-  { id: 'approvals', label: 'Approvals', emoji: '🔐' },
-  { id: 'scheduler', label: 'Scheduler', emoji: '⏰' },
-  { id: 'cost', label: 'Tokens Used', emoji: '📊' },
-  { id: 'system', label: 'System', emoji: '⚙️' },
+  { id: 'approvals', label: 'Approvals', icon: Lock },
+  { id: 'scheduler', label: 'Scheduler', icon: Clock },
+  { id: 'cost', label: 'Tokens Used', icon: BarChart3 },
+  { id: 'system', label: 'System', icon: Settings },
 ]
 
 // ─── Group chat row ─────────────────────────────────────────────────────────
@@ -247,18 +284,6 @@ function orderTeamAgentsForPhoto(team: Team, teamAgents: AgentState[]): AgentSta
   const [leader] = reordered.splice(leaderIndex, 1)
   if (leader) reordered.unshift(leader)
   return reordered
-}
-
-// Aggregate the team's overall status from its members. Mirrors the
-// status badge shown on individual agent rows so the Group Chat row
-// reads as a peer in the list. Priority: any running > any error >
-// any sleeping > idle.
-function aggregateTeamStatus(teamAgents: AgentState[]): AgentStatus {
-  if (teamAgents.length === 0) return 'idle'
-  if (teamAgents.some((a) => a.status === 'running')) return 'running'
-  if (teamAgents.some((a) => a.status === 'error')) return 'error'
-  if (teamAgents.some((a) => a.status === 'sleeping')) return 'sleeping'
-  return 'idle'
 }
 
 function GroupChatRow({
@@ -532,17 +557,21 @@ export function AgentListColumn() {
               {query ? (
                 <p className="text-[12px] text-secondary/50">No agents match.</p>
               ) : showEmpty ? (
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-2xl">👻</span>
-                  <p className="text-[12px] text-secondary/50">No Boos yet</p>
-                  <button
-                    type="button"
-                    onClick={() => useViewStore.getState().navigateTo('graph')}
-                    className="text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
-                  >
-                    Deploy a team →
-                  </button>
-                </div>
+                <EmptyState
+                  icon={Ghost}
+                  title="No Boos yet"
+                  helper="Deploy a team from the Marketplace to get started."
+                  paddingTop={16}
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => useViewStore.getState().navigateTo('graph')}
+                      className="text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
+                    >
+                      Deploy a team →
+                    </button>
+                  }
+                />
               ) : (
                 <p className="text-[12px] text-secondary/50">No agents connected.</p>
               )}
@@ -600,19 +629,21 @@ export function AgentListColumn() {
       <div className="px-2 flex flex-col gap-0.5">
         {PRIMARY_NAV.map((item) => {
           const isActive = viewMode.type === 'nav' && viewMode.view === item.id
+          const Icon = item.icon
           return (
             <button
               key={item.id}
               type="button"
+              data-testid={`nav-${item.id}`}
               onClick={() => useViewStore.getState().navigateTo(item.id)}
               className={[
-                'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] font-semibold transition-all duration-150',
+                'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-semibold transition-all duration-150',
                 isActive
                   ? 'bg-accent/12 text-accent'
                   : 'text-text/85 hover:bg-foreground/[0.04] hover:text-text',
               ].join(' ')}
             >
-              <span className="text-[14px]">{item.emoji}</span>
+              <Icon size={14} strokeWidth={2} aria-hidden />
               <span>{item.label}</span>
               {item.subtitle && (
                 <span className="text-[10px] font-normal text-text/45">{item.subtitle}</span>
@@ -630,19 +661,21 @@ export function AgentListColumn() {
         {SECONDARY_NAV.map((item) => {
           const isActive = viewMode.type === 'nav' && viewMode.view === item.id
           const badge = item.id === 'approvals' ? pendingApprovals.size : 0
+          const Icon = item.icon
           return (
             <button
               key={item.id}
               type="button"
+              data-testid={`nav-${item.id}`}
               onClick={() => useViewStore.getState().navigateTo(item.id)}
               className={[
-                'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150',
+                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150',
                 isActive
                   ? 'bg-accent/12 text-accent'
                   : 'text-text/70 hover:bg-foreground/5 hover:text-text/90',
               ].join(' ')}
             >
-              <span className="text-[12px]">{item.emoji}</span>
+              <Icon size={13} strokeWidth={1.75} aria-hidden />
               <span>{item.label}</span>
               {badge > 0 && (
                 <span className="ml-auto rounded-full bg-amber px-1.5 py-px text-[9px] font-bold leading-snug text-background">

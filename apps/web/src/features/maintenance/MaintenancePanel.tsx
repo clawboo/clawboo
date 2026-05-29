@@ -8,6 +8,10 @@ import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { consumeSSE } from '@/lib/sseClient'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import {
+  useAtmospherePreference,
+  setAtmospherePreference,
+} from '@/features/atmosphere/useAtmospherePreference'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -45,11 +49,12 @@ function SectionHeading({ children }: { children: string }) {
   return (
     <h2
       style={{
-        fontSize: 14,
+        fontSize: 15,
         fontWeight: 600,
         color: 'var(--foreground)',
         margin: 0,
-        fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+        fontFamily: 'var(--font-display)',
+        letterSpacing: '-0.01em',
       }}
     >
       {children}
@@ -78,6 +83,7 @@ function InfoRow({ label, value }: { label: string; value: string | null }) {
           fontSize: 13,
           color: 'var(--foreground)',
           fontFamily: 'var(--font-geist-mono, monospace)',
+          fontVariantNumeric: 'tabular-nums',
           wordBreak: 'break-all',
         }}
       >
@@ -108,6 +114,60 @@ const toggleThumb: CSSProperties = {
   position: 'absolute',
   top: 2,
   transition: 'left 0.15s',
+}
+
+function WelcomeAtmosphereToggle() {
+  const preference = useAtmospherePreference()
+  const enabled = preference === 'on'
+
+  const handleToggle = useCallback(() => {
+    setAtmospherePreference(enabled ? 'off' : 'on')
+  }, [enabled])
+
+  return (
+    <div style={{ margin: '24px 0 28px' }}>
+      <SectionHeading>Welcome atmosphere</SectionHeading>
+      <div
+        style={{
+          marginTop: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <button
+          type="button"
+          onClick={handleToggle}
+          aria-label="Toggle Welcome screen shader atmosphere"
+          style={{
+            ...toggleTrack,
+            background: enabled
+              ? 'rgb(var(--mint-rgb) / 0.25)'
+              : 'rgb(var(--foreground-rgb) / 0.04)',
+          }}
+        >
+          <div style={{ ...toggleThumb, left: enabled ? 18 : 2 }} />
+        </button>
+        <span style={{ fontSize: 12, color: 'rgb(var(--foreground-rgb) / 0.6)' }}>
+          {enabled
+            ? 'Animated atmosphere on hero surfaces'
+            : 'Static gradient only (lower GPU load)'}
+        </span>
+      </div>
+      <p
+        style={{
+          marginTop: 8,
+          fontSize: 11,
+          color: 'rgb(var(--foreground-rgb) / 0.3)',
+          lineHeight: 1.5,
+        }}
+      >
+        The Welcome screen renders a slow-moving WebGL gradient in brand colors. Turn it off if
+        you&apos;re on a laptop running on battery or prefer the quieter static backdrop. The OS
+        &quot;reduce motion&quot; preference always disables the shader.
+      </p>
+    </div>
+  )
 }
 
 function AgentCoordinationToggle() {
@@ -612,7 +672,12 @@ export function MaintenancePanel() {
 
         <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
 
-        {/* Section 5: Agent Coordination */}
+        {/* Section 5: Welcome atmosphere (Phase 15) */}
+        <WelcomeAtmosphereToggle />
+
+        <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />
+
+        {/* Section 6: Agent Coordination */}
         <AgentCoordinationToggle />
 
         <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)' }} />

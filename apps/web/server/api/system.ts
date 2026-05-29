@@ -13,7 +13,8 @@ import {
   findProcessByPort,
 } from '../lib/processManager'
 import { getModelsFromCli } from '../lib/modelCache'
-import { findExecutable, isWindows, resolveShimName } from '../lib/platform'
+import { isWindows, resolveShimName } from '../lib/platform'
+import { detectOpenClaw, invalidateOpenClawCache } from '../lib/openclawDetect'
 import { MODEL_GROUPS as STATIC_MODEL_GROUPS } from '../../src/lib/modelCatalog'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -53,32 +54,10 @@ function sendEvent(res: Response, data: Record<string, unknown>): void {
   res.write(`data: ${JSON.stringify(data)}\n\n`)
 }
 
-function detectOpenClaw(): { installed: boolean; version: string | null; path: string | null } {
-  // findExecutable wraps the platform-specific `which` (Unix) / `where`
-  // (Windows) lookup. Returns null when not on PATH — no throw, so we
-  // can branch cleanly.
-  const binPath = findExecutable('openclaw')
-  if (!binPath) return { installed: false, version: null, path: null }
-  try {
-    // `shell: isWindows` is required because Node 18.20.2+ / 20.12.2+ / 22+
-    // refuse to spawn .cmd / .bat files without it (CVE-2024-27980 fix).
-    // On Windows, binPath is the absolute path to openclaw.cmd, so this
-    // applies even though we're passing an absolute path. On Unix, the
-    // option is a no-op.
-    // `windowsHide: isWindows` — with shell:true on Windows we go through
-    // cmd.exe which would otherwise pop a visible console window in front
-    // of the dashboard. Hide it. No-op on Unix.
-    const raw = execFileSync(binPath, ['--version'], {
-      encoding: 'utf8',
-      shell: isWindows,
-      windowsHide: isWindows,
-    }).trim()
-    const version = raw.replace(/^openclaw\s+v?/i, '').trim() || raw
-    return { installed: true, version, path: binPath }
-  } catch {
-    return { installed: true, version: null, path: binPath }
-  }
-}
+// OpenClaw detection (installed? version? path?) lives in
+// ../lib/openclawDetect — it's async + per-session-cached so a slow
+// `openclaw --version` can never freeze the single-threaded server. See
+// that module's header for the full rationale.
 
 function readOpenclawJson(stateDir: string): Record<string, unknown> | null {
   try {
@@ -291,7 +270,7 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
     const nodeVersion = process.version
     const major = parseInt(nodeVersion.slice(1), 10)
 
-    const oc = detectOpenClaw()
+    const oc = await detectOpenClaw()
 
     const stateDir = resolveStateDir()
     const configExists = fs.existsSync(path.join(stateDir, 'openclaw.json'))
@@ -366,7 +345,7 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
 // the regex could run, so the user saw "Command failed: …" in the SPA's
 // approval dialog instead of a successful approval.
 export async function approveDevicePOST(_req: Request, res: Response): Promise<void> {
-  const oc = detectOpenClaw()
+  const oc = await detectOpenClaw()
   if (!oc.installed || !oc.path) {
     res.status(400).json({ error: 'OpenClaw not installed' })
     return
@@ -509,16 +488,25 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
 
   child.on('close', (code) => {
     if (code === 0) {
-      const oc = detectOpenClaw()
-      sendEvent(res, { type: 'complete', success: true, version: oc.version ?? 'unknown' })
+      // The binary was just (re)installed — drop any cached version so we
+      // re-read the freshly-installed one. Detection is async + bounded, so
+      // a slow cold-start `--version` can't freeze the response: worst case
+      // it times out and we report version 'unknown', and the client
+      // advances regardless (the wizard only needs success, not the exact
+      // version).
+      invalidateOpenClawCache()
+      void detectOpenClaw().then((oc) => {
+        sendEvent(res, { type: 'complete', success: true, version: oc.version ?? 'unknown' })
+        res.end()
+      })
     } else {
       sendEvent(res, {
         type: 'error',
         code: `EXIT_${code}`,
         message: `Installation failed with exit code ${code}`,
       })
+      res.end()
     }
-    res.end()
   })
 
   res.on('close', () => {
@@ -759,7 +747,7 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
     }
 
     // Find openclaw binary
-    const oc = detectOpenClaw()
+    const oc = await detectOpenClaw()
     if (!oc.installed || !oc.path) {
       sendEvent(res, { type: 'error', code: 'NOT_INSTALLED', message: 'OpenClaw is not installed' })
       res.end()
@@ -841,13 +829,13 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
 }
 
 // GET /api/system/openclaw-config
-export function openclawConfigGET(_req: Request, res: Response): void {
+export async function openclawConfigGET(_req: Request, res: Response): Promise<void> {
   try {
     const stateDir = resolveStateDir()
     const config = readOpenclawJson(stateDir)
     const envContent = readEnvFile(stateDir)
     const env = parseEnvFlags(envContent)
-    const oc = detectOpenClaw()
+    const oc = await detectOpenClaw()
 
     // Also check auth-profiles.json for configured providers
     const authProviders = detectAuthProfileKeys(stateDir)
@@ -1123,10 +1111,28 @@ export async function systemModelsGET(_req: Request, res: Response): Promise<voi
     // Only include providers that are in our known API keys list + local
     const knownProviders = new Set([...Object.values(AUTH_PROFILE_PROVIDERS), 'ollama'])
 
+    // Normalize provider names to the static catalog's TitleCase form. The
+    // CLI returns lowercase ('anthropic', 'cerebras', etc.) while the static
+    // catalog uses display-case ('Anthropic', 'Cerebras', etc.). Mixing them
+    // in one dropdown looks unfinished, so we rewrite each CLI group's
+    // `provider` field to the canonical static-catalog spelling when one
+    // exists. Falls through to the CLI name if no match — preferable to an
+    // ad-hoc capitalisation.
+    const CANONICAL_NAMES: Record<string, string> = {}
+    for (const staticGroup of STATIC_MODEL_GROUPS) {
+      CANONICAL_NAMES[staticGroup.provider.toLowerCase()] = staticGroup.provider
+    }
+    function canonicalize<T extends { provider: string }>(group: T): T {
+      const canonical = CANONICAL_NAMES[group.provider.toLowerCase()]
+      return canonical && canonical !== group.provider ? { ...group, provider: canonical } : group
+    }
+
     let resultGroups
     if (groups) {
-      // Start with CLI groups, filtered to known providers
-      resultGroups = groups.filter((g) => knownProviders.has(g.provider.toLowerCase()))
+      // Start with CLI groups, filtered to known providers, with canonical names.
+      resultGroups = groups
+        .filter((g) => knownProviders.has(g.provider.toLowerCase()))
+        .map(canonicalize)
       // Supplement with static catalog entries for any known providers missing from CLI
       const cliProviders = new Set(resultGroups.map((g) => g.provider.toLowerCase()))
       for (const staticGroup of STATIC_MODEL_GROUPS) {

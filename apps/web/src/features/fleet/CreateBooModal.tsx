@@ -123,7 +123,7 @@ export function CreateBooModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.92, y: 20 }}
             transition={{ type: 'spring', damping: 28, stiffness: 360 }}
-            className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl"
+            className="surface-overlay-tier w-full max-w-md rounded-2xl p-6"
           >
             <h2
               className="mb-5 text-[16px] font-semibold text-text"
