@@ -6,8 +6,8 @@ import { GitHubStarButton } from './GitHubStarButton'
 // Why in-flow instead of an overlay:
 //   - Overlay tried to share the row with each view's existing top-right
 //     content (Atlas's Re-layout/Team-halos/Connect, Group Chat's
-//     Brief & Rules gear, Cost's Frugal Mode, Agent Detail's model
-//     selector). Even after matching the pill's height to those buttons,
+//     Brief & Rules gear, Agent Detail's model selector). Even after
+//     matching the pill's height to those buttons,
 //     the VERTICAL CENTER of each view's first row differs (each has its
 //     own padding / row height), so a fixed-top pill could never align
 //     with all four at once.
