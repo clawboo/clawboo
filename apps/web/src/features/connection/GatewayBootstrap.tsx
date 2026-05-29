@@ -4,7 +4,10 @@
  * Top-level connection orchestrator. Determines which overlay to render:
  *
  *   First-time user (no 'clawboo.onboarded' in localStorage)
- *     → OnboardingWizard (welcome → connect → team → deploy → done)
+ *     → OnboardingWizard (welcome → detect → [install → configure →
+ *       startGateway] → team → deploy). When the wizard finishes with a
+ *       deployed team, we navigate the user into that team's group chat;
+ *       otherwise the user lands on the default view.
  *
  *   Returning user (key present), not connected
  *     → Auto-connect attempt using saved settings.
@@ -35,6 +38,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useApprovalsStore } from '@/stores/approvals'
 import { fetchExecConfigMap } from '@/lib/execConfigMap'
 import { useTeamStore } from '@/stores/team'
+import { useViewStore } from '@/stores/view'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { consumeSSE } from '@/lib/sseClient'
@@ -518,7 +522,7 @@ export function GatewayBootstrap() {
   // ── First-time onboarding complete handler ─────────────────────────────────
 
   const handleOnboardingComplete = useCallback(
-    async (newClient: GatewayClient, url: string) => {
+    async (newClient: GatewayClient, url: string, teamId: string | null) => {
       markOnboarded()
 
       // Disconnect old client before replacing to avoid leaked WS listeners
@@ -533,6 +537,28 @@ export function GatewayBootstrap() {
       // Hydrate fleet + teams (agents were just created by the wizard)
       await hydrateFleet(newClient)
       await hydrateTeams()
+
+      // Post-onboarding landing surface.
+      //
+      // When the user deployed a team, drop them straight into that team's
+      // group chat — that's where their work starts (chat with the new
+      // boos, walk through the onboarding gate). The default view store
+      // initializes to `{ type: 'nav', view: 'graph' }` (Atlas), and
+      // without this redirect a fresh-install user would land on an empty
+      // Atlas wondering what to do next.
+      //
+      // We also select the team in the team store so the sidebar
+      // highlights it and AgentListColumn shows its boos. If the team
+      // doesn't appear in the hydrated list (rare — race between the
+      // wizard's POST /api/teams and `hydrateTeams`), the welcome view
+      // takes over and the user can pick the team manually.
+      if (teamId) {
+        const exists = useTeamStore.getState().teams.some((t) => t.id === teamId)
+        if (exists) {
+          useTeamStore.getState().selectTeam(teamId)
+          useViewStore.getState().openGroupChat(teamId)
+        }
+      }
 
       // Show the "Click a Boo" tip after the wizard exits
       setShowBooTip(true)

@@ -1,16 +1,20 @@
 /**
  * apps/web/src/features/onboarding/OnboardingWizard.tsx
  *
- * 4-step first-time onboarding wizard:
- *   Welcome → Connect → Team → Deploy → Done
+ * First-time onboarding wizard:
+ *   Welcome → Detect → [Install → Configure → StartGateway] → Team → Deploy
  *
  * Only shown when localStorage('clawboo.onboarded') is absent.
- * Calls onComplete(client, url) when the user is ready to see the Ghost Graph.
+ *
+ * Calls onComplete(client, url, teamId?) when deployment finishes. `teamId`
+ * is the id of the team that was just deployed (or null when the user skipped
+ * the team step). The parent uses this to land the user in that team's group
+ * chat instead of the default Atlas view.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowRight, Check, CheckCircle2, Eye, EyeOff, Loader2, X } from 'lucide-react'
+import { ArrowRight, Check, Eye, EyeOff, Loader2, X } from 'lucide-react'
 import {
   GatewayClient,
   formatGatewayError,
@@ -48,7 +52,6 @@ type WizardStep =
   | 'connect'
   | 'team'
   | 'deploy'
-  | 'done'
 
 const STEP_INDEX: Record<WizardStep, number> = {
   welcome: 0,
@@ -59,11 +62,16 @@ const STEP_INDEX: Record<WizardStep, number> = {
   connect: 5,
   team: 6,
   deploy: 7,
-  done: 8,
 }
 
 export type OnboardingWizardProps = {
-  onComplete: (client: GatewayClient, gatewayUrl: string) => void
+  /**
+   * Called when the wizard finishes. `teamId` is the id of the team the user
+   * just deployed (or null when they skipped the team step). The host
+   * (`GatewayBootstrap`) uses this to navigate into the team's group chat;
+   * otherwise the user lands on the default Atlas view.
+   */
+  onComplete: (client: GatewayClient, gatewayUrl: string, teamId: string | null) => void
 }
 
 // ─── Motion transition ────────────────────────────────────────────────────────
@@ -536,13 +544,22 @@ function DeployStep({
 }: {
   profile: ProfileLike
   client: GatewayClient
-  onComplete: () => void
+  // Receives the id of the newly-deployed team (or null if team creation
+  // failed before any agents were assigned). Threaded up to the wizard so
+  // the post-onboarding navigation can land in the team's group chat.
+  onComplete: (teamId: string | null) => void
 }) {
   const resolved = useMemo(() => resolveTeamAgents(profile), [profile])
   const [progress, setProgress] = useState(0)
   const [currentName, setCurrentName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const fired = useRef(false)
+  // Tracks the teamId across the async deploy flow so the "Continue anyway"
+  // error-escape button can pass it to onComplete even when an agent-level
+  // failure interrupts the happy path. Updated as soon as POST /api/teams
+  // returns ok — every later step (agent assign / brief / leader patch) is
+  // best-effort, so the team exists and is usable even on partial failure.
+  const teamIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (fired.current) return
@@ -578,6 +595,9 @@ function DeployStep({
           if (teamRes.ok) {
             const { team } = (await teamRes.json()) as { team: { id: string } }
             teamId = team.id
+            // Capture in the ref so the "Continue anyway" error-escape
+            // button can pass it to onComplete even if a later step throws.
+            teamIdRef.current = team.id
           }
         } catch {
           // team creation failure is non-fatal — agents will be teamless
@@ -755,9 +775,13 @@ function DeployStep({
           }
         }
 
-        // brief pause to let "All Boos deployed!" read
+        // Brief pause to let the "All Boos ready" copy read before the
+        // wizard exits — the previous DoneStep popup that asked the user
+        // to "View Ghost Graph" is gone; this is the only confirmation
+        // beat the user gets before landing in their new team's group
+        // chat.
         await new Promise<void>((r) => setTimeout(r, 700))
-        onComplete()
+        onComplete(teamId)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Deployment failed')
       }
@@ -860,11 +884,13 @@ function DeployStep({
             {progress} / {resolved.length} Boos created
           </p>
 
-          {/* Error escape hatch */}
+          {/* Error escape hatch — passes whatever teamId we captured
+              before the error (may be null if team creation itself failed
+              or set if the team was created but an agent step threw). */}
           {error && (
             <button
               type="button"
-              onClick={onComplete}
+              onClick={() => onComplete(teamIdRef.current)}
               className="font-mono text-[11px] text-secondary/45 underline underline-offset-2 transition hover:text-secondary/70"
             >
               Continue anyway →
@@ -876,80 +902,11 @@ function DeployStep({
   )
 }
 
-// ─── Step 4: Done ─────────────────────────────────────────────────────────────
-
-function DoneStep({
-  profile,
-  onViewGraph,
-}: {
-  profile: ProfileLike | null
-  onViewGraph: () => void
-}) {
-  const agentCount = useMemo(() => (profile ? resolveTeamAgents(profile).length : 0), [profile])
-
-  // Auto-advance so the user doesn't have to click
-  useEffect(() => {
-    const timer = setTimeout(onViewGraph, 1_600)
-    return () => clearTimeout(timer)
-  }, [onViewGraph])
-
-  return (
-    <WizardCard className="relative overflow-hidden">
-      {/* Atmosphere — subtle behind the completion mascot. Inherits the same
-          opt-out + reduced-motion gates as the WelcomeStep atmosphere. */}
-      <ShaderAtmosphere variant="subtle" />
-      <div className="relative z-10 p-8 flex flex-col items-center text-center gap-5">
-        <motion.div
-          initial={{ scale: 0.4, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 380, damping: 22 }}
-          aria-hidden
-          style={{
-            display: 'flex',
-            width: 72,
-            height: 72,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 999,
-            background: 'rgb(var(--mint-rgb) / 0.12)',
-            border: '1px solid rgb(var(--mint-rgb) / 0.28)',
-            boxShadow:
-              '0 0 0 6px rgb(var(--mint-rgb) / 0.06), 0 8px 24px rgb(var(--mint-rgb) / 0.18)',
-          }}
-        >
-          <CheckCircle2 size={34} strokeWidth={1.75} color="var(--mint)" />
-        </motion.div>
-
-        <div>
-          <h2
-            className="text-[22px] font-bold text-text"
-            style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
-          >
-            Your Ghost Graph is ready
-          </h2>
-          <p className="mt-1.5 text-[13px] text-secondary/70">
-            {profile
-              ? `${agentCount} Boo${agentCount !== 1 ? 's' : ''} deployed and waiting for instructions.`
-              : 'Your fleet is ready. Add Boos anytime from the sidebar.'}
-          </p>
-        </div>
-
-        <motion.button
-          type="button"
-          onClick={onViewGraph}
-          whileHover={{ scale: 1.03 }}
-          whileTap={{ scale: 0.97 }}
-          className="flex items-center gap-2 h-11 px-6 rounded-xl bg-accent font-semibold text-[14px] text-primary-foreground transition hover:brightness-110"
-        >
-          View Ghost Graph
-          <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
-        </motion.button>
-
-        <p className="font-mono text-[10px] text-secondary/25">Opening automatically…</p>
-      </div>
-    </WizardCard>
-  )
-}
+// Note: there is no longer a "Done" / "Your Ghost Graph is ready" step.
+// DeployStep already shows "All N Boos ready" with a 700 ms beat before
+// firing onComplete, and the host (`GatewayBootstrap`) routes the user
+// straight into the new team's group chat — the extra modal was friction
+// without information.
 
 // ─── OnboardingWizard ─────────────────────────────────────────────────────────
 
@@ -1036,17 +993,21 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     [goTo],
   )
 
+  // User chose to skip team setup. No team to land in — we pass null so the
+  // host falls through to its default post-onboarding view.
   const handleSkipTeam = useCallback(() => {
-    goTo('done')
-  }, [goTo])
-
-  const handleDeployComplete = useCallback(() => {
-    goTo('done')
-  }, [goTo])
-
-  const handleViewGraph = useCallback(() => {
-    if (client) onComplete(client, gatewayUrl)
+    if (client) onComplete(client, gatewayUrl, null)
   }, [client, gatewayUrl, onComplete])
+
+  // Deploy succeeded (or partially succeeded — error escape hatch also
+  // routes through here with the captured teamId). The host uses teamId to
+  // navigate the user into the new team's group chat.
+  const handleDeployComplete = useCallback(
+    (teamId: string | null) => {
+      if (client) onComplete(client, gatewayUrl, teamId)
+    },
+    [client, gatewayUrl, onComplete],
+  )
 
   // Animate direction based on step progression
   const isForward = STEP_INDEX[step] >= STEP_INDEX[prevStep]
@@ -1195,20 +1156,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
               client={client}
               onComplete={handleDeployComplete}
             />
-          </motion.div>
-        )}
-
-        {step === 'done' && (
-          <motion.div
-            key="done"
-            variants={directedVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={stepTransition}
-            className="w-full flex justify-center"
-          >
-            <DoneStep profile={selectedProfile} onViewGraph={handleViewGraph} />
           </motion.div>
         )}
       </AnimatePresence>
