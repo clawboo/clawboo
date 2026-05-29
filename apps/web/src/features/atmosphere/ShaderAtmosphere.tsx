@@ -79,6 +79,13 @@ export function ShaderAtmosphere({ variant = 'hero' }: ShaderAtmosphereProps) {
           }) 0%, rgb(var(--canvas-rgb) / 0) 70%)`,
         }}
       />
+      {/* NOTE: there is intentionally NO edge vignette here. An earlier
+          version added one to make the asymmetric wash feel "framed", but on
+          the LIVE WebGL shader (vs. the static fallback) the shader's top is
+          naturally light, and tinting it with even a 5% slate vignette turned
+          that light area into a grey "empty" band — the exact dark-corner look
+          we're trying to avoid. The full-bleed gradient reads as intentional
+          on its own (Vercel/Linear-style hero), so the frame is dropped. */}
     </div>
   )
 }

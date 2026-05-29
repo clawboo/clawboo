@@ -77,6 +77,12 @@ export function Select({
           appearance: 'none',
           WebkitAppearance: 'none',
           MozAppearance: 'none',
+          // Fill the wrapper so the absolutely-positioned chevron always sits at
+          // the field's right edge. Without this the native <select> shrinks to
+          // its text content while the chevron stays pinned to the (wider)
+          // wrapper edge — the "arrow floating far from the field" bug whenever a
+          // width is passed (e.g. style={{ width: '100%' }}).
+          width: '100%',
           height: dims.height,
           paddingLeft: dims.pl,
           paddingRight: dims.pr,

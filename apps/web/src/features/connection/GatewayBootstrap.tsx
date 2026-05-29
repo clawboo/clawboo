@@ -30,8 +30,9 @@ import {
 import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayConnectScreen } from './GatewayConnectScreen'
-import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard'
+import { OnboardingWizard, type WizardStep } from '@/features/onboarding/OnboardingWizard'
 import { BooTip } from '@/features/onboarding/BooTip'
+import { isWizardActive, markWizardActive, clearWizardActive } from '@/lib/onboardingProgress'
 import { useGatewayEvents } from './useGatewayEvents'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
@@ -176,6 +177,9 @@ export function GatewayBootstrap() {
 
   // null = not yet determined (avoids SSR/client localStorage mismatch)
   const [showWizard, setShowWizard] = useState<boolean | null>(null)
+  // Step the wizard re-enters at. 'welcome' for a fresh run; 'detect' when
+  // resuming a mid-onboarding refresh (see the resume branch below).
+  const [wizardInitialStep, setWizardInitialStep] = useState<WizardStep>('welcome')
 
   useEffect(() => {
     // ALWAYS verify system state. The previous "fast path" trusted the
@@ -193,6 +197,23 @@ export function GatewayBootstrap() {
     // and skip the wizard. Otherwise clear the stale flag and show the
     // wizard so the user can re-install + reconfigure.
     void (async () => {
+      const onboarded = typeof window !== 'undefined' && localStorage.getItem(ONBOARDED_KEY) === '1'
+
+      // RESUME a mid-onboarding refresh. If the user started the wizard but
+      // never completed it (active marker set, not yet onboarded), re-enter
+      // the wizard rather than fast-pathing to the dashboard — even if
+      // OpenClaw is now configured. Without this, refreshing after the
+      // configure / start-gateway steps (when OpenClaw becomes 'configured')
+      // would skip the team-pick + deploy steps and dump the user on an empty
+      // dashboard. We resume at 'detect', which re-validates the environment
+      // and auto-advances to the team step when everything's already green.
+      if (isWizardActive() && !onboarded) {
+        markWizardActive() // idempotent — keep the marker through the resume
+        setWizardInitialStep('detect')
+        setShowWizard(true)
+        return
+      }
+
       try {
         const resp = await fetch('/api/system/status')
         if (resp.ok) {
@@ -201,6 +222,7 @@ export function GatewayBootstrap() {
             info.openclaw.installed && info.openclaw.configExists && info.openclaw.envExists
           if (configured) {
             markOnboarded()
+            clearWizardActive() // returning user — no wizard run in flight
             setShowWizard(false)
             return
           }
@@ -212,6 +234,9 @@ export function GatewayBootstrap() {
       // marked the user onboarded, the flag is now stale — clear it so a
       // future successful onboarding can re-set it cleanly.
       if (typeof window !== 'undefined') localStorage.removeItem(ONBOARDED_KEY)
+      // Entering a fresh wizard run — mark it active so a mid-flow refresh
+      // resumes here instead of fast-pathing to the dashboard.
+      markWizardActive()
       setShowWizard(true)
     })()
   }, [])
@@ -524,6 +549,9 @@ export function GatewayBootstrap() {
   const handleOnboardingComplete = useCallback(
     async (newClient: GatewayClient, url: string, teamId: string | null) => {
       markOnboarded()
+      // Wizard run finished — drop the in-progress marker so future refreshes
+      // take the returning-user fast path instead of resuming the wizard.
+      clearWizardActive()
 
       // Disconnect old client before replacing to avoid leaked WS listeners
       const prev = useConnectionStore.getState().client
@@ -573,7 +601,11 @@ export function GatewayBootstrap() {
       <AnimatePresence>
         {/* First-time onboarding wizard */}
         {!isConnected && showWizard === true && (
-          <OnboardingWizard key="onboarding" onComplete={handleOnboardingComplete} />
+          <OnboardingWizard
+            key="onboarding"
+            onComplete={handleOnboardingComplete}
+            initialStep={wizardInitialStep}
+          />
         )}
 
         {/* Auto-connecting spinner — shown while we attempt a silent reconnect */}

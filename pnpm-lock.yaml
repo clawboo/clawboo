@@ -220,6 +220,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.0
         version: 4.0.1
+      simple-icons:
+        specifier: ^16.21.0
+        version: 16.21.0
       three:
         specifier: ^0.184.0
         version: 0.184.0
@@ -6829,6 +6832,13 @@ packages:
         integrity: sha512-brv7p5WgH0jmQJr1ZDDfKDOSeWWg+OVypG99A/5vYGPqJ6pxiaHLy8nxtFjBA7oMa01ebA9gfh1uMCFqOuXxvA==,
       }
 
+  simple-icons@16.21.0:
+    resolution:
+      {
+        integrity: sha512-kH6LEx5yvBGVNaVrHnZ7D17G16CmmHiI8DD7MwIwgnWmDFTiFu4PhFZLNdV6bMGr61qbHMMTXLoo/T6C25dMGA==,
+      }
+    engines: { node: '>=0.12.18' }
+
   sisteransi@1.0.5:
     resolution:
       {
@@ -11784,6 +11794,8 @@ snapshots:
       decompress-response: 6.0.0
       once: 1.4.0
       simple-concat: 1.0.1
+
+  simple-icons@16.21.0: {}
 
   sisteransi@1.0.5: {}
 

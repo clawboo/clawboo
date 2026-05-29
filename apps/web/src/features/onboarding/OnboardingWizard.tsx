@@ -43,7 +43,7 @@ const PROFILES: ProfileLike[] = STARTER_TEMPLATES
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type WizardStep =
+export type WizardStep =
   | 'welcome'
   | 'detect'
   | 'install'
@@ -72,6 +72,14 @@ export type OnboardingWizardProps = {
    * otherwise the user lands on the default Atlas view.
    */
   onComplete: (client: GatewayClient, gatewayUrl: string, teamId: string | null) => void
+  /**
+   * Step to start at. Defaults to 'welcome' for a fresh run. The host passes
+   * 'detect' when RESUMING a mid-onboarding refresh — DetectStep re-validates
+   * the environment and auto-advances to the team step when OpenClaw is
+   * already configured + the gateway is running, so the user picks up where
+   * the returning-user fast path would otherwise have skipped them.
+   */
+  initialStep?: WizardStep
 }
 
 // ─── Motion transition ────────────────────────────────────────────────────────
@@ -115,12 +123,16 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
           Honours the opt-out toggle + prefers-reduced-motion. */}
       <ShaderAtmosphere variant="hero" />
 
-      {/* Subtle grid — sits above the atmosphere for tactile depth. */}
+      {/* Subtle grid — sits above the atmosphere for tactile depth.
+          Theme-aware: the line color is driven by --foreground-rgb (light
+          ink in dark mode, dark ink in light mode) so the grid reads in BOTH
+          themes. The previous hardcoded rgba(255,255,255,…) only showed on
+          dark backgrounds — white-on-white made it invisible in light mode. */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-[0.03]"
+        className="pointer-events-none absolute inset-0"
         style={{
           backgroundImage:
-            'linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)',
+            'linear-gradient(rgb(var(--foreground-rgb) / 0.045) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--foreground-rgb) / 0.045) 1px, transparent 1px)',
           backgroundSize: '48px 48px',
         }}
       />
@@ -147,14 +159,26 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
         <div className="flex flex-col items-center gap-2">
           <h1
             className="text-[54px] font-bold tracking-tight text-text leading-none"
-            style={{ fontFamily: 'var(--font-display)' }}
+            style={{
+              fontFamily: 'var(--font-display)',
+              // Theme-aware halo (matches page bg) so the wordmark stays crisp
+              // over the moving shader gradient in both light and dark.
+              textShadow:
+                '0 2px 28px rgb(var(--canvas-rgb) / 0.55), 0 1px 4px rgb(var(--canvas-rgb) / 0.45)',
+            }}
           >
             Clawboo
           </h1>
-          <p className="text-[21px] font-light tracking-wide text-secondary">
+          <p
+            className="text-[21px] font-light tracking-wide text-foreground/75"
+            style={{ textShadow: '0 1px 14px rgb(var(--canvas-rgb) / 0.5)' }}
+          >
             Your AI agents, visible.
           </p>
-          <p className="text-[13px] text-secondary/45 mt-1 leading-relaxed">
+          <p
+            className="text-[13px] text-foreground/80 mt-1 leading-relaxed"
+            style={{ textShadow: '0 1px 12px rgb(var(--canvas-rgb) / 0.5)' }}
+          >
             Deploy and orchestrate your OpenClaw agent teams.
             <br />
             Set up in under 90 seconds.
@@ -173,7 +197,12 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
           <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
         </motion.button>
 
-        <p className="text-[11px] text-secondary/25 font-mono -mt-2">Requires OpenClaw Gateway</p>
+        <p
+          className="text-[11px] text-foreground/60 font-mono -mt-2"
+          style={{ textShadow: '0 1px 10px rgb(var(--canvas-rgb) / 0.45)' }}
+        >
+          Requires OpenClaw Gateway
+        </p>
       </div>
     </div>
   )
@@ -913,9 +942,9 @@ function DeployStep({
 
 // ─── OnboardingWizard ─────────────────────────────────────────────────────────
 
-export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
-  const [step, setStep] = useState<WizardStep>('welcome')
-  const [prevStep, setPrevStep] = useState<WizardStep>('welcome')
+export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: OnboardingWizardProps) {
+  const [step, setStep] = useState<WizardStep>(initialStep)
+  const [prevStep, setPrevStep] = useState<WizardStep>(initialStep)
   const [client, setClient] = useState<GatewayClient | null>(null)
   const [gatewayUrl, setGatewayUrl] = useState('')
   const [selectedProfile, setSelectedProfile] = useState<ProfileLike | null>(null)

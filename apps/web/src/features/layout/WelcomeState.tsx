@@ -184,11 +184,21 @@ export function WelcomeState() {
             fontWeight: 700,
             letterSpacing: '-0.02em',
             lineHeight: 1.1,
+            // Theme-aware halo lifts the text off the moving shader gradient.
+            // --canvas-rgb is near-black in dark / near-white in light, so the
+            // shadow always matches the page bg and reads as a soft plate,
+            // never a drop-shadow. Without it, the heading washes out wherever
+            // a bright gradient blob sits behind it.
+            textShadow:
+              '0 2px 24px rgb(var(--canvas-rgb) / 0.55), 0 1px 4px rgb(var(--canvas-rgb) / 0.45)',
           }}
         >
           Welcome to Clawboo
         </h1>
-        <p className="mx-auto mt-3 max-w-[400px] text-[14px] leading-relaxed text-foreground/55">
+        <p
+          className="mx-auto mt-3 max-w-[400px] text-[14px] leading-relaxed text-foreground/80"
+          style={{ textShadow: '0 1px 12px rgb(var(--canvas-rgb) / 0.5)' }}
+        >
           Deploy, orchestrate, and observe your AI agent fleet.
         </p>
 
@@ -200,11 +210,16 @@ export function WelcomeState() {
         <div className="flex w-full max-w-[340px] flex-col gap-3 text-left">
           {steps.map((step) => (
             <div key={step.num} className="flex items-start gap-3">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/12 text-[12px] font-bold text-primary">
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[12px] font-bold text-primary">
                 {step.num}
               </div>
               <div className="flex-1 pt-0.5">
-                <span className="text-[13px] text-foreground/70">{step.text}</span>
+                <span
+                  className="text-[13px] text-foreground/85"
+                  style={{ textShadow: '0 1px 10px rgb(var(--canvas-rgb) / 0.5)' }}
+                >
+                  {step.text}
+                </span>
                 {step.action && (
                   <button
                     onClick={step.action}

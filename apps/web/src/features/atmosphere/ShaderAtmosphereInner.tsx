@@ -28,7 +28,28 @@ export default function ShaderAtmosphereInner({
   // — the gradient should feel like "weather behind glass", never wash out the
   // foreground. Opacity, brightness, strength are all tuned LOW.
   return (
-    <div className="pointer-events-none absolute inset-0">
+    // ShaderGradient is a 3D scene with a FINITE plane mesh (not a full-screen
+    // fragment shader like Stripe/Linear use), so the plane's edge can always
+    // be exposed at some aspect ratio — no camera tweak or percentage oversize
+    // fully escapes that. The robust fix: render into a SQUARE canvas larger
+    // than the viewport's biggest dimension, centered. A square of side ≥
+    // max(viewportW, viewportH) always covers the viewport at ANY aspect, so
+    // the plane (which fills its square canvas) overflows the visible area on
+    // every side and its edge can never enter frame. `vmax` = 1% of the larger
+    // viewport dimension; 140vmax = 1.4× the bigger side = generous margin at
+    // any aspect (ultra-wide, ultra-tall, square — all covered). No edge in
+    // view means no mask needed (the mask itself created a visible rounded
+    // boundary at extreme aspect).
+    <div
+      className="pointer-events-none absolute"
+      style={{
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: '140vmax',
+        height: '140vmax',
+      }}
+    >
       <ShaderGradientCanvas
         style={{
           position: 'absolute',
@@ -47,10 +68,18 @@ export default function ShaderAtmosphereInner({
           color1={color1}
           color2={color2}
           color3={color3}
-          // Camera: slight 3D tilt, zoomed wide so blobs read as atmosphere.
+          // Camera: looks STRAIGHT AT the plane (cPolarAngle 90) so the plane
+          // faces the camera flat — there's no tilt that exposes a far "horizon"
+          // edge. A finite tilted plane (the old rotationX:50 / cPolarAngle:80
+          // setup) always leaves an empty band above its edge at some aspect
+          // ratio: three.js fixes the vertical FOV and widens the horizontal
+          // FOV as the window gets wider, so an ultra-wide/short viewport sees
+          // PAST the plane's edges. A face-on, unrotated plane fills the frame
+          // edge-to-edge at ANY aspect. cDistance pulled in a touch so the
+          // plane more than covers the viewport.
           cAzimuthAngle={180}
-          cPolarAngle={80}
-          cDistance={4.4}
+          cPolarAngle={90}
+          cDistance={3.6}
           cameraZoom={isSubtle ? 0.95 : 1}
           // Slow, gentle motion. uStrength controls deformation amount —
           // low values keep colour blobs from clashing into hard borders.
@@ -63,9 +92,13 @@ export default function ShaderAtmosphereInner({
           positionX={0}
           positionY={0}
           positionZ={0}
-          rotationX={50}
+          // No tilt (rotationX) or in-plane rotation (rotationZ): a rotated
+          // quad doesn't fill a rectangle (its corners cut in), and tilt
+          // creates the horizon. Keeping it axis-aligned + face-on is what
+          // makes the fill robust across every viewport aspect.
+          rotationX={0}
           rotationY={0}
-          rotationZ={-60}
+          rotationZ={0}
           lightType="3d"
           brightness={0.7}
           envPreset="city"

@@ -68,15 +68,20 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
   }, [setInstallStatus, appendInstallLog])
 
   // ── Mount: auto-start ────────────────────────────────────────────────────
+  // Intentionally NO abort-on-cleanup here. The install is a one-time op
+  // guarded by `firedRef`. Aborting on unmount made it fragile: React
+  // StrictMode (dev) double-invokes effects (mount → cleanup → mount), so the
+  // cleanup aborted the in-flight install (the server's res.on('close') even
+  // killed the npm child) AND the fire-once guard blocked the re-fire —
+  // leaving the wizard stuck on "Installing OpenClaw" forever. Letting the
+  // install run to completion server-side, even across an incidental remount,
+  // is the safer behavior. The Retry path still aborts the prior controller
+  // before re-firing (see startInstall), so we don't leak overlapping streams.
   useEffect(() => {
     if (firedRef.current) return
     firedRef.current = true
     clearInstallLog()
     startInstall()
-
-    return () => {
-      controllerRef.current?.abort()
-    }
   }, [clearInstallLog, startInstall])
 
   // ── Auto-scroll log ──────────────────────────────────────────────────────
@@ -133,7 +138,7 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
         {/* ── Terminal log ──────────────────────────────────────── */}
         <div className="mb-4 max-h-[240px] overflow-y-auto rounded-lg border border-border bg-[#0d1117] p-3">
           {installLog.map((line, i) => (
-            <div key={i} className="font-mono text-[11px] leading-relaxed text-secondary/60">
+            <div key={i} className="font-mono text-[11px] leading-relaxed text-[#c9d1d9]/70">
               {line}
             </div>
           ))}

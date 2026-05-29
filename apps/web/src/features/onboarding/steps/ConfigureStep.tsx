@@ -6,12 +6,13 @@
  * openclaw.json, .env, and auto-saves Clawboo settings.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowLeft, ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { MODEL_GROUPS } from '@/lib/modelCatalog'
-import { Select } from '@/features/shared/Select'
 import { StepIndicator } from '../StepIndicator'
+import { ProviderIcon, PROVIDER_BRAND, type ProviderId } from '../ProviderIcon'
+import { ModelDropdown } from '../ModelDropdown'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -21,80 +22,47 @@ export type ConfigureStepProps = {
 }
 
 // ─── Provider data ───────────────────────────────────────────────────────────
-
-type ProviderId =
-  | 'anthropic'
-  | 'openai'
-  | 'google'
-  | 'ollama'
-  | 'openrouter'
-  | 'xai'
-  | 'groq'
-  | 'mistral'
-  | 'moonshot'
-  | 'minimax'
-  | 'together'
-  | 'nvidia'
-  | 'huggingface'
-  | 'cerebras'
-  | 'venice'
+//
+// Brand marks + accent colors live in `../ProviderIcon` (authentic logos via
+// simple-icons + lettermark fallbacks). Here we only carry the copy + key
+// requirements; the selected-state tint is derived from each provider's accent.
 
 interface ProviderOption {
   id: ProviderId
   name: string
-  icon: string
   description: string
   placeholder: string
   needsKey: boolean
-  tint: string
-  tintBorder: string
-  tintBg: string
 }
 
 const PRIMARY_PROVIDERS: ProviderOption[] = [
   {
     id: 'anthropic',
     name: 'Anthropic',
-    icon: '🅰️',
     description: 'Claude models — fast, capable, and reliable',
     placeholder: 'sk-ant-...',
     needsKey: true,
-    tint: 'text-accent',
-    tintBorder: 'border-accent/40',
-    tintBg: 'bg-accent/8',
   },
   {
     id: 'openai',
     name: 'OpenAI',
-    icon: '🤖',
     description: 'GPT models — versatile and widely used',
     placeholder: 'sk-...',
     needsKey: true,
-    tint: 'text-emerald-400',
-    tintBorder: 'border-emerald-400/40',
-    tintBg: 'bg-emerald-400/8',
   },
   {
     id: 'google',
     name: 'Google',
-    icon: '🔷',
     description: 'Gemini models — great multimodal capabilities',
     placeholder: 'AIza...',
     needsKey: true,
-    tint: 'text-blue-400',
-    tintBorder: 'border-blue-400/40',
-    tintBg: 'bg-blue-400/8',
   },
   {
     id: 'ollama',
     name: 'Ollama',
-    icon: '🦙',
     description: 'Run models locally — free, private, no API key',
     placeholder: '',
     needsKey: false,
-    tint: 'text-amber',
-    tintBorder: 'border-amber/40',
-    tintBg: 'bg-amber/8',
   },
 ]
 
@@ -102,125 +70,82 @@ const MORE_PROVIDERS: ProviderOption[] = [
   {
     id: 'openrouter',
     name: 'OpenRouter',
-    icon: '🔀',
     description: 'Access 200+ models via one API key',
     placeholder: 'sk-or-...',
     needsKey: true,
-    tint: 'text-violet-400',
-    tintBorder: 'border-violet-400/40',
-    tintBg: 'bg-violet-400/8',
   },
-  {
-    id: 'xai',
-    name: 'xAI',
-    icon: '𝕏',
-    description: 'Grok models',
-    placeholder: 'xai-...',
-    needsKey: true,
-    tint: 'text-foreground/75',
-    tintBorder: 'border-foreground/30',
-    tintBg: 'bg-foreground/[0.08]',
-  },
+  { id: 'xai', name: 'xAI', description: 'Grok models', placeholder: 'xai-...', needsKey: true },
   {
     id: 'groq',
     name: 'Groq',
-    icon: '⚡',
     description: 'Ultra-fast inference',
     placeholder: 'gsk_...',
     needsKey: true,
-    tint: 'text-orange-400',
-    tintBorder: 'border-orange-400/40',
-    tintBg: 'bg-orange-400/8',
   },
   {
     id: 'mistral',
     name: 'Mistral',
-    icon: '🌊',
     description: 'Mistral Large and more',
     placeholder: '',
     needsKey: true,
-    tint: 'text-sky-400',
-    tintBorder: 'border-sky-400/40',
-    tintBg: 'bg-sky-400/8',
   },
-  {
-    id: 'moonshot',
-    name: 'Moonshot',
-    icon: '🌙',
-    description: 'Kimi models',
-    placeholder: '',
-    needsKey: true,
-    tint: 'text-indigo-400',
-    tintBorder: 'border-indigo-400/40',
-    tintBg: 'bg-indigo-400/8',
-  },
+  { id: 'moonshot', name: 'Moonshot', description: 'Kimi models', placeholder: '', needsKey: true },
   {
     id: 'minimax',
     name: 'MiniMax',
-    icon: '🔲',
     description: 'MiniMax M2.5 and more',
     placeholder: '',
     needsKey: true,
-    tint: 'text-cyan-400',
-    tintBorder: 'border-cyan-400/40',
-    tintBg: 'bg-cyan-400/8',
   },
   {
     id: 'together',
     name: 'Together',
-    icon: '🤝',
     description: 'Open-source models hosted',
     placeholder: '',
     needsKey: true,
-    tint: 'text-teal-400',
-    tintBorder: 'border-teal-400/40',
-    tintBg: 'bg-teal-400/8',
   },
   {
     id: 'nvidia',
     name: 'NVIDIA',
-    icon: '🟩',
     description: 'NVIDIA NIM endpoints',
     placeholder: 'nvapi-...',
     needsKey: true,
-    tint: 'text-lime-400',
-    tintBorder: 'border-lime-400/40',
-    tintBg: 'bg-lime-400/8',
   },
   {
     id: 'huggingface',
     name: 'Hugging Face',
-    icon: '🤗',
     description: 'Open models via Inference API',
     placeholder: 'hf_...',
     needsKey: true,
-    tint: 'text-yellow-400',
-    tintBorder: 'border-yellow-400/40',
-    tintBg: 'bg-yellow-400/8',
   },
   {
     id: 'cerebras',
     name: 'Cerebras',
-    icon: '🧠',
     description: 'Fast wafer-scale inference',
     placeholder: '',
     needsKey: true,
-    tint: 'text-rose-400',
-    tintBorder: 'border-rose-400/40',
-    tintBg: 'bg-rose-400/8',
   },
   {
     id: 'venice',
     name: 'Venice',
-    icon: '🏛️',
     description: 'Privacy-focused AI',
     placeholder: '',
     needsKey: true,
-    tint: 'text-fuchsia-400',
-    tintBorder: 'border-fuchsia-400/40',
-    tintBg: 'bg-fuchsia-400/8',
   },
 ]
+
+// Selected-state styling derived from each provider's brand accent — replaces
+// the old per-provider Tailwind tint classes + non-theme-aware `ring-white`.
+// `currentColor` accents (Ollama / xAI) resolve to the theme foreground, giving
+// a neutral selected tint for those monochrome brands.
+function selectedTint(id: ProviderId): CSSProperties {
+  const c = PROVIDER_BRAND[id].color
+  return {
+    borderColor: `color-mix(in srgb, ${c} 55%, transparent)`,
+    background: `color-mix(in srgb, ${c} 12%, transparent)`,
+    boxShadow: `0 0 0 1px color-mix(in srgb, ${c} 35%, transparent)`,
+  }
+}
 
 const ALL_PROVIDERS: ProviderOption[] = [...PRIMARY_PROVIDERS, ...MORE_PROVIDERS]
 
@@ -338,7 +263,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
 
         <h2
           className="text-[20px] font-bold text-text mb-1"
-          style={{ fontFamily: 'var(--font-display)' }}
+          style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
         >
           Set Up OpenClaw
         </h2>
@@ -347,7 +272,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
         </p>
 
         {/* ── Primary provider cards ─────────────────────────── */}
-        <div className="mb-4 grid grid-cols-2 gap-3">
+        <div className="mb-5 grid grid-cols-2 gap-3">
           {PRIMARY_PROVIDERS.map((p) => {
             const isSelected = provider === p.id
 
@@ -361,23 +286,27 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
                   if (!p.needsKey) setApiKey('')
                 }}
                 disabled={submitting}
+                style={isSelected ? selectedTint(p.id) : undefined}
                 className={[
-                  'flex flex-col items-start rounded-xl p-4 text-left transition',
+                  'group relative flex flex-col items-start rounded-xl border p-4 text-left',
+                  'transition-[border-color,background-color,box-shadow,transform] duration-200',
                   isSelected
-                    ? `${p.tintBorder} ${p.tintBg} ring-2 ring-white/40`
-                    : 'border border-border bg-background/50 hover:border-foreground/15 hover:bg-background/80',
+                    ? 'border-transparent'
+                    : 'border-border bg-background/40 hover:-translate-y-px hover:border-foreground/15 hover:bg-background/70',
                   submitting ? 'opacity-50 cursor-not-allowed' : '',
                 ].join(' ')}
               >
-                <span className="text-[22px] mb-1.5">{p.icon}</span>
-                <span
-                  className={['text-[14px] font-semibold', isSelected ? p.tint : 'text-text'].join(
-                    ' ',
-                  )}
-                >
-                  {p.name}
-                </span>
-                <span className="text-[11px] leading-snug text-secondary/60 mt-0.5">
+                {isSelected && (
+                  <span
+                    className="absolute right-3 top-3 flex h-4 w-4 items-center justify-center rounded-full"
+                    style={{ background: PROVIDER_BRAND[p.id].color, color: 'var(--background)' }}
+                  >
+                    <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                  </span>
+                )}
+                <ProviderIcon id={p.id} size={36} />
+                <span className="mt-2.5 text-[14px] font-semibold text-text">{p.name}</span>
+                <span className="mt-0.5 text-[11px] leading-snug text-secondary/70">
                   {p.description}
                 </span>
               </button>
@@ -386,7 +315,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
         </div>
 
         {/* ── More providers ──────────────────────────────────── */}
-        <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary/40">
+        <p className="mb-2.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary/40">
           More providers
         </p>
         <div className="mb-5 grid grid-cols-2 gap-2">
@@ -403,19 +332,22 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
                   if (!p.needsKey) setApiKey('')
                 }}
                 disabled={submitting}
+                style={isSelected ? selectedTint(p.id) : undefined}
                 className={[
-                  'flex items-center gap-2 rounded-lg px-3 py-2 text-left transition',
+                  'flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left',
+                  'transition-[border-color,background-color,box-shadow] duration-150',
                   isSelected
-                    ? `${p.tintBorder} ${p.tintBg} ring-1 ring-white/30`
-                    : 'border border-border bg-background/30 hover:border-border hover:bg-background/60',
+                    ? 'border-transparent'
+                    : 'border-border bg-background/25 hover:border-foreground/15 hover:bg-background/60',
                   submitting ? 'opacity-50 cursor-not-allowed' : '',
                 ].join(' ')}
               >
-                <span className="text-[14px] shrink-0">{p.icon}</span>
+                <ProviderIcon id={p.id} size={22} />
                 <span
-                  className={['text-[12px] font-medium', isSelected ? p.tint : 'text-text/70'].join(
-                    ' ',
-                  )}
+                  className={[
+                    'text-[12px] font-medium',
+                    isSelected ? 'text-text' : 'text-text/70',
+                  ].join(' ')}
                 >
                   {p.name}
                 </span>
@@ -493,16 +425,12 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
                     used for new agents
                   </span>
                 </label>
-                <Select
+                <ModelDropdown
                   aria-label="Default model"
                   value={model}
                   onChange={setModel}
                   disabled={submitting}
-                  options={availableModels.map((m, idx) => ({
-                    value: m.id,
-                    label: idx === 0 ? `${m.label}  ·  Recommended` : m.label,
-                  }))}
-                  style={{ width: '100%' }}
+                  options={availableModels.map((m) => ({ id: m.id, label: m.label }))}
                 />
                 <p className="font-mono text-[10px] text-secondary/40">
                   You can change this anytime from System → Default Model.
