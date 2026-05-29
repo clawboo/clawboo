@@ -107,10 +107,13 @@ function WizardCard({
 function WelcomeStep({ onContinue }: { onContinue: () => void }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center bg-background overflow-hidden">
-      {/* Atmosphere — subtle organic gradient behind the hero. Lazy-loaded
-          WebGL when available, CSS radial fallback otherwise. Honours the
-          opt-out toggle + prefers-reduced-motion. */}
-      <ShaderAtmosphere variant="subtle" />
+      {/* Atmosphere — full-strength organic gradient behind the hero. This
+          is the very first screen a user sees on `npx clawboo`; there's no
+          other content competing for attention, so we use the same `hero`
+          variant the post-onboarding WelcomeState uses (NOT `subtle`).
+          Lazy-loaded WebGL when available, CSS radial fallback otherwise.
+          Honours the opt-out toggle + prefers-reduced-motion. */}
+      <ShaderAtmosphere variant="hero" />
 
       {/* Subtle grid — sits above the atmosphere for tactile depth. */}
       <div

@@ -195,11 +195,17 @@
 
   /* Atmosphere palette — Phase 15 ShaderGradient backdrop on hero surfaces.
      Decoupled from brand vars so the atmosphere can be tuned independently
-     (e.g. softer hue on light theme without dropping brand saturation). */
+     (e.g. softer hue on light theme without dropping brand saturation).
+     Light theme keeps a slightly lower intensity than dark (0.32 vs 0.42)
+     because saturated colour reads more strongly on white than on slate,
+     but it has to stay strong enough that the gradient is OBVIOUS at first
+     glance on the welcome / onboarding hero. Previously 0.22, which when
+     combined with the `subtle` variant's 0.5× multiplier produced ~11%
+     visibility on white — essentially invisible. */
   --atmosphere-1: #dc2a48; /* OpenClaw Red (brand-faithful) */
   --atmosphere-2: #059669; /* Mint */
   --atmosphere-3: #d97706; /* Amber */
-  --atmosphere-intensity: 0.22; /* multiplier for both shader & static fallback opacity */
+  --atmosphere-intensity: 0.32; /* multiplier for both shader & static fallback opacity */
 
   color-scheme: light;
 }
