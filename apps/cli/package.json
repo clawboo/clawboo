@@ -1,6 +1,6 @@
 {
   "name": "clawboo",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "The open-source platform for deploying and orchestrating OpenClaw agent teams",
   "license": "MIT",
   "repository": {

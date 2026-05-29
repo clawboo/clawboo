@@ -1,5 +1,11 @@
 # clawboo
 
+## 0.1.8
+
+### Patch Changes
+
+- 4ecda72: Light/dark theme with toggle + persisted preference, premium design-system pass (4-tier surfaces, type scale, motion), Atlas radial layout, GitHub star CTA, authentic provider brand marks + app-consistent model dropdown in onboarding, and onboarding-hang/atmosphere fixes.
+
 ## 0.1.7
 
 ### Patch Changes
