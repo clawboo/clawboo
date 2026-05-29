@@ -26,17 +26,9 @@ import {
 import { TeamTemplateDetail } from '@/features/marketplace/TeamTemplateDetail'
 import { TemplateFanDeck } from './TemplateFanDeck'
 import { TemplateGrid } from './TemplateGrid'
-
-const PRESET_COLORS = [
-  'var(--primary)',
-  'var(--mint)',
-  'var(--amber)',
-  '#60A5FA',
-  '#A78BFA',
-  '#F472B6',
-  '#38BDF8',
-  '#FB923C',
-] as const
+import { TeamColorCollectionPicker } from './TeamColorCollectionPicker'
+import { TeamAccentPicker, TEAM_ACCENT_PRESETS } from './TeamAccentPicker'
+import { DEFAULT_COLLECTION_ID, type CollectionId } from '@/lib/teamPalettes'
 
 // ─── Pick-step source filter entries (agency-agents first, clawboo last) ─────
 
@@ -90,6 +82,7 @@ export function CreateTeamModal({
       setTeamName(initialProfile.name)
       setTeamIcon(initialProfile.emoji)
       setTeamColor(initialProfile.color)
+      setColorCollectionId(DEFAULT_COLLECTION_ID)
       setStep('customize')
     }
   }, [isOpen, initialProfile])
@@ -98,7 +91,9 @@ export function CreateTeamModal({
   // Customize fields
   const [teamName, setTeamName] = useState('')
   const [teamIcon, setTeamIcon] = useState('')
-  const [teamColor, setTeamColor] = useState<string>(PRESET_COLORS[0])
+  // Team accent (icon / halo) and the Boo color collection are independent.
+  const [teamColor, setTeamColor] = useState<string>(TEAM_ACCENT_PRESETS[0])
+  const [colorCollectionId, setColorCollectionId] = useState<CollectionId>(DEFAULT_COLLECTION_ID)
 
   // Deploy state
   const [progress, setProgress] = useState<DeployProgress | null>(null)
@@ -157,7 +152,8 @@ export function CreateTeamModal({
     setSelectedProfile(null)
     setTeamName('')
     setTeamIcon('')
-    setTeamColor(PRESET_COLORS[0])
+    setTeamColor(TEAM_ACCENT_PRESETS[0])
+    setColorCollectionId(DEFAULT_COLLECTION_ID)
     setProgress(null)
     setError(null)
     setPickSearch('')
@@ -178,6 +174,7 @@ export function CreateTeamModal({
     setTeamName(profile.name)
     setTeamIcon(profile.emoji)
     setTeamColor(profile.color)
+    setColorCollectionId(DEFAULT_COLLECTION_ID)
     setStep('customize')
   }, [])
 
@@ -185,7 +182,8 @@ export function CreateTeamModal({
     setSelectedProfile(null)
     setTeamName('New Team')
     setTeamIcon('👻')
-    setTeamColor(PRESET_COLORS[0])
+    setTeamColor(TEAM_ACCENT_PRESETS[0])
+    setColorCollectionId(DEFAULT_COLLECTION_ID)
     setStep('customize')
   }, [])
 
@@ -221,6 +219,7 @@ export function CreateTeamModal({
           name: finalTeamName,
           icon: teamIcon,
           color: teamColor,
+          colorCollectionId,
           templateId: selectedProfile?.id ?? null,
         }),
       })
@@ -235,6 +234,7 @@ export function CreateTeamModal({
         name: team.name,
         icon: team.icon,
         color: team.color,
+        colorCollectionId,
         templateId: team.templateId ?? null,
         leaderAgentId: null,
         isArchived: false,
@@ -796,28 +796,23 @@ export function CreateTeamModal({
                   />
                 </label>
 
-                {/* Color */}
+                {/* Accent color — team icon / halo / header */}
                 <div className="mb-5">
                   <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-secondary">
                     Color
                   </span>
-                  <div className="flex flex-wrap gap-2">
-                    {PRESET_COLORS.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        onClick={() => setTeamColor(color)}
-                        className="h-7 w-7 rounded-full transition-all"
-                        style={{
-                          backgroundColor: color,
-                          boxShadow:
-                            teamColor === color
-                              ? `0 0 0 2px var(--background), 0 0 0 4px ${color}`
-                              : 'none',
-                        }}
-                      />
-                    ))}
-                  </div>
+                  <TeamAccentPicker value={teamColor} onChange={setTeamColor} />
+                </div>
+
+                {/* Color collection — per-Boo avatar palette */}
+                <div className="mb-5">
+                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-secondary">
+                    Color collection
+                  </span>
+                  <TeamColorCollectionPicker
+                    value={colorCollectionId}
+                    onChange={setColorCollectionId}
+                  />
                 </div>
 
                 {/* Preview */}

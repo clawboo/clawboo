@@ -1,5 +1,7 @@
 import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
+import type { CollectionId } from '@/lib/teamPalettes'
+import { normalizeTeamColor } from '@/lib/normalizeTeamColor'
 
 /**
  * Hydrate teams from SQLite on connect + patch agent teamIds in fleet store.
@@ -14,6 +16,7 @@ export async function hydrateTeams(): Promise<void> {
         name: string
         icon: string
         color: string
+        colorCollectionId: CollectionId | null
         templateId: string | null
         leaderAgentId: string | null
         isArchived: number
@@ -25,6 +28,7 @@ export async function hydrateTeams(): Promise<void> {
       useTeamStore.getState().hydrateTeams(
         data.teams.map((t) => ({
           ...t,
+          color: normalizeTeamColor(t.color),
           isArchived: !!t.isArchived,
         })),
       )

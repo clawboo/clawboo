@@ -347,20 +347,28 @@ export function TeamHaloLayer({ nodes }: TeamHaloLayerProps) {
             <g key={halo.teamId}>
               <path
                 d={halo.path}
-                fill={halo.color + '1F'}
-                stroke={halo.color}
                 strokeWidth={strokePx}
                 strokeDasharray={`${dashPx} ${dashPx}`}
                 strokeLinejoin="round"
+                style={{
+                  // Use color-mix + CSS `style` (NOT a `${color}1F` hex-alpha
+                  // attribute) so the fill works for ANY color string — hex,
+                  // rgb, or a CSS var like var(--primary). Hex-alpha concat
+                  // produced an invalid color for var-based team accents, which
+                  // SVG rendered as an opaque BLACK blob. `style` also lets the
+                  // var() resolve (presentation attributes don't resolve vars).
+                  fill: `color-mix(in srgb, ${halo.color} 12%, transparent)`,
+                  stroke: halo.color,
+                }}
               />
               <text
                 x={halo.labelX}
                 y={halo.labelY}
                 fontSize={fontPx}
-                fill={halo.color}
                 fontWeight={600}
                 textAnchor="middle"
                 style={{
+                  fill: halo.color,
                   fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
                   letterSpacing: '0.02em',
                 }}

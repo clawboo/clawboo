@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 
+import type { CollectionId } from '@/lib/teamPalettes'
+
 // ─── Team ────────────────────────────────────────────────────────────────────
 
 export interface Team {
@@ -7,6 +9,8 @@ export interface Team {
   name: string
   icon: string
   color: string
+  /** Chosen generative color collection; null on legacy teams → default applies. */
+  colorCollectionId: CollectionId | null
   templateId: string | null
   agentCount: number
   leaderAgentId: string | null
