@@ -348,7 +348,7 @@ async function run(): Promise<void> {
       '\n' +
       chalk.gray('  •  Browse the Marketplace for skills and team templates') +
       '\n' +
-      chalk.gray('  •  Track costs and optimize with Frugal Toggle') +
+      chalk.gray('  •  Track token usage by team and agent') +
       '\n\n' +
       chalk.gray('  Clawboo:   ') +
       chalk.cyan.underline(dashboardUrl) +

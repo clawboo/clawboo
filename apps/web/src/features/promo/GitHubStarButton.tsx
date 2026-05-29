@@ -130,11 +130,10 @@ export function GitHubStarButton() {
       data-testid="github-star-button"
       title="Star Clawboo on GitHub — it really helps!"
       // Sized to match the surrounding view chrome — Atlas's Re-layout /
-      // Team halos / Connect, Group Chat's Brief & Rules gear, Cost's
-      // Frugal Mode toggle all sit around 30-32 px tall with the same
-      // thin border and no shadow. The earlier 36 px + shadow made the
-      // pill float visually above the rest of the toolbar; now it
-      // belongs in the same row.
+      // Team halos / Connect, Group Chat's Brief & Rules gear all sit
+      // around 30-32 px tall with the same thin border and no shadow.
+      // The earlier 36 px + shadow made the pill float visually above
+      // the rest of the toolbar; now it belongs in the same row.
       className="group inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[12px] font-medium text-foreground transition-all duration-150 hover:border-foreground/20 hover:bg-foreground/[0.04]"
     >
       <Github className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />

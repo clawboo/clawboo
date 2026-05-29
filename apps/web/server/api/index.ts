@@ -6,7 +6,6 @@ import { chatHistoryGET, chatHistoryPOST, chatHistoryDELETE } from './chatHistor
 import { costRecordsGET, costRecordsPOST } from './costRecords'
 import { costRecordsSummaryGET } from './costRecordsSummary'
 import { graphLayoutGET, graphLayoutPOST } from './graphLayout'
-import { ollamaCheckGET } from './ollamaCheck'
 import { execSettingsGET, execSettingsAllGET, execSettingsPOST } from './execSettings'
 import { personalityGET, personalityPOST } from './personality'
 import { skillsGET, skillsPOST, skillsDELETE } from './skills'
@@ -64,9 +63,6 @@ router.post('/api/cost-records', costRecordsPOST)
 // Graph layout
 router.get('/api/graph-layout', graphLayoutGET)
 router.post('/api/graph-layout', graphLayoutPOST)
-
-// Ollama check
-router.get('/api/ollama-check', ollamaCheckGET)
 
 // Exec settings — /all must come before the shorter prefix
 router.get('/api/exec-settings/all', execSettingsAllGET)

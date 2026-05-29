@@ -1,9 +1,8 @@
 // Reusable inline alert/banner primitive (Phase 20a).
 //
-// Replaces the `!` text character that the audit found in
-// CostDashboard's frugal-mode banner (premium SaaS uses semantic Lucide
-// icons, not punctuation). Also covers info / error variants for future
-// sites.
+// A premium-SaaS callout that leads with a semantic Lucide icon
+// (info / warning / error) instead of a bare `!` punctuation character.
+// General-purpose — drop it in for any in-flow callout.
 //
 // Renders as a thin horizontal strip with a leading icon + body, suitable
 // for in-flow callouts (NOT toast notifications — those have their own

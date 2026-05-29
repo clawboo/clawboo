@@ -105,7 +105,7 @@ Three tabs — Skills, Agents, Teams — with category filters, source pills, se
 
 ### Cost intelligence
 
-Every token, every agent, every model. Per-agent breakdown, 30-day daily trend, summary cards at a glance — and a Frugal Toggle that switches your entire fleet to local Ollama with one click.
+Every token, every agent, every team. Per-agent breakdown, 30-day daily trend, and summary cards at a glance — token usage grouped by team and agent so you can see exactly where your spend goes.
 
 ### Approvals & Scheduler
 
