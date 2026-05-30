@@ -26,6 +26,7 @@ const makeTeam = (overrides: Partial<Team>): Team => ({
   name: overrides.name ?? 'Team 1',
   icon: '🛠️',
   color: '#FBBF24',
+  colorCollectionId: null,
   templateId: null,
   agentCount: 0,
   leaderAgentId: null,

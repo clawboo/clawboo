@@ -28,6 +28,10 @@ import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { useBooZeroStore } from '@/stores/booZero'
+import { useTeamStore } from '@/stores/team'
+import { useTheme } from '@/features/theme/useTheme'
+import { DEFAULT_COLLECTION_ID } from '@/lib/teamPalettes'
+import { pickBooColor } from '@/lib/resolveTeamBooColor'
 import { calculateCostUsd, formatCost } from '@/features/cost/costUtils'
 import {
   buildDelegationLinkages,
@@ -645,9 +649,34 @@ export const DelegationCard = memo(function DelegationCard({
   const isBooZero = targetAgentId !== null && targetAgentId === booZeroAgentId
   const avatarSeed = targetAgentId ?? targetName
 
-  // Target tint — same hex the avatar paints with, lifted from boo-avatar.
-  // Fall back to the existing emerald when we can't resolve a target.
-  const tint = targetAgentId ? resolveBooTint(targetAgentId, isBooZero) : '#10b981'
+  // Target tint — the same hex the avatar paints with. Prefer the target's
+  // generated team-palette color (so the card matches the recolored avatar),
+  // falling back to the hashed boo-avatar tint, then emerald.
+  const { resolvedTheme } = useTheme()
+  const collectionId = useTeamStore((s) =>
+    teamId
+      ? (s.teams.find((t) => t.id === teamId)?.colorCollectionId ?? DEFAULT_COLLECTION_ID)
+      : null,
+  )
+  const teamMembersSig = useFleetStore((s) =>
+    teamId
+      ? s.agents
+          .filter((a) => a.teamId === teamId && a.id !== booZeroAgentId)
+          .map((a) => a.id)
+          .sort()
+          .join('|')
+      : '',
+  )
+  const teamTint =
+    targetAgentId && !isBooZero && teamId && collectionId
+      ? pickBooColor(
+          collectionId,
+          teamMembersSig ? teamMembersSig.split('|') : [],
+          targetAgentId,
+          resolvedTheme,
+        )
+      : undefined
+  const tint = teamTint ?? (targetAgentId ? resolveBooTint(targetAgentId, isBooZero) : '#10b981')
 
   // Round 11: target agent live status (running / idle) drives the
   // pulse-glow on the card border and the small status dot in the header.
@@ -858,7 +887,7 @@ export const DelegationCard = memo(function DelegationCard({
       data-is-latest={isLatest ? 'true' : 'false'}
     >
       <div className="flex items-center gap-2.5">
-        <BooAvatar seed={avatarSeed} size={28} />
+        <BooAvatar seed={avatarSeed} size={28} tint={teamTint} isBooZero={isBooZero} />
         <div className="flex min-w-0 flex-col gap-0.5">
           <div className="flex items-center gap-1.5">
             {(() => {
@@ -2403,7 +2432,7 @@ const MentionDropdownInline = memo(function MentionDropdownInline({
                 width: 20,
                 height: 20,
                 borderRadius: '50%',
-                background: `${agent.color ?? 'var(--primary)'}33`,
+                background: `${agent.color ?? '#e94560'}33`,
                 fontSize: 12,
                 flexShrink: 0,
               }}

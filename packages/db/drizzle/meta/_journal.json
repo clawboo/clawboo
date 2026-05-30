@@ -29,6 +29,13 @@
       "when": 1778519394862,
       "tag": "0003_flawless_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1780079316145,
+      "tag": "0004_lively_satana",
+      "breakpoints": true
     }
   ]
 }

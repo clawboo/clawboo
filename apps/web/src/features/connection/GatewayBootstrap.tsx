@@ -42,6 +42,8 @@ import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { hydrateTeams } from '@/lib/hydrateTeams'
+import { DEFAULT_COLLECTION_ID } from '@/lib/teamPalettes'
+import { TEAM_ACCENT_PRESETS } from '@/features/teams/TeamAccentPicker'
 import { consumeSSE } from '@/lib/sseClient'
 import { fetchAgentModelMap } from '@/lib/agentModelMap'
 import type { SystemInfo } from '@/stores/system'
@@ -84,7 +86,13 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
       const res = await fetch('/api/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Default', icon: '👻', color: 'var(--primary)' }),
+        body: JSON.stringify({
+          name: 'Default',
+          icon: '👻',
+          // Hex, never a CSS var — team.color is hex-alpha concatenated app-wide.
+          color: TEAM_ACCENT_PRESETS[0],
+          colorCollectionId: DEFAULT_COLLECTION_ID,
+        }),
       })
       if (!res.ok) return
       const { team } = (await res.json()) as {
@@ -97,6 +105,7 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
         name: team.name,
         icon: team.icon,
         color: team.color,
+        colorCollectionId: DEFAULT_COLLECTION_ID,
         templateId: null,
         leaderAgentId: null,
         isArchived: false,

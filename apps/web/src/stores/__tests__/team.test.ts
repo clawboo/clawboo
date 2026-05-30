@@ -10,6 +10,7 @@ function makeTeam(overrides: Partial<Team> = {}): Team {
     name: 'Test Team',
     icon: '🚀',
     color: '#E94560',
+    colorCollectionId: null,
     templateId: null,
     agentCount: 0,
     leaderAgentId: null,

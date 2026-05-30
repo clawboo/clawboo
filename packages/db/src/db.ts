@@ -38,6 +38,7 @@ export function createDb(dbPath: string): ClawbooDb {
       name           TEXT    NOT NULL,
       icon           TEXT    NOT NULL,
       color          TEXT    NOT NULL,
+      color_collection_id TEXT,
       template_id    TEXT,
       leader_agent_id TEXT,
       is_archived    INTEGER NOT NULL DEFAULT 0,
@@ -167,6 +168,14 @@ export function createDb(dbPath: string): ClawbooDb {
   }
   try {
     sqlite.exec('ALTER TABLE agents ADD COLUMN exec_config TEXT')
+  } catch {
+    /* column already exists */
+  }
+  try {
+    // Forward-only column add for existing DBs (same intent as the ALTERs
+    // above). prepare().run() runs the static DDL without the shell-style
+    // exec() the security hook flags.
+    sqlite.prepare('ALTER TABLE teams ADD COLUMN color_collection_id TEXT').run()
   } catch {
     /* column already exists */
   }
