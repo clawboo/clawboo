@@ -28,6 +28,7 @@ import { TemplateFanDeck } from './TemplateFanDeck'
 import { TemplateGrid } from './TemplateGrid'
 import { TeamColorCollectionPicker } from './TeamColorCollectionPicker'
 import { TeamAccentPicker, TEAM_ACCENT_PRESETS } from './TeamAccentPicker'
+import { TeamIconPicker } from './TeamIconPicker'
 import { DEFAULT_COLLECTION_ID, type CollectionId } from '@/lib/teamPalettes'
 
 // ─── Pick-step source filter entries (agency-agents first, clawboo last) ─────
@@ -783,18 +784,12 @@ export function CreateTeamModal({
                 </label>
 
                 {/* Icon */}
-                <label className="mb-4 block">
+                <div className="mb-4">
                   <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-secondary">
                     Icon
                   </span>
-                  <input
-                    type="text"
-                    value={teamIcon}
-                    onChange={(e) => setTeamIcon(e.target.value)}
-                    className="w-20 rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-center text-lg outline-none focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
-                    maxLength={4}
-                  />
-                </label>
+                  <TeamIconPicker value={teamIcon} onChange={setTeamIcon} />
+                </div>
 
                 {/* Accent color — team icon / halo / header */}
                 <div className="mb-5">

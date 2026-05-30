@@ -38,6 +38,23 @@ export async function hydrateTeams(): Promise<void> {
           useTeamStore.getState().selectTeam(firstActive.id)
         }
       }
+
+      // One-time cleanup: persist any legacy CSS-var (or otherwise non-hex)
+      // team color back to the DB as hex, retiring the old values for good.
+      // Idempotent — once a row is hex, `normalizeTeamColor` is a no-op so no
+      // PATCH fires. Best-effort; the store already holds the normalized hex.
+      for (const t of data.teams) {
+        const normalized = normalizeTeamColor(t.color)
+        if (normalized !== t.color) {
+          void fetch(`/api/teams/${t.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ color: normalized }),
+          }).catch(() => {
+            /* non-fatal — the in-memory store is already normalized */
+          })
+        }
+      }
     }
 
     // Patch fleet store with team assignments from SQLite
