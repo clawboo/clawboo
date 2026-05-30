@@ -367,27 +367,67 @@ export function TeamOnboardingGate({
       })
     }
 
-    // Drop a meta entry into each agent's team transcript so the user sees
-    // their introduction land in chat (the agents won't respond to it — it
-    // was only written to SOUL.md, not sent as a chat message).
-    const now = Date.now()
-    for (const agent of teamAgents) {
-      const teamSk = buildTeamSessionKey(agent.id, teamId)
-      const entry: TranscriptEntry = {
+    // Acknowledge the user IN CHARACTER as Boo Zero (the universal team leader)
+    // so submitting their intro feels like the team RECEIVED them — not a dry
+    // system notice that leaves them wondering if anyone's there. We surface the
+    // user's intro as a "You" message followed by a warm Boo Zero reply that
+    // puts the ball back in the user's court ("what would you like to start
+    // with?"). Both are CLIENT-SIDE entries (no Gateway round-trip), so they
+    // appear instantly and carry zero cascade risk — the same safety contract as
+    // the Phase-B Boo Zero greeting above. If Boo Zero isn't identified yet
+    // (rare, brief window before `identifyBooZero` lands), fall back to a single
+    // neutral meta confirmation so the user still gets feedback.
+    if (booZeroAgent) {
+      const booTeamSk = buildTeamSessionKey(booZeroAgent.id, teamId)
+      const now = Date.now()
+      const youEntry: TranscriptEntry = {
         entryId: crypto.randomUUID(),
         runId: null,
-        sessionKey: teamSk,
-        kind: 'meta',
-        role: 'system',
-        text: `User introduction saved to ${agent.name}'s context.`,
+        sessionKey: booTeamSk,
+        kind: 'user',
+        role: 'user',
+        text: trimmed,
         source: 'local-send',
         timestampMs: now,
-        // Strictly-increasing tiebreaker (see lib/sequenceKey.ts).
         sequenceKey: nextSeq(),
         confirmed: true,
         fingerprint: crypto.randomUUID(),
       }
-      useChatStore.getState().appendTranscript(teamSk, [entry])
+      const ackEntry: TranscriptEntry = {
+        entryId: crypto.randomUUID(),
+        runId: null,
+        sessionKey: booTeamSk,
+        kind: 'assistant',
+        role: 'assistant',
+        text: `Thanks for the intro — I've shared it with the team, so we're all on the same page. What would you like to start with?`,
+        source: 'local-send',
+        // +1ms so the leader's reply sorts AFTER the user's message.
+        timestampMs: now + 1,
+        sequenceKey: nextSeq(),
+        confirmed: true,
+        fingerprint: crypto.randomUUID(),
+      }
+      useChatStore.getState().appendTranscript(booTeamSk, [youEntry, ackEntry])
+    } else {
+      const ackAgentId = teamAgents[0]?.id
+      if (ackAgentId) {
+        const teamSk = buildTeamSessionKey(ackAgentId, teamId)
+        const entry: TranscriptEntry = {
+          entryId: crypto.randomUUID(),
+          runId: null,
+          sessionKey: teamSk,
+          kind: 'meta',
+          role: 'system',
+          text: 'Your introduction was saved — the team has it in context.',
+          source: 'local-send',
+          timestampMs: Date.now(),
+          // Strictly-increasing tiebreaker (see lib/sequenceKey.ts).
+          sequenceKey: nextSeq(),
+          confirmed: true,
+          fingerprint: crypto.randomUUID(),
+        }
+        useChatStore.getState().appendTranscript(teamSk, [entry])
+      }
     }
 
     try {
@@ -456,235 +496,244 @@ export function TeamOnboardingGate({
   // below the unified header.
   return (
     <div className="flex h-full flex-col bg-bg">
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <AnimatePresence mode="wait">
-          {phase === 'welcome' && (
-            <motion.div
-              key="welcome"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-              className="mx-auto flex max-w-md flex-col items-center text-center"
-            >
-              {/* The universal team leader (Boo Zero) introduces the team —
+      {/* Content — vertically centered so the (short) welcome / user-intro
+          states sit in the MIDDLE of the now full-window gate instead of pinned
+          to the top. The inner `min-h-full` + `justify-center` wrapper centers
+          when the phase fits and falls back to top-aligned scrolling when a
+          phase (e.g. the live agent-intro list) grows taller than the viewport. */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="flex min-h-full flex-col items-center justify-center px-6 py-8">
+          <AnimatePresence mode="wait">
+            {phase === 'welcome' && (
+              <motion.div
+                key="welcome"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+                className="mx-auto flex max-w-md flex-col items-center text-center"
+              >
+                {/* The universal team leader (Boo Zero) introduces the team —
                   its avatar replaces the abstract sparkle icon for a stronger
                   "leader presenting the team" framing. Falls back to the
                   sparkle in a colored ring when Boo Zero hasn't been
                   identified (rare — should only happen in the brief window
                   before `identifyBooZero` lands after first hydrate). */}
-              {booZeroAgent ? (
-                <div className="mb-4">
-                  <BooAvatar seed={booZeroAgent.id} size={56} isBooZero />
-                </div>
-              ) : (
-                <div
-                  className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
-                  style={{ background: `${team?.color ?? 'var(--mint)'}22` }}
-                >
-                  <Sparkles size={22} style={{ color: team?.color ?? 'var(--mint)' }} />
-                </div>
-              )}
-              <h3
-                className="mb-2 text-[18px] font-semibold text-text"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                Meet your team
-              </h3>
-              <p className="mb-6 text-[12px] leading-relaxed text-secondary">
-                Before you start chatting, get to know your {teamAgents.length} agent
-                {teamAgents.length !== 1 ? 's' : ''}. They&rsquo;ll briefly introduce themselves so
-                you know who does what.
-              </p>
-
-              {/* Agent avatars */}
-              <div className="mb-4 flex flex-wrap items-center justify-center gap-3">
-                {teamAgents.map((agent) => (
-                  <div
-                    key={agent.id}
-                    className="flex flex-col items-center gap-1.5"
-                    style={{ minWidth: 64 }}
-                  >
-                    <BooAvatar seed={agent.id} size={40} />
-                    <span className="max-w-[80px] truncate text-[10px] text-secondary/70">
-                      {agent.name}
-                    </span>
+                {booZeroAgent ? (
+                  <div className="mb-4">
+                    <BooAvatar seed={booZeroAgent.id} size={56} isBooZero />
                   </div>
-                ))}
-              </div>
+                ) : (
+                  <div
+                    className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
+                    style={{ background: `${team?.color ?? 'var(--mint)'}22` }}
+                  >
+                    <Sparkles size={22} style={{ color: team?.color ?? 'var(--mint)' }} />
+                  </div>
+                )}
+                <h3
+                  className="mb-2 text-[18px] font-semibold text-text"
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  Meet your team
+                </h3>
+                <p className="mb-6 text-[12px] leading-relaxed text-secondary">
+                  Before you start chatting, get to know your {teamAgents.length} agent
+                  {teamAgents.length !== 1 ? 's' : ''}. They&rsquo;ll briefly introduce themselves
+                  so you know who does what.
+                </p>
 
-              {/* "Led by Boo Zero" badge — Boo Zero is the universal team
+                {/* Agent avatars */}
+                <div className="mb-4 flex flex-wrap items-center justify-center gap-3">
+                  {teamAgents.map((agent) => (
+                    <div
+                      key={agent.id}
+                      className="flex flex-col items-center gap-1.5"
+                      style={{ minWidth: 64 }}
+                    >
+                      <BooAvatar seed={agent.id} size={40} />
+                      <span className="max-w-[80px] truncate text-[10px] text-secondary/70">
+                        {agent.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* "Led by Boo Zero" badge — Boo Zero is the universal team
                   leader and will respond first in every team chat, even
                   though it doesn't appear in the team's sidebar agent list. */}
-              {booZeroAgent && (
-                <div
-                  className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-surface/60 px-3 py-1.5 text-[11px] text-secondary"
-                  data-testid="led-by-boo-zero-badge"
+                {booZeroAgent && (
+                  <div
+                    className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-surface/60 px-3 py-1.5 text-[11px] text-secondary"
+                    data-testid="led-by-boo-zero-badge"
+                  >
+                    <BooAvatar seed={booZeroAgent.id} size={20} />
+                    <span>
+                      Led by <strong className="text-text">{booZeroAgent.name}</strong> — your
+                      universal team leader
+                    </span>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleStartIntros}
+                  disabled={!client || teamAgents.length === 0}
+                  className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+                  data-testid="know-your-team-button"
                 >
-                  <BooAvatar seed={booZeroAgent.id} size={20} />
-                  <span>
-                    Led by <strong className="text-text">{booZeroAgent.name}</strong> — your
-                    universal team leader
-                  </span>
-                </div>
-              )}
+                  Know Your Team
+                  <ArrowRight size={14} />
+                </button>
+              </motion.div>
+            )}
 
-              <button
-                type="button"
-                onClick={handleStartIntros}
-                disabled={!client || teamAgents.length === 0}
-                className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
-                data-testid="know-your-team-button"
+            {phase === 'introducing' && (
+              <motion.div
+                key="introducing"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="mx-auto flex max-w-3xl flex-col"
               >
-                Know Your Team
-                <ArrowRight size={14} />
-              </button>
-            </motion.div>
-          )}
+                <h3
+                  className="mb-2 text-center text-[16px] font-semibold text-text"
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  Agents are introducing themselves
+                </h3>
+                <p className="mb-6 text-center text-[12px] text-secondary">
+                  {completedAgentIds.size} of {teamAgents.length} done
+                </p>
 
-          {phase === 'introducing' && (
-            <motion.div
-              key="introducing"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="mx-auto flex max-w-3xl flex-col"
-            >
-              <h3
-                className="mb-2 text-center text-[16px] font-semibold text-text"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                Agents are introducing themselves
-              </h3>
-              <p className="mb-6 text-center text-[12px] text-secondary">
-                {completedAgentIds.size} of {teamAgents.length} done
-              </p>
-
-              <div className="flex flex-col gap-3">
-                {teamAgents.map((agent) => {
-                  const isDone = completedAgentIds.has(agent.id)
-                  const isStarted = introducingAgentIds.has(agent.id)
-                  const introText = agentIntros.get(agent.id)
-                  return (
-                    <motion.div
-                      key={agent.id}
-                      initial={{ opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="flex items-start gap-3 rounded-lg border border-border bg-surface/50 p-3"
-                      style={{
-                        opacity: isDone ? 1 : isStarted ? 0.85 : 0.5,
-                      }}
-                    >
-                      <BooAvatar seed={agent.id} size={32} />
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-1 flex items-center gap-2">
-                          <span className="text-[12px] font-semibold text-text">{agent.name}</span>
-                          {isDone ? (
-                            <Check size={12} className="text-mint" />
+                <div className="flex flex-col gap-3">
+                  {teamAgents.map((agent) => {
+                    const isDone = completedAgentIds.has(agent.id)
+                    const isStarted = introducingAgentIds.has(agent.id)
+                    const introText = agentIntros.get(agent.id)
+                    return (
+                      <motion.div
+                        key={agent.id}
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="flex items-start gap-3 rounded-lg border border-border bg-surface/50 p-3"
+                        style={{
+                          opacity: isDone ? 1 : isStarted ? 0.85 : 0.5,
+                        }}
+                      >
+                        <BooAvatar seed={agent.id} size={32} />
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-1 flex items-center gap-2">
+                            <span className="text-[12px] font-semibold text-text">
+                              {agent.name}
+                            </span>
+                            {isDone ? (
+                              <Check size={12} className="text-mint" />
+                            ) : (
+                              <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-mint" />
+                            )}
+                          </div>
+                          {introText ? (
+                            <p className="text-[11px] leading-relaxed text-secondary/80">
+                              {introText}
+                            </p>
                           ) : (
-                            <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-mint" />
+                            <p className="font-mono text-[10px] font-medium uppercase tracking-wider text-secondary/55">
+                              Thinking…
+                            </p>
                           )}
                         </div>
-                        {introText ? (
-                          <p className="text-[11px] leading-relaxed text-secondary/80">
-                            {introText}
-                          </p>
-                        ) : (
-                          <p className="font-mono text-[10px] font-medium uppercase tracking-wider text-secondary/55">
-                            Thinking…
-                          </p>
-                        )}
-                      </div>
-                    </motion.div>
-                  )
-                })}
-              </div>
-            </motion.div>
-          )}
+                      </motion.div>
+                    )
+                  })}
+                </div>
+              </motion.div>
+            )}
 
-          {phase === 'user-intro' && (
-            <motion.div
-              key="user-intro"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-              className="mx-auto flex max-w-3xl flex-col"
-            >
-              <h3
-                className="mb-2 text-center text-[16px] font-semibold text-text"
-                style={{ fontFamily: 'var(--font-display)' }}
+            {phase === 'user-intro' && (
+              <motion.div
+                key="user-intro"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+                className="mx-auto flex max-w-3xl flex-col"
               >
-                Your turn — introduce yourself
-              </h3>
-              <p className="mb-5 text-center text-[12px] leading-relaxed text-secondary">
-                Tell the team a bit about yourself: your name, what you&rsquo;re working on, or how
-                you&rsquo;d like the team to help. This is saved to each agent&rsquo;s context.
-              </p>
+                <h3
+                  className="mb-2 text-center text-[16px] font-semibold text-text"
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  Your turn — introduce yourself
+                </h3>
+                <p className="mb-5 text-center text-[12px] leading-relaxed text-secondary">
+                  Tell the team a bit about yourself: your name, what you&rsquo;re working on, or
+                  how you&rsquo;d like the team to help. This is saved to each agent&rsquo;s
+                  context.
+                </p>
 
-              {/* Show agent intros recap (if available) — sized to be
+                {/* Show agent intros recap (if available) — sized to be
                   readable, not a footnote. The intros are the user's main
                   context for what each teammate does, so they get body-
                   weight type (13px) at higher contrast (~85% opacity)
                   with relaxed line-height. */}
-              {agentIntros.size > 0 && (
-                <details open className="mb-4 rounded-lg border border-border bg-surface/30 p-4">
-                  <summary className="cursor-pointer text-[12px] font-semibold text-secondary/90">
-                    Recap: who&rsquo;s on the team
-                  </summary>
-                  <div className="mt-4 flex flex-col gap-4">
-                    {teamAgents.map((agent) => {
-                      const intro = agentIntros.get(agent.id)
-                      if (!intro) return null
-                      return (
-                        <div key={agent.id} className="flex items-start gap-3">
-                          <BooAvatar seed={agent.id} size={32} />
-                          <div className="min-w-0 flex-1">
-                            <span className="text-[13px] font-semibold text-text">
-                              {agent.name}
-                            </span>
-                            <p className="mt-0.5 text-[13px] leading-relaxed text-text/75">
-                              {intro}
-                            </p>
+                {agentIntros.size > 0 && (
+                  <details open className="mb-4 rounded-lg border border-border bg-surface/30 p-4">
+                    <summary className="cursor-pointer text-[12px] font-semibold text-secondary/90">
+                      Recap: who&rsquo;s on the team
+                    </summary>
+                    <div className="mt-4 flex flex-col gap-4">
+                      {teamAgents.map((agent) => {
+                        const intro = agentIntros.get(agent.id)
+                        if (!intro) return null
+                        return (
+                          <div key={agent.id} className="flex items-start gap-3">
+                            <BooAvatar seed={agent.id} size={32} />
+                            <div className="min-w-0 flex-1">
+                              <span className="text-[13px] font-semibold text-text">
+                                {agent.name}
+                              </span>
+                              <p className="mt-0.5 text-[13px] leading-relaxed text-text/75">
+                                {intro}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </details>
-              )}
+                        )
+                      })}
+                    </div>
+                  </details>
+                )}
 
-              <textarea
-                value={userIntroText}
-                onChange={(e) => setUserIntroText(e.target.value)}
-                placeholder="Hi team! I'm working on…"
-                rows={5}
-                disabled={submittingUserIntro}
-                className="mb-3 w-full rounded-lg border border-border bg-surface/60 px-3 py-2.5 text-[12px] text-text outline-none transition-colors focus:border-accent/60 disabled:opacity-50"
-                style={{ resize: 'vertical', minHeight: 100 }}
-                data-testid="user-intro-textarea"
-              />
+                <textarea
+                  value={userIntroText}
+                  onChange={(e) => setUserIntroText(e.target.value)}
+                  placeholder="Hi team! I'm working on…"
+                  rows={5}
+                  disabled={submittingUserIntro}
+                  className="mb-3 w-full rounded-lg border border-border bg-surface/60 px-3 py-2.5 text-[12px] text-text outline-none transition-colors focus:border-accent/60 disabled:opacity-50"
+                  style={{ resize: 'vertical', minHeight: 100 }}
+                  data-testid="user-intro-textarea"
+                />
 
-              {error && <p className="mb-2 text-[11px] text-accent">{error}</p>}
+                {error && <p className="mb-2 text-[11px] text-accent">{error}</p>}
 
-              <button
-                type="button"
-                onClick={handleSubmitUserIntro}
-                disabled={submittingUserIntro || !client}
-                className="inline-flex items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
-                data-testid="submit-user-intro"
-              >
-                {submittingUserIntro ? 'Saving…' : 'Continue to Team Chat'}
-                {!submittingUserIntro && <Send size={14} />}
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                <button
+                  type="button"
+                  onClick={handleSubmitUserIntro}
+                  disabled={submittingUserIntro || !client}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+                  data-testid="submit-user-intro"
+                >
+                  {submittingUserIntro ? 'Saving…' : 'Continue to Team Space'}
+                  {!submittingUserIntro && <Send size={14} />}
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   )

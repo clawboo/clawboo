@@ -18,6 +18,7 @@ export function teamsGET(req: Request, res: Response): void {
         name: teams.name,
         icon: teams.icon,
         color: teams.color,
+        colorCollectionId: teams.colorCollectionId,
         templateId: teams.templateId,
         leaderAgentId: teams.leaderAgentId,
         isArchived: teams.isArchived,
@@ -49,9 +50,16 @@ interface CreateBody {
   name: string
   icon: string
   color: string
+  colorCollectionId?: string
   templateId?: string
   leaderAgentId?: string
+  /** Optional client-provided UUID so the create-team preview can seed the
+   *  Boo palette with the SAME id the deployed team will use (per-team color
+   *  rotation). Validated as a UUID; ignored otherwise. */
+  id?: string
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function teamsPOST(req: Request, res: Response): void {
   const body = req.body as CreateBody | undefined
@@ -60,14 +68,15 @@ export function teamsPOST(req: Request, res: Response): void {
     return
   }
 
-  const { name, icon, color, templateId, leaderAgentId } = body
+  const { name, icon, color, colorCollectionId, templateId, leaderAgentId } = body
   if (!name || !icon || !color) {
     res.status(400).json({ error: 'name, icon, and color are required' })
     return
   }
 
   const now = Date.now()
-  const id = crypto.randomUUID()
+  // Honor a valid client-provided id; otherwise mint one server-side.
+  const id = typeof body.id === 'string' && UUID_RE.test(body.id) ? body.id : crypto.randomUUID()
 
   try {
     const db = createDb(getDbPath())
@@ -78,6 +87,7 @@ export function teamsPOST(req: Request, res: Response): void {
         name,
         icon,
         color,
+        colorCollectionId: colorCollectionId ?? null,
         templateId: templateId ?? null,
         leaderAgentId: leaderAgentId ?? null,
         createdAt: now,
@@ -91,6 +101,7 @@ export function teamsPOST(req: Request, res: Response): void {
         name,
         icon,
         color,
+        colorCollectionId: colorCollectionId ?? null,
         templateId: templateId ?? null,
         leaderAgentId: leaderAgentId ?? null,
         isArchived: 0,
@@ -111,6 +122,7 @@ interface PatchBody {
   name?: string
   icon?: string
   color?: string
+  colorCollectionId?: string | null
   isArchived?: number
   leaderAgentId?: string | null
 }
@@ -142,6 +154,7 @@ export function teamsPATCH(req: Request, res: Response): void {
     if (body.name !== undefined) patch['name'] = body.name
     if (body.icon !== undefined) patch['icon'] = body.icon
     if (body.color !== undefined) patch['color'] = body.color
+    if (body.colorCollectionId !== undefined) patch['colorCollectionId'] = body.colorCollectionId
     if (body.isArchived !== undefined) patch['isArchived'] = body.isArchived ? 1 : 0
     if (body.leaderAgentId !== undefined) patch['leaderAgentId'] = body.leaderAgentId
 
@@ -153,6 +166,7 @@ export function teamsPATCH(req: Request, res: Response): void {
         name: teams.name,
         icon: teams.icon,
         color: teams.color,
+        colorCollectionId: teams.colorCollectionId,
         templateId: teams.templateId,
         leaderAgentId: teams.leaderAgentId,
         isArchived: teams.isArchived,

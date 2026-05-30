@@ -6,10 +6,15 @@
 // injected into every team-agent preamble + every Boo Zero turn in this
 // team).
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { X } from 'lucide-react'
 import type { Team } from '@/stores/team'
+import { useTeamStore } from '@/stores/team'
+import { DEFAULT_COLLECTION_ID, type CollectionId } from '@/lib/teamPalettes'
+import { TeamColorCollectionPicker } from '@/features/teams/TeamColorCollectionPicker'
+import { TeamAccentPicker } from '@/features/teams/TeamAccentPicker'
+import { TeamIconPicker } from '@/features/teams/TeamIconPicker'
 import { TeamBriefForm } from './TeamBriefForm'
 import { TeamRulesEditor } from './TeamRulesEditor'
 
@@ -19,6 +24,53 @@ interface TeamSettingsSheetProps {
 }
 
 export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
+  const [collectionId, setCollectionId] = useState<CollectionId>(
+    team.colorCollectionId ?? DEFAULT_COLLECTION_ID,
+  )
+  const [accentColor, setAccentColor] = useState<string>(team.color)
+  const [icon, setIcon] = useState<string>(team.icon)
+
+  // Persist a team setting optimistically: update the store first (drives the
+  // live UI — Boo recolor for the collection, icon/halo for the accent), then
+  // PATCH to make it durable. Each field is independent.
+  const persist = useCallback(
+    (patch: { colorCollectionId?: CollectionId; color?: string; icon?: string }) => {
+      useTeamStore.getState().updateTeam(team.id, patch)
+      void fetch(`/api/teams/${team.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      }).catch(() => {
+        /* optimistic store update already applied; persistence is best-effort */
+      })
+    },
+    [team.id],
+  )
+
+  const handleCollectionChange = useCallback(
+    (id: CollectionId) => {
+      setCollectionId(id)
+      persist({ colorCollectionId: id })
+    },
+    [persist],
+  )
+
+  const handleAccentChange = useCallback(
+    (color: string) => {
+      setAccentColor(color)
+      persist({ color })
+    },
+    [persist],
+  )
+
+  const handleIconChange = useCallback(
+    (next: string) => {
+      setIcon(next)
+      persist({ icon: next })
+    },
+    [persist],
+  )
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -59,9 +111,9 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
           <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">
             <span
               className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-[15px]"
-              style={{ background: `${team.color}22` }}
+              style={{ background: `${accentColor}22` }}
             >
-              {team.icon}
+              {icon}
             </span>
             <div className="min-w-0 flex-1">
               <h2
@@ -87,6 +139,27 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
 
           {/* Body — scrollable */}
           <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-[18px]">
+            <section className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
+                <h3 className="m-0 text-[12px] font-semibold text-foreground/85">Icon</h3>
+                <TeamIconPicker
+                  value={icon}
+                  onChange={handleIconChange}
+                  accentColor={accentColor}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <h3 className="m-0 text-[12px] font-semibold text-foreground/85">Accent color</h3>
+                <TeamAccentPicker value={accentColor} onChange={handleAccentChange} />
+              </div>
+              <div className="flex flex-col gap-2">
+                <h3 className="m-0 text-[12px] font-semibold text-foreground/85">
+                  Color collection
+                </h3>
+                <TeamColorCollectionPicker value={collectionId} onChange={handleCollectionChange} />
+              </div>
+            </section>
+
             <section className="flex flex-col gap-2">
               <h3 className="m-0 text-[12px] font-semibold text-foreground/85">Brief</h3>
               <TeamBriefForm
