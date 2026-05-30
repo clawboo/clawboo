@@ -142,7 +142,11 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
             <section className="flex flex-col gap-3">
               <div className="flex flex-col gap-2">
                 <h3 className="m-0 text-[12px] font-semibold text-foreground/85">Icon</h3>
-                <TeamIconPicker value={icon} onChange={handleIconChange} />
+                <TeamIconPicker
+                  value={icon}
+                  onChange={handleIconChange}
+                  accentColor={accentColor}
+                />
               </div>
               <div className="flex flex-col gap-2">
                 <h3 className="m-0 text-[12px] font-semibold text-foreground/85">Accent color</h3>

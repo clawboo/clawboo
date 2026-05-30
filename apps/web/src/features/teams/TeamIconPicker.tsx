@@ -12,12 +12,18 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Pencil } from 'lucide-react'
 
 import { EMOJI_CATEGORIES, searchEmojis, type EmojiEntry } from './emojiCatalog'
 
 interface TeamIconPickerProps {
   value: string
   onChange: (emoji: string) => void
+  /**
+   * When set, the trigger renders as the team badge — the icon on this accent
+   * color's tint — so it doubles as the live badge preview (no separate chip).
+   */
+  accentColor?: string
 }
 
 interface MenuPos {
@@ -59,7 +65,7 @@ function EmojiGrid({
   )
 }
 
-export function TeamIconPicker({ value, onChange }: TeamIconPickerProps) {
+export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [pos, setPos] = useState<MenuPos | null>(null)
@@ -137,11 +143,29 @@ export function TeamIconPicker({ value, onChange }: TeamIconPickerProps) {
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label="Pick team icon"
+        aria-label="Change team icon"
+        title="Change icon"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-10 w-20 items-center justify-center rounded-lg border border-border bg-foreground/[0.03] text-xl outline-none transition-colors hover:border-foreground/20 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
+        className={`relative flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl text-2xl outline-none transition-all focus:ring-1 focus:ring-ring/30 ${
+          accentColor
+            ? 'hover:brightness-95'
+            : 'border border-border bg-foreground/[0.03] hover:border-foreground/20'
+        }`}
+        style={
+          accentColor
+            ? { backgroundColor: `${accentColor}22`, border: `1px solid ${accentColor}33` }
+            : undefined
+        }
       >
         {value || '🙂'}
+        {/* Edit affordance — makes it obvious the badge is clickable to change */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -bottom-1 -right-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-foreground text-background"
+          style={{ border: '2px solid var(--surface)' }}
+        >
+          <Pencil className="h-2 w-2" strokeWidth={2.5} />
+        </span>
       </button>
 
       {open &&

@@ -29,7 +29,8 @@ import { TemplateGrid } from './TemplateGrid'
 import { TeamColorCollectionPicker } from './TeamColorCollectionPicker'
 import { TeamAccentPicker, TEAM_ACCENT_PRESETS } from './TeamAccentPicker'
 import { TeamIconPicker } from './TeamIconPicker'
-import { DEFAULT_COLLECTION_ID, type CollectionId } from '@/lib/teamPalettes'
+import { DEFAULT_COLLECTION_ID, generateTeamColors, type CollectionId } from '@/lib/teamPalettes'
+import { useTheme } from '@/features/theme/useTheme'
 
 // ─── Pick-step source filter entries (agency-agents first, clawboo last) ─────
 
@@ -73,6 +74,7 @@ export function CreateTeamModal({
   initialProfile,
 }: CreateTeamModalProps) {
   const client = useConnectionStore((s) => s.client)
+  const { resolvedTheme } = useTheme()
 
   const [step, setStep] = useState<Step>('pick')
 
@@ -123,6 +125,17 @@ export function CreateTeamModal({
   const resolvedSelected = useMemo(
     () => (selectedProfile ? resolveTeamAgents(selectedProfile) : []),
     [selectedProfile],
+  )
+
+  // Live preview of each teammate's avatar color for the chosen collection.
+  // Agents have no id yet here, so we use the collection's slot colors — exact
+  // for generative collections, the Classic palette for the legacy set.
+  const previewColors = useMemo(
+    () =>
+      resolvedSelected.length
+        ? generateTeamColors(colorCollectionId, resolvedSelected.length, resolvedTheme)
+        : [],
+    [colorCollectionId, resolvedSelected.length, resolvedTheme],
   )
 
   /**
@@ -750,12 +763,14 @@ export function CreateTeamModal({
 
             {/* ─── Step: Customize ────────────────────────────────── */}
             {step === 'customize' && (
-              <div className="p-6">
-                <div className="mb-5 flex items-center gap-2">
+              <div className="flex max-h-[85vh] flex-col overflow-hidden rounded-2xl">
+                {/* Header (fixed) */}
+                <div className="flex items-center gap-2 px-6 pb-4 pt-6">
                   {!isSingleAgentMode && (
                     <button
                       type="button"
                       onClick={() => setStep('pick')}
+                      aria-label="Back to templates"
                       className="rounded p-1 text-secondary/40 transition-colors hover:text-text"
                     >
                       <ArrowLeft className="h-4 w-4" strokeWidth={2} />
@@ -769,105 +784,108 @@ export function CreateTeamModal({
                   </h2>
                 </div>
 
-                {/* Name */}
-                <label className="mb-4 block">
-                  <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-secondary">
-                    Name
-                  </span>
-                  <input
-                    type="text"
-                    value={teamName}
-                    onChange={(e) => setTeamName(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-[13px] text-text outline-none placeholder:text-secondary/40 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
-                    placeholder="Team name"
-                  />
-                </label>
-
-                {/* Icon */}
-                <div className="mb-4">
-                  <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-secondary">
-                    Icon
-                  </span>
-                  <TeamIconPicker value={teamIcon} onChange={setTeamIcon} />
-                </div>
-
-                {/* Accent color — team icon / halo / header */}
-                <div className="mb-5">
-                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-secondary">
-                    Color
-                  </span>
-                  <TeamAccentPicker value={teamColor} onChange={setTeamColor} />
-                </div>
-
-                {/* Color collection — per-Boo avatar palette */}
-                <div className="mb-5">
-                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-secondary">
-                    Color collection
-                  </span>
-                  <TeamColorCollectionPicker
-                    value={colorCollectionId}
-                    onChange={setColorCollectionId}
-                  />
-                </div>
-
-                {/* Preview */}
-                <div className="mb-5 flex items-center gap-3 rounded-xl border border-border bg-foreground/[0.02] px-4 py-3">
-                  <div
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-xl"
-                    style={{
-                      backgroundColor: `${teamColor}22`,
-                      border: `1px solid ${teamColor}33`,
-                    }}
-                  >
-                    {teamIcon}
-                  </div>
-                  <div>
-                    <div className="text-[13px] font-semibold text-text">
-                      {teamName || 'Untitled'}
-                    </div>
-                    <div className="text-[11px] text-secondary/60">
-                      {isSingleAgentMode
-                        ? '1 agent'
-                        : selectedProfile
-                          ? `${resolvedSelected.length} agents from template`
-                          : 'Empty team'}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Template agent preview */}
-                {selectedProfile && resolvedSelected.length > 0 && (
-                  <div className="mb-5">
-                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-secondary">
-                      Agents
+                {/* Body (scrollable) */}
+                <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-6 pb-2">
+                  {/* Name */}
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-secondary">
+                      Name
                     </span>
-                    <div className="flex flex-col gap-1.5">
-                      {resolvedSelected.map((agent) => (
-                        <div key={agent.id} className="flex items-center gap-2">
-                          <BooAvatar seed={agent.name} size={20} />
-                          <span className="text-[12px] text-text/70">{agent.name}</span>
-                        </div>
-                      ))}
+                    <input
+                      type="text"
+                      value={teamName}
+                      onChange={(e) => setTeamName(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-[13px] text-text outline-none placeholder:text-secondary/40 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
+                      placeholder="Team name"
+                    />
+                  </label>
+
+                  {/* ── Team badge: the team's icon + color ── */}
+                  <section className="flex flex-col gap-3">
+                    <div>
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-text/85">
+                        Team badge
+                      </h3>
+                      <p className="mt-0.5 text-[10.5px] text-secondary/60">
+                        Tap the badge to change its icon, then pick a color.
+                      </p>
                     </div>
-                  </div>
-                )}
+                    <div className="flex items-center gap-3">
+                      {/* The icon picker IS the live badge (icon on the accent tint) */}
+                      <TeamIconPicker
+                        value={teamIcon}
+                        onChange={setTeamIcon}
+                        accentColor={teamColor}
+                      />
+                      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                        <span className="text-[10px] font-medium uppercase tracking-wider text-secondary">
+                          Color
+                        </span>
+                        <TeamAccentPicker value={teamColor} onChange={setTeamColor} />
+                      </div>
+                    </div>
+                  </section>
 
-                {error && <p className="mb-3 text-[11px] text-destructive">{error}</p>}
+                  {/* ── Teammate colors: collection + live roster preview ── */}
+                  <section className="flex flex-col gap-2.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-text/85">
+                        Teammate colors
+                      </h3>
+                      {resolvedSelected.length > 0 && (
+                        <span className="text-[10px] text-secondary/60">
+                          {resolvedSelected.length}{' '}
+                          {resolvedSelected.length === 1 ? 'teammate' : 'teammates'}
+                        </span>
+                      )}
+                    </div>
+                    <TeamColorCollectionPicker
+                      value={colorCollectionId}
+                      onChange={setColorCollectionId}
+                    />
 
-                {/* Confirm */}
-                <button
-                  type="button"
-                  onClick={() => void handleConfirmCustomize()}
-                  disabled={!teamName.trim()}
-                  className="flex h-10 w-full items-center justify-center gap-2 rounded-lg text-[13px] font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{ backgroundColor: teamColor }}
-                >
-                  {isSingleAgentMode
-                    ? 'Create agent'
-                    : selectedProfile
-                      ? 'Deploy team'
-                      : 'Create team'}
-                </button>
+                    {resolvedSelected.length > 0 ? (
+                      <div className="mt-1 max-h-[180px] overflow-y-auto rounded-lg border border-border bg-foreground/[0.02] p-2">
+                        <div className="flex flex-col gap-0.5">
+                          {resolvedSelected.map((agent, i) => (
+                            <div
+                              key={agent.id}
+                              className="flex items-center gap-2 rounded-md px-1 py-0.5"
+                            >
+                              <BooAvatar seed={agent.name} size={22} tint={previewColors[i]} />
+                              <span className="truncate text-[12px] text-text/75">
+                                {agent.name}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-secondary/55">
+                        Teammates you add to this team will use these colors.
+                      </p>
+                    )}
+                  </section>
+
+                  {error && <p className="text-[11px] text-destructive">{error}</p>}
+                </div>
+
+                {/* Footer (fixed) — primary action always visible */}
+                <div className="border-t border-border px-6 py-4">
+                  <button
+                    type="button"
+                    onClick={() => void handleConfirmCustomize()}
+                    disabled={!teamName.trim()}
+                    className="flex h-10 w-full items-center justify-center gap-2 rounded-lg text-[13px] font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{ backgroundColor: teamColor }}
+                  >
+                    {isSingleAgentMode
+                      ? 'Create agent'
+                      : selectedProfile
+                        ? 'Deploy team'
+                        : 'Create team'}
+                  </button>
+                </div>
               </div>
             )}
 
