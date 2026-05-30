@@ -29,7 +29,8 @@ import { TemplateGrid } from './TemplateGrid'
 import { TeamColorCollectionPicker } from './TeamColorCollectionPicker'
 import { TeamAccentPicker, TEAM_ACCENT_PRESETS } from './TeamAccentPicker'
 import { TeamIconPicker } from './TeamIconPicker'
-import { DEFAULT_COLLECTION_ID, generateTeamColors, type CollectionId } from '@/lib/teamPalettes'
+import { DEFAULT_COLLECTION_ID, type CollectionId } from '@/lib/teamPalettes'
+import { paletteFor } from '@/lib/resolveTeamBooColor'
 import { useTheme } from '@/features/theme/useTheme'
 
 // ─── Pick-step source filter entries (agency-agents first, clawboo last) ─────
@@ -97,6 +98,11 @@ export function CreateTeamModal({
   // Team accent (icon / halo) and the Boo color collection are independent.
   const [teamColor, setTeamColor] = useState<string>(TEAM_ACCENT_PRESETS[0])
   const [colorCollectionId, setColorCollectionId] = useState<CollectionId>(DEFAULT_COLLECTION_ID)
+  // The team id is minted on the CLIENT so the customize-step preview can seed
+  // the Boo palette with the SAME id the deployed team will use (per-team hue
+  // rotation) — the preview then matches what the team actually looks like.
+  // Regenerated in `reset()` so each created team gets a fresh, unique id.
+  const [pendingTeamId, setPendingTeamId] = useState<string>(() => crypto.randomUUID())
 
   // Deploy state
   const [progress, setProgress] = useState<DeployProgress | null>(null)
@@ -127,15 +133,16 @@ export function CreateTeamModal({
     [selectedProfile],
   )
 
-  // Live preview of each teammate's avatar color for the chosen collection.
-  // Agents have no id yet here, so we use the collection's slot colors — exact
-  // for generative collections, the Classic palette for the legacy set.
+  // Live preview of each teammate's avatar color for the chosen collection,
+  // seeded by the pending team id so the rotated palette matches what the team
+  // will actually look like once deployed. (Classic ignores the seed and shows
+  // its fixed legacy tints, exactly as before.)
   const previewColors = useMemo(
     () =>
       resolvedSelected.length
-        ? generateTeamColors(colorCollectionId, resolvedSelected.length, resolvedTheme)
+        ? paletteFor(colorCollectionId, resolvedSelected.length, resolvedTheme, pendingTeamId)
         : [],
-    [colorCollectionId, resolvedSelected.length, resolvedTheme],
+    [colorCollectionId, resolvedSelected.length, resolvedTheme, pendingTeamId],
   )
 
   /**
@@ -174,6 +181,8 @@ export function CreateTeamModal({
     setPickCategory('all')
     setPickSource('all')
     setDetailTemplate(null)
+    // Fresh id for the next team so each one gets its own palette rotation.
+    setPendingTeamId(crypto.randomUUID())
   }, [])
 
   const handleClose = useCallback(() => {
@@ -230,6 +239,9 @@ export function CreateTeamModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          // Client-minted id so the deployed team's Boo palette matches the
+          // preview the user just saw (same per-team hue rotation seed).
+          id: pendingTeamId,
           name: finalTeamName,
           icon: teamIcon,
           color: teamColor,
@@ -504,7 +516,18 @@ export function CreateTeamModal({
       setError(err instanceof Error ? err.message : 'Something went wrong')
       setStep('customize')
     }
-  }, [client, teamName, teamIcon, teamColor, selectedProfile, reset, onClose, onCreated])
+  }, [
+    client,
+    teamName,
+    teamIcon,
+    teamColor,
+    selectedProfile,
+    colorCollectionId,
+    pendingTeamId,
+    reset,
+    onClose,
+    onCreated,
+  ])
 
   if (!isOpen) return null
 

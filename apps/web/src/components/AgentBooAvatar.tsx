@@ -40,7 +40,8 @@ function useTeamBooColor(agentId: string, isBooZero: boolean): string | undefine
   return useMemo(() => {
     if (isBooZero || !teamId || !collectionId) return undefined
     const members = membersSig ? membersSig.split('|') : []
-    return pickBooColor(collectionId, members, agentId, resolvedTheme)
+    // Seed with teamId so same-collection teams get distinct rotated palettes.
+    return pickBooColor(collectionId, members, agentId, resolvedTheme, teamId)
   }, [isBooZero, teamId, collectionId, membersSig, agentId, resolvedTheme])
 }
 

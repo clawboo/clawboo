@@ -53,7 +53,13 @@ interface CreateBody {
   colorCollectionId?: string
   templateId?: string
   leaderAgentId?: string
+  /** Optional client-provided UUID so the create-team preview can seed the
+   *  Boo palette with the SAME id the deployed team will use (per-team color
+   *  rotation). Validated as a UUID; ignored otherwise. */
+  id?: string
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function teamsPOST(req: Request, res: Response): void {
   const body = req.body as CreateBody | undefined
@@ -69,7 +75,8 @@ export function teamsPOST(req: Request, res: Response): void {
   }
 
   const now = Date.now()
-  const id = crypto.randomUUID()
+  // Honor a valid client-provided id; otherwise mint one server-side.
+  const id = typeof body.id === 'string' && UUID_RE.test(body.id) ? body.id : crypto.randomUUID()
 
   try {
     const db = createDb(getDbPath())

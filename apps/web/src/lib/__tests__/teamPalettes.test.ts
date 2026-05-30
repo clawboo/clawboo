@@ -5,6 +5,7 @@ import { TINTS, resolveBooTint } from '@clawboo/ui'
 import {
   generateTeamColors,
   collectionAnchorColor,
+  hueRotationFromSeed,
   PALETTE_RECIPES,
   COLLECTION_IDS,
   DEFAULT_COLLECTION_ID,
@@ -171,8 +172,9 @@ describe('resolveTeamBooColor', () => {
     expect(ca).toMatch(HEX)
     expect(cb).toMatch(HEX)
     expect(ca).not.toBe(cb)
-    // 'a' < 'b' by stable sort, palette of 2 members excluding Boo Zero 'z'.
-    const palette = generateTeamColors('sharp-saas', 2, 'light')
+    // 'a' < 'b' by stable sort, palette of 2 members excluding Boo Zero 'z',
+    // rotated by the team id seed ('t').
+    const palette = generateTeamColors('sharp-saas', 2, 'light', hueRotationFromSeed('t'))
     expect(ca).toBe(palette[0])
     expect(cb).toBe(palette[1])
   })
@@ -233,6 +235,45 @@ describe('classic — legacy-faithful collection', () => {
       )
       expect(pickBooColor('classic', [], agentId, 'dark')).toBe(resolveBooTint(agentId, false))
     }
+  })
+})
+
+describe('per-team hue rotation', () => {
+  it('hueRotationFromSeed is deterministic and in 0–359', () => {
+    expect(hueRotationFromSeed('team-A')).toBe(hueRotationFromSeed('team-A'))
+    for (const s of ['', 'a', 'team-A', 'f66b9297-763c-4a50-9489-b75d7d95584c']) {
+      const r = hueRotationFromSeed(s)
+      expect(r).toBeGreaterThanOrEqual(0)
+      expect(r).toBeLessThan(360)
+    }
+    expect(hueRotationFromSeed('')).toBe(0)
+  })
+
+  it('gives two teams on the SAME collection + count different colors', () => {
+    const teamA = generateTeamColors('sharp-saas', 4, 'dark', hueRotationFromSeed('team-A'))
+    const teamB = generateTeamColors('sharp-saas', 4, 'dark', hueRotationFromSeed('team-B'))
+    expect(teamA).not.toEqual(teamB)
+  })
+
+  it('keeps the same chroma/lightness character across the rotation', () => {
+    // Rotation shifts hue only — the palette still reads as its collection.
+    const base = generateTeamColors('vivid-pop', 6, 'dark', 0).map((h) => parse(h).c)
+    const rot = generateTeamColors('vivid-pop', 6, 'dark', hueRotationFromSeed('xyz')).map(
+      (h) => parse(h).c,
+    )
+    expect(avg(rot)).toBeCloseTo(avg(base), 1)
+  })
+
+  it('default (no rotation) is unchanged — backward compatible', () => {
+    expect(generateTeamColors('vivid-pop', 5, 'light')).toEqual(
+      generateTeamColors('vivid-pop', 5, 'light', 0),
+    )
+  })
+
+  it('classic ignores the seed (stays pixel-exact across teams)', () => {
+    const a = generateTeamColors('classic', 5, 'light', hueRotationFromSeed('team-A'))
+    const b = generateTeamColors('classic', 5, 'light', hueRotationFromSeed('team-B'))
+    expect(a).toEqual(b)
   })
 })
 

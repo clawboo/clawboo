@@ -173,8 +173,10 @@ test.describe('Group Chat', () => {
       timeout: 1_000,
     })
 
-    // Ghost Graph should still be visible alongside the gate (2-panel layout)
-    await expect(page.locator('.react-flow')).toBeVisible({ timeout: 10_000 })
+    // The intro gate fills the whole window during onboarding — the Ghost Graph
+    // is intentionally NOT rendered until the user finishes and the team space
+    // "opens" into the graph(top)+chat(bottom) split.
+    await expect(page.locator('.react-flow')).not.toBeVisible({ timeout: 2_000 })
   })
 
   test('nests delegated agent response inside the source DelegationCard', async ({

@@ -199,8 +199,27 @@ function toHex(p: OklchPoint): string {
 }
 
 /**
+ * Deterministic hue rotation (0–359°) from a seed string (a team id). Lets two
+ * teams that picked the SAME collection — and even the same member count — land
+ * on a DIFFERENT slice of the hue wheel, so their Boos don't look identical.
+ * FNV-1a over the seed; empty seed → no rotation (the recipe's own hueOffset).
+ * The rotation only shifts WHICH hues appear — chroma + lightness (the palette's
+ * "feel") are untouched, so a team still reads as its chosen collection.
+ */
+export function hueRotationFromSeed(seed: string): number {
+  if (!seed) return 0
+  let h = 0x811c9dc5
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0) % 360
+}
+
+/**
  * Generate `count` distinct hex colors for a team, from `collectionId`,
- * adapted to the active `theme`. Hues are evenly spaced around the wheel,
+ * adapted to the active `theme`. Hues are evenly spaced around the wheel
+ * (starting from the recipe's offset plus an optional per-team `hueRotation`),
  * lightness is staggered, adjacent collisions are nudged apart, and every
  * result is gamut-mapped to sRGB.
  */
@@ -208,11 +227,13 @@ export function generateTeamColors(
   collectionId: CollectionId,
   count: number,
   theme: 'light' | 'dark',
+  hueRotation = 0,
 ): string[] {
   if (count <= 0) return []
   const recipe = PALETTE_RECIPES[collectionId] ?? PALETTE_RECIPES[DEFAULT_COLLECTION_ID]
   // Legacy fixed palette (e.g. Classic): cycle the literal list verbatim,
-  // theme-independent — exactly how the original tints behaved.
+  // theme-independent — exactly how the original tints behaved. The per-team
+  // rotation does NOT apply (the list is pixel-exact by contract).
   if (recipe.fixedColors && recipe.fixedColors.length > 0) {
     const fixed = recipe.fixedColors
     return Array.from({ length: count }, (_, i) => fixed[i % fixed.length])
@@ -223,7 +244,7 @@ export function generateTeamColors(
 
   const points: OklchPoint[] = []
   for (let i = 0; i < count; i++) {
-    const h = (recipe.hueOffset + i * hueStep) % 360
+    const h = (recipe.hueOffset + hueRotation + i * hueStep) % 360
     // Okabe-Ito: even Boos lighter, odd Boos darker.
     const staggered = baseL + (i % 2 === 0 ? recipe.stagger : -recipe.stagger)
     const l = clamp(staggered, L_MIN, L_MAX)
