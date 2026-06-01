@@ -17,14 +17,16 @@
     <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&display=swap" rel="stylesheet" />
 
     <!-- Theme init — runs synchronously before React mounts to prevent FOUC.
-         Reads localStorage('clawboo.theme'), defaults to system preference.
+         Reads localStorage('clawboo.theme'); fresh installs (no stored value)
+         default to LIGHT so onboarding happens in light mode. Once the user
+         picks a preference (light/dark/system) it's respected.
          Mirror of the resolver inside features/theme/ThemeProvider.tsx. -->
     <script>
       (function () {
         try {
           var stored = window.localStorage.getItem('clawboo.theme');
           var pref =
-            stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+            stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'light';
           var resolved =
             pref === 'system'
               ? window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
