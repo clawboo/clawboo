@@ -1,15 +1,9 @@
 <p align="center">
-  <img src="docs/screenshots/clawboo-mascot.png" height="160" alt="Clawboo — ghost-lobster mascot" />
-</p>
-
-<h1 align="center">Clawboo</h1>
-
-<p align="center">
-  <strong>The open-source AI agent team studio.</strong>
+  <img src="docs/screenshots/hero-tight-final.webp" alt="Clawboo: an open-source AI agent studio and multi-agent harness. Deploy a team of AI agents and watch them delegate, collaborate, and ship live." width="100%" />
 </p>
 
 <p align="center">
-  A purpose-built multi-agent harness, a <strong>300+ agent catalog</strong>, and live group chat with structured delegation.
+  A purpose-built multi-agent harness for self-hosted teams of <strong>AI agents</strong>, plus a <strong>300+ agent catalog</strong> and live group chat with structured delegation.
   <br/>
   Powered today by <a href="https://github.com/openclaw/openclaw">OpenClaw</a>; more agent runtimes coming.
 </p>
@@ -38,7 +32,7 @@
 <br/>
 
 <p align="center">
-  <img src="docs/screenshots/clawboo-demo.gif" alt="Clawboo demo — Boo Zero delegates work to three specialists who respond live inside DelegationCards" width="92%" />
+  <img src="docs/screenshots/clawboo-demo.gif" alt="Clawboo demo: Boo Zero delegates work to three specialists who respond live inside DelegationCards" width="92%" />
 </p>
 
 <p align="center">
