@@ -16,7 +16,7 @@ Thanks for taking the time to contribute! Please read this guide before opening 
 git clone https://github.com/clawboo/clawboo.git
 cd clawboo
 pnpm install
-pnpm dev          # starts apps/web on :3000
+pnpm dev          # Vite UI on :5173, API on :18790
 ```
 
 ## Branching

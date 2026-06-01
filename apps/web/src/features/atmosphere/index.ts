@@ -1,7 +1,2 @@
-export { ShaderAtmosphere } from './ShaderAtmosphere'
-export { StaticAtmosphere } from './StaticAtmosphere'
-export {
-  useAtmospherePreference,
-  setAtmospherePreference,
-  type AtmospherePreference,
-} from './useAtmospherePreference'
+export { SkyAtmosphere, isDarkSky, type SkyMood, type SkyAtmosphereProps } from './SkyAtmosphere'
+export { BackgroundBoos, type BackgroundBoosProps } from './BackgroundBoos'

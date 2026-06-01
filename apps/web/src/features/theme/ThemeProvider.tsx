@@ -17,10 +17,12 @@ export interface ThemeContextValue {
 export const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 function readStoredPreference(): ThemePreference {
-  if (typeof window === 'undefined') return 'system'
+  // Fresh installs (no stored value) default to LIGHT so onboarding happens in
+  // light mode. Any explicit choice (light/dark/system) is respected thereafter.
+  if (typeof window === 'undefined') return 'light'
   const raw = window.localStorage.getItem(THEME_STORAGE_KEY)
   if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
-  return 'system'
+  return 'light'
 }
 
 function systemPrefersDark(): boolean {

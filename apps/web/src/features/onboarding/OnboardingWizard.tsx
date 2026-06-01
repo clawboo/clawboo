@@ -32,7 +32,7 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
 import { StepIndicator } from './StepIndicator'
-import { ShaderAtmosphere } from '@/features/atmosphere'
+import { SkyAtmosphere } from '@/features/atmosphere'
 import { STARTER_TEMPLATES, resolveTeamAgents } from '@/features/marketplace/teamCatalog'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -114,28 +114,14 @@ function WizardCard({
 
 function WelcomeStep({ onContinue }: { onContinue: () => void }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-background overflow-hidden">
-      {/* Atmosphere — full-strength organic gradient behind the hero. This
-          is the very first screen a user sees on `npx clawboo`; there's no
-          other content competing for attention, so we use the same `hero`
-          variant the post-onboarding WelcomeState uses (NOT `subtle`).
-          Lazy-loaded WebGL when available, CSS radial fallback otherwise.
-          Honours the opt-out toggle + prefers-reduced-motion. */}
-      <ShaderAtmosphere variant="hero" />
-
-      {/* Subtle grid — sits above the atmosphere for tactile depth.
-          Theme-aware: the line color is driven by --foreground-rgb (light
-          ink in dark mode, dark ink in light mode) so the grid reads in BOTH
-          themes. The previous hardcoded rgba(255,255,255,…) only showed on
-          dark backgrounds — white-on-white made it invisible in light mode. */}
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundImage:
-            'linear-gradient(rgb(var(--foreground-rgb) / 0.045) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--foreground-rgb) / 0.045) 1px, transparent 1px)',
-          backgroundSize: '48px 48px',
-        }}
-      />
+    <div
+      className="absolute inset-0 flex flex-col items-center justify-center overflow-hidden"
+      style={{ background: '#8fb9ee' }}
+    >
+      {/* Calm Day sky with drifting clouds. Theme-independent — the welcome is
+          always the bright Day sky regardless of the app's light/dark
+          preference (one consistent, calm entry screen). */}
+      <SkyAtmosphere />
 
       <div className="relative z-10 flex flex-col items-center gap-7 px-6 text-center max-w-md">
         {/* Animated ghost */}
@@ -158,26 +144,29 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
         {/* Wordmark */}
         <div className="flex flex-col items-center gap-2">
           <h1
-            className="text-[54px] font-bold tracking-tight text-text leading-none"
+            className="text-[54px] font-bold tracking-tight leading-none"
             style={{
               fontFamily: 'var(--font-display)',
-              // Theme-aware halo (matches page bg) so the wordmark stays crisp
-              // over the moving shader gradient in both light and dark.
-              textShadow:
-                '0 2px 28px rgb(var(--canvas-rgb) / 0.55), 0 1px 4px rgb(var(--canvas-rgb) / 0.45)',
+              // Pinned dark — the Day sky is always light, so the wordmark stays
+              // dark regardless of the app theme; white halo lifts it off clouds.
+              color: 'rgb(30,37,64)',
+              textShadow: '0 2px 30px rgba(255,255,255,0.7), 0 1px 2px rgba(255,255,255,0.8)',
             }}
           >
             Clawboo
           </h1>
           <p
-            className="text-[21px] font-light tracking-wide text-foreground/75"
-            style={{ textShadow: '0 1px 14px rgb(var(--canvas-rgb) / 0.5)' }}
+            className="text-[21px] font-light tracking-wide"
+            style={{ color: 'rgba(30,37,64,0.8)', textShadow: '0 1px 14px rgba(255,255,255,0.7)' }}
           >
             Your AI agents, visible.
           </p>
           <p
-            className="text-[13px] text-foreground/80 mt-1 leading-relaxed"
-            style={{ textShadow: '0 1px 12px rgb(var(--canvas-rgb) / 0.5)' }}
+            className="text-[13px] mt-1 leading-relaxed"
+            style={{
+              color: 'rgba(30,37,64,0.68)',
+              textShadow: '0 1px 12px rgba(255,255,255,0.65)',
+            }}
           >
             Deploy and orchestrate your OpenClaw agent teams.
             <br />
@@ -198,8 +187,8 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
         </motion.button>
 
         <p
-          className="text-[11px] text-foreground/60 font-mono -mt-2"
-          style={{ textShadow: '0 1px 10px rgb(var(--canvas-rgb) / 0.45)' }}
+          className="text-[11px] font-mono -mt-2"
+          style={{ color: 'rgba(30,37,64,0.62)', textShadow: '0 1px 10px rgba(255,255,255,0.65)' }}
         >
           Requires OpenClaw Gateway
         </p>
