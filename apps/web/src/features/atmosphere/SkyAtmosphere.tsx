@@ -16,6 +16,7 @@
  */
 import { useMemo } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
+import { BackgroundBoos } from './BackgroundBoos'
 
 export type SkyMood = 'dawn' | 'day' | 'dusk' | 'night'
 
@@ -170,6 +171,8 @@ export interface SkyAtmosphereProps {
   shading?: number
   /** 0–1.3 — sun/moon glow strength. */
   glow?: number
+  /** Faint background boo silhouettes drifting behind the clouds. 0 disables. */
+  boos?: number
   motionEnabled?: boolean
 }
 
@@ -179,6 +182,7 @@ export function SkyAtmosphere({
   definition = 0.7,
   shading = 0,
   glow = 0,
+  boos = 6,
   motionEnabled = true,
 }: SkyAtmosphereProps) {
   const reduce = useReducedMotion()
@@ -210,6 +214,9 @@ export function SkyAtmosphere({
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
       <div className="absolute inset-0" style={{ background: sky.gradient }} />
       <div className="absolute inset-0" style={{ background: sky.glow, opacity: glow }} />
+
+      {/* Faint "boo-verse" — distant boo silhouettes behind the clouds. */}
+      <BackgroundBoos count={boos} animate={animate} />
 
       <Cloud
         lit={layers.far.lit}
