@@ -33,7 +33,20 @@ export const isWindows = process.platform === 'win32'
 export function findExecutable(name: string): string | null {
   try {
     const cmd = isWindows ? 'where' : 'which'
-    const out = execFileSync(cmd, [name], { encoding: 'utf8' }).trim()
+    // `timeout` is load-bearing: this runs SYNCHRONOUSLY (it blocks the single-
+    // threaded server), and on Windows `where` can be slow under Defender
+    // real-time scanning. An unbounded spawn here froze `/api/system/status`
+    // past the client timeout on Windows CI runners (and would stall the
+    // onboarding DetectStep for real users). `where`/`which` is normally
+    // <200 ms, so a 5 s cap never trips in practice but bounds the worst case;
+    // on timeout it throws → caught below → treated as "not found".
+    // `windowsHide` suppresses the cmd.exe console flash (matches our other
+    // Windows spawns).
+    const out = execFileSync(cmd, [name], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      windowsHide: true,
+    }).trim()
     if (!out) return null
     // `where` on Windows may return multiple paths; first one wins.
     const first = out.split(/\r?\n/)[0]
