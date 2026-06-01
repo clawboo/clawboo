@@ -6,7 +6,7 @@ import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
 import { consumeSSE } from '@/lib/sseClient'
-import { ShaderAtmosphere } from '@/features/atmosphere'
+import { SkyAtmosphere } from '@/features/atmosphere'
 import type { SystemInfo } from '@/stores/system'
 
 // ─── System Status Hint ──────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ function SystemHint({ isConnected }: { isConnected: boolean }) {
 
   if (!systemInfo.openclaw.installed) {
     return (
-      <div className="mt-2 text-[11px] leading-relaxed text-secondary/60">
+      <div className="mt-2 text-[11px] leading-relaxed text-[rgba(30,37,64,0.62)]">
         <span className="text-amber">OpenClaw is not installed.</span>{' '}
         <a
           href="https://docs.openclaw.ai/start/getting-started"
@@ -87,7 +87,7 @@ function SystemHint({ isConnected }: { isConnected: boolean }) {
 
   if (!systemInfo.gateway.running) {
     return (
-      <div className="mt-2 text-[11px] leading-relaxed text-secondary/60">
+      <div className="mt-2 text-[11px] leading-relaxed text-[rgba(30,37,64,0.62)]">
         <span className="text-amber">Gateway is offline.</span>{' '}
         <button
           onClick={handleStartGateway}
@@ -110,7 +110,7 @@ function SystemHint({ isConnected }: { isConnected: boolean }) {
   }
 
   return (
-    <div className="mt-2 text-[11px] leading-relaxed text-secondary/60">
+    <div className="mt-2 text-[11px] leading-relaxed text-[rgba(30,37,64,0.62)]">
       Gateway is running. Connecting...
     </div>
   )
@@ -145,14 +145,16 @@ export function WelcomeState() {
   ]
 
   return (
-    <div className="relative flex h-full flex-col items-center justify-center gap-6 overflow-hidden p-8 text-center">
-      {/* Phase 15 — ShaderGradient atmosphere. Falls back to a static
-          multi-radial CSS gradient under prefers-reduced-motion, the user
-          opt-out toggle, or while the WebGL chunk is still loading. */}
-      <ShaderAtmosphere variant="hero" />
+    <div
+      className="relative flex h-full flex-col items-center justify-center gap-6 overflow-hidden p-8 text-center"
+      style={{ background: '#8fb9ee' }}
+    >
+      {/* Calm Day sky with drifting clouds — theme-independent (always the
+          bright Day sky regardless of the app's light/dark preference). */}
+      <SkyAtmosphere />
 
       <motion.div
-        className="relative"
+        className="relative z-10"
         initial={{ opacity: 0, y: 12, scale: 0.92 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: 'spring', stiffness: 200, damping: 22 }}
@@ -172,32 +174,30 @@ export function WelcomeState() {
       </motion.div>
 
       <motion.div
+        className="relative z-10"
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1, duration: 0.4, ease: 'easeOut' }}
       >
         <h1
-          className="m-0 text-foreground"
+          className="m-0"
           style={{
             fontFamily: 'var(--font-display)',
             fontSize: 36,
             fontWeight: 700,
             letterSpacing: '-0.02em',
             lineHeight: 1.1,
-            // Theme-aware halo lifts the text off the moving shader gradient.
-            // --canvas-rgb is near-black in dark / near-white in light, so the
-            // shadow always matches the page bg and reads as a soft plate,
-            // never a drop-shadow. Without it, the heading washes out wherever
-            // a bright gradient blob sits behind it.
-            textShadow:
-              '0 2px 24px rgb(var(--canvas-rgb) / 0.55), 0 1px 4px rgb(var(--canvas-rgb) / 0.45)',
+            // Pinned dark — the Day sky is always light; white halo lifts the
+            // heading off the clouds regardless of the app theme.
+            color: 'rgb(30,37,64)',
+            textShadow: '0 2px 24px rgba(255,255,255,0.7), 0 1px 4px rgba(255,255,255,0.8)',
           }}
         >
           Welcome to Clawboo
         </h1>
         <p
-          className="mx-auto mt-3 max-w-[400px] text-[14px] leading-relaxed text-foreground/80"
-          style={{ textShadow: '0 1px 12px rgb(var(--canvas-rgb) / 0.5)' }}
+          className="mx-auto mt-3 max-w-[400px] text-[14px] leading-relaxed"
+          style={{ color: 'rgba(30,37,64,0.78)', textShadow: '0 1px 12px rgba(255,255,255,0.7)' }}
         >
           Deploy, orchestrate, and observe your AI agent fleet.
         </p>
@@ -207,7 +207,7 @@ export function WelcomeState() {
 
       {/* Quick-start steps */}
       {isConnected && (
-        <div className="flex w-full max-w-[340px] flex-col gap-3 text-left">
+        <div className="relative z-10 flex w-full max-w-[340px] flex-col gap-3 text-left">
           {steps.map((step) => (
             <div key={step.num} className="flex items-start gap-3">
               <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[12px] font-bold text-primary">
@@ -215,8 +215,11 @@ export function WelcomeState() {
               </div>
               <div className="flex-1 pt-0.5">
                 <span
-                  className="text-[13px] text-foreground/85"
-                  style={{ textShadow: '0 1px 10px rgb(var(--canvas-rgb) / 0.5)' }}
+                  className="text-[13px]"
+                  style={{
+                    color: 'rgba(30,37,64,0.82)',
+                    textShadow: '0 1px 10px rgba(255,255,255,0.7)',
+                  }}
                 >
                   {step.text}
                 </span>
@@ -243,7 +246,7 @@ export function WelcomeState() {
           transition={{ delay: 0.2, duration: 0.3, ease: 'easeOut' }}
           whileHover={{ y: -1 }}
           whileTap={{ scale: 0.98 }}
-          className="mt-2 rounded-xl border-none bg-primary px-6 py-3 text-[14px] font-semibold text-primary-foreground"
+          className="relative z-10 mt-2 rounded-xl border-none bg-primary px-6 py-3 text-[14px] font-semibold text-primary-foreground"
           style={{
             boxShadow:
               '0 8px 24px rgb(var(--primary-rgb) / 0.3), 0 0 0 1px rgb(var(--primary-rgb) / 0.15)',
@@ -256,7 +259,7 @@ export function WelcomeState() {
 
       {/* Nav shortcuts when teams exist */}
       {isConnected && hasTeams && (
-        <div className="mt-1 flex gap-2">
+        <div className="relative z-10 mt-1 flex gap-2">
           {(
             [
               { label: 'Atlas', icon: Globe, view: 'graph' as const },
@@ -269,7 +272,7 @@ export function WelcomeState() {
               <button
                 key={item.view}
                 onClick={() => useViewStore.getState().navigateTo(item.view)}
-                className="flex items-center gap-2 rounded-lg border border-border bg-foreground/[0.04] px-3.5 py-1.5 text-[12px] text-foreground/55 transition-all duration-150 hover:border-foreground/15 hover:text-foreground/80"
+                className="flex items-center gap-2 rounded-lg border border-[rgba(30,37,64,0.14)] bg-[rgba(255,255,255,0.45)] px-3.5 py-1.5 text-[12px] text-[rgba(30,37,64,0.7)] transition-all duration-150 hover:border-[rgba(30,37,64,0.28)] hover:text-[rgba(30,37,64,0.92)]"
                 style={{
                   transitionTimingFunction: 'var(--motion-easing-standard)',
                 }}
