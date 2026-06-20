@@ -12,11 +12,12 @@
 // canvas without GroupChatView having to plumb it through.
 
 import { useState } from 'react'
-import { Settings } from 'lucide-react'
+import { MessagesSquare, Settings } from 'lucide-react'
 import { useGraphStore } from '@/features/graph/store'
 import type { Team } from '@/stores/team'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { TeamSettingsSheet } from './TeamSettingsSheet'
+import { TeamChatRoom } from './TeamChatRoom'
 
 interface GroupChatViewHeaderProps {
   team: Team | null
@@ -27,15 +28,25 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
   // each returns a number and React's default reference check works.
   const booCount = useGraphStore((s) => s.nodes.filter((n) => n.type === 'boo').length)
   const skillCount = useGraphStore((s) => s.nodes.filter((n) => n.type === 'skill').length)
+  // The graph store is shared across Atlas + every team graph. Only trust the
+  // count once it has STRUCTURALLY rebuilt for THIS team — otherwise a stale
+  // count from a previous scope flashes (e.g. "23 Boos" from Atlas before the
+  // team graph hydrates).
+  const graphScopeKey = useGraphStore((s) => s.graphScopeKey)
 
   // Open-state for the team-settings sheet — holds the brief + rules
   // editors that used to live in the System panel. Local-state because
   // it doesn't outlive the team-chat view.
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // The peer-chat room — every teammate as a named author, any runtime can
+  // lead. A right-slide drawer so it never disturbs the aspect-sensitive graph split.
+  const [roomOpen, setRoomOpen] = useState(false)
 
-  // Don't flash "0 Boos · 0 skills" before the graph hydrates — render an
-  // ellipsis placeholder until the structural rebuild lands its first node.
-  const hasGraph = booCount > 0
+  // Don't flash "0 Boos · 0 skills" before the graph hydrates, NOR a stale count
+  // from the previous scope — render an ellipsis placeholder until the graph has
+  // structurally rebuilt for THIS team AND landed its first node.
+  const scopeReady = graphScopeKey === `team:${team?.id ?? 'none'}`
+  const hasGraph = scopeReady && booCount > 0
   return (
     <>
       {/* 44 px fixed-height row + 12 px horizontal padding — matches the
@@ -79,6 +90,19 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
         {team && (
           <button
             type="button"
+            onClick={() => setRoomOpen(true)}
+            aria-label={`${team.name} — team room`}
+            title="Team room — peers, any runtime can lead"
+            data-testid="team-room-button"
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-foreground/[0.04] px-2.5 text-[11px] font-medium text-text/70 transition hover:bg-foreground/[0.08] hover:text-text"
+          >
+            <MessagesSquare size={13} strokeWidth={1.75} />
+            Team room
+          </button>
+        )}
+        {team && (
+          <button
+            type="button"
             onClick={() => setSettingsOpen(true)}
             aria-label={`${team.name} — brief & rules`}
             title="Team brief & rules"
@@ -98,6 +122,7 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
       {settingsOpen && team && (
         <TeamSettingsSheet team={team} onClose={() => setSettingsOpen(false)} />
       )}
+      {roomOpen && team && <TeamChatRoom teamId={team.id} onClose={() => setRoomOpen(false)} />}
     </>
   )
 }
