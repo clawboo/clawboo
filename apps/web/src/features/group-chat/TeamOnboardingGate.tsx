@@ -7,8 +7,8 @@
 // Phase B: Sequential agent introductions — one chat.send per agent, no @mentions
 // Phase C: User self-introduction — saved to each agent's SOUL.md
 //
-// During onboarding, useTeamOrchestration is NOT mounted (GroupChatPanel
-// doesn't render until onComplete fires), so delegation detection and relay
+// During onboarding, team orchestration is NOT mounted (GroupChatPanel
+// doesn't render until onComplete fires), so delegation routing and relay
 // are inactive — this is what prevents the cascade.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -25,6 +25,7 @@ import { buildTeamSessionKey, setTeamChatOverride } from '@/lib/sessionUtils'
 import { markAgentAwake } from '@/lib/wakeTracker'
 import { nextSeq } from '@/lib/sequenceKey'
 import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
+import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -326,11 +327,7 @@ export function TeamOnboardingGate({
       try {
         let current = ''
         try {
-          const res = await client.call<{ file: { content?: string; missing?: boolean } }>(
-            'agents.files.get',
-            { agentId: agent.id, name: 'SOUL.md' },
-          )
-          current = res?.file?.content ?? ''
+          current = await readAgentFile(agent.id, 'SOUL.md')
         } catch {
           current = ''
         }
@@ -343,11 +340,7 @@ export function TeamOnboardingGate({
         } else {
           next = `${current.trimEnd()}${patchBlock}`
         }
-        await client.call('agents.files.set', {
-          agentId: agent.id,
-          name: 'SOUL.md',
-          content: next,
-        })
+        await writeAgentFile(agent.id, 'SOUL.md', next)
       } catch {
         // Non-fatal — one agent failing doesn't block the gate from opening.
       }
@@ -361,7 +354,6 @@ export function TeamOnboardingGate({
     // effort; the per-turn rules block stays authoritative regardless.
     if (booZeroAgent) {
       void syncBooZeroSoulIdentity({
-        client,
         agentId: booZeroAgent.id,
         displayName: booZeroAgent.name,
       })

@@ -258,24 +258,24 @@ describe('useGraphStore', () => {
   })
 
   describe('setAgentFiles', () => {
-    it('sets files for an agent', () => {
-      useGraphStore.getState().setAgentFiles('a1', { toolsMd: '## Tools', agentsMd: '## Agents' })
+    it('sets capabilities + agentsMd for an agent', () => {
+      useGraphStore.getState().setAgentFiles('a1', { capabilities: [], agentsMd: '## Agents' })
       const files = useGraphStore.getState().agentFiles.get('a1')
-      expect(files).toEqual({ toolsMd: '## Tools', agentsMd: '## Agents' })
+      expect(files).toEqual({ capabilities: [], agentsMd: '## Agents' })
     })
 
     it('merges with existing files', () => {
-      useGraphStore.getState().setAgentFiles('a1', { toolsMd: '## Tools' })
+      useGraphStore.getState().setAgentFiles('a1', { capabilities: [] })
       useGraphStore.getState().setAgentFiles('a1', { agentsMd: '## Agents' })
       const files = useGraphStore.getState().agentFiles.get('a1')
-      expect(files).toEqual({ toolsMd: '## Tools', agentsMd: '## Agents' })
+      expect(files).toEqual({ capabilities: [], agentsMd: '## Agents' })
     })
 
     it('does not affect other agents', () => {
-      useGraphStore.getState().setAgentFiles('a1', { toolsMd: 'A1 tools' })
-      useGraphStore.getState().setAgentFiles('a2', { toolsMd: 'A2 tools' })
-      expect(useGraphStore.getState().agentFiles.get('a1')!.toolsMd).toBe('A1 tools')
-      expect(useGraphStore.getState().agentFiles.get('a2')!.toolsMd).toBe('A2 tools')
+      useGraphStore.getState().setAgentFiles('a1', { agentsMd: 'A1 agents' })
+      useGraphStore.getState().setAgentFiles('a2', { agentsMd: 'A2 agents' })
+      expect(useGraphStore.getState().agentFiles.get('a1')!.agentsMd).toBe('A1 agents')
+      expect(useGraphStore.getState().agentFiles.get('a2')!.agentsMd).toBe('A2 agents')
     })
   })
 

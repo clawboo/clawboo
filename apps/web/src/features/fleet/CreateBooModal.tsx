@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
-import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
+import { createAgent } from '@/lib/createAgent'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
 
 const DEFAULT_SOUL = `# SOUL\n\nYou are a helpful AI assistant. You approach tasks methodically, communicate clearly, and ask for clarification when needed.`
@@ -63,11 +63,10 @@ export function CreateBooModal({
     setError(null)
 
     try {
-      const workspaceDir = await resolveWorkspaceDir(client)
       const baseSoul = role.trim() || DEFAULT_SOUL
       const soulWithPersonality = mergeSoulWithPersonality(baseSoul, DEFAULT_PERSONALITY)
 
-      const agentId = await createAgent(client, trimmedName, workspaceDir, {
+      const agentId = await createAgent(trimmedName, {
         soul: soulWithPersonality,
         identity: `# IDENTITY\n\nYou are ${trimmedName}.`,
         tools: '# TOOLS\n',

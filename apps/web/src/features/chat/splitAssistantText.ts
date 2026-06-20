@@ -3,7 +3,7 @@
 // emit a markdown block for prose and a styled card for each
 // `<delegate>` block.
 
-import { findDelegationBlocks } from '@/features/group-chat/delegationDetector'
+import { findDelegationBlocks } from '@/features/group-chat/delegationTags'
 
 export type AssistantSegment =
   | { kind: 'prose'; text: string }

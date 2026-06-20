@@ -1,0 +1,51 @@
+{
+  "name": "@clawboo/evals",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Eval harness for clawboo's own orchestration: capability + regression suites, code/model graders, pass@1 / pass^k reporting, and the ±verifier × ±structured-state ablation scorecard",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/evals"
+  },
+  "keywords": [
+    "clawboo",
+    "evals",
+    "ablation",
+    "orchestration"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clawboo/db": "workspace:*",
+    "@clawboo/executor": "workspace:*",
+    "@clawboo/governance": "workspace:*",
+    "@clawboo/obs": "workspace:*",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -21,7 +21,7 @@ import type { SkillNodeData, SkillCategory } from '../types'
 
 // ─── Category → colour + icon ─────────────────────────────────────────────────
 //
-// Phase 20 — emoji glyphs replaced with Lucide icons; raw hex replaced with
+// Emoji glyphs replaced with Lucide icons; raw hex replaced with
 // the shared `--category-*` token palette (see globals.css). Both light and
 // dark modes inherit through the var() chain.
 
@@ -75,7 +75,10 @@ export const SkillNode = memo(function SkillNode({
   data,
   dragging,
 }: NodeProps<Node<SkillNodeData, 'skill'>>) {
-  const { name, category, description, isVisible, isLeadership } = data
+  const { name, category, description, isVisible, isLeadership, available } = data
+  // Capability availability → greyed (opacity + grayscale), matching the
+  // dashboard + the MCPToolsSection treatment. `undefined` = available.
+  const greyed = available === false
   const floatRef = useFloatingMotion(nodeId, 'skill', dragging)
   // Leadership orbital reads its visuals from a dedicated constant — the
   // `category` field is still set on the data (defaulted to `'other'` in
@@ -110,15 +113,16 @@ export const SkillNode = memo(function SkillNode({
     >
       <div ref={floatRef}>
         <div
-          title={description ?? name}
+          title={greyed ? `${description ?? name} — unavailable` : (description ?? name)}
           className="group"
           style={{
             width: CIRCLE,
             height: CIRCLE,
             position: 'relative',
             overflow: 'visible',
-            opacity: isHighlighted ? 1 : 0.22,
-            transition: 'opacity 0.2s ease',
+            opacity: greyed ? (isHighlighted ? 0.5 : 0.16) : isHighlighted ? 1 : 0.22,
+            filter: greyed ? 'grayscale(1)' : undefined,
+            transition: 'opacity 0.2s ease, filter 0.2s ease',
           }}
         >
           {/* Filled circle. `color-mix(in srgb, ...)` lets us compose

@@ -1,0 +1,56 @@
+{
+  "name": "@clawboo/executor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runtime-adapter trait + normalized lifecycle-event union for heterogeneous agent executors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/executor"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/executor",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "executor",
+    "runtime",
+    "adapter",
+    "lifecycle-events"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "import": "./dist/contract.mjs",
+      "require": "./dist/contract.js"
+    },
+    "./tiers": {
+      "types": "./dist/tiers.d.ts",
+      "import": "./dist/tiers.mjs",
+      "require": "./dist/tiers.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

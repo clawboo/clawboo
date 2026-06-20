@@ -31,12 +31,18 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`
 
 const SANDBOX_HOME = mkdtempSync(path.join(os.tmpdir(), 'clawboo-e2e-'))
 const SANDBOX_STATE_DIR = path.join(SANDBOX_HOME, '.openclaw')
+// clawboo now owns its OWN state dir (~/.clawboo by default); CLAWBOO_HOME
+// overrides it. Sandbox it under the same temp root so the run can't touch the
+// developer's real ~/.clawboo (DB / settings / secrets vault / worktrees).
+const SANDBOX_CLAWBOO_DIR = path.join(SANDBOX_HOME, '.clawboo')
 mkdirSync(SANDBOX_STATE_DIR, { recursive: true })
+mkdirSync(SANDBOX_CLAWBOO_DIR, { recursive: true })
 
 // Expose the sandbox path to the test-runner process so fixtures can verify
 // they're running in a sandboxed context before doing anything destructive.
 process.env.CLAWBOO_E2E_SANDBOX_HOME = SANDBOX_HOME
 process.env.CLAWBOO_E2E_SANDBOX_STATE_DIR = SANDBOX_STATE_DIR
+process.env.CLAWBOO_E2E_SANDBOX_CLAWBOO_DIR = SANDBOX_CLAWBOO_DIR
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -65,12 +71,15 @@ export default defineConfig({
     // finished, blocking `pnpm e2e` from running standalone.
     timeout: 180_000,
     env: {
-      // Sandbox the spawned server. `HOME` overrides what os.homedir()
-      // returns (controls the SQLite path); `OPENCLAW_STATE_DIR` overrides
-      // resolveStateDir() (controls openclaw.json / .env / settings.json).
-      // Tests run against this isolated env and CAN'T touch ~/.openclaw.
+      // Sandbox the spawned server. `CLAWBOO_HOME` overrides resolveClawbooDir()
+      // (clawboo's OWN dir: SQLite DB / settings / secrets vault / worktrees /
+      // api-port / device identity); `OPENCLAW_STATE_DIR` overrides
+      // resolveStateDir() (OpenClaw's openclaw.json / .env, read for interop).
+      // `HOME` is kept as a belt-and-suspenders fallback. Tests run against this
+      // isolated env and CAN'T touch the developer's real ~/.clawboo or ~/.openclaw.
       HOME: SANDBOX_HOME,
       OPENCLAW_STATE_DIR: SANDBOX_STATE_DIR,
+      CLAWBOO_HOME: SANDBOX_CLAWBOO_DIR,
     },
   },
 })

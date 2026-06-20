@@ -1,4 +1,4 @@
-// Reusable inline alert/banner primitive (Phase 20a).
+// Reusable inline alert/banner primitive.
 //
 // A premium-SaaS callout that leads with a semantic Lucide icon
 // (info / warning / error) instead of a bare `!` punctuation character.

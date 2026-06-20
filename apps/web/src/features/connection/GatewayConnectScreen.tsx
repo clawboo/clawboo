@@ -57,10 +57,11 @@ export function GatewayConnectScreen({
   useEffect(() => {
     fetch('/api/settings')
       .then((r) => r.json())
-      .then((data: { gatewayUrl?: string; gatewayToken?: string; hasToken?: boolean }) => {
+      .then((data: { gatewayUrl?: string; hasToken?: boolean }) => {
         if (data.gatewayUrl?.trim()) setUrl(data.gatewayUrl.trim())
-        if (data.gatewayToken?.trim()) setToken(data.gatewayToken.trim())
-        else if (data.hasToken) setToken('••••••••')
+        // The raw token never travels to the browser — GET /api/settings returns only
+        // a `hasToken` flag; show the masked placeholder so the field reads as set.
+        if (data.hasToken) setToken('••••••••')
       })
       .catch(() => {
         /* silently ignore — user can type manually */

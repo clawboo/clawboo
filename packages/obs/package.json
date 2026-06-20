@@ -1,0 +1,49 @@
+{
+  "name": "@clawboo/obs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pure observability primitives: typed orchestration-event schema, runtime-error taxonomy, graph + fleet-health projection reducers, metric helpers, and the structured-output judge drive (browser-safe)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/obs"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/obs",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "observability",
+    "event-sourcing",
+    "opentelemetry",
+    "evaluator"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -21,20 +21,17 @@
 // sessions is a benign no-op. We `Promise.allSettled` everything so a
 // single failure can't block the rest of the teardown.
 //
-// For group chat there's a fourth concern: the orchestration hook's
-// in-memory state (debounce timer, relay cooldowns, wake-in-flight set,
-// team-chat overrides). Those don't live in stores, so they need explicit
-// clears here. The debounce timer + `lastCountsRef` snapshot + post-stop
-// freeze window are cleared via the `stopSignal` counter the caller bumps
-// before invoking this — see `useTeamOrchestration`.
+// For group chat there's a fourth concern: orchestration in-memory state
+// (wake-in-flight set, team-chat overrides) that doesn't live in stores, so it
+// needs explicit clears here. The board orchestration's in-flight delegation
+// work is cancelled via the `stopSignal` counter the caller bumps before
+// invoking this — see `useBoardOrchestration`.
 
 import type { GatewayClient } from '@clawboo/gateway-client'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
-import { clearTeamRelayState } from '@/features/group-chat/contextRelay'
 import { clearAllTeamChatOverridesForAgent } from '@/lib/sessionUtils'
 import { clearWakeInFlight } from '@/features/group-chat/groupChatSendOperation'
-import { bumpStopGeneration } from '@/features/group-chat/useTeamOrchestration'
 
 // ── Single agent ─────────────────────────────────────────────────────────────
 
@@ -96,24 +93,13 @@ export interface StopAllInTeamParams {
 
 /**
  * Abort every running run on the team AND wipe orchestration in-flight
- * state so no follow-up delegation / relay fires after Stop. The caller
+ * state so no follow-up delegation fires after Stop. The caller
  * (`GroupChatPanel`) is expected to ALSO bump its `stopSignal` counter
- * before calling this — that clears `useTeamOrchestration`'s debounce
- * timer + bookkeeping refs which live inside the hook and aren't
- * reachable from here.
+ * before calling this — that cancels `useBoardOrchestration`'s in-flight
+ * delegation work, which lives inside the hook and isn't reachable from here.
  */
 export async function stopAllInTeam(params: StopAllInTeamParams): Promise<void> {
   const { client, teamId, participants, teamSessionKeys } = params
-
-  // 0. Bump the orchestration generation counter FIRST — before any await
-  //    yields the microtask queue. Mid-flight delegation/relay IIFEs in
-  //    `useTeamOrchestration` will see the new generation at their next
-  //    checkpoint and bail before issuing their delayed `chat.send`. The
-  //    stop-signal useEffect inside the hook also bumps this, but that
-  //    runs after a React commit — bumping here avoids the small race
-  //    window where an IIFE could slip through its checkpoint before the
-  //    effect lands.
-  bumpStopGeneration(teamId)
 
   // Target every participant that's currently working — `running` covers the
   // common case. `sleeping` agents aren't generating, so no abort needed.
@@ -132,7 +118,6 @@ export async function stopAllInTeam(params: StopAllInTeamParams): Promise<void> 
 
   // 2. Clear orchestration in-memory state — these don't live in stores so
   //    the `chat:aborted` events from the Gateway won't clean them up.
-  clearTeamRelayState(teamId)
   clearWakeInFlight(teamId)
   for (const agent of runningAgents) {
     clearAllTeamChatOverridesForAgent(agent.id)

@@ -1,26 +1,43 @@
 /**
  * features/onboarding/StepIndicator.tsx
  *
- * 3-dot step indicator for the onboarding wizard.
- * Shows Setup / Team / Deploy progress.
+ * Step-progress indicator for the onboarding wizard. The OpenClaw path runs the
+ * default Setup / Team / Deploy beats; the native path is a shorter
+ * Connect / Ready flow (it seeds a team server-side and lands directly), so it
+ * passes `steps={NATIVE_STEPS}` to avoid promising Team/Deploy beats it never
+ * reaches.
  */
 
 import { Check } from 'lucide-react'
 
-export type IndicatorId = 'setup' | 'team' | 'deploy'
+export type IndicatorId = 'setup' | 'team' | 'deploy' | 'connect' | 'ready'
 
-const INDICATOR_STEPS: { id: IndicatorId; label: string }[] = [
+export type IndicatorStep = { id: IndicatorId; label: string }
+
+const DEFAULT_STEPS: IndicatorStep[] = [
   { id: 'setup', label: 'Setup' },
   { id: 'team', label: 'Team' },
   { id: 'deploy', label: 'Deploy' },
 ]
 
-export function StepIndicator({ current }: { current: IndicatorId }) {
-  const currentIdx = INDICATOR_STEPS.findIndex((s) => s.id === current)
+/** The native path's 2-beat flow (paste a key → land in the dashboard). */
+export const NATIVE_STEPS: IndicatorStep[] = [
+  { id: 'connect', label: 'Connect' },
+  { id: 'ready', label: 'Ready' },
+]
+
+export function StepIndicator({
+  current,
+  steps = DEFAULT_STEPS,
+}: {
+  current: IndicatorId
+  steps?: IndicatorStep[]
+}) {
+  const currentIdx = steps.findIndex((s) => s.id === current)
 
   return (
     <div className="flex items-start justify-center gap-0 mb-7">
-      {INDICATOR_STEPS.map((s, i) => {
+      {steps.map((s, i) => {
         const done = i < currentIdx
         const active = i === currentIdx
 
@@ -48,7 +65,7 @@ export function StepIndicator({ current }: { current: IndicatorId }) {
                 {s.label}
               </span>
             </div>
-            {i < INDICATOR_STEPS.length - 1 && (
+            {i < steps.length - 1 && (
               <div
                 className={[
                   'mx-1 mb-5 h-0.5 w-14 rounded-full transition-colors duration-500',

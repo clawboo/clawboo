@@ -17,7 +17,7 @@ import { ModelDropdown } from '../ModelDropdown'
 // ─── Props ───────────────────────────────────────────────────────────────────
 
 export type ConfigureStepProps = {
-  onConfigured: (data: { gatewayToken: string; gatewayUrl: string }) => void
+  onConfigured: (data: { gatewayUrl: string }) => void
   onBack: () => void
 }
 
@@ -245,10 +245,11 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
 
       const data = (await res.json()) as {
         ok: boolean
-        gatewayToken: string
         gatewayUrl: string
       }
-      onConfigured({ gatewayToken: data.gatewayToken, gatewayUrl: data.gatewayUrl })
+      // The provisioning token is persisted server-side and injected by the proxy on
+      // connect — the browser only needs the URL.
+      onConfigured({ gatewayUrl: data.gatewayUrl })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {

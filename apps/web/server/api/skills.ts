@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express'
-import { createDb, skills } from '@clawboo/db'
+import { appendAudit, createDb, scanForInjection, skills } from '@clawboo/db'
 import { eq, desc } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
 
@@ -63,6 +63,25 @@ export function skillsPOST(req: Request, res: Response): void {
 
   try {
     const db = createDb(getDbPath())
+
+    // Supply-chain posture: injection-scan a user-installed skill BEFORE it's
+    // recorded / can run. A destructive/exfil/injection finding blocks the
+    // install (422) + audits it; a clean install is audited too (the forensic
+    // trail).
+    const blob = [name, source, category ?? '', author ?? '', JSON.stringify(req.body)].join('\n')
+    const findings = scanForInjection(blob)
+    if (findings.length > 0) {
+      appendAudit(db, {
+        eventType: 'install',
+        agentId,
+        summary: { blocked: true, name, source, findings },
+      })
+      res
+        .status(422)
+        .json({ ok: false, error: 'skill blocked: injection / supply-chain finding', findings })
+      return
+    }
+    appendAudit(db, { eventType: 'install', agentId, summary: { blocked: false, name, source } })
 
     // Check if skill already exists
     const existing = db.select().from(skills).where(eq(skills.id, id)).get()

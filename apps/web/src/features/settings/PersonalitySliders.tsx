@@ -1,3 +1,4 @@
+import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Loader2, FileText, PenLine, SlidersHorizontal } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
@@ -85,8 +86,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       .catch(() => {})
 
     const soulPromise = client
-      ? client.agents.files
-          .read(selectedAgentId, SOUL_FILE)
+      ? readAgentFile(selectedAgentId, SOUL_FILE)
           .then((content) => {
             // Cache the base content (without any existing personality block)
             baseSoulRef.current = stripPersonalityBlock(content)
@@ -113,9 +113,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
         // Merge personality into existing SOUL.md (preserve role description)
         const mergedContent = mergeSoulWithPersonality(baseSoulRef.current, dirty)
         void mutationQueue
-          .enqueue(selectedAgentId, () =>
-            client.agents.files.set(selectedAgentId, SOUL_FILE, mergedContent),
-          )
+          .enqueue(selectedAgentId, () => writeAgentFile(selectedAgentId, SOUL_FILE, mergedContent))
           .catch(() => {})
       }
     }
@@ -156,11 +154,11 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       void (async () => {
         try {
           // Read fresh base content (in case user edited SOUL.md via editor)
-          const existing = await client.agents.files.read(selectedAgentId, SOUL_FILE)
+          const existing = await readAgentFile(selectedAgentId, SOUL_FILE)
           baseSoulRef.current = stripPersonalityBlock(existing)
           const mergedContent = mergeSoulWithPersonality(baseSoulRef.current, next)
           await mutationQueue.enqueue(selectedAgentId, () =>
-            client.agents.files.set(selectedAgentId, SOUL_FILE, mergedContent),
+            writeAgentFile(selectedAgentId, SOUL_FILE, mergedContent),
           )
         } catch (err: unknown) {
           console.warn('[Personality] SOUL.md merge/write failed (non-fatal):', err)
@@ -208,11 +206,11 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       // 2. Merge custom text into SOUL.md
       void (async () => {
         try {
-          const existing = await client.agents.files.read(selectedAgentId, SOUL_FILE)
+          const existing = await readAgentFile(selectedAgentId, SOUL_FILE)
           baseSoulRef.current = stripPersonalityBlock(existing)
           const mergedContent = mergeSoulWithCustomPersonality(baseSoulRef.current, text)
           await mutationQueue.enqueue(selectedAgentId, () =>
-            client.agents.files.set(selectedAgentId, SOUL_FILE, mergedContent),
+            writeAgentFile(selectedAgentId, SOUL_FILE, mergedContent),
           )
         } catch (err: unknown) {
           console.warn('[Personality] Custom SOUL.md merge/write failed (non-fatal):', err)
@@ -255,11 +253,11 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
 
       void (async () => {
         try {
-          const existing = await client.agents.files.read(selectedAgentId, SOUL_FILE)
+          const existing = await readAgentFile(selectedAgentId, SOUL_FILE)
           baseSoulRef.current = stripPersonalityBlock(existing)
           const mergedContent = mergeSoulWithPersonality(baseSoulRef.current, values)
           await mutationQueue.enqueue(selectedAgentId, () =>
-            client.agents.files.set(selectedAgentId, SOUL_FILE, mergedContent),
+            writeAgentFile(selectedAgentId, SOUL_FILE, mergedContent),
           )
           useEditorStore.getState().triggerSoulRefresh()
         } catch {

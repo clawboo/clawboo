@@ -230,6 +230,55 @@ describe('GatewayClient', () => {
     })
   })
 
+  describe('config.patch envelope', () => {
+    it('wraps a partial-config update in a { raw: <json-string> } envelope', async () => {
+      // OpenClaw 2026.5.x's config.patch params schema is `{ raw: NonEmptyString,
+      // ... }` (additionalProperties:false) and deep-merges the parsed raw — a bare
+      // top-level key like `{ mcp }` is rejected. Lock the wire encoding.
+      const client = new GatewayClient()
+      const ws = await connectClient(client)
+      ws.sent.length = 0
+
+      const update = {
+        mcp: {
+          servers: {
+            'clawboo-memory': { url: 'http://x/api/mcp/memory', transport: 'streamable-http' },
+          },
+        },
+      }
+      const patchPromise = client.config.patch(update)
+
+      const frame = JSON.parse(ws.sent[0]) as Record<string, unknown>
+      expect(frame['method']).toBe('config.patch')
+      const params = frame['params'] as Record<string, unknown>
+      expect(Object.keys(params)).toEqual(['raw'])
+      expect(typeof params['raw']).toBe('string')
+      expect(JSON.parse(params['raw'] as string)).toEqual(update)
+
+      ws.simulateMessage({ type: 'res', id: frame['id'], ok: true, payload: {} })
+      await patchPromise
+      client.disconnect()
+    })
+
+    it('carries the baseHash (optimistic-concurrency token) when provided', async () => {
+      // OpenClaw 2026.5.x's handler also enforces a baseHash from config.get
+      // ("config base hash required"). The helper passes it through.
+      const client = new GatewayClient()
+      const ws = await connectClient(client)
+      ws.sent.length = 0
+
+      const patchPromise = client.config.patch({ model: 'x' }, 'hash-abc-123')
+      const frame = JSON.parse(ws.sent[0]) as Record<string, unknown>
+      const params = frame['params'] as Record<string, unknown>
+      expect(params['baseHash']).toBe('hash-abc-123')
+      expect(JSON.parse(params['raw'] as string)).toEqual({ model: 'x' })
+
+      ws.simulateMessage({ type: 'res', id: frame['id'], ok: true, payload: {} })
+      await patchPromise
+      client.disconnect()
+    })
+  })
+
   describe('connection lifecycle', () => {
     it('pending calls are rejected when WebSocket closes', async () => {
       const client = new GatewayClient()
@@ -256,6 +305,26 @@ describe('GatewayClient', () => {
       await expect(
         client.connect('ws://localhost:18789', { disableDeviceAuth: true }),
       ).rejects.toThrow('already connected')
+      client.disconnect()
+    })
+
+    it('after a non-manual drop, goes to reconnecting and reconnects on the backoff timer', async () => {
+      const client = new GatewayClient()
+      await connectClient(client)
+      expect(client.status).toBe('connected')
+      const firstWs = wsInstance
+
+      // A server-side drop (NOT a manual disconnect) engages the reconnect loop.
+      wsInstance!.simulateClose(1006, 'dropped')
+      expect(client.status).toBe('reconnecting')
+
+      // The reconnect is scheduled at the first backoff (800ms): before it, the
+      // socket is unchanged; after it, a fresh socket is created.
+      await vi.advanceTimersByTimeAsync(799)
+      expect(wsInstance).toBe(firstWs)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(wsInstance).not.toBe(firstWs) // reconnected with a new socket
+
       client.disconnect()
     })
   })

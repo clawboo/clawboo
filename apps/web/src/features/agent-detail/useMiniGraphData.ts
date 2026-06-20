@@ -1,3 +1,6 @@
+import { readAgentFile } from '@/lib/agentSourceClient'
+import { fetchCapabilities, groupAgentCapabilities } from '@/lib/capabilitiesClient'
+import type { CapabilityRecord } from '@clawboo/capability-registry'
 import { useEffect, useMemo, useState } from 'react'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
@@ -7,9 +10,9 @@ import type { GraphNode, GraphEdge } from '@/features/graph/types'
 
 // ─── useMiniGraphData ────────────────────────────────────────────────────────
 //
-// Fetches TOOLS.md + AGENTS.md for a single agent and builds graph nodes/edges
-// using the shared `buildGraphElements` function. State is local — NOT stored
-// in useGraphStore to avoid interference with the fleet-wide Ghost Graph.
+// Fetches the agent's capability inventory (+ AGENTS.md for routing) and builds
+// graph nodes/edges via the shared `buildGraphElements`. State is local — NOT
+// stored in useGraphStore to avoid interference with the fleet-wide Ghost Graph.
 
 export function useMiniGraphData(agentId: string): {
   nodes: GraphNode[]
@@ -21,14 +24,14 @@ export function useMiniGraphData(agentId: string): {
   const refreshKey = useGraphStore((s) => s.refreshKey)
 
   const [agentFiles, setAgentFiles] = useState<
-    Map<string, { toolsMd: string | null; agentsMd: string | null }>
+    Map<string, { capabilities: CapabilityRecord[] | null; agentsMd: string | null }>
   >(new Map())
   const [isLoading, setIsLoading] = useState(true)
 
   // Find the single agent
   const agent = useMemo(() => agents.find((a) => a.id === agentId) ?? null, [agents, agentId])
 
-  // Fetch TOOLS.md + AGENTS.md for this agent
+  // Fetch the agent's capabilities + AGENTS.md
   useEffect(() => {
     if (!client || !agentId) return
 
@@ -36,14 +39,18 @@ export function useMiniGraphData(agentId: string): {
     setIsLoading(true)
 
     const fetchFiles = async () => {
-      const [toolsMd, agentsMd] = await Promise.all([
-        client.agents.files.read(agentId, 'TOOLS.md').catch(() => null),
-        client.agents.files.read(agentId, 'AGENTS.md').catch(() => null),
+      const [capView, agentsMd] = await Promise.all([
+        fetchCapabilities({ agentId }),
+        readAgentFile(agentId, 'AGENTS.md').catch(() => null),
       ])
       if (cancelled) return
 
-      const map = new Map<string, { toolsMd: string | null; agentsMd: string | null }>()
-      map.set(agentId, { toolsMd, agentsMd })
+      const capabilities = groupAgentCapabilities(capView.records).get(agentId) ?? []
+      const map = new Map<
+        string,
+        { capabilities: CapabilityRecord[] | null; agentsMd: string | null }
+      >()
+      map.set(agentId, { capabilities, agentsMd })
       setAgentFiles(map)
       setIsLoading(false)
     }

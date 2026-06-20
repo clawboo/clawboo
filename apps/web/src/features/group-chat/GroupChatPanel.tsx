@@ -6,12 +6,12 @@ import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
+import { useBoardStore } from '@/stores/board'
 import { resolveTeamInternalLead } from '@/lib/resolveTeamLeader'
 import { useBooZeroStore } from '@/stores/booZero'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { sendGroupChatMessage } from './groupChatSendOperation'
-import { useTeamOrchestration } from './useTeamOrchestration'
-import { buildDelegationLinkages } from './buildDelegationLinkages'
+import { useBoardOrchestration } from './useBoardOrchestration'
 import { stopAllInTeam } from '@/features/chat/stopChatOperation'
 import { appendRule, fetchTeamRules, parseRuleCommand, saveTeamRules } from '@/lib/teamRules'
 import { nextSeq } from '@/lib/sequenceKey'
@@ -29,6 +29,7 @@ import {
   type MessageComposerHandle,
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
+import { BoardTaskCard } from './BoardTaskCard'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 
@@ -61,24 +62,11 @@ export function GroupChatPanel({
   const connectionStatus = useConnectionStore((s) => s.status)
   const transcripts = useChatStore((s) => s.transcripts)
   const streamingTextMap = useChatStore((s) => s.streamingText)
-  // Round 5: subscribe to stream-start timestamps so live StreamingCards
-  // can position themselves at their chronological slot in the merged
-  // timeline (not always-at-the-end). After commit, the committed entry
-  // takes the same `timestampMs` value — zero visible re-arrangement.
+  // Subscribe to stream-start timestamps so live StreamingCards can position
+  // themselves at their chronological slot in the merged timeline (not always-
+  // at-the-end). After commit, the committed entry takes the same `timestampMs`
+  // value — zero visible re-arrangement.
   const streamStartedAtMap = useChatStore((s) => s.streamStartedAt)
-  // Round 7: Clawboo's recorded outgoing routing events for this team.
-  // Threaded into `buildDelegationLinkages` Path 3 so DelegationCards
-  // surface ACTUAL Clawboo routing — `dispatchDelegation` + relay batches
-  // — independent of whatever the LLM emits in prose.
-  const clawbooDispatchesMap = useChatStore((s) => s.clawbooDispatches)
-  // Round 13: implicit fan-out workstreams. When the leader emits pure
-  // prose like "I'll ask all teammates" without structured tags,
-  // `useTeamOrchestration` mints a `pendingWorkstreams` record with
-  // `:implicit-fanout` suffix. Threaded into `buildDelegationLinkages`
-  // Path 4 so the WorkstreamCard renders the implicit batch with the
-  // same DONE pills / preview lines / grid as an explicit `<delegate>`
-  // batch.
-  const pendingWorkstreamsMap = useChatStore((s) => s.pendingWorkstreams)
 
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
@@ -87,24 +75,23 @@ export function GroupChatPanel({
     [agents, booZeroAgentId],
   )
   // Team-internal lead (CTO, Team Lead, etc., detected via
-  // `detectGenuineLeader` at deploy time). Surfaced separately for relay
-  // routing under Boo Zero — `sendGroupChatMessage` and `useTeamOrchestration`
+  // `detectGenuineLeader` at deploy time). Surfaced separately for routing
+  // under Boo Zero — `sendGroupChatMessage` and `useBoardOrchestration`
   // each prefer `booZeroAgent` over this when present.
   const teamInternalLeadId = resolveTeamInternalLead(teamId, team?.leaderAgentId ?? null, agents)
 
   // ── Stop signal ─────────────────────────────────────────────────────────
   // Monotonic counter bumped when the Stop button is pressed. Feeds into
-  // `useTeamOrchestration` below so the hook can cancel its 500ms debounce
-  // timer and clear its bookkeeping refs. The `chat.abort` RPCs themselves
-  // are fired separately by `stopAllInTeam` — this signal only owns the
-  // orchestration-side cleanup.
+  // `useBoardOrchestration` below so the hook can cancel in-flight delegation
+  // work. The `chat.abort` RPCs themselves are fired separately by
+  // `stopAllInTeam` — this signal only owns the orchestration-side cleanup.
   const [stopSignal, setStopSignal] = useState(0)
 
   // ── History-hydration gate ──────────────────────────────────────────────
-  // `useTeamOrchestration` must NOT process historical entries that arrive
+  // `useBoardOrchestration` must NOT process historical entries that arrive
   // via `/api/chat-history` hydration as if they were new — that's the root
   // cause of the "7-hour-later cascade of intros / wake messages" we saw in
-  // production. The hook seeds `lastCountsRef` on mount; if it mounts before
+  // production. The hook seeds its baseline on mount; if it mounts before
   // hydration completes, the seed reads `0` and every hydrated entry trips
   // the subscription's "new entries" branch.
   //
@@ -117,35 +104,6 @@ export function GroupChatPanel({
   // team's hydration cycle. Falls open after a 5s timeout as a safety net —
   // a hung fetch shouldn't lock the team chat orchestration forever.
   const [historyHydrated, setHistoryHydrated] = useState(false)
-
-  // ── Team orchestration (delegation detection + context relay) ───────────
-  //
-  // Always on — relay + delegation routing is the whole point of a team
-  // chat, so there's no user toggle. The hook is gated only by the
-  // Gateway connection: when disconnected, the hook stays quiet to avoid
-  // queuing relays that would fail to send anyway.
-  useTeamOrchestration({
-    teamId,
-    // Pass the actual team name — used by the silent-resume wake message
-    // in the wake-on-relay path so the body reads `team "Dev Team"` rather
-    // than `team "<uuid>"`.
-    teamName: team?.name ?? 'Team',
-    teamAgents,
-    // Pass the team-internal lead — Boo Zero is the actual relay hub when
-    // present, so the orchestration hook prefers Boo Zero (see its impl).
-    leaderAgentId: teamInternalLeadId,
-    booZeroAgent,
-    client,
-    // Hold orchestration until history has fully hydrated. This is the
-    // load-bearing fix for the "rehydrate cascade" — see `historyHydrated`
-    // declaration above. While `false`, the hook returns early without
-    // subscribing, so the hydration-time `appendTranscript` calls don't
-    // trip the "new entries" branch and fire stale wake/relay messages
-    // for entries that landed hours ago.
-    enabled: connectionStatus === 'connected' && historyHydrated,
-    userIntroText,
-    stopSignal,
-  })
 
   // "Effective participants" — DB team members + Boo Zero (when present),
   // deduplicated by agent id.
@@ -198,6 +156,21 @@ export function GroupChatPanel({
     [participants, teamId],
   )
 
+  // ── Event-driven board orchestration ──────────────────────────────────────
+  // The structured, lifecycle-event-driven orchestration path. Observes each
+  // participant's session via the OpenClaw RuntimeAdapter and turns structured
+  // delegations into durable board tasks. Gated on the Gateway connection +
+  // history hydration so it never replays historical entries as new.
+  useBoardOrchestration({
+    teamId,
+    teamAgents,
+    booZeroAgent,
+    client,
+    teamSessionKeys,
+    enabled: connectionStatus === 'connected' && historyHydrated,
+    stopSignal,
+  })
+
   // ── Merge all team transcripts (using team-scoped sessionKeys) ────────────
   const mergedEntries = useMemo(() => {
     const all: TranscriptEntry[] = []
@@ -217,95 +190,13 @@ export function GroupChatPanel({
 
   const blocks = useMemo(() => groupEntriesToBlocks(mergedEntries), [mergedEntries])
 
-  // ── Delegation linkages ──────────────────────────────────────────────────
-  // Pure scan of the merged transcript: pairs each `<delegate>` block in a
-  // source agent's reply with the next eligible target reply. Used by the
-  // renderer to (1) hide claimed target replies from the top-level stream
-  // and (2) nest those replies inside the source's DelegationCard.
-  const linkages = useMemo(
-    () =>
-      buildDelegationLinkages({
-        blocks,
-        mergedEntries,
-        teamId,
-        participants: participants.map((a) => ({ id: a.id, name: a.name })),
-        clawbooDispatches: clawbooDispatchesMap,
-        pendingWorkstreams: pendingWorkstreamsMap,
-        // Round 15: feed live streaming text + stream-start anchors into the
-        // linkage scan so closed `<delegate>` blocks emitted mid-stream
-        // (before the leader's source entry commits) claim their target's
-        // streaming/committed reply. Without this, the target's reply
-        // appears at top level during the gap and "jumps inside" the card
-        // only once the leader commits.
-        streamingTexts: streamingTextMap,
-        streamStartedAt: streamStartedAtMap,
-      }),
-    [
-      blocks,
-      mergedEntries,
-      teamId,
-      participants,
-      clawbooDispatchesMap,
-      pendingWorkstreamsMap,
-      streamingTextMap,
-      streamStartedAtMap,
-    ],
-  )
-
-  // Pick the entryId of the chronologically-latest LEADER source-turn that
-  // contains visible delegations. All delegations on THAT source default-
-  // expand; older ones collapse (per the user's "newest expanded, older
-  // collapsed" accordion topology).
-  //
-  // Restrict to leader = Boo Zero. A specialist agent occasionally emits
-  // its own `<delegate>` tag in a response — those linkages have higher
-  // timestamps than Boo Zero's last delegation turn and would otherwise
-  // win the "latest" comparison, but their cards render NESTED inside the
-  // parent DelegationCard (not at top level), so they never receive the
-  // auto-expand signal. Net effect of including them: ALL visible top-
-  // level cards stay collapsed forever. Filtering to leader-source
-  // linkages restores the "newest top-level workstream auto-opens"
-  // behavior the user expects.
-  //
-  // Sort by `timestampMs` (wall-clock, stable across reloads) NOT
-  // `sequenceKey` (process-local, resets to 0 on reload) — same lesson as
-  // Round 7B's `findTargetResponse` fix.
-  const latestSourceEntryIdWithDelegations = useMemo(() => {
-    let latestTs = -1
-    let latestSeq = -1
-    let latestId: string | null = null
-    for (const linkage of linkages.linkagesByDelegationId.values()) {
-      // Only consider linkages whose source is the leader (Boo Zero). A
-      // specialist's rogue `<delegate>` shouldn't move the accordion
-      // pointer because its cards aren't visible top-level.
-      if (booZeroAgent && linkage.sourceAgentId !== booZeroAgent.id) continue
-      const sourceEntry = mergedEntries.find((e) => e.entryId === linkage.sourceEntryId)
-      if (!sourceEntry) continue
-      const ts = sourceEntry.timestampMs ?? 0
-      if (ts > latestTs || (ts === latestTs && sourceEntry.sequenceKey > latestSeq)) {
-        latestTs = ts
-        latestSeq = sourceEntry.sequenceKey
-        latestId = sourceEntry.entryId
-      }
-    }
-    return latestId
-  }, [linkages, mergedEntries, booZeroAgent])
-
-  // Filter assistant-turn blocks whose owning entry is claimed by some
-  // delegation — those render INSIDE a DelegationCard, not at the top level.
-  const topLevelBlocks = useMemo(
-    () =>
-      blocks.filter((b) => {
-        if (b.kind !== 'assistant-turn') return true
-        const owner = b.assistant ?? b.thinking[0] ?? b.tools[0] ?? null
-        if (!owner) return true
-        return !linkages.claimedEntries.has(owner.entryId)
-      }),
-    [blocks, linkages.claimedEntries],
-  )
+  // Every committed turn renders at top level — delegations surface as durable
+  // BoardTaskCards (from the projection store), not nested inside the source's
+  // turn. (`topLevelBlocks` alias kept for the render loop's local naming.)
+  const topLevelBlocks = blocks
 
   // ── Load persisted history for all participants (team-scoped sessionKeys) ──
-  // Tracks completion via `historyHydrated`: `useTeamOrchestration` is gated
+  // Tracks completion via `historyHydrated`: `useBoardOrchestration` is gated
   // on this flag so it doesn't see the hydration-time appends as "new"
   // entries and replay stale wake/relay messages (the 7-hour-cascade bug).
   // The 5s safety timeout is a fallback — if a fetch hangs forever we still
@@ -318,11 +209,9 @@ export function GroupChatPanel({
   // fleet store update (every agent status patch during streaming). With
   // the array as a dep, this effect re-fired on every chat tick, resetting
   // `historyHydrated` to `false` → disabling orchestration → the
-  // `useTeamOrchestration` subscription kept unmounting and remounting,
-  // its `processNewEntries` never running. That broke Round 7's dispatch
-  // recording, Round 8's plan state machine, AND Round 10's workstream
-  // auto-synthesis. The string signature only changes when the set of
-  // participant IDs actually changes (e.g., team switch, agent deleted).
+  // `useBoardOrchestration` subscription kept unmounting and remounting.
+  // The string signature only changes when the set of participant IDs
+  // actually changes (e.g., team switch, agent deleted).
   const participantSignature = useMemo(
     () =>
       participants
@@ -349,13 +238,11 @@ export function GroupChatPanel({
     // during streaming — a chat tick can fire 10+ patches per second), and
     // `teamSessionKeys` is downstream of that. If we put them in the deps,
     // this effect re-fires on every chat tick, resets `historyHydrated` to
-    // `false`, and the `useTeamOrchestration` subscription gated on it
-    // unmounts/remounts in a tight loop — breaking Round 7 dispatch
-    // recording, Round 8 plan state machines, AND Round 10 workstream
-    // auto-synthesis. The `participantSignature` string only changes when
-    // the set of participant IDs actually changes (team switch, agent
-    // added/removed), which is the right granularity for "re-hydrate
-    // history".
+    // `false`, and the `useBoardOrchestration` subscription gated on it
+    // unmounts/remounts in a tight loop. The `participantSignature` string
+    // only changes when the set of participant IDs actually changes (team
+    // switch, agent added/removed), which is the right granularity for
+    // "re-hydrate history".
     const fetches: Promise<unknown>[] = []
     for (const agent of participantsRef.current) {
       const teamSk = teamSessionKeysRef.current.get(agent.id)
@@ -393,6 +280,16 @@ export function GroupChatPanel({
     }
   }, [participantSignature])
 
+  // ── Board projection load ─────────────────────────────────────────────────
+  // The chat renders task cards from the board projection store (the canonical
+  // source), so on a refresh it re-loads from SQLite-backed REST (refresh-
+  // survival). Keyed on the teamId STRING, NEVER on the participants/tasks
+  // arrays (those reallocate on every fleet patch and would re-fire this in a
+  // loop — the rehydrate-cascade hazard).
+  useEffect(() => {
+    void useBoardStore.getState().load(teamId)
+  }, [teamId])
+
   // ── Auto-scroll ───────────────────────────────────────────────────────────
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -413,11 +310,7 @@ export function GroupChatPanel({
 
   // Collect all streaming texts for participants (using team-scoped sessionKeys).
   // Boo Zero's stream lands in the merged transcript with its own avatar/name.
-  //
-  // Streams whose target sessionKey is OWNED by a pending DelegationCard are
-  // filtered out — that card subscribes to the same stream itself and renders
-  // it inline. Without this filter the stream would appear both inside the
-  // card AND as a duplicate top-level StreamingCard.
+  // Every participant's live stream renders as a top-level StreamingCard.
   const activeStreams = useMemo(() => {
     const streams: {
       agentId: string
@@ -429,7 +322,6 @@ export function GroupChatPanel({
     for (const agent of participants) {
       const teamSk = teamSessionKeys.get(agent.id)
       if (!teamSk) continue
-      if (linkages.streamingOwnerByTargetSessionKey.has(teamSk)) continue
       const text = streamingTextMap.get(teamSk)
       if (text != null) {
         // Stream-start anchors the live card's chronological position in
@@ -447,13 +339,7 @@ export function GroupChatPanel({
       }
     }
     return streams
-  }, [
-    participants,
-    teamSessionKeys,
-    streamingTextMap,
-    streamStartedAtMap,
-    linkages.streamingOwnerByTargetSessionKey,
-  ])
+  }, [participants, teamSessionKeys, streamingTextMap, streamStartedAtMap])
 
   // ── Interleaved render timeline ───────────────────────────────────────────
   // Committed blocks and active streaming cards merged into ONE chronologically-
@@ -461,9 +347,19 @@ export function GroupChatPanel({
   // response BEGAN — committed entries from `appendOutputLines` use the same
   // stream-start anchor, so a streaming card and its eventual committed entry
   // occupy the same chronological slot. No visible re-arrangement on commit.
+  //
+  // Board projection (flag-on) — READ-ONLY in render. The Map ref changes on
+  // every change-feed update (intended re-render); it MUST NOT feed any effect.
+  const boardTasksMap = useBoardStore((s) => s.tasksByTeam.get(teamId))
+  const boardTaskList = useMemo(
+    () =>
+      boardTasksMap ? [...boardTasksMap.values()].filter((t) => t.status !== 'cancelled') : [],
+    [boardTasksMap],
+  )
   type RenderItem =
     | { kind: 'block'; block: (typeof topLevelBlocks)[number]; ts: number; tieKey: number }
     | { kind: 'stream'; stream: (typeof activeStreams)[number]; ts: number; tieKey: number }
+    | { kind: 'board-task'; task: (typeof boardTaskList)[number]; ts: number; tieKey: number }
   const renderItems = useMemo<RenderItem[]>(() => {
     const blockTs = (block: (typeof topLevelBlocks)[number]): number => {
       // AssistantBlock carries its own `timestampMs`; meta/user blocks
@@ -490,12 +386,17 @@ export function GroupChatPanel({
         tieKey: Number.MAX_SAFE_INTEGER,
       })
     }
+    // Board task cards (flag-on) interleave by createdAt — the durable,
+    // refresh-surviving record of each delegation + its live status.
+    for (const task of boardTaskList) {
+      items.push({ kind: 'board-task', task, ts: task.createdAt, tieKey: 1 })
+    }
     items.sort((a, b) => {
       if (a.ts !== b.ts) return a.ts - b.ts
       return a.tieKey - b.tieKey
     })
     return items
-  }, [topLevelBlocks, activeStreams])
+  }, [topLevelBlocks, activeStreams, boardTaskList])
 
   const anyRunning = teamAgents.some((a) => a.status === 'running')
 
@@ -717,6 +618,13 @@ export function GroupChatPanel({
                     </div>
                   )
                 }
+                if (item.kind === 'board-task') {
+                  return (
+                    <div key={`board-task-${item.task.id}`} className={i === 0 ? '' : 'mt-3'}>
+                      <BoardTaskCard task={item.task} />
+                    </div>
+                  )
+                }
                 blockIdx += 1
                 const block = item.block
                 let currentOwnerAgentId: string | null = null
@@ -769,10 +677,7 @@ export function GroupChatPanel({
                       streaming={
                         anyRunning && blockIdx === lastBlockSeenIdx && activeStreams.length === 0
                       }
-                      linkagesBySourceEntry={linkages.linkagesBySourceEntry}
-                      claimedEntries={linkages.claimedEntries}
                       teamId={teamId}
-                      latestSourceEntryId={latestSourceEntryIdWithDelegations}
                       isFollowup={isFollowup}
                     />
                   </div>

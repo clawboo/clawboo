@@ -5,6 +5,7 @@
 // group chat transcripts from 1:1 agent chat.
 
 import type { GatewayClientLike } from '@clawboo/gateway-client'
+import { listAgentSessions } from '@/lib/agentSourceClient'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import type { AgentState } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
@@ -86,22 +87,18 @@ export interface GroupChatSendParams {
  * Best-effort Gateway verification: check which agents already have team sessions.
  * Returns agentIds confirmed as having active team sessions.
  */
-async function verifyAgentSessions(
-  client: GatewayClientLike,
-  agentIds: string[],
-  teamId: string,
-): Promise<Set<string>> {
+async function verifyAgentSessions(agentIds: string[], teamId: string): Promise<Set<string>> {
   const confirmed = new Set<string>()
   const checks = agentIds.map(async (id) => {
     try {
-      const sessions = await client.call<{ key: string }[]>('sessions.list', { agentId: id })
+      const sessions = await listAgentSessions(id)
       const teamSk = buildTeamSessionKey(id, teamId)
-      if (Array.isArray(sessions) && sessions.some((s) => s.key === teamSk)) {
+      if (sessions.some((s) => s.sourceSessionId === teamSk)) {
         confirmed.add(id)
         markAgentAwake(id, teamId)
       }
     } catch {
-      // Gateway error — trust localStorage fallback
+      // Source/Gateway error — trust localStorage fallback
     }
   })
   // 3s timeout to avoid blocking the user's message indefinitely
@@ -345,7 +342,7 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
       wakeInFlight.add(teamId)
       try {
         // Best-effort Gateway verification — skip agents already confirmed active
-        const confirmed = await verifyAgentSessions(client, sleeping, teamId)
+        const confirmed = await verifyAgentSessions(sleeping, teamId)
         const needsWake = sleeping.filter((id) => !confirmed.has(id))
 
         if (needsWake.length > 0) {

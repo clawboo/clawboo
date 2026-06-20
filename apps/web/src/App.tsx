@@ -4,44 +4,26 @@ import { GatewayBootstrap } from '@/features/connection/GatewayBootstrap'
 import { TeamSidebar } from '@/features/layout/TeamSidebar'
 import { AgentListColumn } from '@/features/layout/AgentListColumn'
 import { ContentArea } from '@/features/layout/ContentArea'
+import { FirstRunNudge } from '@/features/fleet/FirstRunNudge'
 import { AppTopBar } from '@/features/promo/AppTopBar'
 import { useViewStore } from '@/stores/view'
+import { useConnectionStore } from '@/stores/connection'
+import { shouldShowGlobalTopBar } from '@/lib/topBar'
 
 export function App() {
   const viewMode = useViewStore((s) => s.viewMode)
   const isBooZero = viewMode.type === 'booZero'
   const columnCollapsed = useViewStore((s) => s.columnCollapsed)
+  // The first-run nudge only belongs on the settled dashboard (status 'connected'
+  // in both gateway and native mode), never over the onboarding wizard.
+  const onDashboard = useConnectionStore((s) => s.status === 'connected')
 
-  // Views with their own integrated top row host the GitHub Star pill
-  // inline — no need for the global top bar in those views. Saves 44 px
-  // of always-on chrome in the highest-traffic surfaces.
-  //
-  // Views that integrate inline:
-  //   - agent / booZero  → shared identity row (`AgentDetailView`)
-  //   - groupChat        → team header (`GroupChatViewHeader`)
-  //   - nav: 'graph'     → Atlas toolbar (`GhostGraphPanel`)
-  //   - nav: 'marketplace' → Marketplace toolbar (`MarketplacePanel`)
-  //   - nav: 'approvals'   → Approvals header (`ApprovalsPanel`)
-  //   - nav: 'scheduler'   → Scheduler toolbar (`SchedulerPanel`)
-  //   - nav: 'cost'        → Cost dashboard header (`CostDashboard`)
-  //   - nav: 'system'      → System title row (`MaintenancePanel`)
-  //
-  // Only `welcome` still uses the global AppTopBar.
-  const navWithIntegratedStar = new Set([
-    'graph',
-    'marketplace',
-    'approvals',
-    'scheduler',
-    'cost',
-    'system',
-  ])
-  const isNavIntegrated =
-    viewMode.type === 'nav' && navWithIntegratedStar.has(viewMode.view as string)
-  const showGlobalTopBar =
-    viewMode.type !== 'agent' &&
-    viewMode.type !== 'booZero' &&
-    viewMode.type !== 'groupChat' &&
-    !isNavIntegrated
+  // Every nav view + agent/booZero/groupChat host the GitHub Star pill inline in
+  // their own header, so the global AppTopBar (a Star-pill-only strip) would be a
+  // duplicate there — it renders ONLY for `welcome`. The rule lives in
+  // `lib/topBar.ts` (built from `NAV_VIEWS`) so a new dashboard tab can't silently
+  // reintroduce the double-Star bug.
+  const showGlobalTopBar = shouldShowGlobalTopBar(viewMode)
 
   return (
     <Providers>
@@ -61,6 +43,7 @@ export function App() {
           <ContentArea />
         </main>
       </div>
+      {onDashboard && <FirstRunNudge />}
     </Providers>
   )
 }

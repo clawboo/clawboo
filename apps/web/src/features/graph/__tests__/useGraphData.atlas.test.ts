@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import type { CapabilityRecord } from '@clawboo/capability-registry'
 import { buildGraphElements } from '../useGraphData'
 import type { AgentState } from '@/stores/fleet'
 import type { Team } from '@/stores/team'
@@ -259,9 +260,12 @@ describe('buildGraphElements (atlas scope)', () => {
       ['tA', 'lead-A'],
       ['tB', 'lead-B'],
     ])
-    const agentFiles = new Map<string, { toolsMd: string | null; agentsMd: string | null }>([
-      ['lead-A', { toolsMd: null, agentsMd: '- Route to @Member A1 for tasks.' }],
-      ['lead-B', { toolsMd: null, agentsMd: '- Route to @Member B1 for tasks.' }],
+    const agentFiles = new Map<
+      string,
+      { capabilities: CapabilityRecord[] | null; agentsMd: string | null }
+    >([
+      ['lead-A', { capabilities: null, agentsMd: '- Route to @Member A1 for tasks.' }],
+      ['lead-B', { capabilities: null, agentsMd: '- Route to @Member B1 for tasks.' }],
     ])
 
     const { rawNodes, rawEdges } = buildGraphElements(
@@ -305,9 +309,10 @@ describe('buildGraphElements (atlas scope)', () => {
       ['tB', null],
     ])
 
-    const agentFiles = new Map<string, { toolsMd: string | null; agentsMd: string | null }>([
-      ['lead-A', { toolsMd: null, agentsMd: '- Route to @Lead B for tasks.' }],
-    ])
+    const agentFiles = new Map<
+      string,
+      { capabilities: CapabilityRecord[] | null; agentsMd: string | null }
+    >([['lead-A', { capabilities: null, agentsMd: '- Route to @Lead B for tasks.' }]])
 
     const { rawEdges } = buildGraphElements(
       [agentA, agentB, booZero],

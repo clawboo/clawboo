@@ -15,6 +15,7 @@ import {
 } from '@/lib/sessionUtils'
 import { clearAllWakeRecords } from '@/lib/wakeTracker'
 import { nextSeq } from '@/lib/sequenceKey'
+import { refreshFleetFromRegistry, listAgentSessions } from '@/lib/agentSourceClient'
 
 // ─── useGatewayEvents ─────────────────────────────────────────────────────────
 //
@@ -92,7 +93,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
             const teamKey = getTeamChatOverride(intent.agentId, priorRunId)
             if (teamKey) {
               useChatStore.getState().setStreamingText(teamKey, null)
-              // Delay clearing override by 200ms so useTeamOrchestration can
+              // Delay clearing override by 200ms so team orchestration can
               // process the newly committed entry before the override is gone.
               setTimeout(() => {
                 if (priorRunId) clearTeamChatOverride(intent.agentId, priorRunId)
@@ -219,44 +220,22 @@ export function useGatewayEvents(client: GatewayClient | null): void {
         }).catch(() => {})
       },
 
-      // Re-fetch agent sessions after a chat final (best-effort)
+      // Re-fetch agent sessions after a chat final (best-effort). Routes through
+      // the AgentSource (server delegates to the Gateway).
       requestHistoryRefresh: async (agentId, _reason) => {
-        const cl = useConnectionStore.getState().client
-        if (!cl) return
         try {
-          await cl.sessions.list(agentId)
-          // Sessions list refreshed — agent's sessionKey stays current via hydration
+          await listAgentSessions(agentId)
         } catch {
           // Ignore — transcript is built from events
         }
       },
 
-      // Re-fetch the full agent list (debounced, triggered by presence/heartbeat)
+      // Re-fetch the full agent list (debounced, triggered by presence/heartbeat).
+      // Reads the registry from SQLite (the server-side AgentSource keeps it fresh
+      // via its own Gateway event subscription) — no direct Gateway call here.
       loadSummarySnapshot: async () => {
-        const cl = useConnectionStore.getState().client
-        if (!cl) return
         try {
-          const result = await cl.agents.list()
-          const mainKey = result.mainKey?.trim() || 'main'
-          // Preserve existing teamId + execConfig assignments — Gateway doesn't know about these
-          const existing = useFleetStore.getState().agents
-          const existingTeamIds = new Map(existing.map((a) => [a.id, a.teamId]))
-          const existingExecConfigs = new Map(existing.map((a) => [a.id, a.execConfig]))
-          useFleetStore.getState().hydrateAgents(
-            result.agents.map((a) => ({
-              id: a.id,
-              name: a.identity?.name ?? a.name ?? a.id,
-              status: 'idle' as const,
-              sessionKey: `agent:${a.id}:${mainKey}`,
-              model: null,
-              createdAt: null,
-              streamingText: null,
-              runId: null,
-              lastSeenAt: null,
-              teamId: existingTeamIds.get(a.id) ?? null,
-              execConfig: existingExecConfigs.get(a.id) ?? null,
-            })),
-          )
+          await refreshFleetFromRegistry()
         } catch {
           // Ignore
         }

@@ -9,7 +9,28 @@ import { create } from 'zustand'
 // kept as `'graph'` for minimal churn across viewMode discriminants and
 // keyboard shortcut wiring; the team-scoped Ghost Graph still lives inside
 // `GroupChatView` and is unaffected.
-export type NavView = 'graph' | 'approvals' | 'cost' | 'marketplace' | 'scheduler' | 'system'
+// The canonical list of nav views (single source of truth). `NavView` is derived
+// from it so the set is enumerable at runtime — e.g. the AppTopBar inline-star
+// rule in `lib/topBar.ts` builds its set from this, so adding a view here keeps
+// that rule in sync automatically (every nav panel hosts the Star pill inline).
+export const NAV_VIEWS = [
+  'graph',
+  'fleet',
+  'approvals',
+  'cost',
+  'marketplace',
+  'scheduler',
+  'system',
+  'obs',
+  'board',
+  'runtimes',
+  'memory',
+  'governance',
+  'capabilities',
+  'health',
+] as const
+
+export type NavView = (typeof NAV_VIEWS)[number]
 
 export type ViewMode =
   | { type: 'agent'; agentId: string }

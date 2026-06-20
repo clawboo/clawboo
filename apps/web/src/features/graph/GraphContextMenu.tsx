@@ -31,7 +31,7 @@ interface MenuItemConfig {
   action: 'chat' | 'editPersonality' | 'editFiles' | 'selectInSidebar' | 'delete'
 }
 
-// Phase 20 audit follow-up — emoji glyphs replaced with Lucide icons to
+// Emoji glyphs replaced with Lucide icons to
 // match TeamContextMenu / sidebar nav. The pattern is now consistent
 // across every menu surface in the app.
 const items: MenuItemConfig[] = [

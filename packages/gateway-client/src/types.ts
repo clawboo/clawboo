@@ -114,7 +114,14 @@ export interface GatewayConfig {
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
 
-export type GatewayGapInfo = { expected: number; received: number }
+/** The signed device fields a connect frame carries (Ed25519 device auth). */
+export interface GatewayDeviceField {
+  id: string
+  publicKey: string
+  signature: string
+  signedAt: number
+  nonce?: string
+}
 
 export interface ConnectOptions {
   clientName?: string
@@ -126,7 +133,44 @@ export interface ConnectOptions {
   platform?: string
   mode?: string
   instanceId?: string
+  /**
+   * Optional device-auth signer for NON-browser (Node) callers. The browser path
+   * signs internally via `crypto.subtle` + localStorage (`buildDeviceConnectFields`);
+   * a Node client has neither, so it injects this hook instead. When provided, the
+   * client calls it with the assembled connect params + the server challenge nonce
+   * and uses the returned device field (skipping the browser signing path).
+   * Pair with `disableDeviceAuth: true` so the browser path never runs.
+   * The server wires this to the proxy's `signConnectParams(identity, params, nonce)`.
+   */
+  signConnect?: (
+    params: Record<string, unknown>,
+    nonce: string | null,
+  ) => Promise<{ device: GatewayDeviceField }>
+  /**
+   * The `Origin` to present on the WebSocket handshake. A browser sets Origin
+   * automatically from the page and CANNOT override it, so this is a NON-browser
+   * (Node) hook only — used by the server-side AgentSource connection, which must
+   * present an allowed Origin or the Gateway rejects the connect with
+   * `CONTROL_UI_ORIGIN_NOT_ALLOWED`. Requires `webSocketImpl`: the Node global
+   * (undici) WebSocket follows the WHATWG signature and drops a custom Origin; the
+   * `ws` package honours `new WebSocket(url, { origin })`.
+   */
+  origin?: string
+  /**
+   * A WebSocket constructor to use instead of the ambient global. Browser callers
+   * omit it (the DOM `WebSocket` is used). Node callers that need a custom `origin`
+   * pass the `ws` package's `WebSocket`.
+   */
+  webSocketImpl?: WebSocketLikeCtor
 }
+
+/**
+ * A WebSocket constructor compatible with both the browser global and the `ws`
+ * package. The optional second arg is an options bag (`{ origin }`) that `ws`
+ * honours; the browser global ignores a non-string second arg, so the no-origin
+ * call path stays safe across both.
+ */
+export type WebSocketLikeCtor = new (url: string, options?: { origin?: string }) => WebSocket
 
 // ─── Session patch types ──────────────────────────────────────────────────────
 

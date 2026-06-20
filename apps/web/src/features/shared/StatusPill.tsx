@@ -1,4 +1,4 @@
-// Reusable status pill primitive (Phase 20a).
+// Reusable status pill primitive.
 //
 // Renders the canonical mono / uppercase / tracking-widest status indicator
 // used across Approvals / Scheduler / Marketplace / chat cards.
@@ -92,7 +92,7 @@ export function StatusPill({
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider ${
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider ${
         className ?? ''
       }`}
       style={{

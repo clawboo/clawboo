@@ -15,6 +15,8 @@ export const BooLiveActivity = memo(function BooLiveActivity({ agentId }: { agen
   const sessionKey = useFleetStore(
     (s) => s.agents.find((a) => a.id === agentId)?.sessionKey ?? null,
   )
+  // Surface a failure on the live card instead of an endless typing indicator.
+  const status = useFleetStore((s) => s.agents.find((a) => a.id === agentId)?.status ?? null)
   const streamingText = useChatStore((s) =>
     sessionKey ? (s.streamingText.get(sessionKey) ?? null) : null,
   )
@@ -26,6 +28,38 @@ export const BooLiveActivity = memo(function BooLiveActivity({ agentId }: { agen
   )
 
   if (!sessionKey) return null
+
+  const isError = status === 'error'
+  if (isError) {
+    return (
+      <div
+        style={{
+          fontFamily: 'var(--font-mono, "Geist Mono", ui-monospace, monospace)',
+          fontSize: 11,
+          lineHeight: 1.35,
+          color: 'var(--primary)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+        }}
+      >
+        <span
+          aria-hidden
+          style={{
+            width: 4,
+            height: 4,
+            borderRadius: '50%',
+            background: 'var(--primary)',
+            flexShrink: 0,
+          }}
+        />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          encountered an error
+        </span>
+      </div>
+    )
+  }
   if (!activity) return <InlineTyping />
 
   const isStreaming = activity.kind === 'streaming'

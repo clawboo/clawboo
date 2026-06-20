@@ -1,7 +1,6 @@
-// Reusable branded empty-state primitive (Phase 20a).
+// Reusable branded empty-state primitive.
 //
-// Canonical pattern (per docs/clawboo-design-system.md §6, codified during
-// Phases 6 + 14): 56-px circular icon disc + Lucide icon @ 26 px /
+// Canonical pattern: 56-px circular icon disc + Lucide icon @ 26 px /
 // strokeWidth 1.5–1.75 + Cabinet Grotesk title @ 65% opacity + DM Sans
 // helper @ 40% opacity + optional CTA.
 //
@@ -98,9 +97,9 @@ export function EmptyState({
       </div>
       <span
         style={{
-          fontSize: 14,
+          fontSize: 16,
           fontWeight: 600,
-          color: 'rgb(var(--foreground-rgb) / 0.65)',
+          color: 'rgb(var(--foreground-rgb) / 0.7)',
           fontFamily: 'var(--font-display)',
           letterSpacing: '-0.01em',
         }}

@@ -7,7 +7,8 @@ import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 import { useBooZeroStore } from '@/stores/booZero'
-import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
+import { createAgent } from '@/lib/createAgent'
+import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
@@ -113,7 +114,7 @@ export function CreateTeamModal({
   const [pickCategory, setPickCategory] = useState<TemplateCategory | 'all'>('all')
   const [pickSource, setPickSource] = useState<TemplateSource | 'all'>('all')
   const [detailTemplate, setDetailTemplate] = useState<TeamTemplate | null>(null)
-  // View-mode toggle (Phase 16 hybrid). `auto` flips based on count: ≤ 12
+  // View-mode toggle (hybrid). `auto` flips based on count: ≤ 12
   // templates → fan (signature), > 12 → grid (scan). User can lock the mode
   // by tapping the toggle; that choice persists for the modal session.
   const [viewMode, setViewMode] = useState<'auto' | 'fan' | 'grid'>('auto')
@@ -303,7 +304,6 @@ export function CreateTeamModal({
         : null
       const universalLeaderName = booZeroAgent?.name ?? null
 
-      const workspaceDir = await resolveWorkspaceDir(client)
       let genuineLeaderAgentId: string | null = null
       for (let i = 0; i < resolved.length; i++) {
         const agent = resolved[i]
@@ -347,7 +347,7 @@ export function CreateTeamModal({
           universalLeaderName,
         })
 
-        const agentId = await createAgent(client, finalAgentName, workspaceDir, {
+        const agentId = await createAgent(finalAgentName, {
           soul: soulWithPersonality,
           identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
           tools: agent.toolsTemplate,
@@ -471,29 +471,9 @@ export function CreateTeamModal({
         }
       }
 
-      // Re-hydrate fleet from gateway to pick up new agents
+      // Re-hydrate fleet from the registry (SQLite) to pick up the new agents.
       try {
-        const result = await client.agents.list()
-        const mainKey = result.mainKey?.trim() || 'main'
-        // Preserve existing teamId + execConfig assignments — Gateway doesn't know about these
-        const existing = useFleetStore.getState().agents
-        const existingTeamIds = new Map(existing.map((a) => [a.id, a.teamId]))
-        const existingExecConfigs = new Map(existing.map((a) => [a.id, a.execConfig]))
-        useFleetStore.getState().hydrateAgents(
-          result.agents.map((a) => ({
-            id: a.id,
-            name: a.identity?.name ?? a.name ?? a.id,
-            status: 'idle' as const,
-            sessionKey: `agent:${a.id}:${mainKey}`,
-            model: null,
-            createdAt: null,
-            streamingText: null,
-            runId: null,
-            lastSeenAt: null,
-            teamId: existingTeamIds.get(a.id) ?? null,
-            execConfig: existingExecConfigs.get(a.id) ?? null,
-          })),
-        )
+        await refreshFleetFromRegistry()
       } catch {
         // hydration failure is non-fatal
       }
@@ -693,7 +673,7 @@ export function CreateTeamModal({
                   })}
                 </div>
 
-                {/* Phase 16 — View-mode toggle row + Fan/Grid renderer.
+                {/* View-mode toggle row + Fan/Grid renderer.
                     Auto-mode flips based on filter count (≤ 12 → Fan, > 12 →
                     Grid) so the user almost never has to think about it; an
                     explicit Fan/Grid pill on the right lets power users
