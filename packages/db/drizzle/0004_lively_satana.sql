@@ -1,1 +1,0 @@
-ALTER TABLE `teams` ADD `color_collection_id` text;
