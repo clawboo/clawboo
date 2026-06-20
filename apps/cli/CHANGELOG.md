@@ -1,5 +1,11 @@
 # clawboo
 
+## 0.2.0
+
+### Minor Changes
+
+- The v0.2.0 liberated cut. Native agents are built in (paste a provider key, no external CLI), and OpenClaw, Claude Code, Codex, and Hermes join as peer teammates in one chat, sharing one durable board, one tiered memory, and one capability dashboard, all governed and verified. Includes the team-task scheduler, per-runtime native homes, an encrypted credential vault under `~/.clawboo/`, and a release-cut security audit. See CHANGELOG.md for the full arc.
+
 ## 0.1.9
 
 ### Patch Changes

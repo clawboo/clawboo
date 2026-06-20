@@ -15,6 +15,8 @@ import { exec, fork, spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 
+import { resolveClawbooDir } from '@clawboo/config'
+
 // ─── Version ──────────────────────────────────────────────────────────────────
 
 declare const __CLI_VERSION__: string
@@ -110,7 +112,7 @@ async function probeClawbooDashboard(
 // Mirrors `apps/web/server/lib/portUtils.ts` — kept in lockstep:
 // - DEFAULT_API_PORT 18790 (one above OpenClaw Gateway 18789)
 // - 20-port fallback window (18790-18809)
-// - Runtime port file at <state-dir>/clawboo/api-port.txt
+// - Runtime port file at ~/.clawboo/api-port.txt (CLAWBOO_HOME override)
 //
 // On every `npx clawboo` launch we figure out where the dashboard is or
 // will be, in this priority order:
@@ -131,10 +133,11 @@ function readPortEnv(name: string): number | null {
 }
 
 function getRuntimePortFilePath(): string {
-  const stateDir =
-    (process.env.OPENCLAW_STATE_DIR ?? '').trim() ||
-    path.join(process.env.HOME ?? process.env.USERPROFILE ?? '', '.openclaw')
-  return path.join(stateDir, 'clawboo', 'api-port.txt')
+  // Use the SERVER's exact resolver (bundled into this standalone binary by
+  // tsup) so the CLI and server agree on the home dir at every edge — a relative
+  // CLAWBOO_HOME, an unset HOME, `~` expansion. Re-inlining it drifted at those
+  // edges and broke port discovery (the API server writes api-port.txt there).
+  return path.join(resolveClawbooDir(), 'api-port.txt')
 }
 
 function readRuntimePort(): number | null {
@@ -281,7 +284,13 @@ async function run(): Promise<void> {
     if (launchedFrom === 'bundled') {
       const child = fork(bundledServerPath, [], {
         cwd: __dirname,
-        env: { ...process.env, NODE_ENV: 'production' },
+        env: {
+          ...process.env,
+          NODE_ENV: 'production',
+          // Where the bundled MCP stdio bins live (dist/bin next to server.js), so
+          // the server's /api/mcp/config emits the right `node <bin>` attach snippet.
+          CLAWBOO_MCP_BIN_DIR: path.join(__dirname, 'bin'),
+        },
         detached: true,
         stdio: 'ignore',
       })
