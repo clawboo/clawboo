@@ -1,6 +1,7 @@
 import path from 'node:path'
-import os from 'node:os'
+
+import { resolveClawbooDir } from '@clawboo/config'
 
 export function getDbPath(): string {
-  return path.join(os.homedir(), '.openclaw', 'clawboo', 'clawboo.db')
+  return path.join(resolveClawbooDir(), 'clawboo.db')
 }
