@@ -1,16 +1,257 @@
 import type { Request, Response } from 'express'
-import { createDb, agents, costRecords, approvalHistory, settings } from '@clawboo/db'
+import { createDb, agents, costRecords, approvalHistory, settings, getSetting } from '@clawboo/db'
+import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
+import { getRegistry } from '../lib/agentSource'
+import { nativeConfigKey, nativeFileKey } from '../lib/runtimes/native/agentConfigStore'
 
-// Per-agent `settings` keys that should be removed alongside the agent row.
-// Today the only per-agent key is `boo-zero:display-name:<agentId>` (see
-// `server/api/booZero.ts` DISPLAY_NAME_KEY_PREFIX). Add new prefixes here
-// whenever a per-agent settings key is introduced — the helper is consumed
-// by BOTH `agentsDELETE` (single agent) and `agentsCleanupPOST` (ghost
-// sweep) so adding a row stays a one-line change.
+// The source throws Error('gateway_disconnected') when a write/file/session op
+// needs a live Gateway but the server-side connection is down.
+function isDisconnected(err: unknown): boolean {
+  return err instanceof Error && err.message === 'gateway_disconnected'
+}
+
+// Multi-source routing: per-agent operations go to the source that OWNS the
+// row (its `sourceId`). Unknown ids fall back to the default (OpenClaw)
+// source so its 404 semantics are preserved.
+function sourceForAgent(agentId: string): AgentSource {
+  const reg = getRegistry()
+  const row = createDb(getDbPath())
+    .select({ sourceId: agents.sourceId })
+    .from(agents)
+    .where(eq(agents.id, agentId))
+    .get()
+  return (row && reg.registry.get(row.sourceId)) || reg.source
+}
+
+// ─── GET /api/agents ─────────────────────────────────────────────────────────
+// The read surface: aggregates EVERY registered source (OpenClaw + native; all
+// SQLite-backed, so it works even when the Gateway connection is down — `stale`
+// flags the OpenClaw leg). `defaultId`/`mainKey`/`stale`/`lastSyncedAt` stay
+// OpenClaw-derived: Boo Zero and the Gateway session keys are OpenClaw
+// concepts; native records carry their own sessionKey on the record.
+export async function agentsListGET(req: Request, res: Response): Promise<void> {
+  try {
+    const reg = getRegistry()
+    const includeArchived = req.query['includeArchived'] === 'true'
+    const teamId =
+      typeof req.query['teamId'] === 'string' ? (req.query['teamId'] as string) : undefined
+    const lists = await Promise.all(
+      reg.registry
+        .list()
+        .map((s) => s.listAgents({ includeArchived, ...(teamId !== undefined ? { teamId } : {}) })),
+    )
+    const db = createDb(getDbPath())
+    const health = await reg.source.health()
+    res.json({
+      defaultId: getSetting(db, 'agent-source:openclaw:defaultId') ?? '',
+      mainKey: (getSetting(db, 'agent-source:openclaw:mainKey') ?? '').trim() || 'main',
+      agents: lists.flat(),
+      stale: health.connection !== 'connected',
+      lastSyncedAt: health.lastSyncedAt,
+    })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/agents/registry/health ─────────────────────────────────────────
+// Always 200 — reports the server-side Gateway connection state. (Registered
+// BEFORE /api/agents/:agentId so ':agentId' doesn't swallow 'registry'.)
+export async function agentsRegistryHealthGET(_req: Request, res: Response): Promise<void> {
+  try {
+    res.json(await getRegistry().source.health())
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── POST /api/agents ────────────────────────────────────────────────────────
+// Create an agent. Default source = OpenClaw (Gateway create + file writes +
+// SQLite mirror; 503 when the server-side connection is down). An optional
+// `sourceId` routes the create to a peer source (e.g. 'clawboo-native', whose
+// writes are pure SQLite and always work).
+interface CreateAgentBody {
+  name?: string
+  teamId?: string | null
+  personalityConfig?: unknown
+  execConfig?: unknown
+  avatarSeed?: string | null
+  files?: Record<string, string>
+  sourceId?: string
+}
+export async function agentsCreatePOST(req: Request, res: Response): Promise<void> {
+  const body = req.body as CreateAgentBody | undefined
+  if (!body || typeof body.name !== 'string' || !body.name.trim()) {
+    res.status(400).json({ error: 'name is required' })
+    return
+  }
+  const reg = getRegistry()
+  const source = body.sourceId ? reg.registry.get(body.sourceId) : reg.source
+  if (!source) {
+    res.status(400).json({ error: `unknown sourceId '${String(body.sourceId)}'` })
+    return
+  }
+  try {
+    const agent = await source.createAgent({
+      name: body.name.trim(),
+      teamId: body.teamId ?? null,
+      personalityConfig: body.personalityConfig,
+      execConfig: body.execConfig,
+      avatarSeed: body.avatarSeed ?? null,
+      files: body.files,
+    })
+    res.status(201).json({ agent })
+  } catch (err) {
+    if (isDisconnected(err)) {
+      res.status(503).json({ error: 'gateway_disconnected' })
+      return
+    }
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── POST /api/agents/sync ───────────────────────────────────────────────────
+// Manual sync trigger + browser-fallback. With a body ({ defaultId, mainKey,
+// agents }) it upserts WITHOUT needing the server's own connection (the browser,
+// connected via the proxy, pushes its agents.list result). With no body it runs
+// the server-side sync (needs the connection → 503 when down).
+interface SyncBody {
+  defaultId?: string
+  mainKey?: string
+  scope?: string
+  agents?: Array<{ id: string; name?: string; identity?: Record<string, unknown> }>
+}
+export async function agentsSyncPOST(req: Request, res: Response): Promise<void> {
+  const source = getRegistry().source
+  const body = req.body as SyncBody | undefined
+  try {
+    if (body && Array.isArray(body.agents)) {
+      const result = source.upsertFromList(body.agents, {
+        defaultId: body.defaultId ?? '',
+        mainKey: (body.mainKey ?? '').trim() || 'main',
+        scope: body.scope ?? '',
+      })
+      res.json({ result: { ...result, durationMs: 0, at: Date.now() } })
+      return
+    }
+    const result = await source.sync()
+    res.json({ result })
+  } catch (err) {
+    if (isDisconnected(err)) {
+      res.status(503).json({ error: 'gateway_disconnected' })
+      return
+    }
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/agents/:agentId ────────────────────────────────────────────────
+export async function agentGET(req: Request, res: Response): Promise<void> {
+  const agentId = req.params['agentId'] as string | undefined
+  if (!agentId) {
+    res.status(400).json({ error: 'agentId required' })
+    return
+  }
+  try {
+    const agent = await sourceForAgent(agentId).getAgent(agentId)
+    if (!agent) {
+      res.status(404).json({ error: 'agent not found' })
+      return
+    }
+    res.json({ agent })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET / PUT /api/agents/:agentId/files/:name ──────────────────────────────
+function validFileName(name: string | undefined): name is AgentFileName {
+  return !!name && (AGENT_FILE_NAMES as readonly string[]).includes(name)
+}
+export async function agentFileGET(req: Request, res: Response): Promise<void> {
+  const agentId = req.params['agentId'] as string | undefined
+  const name = req.params['name'] as string | undefined
+  if (!agentId) {
+    res.status(400).json({ error: 'agentId required' })
+    return
+  }
+  if (!validFileName(name)) {
+    res.status(400).json({ error: 'invalid file name' })
+    return
+  }
+  try {
+    const content = await sourceForAgent(agentId).readFile(agentId, name)
+    res.json({ name, content })
+  } catch (err) {
+    if (isDisconnected(err)) {
+      res.status(503).json({ error: 'gateway_disconnected' })
+      return
+    }
+    res.status(500).json({ error: String(err) })
+  }
+}
+export async function agentFilePUT(req: Request, res: Response): Promise<void> {
+  const agentId = req.params['agentId'] as string | undefined
+  const name = req.params['name'] as string | undefined
+  const body = req.body as { content?: unknown } | undefined
+  if (!agentId) {
+    res.status(400).json({ error: 'agentId required' })
+    return
+  }
+  if (!validFileName(name)) {
+    res.status(400).json({ error: 'invalid file name' })
+    return
+  }
+  if (typeof body?.content !== 'string') {
+    res.status(400).json({ error: 'content (string) required' })
+    return
+  }
+  try {
+    await sourceForAgent(agentId).writeFile(agentId, name, body.content)
+    res.json({ name, content: body.content })
+  } catch (err) {
+    if (isDisconnected(err)) {
+      res.status(503).json({ error: 'gateway_disconnected' })
+      return
+    }
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/agents/:agentId/sessions ───────────────────────────────────────
+export async function agentSessionsGET(req: Request, res: Response): Promise<void> {
+  const agentId = req.params['agentId'] as string | undefined
+  if (!agentId) {
+    res.status(400).json({ error: 'agentId required' })
+    return
+  }
+  try {
+    const sessions = await sourceForAgent(agentId).listSessions(agentId)
+    res.json({ sessions })
+  } catch (err) {
+    if (isDisconnected(err)) {
+      res.status(503).json({ error: 'gateway_disconnected' })
+      return
+    }
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// Per-agent `settings` keys that should be removed alongside the agent row:
+// `boo-zero:display-name:<agentId>` (see `server/api/booZero.ts`
+// DISPLAY_NAME_KEY_PREFIX) plus the native runtime's per-agent KV rows
+// (AgentConfig + agent files). Add new prefixes here whenever a per-agent
+// settings key is introduced — the helper is consumed by BOTH `agentsDELETE`
+// (single agent) and `agentsCleanupPOST` (ghost sweep) so adding a row stays
+// a one-line change.
 function perAgentSettingKeys(agentId: string): string[] {
-  return [`boo-zero:display-name:${agentId}`]
+  return [
+    `boo-zero:display-name:${agentId}`,
+    nativeConfigKey(agentId),
+    ...AGENT_FILE_NAMES.map((name) => nativeFileKey(agentId, name)),
+  ]
 }
 
 // ─── DELETE /api/agents/:agentId ─────────────────────────────────────────────
@@ -26,24 +267,39 @@ function perAgentSettingKeys(agentId: string): string[] {
 // metadata; without it, deleted agents leave permanent ghost rows in SQLite
 // that inflate per-team `agentCount` and pollute namespace checks.
 
-export function agentsDELETE(req: Request, res: Response): void {
+function deleteLocalAgentRows(agentId: string): void {
+  const db = createDb(getDbPath())
+  // Order matters — children before parent (FK guards).
+  db.delete(costRecords).where(eq(costRecords.agentId, agentId)).run()
+  db.delete(approvalHistory).where(eq(approvalHistory.agentId, agentId)).run()
+  // Per-agent KV settings (no FK to `agents`) — wipe in lock-step.
+  db.delete(settings)
+    .where(inArray(settings.key, perAgentSettingKeys(agentId)))
+    .run()
+  db.delete(agents).where(eq(agents.id, agentId)).run()
+}
+
+export async function agentsDELETE(req: Request, res: Response): Promise<void> {
   const agentId = req.params['agentId'] as string | undefined
   if (!agentId) {
     res.status(400).json({ error: 'agentId required' })
     return
   }
   try {
-    const db = createDb(getDbPath())
-    // Order matters — children before parent.
-    db.delete(costRecords).where(eq(costRecords.agentId, agentId)).run()
-    db.delete(approvalHistory).where(eq(approvalHistory.agentId, agentId)).run()
-    // Per-agent KV settings (display-name override etc.) don't FK to
-    // `agents` so they'd otherwise survive the agent delete and rot in
-    // SQLite. Wipe them in lock-step.
-    const settingKeys = perAgentSettingKeys(agentId)
-    db.delete(settings).where(inArray(settings.key, settingKeys)).run()
-    db.delete(agents).where(eq(agents.id, agentId)).run()
-    res.json({ ok: true })
+    // archiveAgent deletes upstream (Gateway) THEN cleans the SQLite row + FK
+    // children. If the server-side Gateway connection is down, fall back to a
+    // SQLite-only cleanup so the local row never rots (disconnect tolerance).
+    try {
+      await sourceForAgent(agentId).archiveAgent(agentId)
+      res.json({ ok: true, upstreamDeleted: true })
+    } catch (err) {
+      if (isDisconnected(err)) {
+        deleteLocalAgentRows(agentId)
+        res.json({ ok: true, upstreamDeleted: false })
+        return
+      }
+      throw err
+    }
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -87,8 +343,15 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
     const db = createDb(getDbPath())
     const liveIds = body.liveAgentIds
 
-    // Collect IDs of local agent rows that are NOT in the live set.
-    const localRows = db.select({ id: agents.id }).from(agents).all()
+    // Collect IDs of local agent rows that are NOT in the live set. Scoped to
+    // the OpenClaw source: the live-id list comes from the GATEWAY, so only
+    // Gateway-owned rows may be compared against it — native (and any future
+    // peer-source) agents are never ghosts of the Gateway.
+    const localRows = db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.sourceId, 'openclaw'))
+      .all()
     const liveSet = new Set(liveIds)
     const toDelete = localRows.map((r) => r.id).filter((id) => !liveSet.has(id))
 

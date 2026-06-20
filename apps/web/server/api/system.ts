@@ -14,6 +14,7 @@ import {
 } from '../lib/processManager'
 import { getModelsFromCli } from '../lib/modelCache'
 import { isWindows, resolveShimName } from '../lib/platform'
+import { getRegistry } from '../lib/agentSource'
 import { detectOpenClaw, invalidateOpenClawCache } from '../lib/openclawDetect'
 import { MODEL_GROUPS as STATIC_MODEL_GROUPS } from '../../src/lib/modelCatalog'
 
@@ -199,7 +200,11 @@ function parseEnvFlags(content: string | null): Record<string, boolean> {
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith('#'))
   for (const [flag, vars] of Object.entries(FLAG_CHECKS)) {
-    flags[flag] = vars.some((v) => cleaned.some((l) => l.startsWith(`${v}=`)))
+    // A presence flag must reflect a USABLE value: `VAR=` (key present, value empty)
+    // is not a configured key, so require a non-empty value after `=`.
+    flags[flag] = vars.some((v) =>
+      cleaned.some((l) => l.startsWith(`${v}=`) && l.slice(v.length + 1).trim() !== ''),
+    )
   }
   return flags
 }
@@ -604,7 +609,9 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
     const gatewayUrl = `ws://localhost:${port}`
     saveSettings({ gatewayUrl, gatewayToken })
 
-    res.json({ ok: true, gatewayToken, gatewayUrl })
+    // The raw token is persisted server-side only — never returned in the body. The
+    // same-origin proxy injects it on connect, so the browser only needs the URL.
+    res.json({ ok: true, gatewayUrl })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -682,6 +689,11 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
           // Sync .env token → Clawboo settings so the proxy uses the correct token.
           // The .env file is the Gateway's source of truth for auth tokens.
           syncTokenFromEnv()
+          // The Gateway just became reachable → (re)connect the server-side
+          // AgentSource so it syncs the registry (best-effort, non-blocking).
+          void getRegistry()
+            .reconnect()
+            .catch(() => {})
           sendEvent(res, { type: 'complete', success: true, pid: reportPid ?? null, port })
           res.end()
           return
