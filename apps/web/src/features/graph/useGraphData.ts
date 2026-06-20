@@ -5,10 +5,12 @@ import { useTeamStore } from '@/stores/team'
 import { useBooZeroStore } from '@/stores/booZero'
 import type { Team } from '@/stores/team'
 import { useGraphStore } from './store'
-import { parseToolsMd } from './parsers/parseToolsMd'
 import { parseAgentsMd } from './parsers/parseAgentsMd'
 import { computeSpanningTree } from './computeSpanningTree'
 import { resolveTeamInternalLead } from '@/lib/resolveTeamLeader'
+import { readAgentFile } from '@/lib/agentSourceClient'
+import { fetchCapabilities, groupAgentCapabilities } from '@/lib/capabilitiesClient'
+import type { CapabilityRecord } from '@clawboo/capability-registry'
 import type { AgentState } from '@/stores/fleet'
 import type {
   GraphNode,
@@ -16,13 +18,30 @@ import type {
   BooNodeData,
   SkillNodeData,
   ResourceNodeData,
+  SkillCategory,
   TeamRootNodeData,
   GhostGraphScope,
 } from './types'
 
+/** Stable, render-safe node-key slug from a capability's sourceKey. */
+function capSlug(sourceKey: string): string {
+  return sourceKey
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
+/** Map a capability to a SkillNode color bucket (the category drives node tint). */
+function capCategory(cap: CapabilityRecord): SkillCategory {
+  if (cap.source === 'brokered-mcp' || cap.source === 'runtime-builtin') return 'code'
+  if (cap.source === 'mcp-connector') return 'comm'
+  if (cap.source === 'openclaw-extension') return 'web'
+  return 'other'
+}
+
 // ─── useGraphData ─────────────────────────────────────────────────────────────
 //
-// Fetches TOOLS.md + AGENTS.md for each agent and converts them into React Flow
+// Fetches each agent's capability inventory + AGENTS.md and converts them into React Flow
 // nodes + edges stored in useGraphStore.
 //
 // Two separate update paths:
@@ -42,7 +61,7 @@ import type {
 // assumption holds even with two scopes in the codebase.
 
 export function useGraphData(scope: GhostGraphScope = 'team'): void {
-  // Phase 19 — atlas layout mode. Read at the top so the trunk-attribution
+  // Atlas layout mode. Read at the top so the trunk-attribution
   // loop can skip itself in radial mode (where leftmost/middle/rightmost
   // detection by sorted X would be wrong) and every dep edge can be stamped
   // with `layoutMode` so DependencyEdge picks the right path renderer.
@@ -65,7 +84,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
   // Resolve Boo Zero (universal team leader). When relevant (team is
   // selected in team-scope, or always in atlas-scope), we include Boo Zero
   // in the agents that drive both file fetching AND graph building — so
-  // Boo Zero's own TOOLS.md is fetched and its skill / resource children
+  // Boo Zero's own capabilities are fetched and its skill / resource children
   // appear on click (peacock-feather expand). Boo Zero is teamless in the
   // DB (`teamId === null`) so the per-team filter excludes it; this is
   // where we re-include it for graph purposes.
@@ -121,6 +140,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
     store.resetLayout()
     store.setNodes([])
     store.setEdges([])
+    store.setGraphScopeKey(null) // cleared until the new scope's structural rebuild lands
     useGraphStore.setState({ agentFiles: new Map() })
   }, [selectedTeamId, scope])
 
@@ -143,24 +163,39 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
     setFilesError(null)
 
     const fetchAll = async () => {
-      const tasks = agentIds.flatMap((agentId) => [
-        client.agents.files
-          .read(agentId, 'TOOLS.md')
-          .then((content) => ({ agentId, file: 'toolsMd' as const, content }))
-          .catch(() => ({ agentId, file: 'toolsMd' as const, content: null })),
-        client.agents.files
-          .read(agentId, 'AGENTS.md')
-          .then((content) => ({ agentId, file: 'agentsMd' as const, content }))
-          .catch(() => ({ agentId, file: 'agentsMd' as const, content: null })),
-      ])
+      try {
+        // ONE capabilities fetch (the unified inventory — supersedes per-agent
+        // inventory) grouped by agent, + AGENTS.md per agent for dependency edges.
+        const [capView, agentsResults] = await Promise.all([
+          fetchCapabilities(),
+          Promise.all(
+            agentIds.map((agentId) =>
+              readAgentFile(agentId, 'AGENTS.md')
+                .then((content) => ({ agentId, content }))
+                .catch(() => ({ agentId, content: null as string | null })),
+            ),
+          ),
+        ])
+        if (cancelled) return
 
-      const results = await Promise.all(tasks)
-      if (cancelled) return
+        // A total capability-fetch failure (network / non-2xx) returns an empty
+        // view — surface it as an error instead of silently rendering an empty
+        // graph (which is indistinguishable from "this team has no skills").
+        if (!capView.ok) {
+          setFilesError('Could not load capabilities — check the connection and retry.')
+          return
+        }
 
-      for (const { agentId, file, content } of results) {
-        setAgentFiles(agentId, { [file]: content })
+        const byAgent = groupAgentCapabilities(capView.records)
+        for (const { agentId, content } of agentsResults) {
+          setAgentFiles(agentId, { capabilities: byAgent.get(agentId) ?? [], agentsMd: content })
+        }
+      } catch (err) {
+        if (!cancelled)
+          setFilesError(err instanceof Error ? err.message : 'Failed to load the graph.')
+      } finally {
+        if (!cancelled) setLoadingFiles(false)
       }
-      setLoadingFiles(false)
     }
 
     void fetchAll()
@@ -172,7 +207,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
   // ── 2. Structural rebuild ────────────────────────────────────────────────────
   // We pass `graphAgents` (filteredAgents + Boo Zero when appropriate) so
   // Boo Zero's BooNode is created naturally by the `agents.map` loop in
-  // `buildGraphElements` AND its TOOLS.md gets parsed into skill / resource
+  // `buildGraphElements` AND its capabilities become skill / resource
   // children. Previously Boo Zero was added as a synthetic node AFTER the
   // skill loop, so clicking Boo Zero showed no skill children — production
   // bug reported by the user. The synthesized edges (Boo Zero → lead → members
@@ -226,6 +261,10 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
     ], // intentional: string keys + scalars + maps
   )
 
+  // Which scope the structural nodes belong to (`atlas` or `team:<id>`), so a
+  // shared-store consumer (the team chat header's count) can tell "hydrated for
+  // THIS team" from a stale count left over from Atlas / a previous team.
+  const scopeKey = scope === 'atlas' ? 'atlas' : `team:${selectedTeamId ?? 'none'}`
   useEffect(() => {
     // Preserve positions already assigned by ELK or user drag
     const { nodes: existingNodes } = useGraphStore.getState()
@@ -238,7 +277,8 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
 
     useGraphStore.getState().setNodes(nodesWithPositions as GraphNode[])
     useGraphStore.getState().setEdges(rawEdges)
-  }, [rawNodes, rawEdges])
+    useGraphStore.getState().setGraphScopeKey(scopeKey)
+  }, [rawNodes, rawEdges, scopeKey])
 
   // ── 3. Status-only patch ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -270,7 +310,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
 
 export function buildGraphElements(
   agents: AgentState[],
-  agentFiles: Map<string, { toolsMd: string | null; agentsMd: string | null }>,
+  agentFiles: Map<string, { capabilities: CapabilityRecord[] | null; agentsMd: string | null }>,
   teams: Team[] = [],
   /**
    * Team-scope only — the single team-internal lead's agent ID (CTO,
@@ -312,7 +352,7 @@ export function buildGraphElements(
    */
   teamInternalLeadByTeamId: Map<string, string | null> | null = null,
   /**
-   * Phase 19 — when true (radial Atlas), skip the trunk-and-branches
+   * When true (radial Atlas), skip the trunk-and-branches
    * attribution that assumes top-down topology, and stamp every dependency
    * edge with `layoutMode: 'radial'` so DependencyEdge renders a bezier
    * instead of a smooth-step. Top-down Atlas + per-team scope pass `false`
@@ -396,11 +436,11 @@ export function buildGraphElements(
   // orbits Boo Zero in the inner ring; `SkillNode` reads the `isLeadership`
   // flag and overrides its color + icon + hides the Install button.
   //
-  // Source-of-truth note: this skill is NOT in TOOLS.md — it's a graph-
+  // Source-of-truth note: this skill is NOT a capability record — it's a graph-
   // layer attribute. No client-side write to the Gateway, so it survives
   // any future deletion of Boo Zero's tools. The skillId starts with the
   // reserved prefix `clawboo-leadership-` so it can never collide with a
-  // marketplace skill or a user-added TOOLS.md entry.
+  // marketplace skill or a user-installed capability.
   for (const booNode of booNodes) {
     const data = booNode.data as BooNodeData
     if (!data.isUniversalLeader) continue
@@ -438,57 +478,65 @@ export function buildGraphElements(
   for (const agent of agents) {
     const files = agentFiles.get(agent.id)
 
-    // TOOLS.md → per-agent SkillNodes + ResourceNodes
-    if (files?.toolsMd) {
-      const { skills, resources } = parseToolsMd(files.toolsMd)
-
-      for (const skill of skills) {
-        const nodeId = `skill-${agent.id}-${skill.id}`
-        skillNodes.push({
-          id: nodeId,
-          type: 'skill' as const,
-          data: {
-            skillId: skill.id,
-            name: skill.name,
-            category: skill.category,
-            description: skill.description,
-            agentIds: [agent.id],
-          } satisfies SkillNodeData,
-          position: { x: 0, y: 0 },
-        })
-        skillEdges.push({
-          id: `skilledge-${agent.id}-${skill.id}`,
-          type: 'skill',
-          source: `boo-${agent.id}`,
-          sourceHandle: 'center',
-          target: nodeId,
-          targetHandle: 'center',
-          data: {},
-        })
-      }
-
-      for (const resource of resources) {
-        const nodeId = `resource-${agent.id}-${resource.id}`
-        resourceNodes.push({
-          id: nodeId,
-          type: 'resource' as const,
-          data: {
-            resourceId: resource.id,
-            name: resource.name,
-            serviceIcon: resource.serviceIcon,
-            agentIds: [agent.id],
-          } satisfies ResourceNodeData,
-          position: { x: 0, y: 0 },
-        })
-        resourceEdges.push({
-          id: `resourceedge-${agent.id}-${resource.id}`,
-          type: 'resource',
-          source: `boo-${agent.id}`,
-          sourceHandle: 'center',
-          target: nodeId,
-          targetHandle: 'center',
-          data: {},
-        })
+    // Unified capability inventory → per-agent nodes. skill/tool → SkillNode,
+    // connector → ResourceNode. `available` (server-evaluated availability)
+    // drives greying. Supersedes the deleted per-agent markdown skill-file path.
+    const caps = files?.capabilities
+    if (caps && caps.length > 0) {
+      const seen = new Set<string>()
+      for (const cap of caps) {
+        const slug = capSlug(cap.sourceKey)
+        if (cap.kind === 'connector') {
+          const nodeId = `resource-${agent.id}-${slug}`
+          if (seen.has(nodeId)) continue
+          seen.add(nodeId)
+          resourceNodes.push({
+            id: nodeId,
+            type: 'resource' as const,
+            data: {
+              resourceId: slug,
+              name: cap.name,
+              agentIds: [agent.id],
+              available: cap.available,
+            } satisfies ResourceNodeData,
+            position: { x: 0, y: 0 },
+          })
+          resourceEdges.push({
+            id: `resourceedge-${agent.id}-${slug}`,
+            type: 'resource',
+            source: `boo-${agent.id}`,
+            sourceHandle: 'center',
+            target: nodeId,
+            targetHandle: 'center',
+            data: {},
+          })
+        } else {
+          const nodeId = `skill-${agent.id}-${slug}`
+          if (seen.has(nodeId)) continue
+          seen.add(nodeId)
+          skillNodes.push({
+            id: nodeId,
+            type: 'skill' as const,
+            data: {
+              skillId: slug,
+              name: cap.name,
+              category: capCategory(cap),
+              description: cap.description || null,
+              agentIds: [agent.id],
+              available: cap.available,
+            } satisfies SkillNodeData,
+            position: { x: 0, y: 0 },
+          })
+          skillEdges.push({
+            id: `skilledge-${agent.id}-${slug}`,
+            type: 'skill',
+            source: `boo-${agent.id}`,
+            sourceHandle: 'center',
+            target: nodeId,
+            targetHandle: 'center',
+            data: {},
+          })
+        }
       }
     }
 

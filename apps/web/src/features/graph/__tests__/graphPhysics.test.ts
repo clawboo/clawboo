@@ -51,7 +51,7 @@ function makeResourceNode(agentId: string, resourceId: string, x: number, y: num
     id: `resource-${agentId}-${resourceId}`,
     type: 'resource',
     position: { x, y },
-    data: { resourceId, name: resourceId, serviceIcon: '🔧', agentIds: [agentId] },
+    data: { resourceId, name: resourceId, agentIds: [agentId] },
   } as GraphNode
 }
 

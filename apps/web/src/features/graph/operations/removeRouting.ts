@@ -1,3 +1,4 @@
+import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
@@ -29,9 +30,7 @@ export async function removeRouting(
   store.setEdges(prevEdges.filter((e) => e.id !== edgeId))
 
   try {
-    const currentAgentsMd = await client.agents.files
-      .read(sourceAgentId, 'AGENTS.md')
-      .catch(() => null)
+    const currentAgentsMd = await readAgentFile(sourceAgentId, 'AGENTS.md').catch(() => null)
 
     if (!currentAgentsMd) {
       useToastStore.getState().addToast({
@@ -48,7 +47,7 @@ export async function removeRouting(
     const newAgentsMd = filtered.join('\n')
 
     await mutationQueue.enqueue(sourceAgentId, () =>
-      client.agents.files.set(sourceAgentId, 'AGENTS.md', newAgentsMd),
+      writeAgentFile(sourceAgentId, 'AGENTS.md', newAgentsMd),
     )
 
     // Update local agentFiles cache (no triggerRefresh — matches onConnect pattern)
