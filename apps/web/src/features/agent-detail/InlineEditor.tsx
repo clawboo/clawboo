@@ -23,11 +23,13 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
 import { DisplayNameEditor } from '@/features/boo-zero/DisplayNameEditor'
 import { GlobalBriefEditor } from '@/features/boo-zero/GlobalBriefEditor'
+import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 
 // ─── Tab types ───────────────────────────────────────────────────────────────
 
 // `'brief'` is Boo-Zero-only — gated by `isBooZero` at the tab-list level.
-type EditorTab = 'personality' | 'permissions' | 'brief' | AgentFileName
+// `'activity'` is the live obs terminal for this agent.
+type EditorTab = 'personality' | 'permissions' | 'activity' | 'brief' | AgentFileName
 
 const FILE_TAB_LABELS: Record<AgentFileName, string> = {
   'SOUL.md': 'SOUL',
@@ -42,13 +44,14 @@ const FILE_TAB_LABELS: Record<AgentFileName, string> = {
 function getTabLabel(tab: EditorTab): string {
   if (tab === 'personality') return 'Personality'
   if (tab === 'permissions') return 'Permissions'
+  if (tab === 'activity') return 'Activity'
   if (tab === 'brief') return 'Brief'
   return FILE_TAB_LABELS[tab] ?? tab.replace('.md', '')
 }
 
 /** Type guard: is this tab one of the file-backed CodeMirror tabs? */
 function isAgentFileTab(tab: EditorTab): tab is AgentFileName {
-  return tab !== 'personality' && tab !== 'permissions' && tab !== 'brief'
+  return tab !== 'personality' && tab !== 'permissions' && tab !== 'activity' && tab !== 'brief'
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -90,6 +93,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
   const allTabs: EditorTab[] = useMemo(
     () => [
       'personality',
+      'activity',
       'permissions',
       ...(isBooZero ? (['brief'] as const) : []),
       ...visibleFileTabs,
@@ -351,6 +355,13 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
           </div>
         )}
 
+        {/* Activity tab — the live obs terminal for this agent. */}
+        {activeTab === 'activity' && (
+          <div style={{ height: '100%', padding: '12px 16px', minHeight: 0 }}>
+            <ActivityTerminal scope={{ agentId }} fill hideHeader />
+          </div>
+        )}
+
         {/* Brief tab — Boo Zero only (gated at allTabs construction).
             Holds the Display Name override + the Global Brief — the
             load-bearing identity surface that runs through every Boo
@@ -425,9 +436,11 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
             ? `${agentName} · Personality`
             : activeTab === 'permissions'
               ? `${agentName} · Permissions`
-              : activeTab === 'brief'
-                ? `${agentName} · Brief — display name + global brief`
-                : AGENT_FILE_META[activeTab].hint}
+              : activeTab === 'activity'
+                ? `${agentName} · Activity — live tool calls, results, errors`
+                : activeTab === 'brief'
+                  ? `${agentName} · Brief — display name + global brief`
+                  : AGENT_FILE_META[activeTab].hint}
         </span>
         <span>
           {anyDirty ? 'Unsaved' : 'Saved'}

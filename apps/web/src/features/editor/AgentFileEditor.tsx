@@ -1,3 +1,4 @@
+import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Save, X } from 'lucide-react'
 import {
@@ -92,38 +93,38 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
     const loadId = ++loadIdRef.current
     setLoading(true)
 
-    Promise.all(
-      ALL_FILE_TABS.map((name) => client.agents.files.read(agentId, name).catch(() => '')),
-    ).then(async (results) => {
-      if (loadId !== loadIdRef.current) return // stale
+    Promise.all(ALL_FILE_TABS.map((name) => readAgentFile(agentId, name).catch(() => ''))).then(
+      async (results) => {
+        if (loadId !== loadIdRef.current) return // stale
 
-      const next: FilesMap = {}
-      ALL_FILE_TABS.forEach((name, i) => {
-        const content = results[i] ?? ''
-        next[name] = { content, clean: content }
-      })
+        const next: FilesMap = {}
+        ALL_FILE_TABS.forEach((name, i) => {
+          const content = results[i] ?? ''
+          next[name] = { content, clean: content }
+        })
 
-      // Always strip any stale personality block from SOUL.md and re-merge
-      // from SQLite (the source of truth for slider values). This handles two
-      // scenarios: (a) Gateway content has no personality block (never written),
-      // (b) Gateway has a stale personality block (old code overwrote the role
-      // description, or values are out of date).
-      const soulRaw = next['SOUL.md']?.content ?? ''
-      try {
-        const res = await fetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
-        const data = (await res.json()) as { values: unknown }
-        if (data.values && isPersonalityValues(data.values)) {
-          const base = stripPersonalityBlock(soulRaw)
-          const merged = mergeSoulWithPersonality(base, data.values)
-          next['SOUL.md'] = { content: merged, clean: merged }
+        // Always strip any stale personality block from SOUL.md and re-merge
+        // from SQLite (the source of truth for slider values). This handles two
+        // scenarios: (a) Gateway content has no personality block (never written),
+        // (b) Gateway has a stale personality block (old code overwrote the role
+        // description, or values are out of date).
+        const soulRaw = next['SOUL.md']?.content ?? ''
+        try {
+          const res = await fetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
+          const data = (await res.json()) as { values: unknown }
+          if (data.values && isPersonalityValues(data.values)) {
+            const base = stripPersonalityBlock(soulRaw)
+            const merged = mergeSoulWithPersonality(base, data.values)
+            next['SOUL.md'] = { content: merged, clean: merged }
+          }
+        } catch {
+          // Non-fatal — personality data not merged
         }
-      } catch {
-        // Non-fatal — personality data not merged
-      }
 
-      setFiles(next)
-      setLoading(false)
-    })
+        setFiles(next)
+        setLoading(false)
+      },
+    )
   }, [agentId, client])
 
   // ─── Refresh SOUL.md when personality sliders save ─────────────────────────
@@ -178,9 +179,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
     setSaving(true)
     try {
       const contentToSave = fileState.content
-      await mutationQueue.enqueue(agentId, () =>
-        client.agents.files.set(agentId, tab, contentToSave),
-      )
+      await mutationQueue.enqueue(agentId, () => writeAgentFile(agentId, tab, contentToSave))
 
       setFiles((prev) => ({
         ...prev,
@@ -216,9 +215,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
     for (const tab of dirtyTabs) {
       try {
         const contentToSave = currentFiles[tab].content
-        await mutationQueue.enqueue(agentId, () =>
-          client.agents.files.set(agentId, tab, contentToSave),
-        )
+        await mutationQueue.enqueue(agentId, () => writeAgentFile(agentId, tab, contentToSave))
       } catch {
         // best-effort on close
       }

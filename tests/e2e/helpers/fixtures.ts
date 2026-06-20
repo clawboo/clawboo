@@ -41,7 +41,19 @@ export async function assertSandboxed(request: APIRequestContext): Promise<void>
     throw new Error(
       `Refusing to run destructive e2e helpers: CLAWBOO_E2E_SANDBOX_HOME ` +
         `is not set or doesn't live under ${tmpRoot}. This guards against ` +
-        `a misconfigured run wiping the developer's real ~/.openclaw/clawboo/clawboo.db. ` +
+        `a misconfigured run wiping the developer's real ~/.clawboo/clawboo.db. ` +
+        `Run via 'pnpm e2e' which configures the sandbox automatically.`,
+    )
+  }
+
+  // Check #1b — clawboo's OWN state dir (the SQLite DB / settings / secrets
+  // vault) now lives under CLAWBOO_HOME. Verify the sandbox set it under tmp.
+  const sandboxClawbooDir = process.env.CLAWBOO_E2E_SANDBOX_CLAWBOO_DIR
+  if (!sandboxClawbooDir || !sandboxClawbooDir.startsWith(tmpRoot)) {
+    throw new Error(
+      `Refusing to run destructive e2e helpers: CLAWBOO_E2E_SANDBOX_CLAWBOO_DIR ` +
+        `is not set or doesn't live under ${tmpRoot}. clawboo's own state dir ` +
+        `(~/.clawboo by default) must be sandboxed via CLAWBOO_HOME. ` +
         `Run via 'pnpm e2e' which configures the sandbox automatically.`,
     )
   }
@@ -78,8 +90,12 @@ export const test = base.extend<object, { gateway: MockGateway }>({
   gateway: [
     // eslint-disable-next-line no-empty-pattern
     async ({}, use) => {
-      // Snapshot original settings so we can restore after tests
-      let originalSettings: { gatewayUrl?: string; gatewayToken?: string } | null = null
+      // Snapshot the original gateway URL so we can restore it after tests.
+      // The token is NOT read back (GET /api/settings never returns the raw
+      // token) and is NOT rewritten on restore — settingsPOST only updates the
+      // fields present in the body, so omitting gatewayToken leaves the saved
+      // token untouched (the correct restore semantics, no accidental wipe).
+      let originalSettings: { gatewayUrl?: string } | null = null
       try {
         const resp = await fetch(SETTINGS_URL)
         if (resp.ok) originalSettings = (await resp.json()) as typeof originalSettings
@@ -91,23 +107,20 @@ export const test = base.extend<object, { gateway: MockGateway }>({
       await use(gw)
       gw.close()
 
-      // Restore original settings to avoid polluting the user's environment
+      // Restore the original gateway URL to avoid polluting the user's environment.
       try {
         if (originalSettings?.gatewayUrl) {
           await fetch(SETTINGS_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              gatewayUrl: originalSettings.gatewayUrl,
-              gatewayToken: originalSettings.gatewayToken ?? '',
-            }),
+            body: JSON.stringify({ gatewayUrl: originalSettings.gatewayUrl }),
           })
         } else {
-          // Original had no URL — restore defaults
+          // Original had no URL — restore the default URL (token left as-is).
           await fetch(SETTINGS_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ gatewayUrl: 'ws://localhost:18789', gatewayToken: '' }),
+            body: JSON.stringify({ gatewayUrl: 'ws://localhost:18789' }),
           })
         }
       } catch {

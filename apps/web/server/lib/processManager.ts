@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
 import { execFileSync } from 'node:child_process'
+
+import { resolveClawbooDir } from '@clawboo/config'
 
 import { isWindows } from './platform'
 
@@ -12,7 +13,7 @@ export interface GatewayPidInfo {
 }
 
 export function getGatewayPidPath(): string {
-  return path.join(os.homedir(), '.openclaw', 'clawboo', 'gateway.pid')
+  return path.join(resolveClawbooDir(), 'gateway.pid')
 }
 
 export function readGatewayPid(): GatewayPidInfo | null {

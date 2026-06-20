@@ -10,6 +10,24 @@ export default defineConfig({
   clean: false,
   sourcemap: false,
   splitting: false,
-  noExternal: [/^@clawboo\//, 'express', 'cors', 'drizzle-orm', '@noble/ed25519'],
-  external: ['better-sqlite3', 'ws', 'pino', 'pino-pretty'],
+  // The native runtime's provider SDKs (@anthropic-ai/sdk + openai) are pure-JS
+  // HTTP clients and MUST be bundled — a clean `npx clawboo` install ships no
+  // node_modules for them, and native is a first-class built-in runtime. They
+  // stay lazy-imported in the provider clients, so boot cost is unchanged.
+  // croner (the Routines next-occurrence math, pure JS, tiny) rides along the
+  // same way — a clean install must schedule without a node_modules for it.
+  noExternal: [
+    /^@clawboo\//,
+    'express',
+    'cors',
+    'drizzle-orm',
+    '@noble/ed25519',
+    '@anthropic-ai/sdk',
+    'openai',
+    'croner',
+  ],
+  // OTel is lazy-imported and kept EXTERNAL so it
+  // never bloats the bundled dist/server.js; the lazy import resolves it at runtime
+  // (dev) or degrades to event-log-only if absent (lean bundled CLI).
+  external: ['better-sqlite3', 'ws', 'pino', 'pino-pretty', /^@opentelemetry\//],
 })

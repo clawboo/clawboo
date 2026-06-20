@@ -10,7 +10,7 @@
 // disagree, the LLM drifts — calls itself one name in one breath and the
 // other in the next.
 //
-// Phase 2's per-turn `[Your Rules]` block carries the authoritative name
+// The per-turn `[Your Rules]` block carries the authoritative name
 // and is the load-bearing fix. This sync is the belt-and-suspenders layer:
 // when it succeeds, the LLM's natural self-reference also aligns with the
 // override, removing one pressure point for drift.
@@ -29,14 +29,7 @@
 // unreliable for persistence in older runtimes. When it works, great; when
 // it doesn't, the per-turn rules block keeps the identity anchored anyway.
 
-import type { GatewayClientLike } from '@clawboo/gateway-client'
-
-interface SoulFileResponse {
-  file: {
-    content?: string
-    missing?: boolean
-  }
-}
+import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
 
 /**
  * Rewrite the first `# <heading>` line of an existing SOUL.md to `# <name>`.
@@ -59,32 +52,23 @@ function rewriteSoulHeading(current: string, name: string): string {
  * decides whether to surface this to the user).
  */
 export async function syncBooZeroSoulIdentity(params: {
-  client: GatewayClientLike
   agentId: string
   displayName: string
 }): Promise<boolean> {
-  const { client, agentId, displayName } = params
+  const { agentId, displayName } = params
   const trimmed = displayName.trim()
   if (!trimmed) return false
   try {
     let current = ''
     try {
-      const res = await client.call<SoulFileResponse>('agents.files.get', {
-        agentId,
-        name: 'SOUL.md',
-      })
-      current = res?.file?.content ?? ''
+      current = await readAgentFile(agentId, 'SOUL.md')
     } catch {
-      // SOUL.md may be missing entirely — start from empty.
+      // SOUL.md may be missing / source offline — start from empty.
       current = ''
     }
     const next = rewriteSoulHeading(current, trimmed)
     if (next === current) return true // already aligned
-    await client.call('agents.files.set', {
-      agentId,
-      name: 'SOUL.md',
-      content: next,
-    })
+    await writeAgentFile(agentId, 'SOUL.md', next)
     return true
   } catch {
     return false

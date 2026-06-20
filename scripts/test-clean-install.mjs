@@ -156,6 +156,80 @@ async function httpGet(url, opts = {}) {
   }
 }
 
+// Spawn a bundled stdio MCP bin and drive a minimal MCP handshake over its
+// stdin/stdout (raw newline-delimited JSON-RPC — no SDK import needed in this
+// harness): initialize → notifications/initialized → tools/list. Resolves to the
+// tool names. Proves an external runtime can spawn the packaged bin + call a tool.
+function mcpStdioListTools(binPath, dbDir) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('node', [binPath], {
+      env: {
+        ...process.env,
+        HOME: dbDir,
+        USERPROFILE: dbDir,
+        CLAWBOO_DB_PATH: path.join(dbDir, 'mcp.db'),
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let buf = ''
+    let done = false
+    const finish = (fn, arg) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      try {
+        child.kill('SIGTERM')
+      } catch {
+        /* ignore */
+      }
+      fn(arg)
+    }
+    const timer = setTimeout(
+      () => finish(reject, new Error('MCP stdio handshake timed out')),
+      15_000,
+    )
+    const send = (msg) => child.stdin.write(JSON.stringify(msg) + '\n')
+    child.stdout.on('data', (d) => {
+      buf += d.toString()
+      let idx
+      while ((idx = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, idx).trim()
+        buf = buf.slice(idx + 1)
+        if (!line) continue
+        let msg
+        try {
+          msg = JSON.parse(line)
+        } catch {
+          continue
+        }
+        if (msg.id === 1 && msg.result) {
+          send({ jsonrpc: '2.0', method: 'notifications/initialized' })
+          send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+        } else if (msg.id === 2 && msg.result) {
+          finish(
+            resolve,
+            (msg.result.tools ?? []).map((t) => t.name),
+          )
+        } else if (msg.error) {
+          finish(reject, new Error(`MCP error: ${JSON.stringify(msg.error)}`))
+        }
+      }
+    })
+    child.stderr.on('data', () => {}) // the bin may log to stderr; ignore
+    child.on('error', (err) => finish(reject, err))
+    send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'clean-install-smoke', version: '0.0.0' },
+      },
+    })
+  })
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -349,6 +423,33 @@ async function main() {
     return
   }
   log('✓ GET /api/system/status returns expected shape')
+
+  // 12. Test 5: spawn the bundled stdio MCP bin and call a tool (CLAWBOO_MCP
+  //     attach surface) — proves an external runtime can spawn it from the tarball.
+  const tasksBin = path.join(REPO_ROOT, 'apps/cli/dist/bin/tasks.js')
+  let binPresent = true
+  try {
+    const st = await fs.stat(tasksBin)
+    if (!st.isFile()) throw new Error('not a file')
+  } catch {
+    binPresent = false
+    fail(`MCP stdio bin not found at ${tasksBin}. Run 'pnpm assemble' (after 'pnpm build').`)
+  }
+  if (binPresent) {
+    const mcpDbDir = await fs.mkdtemp(path.join(os.tmpdir(), 'clawboo-mcp-bin-'))
+    try {
+      const tools = await mcpStdioListTools(tasksBin, mcpDbDir)
+      if (!tools.includes('list_tasks')) {
+        fail(`Stdio MCP bin tools/list did not include list_tasks: ${JSON.stringify(tools)}`)
+      } else {
+        log('✓ spawned the bundled stdio MCP bin (tasks) and listed its tools')
+      }
+    } catch (err) {
+      fail(`Stdio MCP bin handshake failed: ${err?.message ?? err}`)
+    } finally {
+      await fs.rm(mcpDbDir, { recursive: true, force: true }).catch(() => {})
+    }
+  }
 
   log('All clean-install smoke tests passed.')
 }

@@ -1,11 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildTeamAgentsMd,
-  buildTeamWakeMessage,
   buildTeamContextPreamble,
   buildClawbooHelpDoc,
-  buildSelfDocumentingRelayHeader,
-  buildBatchedRelayMessage,
   isOpenclawControlToken,
   isClawbooControlToken,
   isLikelyRefusal,
@@ -119,67 +116,6 @@ describe('buildTeamAgentsMd', () => {
     expect(result).toMatch(/DO NOT[\s\S]*Rely on plain @-mentions/i)
   })
 })
-
-describe('buildTeamWakeMessage', () => {
-  const teammates = [
-    { name: 'Code Reviewer Boo', role: 'Reviews pull requests' },
-    { name: 'QA Tester Boo', role: 'Writes and runs tests' },
-  ]
-
-  it('includes agent name and team name', () => {
-    const result = buildTeamWakeMessage({
-      agentName: 'Lead Dev Boo',
-      teamName: 'Engineering',
-      teammates,
-    })
-    expect(result).toContain('as Lead Dev Boo')
-    expect(result).toContain('Team: Engineering')
-  })
-
-  it('lists all teammates with roles', () => {
-    const result = buildTeamWakeMessage({
-      agentName: 'Lead Dev Boo',
-      teamName: 'Engineering',
-      teammates,
-    })
-    expect(result).toContain('- @Code Reviewer Boo (Reviews pull requests)')
-    expect(result).toContain('- @QA Tester Boo (Writes and runs tests)')
-  })
-
-  it('includes "REAL agents" instruction', () => {
-    const result = buildTeamWakeMessage({
-      agentName: 'Lead Dev Boo',
-      teamName: 'Engineering',
-      teammates,
-    })
-    expect(result).toContain('REAL agents with their own sessions')
-  })
-
-  it('includes "Do NOT spawn sub-agents" instruction', () => {
-    const result = buildTeamWakeMessage({
-      agentName: 'Lead Dev Boo',
-      teamName: 'Engineering',
-      teammates,
-    })
-    expect(result).toContain('Do NOT spawn sub-agents')
-  })
-
-  it('includes the structured <delegate> protocol example', () => {
-    // Wake messages now nudge agents toward the structured delegation
-    // protocol so they don't have to learn it from AGENTS.md alone.
-    const result = buildTeamWakeMessage({
-      agentName: 'Lead Dev Boo',
-      teamName: 'Engineering',
-      teammates,
-    })
-    expect(result).toContain('<delegate to=')
-    expect(result).toContain('</delegate>')
-    // Uses the first teammate as the example name so the agent has a
-    // concrete target it knows.
-    expect(result).toContain('@Code Reviewer Boo')
-  })
-})
-
 describe('buildTeamContextPreamble', () => {
   const ts = (h: number, m: number) => new Date(2026, 0, 1, h, m).getTime()
 
@@ -611,43 +547,6 @@ describe('buildTeamAgentsMd — workspace isolation + reference pointer', () => 
     expect(result).toMatch(/<delegate to="@Bug Fixer Boo">[\s\S]*summary[\s\S]*<\/delegate>/i)
   })
 })
-
-// ─── buildSelfDocumentingRelayHeader ───────────────────────────────────────
-
-describe('buildSelfDocumentingRelayHeader', () => {
-  it('starts with the [Team Update] prefix', () => {
-    const result = buildSelfDocumentingRelayHeader({ fromAgentName: 'Bug Fixer Boo' })
-    expect(result.startsWith('[Team Update]')).toBe(true)
-  })
-
-  it('includes "not a fresh user message" anti-confusion hint', () => {
-    const result = buildSelfDocumentingRelayHeader({ fromAgentName: 'Bug Fixer Boo' })
-    expect(result).toContain('not a fresh user message')
-  })
-
-  it('tells the recipient to continue their own work using the update as context', () => {
-    const result = buildSelfDocumentingRelayHeader({ fromAgentName: 'Agent' })
-    expect(result).toContain('Continue your own work using this update as context')
-  })
-
-  it('inlines truncated task context when provided', () => {
-    const result = buildSelfDocumentingRelayHeader({
-      fromAgentName: 'Agent',
-      taskContext: 'investigate the auth module',
-    })
-    expect(result).toContain('(re: "investigate the auth module")')
-  })
-
-  it('truncates long task context to 80 chars', () => {
-    const longContext = 'A'.repeat(120)
-    const result = buildSelfDocumentingRelayHeader({
-      fromAgentName: 'Agent',
-      taskContext: longContext,
-    })
-    expect(result).toContain('(re: "' + 'A'.repeat(80) + '...")')
-  })
-})
-
 describe('isOpenclawControlToken', () => {
   it('matches ANNOUNCE_SKIP exactly', () => {
     expect(isOpenclawControlToken('ANNOUNCE_SKIP')).toBe(true)
@@ -767,55 +666,5 @@ describe('shouldDropAssistantTurn', () => {
         "Sorry, I can't help with that because it requires database write access.",
       ),
     ).toBe(false)
-  })
-})
-
-describe('buildBatchedRelayMessage', () => {
-  it('returns empty string for empty items', () => {
-    expect(buildBatchedRelayMessage([])).toBe('')
-  })
-  it('renders single-item batch with self-documenting header', () => {
-    const out = buildBatchedRelayMessage([
-      { fromAgentName: 'Geographer Boo', body: 'Volcanic island in temperate latitude.' },
-    ])
-    expect(out).toContain('[Team Update] — relayed summary from @Geographer Boo')
-    expect(out).toContain('not a fresh user message')
-    expect(out).toContain('Volcanic island in temperate latitude.')
-    expect(out).not.toContain('teammates finished')
-  })
-  it('renders multi-item batch with N-teammates header', () => {
-    const out = buildBatchedRelayMessage([
-      { fromAgentName: 'Geographer Boo', body: 'Volcanic island.' },
-      { fromAgentName: 'Anthropologist Boo', body: 'Patrilineal clans.' },
-      { fromAgentName: 'Historian Boo', body: 'Shattering War origin.' },
-    ])
-    expect(out).toContain('3 teammates finished delegated tasks')
-    expect(out).toContain('@Geographer Boo:')
-    expect(out).toContain('Volcanic island.')
-    expect(out).toContain('@Anthropologist Boo:')
-    expect(out).toContain('@Historian Boo:')
-    expect(out).toContain('Synthesize across them ONLY')
-    expect(out).toContain('Do NOT acknowledge them individually')
-  })
-  it('preserves source ordering in the batched envelope', () => {
-    const out = buildBatchedRelayMessage([
-      { fromAgentName: 'A', body: 'first body' },
-      { fromAgentName: 'B', body: 'second body' },
-      { fromAgentName: 'C', body: 'third body' },
-    ])
-    const idxA = out.indexOf('@A:')
-    const idxB = out.indexOf('@B:')
-    const idxC = out.indexOf('@C:')
-    expect(idxA).toBeGreaterThan(0)
-    expect(idxB).toBeGreaterThan(idxA)
-    expect(idxC).toBeGreaterThan(idxB)
-  })
-  it('truncates over-long taskContext to 80 chars in each item', () => {
-    const longCtx = 'X'.repeat(120)
-    const out = buildBatchedRelayMessage([
-      { fromAgentName: 'A', body: 'body 1', taskContext: longCtx },
-      { fromAgentName: 'B', body: 'body 2' },
-    ])
-    expect(out).toContain('(re: "' + 'X'.repeat(80) + '...")')
   })
 })

@@ -372,7 +372,7 @@ export async function computeAtlasLayout(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Phase 19 — Atlas RADIAL topology.
+// Atlas RADIAL topology.
 //
 //   Boo Zero sits at the centre. Team-roots are distributed equiangularly
 //   on a circle around BZ. Each team's members fan outward from their

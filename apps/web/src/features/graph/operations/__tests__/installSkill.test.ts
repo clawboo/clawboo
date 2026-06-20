@@ -2,38 +2,26 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { installSkillForAgent } from '../installSkill'
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
+// installSkillForAgent now routes through the unified capability pipeline
+// (POST /api/capabilities/install via installCapability) — NOT a TOOLS.md write.
 
-const { mockAddToast, mockTriggerRefresh, mockFilesRead, mockFilesSet, mockEnqueue } = vi.hoisted(
-  () => ({
-    mockAddToast: vi.fn(),
-    mockTriggerRefresh: vi.fn(),
-    mockFilesRead: vi.fn(),
-    mockFilesSet: vi.fn(),
-    mockEnqueue: vi.fn(),
-  }),
-)
-
-vi.mock('@/stores/connection', () => ({
-  useConnectionStore: {
-    getState: () => ({
-      client: {
-        agents: {
-          files: { read: mockFilesRead, set: mockFilesSet },
-        },
-      },
-    }),
-  },
+const { mockAddToast, mockTriggerRefresh, mockInstall } = vi.hoisted(() => ({
+  mockAddToast: vi.fn(),
+  mockTriggerRefresh: vi.fn(),
+  mockInstall: vi.fn(),
 }))
+
+vi.mock('@/lib/capabilitiesClient', () => ({
+  installCapability: mockInstall,
+}))
+
+// No @/stores/fleet mock — installSkillForAgent no longer reads the agent (the
+// fleet AgentState carries no runtime field); the server resolves runtime
+// authoritatively, so the spec just sends the optimistic 'openclaw' default.
 
 vi.mock('@/stores/toast', () => ({
   useToastStore: {
     getState: () => ({ addToast: mockAddToast }),
-  },
-}))
-
-vi.mock('@/lib/mutationQueue', () => ({
-  mutationQueue: {
-    enqueue: mockEnqueue,
   },
 }))
 
@@ -48,75 +36,34 @@ vi.mock('../../store', () => ({
 describe('installSkillForAgent', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockFilesRead.mockResolvedValue('## Skills\n- existing-skill\n')
-    mockEnqueue.mockImplementation((_id: string, fn: () => Promise<void>) => fn())
+    mockInstall.mockResolvedValue({ ok: true })
   })
 
-  it('appends skill to TOOLS.md', async () => {
+  it('installs via the capability pipeline with the right spec', async () => {
     await installSkillForAgent('new-skill', 'agent-1', 'Test Boo')
-
-    expect(mockEnqueue).toHaveBeenCalledWith('agent-1', expect.any(Function))
-    expect(mockFilesSet).toHaveBeenCalledWith(
-      'agent-1',
-      'TOOLS.md',
-      '## Skills\n- existing-skill\n- new-skill\n',
-    )
+    expect(mockInstall).toHaveBeenCalledWith({
+      via: 'native',
+      agentId: 'agent-1',
+      runtime: 'openclaw',
+      kind: 'skill',
+      name: 'new-skill',
+    })
   })
 
-  it('shows info toast if skill already exists', async () => {
-    mockFilesRead.mockResolvedValue('## Skills\n- new-skill\n')
-
+  it('triggers a graph refresh + success toast on a successful install', async () => {
     await installSkillForAgent('new-skill', 'agent-1', 'Test Boo')
-
-    expect(mockAddToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'info' }))
-    expect(mockFilesSet).not.toHaveBeenCalled()
-  })
-
-  it('handles empty TOOLS.md', async () => {
-    mockFilesRead.mockResolvedValue('')
-
-    await installSkillForAgent('new-skill', 'agent-1', 'Test Boo')
-
-    expect(mockFilesSet).toHaveBeenCalledWith('agent-1', 'TOOLS.md', '\n- new-skill\n')
-  })
-
-  it('calls triggerRefresh after install', async () => {
-    await installSkillForAgent('new-skill', 'agent-1', 'Test Boo')
-
     expect(mockTriggerRefresh).toHaveBeenCalledOnce()
-  })
-
-  it('shows success toast on install', async () => {
-    await installSkillForAgent('new-skill', 'agent-1', 'Test Boo')
-
     expect(mockAddToast).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'success', message: expect.stringContaining('new-skill') }),
     )
   })
 
-  it('shows error toast on failure', async () => {
-    mockFilesRead.mockRejectedValue(new Error('Network error'))
-
+  it('shows an error toast (and no refresh) when the install is rejected', async () => {
+    mockInstall.mockResolvedValue({ ok: false, error: 'blocked' })
     await installSkillForAgent('new-skill', 'agent-1', 'Test Boo')
-
     expect(mockAddToast).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'error', message: expect.stringContaining('Network error') }),
+      expect.objectContaining({ type: 'error', message: expect.stringContaining('blocked') }),
     )
-  })
-
-  it('does nothing without client', async () => {
-    const { useConnectionStore } = await import('@/stores/connection')
-    vi.spyOn(useConnectionStore, 'getState').mockReturnValueOnce({ client: null } as never)
-
-    await installSkillForAgent('new-skill', 'agent-1', 'Test Boo')
-
-    expect(mockFilesRead).not.toHaveBeenCalled()
-    expect(mockFilesSet).not.toHaveBeenCalled()
-  })
-
-  it('uses mutationQueue for serialized write', async () => {
-    await installSkillForAgent('new-skill', 'agent-1', 'Test Boo')
-
-    expect(mockEnqueue).toHaveBeenCalledWith('agent-1', expect.any(Function))
+    expect(mockTriggerRefresh).not.toHaveBeenCalled()
   })
 })

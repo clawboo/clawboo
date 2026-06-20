@@ -1,4 +1,4 @@
-// Reusable skeleton loader block with a token-driven shimmer (Phase 6).
+// Reusable skeleton loader block with a token-driven shimmer.
 // Honors `prefers-reduced-motion` via the CSS keyframes media-query in
 // globals.css — when reduced motion is on, the shimmer freezes to a static
 // `--surface-raised` tint.

@@ -1,9 +1,7 @@
 {
   "name": "@clawboo/gateway-proxy",
   "version": "0.1.0",
-  "publishConfig": {
-    "access": "public"
-  },
+  "private": true,
   "description": "Same-origin WebSocket proxy for the OpenClaw Gateway with server-side auth injection",
   "license": "MIT",
   "repository": {
@@ -36,9 +34,11 @@
   "scripts": {
     "build": "tsup",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@clawboo/config": "workspace:*",
     "@noble/ed25519": "^2.1.0",
     "ws": "^8.18.0"
   },
@@ -47,6 +47,7 @@
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.0",
     "tsup": "^8.4.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   }
 }

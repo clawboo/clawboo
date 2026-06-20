@@ -1,9 +1,7 @@
 {
   "name": "@clawboo/config",
   "version": "0.1.0",
-  "publishConfig": {
-    "access": "public"
-  },
+  "private": true,
   "description": "Settings loader and persistence for Clawboo (XDG dirs, env vars, OpenClaw fallback)",
   "license": "MIT",
   "repository": {

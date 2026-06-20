@@ -4,7 +4,7 @@
 // teammate Boo can have multiple outgoing edges to other teammates. Drawing
 // every edge yields a tangle that obscures the leader → teammate flow.
 //
-// The Paperclip / classical-org-chart pattern is: show only ONE primary
+// The classical-org-chart pattern is: show only ONE primary
 // reporting line per node (the BFS spanning tree from the leader), and
 // treat everything else as secondary collaboration metadata.
 //

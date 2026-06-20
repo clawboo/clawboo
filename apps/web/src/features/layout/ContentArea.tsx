@@ -6,6 +6,14 @@ import { ApprovalsPanel } from '@/features/approvals/ApprovalsPanel'
 import { CostDashboard } from '@/app/cost/CostDashboard'
 import { MarketplacePanel } from '@/features/marketplace/MarketplacePanel'
 import { MaintenancePanel } from '@/features/maintenance'
+import { ObsPanel } from '@/features/obs'
+import { BoardPanel } from '@/features/board/BoardPanel'
+import { RuntimesPanel } from '@/features/runtimes/RuntimesPanel'
+import { FleetHealth } from '@/features/fleet/FleetHealth'
+import { MemoryPanel } from '@/features/memory/MemoryPanel'
+import { CapabilitiesPanel } from '@/features/capabilities/CapabilitiesPanel'
+import { GovernancePanel } from '@/features/governance/GovernancePanel'
+import { SystemHealthPanel } from '@/features/health'
 import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
 import { AgentDetailView } from '@/features/agent-detail'
 import { GroupChatView } from '@/features/group-chat/GroupChatView'
@@ -33,11 +41,19 @@ const VIEW_STYLE = {
 // with the default `scope === 'team'`).
 const NAV_PANELS: Record<NavView, () => ReactNode> = {
   graph: () => <GhostGraphPanel scope="atlas" />,
+  fleet: () => <FleetHealth />,
   scheduler: () => <SchedulerPanel />,
   approvals: () => <ApprovalsPanel />,
   cost: () => <CostDashboard />,
   marketplace: () => <MarketplacePanel />,
   system: () => <MaintenancePanel />,
+  obs: () => <ObsPanel />,
+  board: () => <BoardPanel />,
+  runtimes: () => <RuntimesPanel />,
+  memory: () => <MemoryPanel />,
+  governance: () => <GovernancePanel />,
+  capabilities: () => <CapabilitiesPanel />,
+  health: () => <SystemHealthPanel />,
 }
 
 export function ContentArea() {

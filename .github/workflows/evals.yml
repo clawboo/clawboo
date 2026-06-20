@@ -1,0 +1,45 @@
+name: Orchestration Evals
+
+# The full orchestration eval suite + the ±verifier × ±structured-state ablation
+# scorecard. The deterministic capability + regression set and the ablation run
+# with no network; the live-model graders (coordination / handoff quality,
+# groundedness) activate only when provider keys are present as repo secrets. The
+# cheap, deterministic SMOKE subset already runs in `pnpm test` (the PR gate), so
+# this is MANUAL-ONLY: trigger it on demand from the Actions tab when you want the
+# heavier read. No untrusted event input is interpolated into any step.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: evals
+  cancel-in-progress: true
+
+jobs:
+  evals:
+    name: Orchestration evals + ablation scorecard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Build the eval package + its workspace dependencies (db / obs / governance
+      # / executor) so the suite runs against compiled deps.
+      - run: pnpm --filter "@clawboo/evals..." build
+
+      - name: Run the full eval suite + the ablation scorecard
+        run: pnpm --filter @clawboo/evals test
+        env:
+          # Present → the live-model graders run; absent → the deterministic suite
+          # + ablation still run (they never need a network).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

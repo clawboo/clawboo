@@ -1,14 +1,23 @@
+import { listAgents, agentRecordToFleetState } from '@/lib/agentSourceClient'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
+  Activity,
   BarChart3,
+  Brain,
   Clock,
+  Cpu,
+  Gauge,
   Ghost,
   Globe,
+  HeartPulse,
+  KanbanSquare,
   Lock,
   Plus,
+  Puzzle,
   Search,
   Settings,
+  ShieldAlert,
   ShoppingCart,
   Trash2,
   type LucideIcon,
@@ -92,7 +101,7 @@ const STATUS_CONFIG: Record<
 
 function StatusBadge({ status, label }: { status: AgentStatus; label?: string }) {
   const cfg = STATUS_CONFIG[status]
-  // Phase 18 — `label` (when provided) is the fine-grained activity verb that
+  // `label` (when provided) is the fine-grained activity verb that
   // describes WHAT the agent is doing ("Streaming reply", "Delegating to @X",
   // "Just done"), replacing the coarse default ("Working", "Idle"). The dot
   // colour + pulse still derive from the underlying status so the visual
@@ -138,7 +147,7 @@ function AgentRow({
   onSelect: () => void
   onDelete: () => void
 }) {
-  // Phase 18 — compute the live activity verb. Subscribe to the chat-store
+  // Compute the live activity verb. Subscribe to the chat-store
   // maps via single-value selectors keyed by sessionKey so unrelated agents'
   // streams don't trigger this row's re-render (same precedent as
   // BooLiveActivity.tsx and chatComponents.tsx token-count selectors).
@@ -218,10 +227,19 @@ const PRIMARY_NAV: NavItem[] = [
   // now specifically the org-wide map. Subtitle clarifies that Atlas is
   // cross-team (vs. the per-team Ghost Graph users see inside Group Chat).
   { id: 'graph', label: 'Atlas', icon: Globe, subtitle: '(All Teams)' },
+  { id: 'fleet', label: 'Fleet', icon: Gauge, subtitle: '(Overview)' },
   { id: 'marketplace', label: 'Marketplace', icon: ShoppingCart },
 ]
 
 const SECONDARY_NAV: NavItem[] = [
+  // Board + Runtimes + Memory + Governance are always-visible: their subsystems
+  // are always on, so each panel renders its real content unconditionally (no
+  // feature gate).
+  { id: 'board', label: 'Board', icon: KanbanSquare },
+  { id: 'runtimes', label: 'Runtimes', icon: Cpu },
+  { id: 'memory', label: 'Memory', icon: Brain },
+  { id: 'governance', label: 'Governance', icon: ShieldAlert },
+  { id: 'capabilities', label: 'Capabilities', icon: Puzzle },
   { id: 'approvals', label: 'Approvals', icon: Lock },
   { id: 'scheduler', label: 'Scheduler', icon: Clock },
   { id: 'cost', label: 'Tokens Used', icon: BarChart3 },
@@ -413,6 +431,11 @@ export function AgentListColumn() {
 
   const viewMode = useViewStore((s) => s.viewMode)
   const pendingApprovals = useApprovalsStore((s) => s.pendingApprovals)
+  const secondaryNav = [
+    ...SECONDARY_NAV,
+    { id: 'obs' as const, label: 'Observability', icon: Activity },
+    { id: 'health' as const, label: 'System Health', icon: HeartPulse },
+  ]
 
   const [query, setQuery] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -459,37 +482,35 @@ export function AgentListColumn() {
 
   const handleBooCreated = useCallback(
     async (agentId?: string) => {
-      if (!client) return
       try {
-        const result = await client.agents.list()
-        const mainKey = result.mainKey?.trim() || 'main'
-        // Build lookups of existing assignments so we don't wipe them
-        const existing = useFleetStore.getState().agents
-        const existingTeamIds = new Map(existing.map((a) => [a.id, a.teamId]))
-        const existingExecConfigs = new Map(existing.map((a) => [a.id, a.execConfig]))
-        const mapped = result.agents.map((a) => ({
-          id: a.id,
-          name: a.identity?.name ?? a.name ?? a.id,
-          status: 'idle' as const,
-          sessionKey: `agent:${a.id}:${mainKey}`,
-          model: null,
-          createdAt: null,
-          streamingText: null,
-          runId: null,
-          lastSeenAt: null,
-          teamId:
-            agentId && a.id === agentId && selectedTeamId
-              ? selectedTeamId
-              : (existingTeamIds.get(a.id) ?? null),
-          execConfig: existingExecConfigs.get(a.id) ?? null,
-        }))
+        const { defaultId, agents: records } = await listAgents()
+        // Merge live store state so the refresh doesn't clobber running agents.
+        const existing = new Map(useFleetStore.getState().agents.map((a) => [a.id, a]))
+        const mapped = records.map((r) => {
+          const base = agentRecordToFleetState(r)
+          const prev = existing.get(r.id)
+          const merged = prev
+            ? {
+                ...base,
+                status: prev.status,
+                model: prev.model,
+                streamingText: prev.streamingText,
+                runId: prev.runId,
+                lastSeenAt: prev.lastSeenAt,
+              }
+            : base
+          // The just-created agent may not have its team assignment synced yet —
+          // overlay the selected team optimistically.
+          if (agentId && r.id === agentId && selectedTeamId) merged.teamId = selectedTeamId
+          return merged
+        })
         hydrateAgents(mapped)
-        useBooZeroStore.getState().setBooZeroAgentId(identifyBooZero(mapped, result.defaultId))
+        useBooZeroStore.getState().setBooZeroAgentId(identifyBooZero(mapped, defaultId))
       } catch {
         // hydration failure is non-fatal
       }
     },
-    [client, hydrateAgents, selectedTeamId],
+    [hydrateAgents, selectedTeamId],
   )
 
   return (
@@ -594,7 +615,7 @@ export function AgentListColumn() {
                   onDelete={() => {
                     if (!client) return
                     if (!window.confirm(`Delete ${agent.name}? This cannot be undone.`)) return
-                    deleteAgentOperation(agent.id, agent.sessionKey, client).catch((err) => {
+                    deleteAgentOperation(agent.id, agent.sessionKey).catch((err) => {
                       alert(
                         `Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`,
                       )
@@ -656,9 +677,9 @@ export function AgentListColumn() {
       {/* Divider */}
       <div className="mx-3 my-1.5 border-t border-border" />
 
-      {/* Secondary nav — Approvals, Scheduler, Cost, System */}
+      {/* Secondary nav — Approvals, Scheduler, Cost, System, Observability */}
       <div className="px-2 flex flex-col gap-0.5">
-        {SECONDARY_NAV.map((item) => {
+        {secondaryNav.map((item) => {
           const isActive = viewMode.type === 'nav' && viewMode.view === item.id
           const badge = item.id === 'approvals' ? pendingApprovals.size : 0
           const Icon = item.icon

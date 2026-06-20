@@ -1,12 +1,8 @@
 // Pure parser for `[[tool]]` / `[[tool-result]]` markdown lines emitted by
 // `@clawboo/protocol`'s `formatToolCallMarkdown` / `formatToolResultMarkdown`.
 //
-// Extracted to its own module so non-renderer modules
-// (`buildDelegationLinkages.ts`) can parse tool calls without pulling in the
-// React component tree from `chatComponents.tsx` (which would create a
-// circular import: chatComponents imports `buildDelegationLinkages`, and
-// `buildDelegationLinkages` needs `parseToolEntry` for the Round 6
-// `sessions_send` tool-call → DelegationCard pipeline).
+// Kept in its own module (no React imports) so it can be reused outside the
+// renderer without pulling in the component tree from `chatComponents.tsx`.
 
 export interface ParsedToolEntry {
   kind: 'call' | 'result'

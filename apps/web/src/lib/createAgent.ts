@@ -1,39 +1,14 @@
 /**
  * apps/web/src/lib/createAgent.ts
  *
- * Wraps the two-step agent creation flow the gateway requires:
- *   1. config.get → derive workspace path from the config file location
- *   2. agents.create({ name, workspace }) → agentId
- *   3. agents.files.set × N for SOUL.md / IDENTITY.md / TOOLS.md
- *
- * Call resolveWorkspaceDir() once per team deployment, then createAgent()
- * per agent to avoid redundant config.get RPCs.
+ * Thin browser wrappers over the agent registry-of-record (AgentSource). Agent
+ * creation + file I/O happen SERVER-SIDE now (the server resolves the workspace
+ * via its own Gateway connection); these helpers just shape the request + map the
+ * AgentFiles bag into the filename-keyed payload the REST surface expects.
  */
 
-import type { GatewayClient } from '@clawboo/gateway-client'
+import { createAgentRecord, readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
 import { buildClawbooHelpDoc, buildTeamAgentsMd, type TeammateDef } from './teamProtocol'
-
-// ─── Path utilities (no Node.js path module — runs in the browser) ──────────
-
-function dirnameLike(p: string): string {
-  const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
-  return idx < 0 ? '' : p.slice(0, idx)
-}
-
-function joinPathLike(dir: string, leaf: string): string {
-  const sep = dir.includes('\\') ? '\\' : '/'
-  const d = dir.endsWith('/') || dir.endsWith('\\') ? dir.slice(0, -1) : dir
-  return `${d}${sep}${leaf}`
-}
-
-function slugifyName(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  return slug || 'agent'
-}
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -43,21 +18,6 @@ export function buildToolsMd(skills: string[]): string {
   return `# TOOLS\n\n## Skills\n${skills.map((s) => `- ${s}`).join('\n')}\n`
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────
-
-/**
- * Fetch the gateway config and derive the state directory path.
- * Call this once before deploying a team.
- */
-export async function resolveWorkspaceDir(client: GatewayClient): Promise<string> {
-  const snapshot = await client.config.get()
-  const configPath = typeof snapshot.path === 'string' ? snapshot.path.trim() : ''
-  if (!configPath) throw new Error('Gateway did not return a config path.')
-  const stateDir = dirnameLike(configPath)
-  if (!stateDir) throw new Error(`Config path "${configPath}" has no directory component.`)
-  return stateDir
-}
-
 export type AgentFiles = {
   soul?: string
   identity?: string
@@ -65,97 +25,62 @@ export type AgentFiles = {
   agents?: string
   /**
    * `CLAWBOO.md` — workspace-resident operating reference. Read by agents
-   * via `cat ~/CLAWBOO.md` when they need to look up the team protocol
-   * (workspace isolation, [Team Update] semantics, orchestration loop,
-   * etc.). See `buildClawbooHelpDoc` in `lib/teamProtocol.ts`.
+   * via `cat ~/CLAWBOO.md` when they need the team protocol. Best-effort:
+   * older Gateways reject non-allowlisted filenames (the server swallows that).
    */
   clawboo?: string
 }
 
+function toFilePayload(files?: AgentFiles): Record<string, string> | undefined {
+  if (!files) return undefined
+  const out: Record<string, string> = {}
+  if (files.soul) out['SOUL.md'] = files.soul
+  if (files.identity) out['IDENTITY.md'] = files.identity
+  if (files.tools) out['TOOLS.md'] = files.tools
+  if (files.agents) out['AGENTS.md'] = files.agents
+  if (files.clawboo) out['CLAWBOO.md'] = files.clawboo
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+// ─── Public API ─────────────────────────────────────────────────────────────
+
 /**
- * Create one agent and optionally write its personality files.
- * Returns the new agent's ID.
+ * Create one agent (server-side: Gateway create + workspace resolution + file
+ * writes + SQLite mirror) and return the new agent's id.
  */
-export async function createAgent(
-  client: GatewayClient,
-  name: string,
-  workspaceDir: string,
-  files?: AgentFiles,
-): Promise<string> {
-  const workspace = joinPathLike(workspaceDir, `workspace-${slugifyName(name)}`)
-  const result = await client.agents.create({ name, workspace })
-  const agentId = result.agentId.trim()
-  if (!agentId) throw new Error('Gateway did not return an agentId for the created agent.')
-
-  if (files?.soul) await client.agents.files.set(agentId, 'SOUL.md', files.soul)
-  if (files?.identity) await client.agents.files.set(agentId, 'IDENTITY.md', files.identity)
-  if (files?.tools) await client.agents.files.set(agentId, 'TOOLS.md', files.tools)
-  if (files?.agents) await client.agents.files.set(agentId, 'AGENTS.md', files.agents)
-  // CLAWBOO.md is best-effort: older OpenClaw Gateway versions reject any
-  // filename outside their built-in allowlist (SOUL/IDENTITY/TOOLS/AGENTS/
-  // USER/HEARTBEAT/MEMORY) with INVALID_REQUEST `unsupported file ...`. The
-  // workspace-resident reference is a "nice-to-have" delivery channel — the
-  // actual delivery of team protocol facts happens via the team-context
-  // preamble injected on every group-chat message (the "Hybrid Agent
-  // Knowledge Delivery" pattern). Catching the error here prevents one
-  // rejected file write from aborting the whole team-deploy loop.
-  if (files?.clawboo) {
-    try {
-      await client.agents.files.set(agentId, 'CLAWBOO.md', files.clawboo)
-    } catch {
-      // Gateway doesn't accept CLAWBOO.md — fall back silently. Preamble
-      // injection still delivers the operating reference at runtime.
-    }
-  }
-
+export async function createAgent(name: string, files?: AgentFiles): Promise<string> {
+  const record = await createAgentRecord({ name, files: toFilePayload(files) })
+  const agentId = record.id.trim()
+  if (!agentId) throw new Error('AgentSource did not return an id for the created agent.')
   return agentId
 }
 
 /**
- * Re-generate an agent's `AGENTS.md` AND `CLAWBOO.md` from scratch:
- *
- *   - `AGENTS.md`: extracts the routing rules from the current content and
- *     re-wraps them with the latest team protocol (roster, workspace
- *     warning, delegation syntax, anti-sub-agent guardrail, pointer to
- *     `CLAWBOO.md`).
- *   - `CLAWBOO.md`: regenerated unconditionally so agents pick up any
- *     protocol updates the next time they `cat` it.
- *
- * Used by the "Refresh Protocol" UX in `TeamContextMenu` to upgrade existing
- * agents whose `AGENTS.md` was written before a protocol revision.
- *
- * Kept under the `refreshTeamAgentsMd` name for backwards-compatibility with
- * existing callers; the function now refreshes both files.
+ * Re-generate an agent's `AGENTS.md` AND `CLAWBOO.md` from scratch (the "Refresh
+ * Protocol" UX): extract the routing rules from the current AGENTS.md and re-wrap
+ * them with the latest team protocol; regenerate CLAWBOO.md wholesale. Reads/writes
+ * route through the AgentSource (server delegates to the Gateway).
  */
 export async function refreshTeamAgentsMd(params: {
-  client: GatewayClient
   agentId: string
   agentName: string
   teamName: string
   teammates: TeammateDef[]
-  /**
-   * Boo Zero's name — the universal team leader. When provided, the
-   * regenerated AGENTS.md and CLAWBOO.md include the universal-leader
-   * section telling the agent how to escalate upward via `<delegate
-   * to="@Boo Zero">`. Omitted in tests / pre-Boo-Zero builds.
-   */
+  /** Boo Zero's name — the universal team leader (omitted in tests). */
   universalLeaderName?: string | null
   /** Team-internal lead (CTO, Team Lead, etc.), if any. */
   teamInternalLeadName?: string | null
 }): Promise<void> {
-  const {
-    client,
-    agentId,
-    agentName,
-    teamName,
-    teammates,
-    universalLeaderName,
-    teamInternalLeadName,
-  } = params
-  const content = await client.agents.files.read(agentId, 'AGENTS.md')
-  let routingRules = content ?? ''
+  const { agentId, agentName, teamName, teammates, universalLeaderName, teamInternalLeadName } =
+    params
+  let routingRules = ''
+  try {
+    routingRules = await readAgentFile(agentId, 'AGENTS.md')
+  } catch {
+    routingRules = ''
+  }
 
-  // If enhanced format (has "### Routing Rules"), extract only the rules section
+  // If enhanced format (has "### Routing Rules"), extract only the rules section.
   const headerIdx = routingRules.indexOf('### Routing Rules')
   if (headerIdx !== -1) {
     routingRules = routingRules.slice(headerIdx + '### Routing Rules'.length).trim()
@@ -169,22 +94,13 @@ export async function refreshTeamAgentsMd(params: {
     universalLeaderName,
     teamInternalLeadName,
   })
+  const clawboo = buildClawbooHelpDoc({ agentName, teamName, teammates, universalLeaderName })
 
-  // CLAWBOO.md is regenerated wholesale — there's no per-team customization
-  // in it (every team gets the same operating reference, just with the team's
-  // own teammate list inlined for path discoverability).
-  const clawboo = buildClawbooHelpDoc({
-    agentName,
-    teamName,
-    teammates,
-    universalLeaderName,
-  })
-
-  await client.agents.files.set(agentId, 'AGENTS.md', enhanced)
-  // CLAWBOO.md is best-effort — see the comment in `createAgent` above.
-  // Gateways that reject the filename should not poison "Refresh Protocol".
+  await writeAgentFile(agentId, 'AGENTS.md', enhanced)
+  // CLAWBOO.md is best-effort — Gateways that reject the filename shouldn't
+  // poison "Refresh Protocol".
   try {
-    await client.agents.files.set(agentId, 'CLAWBOO.md', clawboo)
+    await writeAgentFile(agentId, 'CLAWBOO.md', clawboo)
   } catch {
     // Silent fallback — preamble injection delivers the operating reference.
   }

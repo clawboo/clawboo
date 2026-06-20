@@ -6,6 +6,7 @@ import {
   clearDeviceToken,
   generateUUID,
 } from './device-auth'
+import { encodeConfigPatchParams } from './helpers'
 import type {
   ReqFrame,
   ResFrame,
@@ -13,7 +14,7 @@ import type {
   GatewayHelloOk,
   ConnectionStatus,
   ConnectOptions,
-  GatewayGapInfo,
+  WebSocketLikeCtor,
   AgentsListResult,
   AgentCreateConfig,
   AgentCreateResult,
@@ -31,7 +32,6 @@ type PendingRequest = {
 
 type StatusHandler = (status: ConnectionStatus) => void
 type EventHandler = (event: EventFrame) => void
-type GapHandler = (info: GatewayGapInfo) => void
 
 const CONNECT_FAILED_CLOSE_CODE = 4008
 const WS_CLOSE_REASON_MAX_BYTES = 123
@@ -74,9 +74,7 @@ export class GatewayClient {
   private pending = new Map<string, PendingRequest>()
   private statusHandlers = new Set<StatusHandler>()
   private eventHandlers = new Set<EventHandler>()
-  private gapHandlers = new Set<GapHandler>()
   private _status: ConnectionStatus = 'disconnected'
-  private lastSeq: number | null = null
   private connectTimer: ReturnType<typeof setTimeout> | null = null
   private connectSent = false
   private resolveConnect: (() => void) | null = null
@@ -110,11 +108,6 @@ export class GatewayClient {
   onEvent(handler: EventHandler): () => void {
     this.eventHandlers.add(handler)
     return () => this.eventHandlers.delete(handler)
-  }
-
-  onGap(handler: GapHandler): () => void {
-    this.gapHandlers.add(handler)
-    return () => this.gapHandlers.delete(handler)
   }
 
   /** Subscribe to a specific event by name. Returns unsubscribe fn. */
@@ -204,8 +197,14 @@ export class GatewayClient {
 
   // ── Private WebSocket wiring ────────────────────────────────────────────────
 
-  private openWebSocket(url: string, _options: ConnectOptions): void {
-    const ws = new WebSocket(url)
+  private openWebSocket(url: string, options: ConnectOptions): void {
+    // Node callers (the server-side AgentSource) can inject the `ws` package's
+    // WebSocket + an `origin` so the Gateway's control-ui origin check passes; the
+    // ambient global undici WebSocket would drop the Origin header. Browser callers
+    // pass neither and fall through to the DOM global with the page's own Origin.
+    const Ctor: WebSocketLikeCtor =
+      options.webSocketImpl ?? (WebSocket as unknown as WebSocketLikeCtor)
+    const ws = options.origin ? new Ctor(url, { origin: options.origin }) : new Ctor(url)
     this.ws = ws
 
     ws.onopen = () => {
@@ -261,6 +260,11 @@ export class GatewayClient {
     }
   }
 
+  // Reconnect-regime ownership (read alongside OpenClawAgentSource.scheduleRetry):
+  // GatewayClient owns reconnection after a connection that HAD opened then DROPPED
+  // (this method, 800ms → 15s). The server's OpenClawAgentSource.scheduleRetry owns
+  // ONLY the case where the INITIAL connect attempt threw (2s → 60s). The two are
+  // gated on disjoint conditions and never fire concurrently for the same event.
   private scheduleReconnect(): void {
     if (this.manualDisconnect) return
     const delay = this.backoffMs
@@ -288,7 +292,10 @@ export class GatewayClient {
       | undefined
 
     const isSecureContext =
-      !opts.disableDeviceAuth && typeof crypto !== 'undefined' && !!crypto.subtle
+      !opts.signConnect &&
+      !opts.disableDeviceAuth &&
+      typeof crypto !== 'undefined' &&
+      !!crypto.subtle
 
     if (isSecureContext) {
       log.debug('device auth enabled, building signed connect fields')
@@ -339,6 +346,19 @@ export class GatewayClient {
       device,
       caps: [],
       auth,
+    }
+
+    // Node device-auth path: a non-browser caller (the server-side AgentSource)
+    // injects a signer instead of the browser's crypto.subtle path. We sign AFTER
+    // params is assembled so the signer sees the real client/role/scopes/auth.
+    if (opts.signConnect) {
+      try {
+        const signed = await opts.signConnect(params as Record<string, unknown>, this.connectNonce)
+        params.device = signed.device
+      } catch (sigErr) {
+        log.warn({ err: sigErr }, 'signConnect failed, forwarding without device fields')
+        params.device = undefined
+      }
     }
 
     log.debug('sending connect RPC')
@@ -413,15 +433,6 @@ export class GatewayClient {
           void this.sendConnect()
         }
         return
-      }
-
-      const seq = typeof evt.seq === 'number' ? evt.seq : null
-      if (seq !== null) {
-        if (this.lastSeq !== null && seq > this.lastSeq + 1) {
-          log.warn({ expected: this.lastSeq + 1, received: seq }, 'event sequence gap detected')
-          this.gapHandlers.forEach((h) => h({ expected: this.lastSeq! + 1, received: seq }))
-        }
-        this.lastSeq = seq
       }
 
       this.eventHandlers.forEach((h) => {
@@ -563,8 +574,13 @@ export class GatewayClient {
   readonly config = {
     get: (): Promise<GatewayConfig> => this.call<GatewayConfig>('config.get'),
 
-    patch: (updates: Partial<GatewayConfig>): Promise<void> =>
-      this.call<void>('config.patch', updates),
+    // OpenClaw 2026.5.x's `config.patch` RPC requires a `{ raw: <json-string>,
+    // baseHash }` envelope (it deep-merges the parsed partial AND enforces the
+    // optimistic-concurrency hash from a prior `config.get`); a bare top-level key
+    // like `{ mcp }` is rejected. `encodeConfigPatchParams` does the wire encoding
+    // so callers keep passing a plain partial-config object + the snapshot hash.
+    patch: (updates: Partial<GatewayConfig>, baseHash?: string): Promise<void> =>
+      this.call<void>('config.patch', encodeConfigPatchParams(updates, baseHash)),
   }
 
   // ── chat namespace ────────────────────────────────────────────────────────

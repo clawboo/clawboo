@@ -6,7 +6,7 @@ import { teamStatusBreakdown } from '@/lib/teamStatus'
 import type { GraphNode, TeamRootNodeData } from './types'
 
 /**
- * TeamStatusClusterLayer — Phase 17.
+ * TeamStatusClusterLayer.
  *
  * Renders a compact `● N` aggregate-status pill above every Atlas team-root
  * junction. Inspired by the General Intelligence Cofounder hub screenshot

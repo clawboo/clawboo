@@ -1,15 +1,19 @@
 /**
  * apps/web/src/features/onboarding/OnboardingWizard.tsx
  *
- * First-time onboarding wizard:
- *   Welcome → Detect → [Install → Configure → StartGateway] → Team → Deploy
+ * First-time onboarding wizard. The first real choice is "How do you want your
+ * agents to run?":
+ *   Welcome → ChooseRuntime →
+ *     · Native    → ConfigureNative → NativeReady  (paste a key, seed a team)
+ *     · OpenClaw  → Detect → [Install → Configure → StartGateway] →
+ *                   ConnectAgents → Team → Deploy
+ *     · Claude Code / Hermes / Codex → ConnectAgents → … (the runtime connect flow)
  *
  * Only shown when localStorage('clawboo.onboarded') is absent.
  *
- * Calls onComplete(client, url, teamId?) when deployment finishes. `teamId`
- * is the id of the team that was just deployed (or null when the user skipped
- * the team step). The parent uses this to land the user in that team's group
- * chat instead of the default Atlas view.
+ * Calls onComplete(client, url, teamId, mode) when the chosen path finishes.
+ * `mode` is 'gateway' (a live GatewayClient) or 'native' (Gateway-free; client
+ * + url are null). `teamId` lands the user in that team's group chat.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -23,15 +27,26 @@ import {
 } from '@clawboo/gateway-client'
 import { BooAvatar } from '@clawboo/ui'
 import type { ProfileLike, TeamProfile } from '@/features/teams/types'
-import { resolveWorkspaceDir, createAgent } from '@/lib/createAgent'
+import { createAgent } from '@/lib/createAgent'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
 import { detectGenuineLeader, matchedLeadershipKeyword } from '@/lib/genuineLeader'
 import { buildTeamBrief, type TeamBriefMember } from '@/lib/booZeroBrief'
 import { useBooZeroStore } from '@/stores/booZero'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
-import { DetectStep, InstallStep, ConfigureStep, StartGatewayStep } from './steps'
+import {
+  DetectStep,
+  InstallStep,
+  ConfigureStep,
+  StartGatewayStep,
+  ConnectAgentsStep,
+  ChooseRuntimeStep,
+  ConfigureNativeStep,
+  NativeReadyStep,
+} from './steps'
+import { setWizardRuntime, type WizardRuntime } from '@/lib/onboardingProgress'
 import { StepIndicator } from './StepIndicator'
+import { useFocusTrap } from './useFocusTrap'
 import { SkyAtmosphere } from '@/features/atmosphere'
 import { STARTER_TEMPLATES, resolveTeamAgents } from '@/features/marketplace/teamCatalog'
 import { useFleetStore } from '@/stores/fleet'
@@ -45,41 +60,85 @@ const PROFILES: ProfileLike[] = STARTER_TEMPLATES
 
 export type WizardStep =
   | 'welcome'
+  | 'chooseRuntime'
+  | 'configureNative'
+  | 'nativeReady'
   | 'detect'
   | 'install'
   | 'configure'
   | 'startGateway'
+  | 'connectAgents'
   | 'connect'
   | 'team'
   | 'deploy'
 
 const STEP_INDEX: Record<WizardStep, number> = {
   welcome: 0,
-  detect: 1,
-  install: 2,
-  configure: 3,
-  startGateway: 4,
-  connect: 5,
-  team: 6,
-  deploy: 7,
+  // The first real choice: "How do you want your agents to run?"
+  chooseRuntime: 1,
+  // Native path — paste a provider key → seed a team → land in the dashboard.
+  configureNative: 2,
+  nativeReady: 3,
+  // OpenClaw / coding-agent paths (the existing gateway flow + the runtime connect).
+  detect: 4,
+  install: 5,
+  configure: 6,
+  startGateway: 7,
+  connectAgents: 8,
+  connect: 9,
+  team: 10,
+  deploy: 11,
 }
+
+/**
+ * Escape steps BACK to the prior step in the chosen path. Onboarding is a
+ * mandatory first-run flow with no "empty app" to dismiss to, so Escape never
+ * unmounts the wizard — it just retreats one step. Steps absent from this map
+ * (welcome, chooseRuntime, and the nativeReady success landing) ignore Escape.
+ */
+const BACK_STEP: Partial<Record<WizardStep, WizardStep>> = {
+  configureNative: 'chooseRuntime',
+  detect: 'chooseRuntime',
+  install: 'detect',
+  configure: 'detect',
+  startGateway: 'configure',
+  connectAgents: 'chooseRuntime',
+  connect: 'detect',
+  team: 'connectAgents',
+  deploy: 'team',
+}
+
+/** The runtime the user picked on the chooseRuntime step. */
+export type SelectedRuntime = WizardRuntime
+
+/** How the wizard finished: a connected OpenClaw Gateway, or a Gateway-free
+ *  native install (no GatewayClient). */
+export type OnboardingMode = 'gateway' | 'native'
 
 export type OnboardingWizardProps = {
   /**
-   * Called when the wizard finishes. `teamId` is the id of the team the user
-   * just deployed (or null when they skipped the team step). The host
-   * (`GatewayBootstrap`) uses this to navigate into the team's group chat;
-   * otherwise the user lands on the default Atlas view.
+   * Called when the wizard finishes. `mode` distinguishes the two endings:
+   *   - `gateway` — a connected OpenClaw Gateway; `client` is the live
+   *     GatewayClient and `gatewayUrl` its URL.
+   *   - `native` — a Gateway-free native install; `client` + `gatewayUrl` are
+   *     null (native agents run server-side, no Gateway).
+   * `teamId` is the id of the team the user just deployed / seeded (or null
+   * when they skipped the team step). The host (`GatewayBootstrap`) uses it to
+   * navigate into the team's group chat; otherwise the user lands on Atlas.
    */
-  onComplete: (client: GatewayClient, gatewayUrl: string, teamId: string | null) => void
+  onComplete: (
+    client: GatewayClient | null,
+    gatewayUrl: string | null,
+    teamId: string | null,
+    mode: OnboardingMode,
+  ) => void
   /**
-   * Step to start at. Defaults to 'welcome' for a fresh run. The host passes
-   * 'detect' when RESUMING a mid-onboarding refresh — DetectStep re-validates
-   * the environment and auto-advances to the team step when OpenClaw is
-   * already configured + the gateway is running, so the user picks up where
-   * the returning-user fast path would otherwise have skipped them.
+   * Step to start at. Defaults to 'welcome' for a fresh run. The host passes a
+   * later step when RESUMING a mid-onboarding refresh.
    */
   initialStep?: WizardStep
+  /** Runtime the user had picked before a refresh (drives resume direction). */
+  initialRuntime?: SelectedRuntime | null
 }
 
 // ─── Motion transition ────────────────────────────────────────────────────────
@@ -168,7 +227,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
               textShadow: '0 1px 12px rgba(255,255,255,0.65)',
             }}
           >
-            Deploy and orchestrate your OpenClaw agent teams.
+            Deploy and orchestrate your AI agent teams.
             <br />
             Set up in under 90 seconds.
           </p>
@@ -190,7 +249,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
           className="text-[11px] font-mono -mt-2"
           style={{ color: 'rgba(30,37,64,0.62)', textShadow: '0 1px 10px rgba(255,255,255,0.65)' }}
         >
-          Requires OpenClaw Gateway
+          Paste an API key, or bring your own runtime
         </p>
       </div>
     </div>
@@ -642,7 +701,6 @@ function DeployStep({
           : null
         const universalLeaderName = booZeroAgent?.name ?? null
 
-        const workspaceDir = await resolveWorkspaceDir(client)
         let genuineLeaderAgentId: string | null = null
         for (let i = 0; i < resolved.length; i++) {
           const agent = resolved[i]!
@@ -683,7 +741,7 @@ function DeployStep({
             universalLeaderName,
           })
 
-          const agentId = await createAgent(client, finalAgentName, workspaceDir, {
+          const agentId = await createAgent(finalAgentName, {
             soul: soulWithPersonality,
             identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
             tools: agent.toolsTemplate,
@@ -931,12 +989,19 @@ function DeployStep({
 
 // ─── OnboardingWizard ─────────────────────────────────────────────────────────
 
-export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: OnboardingWizardProps) {
+export function OnboardingWizard({
+  onComplete,
+  initialStep = 'welcome',
+  initialRuntime = null,
+}: OnboardingWizardProps) {
   const [step, setStep] = useState<WizardStep>(initialStep)
   const [prevStep, setPrevStep] = useState<WizardStep>(initialStep)
   const [client, setClient] = useState<GatewayClient | null>(null)
   const [gatewayUrl, setGatewayUrl] = useState('')
   const [selectedProfile, setSelectedProfile] = useState<ProfileLike | null>(null)
+  const [selectedRuntime, setSelectedRuntime] = useState<SelectedRuntime | null>(initialRuntime)
+  // The team minted by ConfigureNativeStep's seed call — shown on nativeReady.
+  const [seededTeamId, setSeededTeamId] = useState<string | null>(null)
 
   // Gateway URL from ConfigureStep — used by StartGatewayStep completion handler
   const [systemConnectUrl, setSystemConnectUrl] = useState('')
@@ -947,6 +1012,45 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
       setStep(next)
     },
     [step],
+  )
+
+  // Tear down a GatewayClient established earlier in this wizard run. Retreating
+  // to/past `chooseRuntime` abandons the OpenClaw path, so a lingering client
+  // would (a) leak its WebSocket and (b) make a subsequent coding-agent pick
+  // wrongly route into the Gateway team→deploy flow (handleConnectAgentsDone
+  // branches on `client` being set). Idempotent — a no-op when there's no client.
+  const resetGatewayClient = useCallback(() => {
+    if (client) {
+      client.disconnect()
+      setClient(null)
+      setGatewayUrl('')
+    }
+  }, [client])
+
+  // ── chooseRuntime: the user picked how their agents will run ───────────────
+  // Native → paste a key + seed a team. OpenClaw → the existing gateway flow
+  // (entered at `detect`, which routes install/configure/startGateway for a
+  // fresh box). Claude Code / Hermes / Codex → the runtime connect step.
+  const handleChooseRuntime = useCallback(
+    (runtime: SelectedRuntime) => {
+      // A re-pick starts clean — drop any client from a prior OpenClaw attempt.
+      resetGatewayClient()
+      setSelectedRuntime(runtime)
+      setWizardRuntime(runtime)
+      if (runtime === 'clawboo-native') goTo('configureNative')
+      else if (runtime === 'openclaw') goTo('detect')
+      else goTo('connectAgents')
+    },
+    [goTo, resetGatewayClient],
+  )
+
+  // ── Native ready: the seeded team is shown; the user opens the dashboard.
+  // No GatewayClient — native runs server-side. The host enters "native mode".
+  const handleNativeReady = useCallback(
+    (teamId: string | null) => {
+      onComplete(null, null, teamId, 'native')
+    },
+    [onComplete],
   )
 
   // ── DetectStep: everything is green — auto-connect via proxy ──────────────
@@ -971,7 +1075,7 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
       })
       setClient(newClient)
       setGatewayUrl(data.gatewayUrl.trim())
-      goTo('team')
+      goTo('connectAgents')
     } catch {
       goTo('connect')
     }
@@ -979,7 +1083,7 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
 
   // ── ConfigureStep completed ───────────────────────────────────────────────
   const handleConfigured = useCallback(
-    (data: { gatewayToken: string; gatewayUrl: string }) => {
+    (data: { gatewayUrl: string }) => {
       setSystemConnectUrl(data.gatewayUrl)
       goTo('startGateway')
     },
@@ -992,7 +1096,7 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
       setClient(newClient)
       // Use the URL from configure step, or fall back to default
       setGatewayUrl(systemConnectUrl || 'ws://localhost:18789')
-      goTo('team')
+      goTo('connectAgents')
     },
     [goTo, systemConnectUrl],
   )
@@ -1001,10 +1105,22 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
     (newClient: GatewayClient, url: string) => {
       setClient(newClient)
       setGatewayUrl(url)
-      goTo('team')
+      goTo('connectAgents')
     },
     [goTo],
   )
+
+  // "Connect coding agents" step — Continue and Skip both finish it. The OpenClaw
+  // path reaches here with a live `client` and continues into team → deploy. A
+  // coding-agent (Claude Code / Hermes / Codex) FIRST choice has NO client — the
+  // team → deploy flow would create Gateway agents it can never finish, so we
+  // complete onboarding directly. The user lands in the dashboard with the
+  // runtime connected and adds a team from Capabilities later. `mode: 'native'`
+  // is the existing client-free landing (the host enters native/REST mode).
+  const handleConnectAgentsDone = useCallback(() => {
+    if (client) goTo('team')
+    else onComplete(null, null, null, 'native')
+  }, [client, goTo, onComplete])
 
   const handlePickTeam = useCallback(
     (profile: ProfileLike) => {
@@ -1014,10 +1130,12 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
     [goTo],
   )
 
-  // User chose to skip team setup. No team to land in — we pass null so the
-  // host falls through to its default post-onboarding view.
+  // User chose to skip team setup. No team to land in — pass null so the host
+  // falls through to its default post-onboarding view. Complete unconditionally
+  // (a null client = the client-free 'native' landing) so the button is never a
+  // dead no-op.
   const handleSkipTeam = useCallback(() => {
-    if (client) onComplete(client, gatewayUrl, null)
+    onComplete(client, gatewayUrl, null, client ? 'gateway' : 'native')
   }, [client, gatewayUrl, onComplete])
 
   // Deploy succeeded (or partially succeeded — error escape hatch also
@@ -1025,10 +1143,29 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
   // navigate the user into the new team's group chat.
   const handleDeployComplete = useCallback(
     (teamId: string | null) => {
-      if (client) onComplete(client, gatewayUrl, teamId)
+      if (client) onComplete(client, gatewayUrl, teamId, 'gateway')
     },
     [client, gatewayUrl, onComplete],
   )
+
+  // ── A11y: dialog semantics + focus trap + Escape-as-back ───────────────────
+  // The wizard is a mandatory full-screen modal. Trap + restore focus, and let
+  // Escape retreat one step (never dismiss — there is no app behind it).
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useFocusTrap(dialogRef, step)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const back = BACK_STEP[step]
+      if (!back) return
+      // Retreating to the runtime picker abandons any OpenClaw path — tear down
+      // its client so the WS doesn't linger and a re-pick starts clean.
+      if (back === 'chooseRuntime') resetGatewayClient()
+      goTo(back)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [step, goTo, resetGatewayClient])
 
   // Animate direction based on step progression
   const isForward = STEP_INDEX[step] >= STEP_INDEX[prevStep]
@@ -1043,6 +1180,14 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
 
   return (
     <motion.div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Set up Clawboo"
+      // Focusable so the focus-trap's root fallback can land focus inside the
+      // dialog on a control-less step (an element without tabindex isn't a
+      // valid focus target → focus would stay on <body>).
+      tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -1065,7 +1210,61 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
             transition={stepTransition}
             className="absolute inset-0"
           >
-            <WelcomeStep onContinue={() => goTo('detect')} />
+            <WelcomeStep onContinue={() => goTo('chooseRuntime')} />
+          </motion.div>
+        )}
+
+        {step === 'chooseRuntime' && (
+          <motion.div
+            key="chooseRuntime"
+            variants={directedVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={stepTransition}
+            className="w-full flex justify-center"
+          >
+            <ChooseRuntimeStep onPick={handleChooseRuntime} />
+          </motion.div>
+        )}
+
+        {step === 'configureNative' && (
+          <motion.div
+            key="configureNative"
+            variants={directedVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={stepTransition}
+            className="w-full flex justify-center"
+          >
+            <ConfigureNativeStep
+              onSeeded={(teamId) => {
+                setSeededTeamId(teamId)
+                goTo('nativeReady')
+              }}
+              onBack={() => goTo('chooseRuntime')}
+            />
+          </motion.div>
+        )}
+
+        {step === 'nativeReady' && (
+          <motion.div
+            key="nativeReady"
+            variants={directedVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={stepTransition}
+            className="w-full flex justify-center"
+          >
+            <NativeReadyStep
+              teamId={seededTeamId}
+              onOpenDashboard={() => handleNativeReady(seededTeamId)}
+              // Capabilities path passes teamId=null so the host skips the
+              // group-chat redirect, leaving the Capabilities view in place.
+              onOpenCapabilities={() => handleNativeReady(null)}
+            />
           </motion.div>
         )}
 
@@ -1131,6 +1330,28 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
             className="w-full flex justify-center"
           >
             <StartGatewayStep onStarted={handleGatewayStarted} onBack={() => goTo('configure')} />
+          </motion.div>
+        )}
+
+        {step === 'connectAgents' && (
+          <motion.div
+            key="connectAgents"
+            variants={directedVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={stepTransition}
+            className="w-full flex justify-center"
+          >
+            <ConnectAgentsStep
+              onContinue={handleConnectAgentsDone}
+              onSkip={handleConnectAgentsDone}
+              focusRuntime={selectedRuntime}
+              // OpenClaw reaches this step with a live client and continues into
+              // team → deploy; a coding-agent first choice has no client and
+              // completes onboarding here (the terminal path).
+              continuesToTeam={!!client}
+            />
           </motion.div>
         )}
 

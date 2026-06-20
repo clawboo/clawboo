@@ -18,16 +18,17 @@ const MOCK_EDGES = [
   { id: 'skill-1', type: 'skill', source: 'boo-src', target: 'skill-x', data: {} },
 ]
 
+// A truthy client satisfies the `if (!client) return` guard; the actual file I/O
+// now routes through the AgentSource REST client (mocked below).
 vi.mock('@/stores/connection', () => ({
   useConnectionStore: {
-    getState: () => ({
-      client: {
-        agents: {
-          files: { read: mockFilesRead, set: mockFilesSet },
-        },
-      },
-    }),
+    getState: () => ({ client: {} }),
   },
+}))
+
+vi.mock('@/lib/agentSourceClient', () => ({
+  readAgentFile: mockFilesRead,
+  writeAgentFile: mockFilesSet,
 }))
 
 vi.mock('@/stores/fleet', () => ({

@@ -8,6 +8,7 @@ import { useGraphStore } from '../store'
 import { useFloatingMotion } from '../useFloatingMotion'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
+import { useObsOverlayStore } from '@/stores/obsOverlay'
 import { BooLiveActivity } from './BooLiveActivity'
 import { createFlipState, useFlipMorph, type FlipState } from './useFlipMorph'
 import { useChatStore } from '@/stores/chat'
@@ -183,10 +184,13 @@ export const BooNode = memo(function BooNode({
     (a) => a.agentId === agentId,
   )
   const agent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
+  // Event-sourced live status. Undefined when the agent has no projected board
+  // activity → no pip rendered (an idle agent looks the same as ever).
+  const obsStatus = useObsOverlayStore((s) => s.statusByAgent.get(agentId))
   const lastSeenAt = agent?.lastSeenAt ?? null
   const lastSeenLabel = !showCard ? formatLastSeen(lastSeenAt) : null
 
-  // Phase 18 — fine-grained activity verb. Single-value subscriptions so we
+  // Fine-grained activity verb. Single-value subscriptions so we
   // only re-render when this agent's stream or transcript ticks.
   const sk = agent?.sessionKey ?? null
   const streamingText = useChatStore((s) => (sk ? (s.streamingText.get(sk) ?? null) : null))
@@ -310,6 +314,32 @@ export const BooNode = memo(function BooNode({
           />
         )}
 
+        {/* Event-sourced live status pip. Only the actionable
+            states render a pip; idle / no-activity shows nothing, so an idle
+            agent's appearance is unchanged. */}
+        {obsStatus && obsStatus !== 'idle' && (
+          <div
+            title={`live: ${obsStatus}`}
+            style={{
+              position: 'absolute',
+              top: -3,
+              right: -3,
+              width: 9,
+              height: 9,
+              borderRadius: '50%',
+              background:
+                obsStatus === 'working'
+                  ? 'var(--mint)'
+                  : obsStatus === 'stalled'
+                    ? 'var(--amber)'
+                    : 'var(--primary)',
+              boxShadow: '0 0 0 2px var(--surface)',
+              pointerEvents: 'none',
+              zIndex: 3,
+            }}
+          />
+        )}
+
         {/* Selection ring removed — the previous red ring around a clicked
             Boo had no functional purpose; the agent-detail navigation
             happens through the right-click context menu / sidebar. */}
@@ -411,7 +441,7 @@ interface ContentProps {
   name: string
   selected: boolean | undefined
   status: BooNodeData['status']
-  /** Phase 18 — fine-grained activity verb computed by the parent. */
+  /** Fine-grained activity verb computed by the parent. */
   activityVerb: string
   cardStatusColor: string
   lastSeenLabel: string | null

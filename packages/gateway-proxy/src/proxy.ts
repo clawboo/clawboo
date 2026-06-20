@@ -28,7 +28,16 @@ export interface ProxyOptions {
   log?: (msg: string, meta?: Record<string, unknown>) => void
   /** Structured error logger. */
   logError?: (msg: string, err?: unknown) => void
+  /** Upstream WS ping interval (ms). A missed pong within one interval tears the
+   *  half-open connection down. Default 30s. (Config, not a feature flag.) */
+  keepaliveIntervalMs?: number
+  /** Cap on each connect-buffer (frames held before the other side is ready).
+   *  Overflow closes the connection rather than growing unbounded. Default 512. */
+  maxPendingFrames?: number
 }
+
+const DEFAULT_KEEPALIVE_INTERVAL_MS = 30_000
+const DEFAULT_MAX_PENDING_FRAMES = 512
 
 export interface GatewayProxyHandle {
   /** Pass this to `server.on('upgrade', ...)`. */
@@ -90,10 +99,11 @@ function _hasDeviceSignature(params: unknown): boolean {
  * Inject the server-side auth token into the connect params.
  * All other fields (device, client, nonce, etc.) are preserved as-is.
  *
- * This is a fallback for when the browser didn't include a token (e.g.
- * unauthenticated local gateways). The primary path is for the browser
- * to include its own auth.token (obtained from /api/settings) so that
- * device identity signing can include the correct token in its payload.
+ * Server-side injection is the PRIMARY path: the upstream token lives only on the
+ * server and is never returned to the browser (GET /api/settings exposes a
+ * `hasToken` flag, never the value), so the browser connects without a token and
+ * the proxy fills it in here. If a browser ever does supply its own auth.token
+ * (e.g. a remote gateway the user typed a token for), that value is preserved.
  */
 function injectAuthToken(params: unknown, token: string): Record<string, unknown> {
   const next = isObject(params) ? { ...params } : {}
@@ -137,6 +147,8 @@ export function createGatewayProxy(options: ProxyOptions): GatewayProxyHandle {
     allowWs = (req) => resolvePathname(req.url) === '/api/gateway/ws',
     log = () => undefined,
     logError = (msg, err) => console.error(msg, err),
+    keepaliveIntervalMs = DEFAULT_KEEPALIVE_INTERVAL_MS,
+    maxPendingFrames = DEFAULT_MAX_PENDING_FRAMES,
   } = options
 
   const wss = new WebSocketServer({ noServer: true })
@@ -176,12 +188,23 @@ export function createGatewayProxy(options: ProxyOptions): GatewayProxyHandle {
     const pendingBrowserMessages: string[] = []
     // Buffer for upstream messages that arrive before browser WS is open
     const pendingUpstreamMessages: string[] = []
+    // Upstream keepalive (ping/pong) state.
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = null
+    let awaitingPong = false
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
+
+    const stopKeepalive = (): void => {
+      if (keepaliveTimer) {
+        clearInterval(keepaliveTimer)
+        keepaliveTimer = null
+      }
+    }
 
     const closeBoth = (code: number, reason: string): void => {
       if (closed) return
       closed = true
+      stopKeepalive()
       try {
         browserWs.close(code, reason)
       } catch {
@@ -192,6 +215,17 @@ export function createGatewayProxy(options: ProxyOptions): GatewayProxyHandle {
       } catch {
         /* ignore */
       }
+    }
+
+    // Bound a connect-buffer: queue the frame, or tear the connection down if the
+    // peer is stuck/slow and the buffer has grown past its cap (never unbounded).
+    const bufferOrOverflow = (queue: string[], frame: string): void => {
+      if (queue.length >= maxPendingFrames) {
+        logError('proxy: connect-buffer overflow — closing connection', { cap: maxPendingFrames })
+        closeBoth(1011, 'clawboo.buffer_overflow')
+        return
+      }
+      queue.push(frame)
     }
 
     const sendToBrowser = (data: string): void => {
@@ -311,6 +345,37 @@ export function createGatewayProxy(options: ProxyOptions): GatewayProxyHandle {
           sendToBrowser(msg)
         }
         pendingUpstreamMessages.length = 0
+
+        // Application-level keepalive: ping the upstream each interval; if no pong
+        // arrived since the last ping, the TCP connection is half-open — terminate
+        // it so the close path runs immediately instead of stalling on a 60s+ RPC
+        // timeout. (OS TCP keepalive is too slow / not guaranteed.)
+        upstream.on('pong', () => {
+          awaitingPong = false
+        })
+        keepaliveTimer = setInterval(() => {
+          if (closed) {
+            stopKeepalive()
+            return
+          }
+          if (awaitingPong) {
+            logError('proxy: upstream keepalive timed out — terminating half-open connection')
+            try {
+              upstream.terminate()
+            } catch {
+              /* already gone */
+            }
+            stopKeepalive()
+            return
+          }
+          awaitingPong = true
+          try {
+            upstream.ping()
+          } catch {
+            /* gone — the close path will fire */
+          }
+        }, keepaliveIntervalMs)
+        keepaliveTimer.unref?.()
       })
 
       // ── Upstream → browser ─────────────────────────────────────────────
@@ -340,7 +405,7 @@ export function createGatewayProxy(options: ProxyOptions): GatewayProxyHandle {
         if (browserWs.readyState === WebSocket.OPEN) {
           sendToBrowser(upStr)
         } else {
-          pendingUpstreamMessages.push(upStr)
+          bufferOrOverflow(pendingUpstreamMessages, upStr)
         }
       })
 
@@ -391,9 +456,9 @@ export function createGatewayProxy(options: ProxyOptions): GatewayProxyHandle {
         if (id) connectRequestId = id
       }
 
-      // If upstream isn't ready yet, buffer the message
+      // If upstream isn't ready yet, buffer the message (bounded)
       if (!upstreamReady || !upstreamWs || upstreamWs.readyState !== WebSocket.OPEN) {
-        pendingBrowserMessages.push(raw)
+        bufferOrOverflow(pendingBrowserMessages, raw)
         return
       }
 

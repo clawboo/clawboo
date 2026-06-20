@@ -2,6 +2,7 @@ import { GatewayResponseError } from './errors'
 import type {
   Frame,
   AutoRetryDelayParams,
+  GatewayConfig,
   SessionPatchResult,
   SyncSessionSettingsParams,
 } from './types'
@@ -94,6 +95,28 @@ export const isLocalGatewayUrl = (url: string): boolean => {
     return false
   }
 }
+
+// ─── Config patch encoding ────────────────────────────────────────────────────
+
+/**
+ * Encode a partial-config update into the wire shape OpenClaw's `config.patch`
+ * RPC expects: `{ raw: <JSON string of the partial config>, baseHash }`. OpenClaw
+ * 2026.5.x tightened `config.patch` params to `{ raw: NonEmptyString, baseHash?,
+ * ... }` with `additionalProperties: false`, deep-merges the parsed `raw` into the
+ * live config, AND requires the `baseHash` (the snapshot hash from `config.get` —
+ * optimistic concurrency; the handler rejects a patch without it: "config base
+ * hash required; re-run config.get and retry"). So a partial patch like
+ * `{ mcp: { servers } }` must be JSON-stringified under `raw`, carrying the hash
+ * from a prior `config.get`. The merge preserves unrelated config keys, so callers
+ * still send only what changes; this helper centralizes the wire encoding.
+ */
+export const encodeConfigPatchParams = (
+  updates: Partial<GatewayConfig>,
+  baseHash?: string,
+): { raw: string; baseHash?: string } => ({
+  raw: JSON.stringify(updates),
+  ...(baseHash ? { baseHash } : {}),
+})
 
 // ─── Error formatting ─────────────────────────────────────────────────────────
 

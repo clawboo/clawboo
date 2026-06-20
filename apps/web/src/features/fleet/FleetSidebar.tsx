@@ -1,3 +1,4 @@
+import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronDown, ChevronRight, FileEdit, Plus, Search, Trash2 } from 'lucide-react'
@@ -173,7 +174,6 @@ export function FleetSidebar() {
   const agents = useFleetStore((s) => s.agents)
   const selectedAgentId = useFleetStore((s) => s.selectedAgentId)
   const selectAgent = useFleetStore((s) => s.selectAgent)
-  const hydrateAgents = useFleetStore((s) => s.hydrateAgents)
 
   const connectionStatus = useConnectionStore((s) => s.status)
   const client = useConnectionStore((s) => s.client)
@@ -190,33 +190,12 @@ export function FleetSidebar() {
   }, [])
 
   const handleBooCreated = useCallback(async () => {
-    if (!client) return
     try {
-      const result = await client.agents.list()
-      const mainKey = result.mainKey?.trim() || 'main'
-      // Preserve existing execConfig from store
-      const existingExecConfigs = new Map(
-        useFleetStore.getState().agents.map((a) => [a.id, a.execConfig]),
-      )
-      hydrateAgents(
-        result.agents.map((a) => ({
-          id: a.id,
-          name: a.identity?.name ?? a.name ?? a.id,
-          status: 'idle' as const,
-          sessionKey: `agent:${a.id}:${mainKey}`,
-          model: null,
-          createdAt: null,
-          streamingText: null,
-          runId: null,
-          lastSeenAt: null,
-          teamId: null,
-          execConfig: existingExecConfigs.get(a.id) ?? null,
-        })),
-      )
+      await refreshFleetFromRegistry()
     } catch {
       // hydration failure is non-fatal — fleet will catch up on next event
     }
-  }, [client, hydrateAgents])
+  }, [])
 
   // Delayed empty state — only show after 1s to avoid flash during hydration
   const [showEmpty, setShowEmpty] = useState(false)
@@ -306,7 +285,7 @@ export function FleetSidebar() {
                   onDelete={() => {
                     if (!client) return
                     if (!window.confirm(`Delete ${agent.name}? This cannot be undone.`)) return
-                    deleteAgentOperation(agent.id, agent.sessionKey, client).catch((err) => {
+                    deleteAgentOperation(agent.id, agent.sessionKey).catch((err) => {
                       alert(
                         `Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`,
                       )

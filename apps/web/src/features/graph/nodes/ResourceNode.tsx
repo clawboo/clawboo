@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import { motion } from 'framer-motion'
+import { Plug } from 'lucide-react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { useGraphStore } from '../store'
@@ -37,7 +38,9 @@ export const ResourceNode = memo(function ResourceNode({
   id: nodeId,
   data,
 }: NodeProps<Node<ResourceNodeData, 'resource'>>) {
-  const { name, serviceIcon, isVisible } = data
+  const { name, isVisible, available } = data
+  // Capability availability → greyed (matches SkillNode + the dashboard).
+  const greyed = available === false
 
   // Hover cascade — dim when another node is hovered
   const isHighlighted = useGraphStore(
@@ -59,8 +62,9 @@ export const ResourceNode = memo(function ResourceNode({
         height: 70,
         position: 'relative',
         overflow: 'visible',
-        opacity: isHighlighted ? 1 : 0.22,
-        transition: 'opacity 0.2s ease',
+        opacity: greyed ? (isHighlighted ? 0.5 : 0.16) : isHighlighted ? 1 : 0.22,
+        filter: greyed ? 'grayscale(1)' : undefined,
+        transition: 'opacity 0.2s ease, filter 0.2s ease',
         transformOrigin: 'center center',
         pointerEvents: peacock.pointerEvents,
       }}
@@ -81,8 +85,8 @@ export const ResourceNode = memo(function ResourceNode({
             '0 0 18px rgb(var(--amber-rgb) / 0.1), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.04)',
         }}
       >
-        {/* Service icon */}
-        <span style={{ fontSize: 26, lineHeight: 1, userSelect: 'none' }}>{serviceIcon}</span>
+        {/* Connector glyph (lucide, never emoji — the design-system rule) */}
+        <Plug size={22} style={{ color: 'rgb(var(--amber-rgb) / 0.85)' }} aria-label="connector" />
 
         {/* Service name */}
         <span

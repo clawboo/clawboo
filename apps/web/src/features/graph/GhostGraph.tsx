@@ -1,3 +1,4 @@
+import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
 import '@xyflow/react/dist/style.css'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -20,12 +21,23 @@ import type {
   MiniMapNodeProps,
 } from '@xyflow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { GitBranch, LayoutDashboard, Map, Pin, RefreshCw, Sparkles, X } from 'lucide-react'
+import {
+  GitBranch,
+  LayoutDashboard,
+  Map,
+  Pin,
+  RefreshCw,
+  Sparkles,
+  Terminal,
+  X,
+} from 'lucide-react'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
 import { computeElkLayout, computeAtlasLayout, computeAtlasRadialLayout } from './useGraphLayout'
 import { useTeamStore } from '@/stores/team'
+import { useObsGraphOverlay } from '@/features/obs'
+import { useObsOverlayStore } from '@/stores/obsOverlay'
 import { computeOrbitalPositions } from './computeOrbitalPositions'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
@@ -43,6 +55,7 @@ import { installSkillForAgent } from './operations/installSkill'
 import { removeRouting } from './operations/removeRouting'
 import { graphPhysics } from './graphPhysics'
 import { EdgeMarkers } from './edges/EdgeMarkers'
+import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import type { BooNodeData, SkillNodeData, GraphEdge, LayoutData, GhostGraphScope } from './types'
 
 interface ContextMenuState {
@@ -182,12 +195,27 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // identity changes — not on every nodes/edges update from physics ticks.
   const expandedBooNodeIds = useGraphStore((s) => s.expandedBooNodeIds)
 
+  // Event-sourced live overlay: source per-agent status/cost from the projected event log so the
+  // team graph's LIVE layer can't drift from reality. Pushed to a tiny store that
+  // BooNode reads by id — NOT via setNodes, so the ELK/physics pipeline is
+  // untouched and the live overlay never perturbs the layout.
+  const obsTeamId = useTeamStore((s) => s.selectedTeamId)
+  const obsOverlay = useObsGraphOverlay(scope === 'team' ? obsTeamId : null)
+  useEffect(() => {
+    useObsOverlayStore.getState().setOverlay(obsOverlay.status, obsOverlay.cost)
+  }, [obsOverlay])
+
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
   // Hide the MiniMap (bottom-right overview) by default to give Boos more
   // visible canvas. A small floating toggle button takes its place; clicking
   // it expands the MiniMap back when the user wants to navigate a large graph.
   const [showMiniMap, setShowMiniMap] = useState(false)
+
+  // Atlas-only: a slide-in global activity dock — the live "what is every team
+  // doing" terminal. Always mounted (so the slide animates both ways); the obs
+  // subscription is gated on `showActivityDock` so it only tails when open.
+  const [showActivityDock, setShowActivityDock] = useState(false)
 
   const nodesInitialized = useNodesInitialized()
   const { fitView } = useReactFlow()
@@ -203,7 +231,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   const prevNodeLengthRef = useRef(0)
   const elkGenerationRef = useRef(0)
   const prevLayoutKeyRef = useRef(layoutKey)
-  // Phase 19 — flipping atlasLayout requires a fresh layout dispatch even
+  // Flipping atlasLayout requires a fresh layout dispatch even
   // when node count + layoutKey haven't changed. Tracked separately so a
   // toggle invalidates `layoutRanRef` exactly once per change.
   const prevAtlasLayoutRef = useRef(atlasLayout)
@@ -312,7 +340,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       prevNodeLengthRef.current = 0
     }
 
-    // Phase 19 — atlasLayout flip is a re-layout trigger of the same kind as
+    // atlasLayout flip is a re-layout trigger of the same kind as
     // pressing "Re-layout". CRITICAL: it must also DROP saved positions, not
     // just invalidate `layoutRanRef`. Without dropping, the new layout
     // function (e.g. Tree's `computeAtlasLayout`) reuses saved coordinates
@@ -617,9 +645,9 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       store.setEdges([...store.edges, optimisticEdge])
 
       try {
-        const currentAgentsMd = await client.agents.files
-          .read(sourceAgentId, 'AGENTS.md')
-          .catch(() => '# AGENTS\n')
+        const currentAgentsMd = await readAgentFile(sourceAgentId, 'AGENTS.md').catch(
+          () => '# AGENTS\n',
+        )
 
         if (currentAgentsMd.includes('@' + targetAgentName)) {
           // Already in file, edge is correct — just notify
@@ -633,7 +661,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         const newAgentsMd =
           currentAgentsMd.trimEnd() + '\n- Route to @' + targetAgentName + ' for delegated tasks.\n'
         await mutationQueue.enqueue(sourceAgentId, () =>
-          client.agents.files.set(sourceAgentId, 'AGENTS.md', newAgentsMd),
+          writeAgentFile(sourceAgentId, 'AGENTS.md', newAgentsMd),
         )
 
         // Update local agentFiles cache so the structural rebuild in useGraphData
@@ -782,7 +810,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           doesn't leak into other views. */}
       {scope === 'atlas' && showTeamHalos && <TeamHaloLayer nodes={nodes} />}
 
-      {/* Phase 17 — Atlas team-status clusters. Compact ● N pills above each
+      {/* Atlas team-status clusters. Compact ● N pills above each
           team-root junction showing the breakdown of running / idle /
           sleeping / error agents. Always on in Atlas scope (live activity is
           a primary information signal). Pure rendering layer — does not
@@ -819,7 +847,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           </button>
         )}
 
-        {/* Phase 19 — Atlas layout segmented pill (Tree | Radial). Two
+        {/* Atlas layout segmented pill (Tree | Radial). Two
             adjacent buttons inside a single shell so it's obvious BOTH
             options exist and which one is active. Mirrors the FAN | GRID
             toggle in CreateTeamModal. Persisted via the store setter. */}
@@ -885,6 +913,25 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           </button>
         )}
 
+        {/* Global activity dock toggle — Atlas-only. Opens the live "what is
+            every team doing" terminal. */}
+        {scope === 'atlas' && (
+          <button
+            onClick={() => setShowActivityDock((v) => !v)}
+            title="Toggle the live activity feed across all teams"
+            aria-pressed={showActivityDock}
+            className={[
+              'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
+              showActivityDock
+                ? 'border-mint/40 bg-mint/[0.18] text-mint'
+                : 'border-canvas-control-border bg-canvas-control text-foreground/55 hover:text-foreground/90',
+            ].join(' ')}
+          >
+            <Terminal size={14} />
+            Activity
+          </button>
+        )}
+
         {/* Connect mode toggle */}
         <button
           onClick={() => setConnectMode(!connectMode)}
@@ -899,6 +946,84 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           {connectMode ? 'Drawing Edges' : 'Connect'}
         </button>
       </div>
+
+      {/* Atlas global activity dock — a right-edge slide-in panel. Always
+          mounted so the slide animates both ways; the obs subscription only
+          tails while open (`enabled`). */}
+      {scope === 'atlas' && (
+        <div
+          className="surface-floating-tier"
+          style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: 'min(380px, 82%)',
+            zIndex: 25,
+            display: 'flex',
+            flexDirection: 'column',
+            borderTopLeftRadius: 14,
+            borderBottomLeftRadius: 14,
+            transform: showActivityDock ? 'translateX(0)' : 'translateX(calc(100% + 24px))',
+            transition: 'transform 0.32s cubic-bezier(0.32, 0.72, 0, 1)',
+            pointerEvents: showActivityDock ? 'auto' : 'none',
+          }}
+          aria-hidden={!showActivityDock}
+        >
+          <div
+            style={{
+              height: 44,
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '0 14px',
+              borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+            }}
+          >
+            <Terminal size={14} style={{ color: 'var(--mint)' }} />
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                fontFamily: 'var(--font-display)',
+                letterSpacing: '-0.01em',
+                color: 'var(--foreground)',
+              }}
+            >
+              Activity
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                color: 'rgb(var(--foreground-rgb) / 0.45)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              all teams
+            </span>
+            <span style={{ flex: 1 }} />
+            <button
+              type="button"
+              aria-label="Close activity"
+              onClick={() => setShowActivityDock(false)}
+              className="flex items-center justify-center rounded-md text-foreground/50 transition-colors duration-150 hover:bg-foreground/[0.06] hover:text-foreground"
+              style={{
+                width: 28,
+                height: 28,
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+              }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, padding: 12 }}>
+            <ActivityTerminal scope={{}} fill hideHeader enabled={showActivityDock} />
+          </div>
+        </div>
+      )}
 
       {/* MiniMap minimize/maximize toggle. Sits at the bottom-right corner —
           where the MiniMap itself lives — so the relationship between the
@@ -1016,7 +1141,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
             if (!client) return
             const agent = useFleetStore.getState().agents.find((a) => a.id === contextMenu.agentId)
             try {
-              void deleteAgentOperation(contextMenu.agentId, agent?.sessionKey ?? null, client)
+              void deleteAgentOperation(contextMenu.agentId, agent?.sessionKey ?? null)
             } catch {
               // handled inside deleteAgentOperation
             }
@@ -1046,7 +1171,7 @@ const EDGE_META = {
     label: 'Skill Connection',
     color: 'var(--mint)',
     desc: 'This agent has access to this tool.',
-    file: 'TOOLS.md',
+    file: 'Capabilities',
   },
   dependency: {
     label: 'Agent Dependency',
@@ -1058,7 +1183,7 @@ const EDGE_META = {
     label: 'Resource Connection',
     color: 'var(--amber)',
     desc: 'This agent uses this external service.',
-    file: 'TOOLS.md',
+    file: 'Capabilities',
   },
 } as const
 
@@ -1080,7 +1205,9 @@ function EdgeExplainPanel({
   const sourceAgentId = edge.source.startsWith('boo-') ? edge.source.slice(4) : null
   const sourceAgent = sourceAgentId ? agents.find((a) => a.id === sourceAgentId) : null
   const files = sourceAgentId ? agentFiles.get(sourceAgentId) : null
-  const fileContent = edgeType === 'dependency' ? files?.agentsMd : files?.toolsMd
+  // Skill/resource nodes come from the capability inventory now (no markdown
+  // file to excerpt); only dependency edges have an AGENTS.md routing excerpt.
+  const fileContent = edgeType === 'dependency' ? (files?.agentsMd ?? null) : null
   const excerpt = fileContent
     ? fileContent
         .split('\n')

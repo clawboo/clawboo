@@ -1,13 +1,16 @@
 import { create } from 'zustand'
 import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
 import type { NodeChange, EdgeChange } from '@xyflow/react'
+import type { CapabilityRecord } from '@clawboo/capability-registry'
 import type { GraphNode, GraphEdge, LayoutData } from './types'
 
 // ─── Store shape ──────────────────────────────────────────────────────────────
 
 interface GraphStore {
-  // Agent file cache (fetched from Gateway)
-  agentFiles: Map<string, { toolsMd: string | null; agentsMd: string | null }>
+  // Per-agent graph inputs: the agent-scoped capability records (the unified
+  // inventory — supersedes the legacy per-agent markdown skill-file path) +
+  // AGENTS.md routing (still drives dependency edges).
+  agentFiles: Map<string, { capabilities: CapabilityRecord[] | null; agentsMd: string | null }>
   isLoadingFiles: boolean
   filesError: string | null
 
@@ -15,6 +18,13 @@ interface GraphStore {
   nodes: GraphNode[]
   edges: GraphEdge[]
   hasRunLayout: boolean
+
+  // Which scope the current `nodes` were last STRUCTURALLY built for, e.g.
+  // `team:<id>` or `atlas`. `null` while cleared/rebuilding. The global store is
+  // shared across Atlas + every team graph, so a consumer (the team chat header's
+  // boo/skill count) reads this to avoid showing a stale count from the PREVIOUS
+  // scope's nodes before the current team's graph hydrates.
+  graphScopeKey: string | null
 
   // Incremented by resetLayout() — triggers ELK re-run in GhostGraph
   layoutKey: number
@@ -29,7 +39,7 @@ interface GraphStore {
 
   setAgentFiles: (
     agentId: string,
-    files: { toolsMd?: string | null; agentsMd?: string | null },
+    files: { capabilities?: CapabilityRecord[] | null; agentsMd?: string | null },
   ) => void
   setLoadingFiles: (v: boolean) => void
   setFilesError: (e: string | null) => void
@@ -37,6 +47,8 @@ interface GraphStore {
   setNodes: (nodes: GraphNode[]) => void
   setEdges: (edges: GraphEdge[]) => void
   setHasRunLayout: (v: boolean) => void
+  /** Record which scope the just-committed `nodes` belong to (or null when cleared). */
+  setGraphScopeKey: (key: string | null) => void
 
   onNodesChange: (changes: NodeChange<GraphNode>[]) => void
   onEdgesChange: (changes: EdgeChange<GraphEdge>[]) => void
@@ -61,7 +73,7 @@ interface GraphStore {
   setShowTeamHalos: (v: boolean) => void
 
   /**
-   * Phase 19 — Atlas topology. `top-down` (default) is the original flat-row
+   * Atlas topology. `top-down` (default) is the original flat-row
    * org chart with BZ at top and team-roots in a horizontal line; `radial`
    * puts BZ at the centre with teams as petals. Persisted to localStorage.
    */
@@ -105,6 +117,7 @@ export const useGraphStore = create<GraphStore>((set) => ({
   nodes: [],
   edges: [],
   hasRunLayout: false,
+  graphScopeKey: null,
   layoutKey: 0,
 
   selectedEdgeId: null,
@@ -113,7 +126,7 @@ export const useGraphStore = create<GraphStore>((set) => ({
   setAgentFiles: (agentId, files) =>
     set((state) => {
       const next = new Map(state.agentFiles)
-      const existing = next.get(agentId) ?? { toolsMd: null, agentsMd: null }
+      const existing = next.get(agentId) ?? { capabilities: null, agentsMd: null }
       next.set(agentId, { ...existing, ...files })
       return { agentFiles: next }
     }),
@@ -124,6 +137,7 @@ export const useGraphStore = create<GraphStore>((set) => ({
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   setHasRunLayout: (v) => set({ hasRunLayout: v }),
+  setGraphScopeKey: (key) => set({ graphScopeKey: key }),
 
   onNodesChange: (changes) => {
     const cb = useGraphStore.getState()._physicsWakeCallback

@@ -20,7 +20,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
-import { resolveStateDir } from '@clawboo/config'
+import { resolveClawbooDir } from '@clawboo/config'
 
 /** First port to try when no explicit `CLAWBOO_API_PORT` is set. */
 export const DEFAULT_API_PORT = 18790
@@ -34,8 +34,7 @@ export const MAX_PORT_ATTEMPTS = 20
  * alongside the rest of the Clawboo state.
  */
 export function getApiPortFilePath(): string {
-  const stateDir = resolveStateDir(process.env)
-  return path.join(stateDir, 'clawboo', 'api-port.txt')
+  return path.join(resolveClawbooDir(process.env), 'api-port.txt')
 }
 
 /**

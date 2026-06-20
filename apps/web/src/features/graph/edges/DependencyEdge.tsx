@@ -19,7 +19,7 @@ import { useGraphStore } from '../store'
 // `markerEnd` references `url(#dependency-arrow)` defined once in
 // `<EdgeMarkers />` (mounted near the top of `GhostGraph`).
 //
-// **Primary vs secondary edges** (Paperclip-style org-chart filter):
+// **Primary vs secondary edges** (classical org-chart filter):
 //   - Primary edges (BFS spanning tree from team leader) are always
 //     visible; they form the readable hierarchy backbone.
 //   - Secondary edges (every other routing rule) are HIDDEN at rest and
@@ -58,7 +58,7 @@ interface DependencyEdgeData extends Record<string, unknown> {
   isTrunkLeader?: boolean
   isTrunkFollower?: boolean
   siblingTargetIds?: string[]
-  /** Phase 19 — when 'radial', skip trunk-and-branches and render a bezier. */
+  /** When 'radial', skip trunk-and-branches and render a bezier. */
   layoutMode?: 'top-down' | 'radial'
 }
 
@@ -131,7 +131,7 @@ export const DependencyEdge = memo(function DependencyEdge({
 }: EdgeProps) {
   const edgeData = data as DependencyEdgeData | undefined
   const isPrimary = edgeData?.isPrimary !== false
-  // Phase 19 — in radial Atlas, the trunk-and-branches optimisation
+  // In radial Atlas, the trunk-and-branches optimisation
   // (leftmost / middle / rightmost X-sort) doesn't apply. Suppressing the
   // trunk flags here lets the regular primary-edge bezier branch render.
   const isRadial = edgeData?.layoutMode === 'radial'

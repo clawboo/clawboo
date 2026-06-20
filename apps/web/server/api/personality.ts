@@ -4,37 +4,26 @@ import { eq } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
 
 // ─── Storage format ──────────────────────────────────────────────────────────
-// The personalityConfig column stores JSON. Two formats are supported:
-//   Legacy (v1): { verbosity: 50, humor: 50, ... }          — slider values at top level
-//   Current (v2): { values: {...}, customText: "..." | null } — wrapper with optional custom text
-//
-// The GET handler normalizes legacy format to v2 on read. The POST handler
-// always writes v2 format.
+// The personalityConfig column stores JSON as a `{ values, customText }` wrapper:
+//   { values: { verbosity: 50, humor: 50, ... }, customText: "..." | null }
+// The POST handler writes this shape; the GET handler reads it.
 
 interface StoredConfig {
   values: Record<string, number>
   customText: string | null
 }
 
-/** Parse stored JSON, handling both legacy and current formats. */
-function parseStoredConfig(raw: string): StoredConfig | null {
+/** Parse the stored JSON wrapper; null on a corrupt / unexpected blob. */
+export function parseStoredConfig(raw: string): StoredConfig | null {
   try {
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return null
-
-    // Current format: has a `values` key that is an object
     if (parsed.values && typeof parsed.values === 'object' && !Array.isArray(parsed.values)) {
       return {
         values: parsed.values as Record<string, number>,
         customText: typeof parsed.customText === 'string' ? parsed.customText : null,
       }
     }
-
-    // Legacy format: slider keys at top level (verbosity, humor, etc.)
-    if (typeof parsed.verbosity === 'number') {
-      return { values: parsed as Record<string, number>, customText: null }
-    }
-
     return null
   } catch {
     return null

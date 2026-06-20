@@ -62,21 +62,28 @@ export interface SkillNodeData extends Record<string, unknown> {
    * visible leadership signal. `SkillNode` overrides its color + icon
    * and hides the Install button when this is set (the skill is bound
    * to Boo Zero — non-transferrable). Synthesized in `useGraphData.ts`
-   * for every Boo with `BooNodeData.isUniversalLeader === true`. Not
-   * present in TOOLS.md.
+   * for every Boo with `BooNodeData.isUniversalLeader === true`. Not part
+   * of the capability inventory.
    */
   isLeadership?: boolean
+  /**
+   * Server-evaluated capability availability (the reused availability-as-data
+   * expression). `false` → the node renders GREYED (opacity + grayscale), matching
+   * the dashboard + the MCPToolsSection treatment. Defaults to available.
+   */
+  available?: boolean
 }
 
 export interface ResourceNodeData extends Record<string, unknown> {
   resourceId: string
   name: string
-  serviceIcon: string
   agentIds: string[]
   /**
    * Same semantics as `SkillNodeData.isVisible`. See note above.
    */
   isVisible?: boolean
+  /** Capability availability → greyed when false (see SkillNodeData.available). */
+  available?: boolean
 }
 
 // ─── Team-root node ──────────────────────────────────────────────────────────
@@ -109,19 +116,6 @@ export type GraphNode = BooNode | SkillNode | ResourceNode | TeamRootNode
 export type GraphEdge = Edge<Record<string, unknown>>
 
 // ─── Parser output types ──────────────────────────────────────────────────────
-
-export interface ParsedSkill {
-  id: string
-  name: string
-  category: SkillCategory
-  description: string | null
-}
-
-export interface ParsedResource {
-  id: string
-  name: string
-  serviceIcon: string
-}
 
 export interface ParsedBinding {
   targetAgentName: string

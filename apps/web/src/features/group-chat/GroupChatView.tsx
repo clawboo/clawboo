@@ -17,9 +17,9 @@
 // split mounts, so the gate→split swap has no blank frame to cover anyway.
 //
 // Team orchestration (delegation routing + context relay) is ALWAYS on — it's
-// the whole point of a team chat. There's no UI toggle; the
-// `useTeamOrchestration` hook in `GroupChatPanel` is gated only by the
-// connection status (so it stays quiet when the Gateway is down).
+// the whole point of a team chat. There's no UI toggle; the orchestration hook
+// in `GroupChatPanel` is gated only by the connection status (so it stays quiet
+// when the Gateway is down).
 
 import { useEffect, useMemo, useRef } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'

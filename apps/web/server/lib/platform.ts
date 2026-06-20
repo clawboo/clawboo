@@ -22,6 +22,9 @@
 //   manual `npm install -g openclaw@...`.
 
 import { execFileSync } from 'node:child_process'
+import { accessSync, constants, existsSync, readdirSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 export const isWindows = process.platform === 'win32'
 
@@ -54,6 +57,68 @@ export function findExecutable(name: string): string | null {
   } catch {
     return null
   }
+}
+
+function isExecutableFile(p: string): boolean {
+  try {
+    accessSync(p, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Well-known dirs where CLIs installed via `pip install --user` / `pipx` land
+ * but which a GUI-launched or `npx`-spawned server process frequently does NOT
+ * have on its PATH. Notably Hermes (`hermes-agent`) installs to the Python
+ * user-site bin — `~/Library/Python/<X.Y>/bin` on macOS, `~/.local/bin` on
+ * Linux, `%APPDATA%\Python\Python<XY>\Scripts` on Windows.
+ */
+export function extraBinDirs(): string[] {
+  const home = os.homedir()
+  const dirs = [path.join(home, '.local', 'bin')]
+  try {
+    if (process.platform === 'darwin') {
+      const pyRoot = path.join(home, 'Library', 'Python')
+      for (const v of readdirSync(pyRoot)) dirs.push(path.join(pyRoot, v, 'bin'))
+    } else if (isWindows) {
+      const appdata = process.env['APPDATA']
+      if (appdata) {
+        const pyRoot = path.join(appdata, 'Python')
+        for (const v of readdirSync(pyRoot)) dirs.push(path.join(pyRoot, v, 'Scripts'))
+      }
+    }
+  } catch {
+    /* the Python root may not exist — the curated dirs above still apply */
+  }
+  return dirs
+}
+
+/**
+ * Resolve a CLI to an absolute path: PATH first (via `findExecutable`), then the
+ * `extraBinDirs()` user-install locations. Returns the absolute path or `null`.
+ *
+ * This is what makes Hermes discoverable: its `hermes` binary lives in the
+ * Python user-site bin, off the dashboard server's PATH, so a bare PATH probe
+ * (and a bare `spawn('hermes')`) both miss it. Health checks AND the spawn
+ * `command` use the resolved absolute path instead. `extraDirs` is injectable
+ * for tests.
+ */
+export function resolveRuntimeBin(
+  name: string,
+  extraDirs: string[] = extraBinDirs(),
+): string | null {
+  const onPath = findExecutable(name)
+  if (onPath) return onPath
+  const candidates = isWindows ? [`${name}.exe`, `${name}.cmd`, name] : [name]
+  for (const dir of extraDirs) {
+    for (const file of candidates) {
+      const full = path.join(dir, file)
+      if (existsSync(full) && isExecutableFile(full)) return full
+    }
+  }
+  return null
 }
 
 /**

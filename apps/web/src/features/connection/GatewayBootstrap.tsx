@@ -28,11 +28,24 @@ import {
   resolveProxyGatewayUrl,
 } from '@clawboo/gateway-client'
 import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
+import { pushAgentSync, refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayConnectScreen } from './GatewayConnectScreen'
-import { OnboardingWizard, type WizardStep } from '@/features/onboarding/OnboardingWizard'
+import {
+  OnboardingWizard,
+  type WizardStep,
+  type OnboardingMode,
+  type SelectedRuntime,
+} from '@/features/onboarding/OnboardingWizard'
 import { BooTip } from '@/features/onboarding/BooTip'
-import { isWizardActive, markWizardActive, clearWizardActive } from '@/lib/onboardingProgress'
+import {
+  isWizardActive,
+  markWizardActive,
+  clearWizardActive,
+  getWizardRuntime,
+  decideOnboardingView,
+  type WizardRuntime,
+} from '@/lib/onboardingProgress'
 import { useGatewayEvents } from './useGatewayEvents'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
@@ -61,6 +74,71 @@ function markOnboarded(): void {
   if (typeof window !== 'undefined') {
     localStorage.setItem(ONBOARDED_KEY, '1')
   }
+}
+
+/** True when the SQLite registry holds at least one clawboo-native agent — the
+ *  signal that the user set up native (Gateway-free) and should land in the
+ *  dashboard on reload rather than re-running the wizard. Best-effort (REST). */
+async function hasNativeAgents(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/agents')
+    if (!res.ok) return false
+    const body = (await res.json()) as {
+      agents?: { id?: string; runtime?: string; sourceId?: string }[]
+    }
+    return (body.agents ?? []).some(
+      (a) =>
+        a.runtime === 'clawboo-native' ||
+        a.sourceId === 'clawboo-native' ||
+        (a.id ?? '').startsWith('native-'),
+    )
+  } catch {
+    return false
+  }
+}
+
+/** True when a non-OpenClaw runtime (Claude Code / Codex / Hermes / native) has a
+ *  VAULT-stored credential — the durable on-disk proof that a user DELIBERATELY
+ *  connected during the coding-agent onboarding path (which seeds no native agent and
+ *  no team). It reads `hasVaultCredential`, NOT `hasCredential`: the latter also counts
+ *  an ambient `process.env` shell var, so a bare exported provider key + a stale
+ *  `onboarded` flag would otherwise skip the wizard into native mode on a fresh box.
+ *  `/api/runtimes` only lists non-OpenClaw runtimes, so OpenClaw is excluded by
+ *  construction. Best-effort (REST). */
+async function hasConnectedRuntime(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/runtimes')
+    if (!res.ok) return false
+    const body = (await res.json()) as { runtimes?: { hasVaultCredential?: boolean }[] }
+    return (body.runtimes ?? []).some((r) => r.hasVaultCredential === true)
+  } catch {
+    return false
+  }
+}
+
+/** True when at least one team exists — the robust "returning user" signal
+ *  (onboarding always deploys a team, so a completed user has ≥1). Used to
+ *  rescue a returning user from a STALE `wizard.active` marker that a transient
+ *  not-configured reading may have left set. */
+async function hasAnyTeam(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/teams')
+    if (!res.ok) return false
+    const body = (await res.json()) as { teams?: unknown[] } | unknown[]
+    const teams = Array.isArray(body) ? body : (body.teams ?? [])
+    return teams.length > 0
+  } catch {
+    return false
+  }
+}
+
+/** The wizard step a mid-onboarding refresh resumes at, given the runtime the
+ *  user had picked (persisted in localStorage). */
+function resumeStepForRuntime(rt: WizardRuntime | null): WizardStep {
+  if (rt === 'openclaw') return 'detect'
+  if (rt === 'clawboo-native') return 'configureNative'
+  if (rt === 'claude-code' || rt === 'hermes' || rt === 'codex') return 'connectAgents'
+  return 'chooseRuntime'
 }
 
 /**
@@ -174,6 +252,59 @@ function preloadApprovalHistory(): void {
     .catch(() => {})
 }
 
+/**
+ * Enter the dashboard in NATIVE MODE — no OpenClaw Gateway. The native runtime
+ * runs server-side and the registry-of-record is SQLite, so we mark the app
+ * "connected" with a null client and hydrate everything over REST. Used by both
+ * the native onboarding completion AND the reload path (a returning native user
+ * must land in the dashboard, not the wizard / connect screen).
+ *
+ * Resolves `{ ok }`: `ok: false` means the registry hydrate failed (a transient
+ * 5xx) and the app was NOT flipped to 'connected' — the caller surfaces a retry.
+ * Exported for the unit test that drives the real `/api/agents` failure path.
+ */
+export async function enterNativeMode(teamId: string | null): Promise<{ ok: boolean }> {
+  markOnboarded()
+  clearWizardActive()
+
+  const conn = useConnectionStore.getState()
+  // Drop any stale Gateway client; native has none.
+  const prev = conn.client
+  if (prev) prev.disconnect()
+  conn.setClient(null)
+  conn.setGatewayUrl('')
+
+  // Guarded REST hydrate BEFORE flipping to 'connected'. SQLite is the registry
+  // of record so this normally succeeds, but a transient 5xx (the server
+  // mid-restart) must not strand the user in a broken 'connected'-but-empty
+  // state or escape as an unhandled rejection — `listAgents` throws on non-2xx.
+  // We surface a retry instead (see the `nativeError` overlay).
+  let ok = true
+  try {
+    await refreshFleetFromRegistry()
+  } catch {
+    ok = false
+  }
+  await hydrateTeams() // already best-effort (swallows)
+  preloadApprovalHistory()
+
+  if (!ok) {
+    conn.setStatus('error')
+    return { ok: false }
+  }
+  conn.setStatus('connected')
+
+  // Land in the seeded team's group chat when we have one.
+  if (teamId) {
+    const exists = useTeamStore.getState().teams.some((t) => t.id === teamId)
+    if (exists) {
+      useTeamStore.getState().selectTeam(teamId)
+      useViewStore.getState().openGroupChat(teamId)
+    }
+  }
+  return { ok: true }
+}
+
 // ─── GatewayBootstrap ─────────────────────────────────────────────────────────
 
 export function GatewayBootstrap() {
@@ -186,9 +317,16 @@ export function GatewayBootstrap() {
 
   // null = not yet determined (avoids SSR/client localStorage mismatch)
   const [showWizard, setShowWizard] = useState<boolean | null>(null)
-  // Step the wizard re-enters at. 'welcome' for a fresh run; 'detect' when
+  // Native-mode hydration error (client-free). Declared before the reload
+  // effect that sets it. Distinct from `fleetError`, whose Retry re-runs
+  // `hydrateFleet(client)` — a no-op for native's null client. Set when
+  // `enterNativeMode` resolves `{ ok: false }`.
+  const [nativeError, setNativeError] = useState<string | null>(null)
+  // Step the wizard re-enters at. 'welcome' for a fresh run; a later step when
   // resuming a mid-onboarding refresh (see the resume branch below).
   const [wizardInitialStep, setWizardInitialStep] = useState<WizardStep>('welcome')
+  // Runtime the user had picked before a refresh (drives resume direction).
+  const [wizardInitialRuntime, setWizardInitialRuntime] = useState<SelectedRuntime | null>(null)
 
   useEffect(() => {
     // ALWAYS verify system state. The previous "fast path" trusted the
@@ -207,47 +345,90 @@ export function GatewayBootstrap() {
     // wizard so the user can re-install + reconfigure.
     void (async () => {
       const onboarded = typeof window !== 'undefined' && localStorage.getItem(ONBOARDED_KEY) === '1'
+      const wizardActive = isWizardActive()
 
-      // RESUME a mid-onboarding refresh. If the user started the wizard but
-      // never completed it (active marker set, not yet onboarded), re-enter
-      // the wizard rather than fast-pathing to the dashboard — even if
-      // OpenClaw is now configured. Without this, refreshing after the
-      // configure / start-gateway steps (when OpenClaw becomes 'configured')
-      // would skip the team-pick + deploy steps and dump the user on an empty
-      // dashboard. We resume at 'detect', which re-validates the environment
-      // and auto-advances to the team step when everything's already green.
-      if (isWizardActive() && !onboarded) {
-        markWizardActive() // idempotent — keep the marker through the resume
-        setWizardInitialStep('detect')
-        setShowWizard(true)
-        return
-      }
-
+      // On-disk system state is the source of truth, so fetch it FIRST. A
+      // TRANSIENT failure (e.g. the API mid-restart, a slow cold start) must NOT
+      // be mistaken for "OpenClaw not configured" — that path used to clear
+      // `onboarded` + arm `wizard.active`, and a fully-configured returning user
+      // then got trapped in the wizard forever. `info === null` ⇒ transient.
+      let info: SystemInfo | null = null
       try {
         const resp = await fetch('/api/system/status')
-        if (resp.ok) {
-          const info = (await resp.json()) as SystemInfo
-          const configured =
-            info.openclaw.installed && info.openclaw.configExists && info.openclaw.envExists
-          if (configured) {
-            markOnboarded()
-            clearWizardActive() // returning user — no wizard run in flight
-            setShowWizard(false)
-            return
-          }
-        }
+        if (resp.ok) info = (await resp.json()) as SystemInfo
       } catch {
-        // Status check failed — fall through to wizard as the safe default.
+        // Transient — `info` stays null; the decision preserves existing flags.
       }
-      // System not configured (or status fetch failed). If we previously
-      // marked the user onboarded, the flag is now stale — clear it so a
-      // future successful onboarding can re-set it cleanly.
-      if (typeof window !== 'undefined') localStorage.removeItem(ONBOARDED_KEY)
-      // Entering a fresh wizard run — mark it active so a mid-flow refresh
-      // resumes here instead of fast-pathing to the dashboard.
-      markWizardActive()
+      const statusKnown = info !== null
+      const configured =
+        !!info && info.openclaw.installed && info.openclaw.configExists && info.openclaw.envExists
+
+      // Resolve the remaining inputs only where they matter (one extra GET, not
+      // two): teams disambiguate a returning user from a genuine mid-onboarding
+      // run; a native agent marks a returning Gateway-free user.
+      const hasTeam = configured ? await hasAnyTeam() : false
+      const hasNative = statusKnown && !configured ? await hasNativeAgents() : false
+      // Only the "maybe-completed-coding-agent" case needs this extra GET: a
+      // user who finished the wizard (`onboarded`) with no OpenClaw and no
+      // native agent. A connected non-OpenClaw runtime credential confirms it.
+      const hasConnected =
+        onboarded && statusKnown && !configured && !hasNative ? await hasConnectedRuntime() : false
+
+      const resumeWizard = (): void => {
+        markWizardActive() // idempotent — keep the marker through the resume
+        const runtime = getWizardRuntime()
+        setWizardInitialRuntime(runtime)
+        setWizardInitialStep(resumeStepForRuntime(runtime))
+        setShowWizard(true)
+      }
+
+      switch (
+        decideOnboardingView({
+          onboarded,
+          configured,
+          statusKnown,
+          wizardActive,
+          hasTeam,
+          hasNative,
+          hasConnectedRuntime: hasConnected,
+        })
+      ) {
+        case 'dashboard':
+          markOnboarded()
+          clearWizardActive() // returning user — no wizard run in flight
+          setShowWizard(false)
+          return
+        case 'dashboard-transient':
+          // Returning user + transient status failure — preserve flags; the
+          // auto-connect effect / Gateway-offline overlay handles reconnection.
+          setShowWizard(false)
+          return
+        case 'native': {
+          const r = await enterNativeMode(null)
+          setShowWizard(false)
+          if (!r.ok) setNativeError('Could not load your workspace. The server may be restarting.')
+          return
+        }
+        case 'wizard-fresh':
+          // Definitively not configured — clear the stale flag + arm a fresh run.
+          if (typeof window !== 'undefined') localStorage.removeItem(ONBOARDED_KEY)
+          markWizardActive()
+          setShowWizard(true)
+          return
+        case 'wizard-resume':
+          resumeWizard()
+          return
+        case 'wizard-transient':
+          // Transient + nothing known — show the wizard WITHOUT arming the
+          // marker, so the next good load re-decides cleanly.
+          setShowWizard(true)
+          return
+      }
+    })().catch(() => {
+      // Defense-in-depth: the branches above are individually guarded, so a
+      // throw here is unexpected — never leave it as an unhandled rejection.
       setShowWizard(true)
-    })()
+    })
   }, [])
 
   // Post-onboarding Boo tip (only for first-time flow)
@@ -274,6 +455,11 @@ export function GatewayBootstrap() {
     async (liveClient: GatewayClient): Promise<number> => {
       setFleetError(null)
       try {
+        // Browser-fallback sync driver: this is the ONE intentional direct
+        // Gateway agent read left in the SPA. The registry-of-record is SQLite
+        // (served by /api/agents), but on connect the browser warms it from its
+        // own (proxy-approved) Gateway connection so a fresh install hydrates
+        // even before the server's own connection syncs. See pushAgentSync below.
         const result = await liveClient.agents.list()
         const mainKey = result.mainKey?.trim() || 'main'
         // Preserve existing teamId assignments — Gateway doesn't know about teams
@@ -355,7 +541,6 @@ export function GatewayBootstrap() {
             // authoritative anchor regardless of whether the sync sticks.
             // Fire-and-forget so a slow Gateway doesn't delay fleet hydration.
             void syncBooZeroSoulIdentity({
-              client: liveClient,
               agentId: booZeroId,
               displayName: override,
             })
@@ -364,17 +549,23 @@ export function GatewayBootstrap() {
 
         hydrateAgents(mapped)
 
-        // One-shot ghost sweep. Removes local SQLite agent rows for agents
-        // no longer in the Gateway — leftovers from older delete paths that
-        // didn't clean up local state. Skipped when the Gateway returned
-        // zero agents (the server endpoint guards this too, but skipping
-        // here avoids the round-trip + the noisy 400 response).
-        if (mapped.length > 0) {
-          fetch('/api/agents/cleanup-ghosts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ liveAgentIds: mapped.map((a) => a.id) }),
-          }).catch(() => {})
+        // Browser-fallback sync: push the freshly-fetched Gateway list to the
+        // server so SQLite (the registry-of-record) stays warm even if the
+        // server's OWN Gateway connection is degraded (e.g. NOT_PAIRED on a
+        // fresh install while the browser's proxy connection is approved). The
+        // server upserts Gateway-owned columns + archives absent agents, so this
+        // also subsumes the old `cleanup-ghosts` sweep.
+        if (result.agents.length > 0) {
+          void pushAgentSync({
+            defaultId: result.defaultId ?? '',
+            mainKey,
+            scope: result.scope ?? '',
+            agents: result.agents as Array<{
+              id: string
+              name?: string
+              identity?: Record<string, unknown>
+            }>,
+          })
         }
 
         return result.agents.length
@@ -413,6 +604,14 @@ export function GatewayBootstrap() {
     if (showWizard !== false) return
 
     const tryAutoConnect = async () => {
+      // Native mode (or any path that already connected) needs no Gateway — the
+      // reload native branch sets status='connected' with a null client.
+      if (useConnectionStore.getState().status === 'connected') return
+      // A native-mode hydrate FAILURE sets status='error' (+ surfaces the nativeError
+      // retry overlay). Don't kick off a pointless Gateway auto-connect round-trip,
+      // which would also flash the 'Reconnecting…' spinner on top of the error — the
+      // retry overlay owns recovery from here.
+      if (useConnectionStore.getState().status === 'error') return
       setAutoConnecting(true)
       try {
         // 1. Check system status first
@@ -442,18 +641,19 @@ export function GatewayBootstrap() {
         const resp = await fetch('/api/settings')
         if (!resp.ok) return
 
-        const data = (await resp.json()) as { gatewayUrl?: string; gatewayToken?: string }
+        const data = (await resp.json()) as { gatewayUrl?: string }
         if (!data.gatewayUrl?.trim()) return
 
         // Disconnect old client before replacing to avoid leaked WS listeners
         const prev = useConnectionStore.getState().client
         if (prev) prev.disconnect()
 
+        // No token here: the same-origin proxy injects the upstream token server-side,
+        // so the browser never holds it (GET /api/settings returns only `hasToken`).
         const autoClient = new GatewayClient()
         await autoClient.connect(resolveProxyGatewayUrl(), {
           clientName: 'openclaw-control-ui',
           clientVersion: '0.1.0',
-          token: data.gatewayToken?.trim() || undefined,
           authScopeKey: data.gatewayUrl.trim(),
           disableDeviceAuth: true,
         })
@@ -505,7 +705,7 @@ export function GatewayBootstrap() {
           try {
             const resp = await fetch('/api/settings')
             const data = resp.ok
-              ? ((await resp.json()) as { gatewayUrl?: string; gatewayToken?: string })
+              ? ((await resp.json()) as { gatewayUrl?: string })
               : { gatewayUrl: 'ws://localhost:18789' }
             const url = data.gatewayUrl?.trim() || 'ws://localhost:18789'
 
@@ -556,7 +756,22 @@ export function GatewayBootstrap() {
   // ── First-time onboarding complete handler ─────────────────────────────────
 
   const handleOnboardingComplete = useCallback(
-    async (newClient: GatewayClient, url: string, teamId: string | null) => {
+    async (
+      newClient: GatewayClient | null,
+      url: string | null,
+      teamId: string | null,
+      mode: OnboardingMode,
+    ) => {
+      // Native path — no Gateway. Enter native mode (guarded REST hydrate, then
+      // status=connected, null client) and land in the seeded team.
+      if (mode === 'native' || !newClient) {
+        const r = await enterNativeMode(teamId)
+        setShowWizard(false)
+        if (r.ok) setShowBooTip(true)
+        else setNativeError('Could not load your workspace. The server may be restarting.')
+        return
+      }
+
       markOnboarded()
       // Wizard run finished — drop the in-progress marker so future refreshes
       // take the returning-user fast path instead of resuming the wizard.
@@ -614,11 +829,13 @@ export function GatewayBootstrap() {
             key="onboarding"
             onComplete={handleOnboardingComplete}
             initialStep={wizardInitialStep}
+            initialRuntime={wizardInitialRuntime}
           />
         )}
 
-        {/* Auto-connecting spinner — shown while we attempt a silent reconnect */}
-        {!isConnected && showWizard === false && autoConnecting && (
+        {/* Auto-connecting spinner — shown while we attempt a silent reconnect.
+            Suppressed during a native-mode error so it never overlays the retry. */}
+        {!isConnected && showWizard === false && autoConnecting && !nativeError && (
           <motion.div
             key="auto-connecting"
             initial={{ opacity: 0 }}
@@ -719,9 +936,11 @@ export function GatewayBootstrap() {
         )}
 
         {/* Returning-user quick reconnect modal — only shown when auto-connect is not in progress */}
-        {!isConnected && showWizard === false && !autoConnecting && !gatewayOffline && (
-          <GatewayConnectScreen key="reconnect" onConnected={handleConnected} />
-        )}
+        {!isConnected &&
+          showWizard === false &&
+          !autoConnecting &&
+          !gatewayOffline &&
+          !nativeError && <GatewayConnectScreen key="reconnect" onConnected={handleConnected} />}
       </AnimatePresence>
 
       {/* Fleet hydration error overlay */}
@@ -759,6 +978,38 @@ export function GatewayBootstrap() {
                   Reconnect
                 </button>
               </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Native-mode hydration error overlay — client-free Retry (re-runs
+          `enterNativeMode`), distinct from the Gateway `fleetError` overlay. */}
+      <AnimatePresence>
+        {nativeError && (
+          <motion.div
+            key="native-error"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm"
+            data-testid="native-error"
+          >
+            <div className="surface-overlay-tier w-full max-w-[360px] rounded-2xl p-8 text-center">
+              <p className="mb-4 text-[14px] font-medium text-destructive">{nativeError}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setNativeError(null)
+                  void enterNativeMode(null).then((r) => {
+                    if (!r.ok)
+                      setNativeError('Could not load your workspace. The server may be restarting.')
+                  })
+                }}
+                className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-primary-foreground"
+              >
+                Retry
+              </button>
             </div>
           </motion.div>
         )}
