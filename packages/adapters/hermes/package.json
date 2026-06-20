@@ -1,0 +1,48 @@
+{
+  "name": "@clawboo/adapter-hermes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hermes RuntimeAdapter — drives the Hermes CLI as a worker on clawboo's board, mapped to the normalized executor event stream",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/adapters/hermes"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/adapters/hermes",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "executor",
+    "adapter",
+    "hermes"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clawboo/executor": "workspace:*"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
