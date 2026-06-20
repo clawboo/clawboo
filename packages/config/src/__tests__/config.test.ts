@@ -1,5 +1,7 @@
+import path from 'node:path'
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { resolveStateDir, loadSettings, resolveSettingsPath } from '../index'
+import { resolveStateDir, loadSettings, resolveSettingsPath, resolveClawbooDir } from '../index'
 
 // Mock node:fs module
 vi.mock('node:fs', () => ({
@@ -54,6 +56,28 @@ describe('resolveSettingsPath', () => {
     const result = resolveSettingsPath({})
     expect(result).toContain('clawboo')
     expect(result).toContain('settings.json')
+  })
+})
+
+describe('resolveClawbooDir (the CLI now uses this exact resolver)', () => {
+  it('path.resolve()s a RELATIVE CLAWBOO_HOME to an absolute path (not verbatim)', () => {
+    const result = resolveClawbooDir({ CLAWBOO_HOME: 'relative/clawboo-home' })
+    // The CLI's old inline mirror returned a relative override verbatim — the
+    // divergence this aligns. The real resolver always yields an absolute path.
+    expect(path.isAbsolute(result)).toBe(true)
+    expect(result).toBe(path.resolve('relative/clawboo-home'))
+  })
+
+  it('defaults to a <home>/.clawboo absolute path when CLAWBOO_HOME is unset', () => {
+    const result = resolveClawbooDir({})
+    expect(path.isAbsolute(result)).toBe(true)
+    expect(result.endsWith(path.join('', '.clawboo')) || result.includes('.clawboo')).toBe(true)
+  })
+
+  it('expands a ~ override to an absolute path', () => {
+    const result = resolveClawbooDir({ CLAWBOO_HOME: '~/sub' })
+    expect(path.isAbsolute(result)).toBe(true)
+    expect(result.endsWith('sub')).toBe(true)
   })
 })
 

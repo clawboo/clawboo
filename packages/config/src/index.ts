@@ -6,7 +6,7 @@ import path from 'node:path'
 
 const NEW_STATE_DIRNAME = '.openclaw'
 const LEGACY_STATE_DIRNAMES = ['.clawdbot', '.moltbot']
-const CLAWBOO_SETTINGS_FILENAME = 'clawboo/settings.json'
+const CLAWBOO_DIRNAME = '.clawboo'
 const OPENCLAW_CONFIG_FILENAME = 'openclaw.json'
 const DEFAULT_GATEWAY_URL = 'ws://localhost:18789'
 
@@ -16,6 +16,8 @@ export interface ClawbooSettings {
   gatewayUrl: string
   gatewayToken: string
   studioAccessToken?: string
+  /** Epoch ms the user dismissed the first-run nudge (undefined = not dismissed). */
+  firstRunDismissedAt?: number
 }
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
@@ -71,8 +73,22 @@ export function resolveStateDir(env: NodeJS.ProcessEnv = process.env): string {
   return newDir
 }
 
+/**
+ * clawboo's OWN state directory — distinct from OpenClaw's (`resolveStateDir`).
+ * clawboo owns everything under this dir (the SQLite DB, settings, the secrets
+ * vault, worktrees, the proxy device identity, the api-port file, the managed
+ * gateway PID). OpenClaw's dir is only ever READ for interop (gateway config +
+ * provider-key fallback) — never written by clawboo. `CLAWBOO_HOME` overrides
+ * the location (e.g. test sandboxes); otherwise it defaults to `~/.clawboo`.
+ */
+export function resolveClawbooDir(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env['CLAWBOO_HOME']?.trim()
+  if (override) return resolveUserPath(override)
+  return path.join(resolveDefaultHomeDir(), CLAWBOO_DIRNAME)
+}
+
 export function resolveSettingsPath(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(resolveStateDir(env), CLAWBOO_SETTINGS_FILENAME)
+  return path.join(resolveClawbooDir(env), 'settings.json')
 }
 
 // ─── File helpers ─────────────────────────────────────────────────────────────
@@ -167,6 +183,20 @@ const readOpenclawGatewayDefaults = (
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/**
+ * Read a single variable from OpenClaw's `.env` (`<stateDir>/.env`). This is an
+ * INTEROP read only — clawboo never writes there. Used as the lowest-priority
+ * fallback when resolving a runtime provider key, so an existing OpenClaw
+ * provider setup (e.g. `ANTHROPIC_API_KEY`) is reused automatically. Returns the
+ * value or null. Single source for `.env` parsing — do not add a second reader.
+ */
+export function readOpenclawEnvVar(
+  varName: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  return readDotEnvVar(path.join(resolveStateDir(env), '.env'), varName)
+}
+
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): ClawbooSettings {
   const settingsPath = resolveSettingsPath(env)
   const parsed = readJsonFile(settingsPath)
@@ -178,6 +208,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): ClawbooSetti
     typeof parsed?.['studioAccessToken'] === 'string'
       ? parsed['studioAccessToken'].trim()
       : undefined
+  const firstRunDismissedAt =
+    typeof parsed?.['firstRunDismissedAt'] === 'number' ? parsed['firstRunDismissedAt'] : undefined
 
   // Resolve template tokens (e.g. "${GATEWAY_AUTH_TOKEN}") that may have
   // leaked into settings.json from openclaw.json's template syntax.
@@ -192,6 +224,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): ClawbooSetti
         gatewayUrl: url || defaults.url,
         gatewayToken: defaults.token,
         studioAccessToken: studioAccessToken || undefined,
+        ...(firstRunDismissedAt !== undefined ? { firstRunDismissedAt } : {}),
       }
     }
   }
@@ -200,6 +233,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): ClawbooSetti
     gatewayUrl: url || DEFAULT_GATEWAY_URL,
     gatewayToken: token,
     studioAccessToken: studioAccessToken || undefined,
+    ...(firstRunDismissedAt !== undefined ? { firstRunDismissedAt } : {}),
   }
 }
 
@@ -229,6 +263,10 @@ export function saveSettings(
 
   if (updates.studioAccessToken !== undefined) {
     next['studioAccessToken'] = updates.studioAccessToken
+  }
+
+  if (updates.firstRunDismissedAt !== undefined) {
+    next['firstRunDismissedAt'] = updates.firstRunDismissedAt
   }
 
   fs.writeFileSync(settingsPath, JSON.stringify(next, null, 2), 'utf8')
