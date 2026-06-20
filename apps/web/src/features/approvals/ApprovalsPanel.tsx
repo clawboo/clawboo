@@ -5,6 +5,7 @@ import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useApprovalActions } from './useApprovalActions'
+import { MCPToolsSection } from './MCPToolsSection'
 import type { ApprovalRequest } from '@/stores/approvals'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 
@@ -380,6 +381,9 @@ export function ApprovalsPanel() {
             approvals.map((approval) => <ApprovalCard key={approval.id} approval={approval} />)
           )}
         </AnimatePresence>
+
+        {/* MCP tool governance — availability + tool-call approvals. */}
+        <MCPToolsSection />
       </div>
     </div>
   )
