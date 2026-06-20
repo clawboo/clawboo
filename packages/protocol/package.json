@@ -1,9 +1,7 @@
 {
   "name": "@clawboo/protocol",
   "version": "0.1.0",
-  "publishConfig": {
-    "access": "public"
-  },
+  "private": true,
   "description": "Message parser, transcript types, and agent file definitions for Clawboo",
   "license": "MIT",
   "repository": {
