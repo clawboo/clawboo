@@ -1,6 +1,9 @@
 node_modules
 dist
 
+# node-gyp / better-sqlite3 native build output (not a vendored artifact).
+packages/db/build/
+
 .turbo
 .env
 .env.local
@@ -13,3 +16,7 @@ test-results
 playwright-report
 coverage
 .DS_Store
+
+# Work-in-progress documentation site (not ready to publish; keep README screenshot assets)
+/docs/*
+!/docs/screenshots/
