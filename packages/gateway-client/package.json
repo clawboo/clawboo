@@ -1,9 +1,7 @@
 {
   "name": "@clawboo/gateway-client",
   "version": "0.1.1",
-  "publishConfig": {
-    "access": "public"
-  },
+  "private": true,
   "description": "WebSocket client for the OpenClaw Gateway with typed RPC and event subscription",
   "license": "MIT",
   "repository": {
