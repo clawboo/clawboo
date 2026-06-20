@@ -1,0 +1,59 @@
+{
+  "name": "@clawboo/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clawboo-hosted MCP servers (Tasks / Memory / Tools) over a shared SQLite substrate — stdio bins + in-process Streamable HTTP",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/mcp",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "mcp",
+    "model-context-protocol",
+    "tasks",
+    "memory",
+    "tools"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "clawboo-mcp-tasks": "dist/bin/tasks.js",
+    "clawboo-mcp-memory": "dist/bin/memory.js",
+    "clawboo-mcp-tools": "dist/bin/tools.js",
+    "clawboo-mcp-teamchat": "dist/bin/teamchat.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clawboo/db": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
