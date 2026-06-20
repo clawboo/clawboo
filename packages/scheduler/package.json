@@ -1,0 +1,49 @@
+{
+  "name": "@clawboo/scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pure scheduling primitives: cron-spec parsing + next-occurrence math (croner), task-template schema, and the ScheduleSource trait + normalized ScheduleRecord + multiplexer (the unified-scheduler seam)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/scheduler"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/scheduler",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "scheduler",
+    "routines",
+    "cron"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "croner": "^10.0.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
