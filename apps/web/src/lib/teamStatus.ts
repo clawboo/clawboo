@@ -6,7 +6,7 @@ import type { AgentState } from '@/stores/fleet'
  * badge shown on individual agent rows so the Group Chat row reads as a peer
  * in the list. Priority: any running > any error > any sleeping > idle.
  *
- * Phase 17 hoisted this from AgentListColumn so the Atlas team-status
+ * Hoisted from AgentListColumn so the Atlas team-status
  * clusters can reuse the exact same priority logic.
  */
 export function aggregateTeamStatus(teamAgents: AgentState[]): AgentStatus {

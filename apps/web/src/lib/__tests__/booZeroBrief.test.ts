@@ -159,7 +159,7 @@ describe('buildGlobalBrief', () => {
     // imperative DO / DO NOT lists instead of first-person responsibilities.
     expect(out).toContain('You are the universal leader')
     expect(out).toContain('## Required behavior')
-    // Phase 2 (cascade-fix): the required-behavior section now embeds the
+    // Cascade-fix: the required-behavior section now embeds the
     // canonical rules block from `lib/booZeroRules.ts` so brief and per-
     // turn injection share one source of truth.
     expect(out).toContain('[Your Rules — authoritative]')

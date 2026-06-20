@@ -18,7 +18,7 @@ export interface ActivityVerbInput {
 /**
  * Return a short verb describing what the agent is doing **right now**, in
  * place of the generic "Running" / "Idle" label. Pure function — no Zustand
- * subscriptions, no React. Phase 18.
+ * subscriptions, no React.
  *
  * Mappings (in priority order):
  *  - `error`                              → "Error"

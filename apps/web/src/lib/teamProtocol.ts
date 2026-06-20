@@ -21,12 +21,6 @@ export type BuildTeamAgentsMdParams = {
   teamInternalLeadName?: string | null
 }
 
-export type BuildTeamWakeMessageParams = {
-  agentName: string
-  teamName: string
-  teammates: TeammateDef[]
-}
-
 export type BuildClawbooHelpDocParams = {
   agentName: string
   teamName: string
@@ -311,8 +305,8 @@ ${rules}
  *
  * **Why this exists**: OpenClaw agents go cold after idle TTL. Before
  * resuming agent-to-agent work, we need a chat.send to wake the session.
- * The OLD wake body (`buildTeamWakeMessage` below) asked agents to
- * introduce themselves AND listed teammates as `@AgentName` — both of
+ * The previous wake body asked agents to introduce themselves AND listed
+ * teammates as `@AgentName` — both of
  * those triggered a cascade of intros and false-positive delegations
  * (the 11-message "Welcome aboard X" flood seen in production — see
  * the "Group Chat Onboarding Gate — Cascade Fix" notes in the internal
@@ -324,11 +318,7 @@ ${rules}
  * context every turn — so even if the LLM ignores the in-message hint,
  * AGENTS.md tells it the same thing.
  *
- * Used by:
- *   - `groupChatSendOperation.wakeTeamAgents` (user-message-time wake)
- *   - `useTeamOrchestration` wake-on-relay path
- *
- * Both call sites converged on this helper to keep behavior consistent.
+ * Used by `groupChatSendOperation.wakeTeamAgents` (user-message-time wake).
  */
 /**
  * The literal token an agent should emit in response to a resume wake-up.
@@ -356,10 +346,9 @@ export const RESUME_ACK_TOKEN = '__resumed__'
 //      Note: bare "NO" is covered by category 1 (the stripped NO_REPLY)
 //      rather than this refusal regex.
 //
-// `shouldDropAssistantTurn` is the single render-time entry point. It's wired
-// into both `chatComponents.groupEntriesToBlocks` (UI render) AND
-// `buildDelegationLinkages` (renderer-only delegation scan) so the same
-// turn-shape never seeds a misattributed delegation either.
+// `shouldDropAssistantTurn` is the single render-time entry point, wired into
+// `chatComponents.groupEntriesToBlocks` (UI render) so broken-shape turns never
+// reach the visible chat.
 
 /**
  * Canonical Clawboo "no substantive contribution" token. We instruct agents
@@ -419,8 +408,7 @@ export function isLikelyRefusal(text: string): boolean {
  * Single render-time gate for dropping broken-shape assistant turns. Returns
  * true if the renderer should skip the entry entirely (control tokens AND
  * short refusal-shape leaks). The merged transcript renderer in
- * `chatComponents.groupEntriesToBlocks` and the delegation source scanner in
- * `buildDelegationLinkages` both call this to keep behavior consistent.
+ * `chatComponents.groupEntriesToBlocks` calls this.
  */
 export function shouldDropAssistantTurn(text: string): boolean {
   return isOpenclawControlToken(text) || isClawbooControlToken(text) || isLikelyRefusal(text)
@@ -441,27 +429,6 @@ Your session is being reactivated as ${agentName} on team "${teamName}". This me
 REQUIRED RESPONSE: Reply with EXACTLY the single token \`${RESUME_ACK_TOKEN}\` and nothing else. No greeting. No introduction. No emoji. No acknowledgement beyond that one word.
 
 The next message you receive will be the actual instruction. Pick up the work then.`
-}
-
-export function buildTeamWakeMessage(params: BuildTeamWakeMessageParams): string {
-  const { agentName, teamName, teammates } = params
-  const list = teammates.map((t) => `- @${t.name} (${t.role})`).join('\n')
-  const exampleTeammate = teammates[0]?.name ?? 'Teammate Name'
-
-  return `You are joining a team collaboration session as ${agentName}.
-
-Team: ${teamName}
-Your teammates:
-${list}
-
-These are REAL agents with their own sessions on this Gateway. Do NOT spawn sub-agents to simulate them.
-
-When you need a teammate to take on a task, emit an explicit delegation block:
-  <delegate to="@${exampleTeammate}">specific self-contained task description</delegate>
-
-You will receive [Team Update] messages when teammates complete work relevant to you.
-
-Please briefly introduce yourself — your name and what you specialize in, in one sentence.`
 }
 
 export function buildTeamContextPreamble(params: BuildTeamContextPreambleParams): string | null {
@@ -559,6 +526,58 @@ blocks. Bare mentions are a best-effort fallback and may not route.
 `
     : ''
 
+  // When THIS agent is the universal leader, its CLAWBOO.md carries the full
+  // leadership protocol — the verbose examples + DO/DON'T list that the thin
+  // per-turn anchor (booZeroRules) points back to under KV-cache discipline.
+  const isUniversalLeader = Boolean(universalLeaderName && agentName === universalLeaderName)
+  const leadershipBlock = isUniversalLeader
+    ? `## Leadership Protocol (you are the universal leader)
+
+You coordinate; you do not do teammate work yourself. \`<delegate>\` is the ONLY
+routing mechanism — never spawn sub-agents or use a built-in task/sub-agent tool.
+
+CORRECT (single delegation with narration):
+> I'll have @Geographer Boo handle the climate piece.
+> <delegate to="@Geographer Boo">Design a volcanic island setting…</delegate>
+
+CORRECT (multiple in one turn — they run in parallel):
+> <delegate to="@Geographer Boo">…</delegate>
+> <delegate to="@Historian Boo">…</delegate>
+
+WRONG (none of these route or render a card):
+- "Let me delegate:---"  (markdown rule, no tag)
+- "@Geographer Boo, please handle it"  (prose-only mention)
+- \`<delegate to="@X">task\`  (missing closing tag)
+- \`<delegate to=@X>task</delegate>\`  (missing quotes)
+
+### \`<plan>\` blocks — 3+ ordered steps
+Emit a \`<plan>\` and Clawboo fires step 1, then auto-advances each step with the
+prior output piped in (you don't re-prompt). On \`[Plan Complete]\`, do final synthesis.
+
+\`\`\`
+<plan>
+  <step to="@Writer Boo">Write the copy first.</step>
+  <step to="@Designer Boo">Design from the copy.</step>
+</plan>
+\`\`\`
+
+### Parallel workstreams — ≥2 \`<delegate>\` in one turn (no \`<plan>\`)
+Clawboo tracks them as a batch. Wait silently for individual \`[Team Update]\`s;
+synthesize only when you receive the \`[Workstreams Complete]\` envelope.
+
+### DO / DON'T
+- DO delegate every non-trivial request via the exact \`<delegate>\` syntax.
+- DO verify external state with tools (read, list, etc.) before claiming it.
+- DON'T emit acknowledgment-only text ("Got it", "Nice") for \`[Team Update]\`s.
+- DON'T claim a teammate "timed out" — say "still waiting on @<name>" and continue.
+- DON'T do a teammate's work yourself, even if no one has replied yet.
+- DON'T greet or re-introduce yourself on resume — pick up where you left off.
+- DON'T write a file a teammate also owns — namespace your filename or let one owner emit it.
+- If you have nothing substantive to add, emit ONLY the token \`__skipped__\` (never a bare "NO"/"SKIP").
+
+`
+    : ''
+
   return `# CLAWBOO — Team Operating Reference
 
 You are **${agentName}**, an agent in team **${teamName}** on Clawboo, a
@@ -566,7 +585,7 @@ multi-agent dashboard built on OpenClaw. This file is the detailed reference
 for how the team works. Read it any time you're unsure — \`cat ~/CLAWBOO.md\`.
 
 ${universalLeaderBlock}
-
+${leadershipBlock}
 ## Workspaces are isolated
 
 Every teammate has their OWN workspace on disk. You CANNOT read their files.
@@ -646,80 +665,77 @@ The user message you're seeing may be wrapped in some structured blocks:
 // ─── Self-documenting [Team Update] envelope ────────────────────────────────
 
 /**
- * Build the header used by `contextRelay.buildRelayMessage` to wrap a
- * teammate's condensed response. The header is intentionally verbose because
- * agents have repeatedly misread \`[Team Update]\` messages as fresh user
- * input and tried to respond directly to them — costing a turn and confusing
- * the chat. The new header explicitly says "not a fresh user message" and
- * tells the recipient to continue their own work.
+ * Terminal outcome of a board task, as reflected back to the leader. `'done'`
+ * (or omitted) is a successful completion; the others are failures the leader
+ * must act on rather than keep waiting for.
  */
-export function buildSelfDocumentingRelayHeader(params: {
-  fromAgentName: string
-  taskContext?: string
-}): string {
-  const { fromAgentName, taskContext } = params
-  let header = `[Team Update] — relayed summary from @${fromAgentName} (not a fresh user message)`
-  if (taskContext) {
-    const ctx = taskContext.length > 80 ? taskContext.slice(0, 80) + '...' : taskContext
-    header += `\n(re: "${ctx}")`
-  }
-  header +=
-    '\nThe teammate finished a delegated task. Continue your own work using this update as context.'
-  return header
+export type TaskUpdateOutcome = 'done' | 'error' | 'aborted' | 'timeout' | 'max_turns'
+
+export interface TaskUpdateItem {
+  /** Resolved assignee name (agent or, later, a human). */
+  by: string
+  /** Task title, for context. */
+  title?: string
+  /** Condensed report-up (success) or the failure reason/detail. */
+  summary: string
+  /** Terminal outcome. Omitted / `'done'` renders as a successful ✓ entry. */
+  outcome?: TaskUpdateOutcome
+}
+
+const TASK_FAILURE_LABEL: Record<Exclude<TaskUpdateOutcome, 'done'>, string> = {
+  error: 'failed with an error',
+  aborted: 'was stopped before finishing',
+  timeout: 'went silent — timed out with no response',
+  max_turns: 'ran out of room before finishing',
+}
+
+function isTaskFailure(outcome?: TaskUpdateOutcome): outcome is Exclude<TaskUpdateOutcome, 'done'> {
+  return outcome != null && outcome !== 'done'
+}
+
+/** The human label for a failed outcome, or null when the task succeeded. */
+function taskFailureLabel(outcome?: TaskUpdateOutcome): string | null {
+  return isTaskFailure(outcome) ? TASK_FAILURE_LABEL[outcome] : null
 }
 
 /**
- * Build a batched `[Team Update]` envelope that combines N teammate progress
- * reports into ONE message. Used by `useTeamOrchestration`'s relay-batching
- * path to coalesce parallel completions destined for the same hub (typically
- * Boo Zero) inside a 3-second debounce window.
+ * Build a `[Task Update]` envelope reflecting terminated BOARD tasks back to the
+ * leader so it can synthesize OR react to a failure (the chat-fused board's
+ * round-trip). The summaries come from durable task rows (the report-up comment /
+ * execution summary / failure reason), not chat scrollback. Deliberately
+ * participant-kind-agnostic — it says "a task finished/failed", never "your
+ * teammate agent", so a human-completed task reflects identically.
  *
- * Why batching matters: without it, 5 teammates finishing in parallel produce
- * 5 separate `chat.send` calls to Boo Zero, each waking a fresh LLM turn,
- * each generating an acknowledgment ("Got it — that's the X layer"). That
- * was the ~576-token redundant-acknowledgment cascade observed in production.
- * One batched envelope ⇒ one Boo Zero turn ⇒ one synthesis (or zero, per the
- * rules block which now explicitly forbids acknowledgment-only responses).
- *
- * Note: each item's body is expected to be already condensed by
- * `contextRelay.condenseSummary` before being passed in. This builder does
- * NOT re-condense.
+ * A FAILED entry (`outcome` other than `'done'`) is the fix for the
+ * "delegating agent left standing" bug: the leader is told a delegate failed or
+ * went silent — with the reason — and instructed to decide what to do next
+ * instead of waiting forever (the anti-blind-retry framing from the
+ * observability literature).
  */
-export function buildBatchedRelayMessage(
-  items: Array<{
-    fromAgentName: string
-    body: string
-    taskContext?: string
-  }>,
-): string {
+export function buildTaskUpdateMessage(items: TaskUpdateItem[]): string {
   if (items.length === 0) return ''
-  if (items.length === 1) {
-    // Single-item case still goes through here when the batch window expires
-    // with only one teammate's update accumulated. Use the self-documenting
-    // single-item header for visual parity with the non-batched path.
-    const item = items[0]!
-    const header = buildSelfDocumentingRelayHeader({
-      fromAgentName: item.fromAgentName,
-      taskContext: item.taskContext,
-    })
-    return `${header}\n---\n${item.body}\n---`
-  }
-
+  const failures = items.filter((i) => isTaskFailure(i.outcome))
+  const plural = items.length === 1 ? 'task' : 'tasks'
   const headerLines = [
-    `[Team Update] — ${items.length} teammates finished delegated tasks (not fresh user messages)`,
-    'The following are progress reports. Continue your own work using these updates as context.',
-    'Synthesize across them ONLY when the user has asked a follow-up that requires combining them, OR when you need a unified takeaway to drive the next round of delegations. Do NOT acknowledge them individually.',
+    `[Task Update] — ${items.length} ${plural} on the board reached a terminal state (not a fresh user message).`,
+    'These are board-sourced results. Synthesize across them ONLY when the user is waiting on a combined answer, or when you need a unified takeaway to drive the next step. Do NOT acknowledge them individually.',
   ]
+  if (failures.length > 0) {
+    headerLines.push(
+      `⚠ ${failures.length} of these did NOT complete (the ⚠ entries below). Decide what to do next — retry, reassign to another teammate, or tell the user it failed and why. Do NOT keep silently waiting on them.`,
+    )
+  }
   const sections = [headerLines.join('\n'), '---']
   for (const item of items) {
-    let header = `@${item.fromAgentName}:`
-    if (item.taskContext) {
-      const ctx =
-        item.taskContext.length > 80 ? item.taskContext.slice(0, 80) + '...' : item.taskContext
-      header += ` (re: "${ctx}")`
+    const failLabel = taskFailureLabel(item.outcome)
+    const failed = failLabel != null
+    let header = failed ? `⚠ ${item.by} — DID NOT COMPLETE (${failLabel})` : `✓ ${item.by}`
+    if (item.title) {
+      const ctx = item.title.length > 80 ? item.title.slice(0, 80) + '...' : item.title
+      header += ` — "${ctx}"`
     }
     sections.push(header)
-    sections.push(item.body)
+    sections.push(item.summary || (failed ? '(no output was produced before it stopped)' : ''))
     sections.push('---')
   }
   return sections.join('\n')
