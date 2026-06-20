@@ -1,5 +1,5 @@
 /**
- * TemplateFanDeck — Phase 16 signature element.
+ * TemplateFanDeck — signature element.
  *
  * Replaces the vertical pick-list in CreateTeamModal with a fanned card deck
  * (Mercury-style). 5 cards visible at once: a centred focused card flanked by

@@ -1,5 +1,5 @@
 /**
- * TemplateGrid — Phase 16 scale companion to TemplateFanDeck.
+ * TemplateGrid — scale companion to TemplateFanDeck.
  *
  * Compact 3-column grid for browsing 82+ templates. Each card is a
  * brand-tinted mini-card that picks-on-click. The fan stays the "signature

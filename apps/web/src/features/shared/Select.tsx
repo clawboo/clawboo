@@ -1,4 +1,4 @@
-// Styled select primitive (Phase 20e).
+// Styled select primitive.
 //
 // Wraps the native `<select>` element so we keep its full keyboard / a11y
 // behavior (arrow keys, type-ahead, mobile native picker, screen reader
@@ -10,6 +10,7 @@
 // `<select>` would otherwise look browser-default.
 
 import { ChevronDown } from 'lucide-react'
+import { useState } from 'react'
 import type { ChangeEvent, CSSProperties, ReactNode, SelectHTMLAttributes } from 'react'
 
 export type SelectSize = 'sm' | 'md'
@@ -55,6 +56,8 @@ export function Select({
   ...rest
 }: SelectProps) {
   const dims = SIZE_STYLES[size]
+  const [hovered, setHovered] = useState(false)
+  const active = hovered && !disabled
 
   function handleChange(event: ChangeEvent<HTMLSelectElement>) {
     onChange(event.target.value)
@@ -73,6 +76,8 @@ export function Select({
         value={value}
         onChange={handleChange}
         disabled={disabled}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         style={{
           appearance: 'none',
           WebkitAppearance: 'none',
@@ -86,8 +91,8 @@ export function Select({
           height: dims.height,
           paddingLeft: dims.pl,
           paddingRight: dims.pr,
-          background: 'rgb(var(--foreground-rgb) / 0.05)',
-          border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
+          background: `rgb(var(--foreground-rgb) / ${active ? 0.08 : 0.05})`,
+          border: `1px solid rgb(var(--foreground-rgb) / ${active ? 0.2 : 0.1})`,
           borderRadius: 6,
           color: 'rgb(var(--foreground-rgb) / 0.85)',
           fontSize: dims.fontSize,

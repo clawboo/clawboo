@@ -2,8 +2,7 @@
 // under templates/builtin/. This file is hand-written (not auto-generated) because
 // the source is local TS with path-alias imports and rarely changes.
 //
-// Session 3 will atomically migrate TEAM_CATALOG to agentIds[] and delete the
-// legacy templates/builtin/*.ts files — this file stays as the canonical home
+// TEAM_CATALOG references these via agentIds[]; this file is the canonical home
 // for the 15 built-in agents.
 
 import type {

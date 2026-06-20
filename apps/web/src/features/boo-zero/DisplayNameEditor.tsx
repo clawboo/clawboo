@@ -46,7 +46,7 @@ export function DisplayNameEditor({
       // documented unreliable); the per-turn rules block remains the
       // authoritative identity surface either way.
       if (client) {
-        void syncBooZeroSoulIdentity({ client, agentId, displayName: trimmed })
+        void syncBooZeroSoulIdentity({ agentId, displayName: trimmed })
       }
       useToastStore.getState().addToast({
         type: 'success',

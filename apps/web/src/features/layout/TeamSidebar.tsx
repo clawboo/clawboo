@@ -196,7 +196,7 @@ export function TeamSidebar() {
       if (client) {
         for (const agent of teamAgents) {
           try {
-            await deleteAgentOperation(agent.id, agent.sessionKey, client)
+            await deleteAgentOperation(agent.id, agent.sessionKey)
             deletedCount++
           } catch {
             // Continue
@@ -261,7 +261,6 @@ export function TeamSidebar() {
           .filter((a) => a.id !== agent.id)
           .map((a) => ({ name: a.name, role: a.name }))
         await refreshTeamAgentsMd({
-          client,
           agentId: agent.id,
           agentName: agent.name,
           teamName: team.name,

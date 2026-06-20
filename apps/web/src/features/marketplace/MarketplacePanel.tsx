@@ -2,13 +2,11 @@ import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Search, SearchX } from 'lucide-react'
 import { Select } from '@/features/shared/Select'
-import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
 import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
 import type { InstalledSkillRecord } from '@/stores/marketplace'
-import { mutationQueue } from '@/lib/mutationQueue'
 import { useGraphStore } from '@/features/graph/store'
 import { SKILL_CATALOG, searchCatalog } from './catalog'
 import type { CatalogSkill } from './catalog'
@@ -37,7 +35,7 @@ import { AgentTemplateDetail } from './AgentTemplateDetail'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 
 // ─── Skill category colours ─────────────────────────────────────────────────
-// Token-driven palette shared with SkillNode.tsx via `--category-*` (Phase 20).
+// Token-driven palette shared with SkillNode.tsx via `--category-*`.
 
 const CATEGORY_META: Record<SkillCategory | 'all', { color: string; label: string }> = {
   all: { color: 'var(--foreground)', label: 'All' },
@@ -69,43 +67,32 @@ async function installSkillFromMarketplace(
   agentId: string,
   agentName: string,
 ) {
-  const client = useConnectionStore.getState().client
-  if (!client) return
-
   try {
-    const currentTools = await client.agents.files.read(agentId, 'TOOLS.md')
-
-    if (currentTools.toLowerCase().includes(skill.name.toLowerCase())) {
+    // The skills table is the source of truth — the native capability adapter
+    // reads it (injection-scanned + audited server-side), so the skill appears on
+    // the Ghost Graph + the Capabilities dashboard. (Supersedes the legacy
+    // per-agent markdown skill-file write.)
+    const res = await fetch('/api/skills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: skill.id,
+        name: skill.name,
+        source: skill.source,
+        category: skill.category,
+        trustScore: skill.trustScore,
+        agentId,
+        version: skill.version,
+        author: skill.author,
+      }),
+    })
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
       useToastStore.getState().addToast({
-        message: `${skill.name} already installed on ${agentName}`,
-        type: 'info',
+        message: `Failed to install "${skill.name}": ${data.error ?? `HTTP ${res.status}`}`,
+        type: 'error',
       })
       return
-    }
-
-    const newTools = currentTools.trimEnd() + '\n- ' + skill.name + '\n'
-    await mutationQueue.enqueue(agentId, () =>
-      client.agents.files.set(agentId, 'TOOLS.md', newTools),
-    )
-
-    // Persist to SQLite (best-effort)
-    try {
-      await fetch('/api/skills', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: skill.id,
-          name: skill.name,
-          source: skill.source,
-          category: skill.category,
-          trustScore: skill.trustScore,
-          agentId,
-          version: skill.version,
-          author: skill.author,
-        }),
-      })
-    } catch {
-      // Non-fatal — TOOLS.md is the real source of truth
     }
 
     // Update marketplace store

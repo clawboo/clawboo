@@ -430,10 +430,18 @@ export function MaintenancePanel() {
 
         addToast({ message: 'Default model updated', type: 'success' })
 
-        // Best-effort hot reload via Gateway client
+        // Best-effort hot reload via Gateway client. OpenClaw 2026.5.x's
+        // config.patch requires the snapshot hash (from config.get), and the model
+        // lives at agents.defaults.model.primary (the config-file shape used above),
+        // not a bare top-level `model`.
         if (client) {
           try {
-            await client.config.patch({ model })
+            const snapshot = await client.config.get()
+            const baseHash = (snapshot['hash'] ?? snapshot['baseHash']) as string | undefined
+            await client.config.patch(
+              { agents: { defaults: { model: { primary: model } } } },
+              baseHash,
+            )
           } catch {
             // Hot reload failed — config file was still updated
           }
@@ -553,7 +561,7 @@ export function MaintenancePanel() {
         </p>
 
         {/* Section 1: Gateway */}
-        <div style={{ marginBottom: 28 }}>
+        <div style={{ marginTop: 24, marginBottom: 28 }}>
           <SectionHeading>Gateway</SectionHeading>
           <div style={{ marginTop: 14 }}>
             <GatewayControls />
