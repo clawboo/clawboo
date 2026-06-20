@@ -10,10 +10,10 @@
  *   - Fresh browser contexts (preview, incognito) work out of the box
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { resolveClawbooDir } from '@clawboo/config'
 import { getPublicKeyAsync, signAsync, utils } from '@noble/ed25519'
 
 // ─── Base64url encoding ─────────────────────────────────────────────────────
@@ -63,15 +63,16 @@ async function generateIdentity(): Promise<DeviceIdentity> {
   }
 }
 
-function getIdentityPath(): string {
-  return join(homedir(), '.openclaw', 'clawboo', 'proxy-device-identity.json')
+/** Absolute path of the proxy's Ed25519 device-identity file (holds the PRIVATE key). */
+export function getProxyDeviceIdentityPath(): string {
+  return join(resolveClawbooDir(), 'proxy-device-identity.json')
 }
 
 /**
  * Load device identity from disk, or generate and persist a new one.
  */
 export async function loadOrCreateProxyDeviceIdentity(): Promise<DeviceIdentity> {
-  const path = getIdentityPath()
+  const path = getProxyDeviceIdentityPath()
 
   // Try to load existing identity
   try {
@@ -83,6 +84,15 @@ export async function loadOrCreateProxyDeviceIdentity(): Promise<DeviceIdentity>
       typeof parsed.publicKey === 'string' &&
       typeof parsed.privateKey === 'string'
     ) {
+      // Re-harden perms on every load: an identity file written by an older code
+      // path (or loosened on disk) is brought back to 0600 so the Ed25519 private
+      // key never lingers world-readable after an upgrade. Best-effort — POSIX
+      // modes are advisory on Windows.
+      try {
+        chmodSync(path, 0o600)
+      } catch {
+        /* best effort — POSIX modes advisory on Windows */
+      }
       // Verify device ID matches public key fingerprint
       const derivedId = fingerprintPublicKey(base64UrlDecode(parsed.publicKey))
       return {
@@ -104,10 +114,25 @@ export async function loadOrCreateProxyDeviceIdentity(): Promise<DeviceIdentity>
     createdAtMs: Date.now(),
   }
 
-  // Ensure directory exists
+  // Persist with restrictive perms — the file holds the Ed25519 PRIVATE key.
+  // Mirror the secrets vault: 0700 dir, 0600 file. `mode` on writeFileSync only
+  // applies on create (and is umask-masked), so chmod is the load-bearing
+  // guarantee for an existing/re-written file. All best-effort (POSIX modes are
+  // advisory on Windows).
   try {
-    mkdirSync(join(homedir(), '.openclaw', 'clawboo'), { recursive: true })
-    writeFileSync(path, JSON.stringify(stored, null, 2), 'utf-8')
+    const dir = resolveClawbooDir()
+    mkdirSync(dir, { recursive: true })
+    try {
+      chmodSync(dir, 0o700)
+    } catch {
+      /* best effort — Windows / pre-existing dir perms */
+    }
+    writeFileSync(path, JSON.stringify(stored, null, 2), { encoding: 'utf-8', mode: 0o600 })
+    try {
+      chmodSync(path, 0o600)
+    } catch {
+      /* best effort — POSIX modes advisory on Windows */
+    }
   } catch {
     // Non-fatal — identity works for this session even if not persisted
   }
