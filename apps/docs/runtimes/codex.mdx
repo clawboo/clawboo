@@ -1,0 +1,151 @@
+---
+title: Codex runtime
+description: The codex runtime — spawns codex exec, authenticates via ChatGPT OAuth, synthesizes text-deltas, reports no USD cost, and carries a thread id.
+---
+`codex` is the [runtime](/appendices/glossary) that drives OpenAI's `codex exec` CLI: Clawboo installs the `codex` binary, spawns it per board task in an isolated home, and reshapes its `--json` event stream into the normalized [RuntimeEvent](/appendices/glossary) stream every other runtime emits. It is one of the five runtimes — a co-equal peer beside `openclaw`, `clawboo-native`, `claude-code`, and `hermes`.
+
+Codex differs from the other CLI runtimes in two ways that matter operationally: it authenticates through an **interactive ChatGPT OAuth login** (`codex login`), not a pasted API key; and it reports **no USD cost**, so spend is surfaced as token usage with an explicitly estimated, null dollar figure. Use this page to understand its capabilities, how to install and connect it, how the driver works, and the documented authentication limitation.
+
+## What it is
+
+Codex is a [wrapped one-shot](/appendices/glossary) runtime. It is a thin [RuntimeAdapter](/appendices/glossary) (`@clawboo/adapter-codex`) constructed with a per-run driver factory; the real driver spawns `codex exec --json` as a black-box subprocess, parses its stdout JSON-lines stream best-effort into the adapter's `CodexNativeEvent` union, and tears it down at the end of the task. The runtime differences live entirely in the mapper and the driver — the adapter's trait surface is identical to Claude Code's.
+
+Two properties shape the whole runtime:
+
+- **Whole-block text becomes a synthesized stream.** Whether Codex emits incremental `output_text.delta` frames or one `agent_message` block per turn is its choice; the driver maps either form to a `text` native event, and the mapper turns that into a `text-delta` [RuntimeEvent](/appendices/glossary). A block-emitting Codex still surfaces as a (single, synthesized) text-delta — the adapter declares `streaming: true` regardless.
+- **No USD cost.** Codex carries token `usage` but reports no dollar figure. A `result` with usage therefore yields a `cost` event with `costUsd: null` and `estimated: true`, never a concrete USD — the honest signal that the host's budget kill-switch sees usage but cannot price the run.
+
+<Note>
+Codex is a peer, not a substitute. Clawboo never migrates a `codex` agent into any other runtime's agent (or vice versa); the adapter package ships no cross-runtime agent-file mapping. A [team](/appendices/glossary) can mix a Codex specialist with agents on any other runtime.
+</Note>
+
+## Capabilities
+
+The Codex adapter reports the following capabilities. Callers branch on these (never on the runtime id), so they describe what the host may do with a Codex run.
+
+| Capability | Value | Meaning |
+|---|---|---|
+| `streaming` | `true` | Text surfaces as deltas (synthesized from whole blocks when needed) |
+| `mcp` | `true` | Attaches Clawboo's MCP servers via a generated `config.toml` |
+| `worktrees` | `true` | Gets an isolated git [worktree](/appendices/glossary) for file-mutating tasks |
+| `resume` | `true` | The adapter captures a `thread` id (see [the limitation](#the-thread-id-and-resume-limitation)) |
+| `toolApproval` | `true` | Tool calls go through the broker's approval pipeline |
+| `models` | `['gpt-5-codex', 'gpt-5', 'o4-mini']` | A routable surface, not an exhaustive list |
+| `runtimeClass` | `'wrapped-oneshot'` | Resolves to the plain one-shot integration plan |
+| `nativeHome` | `{ scope: 'per-run', persist: false }` | A throwaway `CODEX_HOME` per run; nothing preserved across runs |
+| `nativeSkills` | `'none'` | No native skills dir to preserve |
+| `nativeMemory` | `'none'` | No cross-run self-improvement substrate |
+| `nativeChannels` | `'none'` | The shared MCP spine is the only voice |
+| `nativeScheduler` | `false` | The host owns when-to-run |
+
+Because `runtimeClass` is `'wrapped-oneshot'` with `nativeHome: { scope: 'per-run', persist: false }`, the integration planner resolves a Codex run to an **ephemeral home** with both preserve flags clamped to `false`. This is today's reality, declared honestly: the driver mkdtemps a fresh `CODEX_HOME` each run, and there is no durable native plane to keep intact. The shared plane (board, memory, tools) is reached through MCP.
+
+## How to install and connect
+
+The install/connect/disconnect mechanics are shared with the other CLI runtimes and run from the **Runtimes** panel; see [Connecting runtimes](/runtimes/connecting-runtimes) for the card UI, the encrypted vault, and the resolution chain. The Codex specifics are below.
+
+### 1. Install the CLI
+
+Codex is installed via npm. From the `not-installed` state, the card opens `POST /api/runtimes/codex/install`, a Server-Sent Events stream that runs:
+
+```bash
+npm install -g @openai/codex@0
+```
+
+The package is pinned to the current `0.x` major so a future `1.0` is never auto-installed. If `npm` is not found, the stream emits an `error` event with code `NPM_MISSING`. The runtime's health binary is `codex`, resolved by `resolveRuntimeBin` over PATH plus the well-known user-install dirs.
+
+### 2. Authenticate with `codex login` (OAuth)
+
+This is where Codex departs from the other api-key runtimes. Codex authenticates via an interactive ChatGPT OAuth flow, and it **cannot be connected with a pasted API key on current versions**. The descriptor declares `authKind: 'oauth'`, `envVar: null`, and `headlessAuth: false` — there is no vault slot for a Codex credential.
+
+`POST /api/runtimes/codex/connect` is therefore a no-op on storage. It returns the terminal login command instead of writing a key:
+
+```json
+{ "ok": true, "connectionState": "needs-login", "loginCommand": "codex login" }
+```
+
+The card surfaces the `codex login` command with a copy button. Run it in your own terminal to complete the ChatGPT OAuth flow, then click **Re-check** in the card. Once `codex login` has authenticated locally, the adapter's run path uses Codex's own `CODEX_HOME` (which the driver isolates per run) — Clawboo never stores a Codex credential in its vault, and `disconnect` is likewise a no-op for Codex.
+
+<Info>
+The connection state machine reflects this: an installed `oauth` runtime is always `needs-login`, and it never reaches `ready` from a vault key. After `codex login` succeeds, the card still shows `needs-login` until you click **Re-check** — the card does not auto-detect the login.
+</Info>
+
+### 3. Run a board task
+
+`POST /api/runtimes/codex/run` drives a board task on Codex end to end: claim → worktree → run → report-up. The driver:
+
+1. Creates a throwaway `CODEX_HOME` with `mkdtemp`.
+2. Writes a `config.toml` pointing Codex's MCP client at this server's hosted Tasks, Memory, and Tools servers (the run's [memory](/concepts/memory) scope is appended to the Memory server's URL only).
+3. Spawns `codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check [--model <m>] <prompt>` with `CODEX_HOME` set and a process-group leader so the whole tree can be killed on abort.
+
+The bypass flags are deliberate: the worktree is the isolation boundary (and already a git repo), so Codex's own sandbox and approval prompts are turned off — Clawboo gates externally instead. Clawboo's own server secrets are scrubbed from the child environment before the untrusted subprocess inherits it; only the explicitly granted env is merged on top.
+
+## How the driver works
+
+The Codex driver builds on the shared subprocess substrate that all spawned runtimes use. It buffers native events until the adapter subscribes (so frames emitted between `start()` and the first listener are never dropped), parses stdout line by line, and **always synthesizes a terminal `result` on process exit** — so a run's lifecycle completes even if mid-stream parsing missed the completion event.
+
+### Event translation
+
+Each stdout line is JSON-parsed and run through a tolerant translator that handles shape drift. `codex exec` wraps events as `{ id, msg: { type, ... } }`, so the parser reads the inner `msg` when present:
+
+| Codex frame (matched substring) | Native event | Notes |
+|---|---|---|
+| `thread_id` / `session_id` | `thread` | The first one becomes the run's late-bound `runId` |
+| `output_text.delta` | `text` | Incremental Responses-style delta |
+| `agent_message` / `message` | `text` | A whole agent-message block (synthesized into a delta) |
+| `reasoning` | `text` (channel `reasoning`) | Private reasoning, separated from assistant text |
+| `function_call` / `tool_call` / `exec_command` | `tool-call` | Tool/function invocation |
+| `usage` | *(accumulated)* | Carried into the terminal cost event |
+| `completed` / `task_complete` / `turn.done` | `result` | Terminal completion |
+
+### The terminal `result`
+
+If the stream never produced a `result`, the driver synthesizes one when the process exits, derived from the exit code and signal:
+
+- A clean exit (`code === 0`) → `result` with `ok: true`.
+- A deliberate abort kills the process with `SIGTERM`/`SIGKILL` (exit code `null`) → `result` with `aborted: true`, mapped to a clean `done: aborted` terminal rather than a spurious error.
+- Any other non-zero exit → `result` with `ok: false` and `errorMessage` from stderr (or `codex exited with code <n>`).
+
+The synthesis is idempotent: the subprocess substrate fires `onClose` from both the `error` and `close` events, so the driver marks the terminal as synthesized and a second call returns nothing — never two `result` terminals.
+
+### The cost mapping
+
+Codex reports token usage but no USD, so the pure mapper translates a `result` with usage into a `cost` event with `costUsd: null` and `estimated: true`. The accompanying `done` event also carries `costUsd: null`. This is the deliberate asymmetry versus the runtimes that report real dollars — the host gets honest usage counts and an explicit "not priced" signal instead of a fabricated cost.
+
+## The thread id and resume limitation
+
+The adapter declares `resume: true` and the driver captures Codex's `thread` id (its resume handle) from the event stream. But the wired run path does **not** currently feed a thread id back into `codex exec` — the Codex driver does not pass a `ctx.resume` handle into its args, and the Codex adapter (unlike Claude Code and Hermes) defines no `sessionCodec`. So a same-runtime Codex resume is not yet wired end to end; a cross-runtime pickup rides the prose handoff note in the [worktree](/concepts/worktrees-and-handoff) like any other runtime.
+
+<Info>
+**Codex's OAuth lives in `$CODEX_HOME/auth.json`.** Because the driver mkdtemps a throwaway `CODEX_HOME` per run, a user's `codex login` against the default `~/.codex` is invisible to a spawned run. Flipping to a persistent per-identity home would change auth behavior and needs its own login-against-that-home connect flow first. This is the reason Codex is declared `nativeHome: { scope: 'per-run', persist: false }` rather than persistent.
+</Info>
+
+## Verify it worked
+
+- `GET /api/runtimes` should show the `codex` entry with `installed: true` once the CLI resolves, `authKind: "oauth"`, `envVar: null`, and `connectionState: "needs-login"`. An installed `oauth` runtime is always `needs-login` — it never reads `ready` from a stored credential.
+- After running `codex login` in your terminal, click **Re-check** in the card. (The card does not auto-detect the login.)
+- Run a board task via `POST /api/runtimes/codex/run`. A clean run returns `doneReason: 'success'` with `costUsd: null` and `usedWorktree: true`.
+
+## Troubleshooting
+
+<Warning>
+**Codex shows "Needs login" after a successful `codex login`.** The card does not auto-detect the login — click **Re-check** to re-fetch status. Codex never reaches `ready` from a vault key; its auth lives in `CODEX_HOME`, and `connect`/`disconnect` are no-ops on storage.
+</Warning>
+
+<Warning>
+**A run reports `costUsd: null`.** This is correct, not a bug. Codex reports token usage but no USD, so the mapper surfaces `cost` with `costUsd: null, estimated: true`. The budget kill-switch sees usage but cannot enforce a dollar cap on a Codex run.
+</Warning>
+
+<Danger>
+**Codex's OAuth is per-`CODEX_HOME`.** A `codex login` against your default `~/.codex` does not carry into a Clawboo-spawned run, which uses an isolated `CODEX_HOME`. On versions where API-key/OpenRouter routing is not possible, the auth is the user's to provide inside that flow; see [the limitation](#the-thread-id-and-resume-limitation).
+</Danger>
+
+## Related
+
+- [Connecting runtimes](/runtimes/connecting-runtimes) — the install/connect/disconnect lifecycle and the encrypted vault
+- [Runtimes overview](/runtimes/index) — the capability matrix across all five runtimes
+- [`/api/runtimes` reference](/reference/rest-api/runtimes) — full request/response shapes for connect, run, and the install SSE stream
+- [The board](/concepts/the-board) — the durable task substrate a Codex run drives
+- [Worktrees and handoff](/concepts/worktrees-and-handoff) — the isolated world a Codex task carries
+- [Claude Code](/runtimes/claude-code) · [Clawboo Native](/runtimes/native) · [Hermes](/runtimes/hermes) — the sibling runtimes
+- [Environment variables](/reference/environment-variables) — `CLAWBOO_HOME`, `CLAWBOO_SECRETS_MASTER_KEY`

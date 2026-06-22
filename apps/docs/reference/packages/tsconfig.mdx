@@ -1,0 +1,87 @@
+---
+title: "@clawboo/tsconfig"
+description: Shared TypeScript compiler-option presets (base, react, node) every Clawboo package and app extends via the tsconfig "extends" field.
+---
+| | |
+|---|---|
+| **Version** | `0.0.0` |
+| **Purity** | config-only (no runtime code, no `src/` barrel) |
+| **Purpose** | Three shipped `tsconfig` presets — `base.json`, `react.json`, `node.json` — that pin the TypeScript 5 strict compiler options shared across the monorepo. Consumed exclusively via the `"extends"` field of each package/app `tsconfig.json`. |
+| **Workspace deps** | none |
+| **External deps** | none |
+
+This is a **config-only** package: `package.json` ships exactly the three preset JSON files (no `src/`, no `main`, no `exports`, no `types`, no build step). It is `private: true` and never published. Every other workspace package and both apps add it as a `devDependency` and reference a preset by its file path in `"extends"`. `react.json` and `node.json` both extend `base.json` and override only what they must, so the strict baseline stays in one place.
+
+## Presets
+
+There is no `src/index.ts` barrel to enumerate. The "API" of this package is the three preset files and the compiler options they set. A consumer references one via `"extends"`:
+
+```json
+{
+  "extends": "@clawboo/tsconfig/base.json",
+  "compilerOptions": { /* per-package overrides */ }
+}
+```
+
+### `base.json`
+
+The strict TS 5 baseline. Every preset (and most packages directly) extend this.
+
+| Option | Value | Effect |
+|---|---|---|
+| `strict` | `true` | Full strict family (`noImplicitAny`, `strictNullChecks`, etc.). |
+| `target` | `ES2022` | Emit / lib target. |
+| `module` | `ESNext` | ES-module output (node preset overrides to `CommonJS`). |
+| `moduleResolution` | `bundler` | Bundler-style resolution (node preset overrides to `node`). |
+| `esModuleInterop` | `true` | Interop for CJS default imports. |
+| `skipLibCheck` | `true` | Skip type-checking `.d.ts` dependencies. |
+| `forceConsistentCasingInFileNames` | `true` | Case-sensitive import paths. |
+| `resolveJsonModule` | `true` | `import x from './x.json'`. |
+| `isolatedModules` | `true` | Each file transpilable in isolation (required by Vite / esbuild / tsup). |
+| `declaration` | `true` | Emit `.d.ts`. |
+| `declarationMap` | `true` | Emit `.d.ts.map` for go-to-definition into source. |
+| `sourceMap` | `true` | Emit `.js.map`. |
+
+### `react.json`
+
+`base.json` + the browser/JSX surface. Used by the two front-end packages.
+
+| Override | Value | Effect |
+|---|---|---|
+| `extends` | `./base.json` | Inherits the strict baseline. |
+| `jsx` | `react-jsx` | The automatic JSX runtime (no `import React`). |
+| `lib` | `["dom", "dom.iterable", "ES2022"]` | Browser DOM libs alongside ES2022. |
+
+### `node.json`
+
+`base.json` + CommonJS / Node resolution. Used by the server-side packages and the CLI.
+
+| Override | Value | Effect |
+|---|---|---|
+| `extends` | `./base.json` | Inherits the strict baseline. |
+| `module` | `CommonJS` | CJS output for the Node/CLI build target. |
+| `moduleResolution` | `node` | Classic Node resolution. |
+| `types` | `["node"]` | Pulls in `@types/node` ambient types. |
+
+<Note>
+The presets only ship `compilerOptions`. They set no `include` / `exclude` / `outDir` — each consumer's own `tsconfig.json` supplies those plus any per-package overrides (e.g. a package that emits ESM keeps `base.json`'s `module: ESNext`; a tsup-built package may add its own `outDir`).
+</Note>
+
+## Used by
+
+All 25 workspace packages and both apps add `@clawboo/tsconfig` as a `devDependency` and extend one of the three presets:
+
+- **`base.json`** (17 consumers) — the pure / build-tool-resolved packages: `agent-registry`, `boo-avatar`, `capability-registry`, `compaction`, `evals`, `events`, `executor`, `gateway-client`, `governance`, `obs`, `protocol`, `scheduler`, and the five adapters (`adapter-{claude-code,codex,hermes,native,openclaw}`).
+- **`react.json`** (2 consumers) — `apps/web` and `packages/ui` (the only DOM/JSX surfaces).
+- **`node.json`** (7 consumers) — `apps/cli`, `packages/config`, `packages/db`, `packages/gateway-proxy`, `packages/logger`, `packages/mcp`, `packages/worktrees` (the server-side / Node-resolved packages).
+
+## Source
+
+Preset files (config-only — no barrel): [`packages/tsconfig/base.json`](https://github.com/clawboo/clawboo/tree/main/packages/tsconfig/base.json), [`packages/tsconfig/react.json`](https://github.com/clawboo/clawboo/tree/main/packages/tsconfig/react.json), [`packages/tsconfig/node.json`](https://github.com/clawboo/clawboo/tree/main/packages/tsconfig/node.json). The `package.json` `"files"` array ships exactly these three; there is no `exports` map or `main` entry.
+
+## See also
+
+- [Monorepo & build](/internals/monorepo-and-build) — Turbo/pnpm topology, build order, and where these presets sit in it.
+- [Packages overview](/reference/packages/index) — the full `@clawboo/*` package list + dependency graph.
+- [@clawboo/ui](/reference/packages/ui) — one of the two `react.json` consumers.
+- [@clawboo/db](/reference/packages/db) — a `node.json` consumer.

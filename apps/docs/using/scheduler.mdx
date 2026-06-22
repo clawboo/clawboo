@@ -1,0 +1,140 @@
+---
+title: Schedule recurring team work
+description: Use the Scheduler tab to create, pause, run, and delete Routines and OpenClaw cron from one unified surface.
+---
+Use this page when you want an agent to do something on a clock — a nightly cleanup, an hourly check, a one-off run at a future time — without sitting in front of the dashboard. Clawboo's scheduler runs that work as **Routines**: durable, recurring fires that drop a team task onto [the board](/concepts/the-board) and dispatch it through the normal executor path.
+
+The Scheduler tab is a *unified* surface. It shows two kinds of schedule side by side and never conflates them:
+
+- **Team work** — clawboo Routines. The `team-task` domain: a fire materializes a board task and runs it. Clawboo fully owns these rows.
+- **Runtime's own life** — the OpenClaw Gateway's own cron jobs. The `runtime-own-life` domain: an OpenClaw agent's standalone scheduled wake, which lives on the Gateway, not in Clawboo's ledger. Clawboo reads and writes these through the Gateway as an operator surface.
+
+Everything on this tab runs from the `SchedulerPanel`, backed by `/api/schedules`. This page covers what each control does, the create dialog's options, and the error-halts policy that parks a failing routine instead of retry-burning it.
+
+## Prerequisites
+
+<Note>
+The Scheduler tab is always available. Open it from the **Scheduler** nav item. The panel polls `GET /api/schedules` on mount and re-fetches every 8 seconds, so `nextRunAt` countdowns and run status stay live without a manual refresh.
+</Note>
+
+- At least one agent exists (the create dialog populates its agent picker from `GET /api/agents`).
+- Scheduling an OpenClaw agent's **own life** (a Gateway cron job) additionally requires the OpenClaw Gateway connected and this device paired — that write rides the operator connection. Every other runtime, and the team-task domain, has no such requirement.
+
+## The Scheduler tab
+
+The panel header shows a `Scheduler` title, an `N schedules` count pill, a **Schedule** button (opens the create dialog), and a **Refresh** button.
+
+Below the header, schedules are grouped by domain:
+
+| Group | Domain | What lives here |
+|---|---|---|
+| **Team work** | `team-task` | clawboo Routines that fire team tasks |
+| **Runtime's own life** | `runtime-own-life` | The OpenClaw Gateway's own cron jobs |
+
+Each row shows the schedule's label (falling back to its `agentId`), a status pill, the human-readable cron, the time until the next run, when it last ran, and — if a fire failed — the last error in red. The status pill maps to one of `running`, `queued`, `claimed` (all rendered as the "working" tone), `paused` (idle tone), `error` (error tone), or `idle`.
+
+The row's action buttons are a **pure function of the schedule's manageability**. A `managed` Routine and an `external-write` Gateway cron are both writable, so they show **Pause/Resume** (managed) or **Enable/Disable** (external-write), **Run now**, and **Delete**. An `observe-only` schedule shows a `read-only` marker and no actions — the UI never offers a write the owning system forbids.
+
+![The Scheduler tab grouped by domain, with Team work and Runtime's own life sections](/images/team-space.png)
+
+<Note>
+When the OpenClaw Gateway is disconnected, the read still returns 200 — degradation is data, not an error. The panel shows an amber banner ("OpenClaw Gateway cron is unavailable … showing the last-known list") and keeps rendering the last-known rows for that source.
+</Note>
+
+## Steps
+
+### Create a routine
+
+1. Click **Schedule** to open the create dialog.
+2. Pick an **Agent** from the dropdown (each option shows the agent name and its runtime).
+3. Choose the **Schedule** intent:
+   - **A team task** — a clawboo Routine (`team-task` domain). Available for every agent.
+   - **Its own life** — an OpenClaw Gateway cron job (`runtime-own-life` domain). This chip is enabled **only** when the selected agent's runtime is `openclaw`; for any other runtime it reads "OpenClaw only" and is disabled. (If you switch to a non-OpenClaw agent while "Its own life" is selected, the dialog snaps the intent back to "A team task".)
+4. Pick when it **Runs** from the cron presets (see [Options](#options) below).
+5. Give it a **Label** (optional; defaults to "Scheduled task" for a team task or "Scheduled wake" for own-life).
+6. Click **Create schedule**.
+
+A team-task create posts `{ source: 'clawboo-routine', domain: 'team-task', agentId, cronSpec, label, teamId, taskTemplate }`. An own-life create posts `{ source: 'openclaw-gateway-cron', domain: 'runtime-own-life', agentId, cronSpec, label, payload }`. On success (`201`) the dialog closes and the list refreshes.
+
+### Pause or resume
+
+Click the pause/play button on a writable row. For a Routine this is **Pause** → **Resume**; for a Gateway cron it's labeled **Disable** → **Enable** (the same `PATCH /api/schedules/:id` with `{ action: 'pause' | 'resume' }`, just different wording for the external system). A paused schedule never auto-fires until you resume it.
+
+### Run now
+
+Click the refresh-arrow button to force-fire immediately. This `POST /api/schedules/:id/run` returns `202` (an enqueue-style acknowledgement): for a Routine it flips the row to `queued` so the ticker picks it up on the next pass; for a Gateway cron it asks the Gateway to run that job now. It does not wait for the run to finish.
+
+### Delete
+
+Click the trash button. The panel confirms first — the wording differs by domain (a Gateway cron job warns that it "removes the agent's own scheduled wake on the OpenClaw Gateway"; a Routine warns it "is removed permanently"). Delete sends `DELETE /api/schedules/:id`.
+
+## Options
+
+### Schedule presets (cron expressions)
+
+The create dialog offers eight **cron-expression** presets. A cron expression is the one spec dialect both sources accept, so the same preset works whether you target a Routine or a Gateway cron:
+
+| Preset | Cron |
+|---|---|
+| Every 5 minutes | `*/5 * * * *` |
+| Every 15 minutes | `*/15 * * * *` |
+| Every 30 minutes | `*/30 * * * *` |
+| Every hour | `0 * * * *` |
+| Every 6 hours | `0 */6 * * *` |
+| Every 12 hours | `0 */12 * * *` |
+| Daily · 9am | `0 9 * * *` |
+| Weekly · Mon 9am | `0 9 * * 1` |
+
+The dialog defaults to **Every hour**.
+
+### One-shot runs (`once@<ISO>`)
+
+A Routine's `cronSpec` also accepts a one-shot form, `once@<ISO-8601>` (for example `once@2026-07-01T09:00:00Z`), parsed by the scheduler package. The create dialog's preset chips only emit recurring cron expressions, so to schedule a one-shot you post a `once@…` spec to `POST /api/schedules` directly. After it fires successfully the row re-enters `idle` with `nextRunAt` set to null, so it self-disables and never repeats.
+
+### Domain and manageability
+
+| Field | Values | What it controls |
+|---|---|---|
+| `domain` | `team-task` · `runtime-own-life` | Which group the row renders under, and what a fire does (board task vs. the agent's own Gateway wake) |
+| `manageability` | `managed` · `external-write` · `observe-only` | Which row actions the UI offers — `observe-only` is read-only |
+| `source` | `clawboo-routine` · `openclaw-gateway-cron` | Which engine owns the row and which API the write routes to |
+
+## The error-halts policy
+
+A failed recurring fire **parks** the routine — it does not silently retry. When a recurring Routine errors, its status goes to `error` and its `nextRunAt` is set to null, so the due-pass (which only queues rows with a non-null `nextRunAt`) skips it. The row stays disarmed, with the failure shown as `lastError` on the row, until a human resumes it. This is deliberate: autonomous scheduled work that retries a broken fire on every tick would burn budget and noise without progress.
+
+<Info>
+A paused or errored routine never auto-fires. To re-arm a parked routine, click **Resume** (the `paused | error → idle` transition re-arms it). A one-shot `once@` that fired successfully is a different case — it self-disables on purpose and is not an error.
+</Info>
+
+The fire itself flows through the standard executor path, so budgets, circuit breakers, verification, the worktree, and the observability trace all apply to a scheduled run exactly as they do to a manually dispatched task.
+
+## Verify it worked
+
+- The new schedule appears under its domain group with a live `nextRunAt` countdown (`in 5m`, `in 1h`, …).
+- When a fire is due, the status pill flips to `queued` → `claimed` → `running`, then back to `idle` (re-armed) on success.
+- After a fire, the row shows `ran <relative time>`.
+- A `team-task` fire materializes a task on [the board](/concepts/the-board) for the routine's team — open the board to see it.
+- If a recurring fire fails, the row goes to the `error` pill with a `lastError` line and an empty next-run countdown — resume it to re-arm.
+
+## Troubleshooting
+
+<Warning>
+**"Its own life" is greyed out.** The Gateway-cron intent is offered only for agents whose runtime is `openclaw`. Select an OpenClaw agent, or schedule the work as a team task instead. An unknown or non-OpenClaw runtime is never defaulted to `openclaw` for this purpose.
+</Warning>
+
+<Warning>
+**Creating an own-life schedule fails with `gateway_disconnected`.** The Gateway-cron write rides the operator connection. Connect the OpenClaw Gateway and pair this device, then retry. A team-task Routine has no Gateway dependency.
+</Warning>
+
+<Danger>
+**A create returns `409`.** The scheduler enforces a one-firing-owner rule: binding a Routine to a board task that another non-manual owner already fires is refused as a conflict, and an illegal status transition is also a `409`. These are conflicts, not transient errors — they are not retried. A `422` means a `team-task` schedule was aimed at the Gateway-cron source (a domain violation); a `403` means the targeted source is `observe-only`.
+</Danger>
+
+## Related
+
+- [Scheduling](/concepts/scheduling) — the model: team-task cron vs. runtime-own-life cron, the ledger, the ticker
+- [The board](/concepts/the-board) — where a `team-task` fire lands
+- [`/api/schedules` reference](/reference/rest-api/schedules) — full request/response shapes and status codes
+- [Connecting runtimes](/runtimes/connecting-runtimes) — get a runtime online so it can run scheduled work
+- [Observability dashboard](/using/observability-dashboard) — see a scheduled run's trace

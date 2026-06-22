@@ -1,0 +1,185 @@
+---
+title: Hermes runtime
+description: Connect and run the Hermes CLI as a one-shot worker on Clawboo's board with a persistent, compounding per-identity home.
+---
+Use this page when you want a [Hermes](https://pypi.org/project/hermes-agent/) agent to execute Clawboo board tasks as a teammate. `hermes` is a [runtime](/appendices/glossary) Clawboo drives by spawning the `hermes` CLI head-less, one run per task. What sets it apart from the other wrapped CLI runtimes is its **persistent per-identity home**: the agent's self-created skills, `MEMORY.md`, sessions, and `state.db` accrue in one stable directory and compound across runs, so a Hermes teammate keeps learning instead of starting fresh each dispatch.
+
+Clawboo takes **zero Python and zero kanban dependency** on Hermes. The adapter is lean TypeScript that drives the `hermes` binary as a black box. Hermes ships its own internal kanban — Clawboo never syncs it. Hermes reaches the team's coordination surface by attaching Clawboo's [MCP](/appendices/glossary) servers (Tasks/Memory/Tools/TeamChat), not by exporting any state into Clawboo. Only a user who opts into the Hermes runtime installs Python.
+
+If you only need the install/connect/disconnect mechanics shared across runtimes, see [Connecting runtimes](/runtimes/connecting-runtimes). This page covers Hermes's capabilities, its specific connect flow, the driver, and the native-preservation invariants you must not break.
+
+## Capabilities
+
+`HermesAdapter.capabilities()` declares the following. Two facts drive most of Hermes's behavior: it is **non-streaming**, and it is a **persistent-home wrapped one-shot**.
+
+| Capability | Value | Meaning |
+|---|---|---|
+| `streaming` | `false` | Hermes has no live token stream. The driver derives lifecycle events from the run's structured output + `state.db`, not from scraping rendered text. |
+| `mcp` | `true` | Attaches Clawboo's Tasks/Memory/Tools/TeamChat MCP servers. |
+| `worktrees` | `true` | Runs file-mutating work in an isolated git worktree. |
+| `resume` | `true` | Can resume the prior native session via `--resume`. |
+| `toolApproval` | `true` | Surfaces tool-approval gates the host resolves. |
+| `models` | `[]` | Empty: Hermes resolves models through its own provider config, not a fixed list. |
+| `runtimeClass` | `'wrapped-oneshot'` | Spawned per task — not a connected substrate. |
+| `nativeHome` | `{ scope: 'per-identity', persist: true }` | One stable home per identity that outlives each run. |
+| `nativeSkills` | `'preserve'` | The host must keep the home's self-created skills intact across runs. |
+| `nativeMemory` | `'preserve'` | The host must keep the home's `MEMORY.md` / `state.db` intact across runs. |
+| `nativeChannels` | `'none'` | Hermes's own channels are not used for teammate dispatch (it is dispatched only via one-shot `hermes chat`). |
+| `nativeScheduler` | `true` | Informational only — Hermes ships its own cron/heartbeat, which Clawboo's scheduler deliberately does not co-run. See [Scheduling](/concepts/scheduling). |
+
+The `nativeHome`/`nativeSkills`/`nativeMemory` claims are what route Hermes to a persistent home **by construction**. The runner reads `resolveRuntimeIntegration(capabilities())` — it branches on the resolved integration plan, never on the runtime id — and a `{ persist: true, scope: 'per-identity' }` claim resolves to a persistent home, materialized once per `(runtime, identity)` under Clawboo's state dir.
+
+<Note>
+`streaming: false` is a permanent runtime asymmetry, not a limitation Clawboo papers over. Quiet-mode `hermes chat` prints the final response, and the driver synthesizes a terminal `done` event on process exit. The board round-trip works the same as a streaming runtime — the difference is the absence of incremental text deltas in the team chat narration.
+</Note>
+
+## Prerequisites
+
+<Note>
+Hermes installs through Python. `pipx` is preferred; a `pip --user` fallback applies if `pipx` is absent. You need Python 3 with `pip`/`pipx` available.
+</Note>
+
+- An [OpenRouter](https://openrouter.ai/) API key — Hermes's `authKind` is `api-key` and its vault slot is `OPENROUTER_API_KEY`. (If your seeded Hermes config already names a provider, that provider wins and the key for *it* is what matters — see [Provider precedence](#provider-precedence).)
+- The Clawboo server running. Connect, install, and run all go through `/api/runtimes/*`.
+
+## Steps
+
+### 1. Install the Hermes CLI
+
+From the **Runtimes** panel, the Hermes card opens `POST /api/runtimes/hermes/install` (a Server-Sent Events stream) from the `not-installed` state. Because Hermes's `packageManager` is `pip`, the installer:
+
+1. Prefers `pipx install 'hermes-agent<1'`.
+2. Falls back to `python -m pip install --user 'hermes-agent<1'` when `pipx` is absent.
+3. Retries once with `--break-system-packages` if it detects a PEP-668 externally-managed environment.
+4. Emits an `error` event with code `PYTHON_MISSING` if neither `pipx` nor `python` is found.
+
+The package is pinned to `hermes-agent<1` to block an auto-install of a future incompatible 1.0 major.
+
+<Warning>
+**Hermes installs but reads as `not-installed`.** Hermes lands in the Python user-site bin (`~/Library/Python/<X.Y>/bin` on macOS, `~/.local/bin` on Linux, `%APPDATA%\Python\Python<XY>\Scripts` on Windows), which is usually **off** the dashboard server's PATH. Clawboo resolves it via `resolveRuntimeBin` (PATH **plus** those user-install dirs), so this is normally handled. If a fresh install's `complete` event still carries a `warning` (the binary did not resolve yet), restart the server.
+</Warning>
+
+### 2. Connect the OpenRouter key
+
+`POST /api/runtimes/hermes/connect` with body `{ apiKey }` stores the key in the [encrypted vault](/runtimes/connecting-runtimes#where-keys-are-stored) under `OPENROUTER_API_KEY` and returns the recomputed `connectionState` (`ready` on success). The key is trimmed; a blank key returns `400` (`{ error: "apiKey is required" }`). **The response never echoes the key.**
+
+```bash
+curl -X POST http://localhost:18790/api/runtimes/hermes/connect \
+  -H 'Content-Type: application/json' \
+  -d '{"apiKey":"sk-or-..."}'
+```
+
+<Tip>
+Because `resolveRuntimeKey` falls back to `process.env` and OpenClaw's `~/.openclaw/.env`, an `OPENROUTER_API_KEY` already exported in the server's environment (or present in `~/.openclaw/.env`) is enough — Hermes reads as connected without an explicit Connect.
+</Tip>
+
+### 3. Run a board task on Hermes
+
+`POST /api/runtimes/hermes/run` with a `taskId` drives the task end to end through the server-side executor runner: claim → worktree → run → report-up. At run time the connected key is resolved from the vault (`resolveRuntimeKey` over `OPENROUTER_API_KEY`) and injected into the spawned Hermes process's environment. See the [Runtimes API](/reference/rest-api/runtimes#post-apiruntimesidrun) for the full request/response shape.
+
+```bash
+curl -X POST http://localhost:18790/api/runtimes/hermes/run \
+  -H 'Content-Type: application/json' \
+  -d '{"taskId":"<task-uuid>","repoPath":"/path/to/repo","kind":"code"}'
+```
+
+## How the driver works
+
+The real driver (`createHermesDriver`) spawns `hermes chat` head-less and builds a deterministic argv. The spawn plan is:
+
+```bash
+hermes chat -q "<context>\n\n<message>" -Q --yolo --accept-hooks \
+  [-m <model>] [--resume <sessionId>] [--provider openrouter]
+```
+
+| Flag | Why |
+|---|---|
+| `chat -q "<prompt>"` | One-shot chat. The prompt is the task context plus the message. Clawboo dispatches Hermes **only** via `hermes chat`, never `hermes gateway` — channels are Hermes-native and stay off for teammate dispatch. |
+| `-Q` | Quiet mode: prints the final response on stdout and the `session_id: <id>` line on stderr. |
+| `--yolo` | Head-less auto-approve — there is no TTY. The worktree is the isolation boundary. |
+| `--accept-hooks` | A seeded config may declare shell hooks; there is no TTY to approve them interactively. |
+| `-m <model>` | Added only when a per-run model override is set. |
+| `--resume <sessionId>` | Added only when resuming a pre-existing home (see [Session resume](#session-resume)). |
+| `--provider openrouter` | Added only as the no-config fallback when an `OPENROUTER_API_KEY` is connected and the home config names no provider (see [Provider precedence](#provider-precedence)). |
+
+The binary is resolved to an **absolute path** via `resolveRuntimeBin('hermes')` (a bare `spawn('hermes')` would `ENOENT` against the off-PATH user-site bin), and that binary's directory is prepended to the child's `PATH` so any tools Hermes itself shells out to are found.
+
+### Non-streaming lifecycle
+
+Because Hermes has no token stream, the driver derives `RuntimeEvent`s from output lines and synthesizes the terminal `result` on process exit:
+
+- `parseHermesLine` parses each stdout line: a JSON frame → a `session_id` line → otherwise plain response text accumulated into the run summary.
+- The `session_id` line is captured **primarily from stderr** in `onClose` (where quiet mode emits it, live-verified against `hermes-agent 0.15.2`); the stdout parse is a forward-compatible tolerance in case a future CLI moves the line.
+- On process exit, `onClose` synthesizes one `result` event. A `SIGTERM`/`SIGKILL` exit (a deliberate abort) is surfaced as a clean `aborted` terminal, not a spurious error; a zero exit is `ok: true`; a non-zero exit carries the stderr as `errorMessage`.
+
+No `session_id` match simply means a fresh session next dispatch — never a failure.
+
+### Cost is estimated
+
+The native→`RuntimeEvent` mapper (`mapHermesEvent`) emits a `cost` event with `costUsd: null` and `estimated: true`. Hermes records token usage, but its head-less USD is unreliable, so cost is reported as estimated (the same posture as Codex).
+
+### Session resume
+
+The adapter's `sessionCodec` serializes the captured native session id. On a same-runtime continuation the runner threads it back as `ctx.resume`, and the driver adds `--resume <sessionId>` — but **only into a pre-existing home**: a freshly created home cannot hold the prior session, so `--resume` is skipped for the home's first run.
+
+## Provider precedence
+
+Hermes resolves its model provider with a strict precedence (`detectProvider` + `buildHermesSpawnPlan`):
+
+1. **The home `config.yaml`'s `model.provider` wins.** When the seeded config names a provider (including a user-defined provider name), Clawboo passes **no** `--provider` flag — Hermes resolves it itself. `detectProvider` reads the provider with a block-scoped line scan of the `model:` block (no YAML dependency), so the top-level `providers:` map can never false-positive.
+2. **Otherwise, a connected `OPENROUTER_API_KEY` adds `--provider openrouter`** as the no-config compatibility fallback — a pasted OpenRouter key just works.
+3. **Otherwise, nothing** is passed, and Hermes uses its built-in default (`auto`).
+
+<Info>
+Your own Hermes config is honored. There is no `--ignore-user-config`. If you configure a provider in `~/.hermes/config.yaml`, it is seed-copied into the home and that provider wins over the OpenRouter fallback.
+</Info>
+
+## The persistent home and native-preservation invariants
+
+When the runner resolves Hermes to a persistent home, the home lives at `<clawboo home>/runtimes/hermes/<sanitized agentId>` (under `resolveClawbooDir()`, so the `CLAWBOO_HOME` override applies). The agent id is collapsed to a safe path segment — dots are excluded entirely, so directory traversal is impossible by construction. The home is created owner-only (`0700`). Without a runner-materialized home (the conservative default), the driver falls back to a throwaway `mkdtemp` home, and nothing compounds.
+
+Inside a Clawboo-owned home, **Clawboo performs exactly two writes**, and everything else belongs to Hermes:
+
+| Clawboo writes | When |
+|---|---|
+| `mcp.json` | Refreshed every run (the server port can change across restarts; removed when there is no MCP base URL so a stale attach config never lingers). |
+| `config.yaml` | A one-time seed copy from the user's `~/.hermes/config.yaml` — copy-if-absent, never overwritten, never written back. |
+
+These are the load-bearing invariants. **Do not break them:**
+
+- **Clawboo never writes into the user's real `~/.hermes`** — it reads/copies from it only.
+- **`.env` is never seeded.** Provider keys ride the spawned process's environment (the vault is the source of truth); copying credentials would multiply secret surfaces on disk.
+- **There is no Hermes-skills writer.** `hermesSkills.ts` exposes a read-only view (`listNativeSkills`) and a pure merge policy (`mergeSkillSets`) where the **native skill wins on any name collision** — Clawboo never shadows a self-created skill, and the absence of a `syncSkills` writer is an explicit invariant, not an omission.
+- **`--resume` only into a pre-existing home, and never on a rotation successor** — resuming an exhausted session would re-exhaust it; continuity rides the handoff note instead.
+
+Hermes is a single-task **worker** on Clawboo's one [board of record](/concepts/the-board). Clawboo does not sync Hermes's internal kanban (two boards would mean drift, double-dispatch, and stale-claim races); Hermes reaches the team's coordination surface by attaching Clawboo's Tasks/Memory/Tools/TeamChat MCP servers via the `mcp.json` in its home.
+
+## Verify it worked
+
+- Re-fetch `GET /api/runtimes` (or click **Re-check** in the card). Hermes's `connectionState` should read `ready` and `health.ok` should be `true`. `health` resolves the `hermes` binary via `resolveRuntimeBin` (PATH plus user-install dirs), so a user-site install reads healthy.
+- After a run, the persistent home at `<clawboo home>/runtimes/hermes/<agentId>/` should contain Hermes's own `state.db` (growing across runs), `MEMORY.md`, and `sessions/` — the home compounding is the signal that preservation worked. The board task should move to `in_review` (non-empty diff) or `done`, with a report-up summary comment.
+
+## Troubleshooting
+
+<Warning>
+**Hermes reads as "failed" / not installed even though it works in a terminal.** Hermes installs to the Python user-site bin, which a GUI- or `npx`-launched server does not inherit on its PATH. Both the health check (`cliHealth`) and the spawn resolve through `resolveRuntimeBin` (PATH plus `extraBinDirs()`), so a user-site install reads healthy. If health still fails after install, restart the server so the binary is re-probed.
+</Warning>
+
+<Danger>
+**A sandboxed `$HOME` hides Hermes.** When `HOME` is overridden (e.g. an e2e or dev sandbox), the Python user-site bin under the real home is hidden. For a sandboxed live run, set `PYTHONUSERBASE` to the real user base and prepend the Python bin dir to `PATH`. At your normal home, neither is needed.
+</Danger>
+
+<Danger>
+**`POST /api/runtimes/openclaw/...` returns 404.** OpenClaw is not a `/api/runtimes` runtime — only `claude-code`, `codex`, `hermes`, and `clawboo-native` are valid ids. OpenClaw connects through the Gateway. See [OpenClaw](/runtimes/openclaw).
+</Danger>
+
+## Related
+
+- [Connecting runtimes](/runtimes/connecting-runtimes) — install/connect/disconnect mechanics + the encrypted vault
+- [Runtimes overview](/runtimes/index) — the full capability matrix
+- [`/api/runtimes` reference](/reference/rest-api/runtimes) — request/response shapes for install, connect, run
+- [The board](/concepts/the-board) — the one board of record Hermes works against
+- [Worktrees and handoff](/concepts/worktrees-and-handoff) — the isolated world a Hermes run executes in
+- [MCP servers](/operating/mcp-servers) — the Tasks/Memory/Tools/TeamChat spine Hermes attaches
+- [Scheduling](/concepts/scheduling) — why Clawboo's scheduler owns when-to-run, not Hermes's cron
+- [Glossary](/appendices/glossary) — canonical term definitions

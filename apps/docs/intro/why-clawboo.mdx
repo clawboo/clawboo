@@ -1,0 +1,104 @@
+---
+title: Why Clawboo
+description: What Clawboo adds over running runtimes standalone or stitching them yourself — one team room, race-free coordination, deep integration, independent verification, governance, and observability.
+---
+You can already run a coding agent on its own. You can run several of them. What you cannot easily do is make *different* agent runtimes — one on the native harness, one on OpenClaw, one on Hermes — work as one team without writing the coordination layer yourself: a shared room they can all speak in, a way to hand work between them without double-firing, and guardrails that hold when twelve of them write the same database at once.
+
+Clawboo is that coordination layer. This page is the honest case for it: six things it gives a team that you would otherwise have to build, with the mechanism that makes each one true. Each is a real piece of the running system, not a slogan — where a claim has a moving part, the part is named.
+
+## One team room across heterogeneous runtimes
+
+Stitching runtimes yourself, the first wall you hit is that they don't share a conversation. Each one has its own session, its own transcript, its own idea of "the user." There is no neutral surface where a Claude Code agent and an OpenClaw agent are *peers*.
+
+Clawboo's [peer chat](/concepts/peer-chat) is that surface. Every team member — whatever runtime it runs on — posts into one durable room as a named peer, and any of them can lead. The room is a SQLite table; the model-facing side is a [TeamChat MCP](/appendices/glossary) server every runtime attaches the same way. A bounded *exchange* drives a sequence of turns, picking who speaks next deterministically (round-robin with a least-spoken bias, so the leader can't starve a specialist) and capping how many turns one stimulus can run.
+
+The room also fixes a problem you'd have to solve yourself: **a teammate's words must not carry user authority**. When a post is delivered to a runtime, it is wrapped as evidence — `[Inter-session message · from=… · kind=… · seq=… · isUser=false]` — with the `isUser=false` token reproduced verbatim. A peer that writes "ignore your instructions" lands as *quoted context*, not as a command, because the wrapper guarantees exactly one authentic header (the outer one, controlled by the connection binding) and quote-prefixes every body line so the body can never present itself as a second, user-authority turn. Escalation is prevented by construction, not by the receiver's judgment.
+
+![Clawboo team space — graph on top, mixed-runtime group chat below](/images/team-space.png)
+
+## Durable, race-free coordination
+
+A chat transcript can't be transactionally claimed, can't survive a refresh as authority, and can't tell a crashed run from a slow one. The moment two agents might pick up the same work, narration-only orchestration breaks.
+
+Clawboo's [board](/concepts/the-board) is the durable, transactional source of truth instead. Delegation becomes a board task; picking up work is an **atomic claim**; the outcome lands back on the board. The claim is a single conditional UPDATE, not a read-then-write:
+
+```sql
+UPDATE tasks
+   SET assignee_agent_id = ?, assignee_runtime = ?, status = 'in_progress', updated_at = ?
+ WHERE id = ?
+   AND status = 'todo'
+   AND assignee_agent_id IS NULL
+   AND dropped = 0
+RETURNING *
+```
+
+Because the guard is part of the same statement that does the write, at most one concurrent caller wins. The winner gets the row back; every loser gets zero rows. That zero-row result is **data, not an error** — the claim returns `{ ok: false, reason: 'conflict' }`, the REST layer returns a `409`, and the rule the whole system follows is **never retry a 409**: a conflict means someone else legitimately owns the work. Double-fire is impossible by construction.
+
+The durability is the rest of the story. The board is canonical; chat is *narration* of board state, reflected after the canonical write and never a path back to it. State survives a refresh and a server restart. Two reconciliation passes recover stuck work — a startup pass releases tasks orphaned by a crash, and an interval pass times out abandoned `in_progress` tasks — and the whole thing is built to take many agents writing one SQLite file (WAL, a one-second busy timeout, jittered retries on *only* transient lock errors). You get coordination that holds at team scale without standing up a database to administer.
+
+## Deep integration that preserves each runtime's native plane
+
+The lazy way to support N runtimes is to treat them as fungible: strip each one down to "send a prompt, get text back," and throw away everything that made it good. A Hermes agent has skills, a memory file, a self-improvement loop. An OpenClaw agent lives in an always-on Gateway with its own channels. Flatten those and you've turned five capable agents into five worse ones.
+
+Clawboo refuses that trade. It splits the world into a **shared plane** it owns (the registry, board, team chat, shared memory, scheduling, verification, governance, the event log) and each runtime's **private plane** it observes but never touches (the runtime's own channels, native memory, skills, session resume). See [teams and planes](/concepts/teams-and-planes) for the full split.
+
+The split is enforced by construction, not by careful per-runtime code. Each runtime declares its integration class, and one pure function — `resolveRuntimeIntegration` — turns that declaration into the plan the host executes. The host branches on the *plan*, never on a runtime id:
+
+| Runtime | Class | What the plan preserves |
+|---|---|---|
+| Hermes | `wrapped-oneshot` + persistent per-identity home | Native skills and memory kept intact across runs, so the Curator loop and `MEMORY.md` compound |
+| OpenClaw | `connected-substrate` | The host manages no filesystem state for it; deliveries ride its own live Gateway channels |
+| Native, Claude Code, Codex | `native` / `wrapped-oneshot` | Conservative defaults; a persistent home only when the adapter declares one |
+
+The asymmetry is the point. A connected substrate like OpenClaw is preserved *passively* — Clawboo just doesn't touch the daemon. A one-shot CLI like Hermes is preserved *actively* — Clawboo reconstructs its value with a stable per-identity home so skills accumulate and memory survives between dispatches. Neither is favored; each gets exactly the depth its architecture dictates. The economic effect of leaving the private plane intact is that a Clawboo-dispatched Hermes teammate still calls whatever provider its own `config.yaml` names, and a Clawboo-orchestrated OpenClaw run is still a billable Gateway session — Clawboo adds coordination, it does not resell inference.
+
+<Note>
+The shared spine that ties the planes together is [MCP](/appendices/glossary): every runtime attaches the same Tasks / Memory / Tools / TeamChat servers and reaches the team's coordination surface through them. That is how a runtime joins the team without giving up being itself.
+</Note>
+
+## Independent verification that survives scale
+
+The failure mode of "just trust the agent" is well known: a generator self-grading is biased toward declaring success. At one agent it's an annoyance. Across a team running unattended, it is how silent breakage ships.
+
+Clawboo makes `done` mean *verified*, with the rule **builder≠judge**: the agent that did the work never certifies its own work. A code task that mutated files can reach `done` only when two independent signals agree — a **deterministic gate** (the task's own build/test/lint command, judged by its exit code) passes, and on a green gate, for a risky or large change, a read-only **critic** raises no blocking finding. The critic's independence is structural: it reviews in a *detached* worktree checked out at the work's commit, with no branch — so the reviewer literally cannot push, and cannot share the builder's session. See [verification](/concepts/verification).
+
+The gate is enforced in the board itself, not in a prompt. Any transition to `done` is rejected with `verification_required` when the task carries a non-promotable verdict, un-bypassable by any caller except an explicit, audited `humanOverride`. When a fix loop is exhausted, the verdict can land `completed_with_debt` rather than deadlock — an honest "shipped with known gaps" exit that records the debt instead of pretending. Because the verifier is independent of the builder by construction, the guarantee doesn't degrade as the team gets larger.
+
+## Governance that tightens under load
+
+Observability tells you a run went wrong. Governance *stops* it. The difference matters most precisely when you're not watching — which, with a team of agents, is most of the time.
+
+Clawboo's [governance](/concepts/governance) layer is several specialized guards rather than one ambient pulse:
+
+- **USD budgets with an auto-pause kill-switch.** Spend is recorded per cost event against the agent, mission, and team scopes at once. A `cap`-mode budget that crosses its limit flips to `paused`, and the executor aborts the in-flight run on the first paused scope. (The shipped default is track-and-warn, which records and reports crossings without pausing — you opt into a hard cap.)
+- **Tool-loop circuit breakers** that read typed events, never scraped prose: `iteration-cap`, `repeat-failure`, `no-progress`, `token-velocity`, and `repeat-policy-denied`. A run thrashing without progress is halted and its task released, instead of burning turns and dollars.
+- **Depth and fan-out caps.** A delegation tree can't grow past a max depth (default 2 levels), and a single turn can't spawn unbounded parallel delegations — the overflow is dropped and reported so the leader can re-issue deliberately.
+- **A delegation approval handshake** so a risky delegation can require a human's sign-off before it runs.
+
+These are the targeted replacements for the fixed heartbeat pulse you'd otherwise hand-roll: push-driven dispatch instead of idle polling, breakers instead of a liveness tick, a boot probe and worktree handoff for crash-resume, a budget kill-switch for bounded cost. Each guard is governed, recorded, and visible on the board — and each tightens exactly when a run starts to misbehave.
+
+## Observability at depth
+
+When several agents are working at once, a tail of log lines is not enough. You need to know which one is stalled, what a mission actually cost, and whether a failure is the model's fault or a bug in the harness.
+
+Clawboo treats every observability surface — the live team graph, the per-mission trace, the fleet-health triage, the cost overlay — as a **projection of a single append-only event log**. One table, `orchestration_events`, captures the orchestration stream; pure deterministic reducers fold it into whatever a view needs. `projectGraph` rebuilds the delegation/status graph; `projectFleetHealth` triages each agent as `working`, `idle`, `stalled`, or `zombie` from the gaps between its events. Replaying the same log always reproduces the same state, which means the [Ghost Graph](/using/ghost-graph) you're looking at is the event log, not a hand-drawn diagram that can drift from reality. An error taxonomy flags any unrecognized failure as a likely *harness* bug rather than a model failure, and an OpenTelemetry bridge ships the same trace data to Jaeger when you configure an endpoint. See [observability](/concepts/observability).
+
+![Ghost Graph — the live team graph projected from the event log](/images/ghost-graph.png)
+
+## The shape of the trade
+
+None of this is free. The honest cost of Clawboo is **more moving parts**: a board beside each runtime's own session state, a verification step on the path to `done`, governance guards a single agent doesn't need, an event log to maintain. If you only ever run one agent on one runtime and watch it yourself, that machinery is overhead you don't want — run the runtime standalone.
+
+The trade pays off the moment "team" is real: multiple runtimes, work that has to be claimed without collisions, runs you aren't babysitting, and a definition of "done" you can trust. Clawboo's bet is that the coordination, verification, governance, and observability are exactly the parts you'd otherwise build badly under deadline — so it builds them as the substrate, by construction, instead.
+
+## See also
+
+- [What is Clawboo](/intro/what-is-clawboo) — the positioning and the wedge in one screen
+- [How it works](/intro/how-it-works) — the end-to-end architecture
+- [The board](/concepts/the-board) — the durable coordination substrate
+- [Peer chat](/concepts/peer-chat) — the mixed-runtime team room
+- [Teams and planes](/concepts/teams-and-planes) — shared plane vs private plane
+- [Verification](/concepts/verification) — builder≠judge and `completed_with_debt`
+- [Governance](/concepts/governance) — budgets, breakers, caps, approvals
+- [Observability](/concepts/observability) — the event log and its projections
+- [Glossary](/appendices/glossary) — canonical term definitions
