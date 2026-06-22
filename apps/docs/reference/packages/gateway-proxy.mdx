@@ -20,7 +20,7 @@ The proxy is what keeps the browser from ever seeing the Gateway token: the SPA 
 |---|---|---|
 | `createGatewayProxy` | `(options: ProxyOptions) => GatewayProxyHandle` | Builds the WS proxy. Loads the proxy device identity eagerly, opens the upstream connection per browser WS (before the first browser message, to catch the spontaneous `connect.challenge`), injects token + device signature into `connect` frames, and forwards bidirectionally with a bounded connect-buffer and an application-level keepalive. |
 | `createAccessGate` | `(options?: AccessGateOptions) => AccessGate` | Builds a token-cookie access gate. Disabled when no token is given (`enabled: false`, all requests pass). When enabled: a `?access_token=…` query sets an HttpOnly cookie and 302-redirects; `/api/*` requests then require that cookie. Token comparison is constant-time (SHA-256 + `timingSafeEqual`). |
-| `getProxyDeviceIdentityPath` | `() => string` | Absolute path of the proxy's Ed25519 identity file — `resolveClawbooDir()/proxy-device-identity.json` (holds the private key). |
+| `getProxyDeviceIdentityPath` | `() => string` | Absolute path of the proxy's Ed25519 identity file, `resolveClawbooDir()/proxy-device-identity.json` (holds the private key). |
 | `loadOrCreateProxyDeviceIdentity` | `() => Promise<DeviceIdentity>` | Loads the persisted identity (re-hardening perms to `0600` on every load), or generates + persists a fresh one (`0700` dir, `0600` file). Persistence is best-effort; an in-memory identity still works for the session if the write fails. |
 | `signConnectParams` | `(identity: DeviceIdentity, params: Record<string, unknown>, nonce: string \| null) => Promise<ProxyDeviceFields>` | Extracts `client.id` / `client.mode` / `role` / `scopes` / `auth.token` from connect params, builds the device-auth payload (v2 when a `nonce` is present, else v1), and Ed25519-signs it. Returns the `{ device: { id, publicKey, signature, signedAt, nonce? } }` field to merge into the connect frame. |
 
@@ -29,12 +29,12 @@ The proxy is what keeps the browser from ever seeing the Gateway token: the SPA 
 | Export | Kind | Contract |
 |---|---|---|
 | `ProxyOptions` | interface | `createGatewayProxy` input: `{ loadUpstreamSettings: () => Promise<UpstreamSettings>; allowWs?; log?; logError?; keepaliveIntervalMs?; maxPendingFrames? }`. Defaults: `allowWs` matches `/api/gateway/ws`, keepalive `30_000` ms, buffer cap `512` frames. |
-| `UpstreamSettings` | interface | `{ url: string; token: string }` — the upstream Gateway WS URL + bearer token, resolved per connection by `loadUpstreamSettings`. |
+| `UpstreamSettings` | interface | `{ url: string; token: string }`, the upstream Gateway WS URL + bearer token, resolved per connection by `loadUpstreamSettings`. |
 | `GatewayProxyHandle` | interface | `createGatewayProxy` return: `{ handleUpgrade: (req, socket, head) => void; wss: WebSocketServer }`. Pass `handleUpgrade` to `server.on('upgrade', …)`. |
 | `AccessGateOptions` | interface | `{ token?: string; cookieName?: string; queryParam?: string }`. Defaults: cookie `clawboo_access`, query param `access_token`. Empty/undefined token disables the gate. |
 | `AccessGate` | interface | `{ enabled: boolean; handleHttp: (req, res) => boolean; allowUpgrade: (req) => boolean }`. `handleHttp` returns `true` when it has written the response (caller must not write again). |
-| `DeviceIdentity` | type | `{ deviceId: string; publicKey: string; privateKey: string }` — public/private keys base64url-encoded; `deviceId` is the SHA-256 fingerprint of the public key. |
-| `ProxyDeviceFields` | type | `{ device: { id: string; publicKey: string; signature: string; signedAt: number; nonce?: string } }` — the signed device field merged onto connect params. |
+| `DeviceIdentity` | type | `{ deviceId: string; publicKey: string; privateKey: string }`, public/private keys base64url-encoded; `deviceId` is the SHA-256 fingerprint of the public key. |
+| `ProxyDeviceFields` | type | `{ device: { id: string; publicKey: string; signature: string; signedAt: number; nonce?: string } }`, the signed device field merged onto connect params. |
 
 <Note>
 The barrel exposes no classes or runtime constants. `WebSocketServer` surfaces only as a field type on `GatewayProxyHandle.wss` (re-exported from `ws`, not from this package). The keepalive interval and frame-cap are config options on `ProxyOptions`, not exported constants.
@@ -42,9 +42,9 @@ The barrel exposes no classes or runtime constants. `WebSocketServer` surfaces o
 
 ## Used by
 
-- `apps/web/server/index.ts` — boots the proxy (`createGatewayProxy`) for the `/api/gateway/ws` upgrade and the `createAccessGate` for HTTP/WS authorization.
-- `apps/web/server/lib/agentSource/registry.ts` — re-uses `loadOrCreateProxyDeviceIdentity` + `signConnectParams` (+ the `DeviceIdentity` type) so the server-side `OpenClawAgentSource`'s non-browser `GatewayClient` signs its own connect frames with the already-paired proxy identity.
-- `apps/web/server/lib/bootProbe.ts` — calls `getProxyDeviceIdentityPath` to check the vault/identity file location during the boot health probe.
+- `apps/web/server/index.ts`, boots the proxy (`createGatewayProxy`) for the `/api/gateway/ws` upgrade and the `createAccessGate` for HTTP/WS authorization.
+- `apps/web/server/lib/agentSource/registry.ts`, re-uses `loadOrCreateProxyDeviceIdentity` + `signConnectParams` (+ the `DeviceIdentity` type) so the server-side `OpenClawAgentSource`'s non-browser `GatewayClient` signs its own connect frames with the already-paired proxy identity.
+- `apps/web/server/lib/bootProbe.ts`, calls `getProxyDeviceIdentityPath` to check the vault/identity file location during the boot health probe.
 
 ## Source
 
@@ -52,7 +52,7 @@ Barrel: [`packages/gateway-proxy/src/index.ts`](https://github.com/clawboo/clawb
 
 ## See also
 
-- [Gateway & events pipeline](/concepts/gateway-and-events) — where the proxy sits in the Gateway flow.
-- [Security](/operating/security) — access gate, device auth, and safe exposure.
-- [@clawboo/gateway-client](/reference/packages/gateway-client) — the WS client whose `signConnect` hook consumes `signConnectParams`.
-- [@clawboo/config](/reference/packages/config) — source of `resolveClawbooDir`, which locates the identity file.
+- [Gateway & events pipeline](/concepts/gateway-and-events), where the proxy sits in the Gateway flow.
+- [Security](/operating/security), access gate, device auth, and safe exposure.
+- [@clawboo/gateway-client](/reference/packages/gateway-client), the WS client whose `signConnect` hook consumes `signConnectParams`.
+- [@clawboo/config](/reference/packages/config), source of `resolveClawbooDir`, which locates the identity file.

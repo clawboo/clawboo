@@ -1,13 +1,13 @@
 ---
 title: Package overview
-description: The 25 @clawboo/* workspace packages — version, purity, purpose, dependency graph, and build order.
+description: The 25 @clawboo/* workspace packages: version, purity, purpose, dependency graph, and build order.
 ---
-Clawboo is a TurboRepo + pnpm-workspaces monorepo. Every shared library lives under the `@clawboo/*` scope in `packages/`; all of them are **internal** (`private: true`) — the only published npm artifact is the `clawboo` CLI (`apps/cli`), which inlines every `@clawboo/*` package it needs into its bundle (`dist/`). The two consumers are `apps/web` (the dashboard + Express API) and `apps/cli` (`npx clawboo`). Packages divide cleanly into **pure / browser-safe** ones (no `node:*` imports — safe to bundle into the Vite SPA or run in a worker) and **server-only** ones (touch `node:fs`/`node:http`/`better-sqlite3` and may only run in the Express server, the bundled CLI server, or the MCP stdio bins). Dependencies flow one way: apps depend on packages, packages depend on packages, and packages never import apps. `@clawboo/tsconfig` is the shared TypeScript-config root (a devDependency everywhere, no runtime edge).
+Clawboo is a TurboRepo + pnpm-workspaces monorepo. Every shared library lives under the `@clawboo/*` scope in `packages/`; all of them are **internal** (`private: true`); the only published npm artifact is the `clawboo` CLI (`apps/cli`), which inlines every `@clawboo/*` package it needs into its bundle (`dist/`). The two consumers are `apps/web` (the dashboard + Express API) and `apps/cli` (`npx clawboo`). Packages divide cleanly into **pure / browser-safe** ones (no `node:*` imports, safe to bundle into the Vite SPA or run in a worker) and **server-only** ones (touch `node:fs`/`node:http`/`better-sqlite3` and may only run in the Express server, the bundled CLI server, or the MCP stdio bins). Dependencies flow one way: apps depend on packages, packages depend on packages, and packages never import apps. `@clawboo/tsconfig` is the shared TypeScript-config root (a devDependency everywhere, no runtime edge).
 
-There are **25 packages** (20 top-level + 5 nested adapters under `packages/adapters/*`). Versions diverge per package — most sit at `0.1.0`, `events` and `gateway-client` are at `0.1.1`, and `tsconfig` is `0.0.0`.
+There are **25 packages** (20 top-level + 5 nested adapters under `packages/adapters/*`). Versions diverge per package; most sit at `0.1.0`, `events` and `gateway-client` are at `0.1.1`, and `tsconfig` is `0.0.0`.
 
 <Note>
-"Purity" here describes the package's **imports**, not whether it ships to the browser. The five runtime adapters import nothing from `node:*` (they take injected driver factories — the real subprocess/SDK drivers live server-side in `apps/web/server/lib/runtimes/`), so they are import-pure even though they're consumed server-side.
+"Purity" here describes the package's **imports**, not whether it ships to the browser. The five runtime adapters import nothing from `node:*` (they take injected driver factories; the real subprocess/SDK drivers live server-side in `apps/web/server/lib/runtimes/`), so they are import-pure even though they're consumed server-side.
 </Note>
 
 ## At a glance
@@ -85,13 +85,13 @@ graph TD
 
 Packages build before the apps that depend on them. Within each tier, packages have no `@clawboo/*` edge on a sibling in the same tier.
 
-1. **`tsconfig` + `logger`** — the shared TS-config root and the base logger (`logger` has no `@clawboo/*` edge).
-2. **`config` · `gateway-client` · `protocol` · `agent-registry`** — `gateway-client` depends on `logger`; the rest are pure/zero-dep.
-3. **`events` · `db` · `gateway-proxy`** — `events` → `gateway-client`/`logger`/`protocol`; `gateway-proxy` → `config`; `db` → `compaction`/`governance`/`obs` (which build in tier 4 below — `db` is sequenced after them in practice).
-4. **`executor` · `adapters/*` · `worktrees` · `compaction` · `scheduler` · `governance` · `obs`** — `executor` is pure (`./` + `./contract` + `./tiers`); the five adapters depend only on `executor` (`adapter-openclaw` also on `events`/`gateway-client`/`logger`/`protocol`); `compaction`/`obs`/`governance` are the dependencies `db` pulls in.
-5. **`boo-avatar` + `ui`** — `ui` → `boo-avatar`.
-6. **`mcp`** — depends on `db`; bundles its stdio bins.
-7. **`apps/web` → `apps/cli`** — the web app consumes all 24 runtime packages; the CLI consumes only `config` (+ the `tsconfig` devDependency).
+1. **`tsconfig` + `logger`**, the shared TS-config root and the base logger (`logger` has no `@clawboo/*` edge).
+2. **`config` · `gateway-client` · `protocol` · `agent-registry`**; `gateway-client` depends on `logger`; the rest are pure/zero-dep.
+3. **`events` · `db` · `gateway-proxy`**; `events` → `gateway-client`/`logger`/`protocol`; `gateway-proxy` → `config`; `db` → `compaction`/`governance`/`obs` (which build in tier 4 below; `db` is sequenced after them in practice).
+4. **`executor` · `adapters/*` · `worktrees` · `compaction` · `scheduler` · `governance` · `obs`**; `executor` is pure (`./` + `./contract` + `./tiers`); the five adapters depend only on `executor` (`adapter-openclaw` also on `events`/`gateway-client`/`logger`/`protocol`); `compaction`/`obs`/`governance` are the dependencies `db` pulls in.
+5. **`boo-avatar` + `ui`**; `ui` → `boo-avatar`.
+6. **`mcp`**, depends on `db`; bundles its stdio bins.
+7. **`apps/web` → `apps/cli`**; the web app consumes all 24 runtime packages; the CLI consumes only `config` (+ the `tsconfig` devDependency).
 
 <Note>
 The `db` ↔ `compaction`/`governance`/`obs` and `evals` ↔ `db`/`executor`/`governance`/`obs` edges mean tiers 3–4 are interleaved in dependency terms; Turbo resolves the exact topological order from each `package.json`. The tiers above are the human-readable grouping, not a strict serial sequence.

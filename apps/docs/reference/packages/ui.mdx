@@ -1,6 +1,6 @@
 ---
 title: "@clawboo/ui"
-description: Shared React UI primitives — the BooAvatar component, the cn class merger, the cva re-export, and the design-token constant.
+description: Shared React UI primitives: the BooAvatar component, the cn class merger, the cva re-export, and the design-token constant.
 ---
 - **Version** 0.1.0  ·  **Purity** browser-safe (React component package; ships JSX)
 - **Purpose** Shared React components, the `BooAvatar`, the `cn` class merger, and the design-token constant for Clawboo's apps.
@@ -8,7 +8,7 @@ description: Shared React UI primitives — the BooAvatar component, the cn clas
 - **External deps** `class-variance-authority`, `clsx`, `tailwind-merge`; peer `react` (`^18 || ^19`)
 
 <Note>
-shadcn/ui components are NOT exported here — they are initialized per-app via `npx shadcn@latest init`. This package carries only the cross-app primitives. The single React component shipped is `BooAvatar`.
+shadcn/ui components are NOT exported here; they are initialized per-app via `npx shadcn@latest init`. This package carries only the cross-app primitives. The single React component shipped is `BooAvatar`.
 </Note>
 
 ## Public API
@@ -19,7 +19,7 @@ The barrel re-exports two symbols (`resolveBooTint`, `TINTS`) directly from `@cl
 
 | Export | Signature | Contract |
 |---|---|---|
-| `cn` | `cn(...inputs: ClassValue[]): string` | Merge Tailwind class strings: `twMerge(clsx(inputs))` — dedupes conflicting utility classes, last-wins. |
+| `cn` | `cn(...inputs: ClassValue[]): string` | Merge Tailwind class strings: `twMerge(clsx(inputs))`, dedupes conflicting utility classes, last-wins. |
 | `cva` | re-export of `class-variance-authority`'s `cva` | Class-variance-authority factory; re-exported so consumers import it from one place. |
 | `resolveBooTint` | `resolveBooTint(seed: string, isBooZero = false): string` | Re-exported from `@clawboo/boo-avatar`. Deterministic FNV-1a tint from a seed; Boo Zero → `TINTS[0]`, others map into `TINTS[1..9]`. Same logic `generateBooAvatar` uses internally. |
 
@@ -65,7 +65,7 @@ const tokens = {
 
 ## Used by
 
-`@clawboo/web` (`apps/web`) — the only consumer. `BooAvatar` is wrapped by `AgentBooAvatar` (which auto-resolves `isBooZero`) and used in preview surfaces (CreateTeamModal, OnboardingWizard, NativeReadyStep, marketplace cards, the welcome-screen Boo-verse). `TINTS` seeds the team-color palettes (`lib/teamPalettes.ts`, `lib/resolveTeamBooColor.ts`); `cn`/`cva`/`VariantProps` are re-exported through `lib/utils.ts`.
+`@clawboo/web` (`apps/web`), the only consumer. `BooAvatar` is wrapped by `AgentBooAvatar` (which auto-resolves `isBooZero`) and used in preview surfaces (CreateTeamModal, OnboardingWizard, NativeReadyStep, marketplace cards, the welcome-screen Boo-verse). `TINTS` seeds the team-color palettes (`lib/teamPalettes.ts`, `lib/resolveTeamBooColor.ts`); `cn`/`cva`/`VariantProps` are re-exported through `lib/utils.ts`.
 
 ## Source
 
@@ -73,6 +73,6 @@ const tokens = {
 
 ## See also
 
-- [@clawboo/boo-avatar](/reference/packages/boo-avatar) — source of `generateBooAvatar`, `resolveBooTint`, `TINTS`, `BooAvatarParams`
-- [Design system](/internals/design-system) — the runtime CSS-token system that supersedes the static `tokens` constant
+- [@clawboo/boo-avatar](/reference/packages/boo-avatar), source of `generateBooAvatar`, `resolveBooTint`, `TINTS`, `BooAvatarParams`
+- [Design system](/internals/design-system), the runtime CSS-token system that supersedes the static `tokens` constant
 - [Packages overview](/reference/packages/index)

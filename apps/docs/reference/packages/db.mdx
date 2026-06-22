@@ -1,17 +1,17 @@
 ---
 title: "@clawboo/db"
-description: SQLite + Drizzle ORM data layer — schema, board, memory, tools, governance, events, sessions, routines, team-chat.
+description: SQLite + Drizzle ORM data layer: schema, board, memory, tools, governance, events, sessions, routines, team-chat.
 ---
-**Version** 0.1.0 · **Purity** server-only (`better-sqlite3` native binding) · **Purpose** the single SQLite + Drizzle data layer — schema, connection, and every domain repository (board, memory, tools broker, governance, event log, sessions, routines, team-chat). It is the cross-process bus: the Express server and the MCP stdio bins open the same file.
+**Version** 0.1.0 · **Purity** server-only (`better-sqlite3` native binding) · **Purpose** the single SQLite + Drizzle data layer: schema, connection, and every domain repository (board, memory, tools broker, governance, event log, sessions, routines, team-chat). It is the cross-process bus: the Express server and the MCP stdio bins open the same file.
 
 **Workspace deps** `@clawboo/compaction`, `@clawboo/governance`, `@clawboo/obs`
 **External deps** `better-sqlite3`, `drizzle-orm`, `zod`, `@noble/ed25519`
 
 <Note>
-This is the registry of record. The 27 Drizzle-typed tables + the inline `CREATE TABLE IF NOT EXISTS` bootstrap in `createDb` make a fresh file immediately usable; the inline DDL is the **sole** schema source — there is no migration ladder (no `db:migrate` / `db:generate` scripts; a schema change is a hard reset of the local DB). SQLite-native columns (team, personality, runtime, capabilities) are never clobbered by a Gateway re-sync.
+This is the registry of record. The 27 Drizzle-typed tables + the inline `CREATE TABLE IF NOT EXISTS` bootstrap in `createDb` make a fresh file immediately usable; the inline DDL is the **sole** schema source; there is no migration ladder (no `db:migrate` / `db:generate` scripts; a schema change is a hard reset of the local DB). SQLite-native columns (team, personality, runtime, capabilities) are never clobbered by a Gateway re-sync.
 </Note>
 
-The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schema`, `db`, and nine domain sub-modules (`board`, `capabilities`, `memory`, `tools`, `governance`, `events`, `sessions`, `routines`, `teamChat`) via `export *`. There are no `package.json` subpath `exports` — everything is reachable from `@clawboo/db`.
+The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schema`, `db`, and nine domain sub-modules (`board`, `capabilities`, `memory`, `tools`, `governance`, `events`, `sessions`, `routines`, `teamChat`) via `export *`. There are no `package.json` subpath `exports`; everything is reachable from `@clawboo/db`.
 
 ## Public API
 
@@ -28,7 +28,7 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 | `integrityCheck` | `(db) => string` | Run `PRAGMA integrity_check` and return its result string. |
 | `listTableNames` | `(db) => string[]` | List the SQLite table names present. |
 
-**Board — repository (`board/repository.ts`)**
+**Board, repository (`board/repository.ts`)**
 
 | Export | Signature | Contract |
 |---|---|---|
@@ -46,7 +46,7 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 | `getDependents` | `(db, taskId) => DbTask[]` | Transitive downstream dependents (recursive CTE). |
 | `cancelDependents` | `(db, taskId) => DbTask[]` | Cancel the still-pending dependents of a failed/blocked task. |
 | `getReadyTasks` | `(db, filter?) => DbTask[]` | Tasks with no unmet blockers (the ready-pump source). |
-| `getAncestors` | `(db, taskId) => AncestorRow[]` | The parent chain (recursive CTE, zod-validated) — backs the depth cap. |
+| `getAncestors` | `(db, taskId) => AncestorRow[]` | The parent chain (recursive CTE, zod-validated), backs the depth cap. |
 | `addComment` / `getComments` | comment CRUD | Per-task discussion / system notes. |
 | `createWorkspace` / `getWorkspaceForTask` / `updateWorkspaceStatus` / `listActiveWorkspaces` / `setTaskWorkspaceRefs` | worktree rows | Per-task git-worktree isolation records. |
 | `createExecutionProcess` | `(db, input: CreateExecInput) => DbExecutionProcess` | Open one run row for a task. |
@@ -55,7 +55,7 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 | `reconcileOrphans` | `(db) => ReconcileResult` | Boot: a `running` exec orphaned by a crash → `failed` + task released (tombstoned, idempotent). |
 | `reconcileStaleInProgress` | `(db, olderThanMs) => ReconcileResult` | TTL backstop: time out + release a stale `in_progress` task. |
 
-**Board — state machine (`board/state-machine.ts`)**
+**Board, state machine (`board/state-machine.ts`)**
 
 | Export | Signature | Contract |
 |---|---|---|
@@ -64,7 +64,7 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 | `isTerminal` | `(status) => boolean` | True for `done`/`cancelled`. |
 | `isTaskStatus` | `(value: unknown) => value is TaskStatus` | Type guard. |
 
-**Board — contention (`board/contention.ts`)**
+**Board, contention (`board/contention.ts`)**
 
 | Export | Signature | Contract |
 |---|---|---|
@@ -72,7 +72,7 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 | `withWriteRetry` | `<T>(fn: () => T) => T` | Jittered retry of a write on `SQLITE_BUSY` only. |
 | `immediateWrite` | `<T>(db, cb: (tx: BoardTx) => T) => T` | Run `cb` inside a `BEGIN IMMEDIATE` transaction. |
 
-**Board — verification (`board/verification.ts`)**
+**Board, verification (`board/verification.ts`)**
 
 | Export | Signature | Contract |
 |---|---|---|
@@ -83,11 +83,11 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 
 | Export | Signature | Contract |
 |---|---|---|
-| `upsertCapabilities` | `(db, sourceId, rows: DbCapabilityInsert[]) => void` | Source-scoped reconcile in one `immediateWrite` — replaces only this source's rows (a re-read never deletes another source's). |
+| `upsertCapabilities` | `(db, sourceId, rows: DbCapabilityInsert[]) => void` | Source-scoped reconcile in one `immediateWrite`; replaces only this source's rows (a re-read never deletes another source's). |
 | `listCapabilities` | `(db, filter?: ListCapabilitiesFilter) => DbCapability[]` | Filterable inventory read (runtime/kind/scope/agent). |
 | `getCapability` | `(db, id) => DbCapability \| null` | Read one capability row. |
 
-**Memory — embedding + summary (`memory/embedding.ts`, `memory/summary.ts`)**
+**Memory, embedding + summary (`memory/embedding.ts`, `memory/summary.ts`)**
 
 | Export | Signature | Contract |
 |---|---|---|
@@ -134,7 +134,7 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 | `appendEvent` | `(db, input: AppendEventInput) => DbOrchestrationEvent` | Append one orchestration event (`seq` SQLite-assigned, `data` scrubbed, unknown kind coerced to `error`). |
 | `listEvents` | `(db, filter?: ListEventsFilter) => DbOrchestrationEvent[]` | Read the event log in `seq` order (team/task/agent/trace/`afterSeq` filters). |
 
-**Sessions — rotation lineage (`sessions/index.ts`)**
+**Sessions, rotation lineage (`sessions/index.ts`)**
 
 | Export | Signature | Contract |
 |---|---|---|
@@ -142,7 +142,7 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 | `getSessionBySourceId` | `(db, sourceId, sourceSessionId) => DbSession \| undefined` | Look up a session by its source + stream key. |
 | `getSessionLineage` | `(db, sessionId) => DbSession[]` | Walk the rotation chain (newest-first). |
 
-**Routines — scheduled-runs ledger (`routines/*`)**
+**Routines, scheduled-runs ledger (`routines/*`)**
 
 | Export | Signature | Contract |
 |---|---|---|
@@ -169,47 +169,47 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 ### Types & interfaces
 
 - **Drizzle row types** (per table, select + insert): `DbAgent`/`DbAgentInsert`, `DbApprovalHistory(+Insert)`, `DbBooZeroTeamBrief(+Insert)`, `DbBudget(+Insert)`, `DbCapability(+Insert)`, `DbChatMessage(+Insert)`, `DbCostRecord(+Insert)`, `DbExecutionProcess(+Insert)`, `DbGovernanceAudit(+Insert)`, `DbGraphLayout(+Insert)`, `DbMemoryFact(+Insert)`, `DbMemoryProcedure(+Insert)`, `DbOrchestrationEvent(+Insert)`, `DbScheduledRun(+Insert)`, `DbSession(+Insert)`, `DbSetting(+Insert)`, `DbSkill(+Insert)`, `DbTask(+Insert)`, `DbTaskComment(+Insert)`, `DbTaskDep(+Insert)`, `DbTeam(+Insert)`, `DbTeamChat(+Insert)`, `DbTeamProfile(+Insert)`, `DbToolCallApproval(+Insert)`, `DbToolCallAudit(+Insert)`, `DbToolRegistry(+Insert)`, `DbWorkspace(+Insert)`.
-- **Connection** — `ClawbooDb` (the Drizzle instance type).
-- **Board** — `Scope`, `CreateTaskInput`, `ListTasksFilter`, `ClaimReason`, `ClaimResult`, `UpdateStatusReason`, `UpdateStatusResult`, `UpdateStatusOptions`, `TaskFields`, `WorkspaceStatus`, `CreateExecInput`, `CompleteExecOutcome`, `ReconcileResult`, `BoardTx`, `TaskStatus`. Zod body/result types: `CreateTaskBody`, `UpdateTaskBody`, `ClaimBody`, `CommentBody`, `CreateExecutionBody`, `CompleteExecutionBody`, `LinkDepBody`, `ProvisionWorkspaceBody`, `WorkspaceActionBody`, `AncestorRow`.
-- **Capabilities** — `ListCapabilitiesFilter`.
-- **Memory** — `MemoryStore`, `EmbeddingProvider`, `Fact`, `Procedure`, `MemoryScope`, `MemorySearchResult`, `SearchMode`, `SearchOpts`, `BrowseOpts`, `SaveFactInput`, `SaveProcedureInput`, `ResolveEmbeddingOpts`, `StructuredSummaryInput`. Zod body types: `SaveFactBody`, `SaveProcedureBody`, `SaveMemoryBody`, `SearchMemoryBody`, `BrowseMemoryBody`, `MemoryScopeBody`.
-- **Tools** — `ToolDescriptor`, `ToolCall`, `ToolCallContext`, `ToolOwner`, `ToolRisk`, `ToolProvenance`, `AvailabilityContext`, `AvailabilityRequirement`, `AvailabilityResult`, `DefaultAvailabilityOpts`, `Inspector`, `InspectorDecision`, `ChainOutcome`, `InjectionFinding`, `InjectionSeverity`, `ProvenanceResult`, `ProvenanceVerifyOpts`, `BrokeredResult`, `BrokerOptions`, `ApprovalDecision`, `ApprovalResolution`, `VisibleTool`, `ListToolsQuery`, `ResolveApprovalBody`.
-- **Governance** — `BudgetScope`, `BudgetMode`, `RecordSpendResult`, `SetBudgetLimitInput`, `ResumeBudgetOptions`, `GovernanceEventType`, `AppendAuditInput`, `ListGovernanceAuditFilter`, `SetBudgetBody`.
-- **Events** — `AppendEventInput`, `ListEventsFilter`.
-- **Sessions** — `RecordRotationInput`.
-- **Routines** — `ScheduledRunStatus`, `RegisterScheduledRunInput`, `RegisterScheduledRunResult`, `ListScheduledRunsFilter`, `RoutineScope`, `RunOutcome`, `SetStatusResult`, `UpdateScheduledRunPatch`.
-- **Team-chat** — `TeamChatKind`, `PostToRoomInput`, `ReadRoomInput`.
+- **Connection**, `ClawbooDb` (the Drizzle instance type).
+- **Board**, `Scope`, `CreateTaskInput`, `ListTasksFilter`, `ClaimReason`, `ClaimResult`, `UpdateStatusReason`, `UpdateStatusResult`, `UpdateStatusOptions`, `TaskFields`, `WorkspaceStatus`, `CreateExecInput`, `CompleteExecOutcome`, `ReconcileResult`, `BoardTx`, `TaskStatus`. Zod body/result types: `CreateTaskBody`, `UpdateTaskBody`, `ClaimBody`, `CommentBody`, `CreateExecutionBody`, `CompleteExecutionBody`, `LinkDepBody`, `ProvisionWorkspaceBody`, `WorkspaceActionBody`, `AncestorRow`.
+- **Capabilities**, `ListCapabilitiesFilter`.
+- **Memory**, `MemoryStore`, `EmbeddingProvider`, `Fact`, `Procedure`, `MemoryScope`, `MemorySearchResult`, `SearchMode`, `SearchOpts`, `BrowseOpts`, `SaveFactInput`, `SaveProcedureInput`, `ResolveEmbeddingOpts`, `StructuredSummaryInput`. Zod body types: `SaveFactBody`, `SaveProcedureBody`, `SaveMemoryBody`, `SearchMemoryBody`, `BrowseMemoryBody`, `MemoryScopeBody`.
+- **Tools**, `ToolDescriptor`, `ToolCall`, `ToolCallContext`, `ToolOwner`, `ToolRisk`, `ToolProvenance`, `AvailabilityContext`, `AvailabilityRequirement`, `AvailabilityResult`, `DefaultAvailabilityOpts`, `Inspector`, `InspectorDecision`, `ChainOutcome`, `InjectionFinding`, `InjectionSeverity`, `ProvenanceResult`, `ProvenanceVerifyOpts`, `BrokeredResult`, `BrokerOptions`, `ApprovalDecision`, `ApprovalResolution`, `VisibleTool`, `ListToolsQuery`, `ResolveApprovalBody`.
+- **Governance**, `BudgetScope`, `BudgetMode`, `RecordSpendResult`, `SetBudgetLimitInput`, `ResumeBudgetOptions`, `GovernanceEventType`, `AppendAuditInput`, `ListGovernanceAuditFilter`, `SetBudgetBody`.
+- **Events**, `AppendEventInput`, `ListEventsFilter`.
+- **Sessions**, `RecordRotationInput`.
+- **Routines**, `ScheduledRunStatus`, `RegisterScheduledRunInput`, `RegisterScheduledRunResult`, `ListScheduledRunsFilter`, `RoutineScope`, `RunOutcome`, `SetStatusResult`, `UpdateScheduledRunPatch`.
+- **Team-chat**, `TeamChatKind`, `PostToRoomInput`, `ReadRoomInput`.
 
 ### Classes
 
-- `SqliteMemoryStore` — the local-first `MemoryStore` (FTS5 + optional Float32-BLOB vector index + hybrid blend; embedding best-effort, degrades to FTS).
-- `DeterministicEmbeddingProvider` / `OllamaEmbeddingProvider` / `OpenAiEmbeddingProvider` — the three `EmbeddingProvider` implementations.
-- `ToolRegistry` — in-memory broker tool registry; `createBuiltinRegistry()` seeds it.
+- `SqliteMemoryStore`, the local-first `MemoryStore` (FTS5 + optional Float32-BLOB vector index + hybrid blend; embedding best-effort, degrades to FTS).
+- `DeterministicEmbeddingProvider` / `OllamaEmbeddingProvider` / `OpenAiEmbeddingProvider`, the three `EmbeddingProvider` implementations.
+- `ToolRegistry`, in-memory broker tool registry; `createBuiltinRegistry()` seeds it.
 
 ### Constants
 
-- **Schema** — the 27 Drizzle table objects: `agents`, `approvalHistory`, `booZeroTeamBriefs`, `budgets`, `capabilities`, `chatMessages`, `costRecords`, `executionProcesses`, `governanceAudit`, `graphLayouts`, `memoryFacts`, `memoryProcedures`, `orchestrationEvents`, `scheduledRuns`, `sessions`, `settings`, `skills`, `taskComments`, `taskDeps`, `tasks`, `teamChat`, `teams`, `teamProfiles`, `toolCallApprovals`, `toolCallAudit`, `toolRegistry`, `workspaces`.
-- **Board** — `TASK_STATUSES`, plus the zod schemas `taskStatusSchema`, `createTaskBody`, `updateTaskBody`, `claimBody`, `commentBody`, `createExecutionBody`, `completeExecutionBody`, `linkDepBody`, `provisionWorkspaceBody`, `workspaceActionBody`, `ancestorRowSchema`, `ancestorRowsSchema`.
-- **Memory** — zod schemas `memoryScopeSchema`, `searchModeSchema`, `saveFactBody`, `saveProcedureBody`, `saveMemoryBody`, `searchMemoryBody`, `browseMemoryBody`.
-- **Tools** — `BUILTIN_TOOLS`, `echoTool`, `memoryNoteTool`, `webSearchTool`, `deletePathTool`; zod schemas `listToolsQuery`, `resolveApprovalBody`.
-- **Governance** — zod schemas `budgetScopeSchema`, `budgetModeSchema`, `setBudgetBody`, `resumeBudgetBody`.
-- **Routines** — `SCHEDULED_RUN_STATUSES`.
+- **Schema**, the 27 Drizzle table objects: `agents`, `approvalHistory`, `booZeroTeamBriefs`, `budgets`, `capabilities`, `chatMessages`, `costRecords`, `executionProcesses`, `governanceAudit`, `graphLayouts`, `memoryFacts`, `memoryProcedures`, `orchestrationEvents`, `scheduledRuns`, `sessions`, `settings`, `skills`, `taskComments`, `taskDeps`, `tasks`, `teamChat`, `teams`, `teamProfiles`, `toolCallApprovals`, `toolCallAudit`, `toolRegistry`, `workspaces`.
+- **Board**, `TASK_STATUSES`, plus the zod schemas `taskStatusSchema`, `createTaskBody`, `updateTaskBody`, `claimBody`, `commentBody`, `createExecutionBody`, `completeExecutionBody`, `linkDepBody`, `provisionWorkspaceBody`, `workspaceActionBody`, `ancestorRowSchema`, `ancestorRowsSchema`.
+- **Memory**, zod schemas `memoryScopeSchema`, `searchModeSchema`, `saveFactBody`, `saveProcedureBody`, `saveMemoryBody`, `searchMemoryBody`, `browseMemoryBody`.
+- **Tools**, `BUILTIN_TOOLS`, `echoTool`, `memoryNoteTool`, `webSearchTool`, `deletePathTool`; zod schemas `listToolsQuery`, `resolveApprovalBody`.
+- **Governance**, zod schemas `budgetScopeSchema`, `budgetModeSchema`, `setBudgetBody`, `resumeBudgetBody`.
+- **Routines**, `SCHEDULED_RUN_STATUSES`.
 
 ## Used by
 
-- **`apps/web`** — the Express server (`server/`, `server/api/`, `server/lib/**`) and three browser sites (`src/stores`, `src/features/approvals`, `src/features/connection`).
-- **`@clawboo/mcp`** — the Tasks / Memory / Tools / TeamChat MCP servers + the stdio bins.
-- **`@clawboo/evals`** — the eval harness graders/tasks (throwaway boards).
+- **`apps/web`**, the Express server (`server/`, `server/api/`, `server/lib/**`) and three browser sites (`src/stores`, `src/features/approvals`, `src/features/connection`).
+- **`@clawboo/mcp`**, the Tasks / Memory / Tools / TeamChat MCP servers + the stdio bins.
+- **`@clawboo/evals`**, the eval harness graders/tasks (throwaway boards).
 
 ## Source
 
-Barrel: [`packages/db/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/db/src/index.ts). Schema: `packages/db/src/schema.ts`. Sub-modules: `board/`, `capabilities/`, `memory/`, `tools/`, `governance/`, `events/`, `sessions/`, `routines/`, `teamChat/`. Connection + inline schema DDL: `db.ts` (the sole schema source — there is no migration ladder).
+Barrel: [`packages/db/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/db/src/index.ts). Schema: `packages/db/src/schema.ts`. Sub-modules: `board/`, `capabilities/`, `memory/`, `tools/`, `governance/`, `events/`, `sessions/`, `routines/`, `teamChat/`. Connection + inline schema DDL: `db.ts` (the sole schema source; there is no migration ladder).
 
 ## See also
 
-- [Database schema reference](/reference/database-schema) — the 27 tables + ERD.
-- [The board](/concepts/the-board) — state machine, atomic claim, deps.
-- [Memory](/concepts/memory) — shared Memory-MCP tier.
-- [Governance](/concepts/governance) — budgets, kill-switch, audit.
-- [Observability](/concepts/observability) — the event log.
-- [`@clawboo/governance`](/reference/packages/governance) · [`@clawboo/obs`](/reference/packages/obs) · [`@clawboo/mcp`](/reference/packages/mcp) — consumers/upstreams of this layer.
+- [Database schema reference](/reference/database-schema), the 27 tables + ERD.
+- [The board](/concepts/the-board), state machine, atomic claim, deps.
+- [Memory](/concepts/memory), shared Memory-MCP tier.
+- [Governance](/concepts/governance), budgets, kill-switch, audit.
+- [Observability](/concepts/observability), the event log.
+- [`@clawboo/governance`](/reference/packages/governance) · [`@clawboo/obs`](/reference/packages/obs) · [`@clawboo/mcp`](/reference/packages/mcp), consumers/upstreams of this layer.

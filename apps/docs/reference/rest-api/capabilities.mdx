@@ -1,10 +1,10 @@
 ---
 title: Capabilities API
-description: REST reference for the unified capability inventory — list every runtime's skills, tools, and connectors, and act on the manageable ones.
+description: REST reference for the unified capability inventory: list every runtime's skills, tools, and connectors, and act on the manageable ones.
 ---
 REST surface for the unified [capability inventory](/concepts/capabilities): one merged stream of every skill, tool, and connector across all five runtimes, plus a single manageability-gated action endpoint. `GET /api/capabilities` is the one read both the Ghost Graph and the Capabilities dashboard consume; `POST /api/capabilities/:action` installs a curated skill or connector, toggles a manageable capability, or resolves a pending tool-call approval.
 
-The read fans a `CapabilityMultiplexer` over five per-runtime `CapabilitySource` adapters (`native`, `hermes`, `claude-code`, `codex`, `openclaw`), persists each OK source's records, and serves last-good rows for any degraded source — so a blipped Gateway never blanks the inventory. The merged result carries both the records and a per-source read-status list.
+The read fans a `CapabilityMultiplexer` over five per-runtime `CapabilitySource` adapters (`native`, `hermes`, `claude-code`, `codex`, `openclaw`), persists each OK source's records, and serves last-good rows for any degraded source, so a blipped Gateway never blanks the inventory. The merged result carries both the records and a per-source read-status list.
 
 <Note>
 A capability is acted on by a pure function of its `manageability` tier. `managed` and `external-write` rows are writable; `observe-only` rows (runtime built-ins, external-vendor CLIs) are read-only and reject `enable`/`disable` with **422**. A `runtime-of-record` row may also be non-writable when its source emits `writable: false`. See [Concepts → Capabilities](/concepts/capabilities) for the tier model.
@@ -23,9 +23,9 @@ The POST body is parsed by `express.json({ limit: '2mb' })`.
 
 ## `GET /api/capabilities`
 
-Returns the merged `CapabilityRecord[]` plus a `SourceReadStatus[]` for every source. Records are deduplicated by `id` with fresh records winning over stale (last-good) rows, then filtered by the supplied query params. Filtering happens after the merge — an unknown filter value yields an empty `records[]`, not an error.
+Returns the merged `CapabilityRecord[]` plus a `SourceReadStatus[]` for every source. Records are deduplicated by `id` with fresh records winning over stale (last-good) rows, then filtered by the supplied query params. Filtering happens after the merge; an unknown filter value yields an empty `records[]`, not an error.
 
-- **Path params** — none.
+- **Path params**: none.
 - **Query params**:
 
 | Param | Type | Effect |
@@ -37,11 +37,11 @@ Returns the merged `CapabilityRecord[]` plus a `SourceReadStatus[]` for every so
 
 Each param is applied only when present and non-empty; omit all four for the full inventory.
 
-- **Request body** — none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the merged view:
+**`200 OK`**: the merged view:
 
 ```ts
 {
@@ -88,7 +88,7 @@ Each param is applied only when present and non-empty; omit all four for the ful
 
 `sources[]` reports each adapter's read outcome. A source with `ok: false, degraded: true` did not read fresh; its records in `records[]` are the last-good rows from the durable table (served unchanged so the inventory stays populated through a disconnect).
 
-**`500 Internal Server Error`** — any failure loading the inventory:
+**`500 Internal Server Error`**: any failure loading the inventory:
 
 ```json
 { "error": "<message>" }
@@ -110,12 +110,12 @@ curl 'http://localhost:18790/api/capabilities?runtime=hermes&kind=connector'
 
 A single action endpoint dispatched on the `:action` path segment. `install` adds a curated skill or connector to an agent; `enable`/`disable` toggle an existing manageable capability by its `id`; `approve` resolves a pending tool-call approval. Writes route to the owning source's `write()` through the multiplexer (which is also where the durable audit happens); `approve` reuses the existing approval handshake (`resolveApproval`) and never routes through a source.
 
-- **Path params** — `action` (one of `install` \| `enable` \| `disable` \| `approve`; any other value returns **400**).
-- **Request body** — shape depends on `:action` (below).
+- **Path params**: `action` (one of `install` \| `enable` \| `disable` \| `approve`; any other value returns **400**).
+- **Request body**: shape depends on `:action` (below).
 
 ### Action: `install`
 
-Installs a skill or connector onto an agent. The body is the install spec, accepted either nested under `spec` or as the top-level body. The target agent must exist (an unknown `agentId` would produce an invisible orphan annotation, so it is rejected up front). The owning runtime is resolved authoritatively from the agent row — the client's `runtime` field is a placeholder and is overwritten before the write.
+Installs a skill or connector onto an agent. The body is the install spec, accepted either nested under `spec` or as the top-level body. The target agent must exist (an unknown `agentId` would produce an invisible orphan annotation, so it is rejected up front). The owning runtime is resolved authoritatively from the agent row; the client's `runtime` field is a placeholder and is overwritten before the write.
 
 **Request body**:
 
@@ -133,25 +133,25 @@ Installs a skill or connector onto an agent. The body is the install spec, accep
 }
 ```
 
-**`400 Bad Request`** — the body is not a valid install spec (missing/non-string `via`, `agentId`, `runtime`, `kind`, or `name`):
+**`400 Bad Request`**: the body is not a valid install spec (missing/non-string `via`, `agentId`, `runtime`, `kind`, or `name`):
 
 ```json
 { "error": "install requires a valid spec { via, agentId, runtime, kind, name }" }
 ```
 
-**`404 Not Found`** — the target `agentId` is not a known agent row:
+**`404 Not Found`**: the target `agentId` is not a known agent row:
 
 ```json
 { "error": "agent not found" }
 ```
 
-**`200 OK`** — the capability was installed; the fresh record is returned (or `null` for an acknowledgement that yields no new row):
+**`200 OK`**: the capability was installed; the fresh record is returned (or `null` for an acknowledgement that yields no new row):
 
 ```ts
 { ok: true, record: CapabilityRecord | null }
 ```
 
-**`422 Unprocessable Entity`** — the owning source refused the write for its tier (an `UnsupportedCapabilityWriteError`, e.g. an `observe-only` source):
+**`422 Unprocessable Entity`**: the owning source refused the write for its tier (an `UnsupportedCapabilityWriteError`, e.g. an `observe-only` source):
 
 ```ts
 { error: "<message>", manageability: 'managed' | 'external-write' | 'runtime-of-record' | 'observe-only' }
@@ -159,7 +159,7 @@ Installs a skill or connector onto an agent. The body is the install spec, accep
 
 ### Action: `enable` / `disable`
 
-Toggles an existing capability identified by its composite `id`. The handler resolves the row, then enforces the same tier the UI shows: an `observe-only` capability — or any capability whose source marked it `writable: false` — is rejected with **422** before any source write is attempted.
+Toggles an existing capability identified by its composite `id`. The handler resolves the row, then enforces the same tier the UI shows: an `observe-only` capability, or any capability whose source marked it `writable: false`, is rejected with **422** before any source write is attempted.
 
 **Request body**:
 
@@ -167,7 +167,7 @@ Toggles an existing capability identified by its composite `id`. The handler res
 { id: string }   // the composite capability id, e.g. "native:tool_registry:echo"
 ```
 
-**`400 Bad Request`** — missing `id`:
+**`400 Bad Request`**: missing `id`:
 
 ```json
 { "error": "enable requires { id }" }
@@ -175,13 +175,13 @@ Toggles an existing capability identified by its composite `id`. The handler res
 
 (For `disable`, the message reads `disable requires { id }`.)
 
-**`404 Not Found`** — no capability row with that `id`:
+**`404 Not Found`**: no capability row with that `id`:
 
 ```json
 { "error": "capability not found" }
 ```
 
-**`422 Unprocessable Entity`** — the capability cannot be modified (`observe-only`, or `writable === false`):
+**`422 Unprocessable Entity`**: the capability cannot be modified (`observe-only`, or `writable === false`):
 
 ```ts
 {
@@ -191,7 +191,7 @@ Toggles an existing capability identified by its composite `id`. The handler res
 }
 ```
 
-**`200 OK`** — the toggle was applied; the updated record is returned (or `null`):
+**`200 OK`**: the toggle was applied; the updated record is returned (or `null`):
 
 ```ts
 { ok: true, record: CapabilityRecord | null }
@@ -199,7 +199,7 @@ Toggles an existing capability identified by its composite `id`. The handler res
 
 ### Action: `approve`
 
-Resolves a pending tool-call approval row (the same `tool_call_approvals` handshake the Approvals panel uses — approval ids carry no source prefix, so this is not a source-routed write). The resolve is idempotent: a row already resolved is a no-op and returns the existing row.
+Resolves a pending tool-call approval row (the same `tool_call_approvals` handshake the Approvals panel uses, approval ids carry no source prefix, so this is not a source-routed write). The resolve is idempotent: a row already resolved is a no-op and returns the existing row.
 
 **Request body**:
 
@@ -210,19 +210,19 @@ Resolves a pending tool-call approval row (the same `tool_call_approvals` handsh
 }
 ```
 
-**`400 Bad Request`** — missing `id` or a `decision` outside the allowed set:
+**`400 Bad Request`**: missing `id` or a `decision` outside the allowed set:
 
 ```json
 { "error": "approve requires { id, decision }" }
 ```
 
-**`404 Not Found`** — no approval row with that `id`:
+**`404 Not Found`**: no approval row with that `id`:
 
 ```json
 { "error": "approval not found" }
 ```
 
-**`200 OK`** — the approval was resolved; the row is returned:
+**`200 OK`**: the approval was resolved; the row is returned:
 
 ```ts
 {
@@ -245,25 +245,25 @@ Resolves a pending tool-call approval row (the same `tool_call_approvals` handsh
 
 ### Catch-all
 
-**`400 Bad Request`** — `:action` is not one of the four known actions:
+**`400 Bad Request`**: `:action` is not one of the four known actions:
 
 ```json
 { "error": "unknown action: <action>" }
 ```
 
-**`404 Not Found`** — the multiplexer routed to an unknown source / unparseable id (an `UnknownCapabilityError` thrown from a write):
+**`404 Not Found`**: the multiplexer routed to an unknown source / unparseable id (an `UnknownCapabilityError` thrown from a write):
 
 ```json
 { "error": "<message>" }
 ```
 
-**`422 Unprocessable Entity`** — a source threw `UnsupportedCapabilityWriteError` (a write aimed at a tier that forbids it):
+**`422 Unprocessable Entity`**: a source threw `UnsupportedCapabilityWriteError` (a write aimed at a tier that forbids it):
 
 ```ts
 { error: "<message>", manageability: 'managed' | 'external-write' | 'runtime-of-record' | 'observe-only' }
 ```
 
-**`500 Internal Server Error`** — any other failure:
+**`500 Internal Server Error`**: any other failure:
 
 ```json
 { "error": "<message>" }
@@ -296,9 +296,9 @@ Every error response on these routes is the standard `{ error: string }` envelop
 
 ## See also
 
-- [Capabilities (concept) — the inventory + manageability tiers](/concepts/capabilities)
+- [Capabilities (concept), the inventory + manageability tiers](/concepts/capabilities)
 - [Capabilities dashboard (how-to)](/using/capabilities-dashboard)
-- [`@clawboo/capability-registry`](/reference/packages/capability-registry) — `CapabilityRecord`, the `CapabilitySource` trait, the multiplexer
-- [Tools & MCP API](/reference/rest-api/tools-and-mcp) — the brokered tools + the approval queue this `approve` action resolves
-- [Governance API](/reference/rest-api/governance) — delegation approvals share the same `tool_call_approvals` table
+- [`@clawboo/capability-registry`](/reference/packages/capability-registry), `CapabilityRecord`, the `CapabilitySource` trait, the multiplexer
+- [Tools & MCP API](/reference/rest-api/tools-and-mcp), the brokered tools + the approval queue this `approve` action resolves
+- [Governance API](/reference/rest-api/governance), delegation approvals share the same `tool_call_approvals` table
 - [REST API overview](/reference/rest-api/index)

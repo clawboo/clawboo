@@ -2,14 +2,14 @@
 title: Check System Health
 description: Read the boot-probe checklist, the degraded/fatal banner, resolved runtime state, and re-run the probe from the System Health panel.
 ---
-Use this page when you want to know whether your Clawboo install is sound: which foundations passed at boot, what the server resolved (state dir, database, port), and what production posture it is running with. The **System Health** panel is the always-visible surface over the [boot probe](/appendices/glossary) — it is the user-facing replacement for the deleted Labs Diagnostics panel, so it is a normal navigation item, not a feature-gated lab.
+Use this page when you want to know whether your Clawboo install is sound: which foundations passed at boot, what the server resolved (state dir, database, port), and what production posture it is running with. The **System Health** panel is the always-visible surface over the [boot probe](/appendices/glossary); it is the user-facing replacement for the deleted Labs Diagnostics panel, so it is a normal navigation item, not a feature-gated lab.
 
 The panel (`SystemHealthPanel`) is backed by `/api/health`. The boot probe runs once on every server start and is cached; the panel reads that cached report and can recompute it on demand.
 
 ## Prerequisites
 
 <Note>
-System Health is always available. It is the one liveness surface that answers even when the OpenClaw Gateway is down — the report is computed from local filesystem, SQLite, vault, and in-process MCP state, not from a runtime connection.
+System Health is always available. It is the one liveness surface that answers even when the OpenClaw Gateway is down; the report is computed from local filesystem, SQLite, vault, and in-process MCP state, not from a runtime connection.
 </Note>
 
 - A running Clawboo server. No runtime needs to be connected; the panel works on a fresh install before you have onboarded.
@@ -38,20 +38,20 @@ The toolbar shows a single rollup pill computed from the report's `fatal` and `d
 
 When the report has any failing check, a banner appears above the checklist:
 
-- **Fatal** — *"The install has a fatal problem."* Clawboo has no upgrade/repair path, so the remedy is to reset `~/.clawboo` and re-run onboarding for a clean start.
-- **Degraded** — *"Running degraded."* Some optional subsystems are unavailable; the rest of Clawboo works normally. The failing checks below tell you which.
+- **Fatal**: *"The install has a fatal problem."* Clawboo has no upgrade/repair path, so the remedy is to reset `~/.clawboo` and re-run onboarding for a clean start.
+- **Degraded**: *"Running degraded."* Some optional subsystems are unavailable; the rest of Clawboo works normally. The failing checks below tell you which.
 
-This split is intentional: almost everything **degrades** (the server keeps running) rather than being fatal. Only two failures are fatal — the [clawboo home](/appendices/glossary) is not writable, or the SQLite file fails its integrity check — because nothing works without them.
+This split is intentional: almost everything **degrades** (the server keeps running) rather than being fatal. Only two failures are fatal: the [clawboo home](/appendices/glossary) is not writable, or the SQLite file fails its integrity check, because nothing works without them.
 
 ### The Checks checklist
 
-Each entry in `report.checks[]` renders as a row with an icon, the humanized check name, a tone pill (`OK` / `Degraded` / `Fatal`), the check's `durationMs`, a one-line `message`, and — only when the check failed — its `detail` line. The nine checks the boot probe runs, in order:
+Each entry in `report.checks[]` renders as a row with an icon, the humanized check name, a tone pill (`OK` / `Degraded` / `Fatal`), the check's `durationMs`, a one-line `message`, and, only when the check failed, its `detail` line. The nine checks the boot probe runs, in order:
 
 | Check id | Label | What it verifies | Failure tone |
 |---|---|---|---|
 | `clawbooHomeWritable` | Clawboo home writable | `~/.clawboo` exists and is writable (mkdir + `W_OK`) | **fatal** |
 | `vaultPerms` | Secrets vault permissions | `secrets/` is `0700`, `master.key` is `0600`, proxy device identity is `0600` (POSIX only; skipped on Windows; "not yet created" on a fresh install) | degraded |
-| `masterKeyBootSentinel` | Master key | A fixed sentinel encrypted on first boot decrypts on every later boot — proving the master key still works | degraded |
+| `masterKeyBootSentinel` | Master key | A fixed sentinel encrypted on first boot decrypts on every later boot, proving the master key still works | degraded |
 | `databaseIntegrity` | Database integrity | SQLite opens and `PRAGMA integrity_check` returns `ok` | **fatal** |
 | `databaseSchema` | Database schema | The core bootstrap tables (`teams`, `agents`, `settings`, `budgets`, `orchestration_events`, `tasks`) are present | degraded |
 | `apiPortFileMatches` | API port file | The on-disk api-port file matches the actual listening port (skipped pre-listen when no port is supplied) | degraded |
@@ -92,7 +92,7 @@ The 80% figure is the budget math's soft-cap percentage (`SOFT_CAP_PERCENT`), re
 
 After you fix a failing check (for example, you tighten the vault permissions or re-enter a runtime key), click **Re-run probe** in the toolbar.
 
-This calls `POST /api/health/recheck`, which recomputes a fresh report — re-running the integrity check, the MCP round-trips, and the Gateway/OTel probes — and replaces the cached one. The button is disabled (with a spinner) while a probe is in flight; concurrent probes are de-duped server-side so the slow checks run at most once.
+This calls `POST /api/health/recheck`, which recomputes a fresh report, re-running the integrity check, the MCP round-trips, and the Gateway/OTel probes, and replaces the cached one. The button is disabled (with a spinner) while a probe is in flight; concurrent probes are de-duped server-side so the slow checks run at most once.
 
 The plain `GET /api/health` returns the cached report (or computes one on first call if the server has not produced one yet); only `recheck` forces a fresh run.
 
@@ -103,7 +103,7 @@ The plain `GET /api/health` returns the cached report (or computes one on first 
 | Open / auto-refresh | `GET /api/health` | Returns the latest cached `BootReport` (computes one if none exists yet) |
 | Re-run probe | `POST /api/health/recheck` | Recomputes fresh and replaces the cache |
 
-Both responses carry a top-level `ok` field (`true` when there are no fatal checks), so a simple external liveness check can read that one field. Every check's `detail` and the resolved paths are redacted-on-display before send — a credential-shaped substring is masked while the readable paths and config stay.
+Both responses carry a top-level `ok` field (`true` when there are no fatal checks), so a simple external liveness check can read that one field. Every check's `detail` and the resolved paths are redacted-on-display before send; a credential-shaped substring is masked while the readable paths and config stay.
 
 ## Verify it worked
 
@@ -119,11 +119,11 @@ curl -s http://localhost:18790/api/health | jq '.ok, .fatal, .degraded'
 ## Troubleshooting
 
 <Danger>
-**A fatal check means the install is broken.** Clawboo has no migration or repair path — a fatal `clawbooHomeWritable` or `databaseIntegrity` is not something the panel can fix. Reset `~/.clawboo` and re-run the onboarding wizard to start clean. (Back up the database first if you need its data.)
+**A fatal check means the install is broken.** Clawboo has no migration or repair path; a fatal `clawbooHomeWritable` or `databaseIntegrity` is not something the panel can fix. Reset `~/.clawboo` and re-run the onboarding wizard to start clean. (Back up the database first if you need its data.)
 </Danger>
 
 <Warning>
-**`master key` reads "unreadable — re-enter runtime keys".** The boot sentinel did not decrypt, which means the master key changed, was lost, or `CLAWBOO_SECRETS_MASTER_KEY` now differs from what encrypted the vault. Stored runtime provider keys cannot be decrypted; re-enter them in the Runtimes panel (see [Connecting runtimes](/runtimes/connecting-runtimes)), or reset `~/.clawboo` for a clean start. This check degrades — the server keeps running.
+**`master key` reads "unreadable, re-enter runtime keys".** The boot sentinel did not decrypt, which means the master key changed, was lost, or `CLAWBOO_SECRETS_MASTER_KEY` now differs from what encrypted the vault. Stored runtime provider keys cannot be decrypted; re-enter them in the Runtimes panel (see [Connecting runtimes](/runtimes/connecting-runtimes)), or reset `~/.clawboo` for a clean start. This check degrades; the server keeps running.
 </Warning>
 
 <Note>
@@ -132,8 +132,8 @@ curl -s http://localhost:18790/api/health | jq '.ok, .fatal, .degraded'
 
 ## Related
 
-- [`/api/settings` and `/api/health` reference](/reference/rest-api/settings) — full request/response shapes for the health routes
-- [Production defaults](/operating/production-defaults) — budget posture, breaker defaults, and the full shipped-defaults catalog
-- [Connecting runtimes](/runtimes/connecting-runtimes) — where the encrypted vault and runtime keys live
-- [Security](/operating/security) — the vault, redaction, and safe exposure
-- [Data and state](/operating/data-and-state) — SQLite, file locations, backup, and reset
+- [`/api/settings` and `/api/health` reference](/reference/rest-api/settings): full request/response shapes for the health routes
+- [Production defaults](/operating/production-defaults): budget posture, breaker defaults, and the full shipped-defaults catalog
+- [Connecting runtimes](/runtimes/connecting-runtimes): where the encrypted vault and runtime keys live
+- [Security](/operating/security): the vault, redaction, and safe exposure
+- [Data and state](/operating/data-and-state): SQLite, file locations, backup, and reset

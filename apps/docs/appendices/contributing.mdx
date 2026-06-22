@@ -11,7 +11,7 @@ The single source of truth for process is [`CONTRIBUTING.md`](https://github.com
 ## Prerequisites
 
 - **Node.js 22+** and **pnpm 9+** (the root `package.json` declares `engines.node >=22.0.0` and `engines.pnpm >=9.0.0`; the pinned package manager is `pnpm@9.15.0`).
-- No external runtime is required to develop or test. Clawboo runs agents natively — paste a provider key and the in-process [`clawboo-native`](/runtimes/native) harness handles execution. Connecting [OpenClaw](/runtimes/openclaw), [Claude Code](/runtimes/claude-code), [Codex](/runtimes/codex), or [Hermes](/runtimes/hermes) is only needed when you are working on those adapters.
+- No external runtime is required to develop or test. Clawboo runs agents natively; paste a provider key and the in-process [`clawboo-native`](/runtimes/native) harness handles execution. Connecting [OpenClaw](/runtimes/openclaw), [Claude Code](/runtimes/claude-code), [Codex](/runtimes/codex), or [Hermes](/runtimes/hermes) is only needed when you are working on those adapters.
 
 ## Steps
 
@@ -23,7 +23,7 @@ cd clawboo
 pnpm install
 ```
 
-`pnpm install` resolves the whole workspace — the three globs `packages/*`, `packages/adapters/*`, and `apps/*` (see [Monorepo and build](/internals/monorepo-and-build) for the layout).
+`pnpm install` resolves the whole workspace, the three globs `packages/*`, `packages/adapters/*`, and `apps/*` (see [Monorepo and build](/internals/monorepo-and-build) for the layout).
 
 ### 2. Run the dev stack
 
@@ -38,9 +38,9 @@ The root `dev` script runs `turbo dev`. For the dashboard, `apps/web`'s dev orch
 ```
 
 - The **Vite SPA** serves on `:5173`.
-- The **Express API** binds the resolved port — default **`18790`**, with an auto-fallback that scans up to 20 consecutive ports if `18790` is busy. Pin it with `CLAWBOO_API_PORT` (see [Environment variables](/reference/environment-variables)).
+- The **Express API** binds the resolved port: default **`18790`**, with an auto-fallback that scans up to 20 consecutive ports if `18790` is busy. Pin it with `CLAWBOO_API_PORT` (see [Environment variables](/reference/environment-variables)).
 
-Clawboo stores all of its state under `~/.clawboo/` (auto-created on first run). To point a dev instance at a throwaway directory, set [`CLAWBOO_HOME`](/reference/environment-variables). There are **no feature flags** — every subsystem ships on, so there is nothing to enable.
+Clawboo stores all of its state under `~/.clawboo/` (auto-created on first run). To point a dev instance at a throwaway directory, set [`CLAWBOO_HOME`](/reference/environment-variables). There are **no feature flags**; every subsystem ships on, so there is nothing to enable.
 
 <Tip>
 Governance ships in track-and-warn mode: budgets record spend and warn at thresholds, but nothing auto-pauses a run until you set a hard cap. See [Production defaults](/operating/production-defaults).
@@ -75,10 +75,10 @@ pnpm assemble && pnpm test:clean-install  # bundle the CLI and smoke-test a clea
 
 What each one guards:
 
-- **`pnpm test`** runs two Vitest projects — a node project for pure logic (`*.test.ts`) and a jsdom project for React components (`*.test.tsx`, RTL + MSW + jest-dom + jest-axe). See [Testing](/internals/testing).
+- **`pnpm test`** runs two Vitest projects: a node project for pure logic (`*.test.ts`) and a jsdom project for React components (`*.test.tsx`, RTL + MSW + jest-dom + jest-axe). See [Testing](/internals/testing).
 - **`pnpm e2e`** runs Playwright end-to-end, including the durable-board round-trip and the eval smoke suite.
 - **`pnpm verify:ingest`** re-derives the codegen'd marketplace catalog (304 agents, 82 teams) and fails on any drift from the committed files. If you touched ingestion, regenerate with `pnpm ingest:marketplace` first. See [Codegen and ingestion](/internals/codegen-and-ingestion).
-- **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI and boots it as a clean install to catch first-run regressions. This is the same gate the release workflow runs — see [Release process](/internals/release-process).
+- **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI and boots it as a clean install to catch first-run regressions. This is the same gate the release workflow runs: see [Release process](/internals/release-process).
 
 <Tip>
 Running the full gate locally avoids review back-and-forth. At minimum, every PR must pass `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`; new surfaces should also pass `pnpm e2e`.
@@ -95,12 +95,12 @@ pnpm changeset
 The interactive CLI asks which packages changed, the bump type (`patch` / `minor` / `major`), and a one-line summary, then writes a file under `.changeset/`. Commit it alongside your code.
 
 <Info>
-Every `@clawboo/*` library is `private: true` — only the `clawboo` CLI publishes to npm, with the libraries inlined into its bundle. So in practice a changeset matters when your change reaches the `clawboo` CLI's bundled behavior. **Documentation-only, CI-only, and `apps/web`-only changes do not need a changeset** — the dashboard package (`@clawboo/web`) and `@clawboo/docs` are in the changeset `ignore` list, and the dashboard is not published.
+Every `@clawboo/*` library is `private: true`; only the `clawboo` CLI publishes to npm, with the libraries inlined into its bundle. So in practice a changeset matters when your change reaches the `clawboo` CLI's bundled behavior. **Documentation-only, CI-only, and `apps/web`-only changes do not need a changeset**; the dashboard package (`@clawboo/web`) and `@clawboo/docs` are in the changeset `ignore` list, and the dashboard is not published.
 </Info>
 
 ### 6. Open the pull request
 
-Push your branch and open a PR. The PR template walks the checklist. Keep it to **one concern per PR** — split unrelated changes. Add a test for anything you add (unit logic in Vitest, components in the jsdom project, new end-to-end behavior in Playwright). CI must be green before review, and PRs are squash-merged into `main`.
+Push your branch and open a PR. The PR template walks the checklist. Keep it to **one concern per PR**; split unrelated changes. Add a test for anything you add (unit logic in Vitest, components in the jsdom project, new end-to-end behavior in Playwright). CI must be green before review, and PRs are squash-merged into `main`.
 
 ## Code guidelines
 
@@ -109,7 +109,7 @@ These are enforced by review and, where possible, by lint:
 - **TypeScript strict.** No `any`, no `@ts-ignore`, no leaking `unknown`.
 - **No `console.log`.** Log through [`@clawboo/logger`](/reference/packages/logger) (pino).
 - **Lucide icons only**, never emoji in the UI.
-- **Theme tokens, never raw hex** — use the CSS variables and Tailwind tokens (brand marks are the only exception). See the [design system](/internals/design-system).
+- **Theme tokens, never raw hex**: use the CSS variables and Tailwind tokens (brand marks are the only exception). See the [design system](/internals/design-system).
 - **Pure where it claims to be.** Policy and projection functions stay side-effect-free and unit-testable.
 - **No secrets in logs, responses, or storage.** A credential's *presence* may be shown (the env-var name plus true/false), never its *value*. See [Security](/operating/security).
 
@@ -120,11 +120,11 @@ A change must not break the [seven architecture invariants](/concepts/architectu
 - **The registry is the source of truth for who exists; the Gateway is the source of truth for how OpenClaw agents run.** Reads go through an [`AgentSource`](/internals/agent-source), not directly off the Gateway client.
 - **Packages never import apps.** Dependency flow is one-way (`apps/web` → `packages/**`, `packages/adapters/*` → `@clawboo/executor`). See the [package dependency graph](/reference/packages/index).
 - **A teammate is a [`RuntimeAdapter`](/internals/runtime-adapter).** New runtimes implement the trait and emit the normalized `RuntimeEvent` union rather than special-casing the orchestrator.
-- **The board is canonical for task/coordination state.** Prefer board mutations over prose-scanning heuristics — see [Board internals](/internals/board-internals) and [Delegation and orchestration](/concepts/delegation-and-orchestration).
-- **Schema changes are a hard reset.** There is no migration ladder — `createDb`'s inline `CREATE TABLE IF NOT EXISTS` DDL is the sole source of the schema. Changing it means a fresh `~/.clawboo`, not an in-place migration. See the [database schema reference](/reference/database-schema).
+- **The board is canonical for task/coordination state.** Prefer board mutations over prose-scanning heuristics: see [Board internals](/internals/board-internals) and [Delegation and orchestration](/concepts/delegation-and-orchestration).
+- **Schema changes are a hard reset.** There is no migration ladder; `createDb`'s inline `CREATE TABLE IF NOT EXISTS` DDL is the sole source of the schema. Changing it means a fresh `~/.clawboo`, not an in-place migration. See the [database schema reference](/reference/database-schema).
 
 <Warning>
-The [Internals](/internals/index) pages flag "caution surfaces" — files that encode load-bearing fixes (cascade prevention, stop-generation, history-hydration gating, deterministic plan keys). Read the relevant internals page before changing one, so you preserve the invariant or replace it with a documented reason.
+The [Internals](/internals/index) pages flag "caution surfaces": files that encode load-bearing fixes (cascade prevention, stop-generation, history-hydration gating, deterministic plan keys). Read the relevant internals page before changing one, so you preserve the invariant or replace it with a documented reason.
 </Warning>
 
 ## Release process
@@ -137,11 +137,11 @@ By contributing, you agree your contributions are licensed under the [MIT Licens
 
 ## See also
 
-- [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md) — the canonical process doc this page summarizes
-- [Internals overview](/internals/index) — the contributor's map of the monorepo
-- [Monorepo and build](/internals/monorepo-and-build) — workspaces, build order, and commands
-- [Testing](/internals/testing) — the unit / e2e / clean-install / evals strategy
-- [Release process](/internals/release-process) — Changesets and the publish workflow
-- [Architecture invariants](/concepts/architecture-invariants) — the rules a change must not break
-- [Environment variables](/reference/environment-variables) — `CLAWBOO_HOME`, `CLAWBOO_API_PORT`, and the rest
-- [Design system](/internals/design-system) — tokens, surfaces, motion, theming
+- [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md), the canonical process doc this page summarizes
+- [Internals overview](/internals/index), the contributor's map of the monorepo
+- [Monorepo and build](/internals/monorepo-and-build), workspaces, build order, and commands
+- [Testing](/internals/testing), the unit / e2e / clean-install / evals strategy
+- [Release process](/internals/release-process), Changesets and the publish workflow
+- [Architecture invariants](/concepts/architecture-invariants), the rules a change must not break
+- [Environment variables](/reference/environment-variables), `CLAWBOO_HOME`, `CLAWBOO_API_PORT`, and the rest
+- [Design system](/internals/design-system), tokens, surfaces, motion, theming

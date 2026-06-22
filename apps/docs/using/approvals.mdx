@@ -6,20 +6,20 @@ Use this page when an agent pauses for your decision: an OpenClaw exec command w
 
 The panel renders two distinct surfaces that look alike but are wired differently:
 
-- **Exec Approvals** — OpenClaw's command-execution gate. Requests arrive over the live Gateway connection; you resolve them back through the Gateway, and the decision is also logged to Clawboo's history table.
-- **The shared tool-approval queue** — Clawboo's own database-mediated handshake for brokered tool calls and risky delegations. The same queue (and the same resolve buttons) is reused by the [Governance dashboard](/using/governance-dashboard), so there is one resolve path, not two.
+- **Exec Approvals**: OpenClaw's command-execution gate. Requests arrive over the live Gateway connection; you resolve them back through the Gateway, and the decision is also logged to Clawboo's history table.
+- **The shared tool-approval queue**: Clawboo's own database-mediated handshake for brokered tool calls and risky delegations. The same queue (and the same resolve buttons) is reused by the [Governance dashboard](/using/governance-dashboard), so there is one resolve path, not two.
 
 Below those, the panel lists the broker's tools with their availability, so you can see at a glance which tools are reachable.
 
 ## Prerequisites
 
 <Note>
-The Approvals panel is always available — it is one of the nav views. Whether anything appears depends on whether an agent is configured to ask before acting.
+The Approvals panel is always available; it is one of the nav views. Whether anything appears depends on whether an agent is configured to ask before acting.
 </Note>
 
 - Open the **Approvals** view: click **Approvals** in the sidebar nav (the lock icon), or press **Cmd/Ctrl + 3**. The nav button shows a badge with the pending exec-approval count.
 - For **exec approvals** to appear, the agent's command-execution policy must be set to ask. Open an agent, go to the **Personality** tab → **Execution Permissions**, and set **Command Execution** to **Always Ask** or **Ask for Unknown**. Then ask the agent to run a command. It pauses and the request appears here.
-- For **tool / delegation approvals**, no extra setup is needed — the broker writes a pending row when a risky or availability-gated tool call needs sign-off, and the governance delegation gate writes one for a risky delegation.
+- For **tool / delegation approvals**, no extra setup is needed; the broker writes a pending row when a risky or availability-gated tool call needs sign-off, and the governance delegation gate writes one for a risky delegation.
 
 ## Steps
 
@@ -54,12 +54,12 @@ What happens under the hood differs by surface:
 - **Tool / delegation approval.** The decision is written to the `tool_call_approvals` row via `POST /api/tools/approvals/:id/resolve`. The broker (or the delegation gate) is long-polling that row in another process, so it unblocks the moment you resolve. The queue re-polls every 3 seconds, so the card clears on its own.
 
 <Note>
-Resolving the same tool/delegation row twice is a no-op — the resolve is guarded on `status='pending'`, so a stale double-click can't flip an already-decided approval. An exec approval that has already expired Gateway-side resolves silently (the card just disappears) rather than showing a confusing error.
+Resolving the same tool/delegation row twice is a no-op; the resolve is guarded on `status='pending'`, so a stale double-click can't flip an already-decided approval. An exec approval that has already expired Gateway-side resolves silently (the card just disappears) rather than showing a confusing error.
 </Note>
 
 ### 3. Watch the per-Boo indicator
 
-While a Boo has an exec approval pending, its node in the [Ghost Graph](/using/ghost-graph) shows a pulsing **amber ring** — a circle when the Boo is idle, a rounded outline when it is rendered as an active card. The ring is matched by `agentId`, so it points at exactly the Boo waiting on you. It clears the instant you resolve.
+While a Boo has an exec approval pending, its node in the [Ghost Graph](/using/ghost-graph) shows a pulsing **amber ring**, a circle when the Boo is idle, a rounded outline when it is rendered as an active card. The ring is matched by `agentId`, so it points at exactly the Boo waiting on you. It clears the instant you resolve.
 
 ## What the cards report
 
@@ -88,7 +88,7 @@ The two surfaces write **different tables and have different decision strings.**
 
 ## Tool availability (read-only)
 
-Under the queue, the panel lists every broker tool with an **Available** / **Unavailable** pill, sourced from `GET /api/tools`. A tool is unavailable when an availability requirement (auth, config, env, or plugin) is unmet; the card greys out and its tooltip shows the diagnostics. A non-`safe` risk tool also shows an amber warning icon. This is informational — there are no actions here; it tells you which brokered tools an agent can actually reach.
+Under the queue, the panel lists every broker tool with an **Available** / **Unavailable** pill, sourced from `GET /api/tools`. A tool is unavailable when an availability requirement (auth, config, env, or plugin) is unmet; the card greys out and its tooltip shows the diagnostics. A non-`safe` risk tool also shows an amber warning icon. This is informational; there are no actions here; it tells you which brokered tools an agent can actually reach.
 
 ## Verify it worked
 
@@ -113,7 +113,7 @@ Under the queue, the panel lists every broker tool with an **Available** / **Una
 
 ## Related
 
-- [Governance](/concepts/governance) — how budgets, circuit breakers, caps, and approvals form the guardrail layer
-- [Governance dashboard](/using/governance-dashboard) — reuses the same tool-approval queue
-- [The Ghost Graph](/using/ghost-graph) — where the per-Boo pending-approval ring renders
-- [`/api/governance` reference](/reference/rest-api/governance) — the `/api/approvals`, `/api/tools/approvals`, and delegation-approval shapes
+- [Governance](/concepts/governance), how budgets, circuit breakers, caps, and approvals form the guardrail layer
+- [Governance dashboard](/using/governance-dashboard), reuses the same tool-approval queue
+- [The Ghost Graph](/using/ghost-graph), where the per-Boo pending-approval ring renders
+- [`/api/governance` reference](/reference/rest-api/governance), the `/api/approvals`, `/api/tools/approvals`, and delegation-approval shapes

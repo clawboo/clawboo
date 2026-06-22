@@ -1,20 +1,20 @@
 ---
 title: Schedule recurring team work
-description: A walkthrough for putting a team task on a clock with Routines — cron, one-shot, presets, the one-firing-owner invariant, error-halts, and pause/resume/run-now.
+description: A walkthrough for putting a team task on a clock with Routines: cron, one-shot, presets, the one-firing-owner invariant, error-halts, and pause/resume/run-now.
 ---
 This guide composes Clawboo's scheduler into a real workflow: you'll create a **Routine** that fires a team task on a clock, understand why a failing Routine parks itself instead of retrying, and pause, resume, run, or delete it from one surface. Use it when you want a nightly report, a morning briefing, or a one-off future run to happen without anyone sitting at the dashboard to kick it off.
 
-A Routine is a cron-shaped trigger that, on each fire, materializes a task on [the board](/concepts/the-board) and dispatches it through the ordinary executor pipeline — budgets, approvals, verification, observability, and (for file-mutating work) a worktree all apply exactly as they would to a hand-created task. There is no privileged "scheduled" path. For the full model behind the durable ledger and the rebuildable ticker, read [Scheduling](/concepts/scheduling); for the UI controls, [the Scheduler tab](/using/scheduler); for the request/response shapes and status codes, the [Schedules API](/reference/rest-api/schedules). This page is the task-oriented composition of those three.
+A Routine is a cron-shaped trigger that, on each fire, materializes a task on [the board](/concepts/the-board) and dispatches it through the ordinary executor pipeline; budgets, approvals, verification, observability, and (for file-mutating work) a worktree all apply exactly as they would to a hand-created task. There is no privileged "scheduled" path. For the full model behind the durable ledger and the rebuildable ticker, read [Scheduling](/concepts/scheduling); for the UI controls, [the Scheduler tab](/using/scheduler); for the request/response shapes and status codes, the [Schedules API](/reference/rest-api/schedules). This page is the task-oriented composition of those three.
 
 ## Prerequisites
 
 <Note>
-The Scheduler tab is always available — open it from the **Scheduler** nav item. Everything here also works directly against the [`/api/schedules`](/reference/rest-api/schedules) REST surface if you prefer the API.
+The Scheduler tab is always available; open it from the **Scheduler** nav item. Everything here also works directly against the [`/api/schedules`](/reference/rest-api/schedules) REST surface if you prefer the API.
 </Note>
 
 - At least one agent exists. The create dialog populates its agent picker from `GET /api/agents`, and a Routine targets one agent.
-- A team task Routine works for **any** [runtime](/appendices/glossary) class — native, the wrapped one-shot runtimes (Claude Code, Codex, Hermes), or OpenClaw. Routines are the single external wake for all of them, so a mixed-runtime team has one scheduling surface regardless of what each runtime can do on its own. If a runtime isn't connected yet, see [Connecting runtimes](/runtimes/connecting-runtimes).
-- Scheduling an OpenClaw agent's **own life** (a Gateway cron job, the *other* domain — see [Two cron domains](#two-cron-domains-team-work-vs-a-runtimes-own-life)) additionally needs the OpenClaw Gateway connected and this device paired, because that write rides the operator connection. Team-task Routines have no such dependency.
+- A team task Routine works for **any** [runtime](/appendices/glossary) class: native, the wrapped one-shot runtimes (Claude Code, Codex, Hermes), or OpenClaw. Routines are the single external wake for all of them, so a mixed-runtime team has one scheduling surface regardless of what each runtime can do on its own. If a runtime isn't connected yet, see [Connecting runtimes](/runtimes/connecting-runtimes).
+- Scheduling an OpenClaw agent's **own life** (a Gateway cron job, the *other* domain; see [Two cron domains](#two-cron-domains-team-work-vs-a-runtimes-own-life)) additionally needs the OpenClaw Gateway connected and this device paired, because that write rides the operator connection. Team-task Routines have no such dependency.
 
 ## Two cron domains: team work vs. a runtime's own life
 
@@ -25,7 +25,7 @@ The Scheduler tab shows two kinds of schedule side by side and never conflates t
 | `team-task` | Materializes a board task and runs it through the executor | Clawboo's `scheduled_runs` ledger (`managed`) | "Every weekday at 9am, run the standup-summary team task." |
 | `runtime-own-life` | Wakes an OpenClaw agent on its *own* Gateway schedule | The OpenClaw Gateway (`external-write`) | An OpenClaw agent's cron that wakes *itself* to check email. |
 
-This guide is about the **`team-task`** domain — Routines. The `runtime-own-life` domain is an operator surface over schedules the Gateway owns; Clawboo reads and writes them through the Gateway but never fires a team task into them. The separation is enforced structurally: a `team-task` create aimed at the Gateway-cron source is refused with a `422` domain violation. See [Scheduling → The two cron domains](/concepts/scheduling#the-two-cron-domains) for the rationale.
+This guide is about the **`team-task`** domain, Routines. The `runtime-own-life` domain is an operator surface over schedules the Gateway owns; Clawboo reads and writes them through the Gateway but never fires a team task into them. The separation is enforced structurally: a `team-task` create aimed at the Gateway-cron source is refused with a `422` domain violation. See [Scheduling → The two cron domains](/concepts/scheduling#the-two-cron-domains) for the rationale.
 
 ## Create a Routine
 
@@ -33,7 +33,7 @@ This guide is about the **`team-task`** domain — Routines. The `runtime-own-li
 
 1. Click **Schedule** to open the create dialog.
 2. Pick an **Agent**. Each option shows the agent name and its runtime.
-3. Choose the **Schedule** intent: **A team task** (a Routine — available for every agent). The other chip, **Its own life**, is enabled only when the selected agent's runtime is `openclaw`; for any other runtime it reads "OpenClaw only" and is disabled. Leave it on "A team task".
+3. Choose the **Schedule** intent: **A team task** (a Routine, available for every agent). The other chip, **Its own life**, is enabled only when the selected agent's runtime is `openclaw`; for any other runtime it reads "OpenClaw only" and is disabled. Leave it on "A team task".
 4. Pick when it **Runs** from the cron presets (see [Choose a cadence](#choose-a-cadence) below).
 5. Give it a **Label** (optional; defaults to "Scheduled task" for a team task).
 6. Click **Create schedule**.
@@ -42,7 +42,7 @@ On success the dialog closes (`201`) and the list refreshes. Under the hood the 
 
 ### From the API
 
-The same create over REST. `source`, `domain`, `agentId`, and `cronSpec` are required; everything else is optional. The `taskTemplate` describes the board task each fire materializes — `title` is required, `kind` defaults to `code` (which provisions a [worktree](/concepts/worktrees-and-handoff)), and you can thread a per-node cost cap with `maxNodeCents`.
+The same create over REST. `source`, `domain`, `agentId`, and `cronSpec` are required; everything else is optional. The `taskTemplate` describes the board task each fire materializes; `title` is required, `kind` defaults to `code` (which provisions a [worktree](/concepts/worktrees-and-handoff)), and you can thread a per-node cost cap with `maxNodeCents`.
 
 ```bash
 # A daily Routine that fires a fresh team task at 9am
@@ -80,7 +80,7 @@ The create dialog offers eight cron-expression presets. A cron expression is the
 | Daily · 9am | `0 9 * * *` |
 | Weekly · Mon 9am | `0 9 * * 1` |
 
-Any croner-parseable 5- or 6-field cron expression works, not just the presets — post your own `cronSpec` to the API if you need a different cadence (a 6th field adds seconds). An unparseable spec is refused at creation with a `400` (`code: "invalid_cron_spec"`).
+Any croner-parseable 5- or 6-field cron expression works, not just the presets; post your own `cronSpec` to the API if you need a different cadence (a 6th field adds seconds). An unparseable spec is refused at creation with a `400` (`code: "invalid_cron_spec"`).
 
 ### One-shot: `once@<ISO-8601>`
 
@@ -99,22 +99,22 @@ curl -X POST http://localhost:18790/api/schedules \
   }'
 ```
 
-After a one-shot fires successfully it re-enters `idle` with `nextRunAt` set to null — it self-disables and never repeats. A malformed `once@` timestamp is also a `400`.
+After a one-shot fires successfully it re-enters `idle` with `nextRunAt` set to null; it self-disables and never repeats. A malformed `once@` timestamp is also a `400`.
 
 ## The one-firing-owner invariant
 
 A board task must have exactly one scheduler. Two schedulers firing the same task is the recipe for double-dispatch, stale claims, and drift, so Clawboo enforces a single firing owner of record on every task (`tasks.scheduled_by`: `manual` for a hand-created task, `clawboo` for one a Routine fires).
 
-For most Routines this is invisible — each fire mints a *fresh* per-fire board task stamped `scheduled_by: 'clawboo'`, and nothing collides. The invariant only bites when you bind a Routine to an **existing** team task by passing a `teamTaskId` in the template, telling the Routine to dispatch that one task rather than a new one each fire. Two rules apply:
+For most Routines this is invisible; each fire mints a *fresh* per-fire board task stamped `scheduled_by: 'clawboo'`, and nothing collides. The invariant only bites when you bind a Routine to an **existing** team task by passing a `teamTaskId` in the template, telling the Routine to dispatch that one task rather than a new one each fire. Two rules apply:
 
-- **A bound task can have only one firing owner.** Binding to a task that some other non-`manual` owner already fires is refused with a `409` (`code: "duplicate_firing_owner"`). This is a data refusal — never retry it. The guard is domain-scoped: it reads only `tasks.scheduled_by`, so a runtime's own-life cron never trips it.
-- **A bound Routine must be one-shot.** A bound task is claimable exactly once (`todo → done`), so a recurring schedule against it would fire once and then park in `error` forever. Binding a recurring spec is refused at registration with a `400` (`code: "bound_recurring_schedule"`) — use a `once@<iso>` spec to bind, or leave `teamTaskId` unset for a recurring Routine that mints fresh tasks.
+- **A bound task can have only one firing owner.** Binding to a task that some other non-`manual` owner already fires is refused with a `409` (`code: "duplicate_firing_owner"`). This is a data refusal; never retry it. The guard is domain-scoped: it reads only `tasks.scheduled_by`, so a runtime's own-life cron never trips it.
+- **A bound Routine must be one-shot.** A bound task is claimable exactly once (`todo → done`), so a recurring schedule against it would fire once and then park in `error` forever. Binding a recurring spec is refused at registration with a `400` (`code: "bound_recurring_schedule"`); use a `once@<iso>` spec to bind, or leave `teamTaskId` unset for a recurring Routine that mints fresh tasks.
 
 See [Scheduling → The one-firing-owner invariant](/concepts/scheduling#the-one-firing-owner-invariant) for the three walls that enforce this (registration de-dup, the atomic claim, the Gateway source's refusal) and [the board](/concepts/the-board) for the atomic-claim mechanism.
 
 ## What happens when it fires
 
-When a Routine is due, the ticker flips it to `queued`, atomically claims it, materializes the board task, and branches on the target runtime's integration class — never on a hardcoded runtime id:
+When a Routine is due, the ticker flips it to `queued`, atomically claims it, materializes the board task, and branches on the target runtime's integration class, never on a hardcoded runtime id:
 
 - **Native, Claude Code, Codex, Hermes** run through the ordinary one-shot executor: claim the board task, provision a worktree if the kind requires it, run the adapter, verify, complete.
 - **OpenClaw** runs over its live Gateway connection through a separate operator dispatcher, bounded by a watchdog (10 minutes by default, overridable with `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`).
@@ -123,16 +123,16 @@ Each fire emits a sequence of [observability](/concepts/observability) events un
 
 ## The error-halts policy
 
-When a *recurring* fire fails, the Routine **parks** itself: status goes to `error`, the failure is recorded in `lastError`, and `nextRunAt` is set to null — disarmed. It will not fire again until a human resumes it.
+When a *recurring* fire fails, the Routine **parks** itself: status goes to `error`, the failure is recorded in `lastError`, and `nextRunAt` is set to null, disarmed. It will not fire again until a human resumes it.
 
 This is deliberate, and it's the single most important behavior to internalize. Autonomous scheduled work that retries a broken fire on every tick would burn budget, churn the board, and bury the real problem. Parking surfaces the failure and stops the bleeding. A successful fire, by contrast, re-arms cleanly at its next occurrence, and a one-shot self-disables.
 
 <Info>
-A parked (`error`) Routine and a paused Routine both never auto-fire — the ticker's due-pass only ever queues `idle` rows. To bring a parked Routine back, fix the underlying cause and **Resume** it (the `error → idle` transition re-arms it). A `once@` that fired successfully is *not* an error; it self-disabled on purpose.
+A parked (`error`) Routine and a paused Routine both never auto-fire; the ticker's due-pass only ever queues `idle` rows. To bring a parked Routine back, fix the underlying cause and **Resume** it (the `error → idle` transition re-arms it). A `once@` that fired successfully is *not* an error; it self-disabled on purpose.
 </Info>
 
 <Note>
-A failed dispatch that is really a *lost claim* (some other worker already owns the task, so the work is happening) is recorded as satisfied, not as an error — it does not park the Routine.
+A failed dispatch that is really a *lost claim* (some other worker already owns the task, so the work is happening) is recorded as satisfied, not as an error; it does not park the Routine.
 </Note>
 
 ## Manage a running Routine
@@ -151,7 +151,7 @@ curl -X PATCH http://localhost:18790/api/schedules/clawboo-routine:<row-id> \
 
 ### Run now
 
-Click the refresh-arrow button to force-fire immediately (`POST /api/schedules/:id/run`). This returns `202` — an enqueue-style acknowledgement, not a synchronous run. For a Routine it flips the row to `queued` so the ticker picks it up on the next pass; it does not wait for the run to finish. Watch the trace in the Observability dashboard to see the outcome.
+Click the refresh-arrow button to force-fire immediately (`POST /api/schedules/:id/run`). This returns `202`, an enqueue-style acknowledgement, not a synchronous run. For a Routine it flips the row to `queued` so the ticker picks it up on the next pass; it does not wait for the run to finish. Watch the trace in the Observability dashboard to see the outcome.
 
 ```bash
 curl -X POST http://localhost:18790/api/schedules/clawboo-routine:<row-id>/run
@@ -159,7 +159,7 @@ curl -X POST http://localhost:18790/api/schedules/clawboo-routine:<row-id>/run
 
 ### Change the cadence
 
-A `PATCH` with a `patch` object updates the cron spec, label, or task template in place. Changing the cron spec recomputes `nextRunAt` only for an already-armed (`idle`) row — a paused or parked row stays disarmed until you resume it.
+A `PATCH` with a `patch` object updates the cron spec, label, or task template in place. Changing the cron spec recomputes `nextRunAt` only for an already-armed (`idle`) row; a paused or parked row stays disarmed until you resume it.
 
 ```bash
 curl -X PATCH http://localhost:18790/api/schedules/clawboo-routine:<row-id> \
@@ -175,14 +175,14 @@ Click the trash button (`DELETE /api/schedules/:id`) to remove the Routine perma
 
 - The new Routine appears under the **Team work** group with a live `nextRunAt` countdown (`in 5m`, `in 1h`, …). The panel re-fetches `GET /api/schedules` every 8 seconds, so the countdown and status stay live.
 - When a fire is due, the status pill flips `queued → claimed → running`, then back to `idle` (re-armed) on success. The row then shows `ran <relative time>`.
-- A fire materializes a task on [the board](/using/board) for the Routine's team — open the board to see it.
+- A fire materializes a task on [the board](/using/board) for the Routine's team; open the board to see it.
 - The run shows up as a trace in the [Observability dashboard](/using/observability-dashboard), tagged with the `routine_*` events.
-- If a recurring fire fails, the row goes to the `error` pill with a `lastError` line and an empty next-run countdown — fix the cause and **Resume** to re-arm.
+- If a recurring fire fails, the row goes to the `error` pill with a `lastError` line and an empty next-run countdown; fix the cause and **Resume** to re-arm.
 
 ## Troubleshooting
 
 <Warning>
-**A create returns `409`.** You bound the Routine (via `teamTaskId`) to a board task another non-`manual` owner already fires — the one-firing-owner refusal. This is a conflict, not a transient error; do not retry. Bind to a different task, or leave `teamTaskId` unset so each fire mints its own task.
+**A create returns `409`.** You bound the Routine (via `teamTaskId`) to a board task another non-`manual` owner already fires, the one-firing-owner refusal. This is a conflict, not a transient error; do not retry. Bind to a different task, or leave `teamTaskId` unset so each fire mints its own task.
 </Warning>
 
 <Warning>
@@ -190,21 +190,21 @@ Click the trash button (`DELETE /api/schedules/:id`) to remove the Routine perma
 </Warning>
 
 <Warning>
-**My recurring Routine stopped firing on its own.** It hit the error-halts policy — a fire failed, the row parked in `error`, and `nextRunAt` is null. Check the `lastError` on the row (and the run's obs trace), fix the cause, then **Resume**. Clawboo will not silently retry a broken fire.
+**My recurring Routine stopped firing on its own.** It hit the error-halts policy; a fire failed, the row parked in `error`, and `nextRunAt` is null. Check the `lastError` on the row (and the run's obs trace), fix the cause, then **Resume**. Clawboo will not silently retry a broken fire.
 </Warning>
 
 <Danger>
-**Restarting the server doesn't lose my Routines.** The ticker holds no durable state — the `scheduled_runs` ledger is the source of truth, and boot-resume reconstructs every active Routine from SQLite. A `claimed` orphan re-fires; a recurring `running` orphan re-arms; a one-shot `running` orphan parks in `error` for a human to inspect (its outcome is unknown). See [Scheduling → Boot-resume](/concepts/scheduling#boot-resume-the-ledger-reconstructs-the-actuator).
+**Restarting the server doesn't lose my Routines.** The ticker holds no durable state; the `scheduled_runs` ledger is the source of truth, and boot-resume reconstructs every active Routine from SQLite. A `claimed` orphan re-fires; a recurring `running` orphan re-arms; a one-shot `running` orphan parks in `error` for a human to inspect (its outcome is unknown). See [Scheduling → Boot-resume](/concepts/scheduling#boot-resume-the-ledger-reconstructs-the-actuator).
 </Danger>
 
 ## See also
 
-- [Scheduling](/concepts/scheduling) — the model: the two cron domains, the ledger, the rebuildable ticker, the fire path
-- [The Scheduler tab](/using/scheduler) — every panel control and the create dialog in detail
-- [Schedules API](/reference/rest-api/schedules) — full request/response shapes and status codes
-- [The board](/concepts/the-board) — where a fire lands, the atomic claim, the firing-owner column
-- [Connecting runtimes](/runtimes/connecting-runtimes) — get a runtime online so it can run scheduled work
-- [Cross-runtime handoff](/guides/cross-runtime-handoff) — another way scheduled work composes across runtimes
-- [Governance and budgets](/guides/governance-and-budgets) — cap what a scheduled fire can spend
-- [Observability dashboard](/using/observability-dashboard) — watch a scheduled run's trace
-- [Glossary](/appendices/glossary) — canonical term definitions
+- [Scheduling](/concepts/scheduling), the model: the two cron domains, the ledger, the rebuildable ticker, the fire path
+- [The Scheduler tab](/using/scheduler), every panel control and the create dialog in detail
+- [Schedules API](/reference/rest-api/schedules), full request/response shapes and status codes
+- [The board](/concepts/the-board), where a fire lands, the atomic claim, the firing-owner column
+- [Connecting runtimes](/runtimes/connecting-runtimes), get a runtime online so it can run scheduled work
+- [Cross-runtime handoff](/guides/cross-runtime-handoff), another way scheduled work composes across runtimes
+- [Governance and budgets](/guides/governance-and-budgets), cap what a scheduled fire can spend
+- [Observability dashboard](/using/observability-dashboard), watch a scheduled run's trace
+- [Glossary](/appendices/glossary), canonical term definitions

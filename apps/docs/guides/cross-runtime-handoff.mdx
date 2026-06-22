@@ -2,7 +2,7 @@
 title: Cross-runtime handoff
 description: Pause a file-mutating board task on one runtime and resume it cold on another, using the per-task worktree and AGENT_HANDOFF.json.
 ---
-Use this guide when you want one [runtime](/appendices/glossary) to start a file-mutating board task, pause without losing work, and have a *different* runtime (or a human) pick it up cold — with no chat history and no shared model session. A Claude Code agent can do the first pass and a Codex agent the second; the receiving runtime reconstructs what's done, what's broken, and what's next from the task's git worktree alone.
+Use this guide when you want one [runtime](/appendices/glossary) to start a file-mutating board task, pause without losing work, and have a *different* runtime (or a human) pick it up cold, with no chat history and no shared model session. A Claude Code agent can do the first pass and a Codex agent the second; the receiving runtime reconstructs what's done, what's broken, and what's next from the task's git worktree alone.
 
 This works because a file-mutating task carries its own isolated world: a per-task [worktree](/concepts/worktrees-and-handoff) (its **system-of-record**) plus a structured `AGENT_HANDOFF.json` clock-out artifact. The board is the dispatcher; the worktree is the durable world the dispatched work happens in. This guide composes [Worktrees and handoff](/concepts/worktrees-and-handoff), [the executor runner](/internals/executor-runner), and the [Board API](/reference/rest-api/board) workspace routes into one workflow.
 
@@ -12,9 +12,9 @@ This guide drives the dispatch over REST (`POST /api/runtimes/:id/run`) so the m
 
 ## Prerequisites
 
-- Two connected, **worktree-capable** runtimes. Of the five runtimes, `clawboo-native`, `claude-code`, `codex`, and `hermes` declare `worktrees: true`; OpenClaw declares `worktrees: false` (its agents run in Gateway-owned workspace dirs, so the runner never retargets them — and the executor runner refuses a connected substrate before it claims anything). See [Connecting runtimes](/runtimes/connecting-runtimes) and the [capability matrix](/runtimes/index).
-- A git repository on disk to branch from — its absolute `repoPath`.
-- An existing board task in `todo` for a **file-mutating** kind (`code`, the default). Read-only / research tasks (`research`, `review`) get no worktree, so there is nothing to hand off — provisioning one for them is refused with **422**. See [the board](/concepts/the-board) and [Board API](/reference/rest-api/board).
+- Two connected, **worktree-capable** runtimes. Of the five runtimes, `clawboo-native`, `claude-code`, `codex`, and `hermes` declare `worktrees: true`; OpenClaw declares `worktrees: false` (its agents run in Gateway-owned workspace dirs, so the runner never retargets them, and the executor runner refuses a connected substrate before it claims anything). See [Connecting runtimes](/runtimes/connecting-runtimes) and the [capability matrix](/runtimes/index).
+- A git repository on disk to branch from: its absolute `repoPath`.
+- An existing board task in `todo` for a **file-mutating** kind (`code`, the default). Read-only / research tasks (`research`, `review`) get no worktree, so there is nothing to hand off; provisioning one for them is refused with **422**. See [the board](/concepts/the-board) and [Board API](/reference/rest-api/board).
 
 The examples assume the API at the default loopback port `18790`; substitute your resolved port (see [Deployment](/operating/deployment)).
 
@@ -56,10 +56,10 @@ curl -X POST http://localhost:18790/api/runtimes/claude-code/run \
 
 What the [executor runner](/internals/executor-runner) does, in order:
 
-1. **Atomic claim.** A single guarded UPDATE flips the task `todo → in_progress`. A lost claim is a **409** and is never retried — it means another worker legitimately owns the task.
-2. **Worktree acquisition.** Because `claude-code` declares `capabilities().worktrees`, the runner provisions a fresh isolated checkout on the branch `clawboo/task-<id>`, branched from a commit SHA (not the dirty tree), and writes + commits the system-of-record scaffold (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`). The worktree lives **outside** your repo, under the Clawboo state dir, namespaced by a hash of the repo path — so it never touches your repo's own `git status`.
+1. **Atomic claim.** A single guarded UPDATE flips the task `todo → in_progress`. A lost claim is a **409** and is never retried; it means another worker legitimately owns the task.
+2. **Worktree acquisition.** Because `claude-code` declares `capabilities().worktrees`, the runner provisions a fresh isolated checkout on the branch `clawboo/task-<id>`, branched from a commit SHA (not the dirty tree), and writes + commits the system-of-record scaffold (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`). The worktree lives **outside** your repo, under the Clawboo state dir, namespaced by a hash of the repo path, so it never touches your repo's own `git status`.
 3. **Run.** The runtime works in the checkout, mutating real files.
-4. **Pause (because `keepForResume`).** On a successful terminal the runner writes `AGENT_HANDOFF.json` into the worktree (with `nextBestStep` carrying the run's reported summary), then calls `releaseTask` — the task drops back to `todo` and the **worktree is kept**. The verification gate does **not** run on a pause; it runs only on a `complete` (step 4 below).
+4. **Pause (because `keepForResume`).** On a successful terminal the runner writes `AGENT_HANDOFF.json` into the worktree (with `nextBestStep` carrying the run's reported summary), then calls `releaseTask`; the task drops back to `todo` and the **worktree is kept**. The verification gate does **not** run on a pause; it runs only on a `complete` (step 4 below).
 
 ### 2. Inspect the handoff (optional)
 
@@ -69,7 +69,7 @@ The pause leaves a fully cold-resumable task. Confirm it with the [cold-resume r
 curl http://localhost:18790/api/board/<task-id>/workspace
 ```
 
-The `resume` block is `reconstructState`'s output, computed purely from the worktree — `AGENT_HANDOFF.json`, falling back to `task-progress.md` + `init.sh`. No chat history, no board UI:
+The `resume` block is `reconstructState`'s output, computed purely from the worktree: `AGENT_HANDOFF.json`, falling back to `task-progress.md` + `init.sh`. No chat history, no board UI:
 
 ```json
 {
@@ -90,12 +90,12 @@ The `resume` block is `reconstructState`'s output, computed purely from the work
 ```
 
 <Note>
-`AGENT_HANDOFF.json` is **structured data, not prose** — the next runtime parses it rather than interpreting English. Its `runtime` field is role-neutral and may be `'human'`, so a person can pick up (or hand off) the task from the exact same artifact. See [Worktrees and handoff](/concepts/worktrees-and-handoff#the-cross-runtime-handoff).
+`AGENT_HANDOFF.json` is **structured data, not prose**; the next runtime parses it rather than interpreting English. Its `runtime` field is role-neutral and may be `'human'`, so a person can pick up (or hand off) the task from the exact same artifact. See [Worktrees and handoff](/concepts/worktrees-and-handoff#the-cross-runtime-handoff).
 </Note>
 
 ### 3. Resume on a different runtime
 
-Dispatch the **same `taskId`** on runtime B. The task is back in `todo`, so runtime B claims it cleanly and reuses the kept worktree — this is the cross-runtime continuation path. Drop `keepForResume` to let runtime B finish for real.
+Dispatch the **same `taskId`** on runtime B. The task is back in `todo`, so runtime B claims it cleanly and reuses the kept worktree; this is the cross-runtime continuation path. Drop `keepForResume` to let runtime B finish for real.
 
 ```bash
 curl -X POST http://localhost:18790/api/runtimes/codex/run \
@@ -108,7 +108,7 @@ curl -X POST http://localhost:18790/api/runtimes/codex/run \
   }'
 ```
 
-The runner's `acquireWorkspace` finds the existing active worktree for the task and reuses it as-is rather than provisioning a new one. (If a garbage-collection sweep had reaped the directory — keeping the branch — the runner rebuilds the checkout from the retained branch before running, so a reused worktree is never a missing directory.) Either way it reconstructs the `ResumeState` from the worktree's system-of-record and seeds the prompt's context tier with the prior handoff, so runtime B starts from runtime A's `done` / `broken` / `next` — not from scratch.
+The runner's `acquireWorkspace` finds the existing active worktree for the task and reuses it as-is rather than provisioning a new one. (If a garbage-collection sweep had reaped the directory, keeping the branch, the runner rebuilds the checkout from the retained branch before running, so a reused worktree is never a missing directory.) Either way it reconstructs the `ResumeState` from the worktree's system-of-record and seeds the prompt's context tier with the prior handoff, so runtime B starts from runtime A's `done` / `broken` / `next`, not from scratch.
 
 ### 4. Let the resuming runtime complete
 
@@ -116,7 +116,7 @@ Because step 3 dropped `keepForResume`, runtime B finishes the run through the n
 
 | Diff vs baseline | What happens | Terminal status |
 |---|---|---|
-| Empty | No deliverable — worktree + branch removed | `done` (verification gate intentionally bypassed) |
+| Empty | No deliverable: worktree + branch removed | `done` (verification gate intentionally bypassed) |
 | Non-empty | Worktree retained, the [verification](/concepts/verification) gate runs (deterministic build/test/lint, plus an optional read-only critic) | `pass` → `done` · `completed_with_debt` over a green gate → `done` · debt over a red gate → `blocked` · `fail` → `in_progress` |
 
 Only a promotable verdict moves `in_review → done`. See [Verification](/concepts/verification) and the [`PATCH .../workspace` complete action](/reference/rest-api/board#patch-apiboardtaskidworkspace).
@@ -126,8 +126,8 @@ Only a promotable verdict moves `in_review → done`. See [Verification](/concep
 | You want… | Do this |
 |---|---|
 | Hand off to a **human** | Write `AGENT_HANDOFF.json` directly via [`POST /api/board/:taskId/workspace/handoff`](/reference/rest-api/board#post-apiboardtaskidworkspacehandoff) with `runtime: "human"`. The person reads the worktree, runs `./init.sh` to confirm the baseline, and works from `done`/`broken`/`next`. |
-| Pause manually (no run) | [`PATCH /api/board/:taskId/workspace`](/reference/rest-api/board#patch-apiboardtaskidworkspace) with `{"action":"pause"}` commits uncommitted work, drops the worktree directory, and keeps the branch — resumable. |
-| Continue on the **same** runtime | If runtime B equals runtime A and the runtime supports native resume, the runner threads the persisted `nativeSessionId` into `ctx.resume` and resumes the exact native session. A **cross**-runtime pickup ignores `nativeSessionId` and resumes from the structured handoff alone — a session id is meaningless to a different runtime. |
+| Pause manually (no run) | [`PATCH /api/board/:taskId/workspace`](/reference/rest-api/board#patch-apiboardtaskidworkspace) with `{"action":"pause"}` commits uncommitted work, drops the worktree directory, and keeps the branch, resumable. |
+| Continue on the **same** runtime | If runtime B equals runtime A and the runtime supports native resume, the runner threads the persisted `nativeSessionId` into `ctx.resume` and resumes the exact native session. A **cross**-runtime pickup ignores `nativeSessionId` and resumes from the structured handoff alone; a session id is meaningless to a different runtime. |
 | Pin the branch point | Pass `baseSha` (or `baseRef`) when provisioning via [`POST /api/board/:taskId/workspace`](/reference/rest-api/board#post-apiboardtaskidworkspace); the default branch point is `HEAD` resolved to a full SHA. |
 | Inspect the worktree's files + diff | [`GET /api/board/:taskId/workspace/detail`](/reference/rest-api/board#get-apiboardtaskidworkspacedetail) returns the system-of-record file contents and the unified diff against the baseline. |
 
@@ -144,7 +144,7 @@ Only a promotable verdict moves `in_review → done`. See [Verification](/concep
 </Warning>
 
 <Warning>
-**The first runtime completed instead of pausing.** `keepForResume` must be `true` (boolean) in the run body. Without it, a successful run with a non-empty diff routes straight into the verification gate and a clean verdict promotes the task to `done` — there is nothing left to hand off.
+**The first runtime completed instead of pausing.** `keepForResume` must be `true` (boolean) in the run body. Without it, a successful run with a non-empty diff routes straight into the verification gate and a clean verdict promotes the task to `done`; there is nothing left to hand off.
 </Warning>
 
 <Danger>
@@ -152,16 +152,16 @@ Only a promotable verdict moves `in_review → done`. See [Verification](/concep
 </Danger>
 
 <Danger>
-**Don't retry a 409 on claim or status change.** A 409 from the claim (or an `illegal_transition` on a status PATCH) is data, not a transient error — the task is simply taken or the transition is illegal. A dead `in_progress` task is recovered by the board's orphan reconciliation, which releases it to `todo` for a normal re-claim. See [the board](/concepts/the-board#the-atomic-claim).
+**Don't retry a 409 on claim or status change.** A 409 from the claim (or an `illegal_transition` on a status PATCH) is data, not a transient error; the task is simply taken or the transition is illegal. A dead `in_progress` task is recovered by the board's orphan reconciliation, which releases it to `todo` for a normal re-claim. See [the board](/concepts/the-board#the-atomic-claim).
 </Danger>
 
 ## Related
 
-- [Worktrees and handoff](/concepts/worktrees-and-handoff) — the system-of-record + `AGENT_HANDOFF.json` model
-- [The executor runner](/internals/executor-runner) — claim → worktree → run → verify → handoff, and the `keepForResume` pause
-- [Board API](/reference/rest-api/board) — the `/api/board/:taskId/workspace*` routes
-- [Runtimes API](/reference/rest-api/runtimes) — `POST /api/runtimes/:id/run`, the dispatch entry point
-- [Verification](/concepts/verification) — the builder≠judge gate the resuming runtime triggers on completion
-- [Connecting runtimes](/runtimes/connecting-runtimes) — bring `claude-code` / `codex` / `hermes` / `clawboo-native` online
-- [Multi-runtime team guide](/guides/multi-runtime-team) — build a team mixing runtimes
-- [Glossary](/appendices/glossary) — canonical term definitions
+- [Worktrees and handoff](/concepts/worktrees-and-handoff): the system-of-record + `AGENT_HANDOFF.json` model
+- [The executor runner](/internals/executor-runner): claim → worktree → run → verify → handoff, and the `keepForResume` pause
+- [Board API](/reference/rest-api/board): the `/api/board/:taskId/workspace*` routes
+- [Runtimes API](/reference/rest-api/runtimes): `POST /api/runtimes/:id/run`, the dispatch entry point
+- [Verification](/concepts/verification): the builder≠judge gate the resuming runtime triggers on completion
+- [Connecting runtimes](/runtimes/connecting-runtimes): bring `claude-code` / `codex` / `hermes` / `clawboo-native` online
+- [Multi-runtime team guide](/guides/multi-runtime-team): build a team mixing runtimes
+- [Glossary](/appendices/glossary): canonical term definitions

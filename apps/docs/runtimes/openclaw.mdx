@@ -1,10 +1,10 @@
 ---
 title: OpenClaw
-description: Connect the OpenClaw runtime — a connected substrate driven over the Gateway, with device pairing, registry sync, and global memory scope.
+description: Connect the OpenClaw runtime, a connected substrate driven over the Gateway, with device pairing, registry sync, and global memory scope.
 ---
-Use this page to bring the **OpenClaw** [runtime](/appendices/glossary) online. Unlike the other four runtimes, OpenClaw is **not a CLI you install** — it is a *connected substrate*. Clawboo connects to a running **OpenClaw Gateway** (a WebSocket server that hosts OpenClaw agents), syncs the Gateway's agent list into SQLite as the [registry of record](/appendices/glossary), and drives chat over that long-lived connection. There is no per-task subprocess to spawn.
+Use this page to bring the **OpenClaw** [runtime](/appendices/glossary) online. Unlike the other four runtimes, OpenClaw is **not a CLI you install**; it is a *connected substrate*. Clawboo connects to a running **OpenClaw Gateway** (a WebSocket server that hosts OpenClaw agents), syncs the Gateway's agent list into SQLite as the [registry of record](/appendices/glossary), and drives chat over that long-lived connection. There is no per-task subprocess to spawn.
 
-This is why OpenClaw is connected and managed differently from `claude-code`, `codex`, `hermes`, and `clawboo-native` — those are CLIs Clawboo installs and runs per task (see [Connecting runtimes](/runtimes/connecting-runtimes)). OpenClaw has its own state directory, its own scheduler, and its own external messaging channels; Clawboo coordinates with it, it does not run it.
+This is why OpenClaw is connected and managed differently from `claude-code`, `codex`, `hermes`, and `clawboo-native`; those are CLIs Clawboo installs and runs per task (see [Connecting runtimes](/runtimes/connecting-runtimes)). OpenClaw has its own state directory, its own scheduler, and its own external messaging channels; Clawboo coordinates with it, it does not run it.
 
 ```mermaid
 flowchart LR
@@ -24,7 +24,7 @@ OpenClaw is a separate project. Clawboo connects to an OpenClaw Gateway you run 
 - An OpenClaw Gateway, reachable over WebSocket (default `ws://localhost:18789`). The Clawboo server connects to the URL stored in [settings](/reference/configuration) (`gatewayUrl`).
 - The Gateway's auth token. Clawboo's onboarding writes one into OpenClaw's `~/.openclaw/.env` as `GATEWAY_AUTH_TOKEN` and mirrors it into Clawboo's `settings.json` (`gatewayToken`).
 - Node.js (Clawboo's prerequisite). The install step runs `npm install -g openclaw@^2026.5`, so `npm` must be on `PATH`.
-- For OpenClaw **2026.5.x and later**: a one-time **device pairing approval** — see [Device pairing](#device-pairing-not_paired).
+- For OpenClaw **2026.5.x and later**: a one-time **device pairing approval**, see [Device pairing](#device-pairing-not_paired).
 
 ## How OpenClaw connects
 
@@ -38,7 +38,7 @@ This is the runtime/execution path: the chat stream (`chat.send`, `chat.abort`),
 
 ### The server connection (OpenClawAgentSource)
 
-The Clawboo server opens its **own** Gateway connection — the `OpenClawAgentSource`. This is the *registry of record* leg: it calls `agents.list()` and mirrors the result into SQLite so the fleet list, agent files, and team membership survive the Gateway being down. Reads (`listAgents`, `getAgent`, `listTeams`) come from SQLite and work offline; writes, file I/O, and live sessions delegate to the Gateway and require a live connection.
+The Clawboo server opens its **own** Gateway connection, the `OpenClawAgentSource`. This is the *registry of record* leg: it calls `agents.list()` and mirrors the result into SQLite so the fleet list, agent files, and team membership survive the Gateway being down. Reads (`listAgents`, `getAgent`, `listTeams`) come from SQLite and work offline; writes, file I/O, and live sessions delegate to the Gateway and require a live connection.
 
 A headless Node connection can't use the browser's `crypto.subtle` device-auth path, so the server reuses the **already-paired proxy device identity** (`~/.clawboo/proxy-device-identity.json`) to sign its connect frame via the gateway-client `signConnect` hook. Two details are load-bearing here, both confirmed against OpenClaw 2026.5.x:
 
@@ -51,7 +51,7 @@ If the server connection is down, reads still serve SQLite (the agent list rende
 
 ## Channels
 
-OpenClaw can connect to external messaging channels (WhatsApp, Telegram, and the like) and runs its own cron/heartbeat scheduler. These are the runtime's *private plane* — Clawboo never serves a channel and never co-runs the Gateway's scheduler. The OpenClaw adapter declares this in its capabilities: `nativeChannels: 'gateway'`, `nativeScheduler: true`, `nativeSkills: 'preserve'`, `nativeMemory: 'preserve'`. Clawboo's [Routines](/concepts/scheduling) schedule *team-task* work, a different domain from OpenClaw's own-life cron, so the two never conflate.
+OpenClaw can connect to external messaging channels (WhatsApp, Telegram, and the like) and runs its own cron/heartbeat scheduler. These are the runtime's *private plane*; Clawboo never serves a channel and never co-runs the Gateway's scheduler. The OpenClaw adapter declares this in its capabilities: `nativeChannels: 'gateway'`, `nativeScheduler: true`, `nativeSkills: 'preserve'`, `nativeMemory: 'preserve'`. Clawboo's [Routines](/concepts/scheduling) schedule *team-task* work, a different domain from OpenClaw's own-life cron, so the two never conflate.
 
 ## Steps
 
@@ -94,7 +94,7 @@ A global npm install can hit `EACCES`. The stream emits an `error` event with co
 { "ok": true, "gatewayUrl": "ws://localhost:18789" }
 ```
 
-The raw token is never returned in the body — it is persisted server-side, and the same-origin proxy injects it on connect.
+The raw token is never returned in the body; it is persisted server-side, and the same-origin proxy injects it on connect.
 
 ### 4. Start the Gateway
 
@@ -109,7 +109,7 @@ The raw token is never returned in the body — it is persisted server-side, and
 
 ### 5. Connect (and pair the device)
 
-Once the Gateway is reachable, the SPA connects through `/api/gateway/ws`. On a fresh OpenClaw 2026.5.x install the first connect fails with `NOT_PAIRED` — proceed to the next section.
+Once the Gateway is reachable, the SPA connects through `/api/gateway/ws`. On a fresh OpenClaw 2026.5.x install the first connect fails with `NOT_PAIRED`; proceed to the next section.
 
 ## Device pairing (NOT_PAIRED)
 
@@ -119,7 +119,7 @@ OpenClaw **2026.5.x and later** dropped auto-pair-on-first-connect. A new device
 GatewayResponseError { code: 'NOT_PAIRED', message: 'pairing required: device is not approved yet' }
 ```
 
-The SPA branches on `err.code === 'NOT_PAIRED'` in three places — the connect screen, the onboarding `StartGatewayStep`, and the bootstrap auto-reconnect — and swaps in a **DevicePairingApproval** card. The card's "Approve this device" button hits `POST /api/system/approve-device`, which performs a two-step shell-out against the OpenClaw CLI:
+The SPA branches on `err.code === 'NOT_PAIRED'` in three places: the connect screen, the onboarding `StartGatewayStep`, and the bootstrap auto-reconnect, and swaps in a **DevicePairingApproval** card. The card's "Approve this device" button hits `POST /api/system/approve-device`, which performs a two-step shell-out against the OpenClaw CLI:
 
 1. `openclaw devices approve --latest` runs in **preview** mode: it prints `Approve this exact request with: openclaw devices approve <UUID>` and exits non-zero. Clawboo regex-extracts the UUID from the captured stdout/stderr.
 2. `openclaw devices approve <UUID>` performs the actual approval.
@@ -139,7 +139,7 @@ Power users can pair from a terminal instead: `openclaw devices approve --latest
 
 ## Why OpenClaw can't be run by the per-task executor
 
-The other four runtimes execute a board task by spawning a one-shot process: claim the task, provision a worktree, run the CLI/SDK, report up. OpenClaw is a **connected substrate** — its runs ride the live Gateway session over the server's long-lived connection — so the one-shot executor runner refuses it **by construction**, before any board mutation:
+The other four runtimes execute a board task by spawning a one-shot process: claim the task, provision a worktree, run the CLI/SDK, report up. OpenClaw is a **connected substrate**; its runs ride the live Gateway session over the server's long-lived connection, so the one-shot executor runner refuses it **by construction**, before any board mutation:
 
 - The OpenClaw adapter's `capabilities()` declare `runtimeClass: 'connected-substrate'` (and `worktrees: false`).
 - `resolveRuntimeIntegration(caps)` maps that class to `home.kind === 'connected'`.
@@ -149,7 +149,7 @@ There is a second wall in front of it: `/api/runtimes/:id/run` only accepts the 
 
 ## Global memory scope
 
-When the server-side connection comes up, `OpenClawAgentSource` registers Clawboo's shared **Memory** and **Tasks** [MCP](/appendices/glossary) servers into the Gateway's top-level `mcp.servers` config (each as `{ url, transport: 'streamable-http' }`), so OpenClaw agents can read and write the one shared team memory. This is **idempotent** — it reads the current config, skips the patch when both servers are already registered with the right URLs (so the per-reconnect re-apply can't burn the Gateway's 3-writes-per-60s control-plane budget), and a stale config is re-merged on reconnect.
+When the server-side connection comes up, `OpenClawAgentSource` registers Clawboo's shared **Memory** and **Tasks** [MCP](/appendices/glossary) servers into the Gateway's top-level `mcp.servers` config (each as `{ url, transport: 'streamable-http' }`), so OpenClaw agents can read and write the one shared team memory. This is **idempotent**; it reads the current config, skips the patch when both servers are already registered with the right URLs (so the per-reconnect re-apply can't burn the Gateway's 3-writes-per-60s control-plane budget), and a stale config is re-merged on reconnect.
 
 Two scoping facts follow from the Gateway config being process-wide:
 
@@ -158,10 +158,10 @@ Two scoping facts follow from the Gateway config being process-wide:
 
 ## Verify it worked
 
-- `GET /api/agents/registry/health` (always `200`) reports the source `connection` — it should read `connected` with a recent `lastSyncedAt`.
+- `GET /api/agents/registry/health` (always `200`) reports the source `connection`; it should read `connected` with a recent `lastSyncedAt`.
 - `GET /api/agents` should return your OpenClaw agents with `stale: false`.
 - `GET /api/system/status` should show `gateway.running: true`.
-- Send a message in group chat — the run streams over the same-origin proxy connection.
+- Send a message in group chat; the run streams over the same-origin proxy connection.
 
 ## Troubleshooting
 
@@ -174,16 +174,16 @@ Two scoping facts follow from the Gateway config being process-wide:
 </Warning>
 
 <Danger>
-**`POST /api/runtimes/openclaw/...` returns `404`.** OpenClaw is not a `/api/runtimes` runtime — only `claude-code`, `codex`, `hermes`, and `clawboo-native` are. Drive OpenClaw through `/api/system/*` and `/api/gateway/ws`, not the runtime install/connect/run routes.
+**`POST /api/runtimes/openclaw/...` returns `404`.** OpenClaw is not a `/api/runtimes` runtime; only `claude-code`, `codex`, `hermes`, and `clawboo-native` are. Drive OpenClaw through `/api/system/*` and `/api/gateway/ws`, not the runtime install/connect/run routes.
 </Danger>
 
 ## Related
 
-- [Connecting runtimes](/runtimes/connecting-runtimes) — the CLI runtimes (different connection model)
-- [Runtimes overview](/runtimes/index) — the capability matrix
-- [Gateway and events](/concepts/gateway-and-events) — the Gateway flow and the Bridge→Policy→Handler pipeline
-- [AgentSource](/internals/agent-source) — the registry-of-record sync internals
-- [Memory](/concepts/memory) — the shared Memory-MCP tier
-- [Peer chat](/concepts/peer-chat) — why TeamChat is server-mediated for OpenClaw
-- [System API](/reference/rest-api/system) · [Agents API](/reference/rest-api/agents) — full request/response shapes
-- [Glossary](/appendices/glossary) — canonical term definitions
+- [Connecting runtimes](/runtimes/connecting-runtimes), the CLI runtimes (different connection model)
+- [Runtimes overview](/runtimes/index), the capability matrix
+- [Gateway and events](/concepts/gateway-and-events), the Gateway flow and the Bridge→Policy→Handler pipeline
+- [AgentSource](/internals/agent-source), the registry-of-record sync internals
+- [Memory](/concepts/memory), the shared Memory-MCP tier
+- [Peer chat](/concepts/peer-chat), why TeamChat is server-mediated for OpenClaw
+- [System API](/reference/rest-api/system) · [Agents API](/reference/rest-api/agents), full request/response shapes
+- [Glossary](/appendices/glossary), canonical term definitions

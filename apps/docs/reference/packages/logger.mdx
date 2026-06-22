@@ -10,7 +10,7 @@ description: Pino structured logger plus the display/log-layer credential redact
 | **Workspace deps** | none |
 | **External deps** | `pino`, `pino-pretty` |
 
-The lowest package in the graph: it imports no other `@clawboo/*` package, so the redactor can live here and be shared by both this package's pino instance and the Express server without a dependency inversion. It is server-oriented but reaches the browser bundle transitively (`@clawboo/gateway-client` imports it). The single browser hazard — reading `process.env` at module-eval time — is guarded behind a `typeof process` check, and `pino` ships its own browser shim, so the import is browser-safe. The redactor here is the *display / log boundary* twin of `@clawboo/db`'s storage-layer `scrubSecrets`: different boundary, different mask (`••••` vs `[REDACTED]`), composed as defense in depth.
+The lowest package in the graph: it imports no other `@clawboo/*` package, so the redactor can live here and be shared by both this package's pino instance and the Express server without a dependency inversion. It is server-oriented but reaches the browser bundle transitively (`@clawboo/gateway-client` imports it). The single browser hazard, reading `process.env` at module-eval time, is guarded behind a `typeof process` check, and `pino` ships its own browser shim, so the import is browser-safe. The redactor here is the *display / log boundary* twin of `@clawboo/db`'s storage-layer `scrubSecrets`: different boundary, different mask (`••••` vs `[REDACTED]`), composed as defense in depth.
 
 ## Public API
 
@@ -18,7 +18,7 @@ The lowest package in the graph: it imports no other `@clawboo/*` package, so th
 
 | Export | Signature | Contract |
 |---|---|---|
-| `createLogger` | `(module: string) => Logger` | Returns a pino child logger tagged with `{ module }`. The standard entry point — every server module gets its own named child. |
+| `createLogger` | `(module: string) => Logger` | Returns a pino child logger tagged with `{ module }`. The standard entry point; every server module gets its own named child. |
 | `redactObject` | `<T>(obj: T): T` | Deep-clones `obj`, masking credential-looking KEYS and credential-shaped string VALUES with `••••`. Circular-safe (`WeakSet` guard → `[Circular]`). Applied inside the pino `formatters.log` hook and at every server API site that exposes event payloads / audit entries / trace spans. |
 | `redactValue` | `(value: unknown, key?: string): unknown` | Redacts a single value. When `key` is supplied and reads as a credential key, the whole value is masked; otherwise strings are scanned for credential-shaped substrings. Numbers / booleans / null pass through unchanged so numeric telemetry survives. |
 | `redactJsonString` | `<T extends string \| null \| undefined>(s: T): T` | Parses a JSON string field (obs event `data`, audit `summary`, tool `argsSummary`/`resultSummary`), masks credential keys + values, re-stringifies. Falls back to a value-only scan when the field is not JSON; passes through `null` / empty. |
@@ -27,7 +27,7 @@ The lowest package in the graph: it imports no other `@clawboo/*` package, so th
 
 | Export | Kind | Contract |
 |---|---|---|
-| `Logger` | type | `ReturnType<typeof logger.child>` — the pino child-logger type, used by consumers (e.g. `@clawboo/events`' `EventHandlerDeps.log`) to type an injectable logger. |
+| `Logger` | type | `ReturnType<typeof logger.child>`, the pino child-logger type, used by consumers (e.g. `@clawboo/events`' `EventHandlerDeps.log`) to type an injectable logger. |
 
 ### Constants
 
@@ -41,24 +41,24 @@ The package exposes no classes. `logger` is a configured pino instance, `createL
 </Note>
 
 <Info>
-`redact*` is the display/log layer and masks with `••••`. It is distinct from `@clawboo/db`'s storage-layer `scrubSecrets` (masks with `[REDACTED]` before anything is persisted). They run at different boundaries and compose — already-scrubbed data passes through here harmlessly. Numeric token counts and cost survive both layers (a `SAFE_COUNT_KEYS` allowlist exempts `tokens` / `inputtokens` / `tokencount` / etc.).
+`redact*` is the display/log layer and masks with `••••`. It is distinct from `@clawboo/db`'s storage-layer `scrubSecrets` (masks with `[REDACTED]` before anything is persisted). They run at different boundaries and compose; already-scrubbed data passes through here harmlessly. Numeric token counts and cost survive both layers (a `SAFE_COUNT_KEYS` allowlist exempts `tokens` / `inputtokens` / `tokencount` / etc.).
 </Info>
 
 ## Used by
 
-- `packages/gateway-client/src/{client,device-auth}.ts` — `createLogger` for the WS client + Node device-auth (the transitive path that pulls the logger into the browser bundle).
-- `apps/web/server/index.ts` — `createLogger` for the Express server's request logging.
-- `apps/web/server/lib/redact.ts` — re-exports `redactObject` / `redactValue` / `redactJsonString` / `REDACTION_MASK` as the server's documented apply-site import; consumed by `api/obs.ts`, `api/tools.ts`, `api/governanceAudit.ts`, `api/health.ts`, and `lib/teamChat/leaderState.ts`.
-- `apps/web/server/lib/obs/logger.ts`, `lib/runtimes/native/conversation.ts`, `lib/teamChat/runTeamExchange.ts` — `createLogger` for module-scoped logging.
-- `packages/events/src/types.ts` — imports the `Logger` type for `EventHandlerDeps.log`.
+- `packages/gateway-client/src/{client,device-auth}.ts`, `createLogger` for the WS client + Node device-auth (the transitive path that pulls the logger into the browser bundle).
+- `apps/web/server/index.ts`, `createLogger` for the Express server's request logging.
+- `apps/web/server/lib/redact.ts`, re-exports `redactObject` / `redactValue` / `redactJsonString` / `REDACTION_MASK` as the server's documented apply-site import; consumed by `api/obs.ts`, `api/tools.ts`, `api/governanceAudit.ts`, `api/health.ts`, and `lib/teamChat/leaderState.ts`.
+- `apps/web/server/lib/obs/logger.ts`, `lib/runtimes/native/conversation.ts`, `lib/teamChat/runTeamExchange.ts`, `createLogger` for module-scoped logging.
+- `packages/events/src/types.ts`, imports the `Logger` type for `EventHandlerDeps.log`.
 
 ## Source
 
-Barrel: [`packages/logger/src/index.ts`](https://github.com/clawboo/clawboo/tree/main/packages/logger/src/index.ts). The redactor lives in `redact.ts` (re-exported through the barrel). The `package.json` `exports` map declares only the root `.` entry — no subpath barrels.
+Barrel: [`packages/logger/src/index.ts`](https://github.com/clawboo/clawboo/tree/main/packages/logger/src/index.ts). The redactor lives in `redact.ts` (re-exported through the barrel). The `package.json` `exports` map declares only the root `.` entry, no subpath barrels.
 
 ## See also
 
-- [Security](/operating/security) — how redaction fits the access-gate / device-auth / vault defense layers.
-- [@clawboo/db](/reference/packages/db) — home of the storage-layer `scrubSecrets` twin.
-- [@clawboo/events](/reference/packages/events) — consumes the `Logger` type.
-- [@clawboo/gateway-client](/reference/packages/gateway-client) — the transitive browser-bundle consumer.
+- [Security](/operating/security), how redaction fits the access-gate / device-auth / vault defense layers.
+- [@clawboo/db](/reference/packages/db), home of the storage-layer `scrubSecrets` twin.
+- [@clawboo/events](/reference/packages/events), consumes the `Logger` type.
+- [@clawboo/gateway-client](/reference/packages/gateway-client), the transitive browser-bundle consumer.

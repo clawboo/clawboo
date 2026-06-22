@@ -2,17 +2,17 @@
 title: Browse and deploy from the Marketplace
 description: Search, inspect, and deploy single agents or whole teams from Clawboo's 304-agent / 82-team / 30-skill catalog.
 ---
-Use this page when you want to add agents to your fleet — either one specialist at a time or a pre-wired [team](/appendices/glossary). The **Marketplace** is a static, committed catalog of 304 agents, 82 teams, and 30 skills you can browse offline and deploy with two clicks.
+Use this page when you want to add agents to your fleet: either one specialist at a time or a pre-wired [team](/appendices/glossary). The **Marketplace** is a static, committed catalog of 304 agents, 82 teams, and 30 skills you can browse offline and deploy with two clicks.
 
-The catalog itself never changes at runtime — it is codegen'd from upstream MIT-licensed repos at pinned commits (see [Marketplace catalog reference](/reference/marketplace-catalog)). What this page covers is the dashboard surface that browses it: the three tabs, the search and filter controls, the detail modals, and the two deploy paths. The UI is `MarketplacePanel`; deploying funnels into the same team-create + agent-create pipeline documented in [Teams](/using/teams).
+The catalog itself never changes at runtime; it is codegen'd from upstream MIT-licensed repos at pinned commits (see [Marketplace catalog reference](/reference/marketplace-catalog)). What this page covers is the dashboard surface that browses it: the three tabs, the search and filter controls, the detail modals, and the two deploy paths. The UI is `MarketplacePanel`; deploying funnels into the same team-create + agent-create pipeline documented in [Teams](/using/teams).
 
 ## Prerequisites
 
 <Note>
-The Marketplace is browsable with no Gateway and no runtime connected — it is a static catalog rendered entirely client-side. **Deploying** an agent or team requires a connected runtime (Clawboo Native or OpenClaw) so the new [Boo](/appendices/glossary) records can actually be created.
+The Marketplace is browsable with no Gateway and no runtime connected; it is a static catalog rendered entirely client-side. **Deploying** an agent or team requires a connected runtime (Clawboo Native or OpenClaw) so the new [Boo](/appendices/glossary) records can actually be created.
 </Note>
 
-- A connected runtime to deploy into — see [Connecting runtimes](/runtimes/connecting-runtimes) or the [Native quickstart](/getting-started/quickstart-native).
+- A connected runtime to deploy into: see [Connecting runtimes](/runtimes/connecting-runtimes) or the [Native quickstart](/getting-started/quickstart-native).
 - Nothing to install. The catalog ships inside the dashboard bundle.
 
 ## Where it lives
@@ -25,7 +25,7 @@ The panel opens on the **Agents** tab by default. The toolbar shows all three ta
 
 | Tab | Count | What it lists | Default? |
 |---|---|---|---|
-| **Agents** | 304 | Individual `AgentCatalogEntry` records — one specialist each | yes |
+| **Agents** | 304 | Individual `AgentCatalogEntry` records, one specialist each | yes |
 | **Teams** | 82 | Pre-wired `TeamTemplate`s (a roster of agents + routing) | no |
 | **Skills** | 30 | `CatalogSkill` entries you can install onto an existing agent | no |
 
@@ -47,7 +47,7 @@ Installing a skill is different from deploying an agent. **Install** appends the
 
 ## Search and filters
 
-Each tab has its own search box and filter pills. Search is a case-insensitive substring match — it never hits the network.
+Each tab has its own search box and filter pills. Search is a case-insensitive substring match; it never hits the network.
 
 | Tab | Search matches | Filter pills |
 |---|---|---|
@@ -72,7 +72,7 @@ Both **Details** buttons open a modal you can dismiss with **Escape** or the clo
 
 ### Agent detail (the zero-loss identity view)
 
-`AgentTemplateDetail` shows the agent's avatar, name, role, source/domain/category badges, the full description, a source-attribution link, **clickable skill chips**, **"Appears in N teams" chips**, and — the payoff — the agent's **full `identityTemplate` rendered as Markdown**, labeled *"Full source from \<source\> — preserved verbatim."*
+`AgentTemplateDetail` shows the agent's avatar, name, role, source/domain/category badges, the full description, a source-attribution link, **clickable skill chips**, **"Appears in N teams" chips**, and, the payoff, the agent's **full `identityTemplate` rendered as Markdown**, labeled *"Full source from \<source\>, preserved verbatim."*
 
 This is the zero-loss guarantee made visible: every catalog entry stores its complete original source spec (not a summary), and that exact text is what lands in the agent's `IDENTITY.md` when you deploy. You read the entire spec before committing.
 
@@ -85,7 +85,7 @@ A **Deploy** button at the bottom runs the same single-agent deploy as the card.
 
 ### Team detail
 
-`TeamTemplateDetail` shows the team's emoji, name, source badge, category, description, source-attribution link, an optional expandable **Workflow** narrative, and the **full roster** — each agent with its avatar, role, parsed skills, and parsed `@`-mention routing (so you can see who delegates to whom before deploying). It also has a **Deploy** button.
+`TeamTemplateDetail` shows the team's emoji, name, source badge, category, description, source-attribution link, an optional expandable **Workflow** narrative, and the **full roster**: each agent with its avatar, role, parsed skills, and parsed `@`-mention routing (so you can see who delegates to whom before deploying). It also has a **Deploy** button.
 
 ## Deploy
 
@@ -106,7 +106,7 @@ flowchart TD
 
 ### Deploy a single agent
 
-Click **Deploy** on an `AgentCard` (or in the agent detail modal). Clawboo wraps that one agent into an adhoc one-agent `TeamTemplate` (id `adhoc-<agentId>`) and opens `CreateTeamModal`. The modal detects single-agent mode by shape (`agentIds.length === 1`) and relabels the Customize step — the title reads **"Deploy agent"** and the confirm button reads **"Create agent"**, and the pick step is skipped.
+Click **Deploy** on an `AgentCard` (or in the agent detail modal). Clawboo wraps that one agent into an adhoc one-agent `TeamTemplate` (id `adhoc-<agentId>`) and opens `CreateTeamModal`. The modal detects single-agent mode by shape (`agentIds.length === 1`) and relabels the Customize step; the title reads **"Deploy agent"** and the confirm button reads **"Create agent"**, and the pick step is skipped.
 
 The deploy loop is otherwise identical to a team deploy: it always creates a dedicated team for that one agent, then creates the agent inside it. (A single-agent deploy is just a one-member team.)
 
@@ -123,7 +123,7 @@ When the modal finishes, Clawboo selects the new team and opens its **group chat
 ## Verify it worked
 
 - After a deploy, the dashboard switches you into the new team's group chat. The team appears in the team sidebar and the [Ghost Graph](/using/ghost-graph).
-- Open the agent in the fleet — its **IDENTITY.md** should contain the same source text you saw in the agent detail modal.
+- Open the agent in the fleet; its **IDENTITY.md** should contain the same source text you saw in the agent detail modal.
 - After a skill **Install**, a success toast confirms it, the skill appears on the agent in the [Capabilities dashboard](/using/capabilities-dashboard) and on the Ghost Graph, and the `Used by N agents` count on the skill card reflects it.
 
 ## Troubleshooting
@@ -133,17 +133,17 @@ When the modal finishes, Clawboo selects the new team and opens its **group chat
 </Warning>
 
 <Warning>
-**A skill install returns an error toast.** `POST /api/skills` injection-scans every entry first. A destructive / exfiltration / prompt-injection finding blocks the install with a `422` (the toast shows the finding), and the block is recorded in the governance audit log. This is the supply-chain guard — it is intentional, not a bug.
+**A skill install returns an error toast.** `POST /api/skills` injection-scans every entry first. A destructive / exfiltration / prompt-injection finding blocks the install with a `422` (the toast shows the finding), and the block is recorded in the governance audit log. This is the supply-chain guard; it is intentional, not a bug.
 </Warning>
 
 <Note>
-**Counts won't change after deploy.** The `Skills (30)` / `Agents (304)` / `Teams (82)` toolbar counts are the *catalog* size, not your fleet. They are fixed — deploying does not grow them.
+**Counts won't change after deploy.** The `Skills (30)` / `Agents (304)` / `Teams (82)` toolbar counts are the *catalog* size, not your fleet. They are fixed; deploying does not grow them.
 </Note>
 
 ## See also
 
-- [Teams](/using/teams) — manage a team after you deploy it (leaders, rules, color collections)
-- [Ghost Graph](/using/ghost-graph) — see the deployed agents and their routing
-- [Capabilities dashboard](/using/capabilities-dashboard) — where installed skills surface
-- [Agents](/using/agents) — edit a deployed agent's SOUL / IDENTITY / TOOLS / AGENTS files
-- [Marketplace catalog reference](/reference/marketplace-catalog) — agent/team schemas, sources, pinned SHAs, ingestion mechanism
+- [Teams](/using/teams): manage a team after you deploy it (leaders, rules, color collections)
+- [Ghost Graph](/using/ghost-graph): see the deployed agents and their routing
+- [Capabilities dashboard](/using/capabilities-dashboard): where installed skills surface
+- [Agents](/using/agents): edit a deployed agent's SOUL / IDENTITY / TOOLS / AGENTS files
+- [Marketplace catalog reference](/reference/marketplace-catalog): agent/team schemas, sources, pinned SHAs, ingestion mechanism

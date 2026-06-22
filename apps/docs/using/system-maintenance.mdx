@@ -1,19 +1,19 @@
 ---
 title: System maintenance
-description: Manage OpenClaw from the System panel — gateway control, default model, API keys, agent coordination, and updates.
+description: Manage OpenClaw from the System panel: gateway control, default model, API keys, agent coordination, and updates.
 ---
-Use the **System** panel when you want to operate the OpenClaw [Gateway](/appendices/glossary) and its config from inside the dashboard instead of the terminal: start/stop/restart the Gateway, pick the default model, store provider API keys, toggle agent-to-agent coordination, and check for OpenClaw updates. The panel manages **OpenClaw only** — the other runtimes (`clawboo-native`, `claude-code`, `codex`, `hermes`) are managed from the [Runtimes](/runtimes/connecting-runtimes) panel.
+Use the **System** panel when you want to operate the OpenClaw [Gateway](/appendices/glossary) and its config from inside the dashboard instead of the terminal: start/stop/restart the Gateway, pick the default model, store provider API keys, toggle agent-to-agent coordination, and check for OpenClaw updates. The panel manages **OpenClaw only**; the other runtimes (`clawboo-native`, `claude-code`, `codex`, `hermes`) are managed from the [Runtimes](/runtimes/connecting-runtimes) panel.
 
 Everything on this page is `MaintenancePanel` (`features/maintenance/`) talking to the `/api/system/*` routes. The panel reads `GET /api/system/status` and `GET /api/system/openclaw-config` on mount and writes back through `PATCH /api/system/openclaw-config`, SSE `POST /api/system/gateway`, and SSE `POST /api/system/install-openclaw`.
 
 ## Prerequisites
 
 <Note>
-The System panel is built for the OpenClaw path. If you are running native-only (no Gateway), most sections still render but have nothing to act on — the Gateway controls report **Stopped**, and the Agent Coordination, Command Approval, and per-model hot-reload paths only render or take effect when a live Gateway `client` is connected.
+The System panel is built for the OpenClaw path. If you are running native-only (no Gateway), most sections still render but have nothing to act on; the Gateway controls report **Stopped**, and the Agent Coordination, Command Approval, and per-model hot-reload paths only render or take effect when a live Gateway `client` is connected.
 </Note>
 
 - OpenClaw installed (the System Info section shows the detected version, or "Not installed").
-- The dashboard running (`npx clawboo`) — the System panel is a nav view inside it.
+- The dashboard running (`npx clawboo`); the System panel is a nav view inside it.
 
 ## Where it lives
 
@@ -25,9 +25,9 @@ Open it from the **System** nav button in the left sidebar (the gear / `Settings
 
 The **Gateway** section (`GatewayControls`) shows a live status row and three control buttons.
 
-- The status row is a pulsing dot + **Running** / **Stopped**, the bound port (e.g. `:18789`), and — when running and Clawboo manages the process — an **uptime** label. Status comes from `GET /api/system/status`, which the component polls every 10 seconds. `uptimeMs` is only populated when the Gateway PID is one Clawboo started (`managedByClawboo`); a Gateway you launched yourself reads as Running with no uptime.
+- The status row is a pulsing dot + **Running** / **Stopped**, the bound port (e.g. `:18789`), and, when running and Clawboo manages the process, an **uptime** label. Status comes from `GET /api/system/status`, which the component polls every 10 seconds. `uptimeMs` is only populated when the Gateway PID is one Clawboo started (`managedByClawboo`); a Gateway you launched yourself reads as Running with no uptime.
 - **Start** and **Restart** stream `POST /api/system/gateway` as Server-Sent Events. The component renders each line in a collapsible terminal log (**Show log** / **Hide log**). Start polls the port for up to 60 seconds before reporting success or a `TIMEOUT` error.
-- **Stop** is a plain JSON `POST /api/system/gateway` (`{ action: "stop" }`) — it sends `SIGTERM`, waits up to 2 seconds, then `SIGKILL`s if needed, and reports `{ ok, stopped }`.
+- **Stop** is a plain JSON `POST /api/system/gateway` (`{ action: "stop" }`); it sends `SIGTERM`, waits up to 2 seconds, then `SIGKILL`s if needed, and reports `{ ok, stopped }`.
 
 The buttons disable themselves to match state: **Start** is disabled while running or busy; **Stop** and **Restart** are disabled while stopped or busy.
 
@@ -57,7 +57,7 @@ If a Gateway `client` is connected, the panel also attempts a best-effort hot re
 
 ### Manage API keys
 
-The **API Keys** section (`ApiKeyManager`) lists provider rows — seven primary providers, then an **Additional Providers** group of seven more. Each row shows a status dot (mint = configured, grey = not set), the provider label, its env-var name, and a **Configured** / **Not set** label.
+The **API Keys** section (`ApiKeyManager`) lists provider rows: seven primary providers, then an **Additional Providers** group of seven more. Each row shows a status dot (mint = configured, grey = not set), the provider label, its env-var name, and a **Configured** / **Not set** label.
 
 1. Click **Update** on a row to reveal an inline masked input (with an eye toggle to reveal/hide).
 2. Paste the key and click **Save**.
@@ -83,7 +83,7 @@ The provider → env-var mapping the rows use:
 | Venice | `VENICE_API_KEY` |
 
 <Note>
-These keys are OpenClaw config — they land in `~/.openclaw/.env` and the per-agent auth profiles, not Clawboo's encrypted runtime vault. The non-OpenClaw runtimes store their keys separately; see [Connecting runtimes](/runtimes/connecting-runtimes).
+These keys are OpenClaw config; they land in `~/.openclaw/.env` and the per-agent auth profiles, not Clawboo's encrypted runtime vault. The non-OpenClaw runtimes store their keys separately; see [Connecting runtimes](/runtimes/connecting-runtimes).
 </Note>
 
 ### Toggle agent coordination
@@ -100,14 +100,14 @@ A sibling **Command Approval** section sets the default `tools.exec.ask` posture
 
 The **Boo Zero** section is a breadcrumb, not an editor. The display name and global brief moved to Boo Zero's own agent view (the **Brief** tab), and per-team brief + rules moved to each team's settings sheet (the gear on the team-chat header). The two cards here jump you straight there:
 
-- **Boo Zero — Display name & Global brief** → opens the Boo Zero agent view.
+- **Boo Zero: Display name & Global brief** → opens the Boo Zero agent view.
 - **Per-team brief & rules** → opens the currently-selected team's chat (or the first team).
 
 See [Boo Zero](/using/boo-zero) for the editors themselves.
 
 ### Check version and updates
 
-The **System** section at the bottom shows OpenClaw version, Node.js version, the state dir, and whether `openclaw.json` was found — all from `GET /api/system/status`.
+The **System** section at the bottom shows OpenClaw version, Node.js version, the state dir, and whether `openclaw.json` was found, all from `GET /api/system/status`.
 
 **Check for Updates** runs the OpenClaw installer in place: it streams `POST /api/system/install-openclaw` (which runs `npm install -g openclaw@^2026.5`) as SSE, renders the output in the update log, and on success re-fetches status to show the new version.
 
@@ -124,19 +124,19 @@ The **System** section at the bottom shows OpenClaw version, Node.js version, th
 
 ## Verify it worked
 
-- **Gateway** — after **Start**, the status dot turns mint and reads **Running** with a port; the 10-second poll keeps it current. `GET /api/system/status` returns `gateway.running: true`.
-- **Default Model** — the model pill updates to the new label and a toast confirms it. Re-open `GET /api/system/openclaw-config` and check `config.agents.defaults.model.primary`.
-- **API Keys** — the row's status dot turns mint and the label reads **Configured**; `GET /api/system/openclaw-config` returns the matching `env.has<Provider>Key: true`.
-- **Agent Coordination** — the switch shows **Agents can delegate tasks to each other**; `config.tools.agentToAgent.enabled` reads `true`.
+- **Gateway**: after **Start**, the status dot turns mint and reads **Running** with a port; the 10-second poll keeps it current. `GET /api/system/status` returns `gateway.running: true`.
+- **Default Model**: the model pill updates to the new label and a toast confirms it. Re-open `GET /api/system/openclaw-config` and check `config.agents.defaults.model.primary`.
+- **API Keys**: the row's status dot turns mint and the label reads **Configured**; `GET /api/system/openclaw-config` returns the matching `env.has<Provider>Key: true`.
+- **Agent Coordination**: the switch shows **Agents can delegate tasks to each other**; `config.tools.agentToAgent.enabled` reads `true`.
 
 ## Troubleshooting
 
 <Warning>
-**Start times out.** On a cold start (especially Windows) the Gateway can take 30–50 seconds to bind. The start stream polls for up to 60 seconds; if it still has not bound it emits an `error` event with code `TIMEOUT`. Open the log (**Show log**) to see why, then click **Start** again — a second start joins the in-flight launch rather than spawning a duplicate.
+**Start times out.** On a cold start (especially Windows) the Gateway can take 30–50 seconds to bind. The start stream polls for up to 60 seconds; if it still has not bound it emits an `error` event with code `TIMEOUT`. Open the log (**Show log**) to see why, then click **Start** again; a second start joins the in-flight launch rather than spawning a duplicate.
 </Warning>
 
 <Warning>
-**A key shows "Not set" right after saving.** The presence flag requires a non-empty value after `=` in `.env` — a bare `VAR=` line reads as unconfigured. Re-open the row and confirm the key was actually pasted before **Save**.
+**A key shows "Not set" right after saving.** The presence flag requires a non-empty value after `=` in `.env`; a bare `VAR=` line reads as unconfigured. Re-open the row and confirm the key was actually pasted before **Save**.
 </Warning>
 
 <Warning>
@@ -149,8 +149,8 @@ The **System** section at the bottom shows OpenClaw version, Node.js version, th
 
 ## See also
 
-- [Connecting runtimes](/runtimes/connecting-runtimes) — manage the non-OpenClaw runtimes (Runtimes panel)
-- [OpenClaw](/runtimes/openclaw) — the Gateway runtime, device pairing, and channels
-- [Boo Zero](/using/boo-zero) — where the display name, global brief, and team rules editors live
-- [Cost and budgets](/using/cost-and-budgets) — track and cap spend on the chosen model
-- [`/api/system/*` reference](/reference/rest-api/system) — full request/response shapes for every route on this page
+- [Connecting runtimes](/runtimes/connecting-runtimes), manage the non-OpenClaw runtimes (Runtimes panel)
+- [OpenClaw](/runtimes/openclaw), the Gateway runtime, device pairing, and channels
+- [Boo Zero](/using/boo-zero), where the display name, global brief, and team rules editors live
+- [Cost and budgets](/using/cost-and-budgets), track and cap spend on the chosen model
+- [`/api/system/*` reference](/reference/rest-api/system), full request/response shapes for every route on this page

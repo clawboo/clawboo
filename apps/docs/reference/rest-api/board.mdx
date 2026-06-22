@@ -1,13 +1,13 @@
 ---
 title: Board API
-description: REST reference for the durable board — tasks, atomic claim, status gate, comments, executions, deps, and per-task worktrees.
+description: REST reference for the durable board: tasks, atomic claim, status gate, comments, executions, deps, and per-task worktrees.
 ---
-REST surface over the durable [board](/concepts/the-board) — the transactional source of truth for team/task coordination. These routes create and list tasks, atomically claim a task for a single assignee, transition status through the state machine (with the intrinsic verification gate), record the execution ledger, link dependency chains, cancel a dead downstream chain, and provision / inspect / pause / complete a task's per-task git worktree (its system-of-record).
+REST surface over the durable [board](/concepts/the-board), the transactional source of truth for team/task coordination. These routes create and list tasks, atomically claim a task for a single assignee, transition status through the state machine (with the intrinsic verification gate), record the execution ledger, link dependency chains, cancel a dead downstream chain, and provision / inspect / pause / complete a task's per-task git worktree (its system-of-record).
 
-The board is a thin HTTP layer over `@clawboo/db`'s board repository — the data boundary. Every POST/PATCH body is validated by a co-located zod schema; an invalid body returns **400** `{ error: 'invalid body', details: <zod flatten> }`. The worktree-handoff route validates against `@clawboo/worktrees`' handoff schema and returns **400** `{ error: 'invalid handoff', details: <zod flatten> }` instead. All bodies are parsed by `express.json({ limit: '2mb' })`.
+The board is a thin HTTP layer over `@clawboo/db`'s board repository, the data boundary. Every POST/PATCH body is validated by a co-located zod schema; an invalid body returns **400** `{ error: 'invalid body', details: <zod flatten> }`. The worktree-handoff route validates against `@clawboo/worktrees`' handoff schema and returns **400** `{ error: 'invalid handoff', details: <zod flatten> }` instead. All bodies are parsed by `express.json({ limit: '2mb' })`.
 
 <Info>
-The atomic claim is the board's concurrency primitive. `POST /api/board/:taskId/claim` returns **409** when another worker already won. Per the board contract, **a 409 is data, not a transient error — do not retry it.** The loser did not lose a race it can re-run; the task is simply taken. The same rule applies to the `409 illegal_transition` on `PATCH /api/board/:taskId`.
+The atomic claim is the board's concurrency primitive. `POST /api/board/:taskId/claim` returns **409** when another worker already won. Per the board contract, **a 409 is data, not a transient error; do not retry it.** The loser did not lose a race it can re-run; the task is simply taken. The same rule applies to the `409 illegal_transition` on `PATCH /api/board/:taskId`.
 </Info>
 
 ## Routes
@@ -52,11 +52,11 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
 | `ready` | `'true'` | Return only ready-to-work tasks (deps satisfied). Overrides `status`/`includeDropped`. |
 | `includeDropped` | `'true'` | Include soft-deleted tasks. |
 
-- **Request body** — none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the task list (`tasks[]` is `DbTask[]`, newest-`updatedAt` first; the `ready` variant orders by `priority` then `updatedAt`):
+**`200 OK`**: the task list (`tasks[]` is `DbTask[]`, newest-`updatedAt` first; the `ready` variant orders by `priority` then `updatedAt`):
 
 ```ts
 {
@@ -86,7 +86,7 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
 }
 ```
 
-**`500 Internal Server Error`** — any DB failure:
+**`500 Internal Server Error`**: any DB failure:
 
 ```json
 { "error": "<message>" }
@@ -108,7 +108,7 @@ curl 'http://localhost:18790/api/board?teamId=<team-id>&status=in_progress'
 
 Creates a task. `status` defaults to `todo` (immediately claimable); pass `backlog` for triage. A subtask is created by setting `parentTaskId` (the parent chain bounds delegation depth). On success the handler emits a `task_created` observability event (a no-op when obs is off).
 
-- **Path/query params** — none.
+- **Path/query params**: none.
 - **Request body** (validated by `createTaskBody`):
 
 ```ts
@@ -127,19 +127,19 @@ Creates a task. `status` defaults to `todo` (immediately claimable); pass `backl
 
 ### Responses
 
-**`400 Bad Request`** — body failed validation:
+**`400 Bad Request`**: body failed validation:
 
 ```json
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`200 OK`** — the created task (full `DbTask`, shape as in `GET /api/board`):
+**`200 OK`**: the created task (full `DbTask`, shape as in `GET /api/board`):
 
 ```ts
 { task: { id: string, title: string, status: 'todo', /* …full DbTask… */ } }
 ```
 
-**`500 Internal Server Error`** — DB failure:
+**`500 Internal Server Error`**: DB failure:
 
 ```json
 { "error": "<message>" }
@@ -159,8 +159,8 @@ curl -X POST http://localhost:18790/api/board \
 
 Returns one task plus its comments (oldest first) and its ancestor chain (the parent-task lineage, via recursive CTE).
 
-- **Path params** — `taskId`.
-- **Request body** — none.
+- **Path params**: `taskId`.
+- **Request body**: none.
 
 ### Responses
 
@@ -187,7 +187,7 @@ Returns one task plus its comments (oldest first) and its ancestor chain (the pa
 }
 ```
 
-**`404 Not Found`** — no such task:
+**`404 Not Found`**: no such task:
 
 ```json
 { "error": "task not found" }
@@ -209,13 +209,13 @@ curl http://localhost:18790/api/board/<task-id>
 
 ## `POST /api/board/:taskId/claim`
 
-Atomically claims a `todo` task for a single assignee. The claim is a guarded UPDATE (`status='todo' AND assignee IS NULL AND dropped=0`) — at most one caller wins, the task flips to `in_progress`, and the loser gets a **409**. On a win the handler emits a `task_claimed` event and narrates the claim into the team chat room (best-effort, after the canonical write — never a write path back).
+Atomically claims a `todo` task for a single assignee. The claim is a guarded UPDATE (`status='todo' AND assignee IS NULL AND dropped=0`); at most one caller wins, the task flips to `in_progress`, and the loser gets a **409**. On a win the handler emits a `task_claimed` event and narrates the claim into the team chat room (best-effort, after the canonical write, never a write path back).
 
 <Danger>
-A **409** means another worker holds the task. Do **not** retry it. A dead `in_progress` task is recovered by orphan reconciliation (which releases it to `todo`), after which a normal claim re-acquires it — the liveness logic lives there, not in the claim.
+A **409** means another worker holds the task. Do **not** retry it. A dead `in_progress` task is recovered by orphan reconciliation (which releases it to `todo`), after which a normal claim re-acquires it; the liveness logic lives there, not in the claim.
 </Danger>
 
-- **Path params** — `taskId`.
+- **Path params**: `taskId`.
 - **Request body** (validated by `claimBody`):
 
 ```ts
@@ -227,25 +227,25 @@ A **409** means another worker holds the task. Do **not** retry it. A dead `in_p
 
 ### Responses
 
-**`400 Bad Request`** — body failed validation:
+**`400 Bad Request`**: body failed validation:
 
 ```json
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`200 OK`** — the claim won; the task is now `in_progress` and assigned:
+**`200 OK`**: the claim won; the task is now `in_progress` and assigned:
 
 ```ts
 { ok: true, task: DbTask }
 ```
 
-**`404 Not Found`** — the task does not exist (`reason: 'not_found'`):
+**`404 Not Found`**: the task does not exist (`reason: 'not_found'`):
 
 ```json
 { "ok": false, "error": "not_found" }
 ```
 
-**`409 Conflict`** — the task was not in a claimable state (already claimed, dropped, or not `todo`):
+**`409 Conflict`**: the task was not in a claimable state (already claimed, dropped, or not `todo`):
 
 ```json
 { "ok": false, "error": "conflict" }
@@ -269,15 +269,15 @@ curl -X POST http://localhost:18790/api/board/<task-id>/claim \
 
 ## `PATCH /api/board/:taskId`
 
-Transitions a task's status and/or edits its metadata (`priority` / `title` / `description`). At least one field is required. The status change is enforced by the state machine inside a `BEGIN IMMEDIATE` transaction (illegal transition → **409**). When the target is `done`, the **intrinsic verification gate** applies: a task carrying a non-promotable verdict (a failing deterministic gate, including red-gate debt) is rejected with **409** `verification_required`. The only bypass is `humanOverride: true` — when used with `status: 'done'` the override is recorded in the governance audit log so it is never silent.
+Transitions a task's status and/or edits its metadata (`priority` / `title` / `description`). At least one field is required. The status change is enforced by the state machine inside a `BEGIN IMMEDIATE` transaction (illegal transition → **409**). When the target is `done`, the **intrinsic verification gate** applies: a task carrying a non-promotable verdict (a failing deterministic gate, including red-gate debt) is rejected with **409** `verification_required`. The only bypass is `humanOverride: true`; when used with `status: 'done'` the override is recorded in the governance audit log so it is never silent.
 
 <Note>
-A task with **no** stored verification verdict is *unverified*, not *failing* — it lands `done` normally. The gate blocks known-failing verdicts, not un-run verification; manually completing unverified work is an intentional human judgment call (the autonomous path always writes a verdict via the verification gate before this transition). Moving a task to `todo` releases it (clears the assignee + verdict) so the atomic claim can re-acquire it.
+A task with **no** stored verification verdict is *unverified*, not *failing*; it lands `done` normally. The gate blocks known-failing verdicts, not un-run verification; manually completing unverified work is an intentional human judgment call (the autonomous path always writes a verdict via the verification gate before this transition). Moving a task to `todo` releases it (clears the assignee + verdict) so the atomic claim can re-acquire it.
 </Note>
 
 On a successful status change the handler emits a `status_changed` event and narrates the mutation into the team chat room (best-effort, after the canonical write).
 
-- **Path params** — `taskId`.
+- **Path params**: `taskId`.
 - **Request body** (validated by `updateTaskBody`; at least one field required):
 
 ```ts
@@ -292,19 +292,19 @@ On a successful status change the handler emits a `status_changed` event and nar
 
 ### Responses
 
-**`400 Bad Request`** — empty body or failed validation:
+**`400 Bad Request`**: empty body or failed validation:
 
 ```json
 { "error": "invalid body", "details": { "formErrors": ["at least one field required"], "fieldErrors": {} } }
 ```
 
-**`200 OK`** — applied; the updated task:
+**`200 OK`**: applied; the updated task:
 
 ```ts
 { ok: true, task: DbTask }
 ```
 
-**`404 Not Found`** — the task does not exist (`reason: 'not_found'`, or the field update found no row):
+**`404 Not Found`**: the task does not exist (`reason: 'not_found'`, or the field update found no row):
 
 ```json
 { "ok": false, "error": "not_found" }
@@ -316,7 +316,7 @@ On a successful status change the handler emits a `status_changed` event and nar
 { "error": "task not found" }
 ```
 
-**`409 Conflict`** — the status transition is illegal or the verification gate blocked `→done`:
+**`409 Conflict`**: the status transition is illegal or the verification gate blocked `→done`:
 
 ```ts
 { ok: false, error: 'illegal_transition' | 'verification_required' }
@@ -346,9 +346,9 @@ curl -X PATCH http://localhost:18790/api/board/<task-id> \
 
 ## `POST /api/board/:taskId/comments`
 
-Adds a comment to a task (discussion or a system note). `authorType` defaults to `agent`. The handler emits a `comment_added` event and narrates a truncated form of the comment into the team chat room (best-effort, after the write). The handler does not 404 a missing task before inserting — the comment row is created against the supplied `taskId`.
+Adds a comment to a task (discussion or a system note). `authorType` defaults to `agent`. The handler emits a `comment_added` event and narrates a truncated form of the comment into the team chat room (best-effort, after the write). The handler does not 404 a missing task before inserting; the comment row is created against the supplied `taskId`.
 
-- **Path params** — `taskId`.
+- **Path params**: `taskId`.
 - **Request body** (validated by `commentBody`):
 
 ```ts
@@ -361,13 +361,13 @@ Adds a comment to a task (discussion or a system note). `authorType` defaults to
 
 ### Responses
 
-**`400 Bad Request`** — body failed validation:
+**`400 Bad Request`**: body failed validation:
 
 ```json
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`200 OK`** — the created comment:
+**`200 OK`**: the created comment:
 
 ```ts
 {
@@ -402,9 +402,9 @@ curl -X POST http://localhost:18790/api/board/<task-id>/comments \
 
 ## `POST /api/board/:taskId/executions`
 
-Opens an execution-process row for a task — recorded only after a successful claim. The exec ledger is what orphan reconciliation reads on restart: an executor that starts work MUST open one here and close it via the PATCH below, or a crash leaves the run orphaned (reconciliation then marks it `failed` and releases the task). On success the handler emits an `execution_started` event.
+Opens an execution-process row for a task, recorded only after a successful claim. The exec ledger is what orphan reconciliation reads on restart: an executor that starts work MUST open one here and close it via the PATCH below, or a crash leaves the run orphaned (reconciliation then marks it `failed` and releases the task). On success the handler emits an `execution_started` event.
 
-- **Path params** — `taskId`.
+- **Path params**: `taskId`.
 - **Request body** (validated by `createExecutionBody`):
 
 ```ts
@@ -418,19 +418,19 @@ Opens an execution-process row for a task — recorded only after a successful c
 
 ### Responses
 
-**`400 Bad Request`** — body failed validation:
+**`400 Bad Request`**: body failed validation:
 
 ```json
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`404 Not Found`** — the task does not exist:
+**`404 Not Found`**: the task does not exist:
 
 ```json
 { "error": "task not found" }
 ```
 
-**`200 OK`** — the created execution row (starts in `status: 'running'`):
+**`200 OK`**: the created execution row (starts in `status: 'running'`):
 
 ```ts
 {
@@ -479,9 +479,9 @@ curl -X POST http://localhost:18790/api/board/<task-id>/executions \
 
 ## `PATCH /api/board/executions/:execId`
 
-Closes out an execution row with its outcome and an optional token/cost ledger. The handler emits an `execution_completed` event — `taskId`/`agentId` are not in scope on this REST path (only `execId`), so correlate via the `execution_started` event by `execId`.
+Closes out an execution row with its outcome and an optional token/cost ledger. The handler emits an `execution_completed` event; `taskId`/`agentId` are not in scope on this REST path (only `execId`), so correlate via the `execution_started` event by `execId`.
 
-- **Path params** — `execId`.
+- **Path params**: `execId`.
 - **Request body** (validated by `completeExecutionBody`):
 
 ```ts
@@ -500,13 +500,13 @@ Closes out an execution row with its outcome and an optional token/cost ledger. 
 
 ### Responses
 
-**`400 Bad Request`** — body failed validation:
+**`400 Bad Request`**: body failed validation:
 
 ```json
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`200 OK`** — the execution was closed:
+**`200 OK`**: the execution was closed:
 
 ```json
 { "ok": true }
@@ -530,14 +530,14 @@ curl -X PATCH http://localhost:18790/api/board/executions/<exec-id> \
 
 ## `GET /api/board/:taskId/executions`
 
-Lists a task's execution-process rows (the run ledger) — every spawned run, oldest first.
+Lists a task's execution-process rows (the run ledger), every spawned run, oldest first.
 
-- **Path params** — `taskId`.
-- **Request body** — none.
+- **Path params**: `taskId`.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the ledger (`executions[]` is `DbExecutionProcess[]`, shape as in `POST .../executions`):
+**`200 OK`**: the ledger (`executions[]` is `DbExecutionProcess[]`, shape as in `POST .../executions`):
 
 ```ts
 { ok: true, executions: DbExecutionProcess[] }
@@ -559,9 +559,9 @@ curl http://localhost:18790/api/board/<task-id>/executions
 
 ## `POST /api/board/:taskId/deps`
 
-Links a dependency: `taskId` will not become ready until `dependsOnTaskId` is `done`. Plans become a dep chain — the orchestrator's ready-pump fires the next step when its blocker completes. Both endpoints of the edge must exist (the handler guards against orphan dep rows). On success the handler emits a `dep_linked` event and narrates the dependency into the team chat room.
+Links a dependency: `taskId` will not become ready until `dependsOnTaskId` is `done`. Plans become a dep chain; the orchestrator's ready-pump fires the next step when its blocker completes. Both endpoints of the edge must exist (the handler guards against orphan dep rows). On success the handler emits a `dep_linked` event and narrates the dependency into the team chat room.
 
-- **Path params** — `taskId` (the dependent).
+- **Path params**: `taskId` (the dependent).
 - **Request body** (validated by `linkDepBody`):
 
 ```ts
@@ -572,19 +572,19 @@ Links a dependency: `taskId` will not become ready until `dependsOnTaskId` is `d
 
 ### Responses
 
-**`400 Bad Request`** — body failed validation:
+**`400 Bad Request`**: body failed validation:
 
 ```json
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`404 Not Found`** — either the task or the blocker does not exist:
+**`404 Not Found`**: either the task or the blocker does not exist:
 
 ```json
 { "error": "task not found" }
 ```
 
-**`200 OK`** — the edge was linked (duplicate edges are ignored):
+**`200 OK`**: the edge was linked (duplicate edges are ignored):
 
 ```json
 { "ok": true }
@@ -608,20 +608,20 @@ curl -X POST http://localhost:18790/api/board/<step-2-id>/deps \
 
 ## `POST /api/board/:taskId/cancel-dependents`
 
-Cancels the still-pending (`todo`/`backlog`) transitive dependents of a failed task. A `blocked`/failed blocker can never become `done`, so its downstream chain is dead — cancelling it surfaces the stall instead of leaving ghost `todo` cards that can never become ready. Dependents already `in_progress`/`done`/`cancelled` are left untouched. Each cancelled task emits a `status_changed` event with `reason: 'blocker_failed'`. The returned list lets the caller report the stalled plan chain to the leader.
+Cancels the still-pending (`todo`/`backlog`) transitive dependents of a failed task. A `blocked`/failed blocker can never become `done`, so its downstream chain is dead; cancelling it surfaces the stall instead of leaving ghost `todo` cards that can never become ready. Dependents already `in_progress`/`done`/`cancelled` are left untouched. Each cancelled task emits a `status_changed` event with `reason: 'blocker_failed'`. The returned list lets the caller report the stalled plan chain to the leader.
 
-- **Path params** — `taskId` (the failed blocker).
-- **Request body** — none.
+- **Path params**: `taskId` (the failed blocker).
+- **Request body**: none.
 
 ### Responses
 
-**`404 Not Found`** — the task does not exist:
+**`404 Not Found`**: the task does not exist:
 
 ```json
 { "error": "task not found" }
 ```
 
-**`200 OK`** — the cancelled dependents (id + title only; may be an empty array):
+**`200 OK`**: the cancelled dependents (id + title only; may be an empty array):
 
 ```ts
 { cancelled: Array<{ id: string, title: string }> }
@@ -646,10 +646,10 @@ curl -X POST http://localhost:18790/api/board/<failed-task-id>/cancel-dependents
 Provisions a git worktree + branch + system-of-record (SoR) scaffold for a file-mutating task, and records the worktree/branch refs on the task. The worktree lives outside the user's repo (under the clawboo state dir, namespaced by a hash of the repo path) so it never pollutes the repo's own `git status`. Isolation is decided by task `kind`: `code` (and unknown kinds) → `worktree`; `research` / `review` → `none` (refused). A repeated provision for a task that already has a live, registered checkout reuses it rather than inserting a duplicate workspace row.
 
 <Note>
-A read-only / research task is refused with **422** — it has no file mutations to isolate, so it should not pay the worktree cost.
+A read-only / research task is refused with **422**; it has no file mutations to isolate, so it should not pay the worktree cost.
 </Note>
 
-- **Path params** — `taskId`.
+- **Path params**: `taskId`.
 - **Request body** (validated by `provisionWorkspaceBody`):
 
 ```ts
@@ -663,25 +663,25 @@ A read-only / research task is refused with **422** — it has no file mutations
 
 ### Responses
 
-**`400 Bad Request`** — body failed validation:
+**`400 Bad Request`**: body failed validation:
 
 ```json
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`404 Not Found`** — the task does not exist (`reason: 'not_found'`):
+**`404 Not Found`**: the task does not exist (`reason: 'not_found'`):
 
 ```json
 { "ok": false, "error": "task not found" }
 ```
 
-**`422 Unprocessable Entity`** — the task kind resolves to no worktree isolation (research/review):
+**`422 Unprocessable Entity`**: the task kind resolves to no worktree isolation (research/review):
 
 ```ts
 { ok: false, error: 'no_isolation', isolation: 'none' | 'container' }
 ```
 
-**`200 OK`** — the worktree was provisioned (or an existing one reused):
+**`200 OK`**: the worktree was provisioned (or an existing one reused):
 
 ```ts
 {
@@ -716,20 +716,20 @@ curl -X POST http://localhost:18790/api/board/<task-id>/workspace \
 
 ## `GET /api/board/:taskId/workspace`
 
-The cold-resume read: the task's workspace row plus the resume state reconstructed purely from the worktree's system-of-record (`AGENT_HANDOFF.json`, falling back to `task-progress.md` + `init.sh`) — no chat history, no board UI. This is what lets a fresh runtime (or a human) pick up a task from the worktree alone.
+The cold-resume read: the task's workspace row plus the resume state reconstructed purely from the worktree's system-of-record (`AGENT_HANDOFF.json`, falling back to `task-progress.md` + `init.sh`), no chat history, no board UI. This is what lets a fresh runtime (or a human) pick up a task from the worktree alone.
 
-- **Path params** — `taskId`.
-- **Request body** — none.
+- **Path params**: `taskId`.
+- **Request body**: none.
 
 ### Responses
 
-**`404 Not Found`** — no workspace row for the task (or it has no recorded worktree path):
+**`404 Not Found`**: no workspace row for the task (or it has no recorded worktree path):
 
 ```json
 { "error": "workspace not found" }
 ```
 
-**`200 OK`** — the workspace, the reconstructed resume state, and the parsed handoff (each may be `null` when the worktree is paused-away or no handoff was written):
+**`200 OK`**: the workspace, the reconstructed resume state, and the parsed handoff (each may be `null` when the worktree is paused-away or no handoff was written):
 
 ```ts
 {
@@ -772,10 +772,10 @@ curl http://localhost:18790/api/board/<task-id>/workspace
 
 Pauses or completes a task's worktree.
 
-- **`pause`** — commit any uncommitted work, drop the worktree, keep the branch (the workspace stays `active` and resumable).
-- **`complete`** — an empty diff cleans up the worktree + branch and drives the task to `done` (an empty diff has no deliverable, so the verification gate is intentionally bypassed). A non-empty diff lands the task in `in_review`, runs the verification gate, then gates `→done`: a `pass` (or a `completed_with_debt` over a green deterministic gate) promotes to `done`; debt over a red deterministic gate routes to `blocked` (with a system comment); a `fail` reverts to `in_progress`. SoR bookkeeping files are excluded from the diff (a session that only wrote its own progress/handoff is still "empty").
+- **`pause`**: commit any uncommitted work, drop the worktree, keep the branch (the workspace stays `active` and resumable).
+- **`complete`**: an empty diff cleans up the worktree + branch and drives the task to `done` (an empty diff has no deliverable, so the verification gate is intentionally bypassed). A non-empty diff lands the task in `in_review`, runs the verification gate, then gates `→done`: a `pass` (or a `completed_with_debt` over a green deterministic gate) promotes to `done`; debt over a red deterministic gate routes to `blocked` (with a system comment); a `fail` reverts to `in_progress`. SoR bookkeeping files are excluded from the diff (a session that only wrote its own progress/handoff is still "empty").
 
-- **Path params** — `taskId`.
+- **Path params**: `taskId`.
 - **Request body** (validated by `workspaceActionBody`):
 
 ```ts
@@ -786,25 +786,25 @@ Pauses or completes a task's worktree.
 
 ### Responses
 
-**`400 Bad Request`** — body failed validation:
+**`400 Bad Request`**: body failed validation:
 
 ```json
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`404 Not Found`** — no workspace row (or it has no worktree path / branch):
+**`404 Not Found`**: no workspace row (or it has no worktree path / branch):
 
 ```json
 { "ok": false, "error": "workspace not found" }
 ```
 
-**`200 OK` (`pause`)** — committed-or-not + the resulting HEAD sha:
+**`200 OK` (`pause`)**: committed-or-not + the resulting HEAD sha:
 
 ```ts
 { ok: true, action: 'pause', pause: { committed: boolean, head: string } }
 ```
 
-**`200 OK` (`complete`)** — the diff outcome, the resulting task status, and (when the gate ran on a dirty diff) the verification verdict:
+**`200 OK` (`complete`)**: the diff outcome, the resulting task status, and (when the gate ran on a dirty diff) the verification verdict:
 
 ```ts
 {
@@ -844,9 +844,9 @@ curl -X PATCH http://localhost:18790/api/board/<task-id>/workspace \
 
 ## `POST /api/board/:taskId/workspace/handoff`
 
-Writes the clock-out `AGENT_HANDOFF.json` into the task's worktree — structured data, not prose, so a different runtime (or a human) can pick up the task cleanly. `timestamp` is defaulted server-side to the current ISO-8601 time when omitted before validation.
+Writes the clock-out `AGENT_HANDOFF.json` into the task's worktree, structured data, not prose, so a different runtime (or a human) can pick up the task cleanly. `timestamp` is defaulted server-side to the current ISO-8601 time when omitted before validation.
 
-- **Path params** — `taskId`.
+- **Path params**: `taskId`.
 - **Request body** (validated by `agentHandoffSchema`; `timestamp` defaulted server-side):
 
 ```ts
@@ -868,19 +868,19 @@ Writes the clock-out `AGENT_HANDOFF.json` into the task's worktree — structure
 
 ### Responses
 
-**`400 Bad Request`** — the handoff failed validation:
+**`400 Bad Request`**: the handoff failed validation:
 
 ```json
 { "error": "invalid handoff", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`404 Not Found`** — no workspace row (or it has no worktree path):
+**`404 Not Found`**: no workspace row (or it has no worktree path):
 
 ```json
 { "ok": false, "error": "workspace not found" }
 ```
 
-**`200 OK`** — the handoff was written:
+**`200 OK`**: the handoff was written:
 
 ```json
 { "ok": true }
@@ -910,20 +910,20 @@ curl -X POST http://localhost:18790/api/board/<task-id>/workspace/handoff \
 
 ## `GET /api/board/:taskId/workspace/detail`
 
-The task-detail drawer's Workspace tab: the SoR file contents (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json` — only those present) plus the unified diff and diff-stat against the branch-point baseline, with the SoR bookkeeping files excluded.
+The task-detail drawer's Workspace tab: the SoR file contents (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`, only those present) plus the unified diff and diff-stat against the branch-point baseline, with the SoR bookkeeping files excluded.
 
-- **Path params** — `taskId`.
-- **Request body** — none.
+- **Path params**: `taskId`.
+- **Request body**: none.
 
 ### Responses
 
-**`404 Not Found`** — no workspace row (or it has no worktree path):
+**`404 Not Found`**: no workspace row (or it has no worktree path):
 
 ```json
 { "error": "workspace not found" }
 ```
 
-**`200 OK`** — the SoR contents + diff (`diffStat` / `diff` may be empty when the worktree is paused-away or git is unavailable):
+**`200 OK`**: the SoR contents + diff (`diffStat` / `diff` may be empty when the worktree is paused-away or git is unavailable):
 
 ```ts
 {
@@ -960,9 +960,9 @@ Every error response on these routes is the standard envelope `{ error: string }
 
 ## See also
 
-- [The board](/concepts/the-board) — the state machine, atomic claim, dep chains, and orphan reconciliation
-- [Worktrees and handoff](/concepts/worktrees-and-handoff) — the per-task system-of-record + cross-runtime `AGENT_HANDOFF.json`
-- [Verification](/concepts/verification) — builder≠judge, the deterministic gate + critic, `completed_with_debt`
-- [Runtimes API](/reference/rest-api/runtimes) — `POST /api/runtimes/:id/run` claims and drives one of these tasks end to end
-- [Database schema](/reference/database-schema) — the `tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes` tables
+- [The board](/concepts/the-board), the state machine, atomic claim, dep chains, and orphan reconciliation
+- [Worktrees and handoff](/concepts/worktrees-and-handoff), the per-task system-of-record + cross-runtime `AGENT_HANDOFF.json`
+- [Verification](/concepts/verification), builder≠judge, the deterministic gate + critic, `completed_with_debt`
+- [Runtimes API](/reference/rest-api/runtimes), `POST /api/runtimes/:id/run` claims and drives one of these tasks end to end
+- [Database schema](/reference/database-schema), the `tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes` tables
 - [REST API overview](/reference/rest-api/index)

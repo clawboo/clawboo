@@ -42,7 +42,7 @@ The pipeline is the architectural invariant "all Gateway events go Bridge → Po
 | Export | Kind | Contract |
 |---|---|---|
 | `EventKind` | type | `'summary-refresh' \| 'runtime-chat' \| 'runtime-agent' \| 'approval' \| 'unknown'`. |
-| `EventPlane` | type | `'work' \| 'agent' \| 'trust'` — which store family an intent targets. |
+| `EventPlane` | type | `'work' \| 'agent' \| 'trust'`, which store family an intent targets. |
 | `ChatState` | type | `'delta' \| 'final' \| 'aborted' \| 'error'`. |
 | `LifecyclePhase` | type | `'start' \| 'end' \| 'error'`. |
 | `ChatEventPayload` | type | Parsed `chat` frame: `{ runId, sessionKey, state, seq?, stopReason?, message?, errorMessage? }`. |
@@ -50,20 +50,20 @@ The pipeline is the architectural invariant "all Gateway events go Bridge → Po
 | `ClassifiedEvent` | interface | Bridge output: `{ kind, agentId?, sessionKey?, payload, timestamp, raw: EventFrame }`. |
 | `AgentStatusPatch` | type | Partial agent state mutation: `{ status?, runId?, runStartedAt?, streamText?, thinkingTrace?, lastActivityAt? }`. |
 | `LifecycleTransition` | type | Discriminated union: `{ kind: 'start'; patch; clearRunTracking: false } \| { kind: 'terminal'; patch; clearRunTracking: true } \| { kind: 'ignore' }`. |
-| `EventIntent` | type | The pipeline's currency — a discriminated union of `queueLivePatch` / `clearPendingLivePatch` / `commitChat` / `updateAgentStatus` / `scheduleSummaryRefresh` / `requestHistoryRefresh` / `approvalPending` / `approvalResolved` / `ignore`, each tagged with its `plane`. |
+| `EventIntent` | type | The pipeline's currency, a discriminated union of `queueLivePatch` / `clearPendingLivePatch` / `commitChat` / `updateAgentStatus` / `scheduleSummaryRefresh` / `requestHistoryRefresh` / `approvalPending` / `approvalResolved` / `ignore`, each tagged with its `plane`. |
 | `EventHandlerDeps` | type | Injected dependencies for `createEventHandler`: state queries (`getConnectionStatus`, `getAgentRunId`), dispatchers (`dispatchIntent`, `queueLivePatch`, `appendOutputLines`, `requestHistoryRefresh`, `loadSummarySnapshot`, `refreshHeartbeatLatest`, …), injectable timers, and an optional `log`. |
-| `EventHandlerHandle` | type | `{ applyIntents: (intents: EventIntent[], event: ClassifiedEvent) => void; dispose: () => void }` — the Handler's return shape. |
+| `EventHandlerHandle` | type | `{ applyIntents: (intents: EventIntent[], event: ClassifiedEvent) => void; dispose: () => void }`, the Handler's return shape. |
 | `Patch` | interface | Patch-queue entry: `{ agentId: string; updates: Record<string, unknown> }`. |
 
 <Note>
-The package exposes no classes or runtime constants from its barrel — the Bridge and Policy layers are plain functions, and the Handler / patch-queue are factory functions returning closures.
+The package exposes no classes or runtime constants from its barrel; the Bridge and Policy layers are plain functions, and the Handler / patch-queue are factory functions returning closures.
 </Note>
 
 ## Used by
 
-- `apps/web/src/features/connection/useGatewayEvents.ts` — wires `createEventHandler` + `createPatchQueue` + `processEvent` to the live Gateway stream and the Zustand stores.
-- `apps/web/src/stores/fleet.ts` — imports the `AgentStatusPatch` type for its `patchAgent` action.
-- `packages/adapters/openclaw/src/mapFrame.ts` — reuses the pure Bridge parsers (`isReasoningStream`, `parseAgentPayload`, `parseChatPayload`) to map Gateway frames into the runtime-event stream.
+- `apps/web/src/features/connection/useGatewayEvents.ts`; wires `createEventHandler` + `createPatchQueue` + `processEvent` to the live Gateway stream and the Zustand stores.
+- `apps/web/src/stores/fleet.ts`; imports the `AgentStatusPatch` type for its `patchAgent` action.
+- `packages/adapters/openclaw/src/mapFrame.ts`; reuses the pure Bridge parsers (`isReasoningStream`, `parseAgentPayload`, `parseChatPayload`) to map Gateway frames into the runtime-event stream.
 
 ## Source
 
@@ -71,7 +71,7 @@ Barrel: [`packages/events/src/index.ts`](https://github.com/clawboo/clawboo/tree
 
 ## See also
 
-- [Gateway & events pipeline](/concepts/gateway-and-events) — the conceptual model.
-- [Event pipeline internals](/internals/event-pipeline) — Bridge → Policy → Handler in depth.
-- [@clawboo/gateway-client](/reference/packages/gateway-client) — source of the `EventFrame` type this package consumes.
-- [@clawboo/protocol](/reference/packages/protocol) — the message parsers re-exported here.
+- [Gateway & events pipeline](/concepts/gateway-and-events), the conceptual model.
+- [Event pipeline internals](/internals/event-pipeline), Bridge → Policy → Handler in depth.
+- [@clawboo/gateway-client](/reference/packages/gateway-client), source of the `EventFrame` type this package consumes.
+- [@clawboo/protocol](/reference/packages/protocol), the message parsers re-exported here.

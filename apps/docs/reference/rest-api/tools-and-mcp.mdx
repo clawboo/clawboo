@@ -2,7 +2,7 @@
 title: Tools & MCP API
 description: REST reference for the tools broker (list, approvals, audit) and the in-process Streamable-HTTP MCP transport plus attach-config endpoint.
 ---
-REST surface for two related systems. The **tools broker** REST routes (`/api/tools*`) are the UI-facing half of the broker's dual surface: list the builtin tools with their availability verdict, read the pending tool-approval queue, resolve an approval, and read the forensic audit log. The **MCP** routes (`/api/mcp/*`) are the in-process Streamable-HTTP transport for Clawboo's four MCP servers (`tasks`, `memory`, `tools`, `teamchat`) — the same SQLite-backed servers an external runtime attaches to — plus a per-runtime attach-config snippet endpoint.
+REST surface for two related systems. The **tools broker** REST routes (`/api/tools*`) are the UI-facing half of the broker's dual surface: list the builtin tools with their availability verdict, read the pending tool-approval queue, resolve an approval, and read the forensic audit log. The **MCP** routes (`/api/mcp/*`) are the in-process Streamable-HTTP transport for Clawboo's four MCP servers (`tasks`, `memory`, `tools`, `teamchat`), the same SQLite-backed servers an external runtime attaches to, plus a per-runtime attach-config snippet endpoint.
 
 <Note>
 The MCP routes are not request/response in the usual sense. They speak the Model Context Protocol over Streamable HTTP: a per-session JSON-RPC channel keyed by the `mcp-session-id` header. They are documented below with the transport mechanics + status codes, not a JSON response shape. The *tools and their input schemas* served over these channels are in [MCP tools reference](/reference/mcp-tools).
@@ -36,14 +36,14 @@ All POST bodies on these routes are parsed by `express.json({ limit: '2mb' })`. 
 
 ## `GET /api/tools`
 
-Lists every builtin tool with a server-evaluated availability verdict. The availability is computed against the current process env (`defaultAvailabilityContext()`), so a tool that requires an unconfigured provider reads `available: false` with a diagnostics list explaining why — the UI greys it out and the model's `tools/list` omits it. The four builtins are `echo` and `note` (`safe`), `web_search` (`external`, hidden until a search provider is configured), and `delete_path` (`destructive`).
+Lists every builtin tool with a server-evaluated availability verdict. The availability is computed against the current process env (`defaultAvailabilityContext()`), so a tool that requires an unconfigured provider reads `available: false` with a diagnostics list explaining why; the UI greys it out and the model's `tools/list` omits it. The four builtins are `echo` and `note` (`safe`), `web_search` (`external`, hidden until a search provider is configured), and `delete_path` (`destructive`).
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the tool list with availability:
+**`200 OK`**: the tool list with availability:
 
 ```ts
 {
@@ -59,7 +59,7 @@ Lists every builtin tool with a server-evaluated availability verdict. The avail
 }
 ```
 
-**`500 Internal Server Error`** — any failure building the registry or evaluating availability:
+**`500 Internal Server Error`**: any failure building the registry or evaluating availability:
 
 ```json
 { "error": "<masked message>" }
@@ -75,14 +75,14 @@ curl http://localhost:18790/api/tools
 
 ## `GET /api/tools/approvals`
 
-Returns the pending tool-approval queue — the `tool_call_approvals` rows with `status = 'pending'` that have not passed their `expiresAt`, newest first. Each row's `argsSummary` (scrubbed JSON written by the broker) is masked again at this boundary via `redactJsonString`. This is the queue the Approvals panel and the Governance dashboard render through the shared tool-approval queue UI; the broker (in either the Express process or an MCP stdio bin) polls the same rows for resolution.
+Returns the pending tool-approval queue, the `tool_call_approvals` rows with `status = 'pending'` that have not passed their `expiresAt`, newest first. Each row's `argsSummary` (scrubbed JSON written by the broker) is masked again at this boundary via `redactJsonString`. This is the queue the Approvals panel and the Governance dashboard render through the shared tool-approval queue UI; the broker (in either the Express process or an MCP stdio bin) polls the same rows for resolution.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the pending approvals:
+**`200 OK`**: the pending approvals:
 
 ```ts
 {
@@ -119,10 +119,10 @@ curl http://localhost:18790/api/tools/approvals
 
 ## `POST /api/tools/approvals/:id/resolve`
 
-Resolves a still-pending approval. The decision is validated by a Zod schema; an unknown decision returns **400**. The `UPDATE` is guarded `status = 'pending'`, so resolving an already-resolved (or expired-but-still-present) row is a **no-op UPDATE** — but the handler still returns **200** with the existing row unchanged, because `resolveApproval` returns `getApproval(db, id)`, which has no status or expiry filter and is truthy for any row that exists. The **404** (`approval not found`) fires only when **no row with that id exists** at all. A blocking broker waiter sees the new status on its next poll.
+Resolves a still-pending approval. The decision is validated by a Zod schema; an unknown decision returns **400**. The `UPDATE` is guarded `status = 'pending'`, so resolving an already-resolved (or expired-but-still-present) row is a **no-op UPDATE**; but the handler still returns **200** with the existing row unchanged, because `resolveApproval` returns `getApproval(db, id)`, which has no status or expiry filter and is truthy for any row that exists. The **404** (`approval not found`) fires only when **no row with that id exists** at all. A blocking broker waiter sees the new status on its next poll.
 
-- **Path params** — `id` (approval id).
-- **Request body** — validated by `resolveApprovalBody`:
+- **Path params**: `id` (approval id).
+- **Request body**: validated by `resolveApprovalBody`:
 
 ```ts
 {
@@ -132,19 +132,19 @@ Resolves a still-pending approval. The decision is validated by a Zod schema; an
 
 ### Responses
 
-**`400 Bad Request`** — the body fails Zod validation (missing/invalid `decision`):
+**`400 Bad Request`**: the body fails Zod validation (missing/invalid `decision`):
 
 ```json
 { "error": "invalid body", "details": { /* zod flatten() */ } }
 ```
 
-**`404 Not Found`** — no row with that id exists at all (`getApproval` returns nothing):
+**`404 Not Found`**: no row with that id exists at all (`getApproval` returns nothing):
 
 ```json
 { "error": "approval not found" }
 ```
 
-**`200 OK`** — the approval was resolved; the updated row is returned:
+**`200 OK`**: the approval was resolved; the updated row is returned:
 
 ```ts
 {
@@ -166,7 +166,7 @@ Resolves a still-pending approval. The decision is validated by a Zod schema; an
 ```
 
 <Note>
-The response `approval.argsSummary` here is the stored (scrubbed-at-write) value — unlike `GET /api/tools/approvals`, the resolve response is not re-masked at the boundary.
+The response `approval.argsSummary` here is the stored (scrubbed-at-write) value; unlike `GET /api/tools/approvals`, the resolve response is not re-masked at the boundary.
 </Note>
 
 **`500 Internal Server Error`**:
@@ -196,11 +196,11 @@ Returns the append-only tool-call audit log (before + after phases), newest firs
 | `toolName` | string | (all tools) | Filter to one tool's audit rows |
 | `limit` | number | `100` | Max rows returned |
 
-- **Request body** — none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the audit rows:
+**`200 OK`**: the audit rows:
 
 ```ts
 {
@@ -234,9 +234,9 @@ curl 'http://localhost:18790/api/tools/audit?toolName=web_search&limit=20'
 
 ---
 
-## MCP transport — `/api/mcp/{tasks,memory,tools,teamchat}`
+## MCP transport: `/api/mcp/{tasks,memory,tools,teamchat}`
 
-These four route groups are the in-process **Streamable HTTP** transport for Clawboo's MCP servers. The API server hosts and supervises the servers in-process; HTTP-capable runtimes (and the live smoke) attach over these paths. They are NOT a Clawboo-defined request/response API — they speak MCP's JSON-RPC over Streamable HTTP, with a stateful session per connection keyed by the `mcp-session-id` header.
+These four route groups are the in-process **Streamable HTTP** transport for Clawboo's MCP servers. The API server hosts and supervises the servers in-process; HTTP-capable runtimes (and the live smoke) attach over these paths. They are NOT a Clawboo-defined request/response API; they speak MCP's JSON-RPC over Streamable HTTP, with a stateful session per connection keyed by the `mcp-session-id` header.
 
 Each server name maps to a `(POST, GET, DELETE)` trio:
 
@@ -258,9 +258,9 @@ A fresh MCP server instance is created per session (on the `initialize` request)
 
 ### Per-server session binding (scoping query params)
 
-The `memory` and `teamchat` POST handlers read authoritative binding from the attach URL's query string at session-initialize time. This is how Clawboo binds a run's MCP session to its team/agent — the model can neither widen its visibility nor spoof its identity through tool arguments, because the URL is Clawboo-written config. The other two servers (`tasks`, `tools`) take no scoping params.
+The `memory` and `teamchat` POST handlers read authoritative binding from the attach URL's query string at session-initialize time. This is how Clawboo binds a run's MCP session to its team/agent; the model can neither widen its visibility nor spoof its identity through tool arguments, because the URL is Clawboo-written config. The other two servers (`tasks`, `tools`) take no scoping params.
 
-**Memory — visibility scope** (`parseBoundScope`):
+**Memory: visibility scope** (`parseBoundScope`):
 
 | Query param | Binds |
 |---|---|
@@ -270,7 +270,7 @@ The `memory` and `teamchat` POST handlers read authoritative binding from the at
 
 When none are present the memory session is **unbound** (legacy model-arg behavior, used by the raw stdio bin / external attach).
 
-**TeamChat — room + author identity (anti-spoof)** (`parseTeamChatBinding`):
+**TeamChat: room + author identity (anti-spoof)** (`parseTeamChatBinding`):
 
 | Query param | Binds |
 |---|---|
@@ -281,7 +281,7 @@ When none are present the memory session is **unbound** (legacy model-arg behavi
 
 ### Event stream
 
-The MCP servers' SSE channel (the `GET` route) carries Model Context Protocol JSON-RPC notifications and streamed tool results, not Clawboo-shaped events. The tools each server exposes — `list_tasks` / `create_task` / `claim_task` / `add_comment` (tasks), `memory_save` / `memory_search` / `memory_browse` (memory), the brokered tool set (tools), and `team_chat_post` / `team_chat_subscribe` (teamchat) — and their Zod input shapes are catalogued in the [MCP tools reference](/reference/mcp-tools).
+The MCP servers' SSE channel (the `GET` route) carries Model Context Protocol JSON-RPC notifications and streamed tool results, not Clawboo-shaped events. The tools each server exposes: `list_tasks` / `create_task` / `claim_task` / `add_comment` (tasks), `memory_save` / `memory_search` / `memory_browse` (memory), the brokered tool set (tools), and `team_chat_post` / `team_chat_subscribe` (teamchat), and their Zod input shapes are catalogued in the [MCP tools reference](/reference/mcp-tools).
 
 ### Example (raw initialize handshake)
 
@@ -299,13 +299,13 @@ curl -X POST http://localhost:18790/api/mcp/tasks \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
-In practice you do not hand-roll this — an MCP client library (or the runtime's own MCP support) speaks the protocol. Use `GET /api/mcp/config` to get the attach snippet for your runtime.
+In practice you do not hand-roll this; an MCP client library (or the runtime's own MCP support) speaks the protocol. Use `GET /api/mcp/config` to get the attach snippet for your runtime.
 
 ---
 
 ## `GET /api/mcp/config`
 
-Emits a copy-pasteable attach snippet so the consuming runtime can register one of Clawboo's MCP servers. Clawboo "hosts" the connection setup; the snippet differs per runtime and transport. The HTTP base URL is built from the server's **own bound loopback port** (`loopbackMcpBaseUrl(req)`, reading `req.app.locals.apiPort` set at boot) — **never the client `Host` header**, since a forged `Host` could otherwise redirect a runtime's MCP traffic. It falls back to `http://127.0.0.1:<CLAWBOO_API_PORT or 18790>`. For the stdio transport the bin path uses `CLAWBOO_MCP_BIN_DIR`.
+Emits a copy-pasteable attach snippet so the consuming runtime can register one of Clawboo's MCP servers. Clawboo "hosts" the connection setup; the snippet differs per runtime and transport. The HTTP base URL is built from the server's **own bound loopback port** (`loopbackMcpBaseUrl(req)`, reading `req.app.locals.apiPort` set at boot), **never the client `Host` header**, since a forged `Host` could otherwise redirect a runtime's MCP traffic. It falls back to `http://127.0.0.1:<CLAWBOO_API_PORT or 18790>`. For the stdio transport the bin path uses `CLAWBOO_MCP_BIN_DIR`.
 
 - **Query params**:
 
@@ -315,17 +315,17 @@ Emits a copy-pasteable attach snippet so the consuming runtime can register one 
 | `runtime` | string | `claude-code` | `claude-code` \| `codex` \| `openclaw` |
 | `transport` | string | `http` | `http` \| `stdio` |
 
-- **Request body** — none.
+- **Request body**: none.
 
 ### Responses
 
-**`400 Bad Request`** — `server` is not one of the four known MCP server names:
+**`400 Bad Request`**: `server` is not one of the four known MCP server names:
 
 ```json
 { "error": "unknown server: <server>" }
 ```
 
-**`200 OK`** — the attach config for the requested runtime/server/transport:
+**`200 OK`**: the attach config for the requested runtime/server/transport:
 
 ```ts
 {
@@ -339,7 +339,7 @@ Emits a copy-pasteable attach snippet so the consuming runtime can register one 
 }
 ```
 
-The `snippet`/`structured` shape branches on `runtime` and `transport` — for example `claude-code` + `http` yields `claude mcp add --transport http clawboo-<server> <url>`, while `codex` + `stdio` yields a `[mcp_servers.clawboo-<server>]` TOML block. For `openclaw`, the snippet targets the top-level `mcp.servers` key with `transport: "streamable-http"`.
+The `snippet`/`structured` shape branches on `runtime` and `transport`; for example `claude-code` + `http` yields `claude mcp add --transport http clawboo-<server> <url>`, while `codex` + `stdio` yields a `[mcp_servers.clawboo-<server>]` TOML block. For `openclaw`, the snippet targets the top-level `mcp.servers` key with `transport: "streamable-http"`.
 
 **`500 Internal Server Error`**:
 
@@ -361,10 +361,10 @@ Every error response on these routes is the standard envelope `{ error: string }
 
 ## See also
 
-- [MCP tools reference](/reference/mcp-tools) — the 4 servers, their tools, and Zod input shapes
-- [Operating: MCP servers as teammates](/operating/mcp-servers) — attach config, transports, scoping in practice
-- [Memory API](/reference/rest-api/memory) — the UI-facing memory REST surface over the same store
-- [Governance API](/reference/rest-api/governance) — budgets, delegation-approval, and the shared approval queue
-- [Capabilities API](/reference/rest-api/capabilities) — the unified capability inventory that surfaces broker tools
-- [Runtimes API](/reference/rest-api/runtimes) — a `:id/run` attaches to these `/api/mcp/*` endpoints
+- [MCP tools reference](/reference/mcp-tools), the 4 servers, their tools, and Zod input shapes
+- [Operating: MCP servers as teammates](/operating/mcp-servers), attach config, transports, scoping in practice
+- [Memory API](/reference/rest-api/memory), the UI-facing memory REST surface over the same store
+- [Governance API](/reference/rest-api/governance), budgets, delegation-approval, and the shared approval queue
+- [Capabilities API](/reference/rest-api/capabilities), the unified capability inventory that surfaces broker tools
+- [Runtimes API](/reference/rest-api/runtimes), a `:id/run` attaches to these `/api/mcp/*` endpoints
 - [REST API overview](/reference/rest-api/index)

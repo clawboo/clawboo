@@ -2,19 +2,19 @@
 title: Using group chat
 description: Open a team's Group Chat, pass the Know-Your-Team gate, send messages, route with @mentions, and watch delegations land on the board.
 ---
-Use this page when you want to talk to a whole [team](/appendices/glossary) at once instead of one agent. Group Chat is a merged transcript across every agent on the team plus [Boo Zero](/appendices/glossary) (the universal team leader). You type one message; Boo Zero triages it, delegates to the right teammates, and synthesizes their work back to you — with each delegation surfacing as a durable card on the [board](/using/board).
+Use this page when you want to talk to a whole [team](/appendices/glossary) at once instead of one agent. Group Chat is a merged transcript across every agent on the team plus [Boo Zero](/appendices/glossary) (the universal team leader). You type one message; Boo Zero triages it, delegates to the right teammates, and synthesizes their work back to you, with each delegation surfacing as a durable card on the [board](/using/board).
 
-Group Chat lives in the bottom half of the **team space** — the split view you land in when you open a team. The top half is the team's [Ghost Graph](/using/ghost-graph); the bottom half is the chat. The chat module is `GroupChatPanel`; its onboarding gate is `TeamOnboardingGate`; its orchestration engine is `useBoardOrchestration`. It is backed by `/api/teams/:id/onboarding`, `/api/team-rules/:teamId`, `/api/chat-history`, and `/api/board`.
+Group Chat lives in the bottom half of the **team space**, the split view you land in when you open a team. The top half is the team's [Ghost Graph](/using/ghost-graph); the bottom half is the chat. The chat module is `GroupChatPanel`; its onboarding gate is `TeamOnboardingGate`; its orchestration engine is `useBoardOrchestration`. It is backed by `/api/teams/:id/onboarding`, `/api/team-rules/:teamId`, `/api/chat-history`, and `/api/board`.
 
 ![Team space: Ghost Graph on top, group chat on the bottom](/images/team-space.png)
 
 ## Prerequisites
 
-- A team with at least one agent. Create one from the Marketplace or the team sidebar — see [Using teams](/using/teams).
+- A team with at least one agent. Create one from the Marketplace or the team sidebar, see [Using teams](/using/teams).
 - A connected runtime so agents can actually run. Group Chat's send path is gated on a live OpenClaw Gateway connection (`canSend` requires `client && connectionStatus === 'connected'`). See [Connecting runtimes](/runtimes/connecting-runtimes).
 
 <Note>
-The orchestration engine (`useBoardOrchestration`) is always on — there is no toggle. It is gated only by the connection status and a history-hydration flag, so it stays quiet while the Gateway is down or while past messages are still loading.
+The orchestration engine (`useBoardOrchestration`) is always on; there is no toggle. It is gated only by the connection status and a history-hydration flag, so it stays quiet while the Gateway is down or while past messages are still loading.
 </Note>
 
 ## Steps
@@ -29,7 +29,7 @@ Select a team in the sidebar. When a team is selected and has agents, a **Group 
 2. The full-window **Know-Your-Team gate** (no graph yet) when onboarding is incomplete.
 3. The settled **team space** split (graph on top, chat on bottom) once onboarding is complete.
 
-A returning team — one that already finished onboarding — lands straight on the split.
+A returning team, one that already finished onboarding, lands straight on the split.
 
 ### 2. Pass the "Know Your Team" gate (first open only)
 
@@ -47,12 +47,12 @@ flowchart LR
   composer unlocked"]
 ```
 
-- **Phase A — Meet your team.** A welcome card shows the team's agents and, when present, a "Led by *Boo Zero*" badge. Click **Know Your Team** (`data-testid="know-your-team-button"`) to begin. The button is disabled until a Gateway `client` is present and the team has agents.
-- **Phase B — Agents introduce themselves.** The gate sends a strict introduction prompt to each agent sequentially (one `chat.send` per agent over the team-scoped session). The prompt forbids `@` and teammate references — this is what kills the false-delegation cascade. The gate watches the chat store for a new assistant reply per agent and shows a "*N* of *M* done" counter. A refusal-shaped or too-short intro (the production smoking gun was a bare `NO`) triggers exactly one stronger retry before the gate accepts whatever lands and moves on.
-- **Phase C — Your turn.** A textarea (`data-testid="user-intro-textarea"`) asks you to introduce yourself. The submit button reads **Continue to Team Space** (`data-testid="submit-user-intro"`); your intro must be at least 5 characters. On submit, the text is persisted to SQLite via `PATCH /api/teams/:id/onboarding` (the `userIntroText` field, capped at 4000 chars server-side) and best-effort written to each agent's `SOUL.md`. Boo Zero then acknowledges you in-character, and the split opens into the team space.
+- **Phase A: Meet your team.** A welcome card shows the team's agents and, when present, a "Led by *Boo Zero*" badge. Click **Know Your Team** (`data-testid="know-your-team-button"`) to begin. The button is disabled until a Gateway `client` is present and the team has agents.
+- **Phase B: Agents introduce themselves.** The gate sends a strict introduction prompt to each agent sequentially (one `chat.send` per agent over the team-scoped session). The prompt forbids `@` and teammate references; this is what kills the false-delegation cascade. The gate watches the chat store for a new assistant reply per agent and shows a "*N* of *M* done" counter. A refusal-shaped or too-short intro (the production smoking gun was a bare `NO`) triggers exactly one stronger retry before the gate accepts whatever lands and moves on.
+- **Phase C: Your turn.** A textarea (`data-testid="user-intro-textarea"`) asks you to introduce yourself. The submit button reads **Continue to Team Space** (`data-testid="submit-user-intro"`); your intro must be at least 5 characters. On submit, the text is persisted to SQLite via `PATCH /api/teams/:id/onboarding` (the `userIntroText` field, capped at 4000 chars server-side) and best-effort written to each agent's `SOUL.md`. Boo Zero then acknowledges you in-character, and the split opens into the team space.
 
 <Info>
-Your self-introduction (`userIntroText`) is the source of truth in SQLite, not the `SOUL.md` write (Gateway `SOUL.md` persistence is unreliable). It is re-injected into the context preamble of every group-chat message, so agents always know who they are talking to — even on the very first message and after long gaps.
+Your self-introduction (`userIntroText`) is the source of truth in SQLite, not the `SOUL.md` write (Gateway `SOUL.md` persistence is unreliable). It is re-injected into the context preamble of every group-chat message, so agents always know who they are talking to, even on the very first message and after long gaps.
 </Info>
 
 ### 3. Send a message
@@ -60,25 +60,25 @@ Your self-introduction (`userIntroText`) is the source of truth in SQLite, not t
 Type in the composer (placeholder *"Message team… (@name to target)"*) and press Enter. With no `@mention`, the message routes to the team's leader. The routing priority in `sendGroupChatMessage` is:
 
 1. An explicit `@mention` (see the next step).
-2. **Boo Zero** — the universal, no-mention default.
+2. **Boo Zero**, the universal, no-mention default.
 3. The team-internal lead (a CTO / Team Lead role detected at deploy time, stored as `team.leaderAgentId`).
 4. The first team member.
 
-Before the message reaches the target, `sendGroupChatMessage` assembles a context preamble and prepends, in order: the Boo Zero rules block (only when the target is Boo Zero), the per-team brief (Boo Zero only, from `/api/boo-zero/team-briefs/:teamId`), the team rules block (`/api/team-rules/:teamId`), the merged recent-conversation preamble (including your `userIntroText`), and finally your message. The raw message — `@mention` included — is what shows in the transcript; the assembled context goes only to the Gateway.
+Before the message reaches the target, `sendGroupChatMessage` assembles a context preamble and prepends, in order: the Boo Zero rules block (only when the target is Boo Zero), the per-team brief (Boo Zero only, from `/api/boo-zero/team-briefs/:teamId`), the team rules block (`/api/team-rules/:teamId`), the merged recent-conversation preamble (including your `userIntroText`), and finally your message. The raw message, `@mention` included, is what shows in the transcript; the assembled context goes only to the Gateway.
 
 ### 4. Route with @mentions
 
 Start a message with `@AgentName` to address one teammate directly instead of the leader. `parseMention` only matches an `@` at the **start** of the message, using a longest-prefix, case-insensitive match against the team roster (team members **and** Boo Zero, so `@Boo Zero` works too). The matched name must be followed by whitespace or end-of-string. On a match, the `@mention` is stripped from the message the agent receives, and routing goes to that agent's team-scoped session.
 
 <Tip>
-The agent chips below the transcript are shortcuts — clicking one inserts its `@mention` into the composer for you.
+The agent chips below the transcript are shortcuts; clicking one inserts its `@mention` into the composer for you.
 </Tip>
 
 ### 5. Watch delegations land on the board
 
 When the leader (or any agent) emits a structured delegation, the orchestration engine turns it into a durable **board task** that appears inline in the chat timeline as a `BoardTaskCard`. This is the chat-fused board: the board is canonical, the chat is narration.
 
-A delegation is a structured directive, not prose — the engine reads only typed signals: a `sessions_send` tool-call, or a `<delegate to="@Name">task</delegate>` (or multi-step `<plan>`) directive parsed once from the agent's terminal turn. Per delegation, `useBoardOrchestration` (via the pure `boardOrchestration` core) does this:
+A delegation is a structured directive, not prose; the engine reads only typed signals: a `sessions_send` tool-call, or a `<delegate to="@Name">task</delegate>` (or multi-step `<plan>`) directive parsed once from the agent's terminal turn. Per delegation, `useBoardOrchestration` (via the pure `boardOrchestration` core) does this:
 
 ```mermaid
 sequenceDiagram
@@ -94,9 +94,9 @@ sequenceDiagram
   Engine->>Leader: [Task Update] reflection (batched 3s)
 ```
 
-- **Derive** — chat to board: the delegation creates a task, atomically claims it for the target, and opens an execution row.
-- **Round-trip** — result to board: when the child finishes, its report-up summary and status are written to the board (never the raw transcript).
-- **Reflect** — board to chat: completed tasks are batched (a 3-second window) into a single `[Task Update]` delivered back to the leader for synthesis, plus a visible narration entry.
+- **Derive**: chat to board: the delegation creates a task, atomically claims it for the target, and opens an execution row.
+- **Round-trip**: result to board: when the child finishes, its report-up summary and status are written to the board (never the raw transcript).
+- **Reflect**: board to chat: completed tasks are batched (a 3-second window) into a single `[Task Update]` delivered back to the leader for synthesis, plus a visible narration entry.
 
 Multiple parallel delegations fan out into N tasks (capped at 8 per turn); a `<plan>` becomes a dependency chain where each step fires when its blocker completes. Delivery routes through a non-destructive nudge-queue, so a message to a busy teammate waits for its turn boundary instead of interrupting an in-flight run. The full model is in [Delegation and orchestration](/concepts/delegation-and-orchestration) and [The board](/using/board).
 
@@ -108,16 +108,16 @@ A risky-looking delegation (matching keywords like `delete`, `deploy`, `publish`
 
 While any agent is running or streaming, the composer's Send button morphs into a red **Stop** button (`data-testid="chat-stop-button"`). Clicking it does two things at once:
 
-1. Bumps a monotonic `stopSignal` counter — `useBoardOrchestration` watches this and bails its in-flight delegation work at the next checkpoint (without tearing down the observers).
+1. Bumps a monotonic `stopSignal` counter; `useBoardOrchestration` watches this and bails its in-flight delegation work at the next checkpoint (without tearing down the observers).
 2. Calls `stopAllInTeam`, which optimistically flips every running participant to idle locally, then fires `chat.abort` per running agent and `sessions.abort` per session as a backstop, and clears the in-memory wake/override state.
 
 The result is an immediate UI stop plus a hard cancel of queued and in-flight work, so a stopped team does not restart its cascade one beat later.
 
 ### 7. Capture a durable team rule with `/rule`
 
-Type `/rule <text>` in the composer to add a durable rule for this team. `handleSend` intercepts it **before** routing to any agent: it appends the line to the team's rules in SQLite (`PUT /api/team-rules/:teamId`), drops one confirmation meta entry into the merged transcript, and short-circuits — nothing is sent to the Gateway. The prefix must be `/rule` followed by a space and a non-empty body (so `/rules` or a bare `/rule` does not misfire).
+Type `/rule <text>` in the composer to add a durable rule for this team. `handleSend` intercepts it **before** routing to any agent: it appends the line to the team's rules in SQLite (`PUT /api/team-rules/:teamId`), drops one confirmation meta entry into the merged transcript, and short-circuits; nothing is sent to the Gateway. The prefix must be `/rule` followed by a space and a non-empty body (so `/rules` or a bare `/rule` does not misfire).
 
-Team rules are loaded and prepended to the context preamble on every future message (wrapped as `[Team Rules — set by the user, authoritative]`), so a correction like `/rule don't do work yourself, delegate via <delegate>` survives across sessions instead of rolling out of the recent-message window. The same rules text is also editable from the team's Brief & Rules panel — see [Boo Zero](/using/boo-zero).
+Team rules are loaded and prepended to the context preamble on every future message (wrapped as `[Team Rules — set by the user, authoritative]`), so a correction like `/rule don't do work yourself, delegate via <delegate>` survives across sessions instead of rolling out of the recent-message window. The same rules text is also editable from the team's Brief & Rules panel, see [Boo Zero](/using/boo-zero).
 
 ## Options / variations
 
@@ -132,8 +132,8 @@ Team rules are loaded and prepended to the context preamble on every future mess
 
 ## Verify it worked
 
-- After the gate, the composer unlocks and the placeholder reads *"Message team… (@name to target)"*. Re-fetch `GET /api/teams/:id/onboarding` — both `agentsIntroduced` and `userIntroduced` should be `true`, and `userIntroText` should hold your introduction.
-- Send a message that prompts a delegation; a `BoardTaskCard` should appear inline (assignee avatar, status badge, title) and progress from `in_progress` to `done`. Cross-check `GET /api/board?teamId=<id>` — the same task is there.
+- After the gate, the composer unlocks and the placeholder reads *"Message team… (@name to target)"*. Re-fetch `GET /api/teams/:id/onboarding`; both `agentsIntroduced` and `userIntroduced` should be `true`, and `userIntroText` should hold your introduction.
+- Send a message that prompts a delegation; a `BoardTaskCard` should appear inline (assignee avatar, status badge, title) and progress from `in_progress` to `done`. Cross-check `GET /api/board?teamId=<id>`; the same task is there.
 - A `/rule …` message should drop a "Rule saved for team" confirmation and show up in `GET /api/team-rules/:teamId`.
 
 ## Troubleshooting
@@ -143,7 +143,7 @@ Team rules are loaded and prepended to the context preamble on every future mess
 </Warning>
 
 <Warning>
-**An agent's intro shows "Thinking…" forever in Phase B.** The gate retries a refusal-shaped or too-short intro exactly once, then accepts whatever lands so onboarding can advance. If an agent never replies at all, the gate stays on that agent — confirm the runtime is connected and the agent has a session.
+**An agent's intro shows "Thinking…" forever in Phase B.** The gate retries a refusal-shaped or too-short intro exactly once, then accepts whatever lands so onboarding can advance. If an agent never replies at all, the gate stays on that agent; confirm the runtime is connected and the agent has a session.
 </Warning>
 
 <Danger>
@@ -152,8 +152,8 @@ Team rules are loaded and prepended to the context preamble on every future mess
 
 ## Related
 
-- [Peer chat](/concepts/peer-chat) — the mixed-runtime room model under the team chat
-- [Delegation and orchestration](/concepts/delegation-and-orchestration) — structured tags, no-regex, the board-driven engine
-- [The board](/using/board) — the durable kanban the delegations land on
-- [Using teams](/using/teams) · [Boo Zero](/using/boo-zero) — team setup, leaders, briefs, and rules
-- [Connecting runtimes](/runtimes/connecting-runtimes) — bring a runtime online so agents can run
+- [Peer chat](/concepts/peer-chat), the mixed-runtime room model under the team chat
+- [Delegation and orchestration](/concepts/delegation-and-orchestration), structured tags, no-regex, the board-driven engine
+- [The board](/using/board), the durable kanban the delegations land on
+- [Using teams](/using/teams) · [Boo Zero](/using/boo-zero), team setup, leaders, briefs, and rules
+- [Connecting runtimes](/runtimes/connecting-runtimes), bring a runtime online so agents can run

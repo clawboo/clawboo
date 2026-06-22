@@ -10,7 +10,7 @@ description: Neutral CapabilityRecord types plus the CapabilitySource trait and 
 | **Workspace deps** | none |
 | **External deps** | none (runtime). Dev only: `tsup`, `typescript`, `vitest`, `@clawboo/tsconfig`. |
 
-clawboo OBSERVES every capability across all five runtimes (OpenClaw, clawboo-native, Claude Code, Codex, Hermes) and MANAGES only what the owning runtime cedes. This package holds ONLY the neutral types, the `CapabilitySource` trait, and the multiplexer — the five concrete server-side adapters live in `apps/web/server/lib/capabilitySource/`. One merged `CapabilityRecord` stream feeds both the Ghost Graph and the Capabilities dashboard. Package shape mirrors [`@clawboo/agent-registry`](/reference/packages/agent-registry); the `read()`-fan-in trait mirrors [`@clawboo/scheduler`](/reference/packages/scheduler).
+clawboo OBSERVES every capability across all five runtimes (OpenClaw, clawboo-native, Claude Code, Codex, Hermes) and MANAGES only what the owning runtime cedes. This package holds ONLY the neutral types, the `CapabilitySource` trait, and the multiplexer; the five concrete server-side adapters live in `apps/web/server/lib/capabilitySource/`. One merged `CapabilityRecord` stream feeds both the Ghost Graph and the Capabilities dashboard. Package shape mirrors [`@clawboo/agent-registry`](/reference/packages/agent-registry); the `read()`-fan-in trait mirrors [`@clawboo/scheduler`](/reference/packages/scheduler).
 
 ## Public API
 
@@ -38,12 +38,12 @@ All exports come from the single `.` barrel (`src/index.ts`). No subpath exports
 
 | Export | Kind | Contract |
 |---|---|---|
-| `CapabilityRecord` | interface | The normalized capability row every source projects into — superset of `ToolDescriptor` adding `kind`/`runtime`/`scope`/`manageability`. Carries `id`, `sourceKey`, `name`, `description`, `agentId \| null`, `source`, server-evaluated `available` + `diagnostics`, `status`, optional `writable`/`hint`, `provenance \| null`, dormant `tenantId \| null`, and `syncedAt` (ISO). |
-| `CapabilitySourceId` | union | `'native' \| 'hermes' \| 'claude-code' \| 'codex' \| 'openclaw'` — the five read-adapter / id-prefix keys. |
+| `CapabilityRecord` | interface | The normalized capability row every source projects into: superset of `ToolDescriptor` adding `kind`/`runtime`/`scope`/`manageability`. Carries `id`, `sourceKey`, `name`, `description`, `agentId \| null`, `source`, server-evaluated `available` + `diagnostics`, `status`, optional `writable`/`hint`, `provenance \| null`, dormant `tenantId \| null`, and `syncedAt` (ISO). |
+| `CapabilitySourceId` | union | `'native' \| 'hermes' \| 'claude-code' \| 'codex' \| 'openclaw'`, the five read-adapter / id-prefix keys. |
 | `CapabilityRuntime` | union | Owning runtime, open set: `'openclaw' \| 'clawboo-native' \| 'claude-code' \| 'codex' \| 'hermes' \| 'human' \| (string & {})`. `'human'` is the humans-in-the-graph seam. |
 | `CapabilityKind` | union | `'skill' \| 'tool' \| 'connector'`. |
 | `CapabilityScope` | union | `'team' \| 'agent' \| 'global'`. |
-| `CapabilityManageability` | union | `'managed' \| 'external-write' \| 'runtime-of-record' \| 'observe-only'` — the tier the UI + `write()` path are a pure function of. |
+| `CapabilityManageability` | union | `'managed' \| 'external-write' \| 'runtime-of-record' \| 'observe-only'`, the tier the UI + `write()` path are a pure function of. |
 | `CapabilityOrigin` | union | Where the record was read from: `'brokered-mcp' \| 'curated-skill' \| 'filesystem-skill-md' \| 'mcp-connector' \| 'runtime-builtin' \| 'openclaw-extension' \| 'external-vendor-cli'`. |
 | `CapabilityStatus` | union | `'ready' \| 'disabled' \| 'manageable-but-pending-auth' \| 'unavailable'`. |
 | `CapabilityAvailability` | union | Declarative requirement: `{ auth } \| { config } \| { env } \| { plugin } \| { allOf: [] } \| { anyOf: [] }`. Local structural mirror of `@clawboo/db`'s `AvailabilityRequirement`. |
@@ -54,25 +54,25 @@ All exports come from the single `.` barrel (`src/index.ts`). No subpath exports
 
 | Export | Kind | Contract |
 |---|---|---|
-| `CapabilitySource` | interface | `readonly id: CapabilitySourceId`; `read(): Promise<CapabilityReadResult>` (NEVER rejects — degradation is the status); `write(action): Promise<CapabilityRecord \| null>` (throws the typed errors; `observe-only` → `unsupported()`). |
+| `CapabilitySource` | interface | `readonly id: CapabilitySourceId`; `read(): Promise<CapabilityReadResult>` (NEVER rejects; degradation is the status); `write(action): Promise<CapabilityRecord \| null>` (throws the typed errors; `observe-only` → `unsupported()`). |
 | `CapabilityReadResult` | interface | `{ records: CapabilityRecord[]; status: SourceReadStatus }`. |
-| `SourceReadStatus` | interface | `{ sourceId, ok, degraded, reason?, at }` — per-source liveness. |
+| `SourceReadStatus` | interface | `{ sourceId, ok, degraded, reason?, at }`, per-source liveness. |
 | `CapabilityWriteAction` | union | `{ kind: 'install'; spec } \| { kind: 'enable'; id } \| { kind: 'disable'; id }`. |
 | `CapabilityInstallSpec` | interface | A connector/skill install: `via` (the owning adapter), `agentId`, `runtime`, `kind`, `name`, optional `mcpServer`/`skillContent`, dormant `tenantId?`. |
-| `CapabilityApprovalDecision` | union | `'allow_once' \| 'allow_always' \| 'deny'` — reused by the REST `approve` action (resolves a `tool_call_approvals` row, NOT a source-routed write). |
+| `CapabilityApprovalDecision` | union | `'allow_once' \| 'allow_always' \| 'deny'`, reused by the REST `approve` action (resolves a `tool_call_approvals` row, NOT a source-routed write). |
 
 **Multiplexer** (`registry.ts`):
 
 | Export | Kind | Contract |
 |---|---|---|
-| `MergedCapabilityRead` | interface | `{ records: CapabilityRecord[]; sources: SourceReadStatus[] }` — the merged read shape. |
+| `MergedCapabilityRead` | interface | `{ records: CapabilityRecord[]; sources: SourceReadStatus[] }`, the merged read shape. |
 
 ## Used by
 
-- `apps/web/server/lib/capabilitySource/` — the five concrete adapters (`native.ts`, `hermes.ts`, `claudeCode.ts`, `codex.ts`, `openclaw.ts`), `registry.ts` (constructs the `CapabilityMultiplexer`), `service.ts`, `mapper.ts`, `helpers.ts`, and `transcoder.ts`.
-- `apps/web/server/api/capabilities.ts` — the `/api/capabilities` REST surface.
-- `apps/web/src/lib/capabilitiesClient.ts` — the browser client (re-exports `CapabilityRecord`, `SourceReadStatus`).
-- `apps/web/src/features/graph/` (`store.ts`, `useGraphData.ts`) and `apps/web/src/features/agent-detail/useMiniGraphData.ts` — the Ghost Graph consumes the same stream.
+- `apps/web/server/lib/capabilitySource/`, the five concrete adapters (`native.ts`, `hermes.ts`, `claudeCode.ts`, `codex.ts`, `openclaw.ts`), `registry.ts` (constructs the `CapabilityMultiplexer`), `service.ts`, `mapper.ts`, `helpers.ts`, and `transcoder.ts`.
+- `apps/web/server/api/capabilities.ts`, the `/api/capabilities` REST surface.
+- `apps/web/src/lib/capabilitiesClient.ts`, the browser client (re-exports `CapabilityRecord`, `SourceReadStatus`).
+- `apps/web/src/features/graph/` (`store.ts`, `useGraphData.ts`) and `apps/web/src/features/agent-detail/useMiniGraphData.ts`, the Ghost Graph consumes the same stream.
 
 ## Source
 
@@ -80,7 +80,7 @@ Barrel: [`packages/capability-registry/src/index.ts`](https://github.com/clawboo
 
 ## See also
 
-- [Capabilities concept](/concepts/capabilities) — capability inventory + manageability tiers.
-- [`/api/capabilities` REST](/reference/rest-api/capabilities) — the merged stream + write actions.
-- [`@clawboo/agent-registry`](/reference/packages/agent-registry) — the package-shape precedent.
-- [`@clawboo/scheduler`](/reference/packages/scheduler) — the `read()`-fan-in trait precedent.
+- [Capabilities concept](/concepts/capabilities), capability inventory + manageability tiers.
+- [`/api/capabilities` REST](/reference/rest-api/capabilities), the merged stream + write actions.
+- [`@clawboo/agent-registry`](/reference/packages/agent-registry), the package-shape precedent.
+- [`@clawboo/scheduler`](/reference/packages/scheduler), the `read()`-fan-in trait precedent.

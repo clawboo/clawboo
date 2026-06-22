@@ -4,7 +4,7 @@ description: REST reference for cost records, chat history, graph layout, person
 ---
 REST surface for the remaining SQLite-backed resources that do not warrant their own group: per-run cost records and the cost summary, persisted chat transcripts, Ghost Graph node positions, per-agent personality and execution settings, skill installs (with a supply-chain injection scan), the read-only fleet-health summary, and Boo Zero's per-team / global briefs and display-name override.
 
-Every handler in this group opens the SQLite database at `<CLAWBOO_HOME>/clawboo.db` (default `~/.clawboo/clawboo.db`) — these routes serve and mutate local state and do not require the Gateway to be up. All POST/PUT bodies are parsed by `express.json({ limit: '2mb' })`.
+Every handler in this group opens the SQLite database at `<CLAWBOO_HOME>/clawboo.db` (default `~/.clawboo/clawboo.db`); these routes serve and mutate local state and do not require the Gateway to be up. All POST/PUT bodies are parsed by `express.json({ limit: '2mb' })`.
 
 <Note>
 The order in `api/index.ts` matters: `/api/cost-records/summary` and `/api/exec-settings/all` are registered before their shorter prefixes so the two-segment paths are not swallowed.
@@ -41,7 +41,7 @@ The order in `api/index.ts` matters: `/api/cost-records/summary` and `/api/exec-
 
 ---
 
-## Cost records — `/api/cost-records`
+## Cost records: `/api/cost-records`
 
 Token-usage records, one row per accounted run. The POST handler computes USD from a built-in per-model pricing table (`calculateCostUsd`), and the summary route aggregates the last 30 days for the cost dashboard.
 
@@ -56,11 +56,11 @@ Lists cost records, newest first, capped at 500.
 | `period` | `'today' \| 'week' \| 'month'` | none (all) | `today` = midnight today; `week` = now − 7 days; `month` = now − 30 days; any other value = no time filter |
 | `agentId` | string | none | Filter to one agent |
 
-- **Request body** — none.
+- **Request body**: none.
 
 #### Responses
 
-**`200 OK`** — the matching records (a `costRecords` row array):
+**`200 OK`**: the matching records (a `costRecords` row array):
 
 ```ts
 {
@@ -77,7 +77,7 @@ Lists cost records, newest first, capped at 500.
 }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -111,25 +111,25 @@ Pricing is a built-in table keyed by Claude model ids (opus / sonnet / haiku tie
 
 #### Responses
 
-**`400 Bad Request`** — body is not an object:
+**`400 Bad Request`**: body is not an object:
 
 ```json
 { "error": "invalid JSON" }
 ```
 
-**`400 Bad Request`** — a required field is missing (`inputTokens` / `outputTokens` are checked for `null`/`undefined`, so `0` passes):
+**`400 Bad Request`**: a required field is missing (`inputTokens` / `outputTokens` are checked for `null`/`undefined`, so `0` passes):
 
 ```json
 { "error": "agentId, model, inputTokens, outputTokens required" }
 ```
 
-**`200 OK`** — the record was inserted:
+**`200 OK`**: the record was inserted:
 
 ```ts
 { ok: true, record: { id: number, agentId: string, model: string, inputTokens: number, outputTokens: number, costUsd: number, runId: string | null, createdAt: number } }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -147,12 +147,12 @@ curl -X POST http://localhost:18790/api/cost-records \
 
 Aggregates the last 30 days of cost records into dashboard totals, a per-agent breakdown (agent name joined from `agents`), and a 30-day time series with zero-filled empty days. Takes no parameters.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 #### Responses
 
-**`200 OK`** — the aggregation:
+**`200 OK`**: the aggregation:
 
 ```ts
 {
@@ -179,7 +179,7 @@ Aggregates the last 30 days of cost records into dashboard totals, a per-agent b
 }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -193,7 +193,7 @@ curl http://localhost:18790/api/cost-records/summary
 
 ---
 
-## Chat history — `/api/chat-history`
+## Chat history: `/api/chat-history`
 
 Persists per-session chat transcripts in the `chat_messages` table. Each row stores a JSON-serialized `TranscriptEntry`; reads parse the JSON back, skipping any corrupt row.
 
@@ -205,26 +205,26 @@ Loads a session's transcript entries, oldest first.
 
 | Param | Type | Default | Notes |
 |---|---|---|---|
-| `sessionKey` | string | — | **Required**; the session to load |
+| `sessionKey` | string |, | **Required**; the session to load |
 | `limit` | number | 200 | Clamped to a max of 1000; a non-numeric value falls back to 200 |
 
-- **Request body** — none.
+- **Request body**: none.
 
 #### Responses
 
-**`400 Bad Request`** — missing `sessionKey`:
+**`400 Bad Request`**: missing `sessionKey`:
 
 ```json
 { "error": "sessionKey required" }
 ```
 
-**`200 OK`** — the parsed transcript entries (rows that fail JSON parse are dropped):
+**`200 OK`**: the parsed transcript entries (rows that fail JSON parse are dropped):
 
 ```ts
 { entries: TranscriptEntry[] }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -238,7 +238,7 @@ curl "http://localhost:18790/api/chat-history?sessionKey=<session-key>&limit=500
 
 ### `POST /api/chat-history`
 
-Batch-inserts transcript entries for a session. Inserts are idempotent — each row carries the entry's `entryId` and conflicts on the unique `entry_id` index do nothing. Entries without an `entryId` are skipped.
+Batch-inserts transcript entries for a session. Inserts are idempotent; each row carries the entry's `entryId` and conflicts on the unique `entry_id` index do nothing. Entries without an `entryId` are skipped.
 
 - **Request body**:
 
@@ -252,25 +252,25 @@ Batch-inserts transcript entries for a session. Inserts are idempotent — each 
 
 #### Responses
 
-**`400 Bad Request`** — body is not an object:
+**`400 Bad Request`**: body is not an object:
 
 ```json
 { "error": "invalid JSON" }
 ```
 
-**`400 Bad Request`** — `sessionKey` missing or `entries` not a non-empty array:
+**`400 Bad Request`**: `sessionKey` missing or `entries` not a non-empty array:
 
 ```json
 { "error": "sessionKey and entries[] required" }
 ```
 
-**`200 OK`** — inserted (idempotent on `entryId`; `saved` counts the entries received, not the rows actually written):
+**`200 OK`**: inserted (idempotent on `entryId`; `saved` counts the entries received, not the rows actually written):
 
 ```ts
 { ok: true, saved: number }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -288,24 +288,24 @@ curl -X POST http://localhost:18790/api/chat-history \
 
 Clears every message for a session. Used when an agent is deleted.
 
-- **Query params** — `sessionKey` (required).
-- **Request body** — none.
+- **Query params**: `sessionKey` (required).
+- **Request body**: none.
 
 #### Responses
 
-**`400 Bad Request`** — missing `sessionKey`:
+**`400 Bad Request`**: missing `sessionKey`:
 
 ```json
 { "error": "sessionKey required" }
 ```
 
-**`200 OK`** — cleared:
+**`200 OK`**: cleared:
 
 ```json
 { "ok": true }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -319,7 +319,7 @@ curl -X DELETE "http://localhost:18790/api/chat-history?sessionKey=<session-key>
 
 ---
 
-## Graph layout — `/api/graph-layout`
+## Graph layout: `/api/graph-layout`
 
 Persists Ghost Graph node positions in the `graph_layouts` table, keyed by the `(name, gatewayUrl)` unique index. `name` distinguishes scopes (e.g. `atlas-radial`, `team-<id>`, `default`).
 
@@ -334,11 +334,11 @@ Loads saved positions for a layout. Note the query param is `url`, not `gatewayU
 | `name` | string | `'default'` | The layout scope key |
 | `url` | string | `''` | The Gateway URL the layout was saved under |
 
-- **Request body** — none.
+- **Request body**: none.
 
 #### Responses
 
-**`200 OK`** — the saved layout, or an empty positions map when nothing is stored:
+**`200 OK`**: the saved layout, or an empty positions map when nothing is stored:
 
 ```ts
 { positions: Record<string, { x: number; y: number }> }
@@ -370,25 +370,25 @@ Upserts positions for a layout (conflict on `(name, gatewayUrl)` updates `layout
 
 #### Responses
 
-**`400 Bad Request`** — body is not an object:
+**`400 Bad Request`**: body is not an object:
 
 ```json
 { "ok": false, "error": "invalid JSON" }
 ```
 
-**`400 Bad Request`** — missing `gatewayUrl`:
+**`400 Bad Request`**: missing `gatewayUrl`:
 
 ```json
 { "ok": false, "error": "gatewayUrl required" }
 ```
 
-**`200 OK`** — upserted:
+**`200 OK`**: upserted:
 
 ```json
 { "ok": true }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "ok": false, "error": "<message>" }
@@ -404,7 +404,7 @@ curl -X POST http://localhost:18790/api/graph-layout \
 
 ---
 
-## Personality — `/api/personality`
+## Personality: `/api/personality`
 
 Stores per-agent personality slider values in the `agents.personality_config` column as a JSON wrapper `{ values, customText }`. SQLite is the source of truth for slider values; the merged SOUL.md is written separately by the client.
 
@@ -412,24 +412,24 @@ Stores per-agent personality slider values in the `agents.personality_config` co
 
 Loads an agent's stored personality values and optional custom text.
 
-- **Query params** — `agentId` (required).
-- **Request body** — none.
+- **Query params**: `agentId` (required).
+- **Request body**: none.
 
 #### Responses
 
-**`400 Bad Request`** — missing `agentId`:
+**`400 Bad Request`**: missing `agentId`:
 
 ```json
 { "error": "agentId required" }
 ```
 
-**`200 OK`** — the stored values, or `null`s when nothing is stored or the blob is corrupt:
+**`200 OK`**: the stored values, or `null`s when nothing is stored or the blob is corrupt:
 
 ```ts
 { values: Record<string, number> | null, customText: string | null }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -457,25 +457,25 @@ Upserts an agent's personality config. The handler ensures a placeholder `agents
 
 #### Responses
 
-**`400 Bad Request`** — body is not an object:
+**`400 Bad Request`**: body is not an object:
 
 ```json
 { "error": "invalid JSON" }
 ```
 
-**`400 Bad Request`** — `agentId` or `values` missing:
+**`400 Bad Request`**: `agentId` or `values` missing:
 
 ```json
 { "error": "agentId and values required" }
 ```
 
-**`200 OK`** — upserted:
+**`200 OK`**: upserted:
 
 ```json
 { "ok": true }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -491,7 +491,7 @@ curl -X POST http://localhost:18790/api/personality \
 
 ---
 
-## Skills — `/api/skills`
+## Skills: `/api/skills`
 
 Tracks skill installs in the `skills` table. The per-agent association lives in the row's `metadata.agentIds` array, so a single skill row can be shared across agents. **POST runs a supply-chain injection scan and blocks a flagged install with a 422.**
 
@@ -499,12 +499,12 @@ Tracks skill installs in the `skills` table. The per-agent association lives in 
 
 Lists installed skills, newest first. With `agentId`, filters to rows whose `metadata.agentIds` includes that agent.
 
-- **Query params** — `agentId` (optional).
-- **Request body** — none.
+- **Query params**: `agentId` (optional).
+- **Request body**: none.
 
 #### Responses
 
-**`200 OK`** — the skill rows:
+**`200 OK`**: the skill rows:
 
 ```ts
 {
@@ -521,7 +521,7 @@ Lists installed skills, newest first. With `agentId`, filters to rows whose `met
 }
 ```
 
-**`500 Internal Server Error`** — a DB failure (note: `skills: []` is still present):
+**`500 Internal Server Error`**: a DB failure (note: `skills: []` is still present):
 
 ```json
 { "ok": false, "error": "<message>", "skills": [] }
@@ -554,19 +554,19 @@ Installs a skill for an agent. Before recording anything, the handler runs `scan
 
 #### Responses
 
-**`400 Bad Request`** — body is not an object:
+**`400 Bad Request`**: body is not an object:
 
 ```json
 { "ok": false, "error": "Invalid JSON body" }
 ```
 
-**`400 Bad Request`** — a required field is missing:
+**`400 Bad Request`**: a required field is missing:
 
 ```json
 { "ok": false, "error": "id, name, source, and agentId are required" }
 ```
 
-**`422 Unprocessable Entity`** — the injection scan found a destructive / exfil / injection / supply-chain pattern; the install is blocked and audited:
+**`422 Unprocessable Entity`**: the injection scan found a destructive / exfil / injection / supply-chain pattern; the install is blocked and audited:
 
 ```ts
 {
@@ -580,13 +580,13 @@ Installs a skill for an agent. Before recording anything, the handler runs `scan
 }
 ```
 
-**`200 OK`** — installed (merged into an existing row, or a new row inserted):
+**`200 OK`**: installed (merged into an existing row, or a new row inserted):
 
 ```ts
 { ok: true, skill: { id: string, name: string, source: string, category: string | null, trustScore: number | null, installedAt: number | null, metadata: string | null } | null }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "ok": false, "error": "<message>" }
@@ -604,36 +604,36 @@ curl -X POST http://localhost:18790/api/skills \
 
 Removes an agent from a skill's `metadata.agentIds`. If that was the last agent, the skill row is deleted entirely; otherwise the row is kept with the agent removed.
 
-- **Query params** — `id` (skill id, required) and `agentId` (required).
-- **Request body** — none.
+- **Query params**: `id` (skill id, required) and `agentId` (required).
+- **Request body**: none.
 
 #### Responses
 
-**`400 Bad Request`** — `id` or `agentId` missing:
+**`400 Bad Request`**: `id` or `agentId` missing:
 
 ```json
 { "ok": false, "error": "id and agentId query params are required" }
 ```
 
-**`200 OK`** — skill not found (idempotent no-op):
+**`200 OK`**: skill not found (idempotent no-op):
 
 ```json
 { "ok": true, "deleted": false, "reason": "skill not found" }
 ```
 
-**`200 OK`** — the agent was the last holder; the row was deleted:
+**`200 OK`**: the agent was the last holder; the row was deleted:
 
 ```json
 { "ok": true, "deleted": true, "removedRow": true }
 ```
 
-**`200 OK`** — the agent was removed but the row remains (other agents still hold it):
+**`200 OK`**: the agent was removed but the row remains (other agents still hold it):
 
 ```json
 { "ok": true, "deleted": true, "removedRow": false }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "ok": false, "error": "<message>" }
@@ -647,7 +647,7 @@ curl -X DELETE "http://localhost:18790/api/skills?id=web-search&agentId=<agent-i
 
 ---
 
-## Exec settings — `/api/exec-settings`
+## Exec settings: `/api/exec-settings`
 
 Stores per-agent execution permission settings in the `agents.exec_config` column as JSON. Read per agent, read all agents at once during fleet hydration, or upsert one agent.
 
@@ -655,24 +655,24 @@ Stores per-agent execution permission settings in the `agents.exec_config` colum
 
 Loads one agent's execution settings.
 
-- **Query params** — `agentId` (required).
-- **Request body** — none.
+- **Query params**: `agentId` (required).
+- **Request body**: none.
 
 #### Responses
 
-**`400 Bad Request`** — missing `agentId`:
+**`400 Bad Request`**: missing `agentId`:
 
 ```json
 { "error": "agentId required" }
 ```
 
-**`200 OK`** — the parsed `exec_config`, or `null` when none is stored:
+**`200 OK`**: the parsed `exec_config`, or `null` when none is stored:
 
 ```ts
 { values: { execAsk: string; execSecurity?: string } | null }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -688,18 +688,18 @@ curl "http://localhost:18790/api/exec-settings?agentId=<agent-id>"
 
 Returns a map of every agent's `execAsk` value. Rows without an `exec_config`, or with malformed JSON, or whose `execAsk` is not a string, are skipped. Used during fleet hydration.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 #### Responses
 
-**`200 OK`** — the per-agent `execAsk` map:
+**`200 OK`**: the per-agent `execAsk` map:
 
 ```ts
 { configs: Record<string, { execAsk: string }> }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -726,25 +726,25 @@ Upserts one agent's execution settings. The handler ensures a placeholder `agent
 
 #### Responses
 
-**`400 Bad Request`** — body is not an object:
+**`400 Bad Request`**: body is not an object:
 
 ```json
 { "error": "invalid JSON" }
 ```
 
-**`400 Bad Request`** — `agentId` or `values` missing:
+**`400 Bad Request`**: `agentId` or `values` missing:
 
 ```json
 { "error": "agentId and values required" }
 ```
 
-**`200 OK`** — upserted:
+**`200 OK`**: upserted:
 
 ```json
 { "ok": true }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -760,16 +760,16 @@ curl -X POST http://localhost:18790/api/exec-settings \
 
 ---
 
-## Fleet summary — `/api/fleet/summary`
+## Fleet summary: `/api/fleet/summary`
 
-A read-only aggregation that joins existing tables/streams into one overview — it never recomputes or re-derives state. It counts live (non-archived) agents per runtime, gets each runtime's class + health from the adapters and the OpenClaw source, rolls up the last 24h of board tasks and verification verdicts, and counts governance budgets. The per-runtime tile loop is runtime-id-agnostic (open-set `runtime` strings).
+A read-only aggregation that joins existing tables/streams into one overview; it never recomputes or re-derives state. It counts live (non-archived) agents per runtime, gets each runtime's class + health from the adapters and the OpenClaw source, rolls up the last 24h of board tasks and verification verdicts, and counts governance budgets. The per-runtime tile loop is runtime-id-agnostic (open-set `runtime` strings).
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the overview:
+**`200 OK`**: the overview:
 
 ```ts
 {
@@ -808,7 +808,7 @@ A read-only aggregation that joins existing tables/streams into one overview —
 A runtime with no agent rows still appears (with zero counts) if an adapter or the OpenClaw source reports for it; OpenClaw is always `connected-substrate` and its `healthOk` reflects whether the server-side source connection is `connected`.
 </Note>
 
-**`500 Internal Server Error`** — a failure building the summary:
+**`500 Internal Server Error`**: a failure building the summary:
 
 ```json
 { "error": "<message>" }
@@ -822,36 +822,36 @@ curl http://localhost:18790/api/fleet/summary
 
 ---
 
-## Boo Zero context — `/api/boo-zero/*`
+## Boo Zero context: `/api/boo-zero/*`
 
 [Boo Zero](/appendices/glossary) is the universal team leader. These routes store the markdown briefs it reads (per-team and global) and a Clawboo-side display-name override. Per-team briefs live in the `boo_zero_team_briefs` table (FK-cascades on team delete); the global brief and the display name live in the `settings` key/value table.
 
 <Note>
-A missing brief returns `null` content, not a 404 — the UI then falls back to a client-side default brief. Likewise a missing display name returns `name: null` so the caller falls back to the Gateway-side agent name.
+A missing brief returns `null` content, not a 404; the UI then falls back to a client-side default brief. Likewise a missing display name returns `name: null` so the caller falls back to the Gateway-side agent name.
 </Note>
 
 ### `GET /api/boo-zero/team-briefs/:teamId`
 
 Loads a team's Boo Zero brief.
 
-- **Path params** — `teamId` (required).
-- **Request body** — none.
+- **Path params**: `teamId` (required).
+- **Request body**: none.
 
 #### Responses
 
-**`400 Bad Request`** — missing `teamId`:
+**`400 Bad Request`**: missing `teamId`:
 
 ```json
 { "error": "teamId required" }
 ```
 
-**`200 OK`** — the stored brief, or `null`s when none exists:
+**`200 OK`**: the stored brief, or `null`s when none exists:
 
 ```ts
 { content: string | null, updatedAt: number | null }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -867,7 +867,7 @@ curl http://localhost:18790/api/boo-zero/team-briefs/<team-id>
 
 Upserts a team's brief (conflict on `teamId` updates `content` + `updatedAt`).
 
-- **Path params** — `teamId` (required).
+- **Path params**: `teamId` (required).
 - **Request body**:
 
 ```ts
@@ -876,25 +876,25 @@ Upserts a team's brief (conflict on `teamId` updates `content` + `updatedAt`).
 
 #### Responses
 
-**`400 Bad Request`** — missing `teamId`:
+**`400 Bad Request`**: missing `teamId`:
 
 ```json
 { "error": "teamId required" }
 ```
 
-**`400 Bad Request`** — body missing a string `content`:
+**`400 Bad Request`**: body missing a string `content`:
 
 ```json
 { "error": "content (string) required" }
 ```
 
-**`200 OK`** — upserted:
+**`200 OK`**: upserted:
 
 ```ts
 { content: string, updatedAt: number }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -910,26 +910,26 @@ curl -X PUT http://localhost:18790/api/boo-zero/team-briefs/<team-id> \
 
 ### `DELETE /api/boo-zero/team-briefs/:teamId`
 
-Removes a team's brief. Idempotent — deleting a non-existent brief is a no-op. (The FK cascade already cleans briefs up when the team itself is deleted; this route is for an explicit user action.)
+Removes a team's brief. Idempotent; deleting a non-existent brief is a no-op. (The FK cascade already cleans briefs up when the team itself is deleted; this route is for an explicit user action.)
 
-- **Path params** — `teamId` (required).
-- **Request body** — none.
+- **Path params**: `teamId` (required).
+- **Request body**: none.
 
 #### Responses
 
-**`400 Bad Request`** — missing `teamId`:
+**`400 Bad Request`**: missing `teamId`:
 
 ```json
 { "error": "teamId required" }
 ```
 
-**`200 OK`** — removed (or already absent):
+**`200 OK`**: removed (or already absent):
 
 ```json
 { "ok": true }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -945,22 +945,22 @@ curl -X DELETE http://localhost:18790/api/boo-zero/team-briefs/<team-id>
 
 Loads the global Boo Zero brief from the `settings` key `boo-zero:global-brief`.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 #### Responses
 
-**`200 OK`** — the stored brief, or `null`s when unset:
+**`200 OK`**: the stored brief, or `null`s when unset:
 
 ```ts
 { content: string | null, updatedAt: number | null }
 ```
 
 <Note>
-`updatedAt` is always `null` on this route — the global brief is stored in the settings KV table, and the handler does not re-query the row's timestamp.
+`updatedAt` is always `null` on this route; the global brief is stored in the settings KV table, and the handler does not re-query the row's timestamp.
 </Note>
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -984,19 +984,19 @@ Sets the global Boo Zero brief.
 
 #### Responses
 
-**`400 Bad Request`** — body missing a string `content`:
+**`400 Bad Request`**: body missing a string `content`:
 
 ```json
 { "error": "content (string) required" }
 ```
 
-**`200 OK`** — saved (`updatedAt` is `Date.now()`):
+**`200 OK`**: saved (`updatedAt` is `Date.now()`):
 
 ```ts
 { content: string, updatedAt: number }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -1014,24 +1014,24 @@ curl -X PUT http://localhost:18790/api/boo-zero/global-brief \
 
 Loads the Clawboo-side display-name override for Boo Zero, keyed by agent id, from the `settings` key `boo-zero:display-name:<agentId>`.
 
-- **Path params** — `agentId` (required).
-- **Request body** — none.
+- **Path params**: `agentId` (required).
+- **Request body**: none.
 
 #### Responses
 
-**`400 Bad Request`** — missing `agentId`:
+**`400 Bad Request`**: missing `agentId`:
 
 ```json
 { "error": "agentId required" }
 ```
 
-**`200 OK`** — the override, or `null` when unset:
+**`200 OK`**: the override, or `null` when unset:
 
 ```ts
 { name: string | null }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -1047,7 +1047,7 @@ curl http://localhost:18790/api/boo-zero/display-name/<agent-id>
 
 Sets the display-name override. The value is trimmed and truncated to 80 chars; an empty string clears the override.
 
-- **Path params** — `agentId` (required).
+- **Path params**: `agentId` (required).
 - **Request body**:
 
 ```ts
@@ -1056,25 +1056,25 @@ Sets the display-name override. The value is trimmed and truncated to 80 chars; 
 
 #### Responses
 
-**`400 Bad Request`** — missing `agentId`:
+**`400 Bad Request`**: missing `agentId`:
 
 ```json
 { "error": "agentId required" }
 ```
 
-**`400 Bad Request`** — body missing a string `name`:
+**`400 Bad Request`**: body missing a string `name`:
 
 ```json
 { "error": "name (string) required" }
 ```
 
-**`200 OK`** — saved (returns the trimmed/truncated value actually stored):
+**`200 OK`**: saved (returns the trimmed/truncated value actually stored):
 
 ```ts
 { name: string }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -1092,15 +1092,15 @@ curl -X PUT http://localhost:18790/api/boo-zero/display-name/<agent-id> \
 
 ## Error envelope
 
-Every error response in this group is the standard envelope `{ error: string }`, except the skills routes (and the graph-layout POST), which use `{ ok: false, error: string }`. The skills GET 500 additionally carries `skills: []`, and the skills POST 422 carries `findings: InjectionFinding[]`. The graph-layout GET never returns an error status — a miss or a thrown error both yield `{ positions: {} }` (HTTP 200).
+Every error response in this group is the standard envelope `{ error: string }`, except the skills routes (and the graph-layout POST), which use `{ ok: false, error: string }`. The skills GET 500 additionally carries `skills: []`, and the skills POST 422 carries `findings: InjectionFinding[]`. The graph-layout GET never returns an error status; a miss or a thrown error both yield `{ positions: {} }` (HTTP 200).
 
 ## See also
 
-- [Cost dashboard + budgets](/using/cost-and-budgets) — the UI over cost records
-- [Governance API](/reference/rest-api/governance) — budgets and the budget kill-switch
-- [Agents API](/reference/rest-api/agents) — the agent registry that `agentId` references
-- [Teams API](/reference/rest-api/teams) — teams, rules, and team-chat (`teamId` references)
-- [Boo Zero](/using/boo-zero) — briefs, rules, and display name in the UI
-- [Using the Ghost Graph](/using/ghost-graph) — what `graph-layout` positions
-- [Database schema](/reference/database-schema) — `cost_records`, `chat_messages`, `graph_layouts`, `skills`, `boo_zero_team_briefs`, `agents`
+- [Cost dashboard + budgets](/using/cost-and-budgets), the UI over cost records
+- [Governance API](/reference/rest-api/governance), budgets and the budget kill-switch
+- [Agents API](/reference/rest-api/agents), the agent registry that `agentId` references
+- [Teams API](/reference/rest-api/teams), teams, rules, and team-chat (`teamId` references)
+- [Boo Zero](/using/boo-zero), briefs, rules, and display name in the UI
+- [Using the Ghost Graph](/using/ghost-graph), what `graph-layout` positions
+- [Database schema](/reference/database-schema), `cost_records`, `chat_messages`, `graph_layouts`, `skills`, `boo_zero_team_briefs`, `agents`
 - [REST API overview](/reference/rest-api/index)

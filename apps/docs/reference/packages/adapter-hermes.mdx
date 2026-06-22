@@ -5,15 +5,15 @@ description: Hermes RuntimeAdapter that drives the Hermes CLI as a board worker,
 | | |
 |---|---|
 | **Version** | `0.1.0` |
-| **Purity** | pure (deps: `@clawboo/executor` only; no Node/CLI imports — the heavy spawn driver lives server-side) |
+| **Purity** | pure (deps: `@clawboo/executor` only; no Node/CLI imports; the heavy spawn driver lives server-side) |
 | **Purpose** | The Hermes [`RuntimeAdapter`](/internals/runtime-adapter): boots a headless Hermes run, maps each native lifecycle frame into the normalized `RuntimeEvent` union, and delegates abort/setModel/writeContext to a per-run injected driver. |
 | **Workspace deps** | `@clawboo/executor` |
 | **External deps** | none (runtime) · `tsup`, `typescript`, `vitest`, `@clawboo/tsconfig` (dev) |
 
-This package is the contract-testable shell. It does **not** spawn the `hermes` CLI — a fresh `HermesDriver` is minted per run via the injected `driverFactory`, and the real spawn-backed driver (`hermesDriver`) lives in `apps/web/server/lib/runtimes/`. The only capability difference from the Claude Code / Codex adapters is `streaming: false`: Hermes has no live token stream, so the driver derives structured lifecycle events from its run output + `state.db` rather than scraping rendered text.
+This package is the contract-testable shell. It does **not** spawn the `hermes` CLI; a fresh `HermesDriver` is minted per run via the injected `driverFactory`, and the real spawn-backed driver (`hermesDriver`) lives in `apps/web/server/lib/runtimes/`. The only capability difference from the Claude Code / Codex adapters is `streaming: false`: Hermes has no live token stream, so the driver derives structured lifecycle events from its run output + `state.db` rather than scraping rendered text.
 
 <Note>
-Hermes ships its OWN kanban — clawboo does **not** sync it. Hermes is driven as a single-task worker on clawboo's one board of record; it reaches the team's coordination surface by attaching clawboo's Tasks/Memory/Tools MCP. Two boards would mean drift, double-dispatch, and stale-claim races.
+Hermes ships its OWN kanban; clawboo does **not** sync it. Hermes is driven as a single-task worker on clawboo's one board of record; it reaches the team's coordination surface by attaching clawboo's Tasks/Memory/Tools MCP. Two boards would mean drift, double-dispatch, and stale-claim races.
 </Note>
 
 ## Public API
@@ -28,21 +28,21 @@ All exports come from `src/index.ts`. The package declares a single `.` export i
 
 **`HermesAdapter` members:**
 
-- `capabilities(): Capabilities` — returns `{ streaming: false, mcp: true, worktrees: true, resume: true, toolApproval: true, models: [], runtimeClass: 'wrapped-oneshot', nativeHome: { scope: 'per-identity', persist: true }, nativeSkills: 'preserve', nativeMemory: 'preserve', nativeChannels: 'none', nativeScheduler: true }`. `models` is empty — Hermes resolves models via its own provider config. The native-preservation seam (stable per-identity home, preserved skills/`MEMORY.md`/`state.db`) is what distinguishes Hermes from the stateless wrapped runtimes; `nativeScheduler: true` is informational only (the host does not co-run Hermes's cron for teammates).
-- `sessionCodec: SessionCodec` — serializes `{ sessionKey, sessionId }` (the native Hermes session id captured during the run, falling back to `runId`); `restore` rebuilds a `RunHandle` from the blob. Rotation does not replay the heavy transcript — the codec only carries the session id for lineage + same-runtime `--resume`.
-- `health(): Promise<HealthResult>` — races the injected `healthCheck` against a 2 s timeout; any throw → `{ ok: false, message }`.
-- `start(_task: TaskHandle, opts: StartOpts): Promise<RunHandle>` — mints a driver via `driverFactory(opts)`, stores it by `opts.sessionKey`, calls `driver.start()`, returns `{ adapterId: 'hermes', sessionKey, runId: null }`. The `runId` late-binds in `events()` from the first native frame carrying a session id (falling back to `sessionKey`).
-- `events(run: RunHandle): AsyncIterable<RuntimeEvent>` — subscribes to the run's driver stream, captures + late-binds the native session id, accumulates non-reasoning `text-delta` text, and yields the mapped normalized stream via a bounded `createAsyncQueue` (`max: 1000`). Consumer termination (`return()`) unsubscribes the driver. Returns an empty (closed) queue if no driver is registered for the run.
-- `abort(run: RunHandle): Promise<void>` — delegates to the run's driver `abort()`.
-- `setModel(run: RunHandle, model: string): Promise<void>` — delegates to the run's driver `setModel()`.
-- `writeContext(run: RunHandle, key: string, value: string): Promise<void>` — delegates to the run's driver `writeContext()`.
+- `capabilities(): Capabilities`: returns `{ streaming: false, mcp: true, worktrees: true, resume: true, toolApproval: true, models: [], runtimeClass: 'wrapped-oneshot', nativeHome: { scope: 'per-identity', persist: true }, nativeSkills: 'preserve', nativeMemory: 'preserve', nativeChannels: 'none', nativeScheduler: true }`. `models` is empty; Hermes resolves models via its own provider config. The native-preservation seam (stable per-identity home, preserved skills/`MEMORY.md`/`state.db`) is what distinguishes Hermes from the stateless wrapped runtimes; `nativeScheduler: true` is informational only (the host does not co-run Hermes's cron for teammates).
+- `sessionCodec: SessionCodec`: serializes `{ sessionKey, sessionId }` (the native Hermes session id captured during the run, falling back to `runId`); `restore` rebuilds a `RunHandle` from the blob. Rotation does not replay the heavy transcript; the codec only carries the session id for lineage + same-runtime `--resume`.
+- `health(): Promise<HealthResult>`: races the injected `healthCheck` against a 2 s timeout; any throw → `{ ok: false, message }`.
+- `start(_task: TaskHandle, opts: StartOpts): Promise<RunHandle>`: mints a driver via `driverFactory(opts)`, stores it by `opts.sessionKey`, calls `driver.start()`, returns `{ adapterId: 'hermes', sessionKey, runId: null }`. The `runId` late-binds in `events()` from the first native frame carrying a session id (falling back to `sessionKey`).
+- `events(run: RunHandle): AsyncIterable<RuntimeEvent>`: subscribes to the run's driver stream, captures + late-binds the native session id, accumulates non-reasoning `text-delta` text, and yields the mapped normalized stream via a bounded `createAsyncQueue` (`max: 1000`). Consumer termination (`return()`) unsubscribes the driver. Returns an empty (closed) queue if no driver is registered for the run.
+- `abort(run: RunHandle): Promise<void>`: delegates to the run's driver `abort()`.
+- `setModel(run: RunHandle, model: string): Promise<void>`: delegates to the run's driver `setModel()`.
+- `writeContext(run: RunHandle, key: string, value: string): Promise<void>`: delegates to the run's driver `writeContext()`.
 
 ### Functions
 
 | Export | Signature | Contract |
 |---|---|---|
-| `mapHermesEvent` | `(ev: HermesNativeEvent, ctx: MapContext, nextSeq: () => number, now?: () => number, accumulated?: string) => RuntimeEvent[]` | Pure native→`RuntimeEvent` mapper. Each native event yields zero or more normalized events with a monotonic `seq`. `session`→`status` (phase `init`, optional `model`); `message`→`text-delta` (channel defaults `assistant`, empty text dropped) — coarse block-level deltas since Hermes is non-streaming; `tool-call`/`tool-result` pass through; `result` emits an optional `cost` event (`costUsd: null, estimated: true` — no reliable headless USD) then a terminal `done`/`error`. `aborted`→`done reason:'aborted'`; `ok`→`done reason:'success'`; otherwise a fatal `error` + `done reason:'error'`. Unknown native types are dropped, never crash the stream. |
-| `hermesNativeId` | `(ev: HermesNativeEvent) => string \| undefined` | Recovers the native session id from the frames that carry one — `session.sessionId` or `result.sessionId`; `undefined` otherwise. |
+| `mapHermesEvent` | `(ev: HermesNativeEvent, ctx: MapContext, nextSeq: () => number, now?: () => number, accumulated?: string) => RuntimeEvent[]` | Pure native→`RuntimeEvent` mapper. Each native event yields zero or more normalized events with a monotonic `seq`. `session`→`status` (phase `init`, optional `model`); `message`→`text-delta` (channel defaults `assistant`, empty text dropped), coarse block-level deltas since Hermes is non-streaming; `tool-call`/`tool-result` pass through; `result` emits an optional `cost` event (`costUsd: null, estimated: true`, no reliable headless USD) then a terminal `done`/`error`. `aborted`→`done reason:'aborted'`; `ok`→`done reason:'success'`; otherwise a fatal `error` + `done reason:'error'`. Unknown native types are dropped, never crash the stream. |
+| `hermesNativeId` | `(ev: HermesNativeEvent) => string \| undefined` | Recovers the native session id from the frames that carry one: `session.sessionId` or `result.sessionId`; `undefined` otherwise. |
 
 ### Types & interfaces
 
@@ -50,8 +50,8 @@ All exports come from `src/index.ts`. The package declares a single `.` export i
 |---|---|---|
 | `HermesNativeEvent` | discriminated union | A native lifecycle frame from a headless Hermes run (derived from run output + `state.db`, not scraped text). Variants: `session { sessionId, model? }` · `message { text, channel? }` · `tool-call { id, name, input }` · `tool-result { id, name, output, isError? }` · `result { ok, summary, usage?, model?, sessionId?, aborted?, errorMessage? }`. Cost is `estimated` (token usage only); `sessionId` is the resume handle Hermes persists in `state.db`. |
 | `HermesDriver` | interface | The injected per-run seam (analogous to OpenClaw's `OpenClawGatewayClient`). Methods: `start(): Promise<void>` · `onEvent(handler) => () => void` (subscribe, returns unsubscribe) · `abort(): Promise<void>` · `setModel(model): Promise<void>` · `writeContext(key, value): Promise<void>`. One instance per run; the real driver spawns the `hermes` CLI in an isolated `HERMES_HOME`. |
-| `HermesDriverFactory` | type alias | `(opts: StartOpts) => HermesDriver` — fresh driver per run; the adapter calls it in `start()`. |
-| `MapContext` | interface | `{ runId: string \| null; sessionId: string \| null }` — the ids the mapper stamps onto every emitted `RuntimeEvent` base. |
+| `HermesDriverFactory` | type alias | `(opts: StartOpts) => HermesDriver`, fresh driver per run; the adapter calls it in `start()`. |
+| `MapContext` | interface | `{ runId: string \| null; sessionId: string \| null }`, the ids the mapper stamps onto every emitted `RuntimeEvent` base. |
 
 <Note>
 The `Capabilities`, `HealthResult`, `RunHandle`, `RuntimeAdapter`, `RuntimeEvent`, `SessionCodec`, `StartOpts`, `TaskHandle`, and `Usage` types referenced above are owned by [`@clawboo/executor`](/reference/packages/executor), not re-exported here.
@@ -59,9 +59,9 @@ The `Capabilities`, `HealthResult`, `RunHandle`, `RuntimeAdapter`, `RuntimeEvent
 
 ## Used by
 
-- `apps/web/server/lib/runtimes/index.ts` — instantiates `HermesAdapter`, injecting the real spawn-backed driver and a CLI health probe.
-- `apps/web/server/lib/runtimes/hermesDriver.ts` — imports the `HermesDriver` + `HermesNativeEvent` types to implement the server-side driver against the `hermes` CLI.
-- `apps/web/server/lib/__tests__/executorRunner.test.ts` — imports `HermesAdapter` + driver/event types for the executor-runner integration tests.
+- `apps/web/server/lib/runtimes/index.ts`, instantiates `HermesAdapter`, injecting the real spawn-backed driver and a CLI health probe.
+- `apps/web/server/lib/runtimes/hermesDriver.ts`, imports the `HermesDriver` + `HermesNativeEvent` types to implement the server-side driver against the `hermes` CLI.
+- `apps/web/server/lib/__tests__/executorRunner.test.ts`, imports `HermesAdapter` + driver/event types for the executor-runner integration tests.
 
 ## Source
 
@@ -69,7 +69,7 @@ The `Capabilities`, `HealthResult`, `RunHandle`, `RuntimeAdapter`, `RuntimeEvent
 
 ## See also
 
-- [@clawboo/executor](/reference/packages/executor) — the `RuntimeAdapter` trait + `RuntimeEvent` union this adapter implements.
-- [RuntimeAdapter trait](/internals/runtime-adapter) — the cross-runtime contract.
-- [Hermes runtime](/runtimes/hermes) — using the runtime end-to-end (persistent per-identity home, `--resume`).
+- [@clawboo/executor](/reference/packages/executor), the `RuntimeAdapter` trait + `RuntimeEvent` union this adapter implements.
+- [RuntimeAdapter trait](/internals/runtime-adapter), the cross-runtime contract.
+- [Hermes runtime](/runtimes/hermes), using the runtime end-to-end (persistent per-identity home, `--resume`).
 - Sibling adapters: [@clawboo/adapter-claude-code](/reference/packages/adapter-claude-code), [@clawboo/adapter-codex](/reference/packages/adapter-codex), [@clawboo/adapter-native](/reference/packages/adapter-native), [@clawboo/adapter-openclaw](/reference/packages/adapter-openclaw).

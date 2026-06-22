@@ -1,11 +1,11 @@
 ---
 title: System API
-description: REST reference for /api/system/* — OpenClaw status, install, configure, gateway lifecycle, config, device pairing, and models.
+description: REST reference for /api/system/*: OpenClaw status, install, configure, gateway lifecycle, config, device pairing, and models.
 ---
 REST surface for the OpenClaw side of the host: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. These routes are how the onboarding wizard and the System maintenance panel drive OpenClaw from the dashboard.
 
 <Note>
-This group is OpenClaw-specific. OpenClaw is a connected substrate driven over a Gateway process this server manages, so its lifecycle lives here — not under [`/api/runtimes`](/reference/rest-api/runtimes), which covers the four CLI/SDK runtimes you install and key. The agent registry is at [agents.md](/reference/rest-api/agents).
+This group is OpenClaw-specific. OpenClaw is a connected substrate driven over a Gateway process this server manages, so its lifecycle lives here, not under [`/api/runtimes`](/reference/rest-api/runtimes), which covers the four CLI/SDK runtimes you install and key. The agent registry is at [agents.md](/reference/rest-api/agents).
 </Note>
 
 Two of these routes stream **Server-Sent Events** rather than returning a JSON body: `POST /api/system/install-openclaw` always, and `POST /api/system/gateway` for the `start` and `restart` actions. Each is documented below with an event-stream catalog (event `type` → payload), not a response body. All POST/PATCH routes read a JSON body parsed by `express.json({ limit: '2mb' })`.
@@ -33,14 +33,14 @@ Every child process this group spawns (`openclaw`, `npm`) is launched with `shel
 
 Returns a single snapshot: the Node runtime, OpenClaw install detection, and Gateway process state. The onboarding wizard polls this to decide which step to show; the System Health and maintenance panels poll it for the running/stopped dot. When the Gateway is running and a `.env` exists, this call also opportunistically syncs the Gateway auth token from `.env` into Clawboo's settings (so the proxy never holds a stale token).
 
-OpenClaw detection is async, cached per resolved binary path, and bounded by a 6-second timeout — a cold-start `openclaw --version` can never freeze the single-threaded server. `installed` reflects whether the binary resolves on `PATH`; `version` is `null` if the probe timed out or failed (the binary is still reported installed).
+OpenClaw detection is async, cached per resolved binary path, and bounded by a 6-second timeout; a cold-start `openclaw --version` can never freeze the single-threaded server. `installed` reflects whether the binary resolves on `PATH`; `version` is `null` if the probe timed out or failed (the binary is still reported installed).
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the status snapshot:
+**`200 OK`**: the status snapshot:
 
 ```ts
 {
@@ -68,7 +68,7 @@ OpenClaw detection is async, cached per resolved binary path, and bounded by a 6
 }
 ```
 
-**`500 Internal Server Error`** — any failure assembling the snapshot:
+**`500 Internal Server Error`**: any failure assembling the snapshot:
 
 ```json
 { "error": "<message>" }
@@ -86,12 +86,12 @@ curl http://localhost:18790/api/system/status
 
 Installs the OpenClaw CLI by running `npm install -g openclaw@^2026.5`. The version is pinned to `^2026.5` (not `@latest`) so a new install gets an OpenClaw whose WS connect protocol matches the bundled `gateway-client` (`maxProtocol: 4`); a future protocol bump would otherwise break the connection silently. On success the OpenClaw version cache is invalidated and re-read.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK` + `text/event-stream`** — the handler sets `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, flushes headers, and streams SSE frames. Each frame is `data: <json>\n\n`. The child process is killed if the client closes the connection.
+**`200 OK` + `text/event-stream`**: the handler sets `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, flushes headers, and streams SSE frames. Each frame is `data: <json>\n\n`. The child process is killed if the client closes the connection.
 
 #### Event catalog
 
@@ -124,7 +124,7 @@ data: {"type":"complete","success":true,"version":"2026.5.27"}
 ```
 
 <Note>
-The EACCES `error` frame is informational — it is emitted when stderr matches the pattern, but the stream still continues and the install's final outcome is decided by the process exit code (`complete` on 0, `EXIT_<code>` otherwise).
+The EACCES `error` frame is informational; it is emitted when stderr matches the pattern, but the stream still continues and the install's final outcome is decided by the process exit code (`complete` on 0, `EXIT_<code>` otherwise).
 </Note>
 
 ### Example
@@ -137,9 +137,9 @@ curl -N -X POST http://localhost:18790/api/system/install-openclaw
 
 ## `POST /api/system/configure-openclaw`
 
-Writes a minimal `openclaw.json` and `.env` for a chosen provider, mints a fresh Gateway auth token, and saves the resulting `gatewayUrl` + token into Clawboo's settings. The written `openclaw.json` sets `gateway.mode: 'local'`, the agent default model, and turns on agent-to-agent coordination (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`). The raw token is persisted server-side only — it is never returned in the body (the same-origin proxy injects it on connect).
+Writes a minimal `openclaw.json` and `.env` for a chosen provider, mints a fresh Gateway auth token, and saves the resulting `gatewayUrl` + token into Clawboo's settings. The written `openclaw.json` sets `gateway.mode: 'local'`, the agent default model, and turns on agent-to-agent coordination (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`). The raw token is persisted server-side only; it is never returned in the body (the same-origin proxy injects it on connect).
 
-- **Path/query params** — none.
+- **Path/query params**: none.
 - **Request body**:
 
 ```ts
@@ -155,31 +155,31 @@ When `model` is omitted, the handler picks a per-provider default from its `MODE
 
 ### Responses
 
-**`400 Bad Request`** — body is missing or not an object:
+**`400 Bad Request`**: body is missing or not an object:
 
 ```json
 { "error": "JSON body required" }
 ```
 
-**`400 Bad Request`** — `provider` is missing or empty:
+**`400 Bad Request`**: `provider` is missing or empty:
 
 ```json
 { "error": "provider is required" }
 ```
 
-**`400 Bad Request`** — a non-`ollama` provider with a missing or empty `apiKey`:
+**`400 Bad Request`**: a non-`ollama` provider with a missing or empty `apiKey`:
 
 ```json
 { "error": "apiKey is required for non-ollama providers" }
 ```
 
-**`200 OK`** — config + `.env` written, token minted, settings saved:
+**`200 OK`**: config + `.env` written, token minted, settings saved:
 
 ```ts
 { ok: true, gatewayUrl: string }   // gatewayUrl is `ws://localhost:<port>`
 ```
 
-**`500 Internal Server Error`** — a filesystem or token-generation failure:
+**`500 Internal Server Error`**: a filesystem or token-generation failure:
 
 ```json
 { "error": "<message>" }
@@ -199,7 +199,7 @@ curl -X POST http://localhost:18790/api/system/configure-openclaw \
 
 Drives the Gateway process lifecycle. The `action` field selects the operation. `status` and `stop` return JSON; `start` and `restart` stream SSE (because they poll for the port to bind and emit progress). The default port is resolved from the PID file, then `openclaw.json`'s `gateway.port`, then `18789`.
 
-- **Path/query params** — none.
+- **Path/query params**: none.
 - **Request body**:
 
 ```ts
@@ -208,19 +208,19 @@ Drives the Gateway process lifecycle. The `action` field selects the operation. 
 
 ### Responses
 
-**`400 Bad Request`** — body is missing or not an object:
+**`400 Bad Request`**: body is missing or not an object:
 
 ```json
 { "error": "JSON body required" }
 ```
 
-**`400 Bad Request`** — `action` is not one of the four values:
+**`400 Bad Request`**: `action` is not one of the four values:
 
 ```json
 { "error": "action must be 'start', 'stop', 'restart', or 'status'" }
 ```
 
-**`200 OK` (`action: 'status'`)** — current process state (a stale PID file is cleaned up as a side effect):
+**`200 OK` (`action: 'status'`)**: current process state (a stale PID file is cleaned up as a side effect):
 
 ```ts
 {
@@ -231,7 +231,7 @@ Drives the Gateway process lifecycle. The `action` field selects the operation. 
 }
 ```
 
-**`200 OK` (`action: 'stop'`)** — the stop result. `stopped` is `true` when a process was signalled (SIGTERM, then SIGKILL after a 2-second grace), `false` when none was found:
+**`200 OK` (`action: 'stop'`)**: the stop result. `stopped` is `true` when a process was signalled (SIGTERM, then SIGKILL after a 2-second grace), `false` when none was found:
 
 ```ts
 { ok: true, stopped: true }
@@ -239,7 +239,7 @@ Drives the Gateway process lifecycle. The `action` field selects the operation. 
 { ok: false, message: 'No gateway process found' }
 ```
 
-**`200 OK` + `text/event-stream` (`action: 'start'` or `'restart'`)** — the handler sets the SSE headers, flushes, and streams frames. For `restart` it first stops the running process. A detached child is spawned; it is **not** killed when the client disconnects (the Gateway is meant to outlive the request).
+**`200 OK` + `text/event-stream` (`action: 'start'` or `'restart'`)**: the handler sets the SSE headers, flushes, and streams frames. For `restart` it first stops the running process. A detached child is spawned; it is **not** killed when the client disconnects (the Gateway is meant to outlive the request).
 
 #### Event catalog (`start` / `restart`)
 
@@ -292,14 +292,14 @@ curl -N -X POST http://localhost:18790/api/system/gateway \
 
 ## `GET /api/system/openclaw-config`
 
-Reads `openclaw.json` and the provider-key flags derived from `.env` and per-agent `auth-profiles.json` files. The flags report key presence only — no key values are returned. The exec policy (`tools.exec.ask` / `tools.exec.security`) is surfaced for easy client consumption.
+Reads `openclaw.json` and the provider-key flags derived from `.env` and per-agent `auth-profiles.json` files. The flags report key presence only; no key values are returned. The exec policy (`tools.exec.ask` / `tools.exec.security`) is surfaced for easy client consumption.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the config and derived flags:
+**`200 OK`**: the config and derived flags:
 
 ```ts
 {
@@ -329,7 +329,7 @@ Reads `openclaw.json` and the provider-key flags derived from `.env` and per-age
 
 A provider flag is `true` when its env var is set in `.env` **or** a matching `auth-profiles.json` entry exists. (`hasGoogleKey` matches `GEMINI_API_KEY` or `GOOGLE_API_KEY`; `hasHuggingFaceKey` matches `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`.)
 
-**`500 Internal Server Error`** — a read failure:
+**`500 Internal Server Error`**: a read failure:
 
 ```json
 { "error": "<message>" }
@@ -345,10 +345,10 @@ curl http://localhost:18790/api/system/openclaw-config
 
 ## `PATCH /api/system/openclaw-config`
 
-Read-modify-writes `openclaw.json` and, when keys are supplied, `.env` plus every agent's `auth-profiles.json`. Every field is optional — only the supplied parts are touched. A missing or corrupt `openclaw.json` is treated as an empty object (started fresh).
+Read-modify-writes `openclaw.json` and, when keys are supplied, `.env` plus every agent's `auth-profiles.json`. Every field is optional; only the supplied parts are touched. A missing or corrupt `openclaw.json` is treated as an empty object (started fresh).
 
-- **Path/query params** — none.
-- **Request body** — all fields optional:
+- **Path/query params**: none.
+- **Request body**: all fields optional:
 
 ```ts
 {
@@ -366,13 +366,13 @@ Notes on behavior: `agentModel.model === null | ''` removes the per-agent overri
 
 ### Responses
 
-**`400 Bad Request`** — body is missing or not an object:
+**`400 Bad Request`**: body is missing or not an object:
 
 ```json
 { "error": "JSON body required" }
 ```
 
-**`200 OK`** — the config (and `.env` / profiles) was written. `hotReloadHint` is present only when the Gateway is currently reachable (the client should hot-reload its config):
+**`200 OK`**: the config (and `.env` / profiles) was written. `hotReloadHint` is present only when the Gateway is currently reachable (the client should hot-reload its config):
 
 ```ts
 { ok: true }
@@ -380,7 +380,7 @@ Notes on behavior: `agentModel.model === null | ''` removes the per-agent overri
 { ok: true, hotReloadHint: true }
 ```
 
-**`500 Internal Server Error`** — a filesystem failure:
+**`500 Internal Server Error`**: a filesystem failure:
 
 ```json
 { "error": "<message>" }
@@ -400,38 +400,38 @@ curl -X PATCH http://localhost:18790/api/system/openclaw-config \
 
 Approves the most-recently pending OpenClaw device-pairing request. Required since OpenClaw 2026.5.x dropped auto-pair-on-first-connect: a fresh device sits pending until a human approves it, and an unapproved device's WS connect fails with `NOT_PAIRED` ("pairing required: device is not approved yet"). This endpoint is the in-product remediation the SPA's pairing dialog calls.
 
-It is a two-step shell-out. Step 1 runs `openclaw devices approve --latest`, which on 2026.5.x is a **preview** — it prints the pending request UUID (in a line like `Approve this exact request with: openclaw devices approve <UUID>`) and exits non-zero. The handler regex-extracts the UUID from the combined stdout/stderr. Step 2 runs `openclaw devices approve <UUID>` to actually approve it.
+It is a two-step shell-out. Step 1 runs `openclaw devices approve --latest`, which on 2026.5.x is a **preview**; it prints the pending request UUID (in a line like `Approve this exact request with: openclaw devices approve <UUID>`) and exits non-zero. The handler regex-extracts the UUID from the combined stdout/stderr. Step 2 runs `openclaw devices approve <UUID>` to actually approve it.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`400 Bad Request`** — OpenClaw is not installed:
+**`400 Bad Request`**: OpenClaw is not installed:
 
 ```json
 { "error": "OpenClaw not installed" }
 ```
 
-**`500 Internal Server Error`** — the step-1 preview process failed to spawn (ENOENT, timeout, etc.):
+**`500 Internal Server Error`**: the step-1 preview process failed to spawn (ENOENT, timeout, etc.):
 
 ```json
 { "error": "Failed to run openclaw: <message>" }
 ```
 
-**`404 Not Found`** — no pending request UUID was found in the preview output:
+**`404 Not Found`**: no pending request UUID was found in the preview output:
 
 ```json
 { "error": "No pending device pairing requests found", "details": "<truncated output>" }
 ```
 
-**`200 OK`** — the device was approved:
+**`200 OK`**: the device was approved:
 
 ```ts
 { ok: true, requestId: string, output: string }
 ```
 
-**`500 Internal Server Error`** — step 2 (the real approval) failed; the cleaned stderr/stdout message is surfaced:
+**`500 Internal Server Error`**: step 2 (the real approval) failed; the cleaned stderr/stdout message is surfaced:
 
 ```json
 { "error": "Failed to approve device: <message>", "requestId": "<uuid>" }
@@ -453,12 +453,12 @@ curl -X POST http://localhost:18790/api/system/approve-device
 
 Returns the model catalog used by the model pickers. The catalog is read from `openclaw models list --all --json` (cached 5 minutes); when the CLI is unavailable it falls back to the static catalog. Either way the result is filtered to known providers plus `ollama`, and CLI provider names are normalized to the static catalog's display casing. `configuredProviders` lists the providers that have a key configured (in `.env` or `auth-profiles.json`), always including `ollama`.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the grouped catalog. `groups` is `null` only when both the CLI and static catalog yield nothing:
+**`200 OK`**: the grouped catalog. `groups` is `null` only when both the CLI and static catalog yield nothing:
 
 ```ts
 {
@@ -484,13 +484,13 @@ curl http://localhost:18790/api/system/models
 
 ## Error envelope
 
-Every error response on these routes is the standard envelope `{ error: string }`. Two routes attach extra fields alongside it: `approve-device` adds `details` (on the 404) and `requestId` (on the step-2 500). `GET /api/system/models` is the only route here that never returns an error status — it falls back to a `200` with a `null` catalog.
+Every error response on these routes is the standard envelope `{ error: string }`. Two routes attach extra fields alongside it: `approve-device` adds `details` (on the 404) and `requestId` (on the step-2 500). `GET /api/system/models` is the only route here that never returns an error status; it falls back to a `200` with a `null` catalog.
 
 ## See also
 
-- [OpenClaw runtime — Gateway, device pairing, channels](/runtimes/openclaw)
+- [OpenClaw runtime: Gateway, device pairing, channels](/runtimes/openclaw)
 - [System maintenance (Gateway control, model, API keys)](/using/system-maintenance)
-- [System Health panel](/using/system-health) — the boot-probe surface at [`/api/health`](/reference/rest-api/settings)
-- [Settings API](/reference/rest-api/settings) — `gatewayUrl` + `hasToken`, the proxy token this group mints
-- [Runtimes API](/reference/rest-api/runtimes) — the four CLI/SDK runtimes (OpenClaw is not in that group)
+- [System Health panel](/using/system-health), the boot-probe surface at [`/api/health`](/reference/rest-api/settings)
+- [Settings API](/reference/rest-api/settings), `gatewayUrl` + `hasToken`, the proxy token this group mints
+- [Runtimes API](/reference/rest-api/runtimes), the four CLI/SDK runtimes (OpenClaw is not in that group)
 - [REST API overview](/reference/rest-api/index)

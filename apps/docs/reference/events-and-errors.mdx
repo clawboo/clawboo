@@ -4,7 +4,7 @@ description: Reference for the append-only orchestration event kinds and the run
 ---
 The orchestration **event log** is the append-only stream every observability surface reads. It is simultaneously the always-on local trace store (a trace is all events sharing a `traceId`, ordered by `seq`), the graph-projection source (delegation / status / cost), and the metric + error-taxonomy source. This page is the reference for the two typed contracts that define it: the **event kinds** (the discriminated union in `@clawboo/obs`) and the **runtime error classes** (the Cursor-model classifier).
 
-Both contracts live in `@clawboo/obs` — pure, browser-safe, zero runtime dependency on the OTel SDK. Events are persisted insert-only with secrets scrubbed; one trace per board task, spans per run / tool.
+Both contracts live in `@clawboo/obs`, pure, browser-safe, zero runtime dependency on the OTel SDK. Events are persisted insert-only with secrets scrubbed; one trace per board task, spans per run / tool.
 
 ## At a glance
 
@@ -17,14 +17,14 @@ Both contracts live in `@clawboo/obs` — pure, browser-safe, zero runtime depen
 | Harness-bug predicate | `isHarnessBug(cls)` | `Unknown` ⇒ `true` | `packages/obs/src/taxonomy/errors.ts` |
 
 <Note>
-The kinds are an **append-only enum** — kinds are added (e.g. `session_rotated`, the `routine_*` family, the `team_chat_post` family), never renamed or removed, so old traces keep parsing. Each addition lands in `@clawboo/obs` before any emit site.
+The kinds are an **append-only enum**; kinds are added (e.g. `session_rotated`, the `routine_*` family, the `team_chat_post` family), never renamed or removed, so old traces keep parsing. Each addition lands in `@clawboo/obs` before any emit site.
 </Note>
 
 ---
 
 ## The correlation envelope
 
-Every event — regardless of kind — validates against `orchestrationEventSchema`. The runtime schema validates the envelope **strictly** but treats `data` as an open object (`z.record`), so an emit site can never drop an event on a minor data-shape drift. Observability captures best-effort; the kind → `data` shapes below are TypeScript interfaces (a discriminated union) that keep producers and projection reducers typed without risking event loss at the wire.
+Every event, regardless of kind, validates against `orchestrationEventSchema`. The runtime schema validates the envelope **strictly** but treats `data` as an open object (`z.record`), so an emit site can never drop an event on a minor data-shape drift. Observability captures best-effort; the kind → `data` shapes below are TypeScript interfaces (a discriminated union) that keep producers and projection reducers typed without risking event loss at the wire.
 
 ```ts
 {
@@ -48,12 +48,12 @@ Every event — regardless of kind — validates against `orchestrationEventSche
 | Field | Role |
 |---|---|
 | `id` | Stable event id (filled by the emit helper). |
-| `seq` | Cross-process monotonic, never reused. Assigned by SQLite — optional on the producer side. Traces order by `seq ASC`. |
+| `seq` | Cross-process monotonic, never reused. Assigned by SQLite, optional on the producer side. Traces order by `seq ASC`. |
 | `ts` | Emit timestamp (epoch ms). |
-| `kind` | The discriminant — one of the 22 [event kinds](#event-kinds). |
+| `kind` | The discriminant, one of the 22 [event kinds](#event-kinds). |
 | `traceId` / `spanId` / `parentSpanId` | The trace + span tree. One trace per board task; a run is a span, tool calls are sub-spans. |
 | `correlationId` | Free-form correlation key (e.g. an execution id) for non-trace grouping. |
-| `tenantId` | Dormant multi-tenant seam — currently null (single implicit tenant). |
+| `tenantId` | Dormant multi-tenant seam, currently null (single implicit tenant). |
 | `data` | Kind-specific payload; open at the wire, typed per kind below. |
 
 `parseOrchestrationEvent(value)` validates and defaults `data` before persistence.
@@ -138,7 +138,7 @@ An execution process opened for a task run.
 
 #### `execution_completed`
 
-An execution closed with its outcome. The `costUsd` / token fields carry the run's **final total** (authoritative for the run — see [cost reconciliation](#cost-reconciliation)).
+An execution closed with its outcome. The `costUsd` / token fields carry the run's **final total** (authoritative for the run, see [cost reconciliation](#cost-reconciliation)).
 
 ```ts
 {
@@ -231,7 +231,7 @@ A runtime / tool failure. The `errorClass` and `harnessBug` fields are filled at
 ```
 
 <Note>
-`errorClass` is typed `string` (not the `RuntimeErrorClass` union) because the executor runner also emits `PolicyDenied` for a brokered-tool denial — a non-fatal denial path that is not a runtime failure. Every other value is one of the seven [error classes](#error-taxonomy).
+`errorClass` is typed `string` (not the `RuntimeErrorClass` union) because the executor runner also emits `PolicyDenied` for a brokered-tool denial, a non-fatal denial path that is not a runtime failure. Every other value is one of the seven [error classes](#error-taxonomy).
 </Note>
 
 ### Spans
@@ -331,7 +331,7 @@ A fire failed (the routine is parked / disarmed until a human resumes).
 
 #### `team_chat_post`
 
-A post landed in a team room. `authorAgentId` is resolved from the MCP connection binding — never from tool args (anti-spoof).
+A post landed in a team room. `authorAgentId` is resolved from the MCP connection binding, never from tool args (anti-spoof).
 
 ```ts
 {
@@ -372,17 +372,17 @@ A bounded peer-chat exchange ended (the chatter-forever guard).
 
 ## Cost reconciliation
 
-`cost` events are incremental and `execution_completed` carries the run's **final total**. A runtime that reports cost only at completion (no mid-run `cost` events) would otherwise read `$0` / `0` tokens in the metrics while the graph showed the real total. Both the metrics fold (`summarizeMetrics`) and the graph projection (`projectGraph`) reconcile **per run** (keyed by `taskId`): they take `max(sum of cost events, execution_completed total)`, so the two code paths converge regardless of how a runtime reports cost — no double counting, and the completion total supplies the value when there were no `cost` events at all.
+`cost` events are incremental and `execution_completed` carries the run's **final total**. A runtime that reports cost only at completion (no mid-run `cost` events) would otherwise read `$0` / `0` tokens in the metrics while the graph showed the real total. Both the metrics fold (`summarizeMetrics`) and the graph projection (`projectGraph`) reconcile **per run** (keyed by `taskId`): they take `max(sum of cost events, execution_completed total)`, so the two code paths converge regardless of how a runtime reports cost, no double counting, and the completion total supplies the value when there were no `cost` events at all.
 
 ---
 
 ## Error taxonomy
 
-Every runtime / tool failure is classified (the Cursor model): a failure is mapped to a baseline of **expected** classes; anything that doesn't match is `Unknown`, and an `Unknown` is treated as a **harness bug** — surfaced as an alert (a flagged `error` event plus an error-level structured log) rather than silently swallowed. Expected classes get baselined per runtime so anomalies in their **rate** can be alerted on later; an `Unknown` alerts immediately.
+Every runtime / tool failure is classified (the Cursor model): a failure is mapped to a baseline of **expected** classes; anything that doesn't match is `Unknown`, and an `Unknown` is treated as a **harness bug**, surfaced as an alert (a flagged `error` event plus an error-level structured log) rather than silently swallowed. Expected classes get baselined per runtime so anomalies in their **rate** can be alerted on later; an `Unknown` alerts immediately.
 
 ### Classes
 
-`RUNTIME_ERROR_CLASSES` — the seven members of `RuntimeErrorClass`:
+`RUNTIME_ERROR_CLASSES`, the seven members of `RuntimeErrorClass`:
 
 | Class | Matches (case-insensitive) | Harness bug? |
 |---|---|---|
@@ -400,7 +400,7 @@ Every runtime / tool failure is classified (the Cursor model): a failure is mapp
 function classifyError(code?: string | null, message?: string | null): RuntimeErrorClass
 ```
 
-Joins `code` and `message` into one haystack (`` `${code ?? ''} ${message ?? ''}` ``, trimmed). An empty haystack returns `Unknown`. Otherwise the rules are tried **in order — first match wins** (the order is `RateLimited` → `UserAborted` → `Timeout` → `UnexpectedEnv` → `InvalidArgs` → `ProviderError`), so the more specific / overloaded signals (rate-limit, abort) are checked before the broader provider / env buckets. No match returns `Unknown`.
+Joins `code` and `message` into one haystack (`` `${code ?? ''} ${message ?? ''}` ``, trimmed). An empty haystack returns `Unknown`. Otherwise the rules are tried **in order, first match wins** (the order is `RateLimited` → `UserAborted` → `Timeout` → `UnexpectedEnv` → `InvalidArgs` → `ProviderError`), so the more specific / overloaded signals (rate-limit, abort) are checked before the broader provider / env buckets. No match returns `Unknown`.
 
 ### `isHarnessBug(cls)`
 
@@ -408,11 +408,11 @@ Joins `code` and `message` into one haystack (`` `${code ?? ''} ${message ?? ''}
 function isHarnessBug(cls: RuntimeErrorClass): boolean
 ```
 
-Returns `true` only for `Unknown`. By the Cursor doctrine an unknown class is, by definition, a defect in the harness itself — so it alerts immediately rather than being absorbed as expected noise.
+Returns `true` only for `Unknown`. By the Cursor doctrine an unknown class is, by definition, a defect in the harness itself, so it alerts immediately rather than being absorbed as expected noise.
 
 ### Per-runtime baselines
 
-`BASELINE_EXPECTED_CLASSES` maps a runtime id to the classes whose mere occurrence is not an alert (only a spike in their rate would be). The baseline for `openclaw`, `claude-code`, `codex`, and `hermes` is identical — the six non-`Unknown` classes (`InvalidArgs`, `Timeout`, `ProviderError`, `RateLimited`, `UserAborted`, `UnexpectedEnv`). Any runtime not in the map (including `clawboo-native`) falls back to `GENERIC_BASELINE`, which is the same six classes. `Unknown` is never in a baseline — it always alerts.
+`BASELINE_EXPECTED_CLASSES` maps a runtime id to the classes whose mere occurrence is not an alert (only a spike in their rate would be). The baseline for `openclaw`, `claude-code`, `codex`, and `hermes` is identical, the six non-`Unknown` classes (`InvalidArgs`, `Timeout`, `ProviderError`, `RateLimited`, `UserAborted`, `UnexpectedEnv`). Any runtime not in the map (including `clawboo-native`) falls back to `GENERIC_BASELINE`, which is the same six classes. `Unknown` is never in a baseline; it always alerts.
 
 ```ts
 function isUnexpectedFor(runtime: string | null | undefined, cls: RuntimeErrorClass): boolean
@@ -430,14 +430,14 @@ Because `Unknown` is the only class outside every baseline, an `isUnexpectedFor(
 
 - The executor runner classifies each failure as it drains a run's events, fills `errorClass` + `harnessBug` into the emitted `error` event, and fires a harness-bug alert when the class is `Unknown` (a brokered-tool denial is emitted with `errorClass: 'PolicyDenied'` and `harnessBug: false`, never alerting).
 - The observability **error-taxonomy** view breaks `error` events down by class and surfaces the `Unknown`/harness-bug count.
-- The **fleet-health** view (`projectFleetHealth`) folds the same log into the Gastown triage taxonomy `AgentHealthStatus` — `working` / `idle` / `stalled` / `zombie` — by how long an agent has been quiet while an execution is open (`idle` = no open execution; `working`/`stalled`/`zombie` by quiet-time thresholds).
+- The **fleet-health** view (`projectFleetHealth`) folds the same log into the Gastown triage taxonomy `AgentHealthStatus`: `working` / `idle` / `stalled` / `zombie`, by how long an agent has been quiet while an execution is open (`idle` = no open execution; `working`/`stalled`/`zombie` by quiet-time thresholds).
 - The **graph projection** (`projectGraph`) folds the log into the task-delegation and agent graphs, applying the same per-run cost reconciliation as the metrics.
 
 See the [observability dashboard](/using/observability-dashboard) for how these render in the UI, and the [observability REST API](/reference/rest-api/observability) for the `/api/obs/*` endpoints that serve the event log, traces, errors, graph, and fleet health.
 
 ## See also
 
-- [Observability dashboard](/using/observability-dashboard) — traces, errors, fleet health, evals
-- [Observability REST API](/reference/rest-api/observability) — `/api/obs/*` (events, traces, errors, graph, health, SSE stream)
-- [Glossary](/appendices/glossary) — builder≠judge, harness bug, trace, span
-- [@clawboo/obs](/reference/packages/obs) — the package these contracts live in
+- [Observability dashboard](/using/observability-dashboard), traces, errors, fleet health, evals
+- [Observability REST API](/reference/rest-api/observability), `/api/obs/*` (events, traces, errors, graph, health, SSE stream)
+- [Glossary](/appendices/glossary), builder≠judge, harness bug, trace, span
+- [@clawboo/obs](/reference/packages/obs), the package these contracts live in

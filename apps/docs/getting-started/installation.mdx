@@ -2,7 +2,7 @@
 title: Install Clawboo
 description: Run npx clawboo to launch the dashboard. Prerequisites, what the launcher does, port discovery, and where Clawboo keeps its state.
 ---
-By the end of this tutorial you'll have the Clawboo dashboard running locally and open in your browser, ready for the onboarding wizard. Installation is a single command — there is nothing to configure first.
+By the end of this tutorial you'll have the Clawboo dashboard running locally and open in your browser, ready for the onboarding wizard. Installation is a single command; there is nothing to configure first.
 
 <Note>
 This documents the **v0.2.0 working tree** (commit `03b206a`). The current npm `latest` is **`clawboo@0.1.9`**, so `npx clawboo` installs and runs 0.1.9 until the v0.2.0 tag is published. Differences are noted in [Known Issues](/appendices/known-issues).
@@ -32,7 +32,7 @@ If it prints `v22.x` or higher, you're set. If not, install a current Node from 
 npx clawboo
 ```
 
-`npx` downloads the `clawboo` package (currently `0.1.9`) on first run and executes its CLI entry point. There is no separate "install" step and nothing is added to your global `node_modules` — `npx` caches the package and runs it.
+`npx` downloads the `clawboo` package (currently `0.1.9`) on first run and executes its CLI entry point. There is no separate "install" step and nothing is added to your global `node_modules`; `npx` caches the package and runs it.
 
 **Expected result:** the terminal prints the Clawboo ASCII logo and a version line like `Clawboo v0.1.9`, then begins starting the dashboard.
 
@@ -41,7 +41,7 @@ npx clawboo
 The CLI is a thin launcher. Its job is to get you to a running dashboard and open your browser there. In order, it:
 
 1. **Prints the logo and tagline.**
-2. **Does an informational Gateway probe.** It opens a quick TCP connection to `localhost:18789` (the OpenClaw Gateway's default port). This is purely informational — it prints either `OpenClaw Gateway detected` or `No Gateway detected — the dashboard will guide you through setup.` and does not change what happens next. You do **not** need a Gateway running; the native runtime needs none at all.
+2. **Does an informational Gateway probe.** It opens a quick TCP connection to `localhost:18789` (the OpenClaw Gateway's default port). This is purely informational; it prints either `OpenClaw Gateway detected` or `No Gateway detected — the dashboard will guide you through setup.` and does not change what happens next. You do **not** need a Gateway running; the native runtime needs none at all.
 3. **Finds or starts the dashboard server.** First it looks for an already-running Clawboo dashboard (see [Port discovery](#port-discovery) below). If none is found, it starts the bundled server.
 4. **Opens your browser** at the discovered URL.
 
@@ -53,8 +53,8 @@ On a fresh machine there is no saved state, so the dashboard opens directly into
 
 **Expected result:** your browser shows the Clawboo welcome screen with a **Get Started** button. From here, pick a path:
 
-- **Native runtime (recommended, no Gateway):** [Quickstart — native](/getting-started/quickstart-native). Paste one provider key and you have a working team in about a minute.
-- **OpenClaw Gateway:** [Quickstart — OpenClaw](/getting-started/quickstart-openclaw). Detect, install, configure, and start the Gateway from inside the wizard.
+- **Native runtime (recommended, no Gateway):** [Quickstart: native](/getting-started/quickstart-native). Paste one provider key and you have a working team in about a minute.
+- **OpenClaw Gateway:** [Quickstart: OpenClaw](/getting-started/quickstart-openclaw). Detect, install, configure, and start the Gateway from inside the wizard.
 
 ## What you should see
 
@@ -75,11 +75,11 @@ Clawboo is ready!
 
 …and the onboarding welcome screen in your browser.
 
-![The Clawboo dashboard — a team's Ghost Graph on top and group chat below](/images/team-space.png)
+![The Clawboo dashboard, a team's Ghost Graph on top and group chat below](/images/team-space.png)
 
 ## What just happened
 
-`npx clawboo` ran a launcher that started Clawboo's **bundled server** — a single self-contained Node process that serves both the dashboard UI and every `/api/*` route — and pointed your browser at it. The server bound to **loopback only** (`127.0.0.1`) so a fresh install is never reachable from other machines on your network, picked a free port, and recorded that port so the next `npx clawboo` can find it again. All of Clawboo's own state lives under `~/.clawboo`; nothing was written into your project or your global Node install.
+`npx clawboo` ran a launcher that started Clawboo's **bundled server**, a single self-contained Node process that serves both the dashboard UI and every `/api/*` route, and pointed your browser at it. The server bound to **loopback only** (`127.0.0.1`) so a fresh install is never reachable from other machines on your network, picked a free port, and recorded that port so the next `npx clawboo` can find it again. All of Clawboo's own state lives under `~/.clawboo`; nothing was written into your project or your global Node install.
 
 ## Port discovery
 
@@ -87,7 +87,7 @@ The launcher and the server share one port-resolution scheme so they always agre
 
 | Step | What happens |
 |---|---|
-| **Default port** | `18790` — one above the OpenClaw Gateway's `18789`, in the uncommonly-used 18000–18999 range. |
+| **Default port** | `18790`, one above the OpenClaw Gateway's `18789`, in the uncommonly-used 18000–18999 range. |
 | **Already running?** | Before starting anything, the CLI checks (in order) the `CLAWBOO_API_PORT` env var, the runtime port file at `~/.clawboo/api-port.txt`, then a scan of `18790`→`18809`. If a Clawboo dashboard is already up, it just opens the browser there instead of starting a second server. |
 | **Signature probe** | The CLI doesn't trust a bare open TCP port. It does an HTTP `GET /api/settings` and only accepts a response that is Clawboo-shaped JSON (it must contain a `gatewayUrl` string and a `hasToken` boolean). This is why the launcher correctly skips an OpenClaw Gateway auxiliary port or a Chrome `--remote-debugging-port` that happens to sit in the same range. |
 | **Free-port scan** | When starting fresh, the server tries `18790` and scans up to 20 consecutive ports (`18790`→`18809`) for the first free one. |
@@ -95,12 +95,12 @@ The launcher and the server share one port-resolution scheme so they always agre
 | **Port file** | After binding, the server writes the chosen port to `~/.clawboo/api-port.txt` so the next `npx clawboo` (and the Vite dev proxy, and the e2e helpers) can discover it without scanning. |
 
 <Tip>
-If `18790` is busy, both the launcher and the server will quietly move up to the next free port and report it. You never have to free port 3000-style collisions — Clawboo stays out of the commonly-contested low ports.
+If `18790` is busy, both the launcher and the server will quietly move up to the next free port and report it. You never have to free port 3000-style collisions; Clawboo stays out of the commonly-contested low ports.
 </Tip>
 
 ## Bundled vs dev launch
 
-`npx clawboo` runs the **bundled server** — `server.js` sits next to the CLI entry point in the published package, and the launcher `fork`s it with `NODE_ENV=production`, detached, so it keeps running after the CLI exits. This is the path every end user takes.
+`npx clawboo` runs the **bundled server**; `server.js` sits next to the CLI entry point in the published package, and the launcher `fork`s it with `NODE_ENV=production`, detached, so it keeps running after the CLI exits. This is the path every end user takes.
 
 There is also a **dev launch** used only when you run the CLI from inside a checkout of the Clawboo monorepo (no bundled `server.js` present): the launcher walks up to find the repo root and spawns `npx tsx apps/web/server/index.ts` instead. Working inside the repo, you'll normally start the dev environment directly with `pnpm dev`, which runs an orchestrator that picks a free API port up front and then runs the Express API and the Vite dev server (`:5173`) together so both agree on the port.
 
@@ -115,12 +115,12 @@ Clawboo keeps **all of its own state** under a single directory, separate from O
 | Location | What's there |
 |---|---|
 | `~/.clawboo/` | Clawboo's own state directory (override with `CLAWBOO_HOME`). |
-| `~/.clawboo/clawboo.db` | The SQLite database — the registry of record for agents, teams, the board, memory, settings, and more. |
+| `~/.clawboo/clawboo.db` | The SQLite database, the registry of record for agents, teams, the board, memory, settings, and more. |
 | `~/.clawboo/settings.json` | Gateway URL/token and other saved settings. |
 | `~/.clawboo/api-port.txt` | The runtime port file written on each successful bind. |
 | `~/.openclaw/` | OpenClaw's state directory. Clawboo only ever **reads** this for interop (Gateway config and provider-key fallback); it never writes here. |
 
-Because Clawboo's state is self-contained, "uninstalling" is just removing `~/.clawboo` (and, if you only used Clawboo through `npx`, clearing the npx cache). There is no migration ladder — a schema reset is a hard reset of that directory.
+Because Clawboo's state is self-contained, "uninstalling" is just removing `~/.clawboo` (and, if you only used Clawboo through `npx`, clearing the npx cache). There is no migration ladder; a schema reset is a hard reset of that directory.
 
 <Danger>
 Deleting `~/.clawboo` permanently removes your teams, board tasks, chat history, memory, and settings. Back up `~/.clawboo/clawboo.db` first if you want to keep them.
@@ -133,7 +133,7 @@ Deleting `~/.clawboo` permanently removes your teams, board tasks, chat history,
 </Warning>
 
 <Warning>
-**"Dashboard is taking too long to start."** On a first cold boot — especially on Windows, where Defender scans the freshly-extracted package — the bundled server can take 20–30 seconds to bind. The launcher waits up to 45 seconds. If it still times out, run `npx clawboo` again; the second launch is warm and fast.
+**"Dashboard is taking too long to start."** On a first cold boot, especially on Windows, where Defender scans the freshly-extracted package, the bundled server can take 20–30 seconds to bind. The launcher waits up to 45 seconds. If it still times out, run `npx clawboo` again; the second launch is warm and fast.
 </Warning>
 
 <Warning>
@@ -142,8 +142,8 @@ Deleting `~/.clawboo` permanently removes your teams, board tasks, chat history,
 
 ## Next steps
 
-- [Quickstart — the native runtime (no Gateway)](/getting-started/quickstart-native)
-- [Quickstart — the OpenClaw Gateway path](/getting-started/quickstart-openclaw)
+- [Quickstart: the native runtime (no Gateway)](/getting-started/quickstart-native)
+- [Quickstart: the OpenClaw Gateway path](/getting-started/quickstart-openclaw)
 - [Deploy and watch your first team collaborate](/getting-started/first-team)
 - [Tour the dashboard](/getting-started/dashboard-tour)
 - [Operating: deployment, ports, and the bundled server](/operating/deployment)

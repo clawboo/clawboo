@@ -1,11 +1,11 @@
 ---
 title: "@clawboo/gateway-client"
-description: WebSocket client for the OpenClaw Gateway — typed RPC, event subscription, reconnect, and Ed25519 device auth.
+description: WebSocket client for the OpenClaw Gateway: typed RPC, event subscription, reconnect, and Ed25519 device auth.
 ---
 | | |
 |---|---|
 | **Version** | `0.1.1` |
-| **Purity** | browser-safe (the `ws` dep is for Node injection only — see `webSocketImpl`) |
+| **Purity** | browser-safe (the `ws` dep is for Node injection only; see `webSocketImpl`) |
 | **Purpose** | A WebSocket client for the OpenClaw Gateway: UUID-keyed request/response correlation, event subscription, reconnect lifecycle, and a typed RPC surface for agents / sessions / config / chat. |
 | **Workspace deps** | `@clawboo/logger` |
 | **External deps** | `@noble/ed25519`, `ws` |
@@ -30,12 +30,12 @@ The client owns reconnection after a connection that opened then dropped (`800 m
 | `agents.files.read` | `(agentId, name) => Promise<string>` | Calls RPC `agents.files.get`; returns `res.file.content` or `''` when missing. |
 | `agents.files.set` | `(agentId, name, content) => Promise<void>` | RPC `agents.files.set`, 2-minute timeout. |
 | `sessions.list` | `(agentId: string) => Promise<Session[]>` | RPC `sessions.list`. |
-| `sessions.send` | `(agentId, message) => Promise<void>` | RPC `sessions.send` — delivers a message to the agent's main session. |
+| `sessions.send` | `(agentId, message) => Promise<void>` | RPC `sessions.send`, delivers a message to the agent's main session. |
 | `sessions.patch` | `(key, updates) => Promise<SessionPatchResult>` | RPC `sessions.patch` (model / thinkingLevel / execHost / execSecurity / execAsk). |
 | `sessions.abort` | `(key, runId?) => Promise<{ ok; abortedRunId?; status? }>` | Heavy session-level abort; `runId` optional (Gateway resolves the active run from `key`). `status: 'no-active-run'` is a benign no-op. |
 | `config.get` | `() => Promise<GatewayConfig>` | RPC `config.get`. |
 | `config.patch` | `(updates: Partial<GatewayConfig>, baseHash?) => Promise<void>` | RPC `config.patch`, wire-encoded via `encodeConfigPatchParams` (`{ raw, baseHash }`). |
-| `chat.abort` | `(sessionKey, runId) => Promise<{ ok; abortedRunId?; status? }>` | Surgical per-run cancel — the Stop-button primitive. |
+| `chat.abort` | `(sessionKey, runId) => Promise<{ ok; abortedRunId?; status? }>` | Surgical per-run cancel, the Stop-button primitive. |
 
 ### Functions
 
@@ -68,16 +68,16 @@ The client owns reconnection after a connection that opened then dropped (`800 m
 | `Agent` | interface | `{ id; name; status?; sessionKey?; model?; createdAt? }`. |
 | `AgentListEntry` | interface | `{ id; name?; identity? }` (identity carries theme/emoji/avatar). |
 | `AgentsListResult` | interface | `{ defaultId; mainKey; scope?; agents: AgentListEntry[] }`. |
-| `AgentCreateConfig` | interface | `{ name; workspace }` — the only fields `agents.create` accepts. |
+| `AgentCreateConfig` | interface | `{ name; workspace }`, the only fields `agents.create` accepts. |
 | `AgentCreateResult` | interface | `{ agentId; name; workspace? }`. |
 | `Session` | interface | `{ key; agentId; createdAt?; updatedAt? }`. |
-| `GatewayConfig` | interface | `{ path?; gateway?: { url?; token? }; [key: string]: unknown }` — loose; mirrors the on-disk config. |
+| `GatewayConfig` | interface | `{ path?; gateway?: { url?; token? }; [key: string]: unknown }`, loose; mirrors the on-disk config. |
 | `ConnectionStatus` | type | `'disconnected' \| 'connecting' \| 'connected' \| 'reconnecting'`. |
 | `GatewayDeviceField` | interface | Signed device fields on a connect frame: `{ id; publicKey; signature; signedAt; nonce? }`. |
 | `ConnectOptions` | interface | Connect args: `clientName?`, `clientVersion?`, `token?`, `password?`, `authScopeKey?`, `disableDeviceAuth?`, `platform?`, `mode?`, `instanceId?`, `signConnect?` (Node device-auth hook), `origin?` (Node-only WS Origin), `webSocketImpl?`. |
-| `WebSocketLikeCtor` | type | `new (url: string, options?: { origin?: string }) => WebSocket` — a constructor compatible with both the DOM global and the `ws` package. |
+| `WebSocketLikeCtor` | type | `new (url: string, options?: { origin?: string }) => WebSocket`, a constructor compatible with both the DOM global and the `ws` package. |
 | `SessionPatchResult` | type | `{ ok: true; key; entry?; resolved? }`. |
-| `GatewayClientLike` | type | `{ call<T>(method, params?): Promise<T> }` — the minimal forward-reference used by helper params. |
+| `GatewayClientLike` | type | `{ call<T>(method, params?): Promise<T> }`, the minimal forward-reference used by helper params. |
 | `SyncSessionSettingsParams` | type | Input for `syncGatewaySessionSettings`: `{ client; sessionKey; model?; thinkingLevel?; execHost?; execSecurity?; execAsk? }`. |
 | `AutoRetryDelayParams` | type | Input for `resolveGatewayAutoRetryDelayMs`: `{ status; didAutoConnect; wasManualDisconnect; gatewayUrl; errorMessage; connectErrorCode; attempt }`. |
 | `GatewayErrorPayload` | type | `{ code; message; details?; retryable?; retryAfterMs? }`. |
@@ -94,12 +94,12 @@ The package exports no runtime constants from its barrel. The connect protocol r
 
 ## Used by
 
-- `apps/web/src/stores/connection.ts` — holds the live `GatewayClient` instance (`ConnectionStatus` superset adds an `'error'` state).
-- `apps/web/src/features/connection/{GatewayBootstrap,GatewayConnectScreen,useGatewayEvents}.tsx?` — connect/reconnect lifecycle and event subscription; `GatewayResponseError.code` drives the `NOT_PAIRED` pairing branch.
-- `apps/web/server/lib/agentSource/registry.ts` — the server-side `OpenClawAgentSource` connection injects `WebSocketLikeCtor` + `signConnect` for Node device auth.
-- `apps/web/server/lib/capabilitySource/openclaw.ts` — uses `encodeConfigPatchParams` for the `config.patch` envelope.
-- `packages/events/src/{index,bridge,types}.ts` — consumes the `EventFrame` / `AgentStatus` / `ConnectionStatus` types in the Bridge → Policy → Handler pipeline.
-- `packages/adapters/openclaw/src/{adapter,mapFrame,types}.ts` — maps `EventFrame` / `AgentsListResult` / `SessionPatchResult` into the normalized `RuntimeEvent` stream.
+- `apps/web/src/stores/connection.ts`, holds the live `GatewayClient` instance (`ConnectionStatus` superset adds an `'error'` state).
+- `apps/web/src/features/connection/{GatewayBootstrap,GatewayConnectScreen,useGatewayEvents}.tsx?`, connect/reconnect lifecycle and event subscription; `GatewayResponseError.code` drives the `NOT_PAIRED` pairing branch.
+- `apps/web/server/lib/agentSource/registry.ts`, the server-side `OpenClawAgentSource` connection injects `WebSocketLikeCtor` + `signConnect` for Node device auth.
+- `apps/web/server/lib/capabilitySource/openclaw.ts`, uses `encodeConfigPatchParams` for the `config.patch` envelope.
+- `packages/events/src/{index,bridge,types}.ts`, consumes the `EventFrame` / `AgentStatus` / `ConnectionStatus` types in the Bridge → Policy → Handler pipeline.
+- `packages/adapters/openclaw/src/{adapter,mapFrame,types}.ts`, maps `EventFrame` / `AgentsListResult` / `SessionPatchResult` into the normalized `RuntimeEvent` stream.
 
 ## Source
 
@@ -107,8 +107,8 @@ Barrel: [`packages/gateway-client/src/index.ts`](https://github.com/clawboo/claw
 
 ## See also
 
-- [Gateway & events pipeline](/concepts/gateway-and-events) — how frames flow Bridge → Policy → Handler.
-- [@clawboo/events](/reference/packages/events) — the consumer that turns `EventFrame`s into store mutations.
-- [@clawboo/adapter-openclaw](/reference/packages/adapter-openclaw) — the RuntimeAdapter wrapping this client.
-- [@clawboo/gateway-proxy](/reference/packages/gateway-proxy) — the same-origin WS proxy + the `signConnectParams` server wires to `signConnect`.
-- [OpenClaw runtime](/runtimes/openclaw) — device pairing and channels.
+- [Gateway & events pipeline](/concepts/gateway-and-events), how frames flow Bridge → Policy → Handler.
+- [@clawboo/events](/reference/packages/events), the consumer that turns `EventFrame`s into store mutations.
+- [@clawboo/adapter-openclaw](/reference/packages/adapter-openclaw), the RuntimeAdapter wrapping this client.
+- [@clawboo/gateway-proxy](/reference/packages/gateway-proxy), the same-origin WS proxy + the `signConnectParams` server wires to `signConnect`.
+- [OpenClaw runtime](/runtimes/openclaw), device pairing and channels.

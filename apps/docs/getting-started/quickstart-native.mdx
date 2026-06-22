@@ -1,10 +1,10 @@
 ---
-title: Quickstart — the native runtime (no Gateway)
+title: Quickstart: the native runtime (no Gateway)
 description: Run npx clawboo, choose the native runtime, paste a provider key, and land in a working two-agent team with no OpenClaw Gateway.
 ---
 By the end of this tutorial you'll have a working two-agent team (a leader and a specialist) running entirely inside Clawboo, with no OpenClaw Gateway, started from a single pasted provider API key.
 
-This is the fastest path to a running team. Clawboo's [native runtime](/appendices/glossary) (`clawboo-native`) is an in-process harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, or a local Ollama model), so there is nothing extra to install and no Gateway to set up. If you want the OpenClaw Gateway path instead, see [Quickstart — OpenClaw](/getting-started/quickstart-openclaw).
+This is the fastest path to a running team. Clawboo's [native runtime](/appendices/glossary) (`clawboo-native`) is an in-process harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, or a local Ollama model), so there is nothing extra to install and no Gateway to set up. If you want the OpenClaw Gateway path instead, see [Quickstart: OpenClaw](/getting-started/quickstart-openclaw).
 
 <Note>
 This documents the **v0.2.0 working tree** (commit `03b206a`). The current npm `latest` is **`clawboo@0.1.9`**, so `npx clawboo` installs 0.1.9 until the v0.2.0 tag is published. The native-first onboarding described here is part of v0.2.0; see [Known Issues](/appendices/known-issues).
@@ -13,7 +13,7 @@ This documents the **v0.2.0 working tree** (commit `03b206a`). The current npm `
 ## Prerequisites
 
 <Note>
-- **Node.js 22 or newer** — Clawboo's `engines` field requires `node >=22.0.0`.
+- **Node.js 22 or newer**: Clawboo's `engines` field requires `node >=22.0.0`.
 - **A provider API key** for one of: Anthropic (`sk-ant-…`), OpenAI (`sk-…`), or OpenRouter (`sk-or-…`). Or a running local Ollama, in which case no key is needed.
 - No OpenClaw, no Gateway, no global install required.
 </Note>
@@ -44,13 +44,13 @@ The next screen asks **"How do you want your agents to run?"** It shows the **Cl
 
 Click the **Clawboo Native** card.
 
-**Expected result:** the wizard advances to the native connect step. (Picking any other card branches to a different setup flow — OpenClaw goes to Gateway detection, the coding-agent runtimes go to a connect step.)
+**Expected result:** the wizard advances to the native connect step. (Picking any other card branches to a different setup flow: OpenClaw goes to Gateway detection, the coding-agent runtimes go to a connect step.)
 
 ### 4. Pick a provider and paste your key
 
-The connect step is titled **"Connect Clawboo Native"**. Choose your provider with the pills at the top — **Anthropic** (the default), **OpenAI**, or **OpenRouter** — then paste your API key into the **API Key** field. The eye icon toggles key visibility.
+The connect step is titled **"Connect Clawboo Native"**. Choose your provider with the pills at the top: **Anthropic** (the default), **OpenAI**, or **OpenRouter**, then paste your API key into the **API Key** field. The eye icon toggles key visibility.
 
-If you'd rather use a local model, click **"Use a local model with Ollama — no key needed"**; the key field disappears.
+If you'd rather use a local model, click **"Use a local model with Ollama, no key needed"**; the key field disappears.
 
 Optionally, click **Test connection**. Clawboo does a single authenticated `GET` against the provider's models endpoint (Anthropic `/v1/models`, OpenAI `/v1/models`, OpenRouter `/v1/models`, or the Ollama `/api/tags` probe) with an 8-second timeout. The key used for this test is never stored, logged, or echoed back.
 
@@ -62,8 +62,8 @@ Click **Create my team**.
 
 Two things happen in order:
 
-1. **Your key is stored.** Clawboo writes the key into its encrypted, at-rest vault under the env-var slot for the chosen provider — never to a plaintext file, never returned in any response. For Ollama (keyless) there is nothing to store.
-2. **A starter team is seeded.** Clawboo creates a team named "My First Team" with two `clawboo-native` agents — a **Team Lead** (configured to coordinate by delegating through the durable board) and a **Coder** specialist. Both agents share Clawboo's memory; the leader uses a capable model (e.g. `claude-sonnet-4-6` on Anthropic) and the specialist a cheaper one (e.g. `claude-haiku-4-5`). The team's "Know Your Team" introduction flow is pre-satisfied so you land straight in chat.
+1. **Your key is stored.** Clawboo writes the key into its encrypted, at-rest vault under the env-var slot for the chosen provider, never to a plaintext file, never returned in any response. For Ollama (keyless) there is nothing to store.
+2. **A starter team is seeded.** Clawboo creates a team named "My First Team" with two `clawboo-native` agents: a **Team Lead** (configured to coordinate by delegating through the durable board) and a **Coder** specialist. Both agents share Clawboo's memory; the leader uses a capable model (e.g. `claude-sonnet-4-6` on Anthropic) and the specialist a cheaper one (e.g. `claude-haiku-4-5`). The team's "Know Your Team" introduction flow is pre-satisfied so you land straight in chat.
 
 **Expected result:** the button shows "Setting up…", then the wizard advances to the "Your team is ready" screen.
 
@@ -73,7 +73,7 @@ The final wizard screen, **"Your team is ready"**, shows your two seeded agents,
 
 Click **Open my dashboard**.
 
-**Expected result:** you enter the dashboard in **native mode** — no Gateway, no GatewayClient — and land directly in your new team's group chat. You can start chatting with the team immediately.
+**Expected result:** you enter the dashboard in **native mode**, no Gateway, no GatewayClient, and land directly in your new team's group chat. You can start chatting with the team immediately.
 
 ## What you should see
 
@@ -85,7 +85,7 @@ The seeded team space looks like this once you start collaborating:
 
 ## What just happened
 
-Choosing the native runtime connected your provider key to `clawboo-native`, Clawboo's in-process harness, and seeded a two-agent team into SQLite — the [registry of record](/appendices/glossary) for which agents and teams exist. There was no OpenClaw Gateway involved at any point. The leader is wired to coordinate work by delegating tasks onto [the board](/appendices/glossary) (the durable, race-free kanban that is the source of truth for team coordination) rather than doing everything itself.
+Choosing the native runtime connected your provider key to `clawboo-native`, Clawboo's in-process harness, and seeded a two-agent team into SQLite, the [registry of record](/appendices/glossary) for which agents and teams exist. There was no OpenClaw Gateway involved at any point. The leader is wired to coordinate work by delegating tasks onto [the board](/appendices/glossary) (the durable, race-free kanban that is the source of truth for team coordination) rather than doing everything itself.
 
 ## Next steps
 

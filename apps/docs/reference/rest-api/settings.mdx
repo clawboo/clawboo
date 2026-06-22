@@ -2,13 +2,13 @@
 title: Settings & Health API
 description: REST reference for /api/settings (gateway URL + token) and /api/health (the boot probe / System Health surface).
 ---
-REST surface for two operator-facing concerns: the persisted Clawboo settings (`/api/settings` — the upstream OpenClaw Gateway URL + token, plus a first-run dismiss timestamp) and the boot probe (`/api/health` + `/api/health/recheck` — a fresh-install health check that backs the System Health view and answers a one-field liveness query).
+REST surface for two operator-facing concerns: the persisted Clawboo settings (`/api/settings`, the upstream OpenClaw Gateway URL + token, plus a first-run dismiss timestamp) and the boot probe (`/api/health` + `/api/health/recheck`, a fresh-install health check that backs the System Health view and answers a one-field liveness query).
 
 <Note>
 The raw gateway token is never returned by any route here. `GET /api/settings` exposes only `hasToken: boolean`; the same-origin proxy injects the upstream token server-side, so the browser never needs the credential.
 </Note>
 
-All POST routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Every error response is the standard `{ error: string }` envelope (the health routes' 500 path uses `{ ok: false, error }` — see below).
+All POST routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Every error response is the standard `{ error: string }` envelope (the health routes' 500 path uses `{ ok: false, error }`, see below).
 
 ## Routes
 
@@ -25,12 +25,12 @@ All POST routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Eve
 
 Returns the current persisted settings from `~/.clawboo/settings.json` (via `loadSettings()`). The gateway token is redacted to a presence boolean.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the persisted settings, token-redacted:
+**`200 OK`**: the persisted settings, token-redacted:
 
 ```ts
 {
@@ -40,7 +40,7 @@ Returns the current persisted settings from `~/.clawboo/settings.json` (via `loa
 }
 ```
 
-**`500 Internal Server Error`** — settings could not be loaded:
+**`500 Internal Server Error`**: settings could not be loaded:
 
 ```json
 { "error": "Failed to load settings" }
@@ -58,7 +58,7 @@ curl http://localhost:18790/api/settings
 
 Persists settings with a **partial update**: only fields present in the body are written; an omitted field is left unchanged (so a dismiss-only POST does not clear the gateway URL). When `gatewayUrl` or `gatewayToken` is present, the server-side AgentSource registry is reconnected best-effort (non-blocking, errors swallowed).
 
-- **Path/query params** — none.
+- **Path/query params**: none.
 - **Request body**:
 
 ```ts
@@ -70,30 +70,30 @@ Persists settings with a **partial update**: only fields present in the body are
 ```
 
 <Info>
-`gatewayUrl` is validated to a `ws:`/`wss:` scheme before it is stored, because the same-origin proxy later dials it (`new WebSocket(upstreamUrl)`). A non-websocket target (`http`/`file`/`javascript`) is rejected. The host is intentionally not restricted — a remote gateway is a supported choice.
+`gatewayUrl` is validated to a `ws:`/`wss:` scheme before it is stored, because the same-origin proxy later dials it (`new WebSocket(upstreamUrl)`). A non-websocket target (`http`/`file`/`javascript`) is rejected. The host is intentionally not restricted; a remote gateway is a supported choice.
 </Info>
 
 ### Responses
 
-**`200 OK`** — settings saved:
+**`200 OK`**: settings saved:
 
 ```json
 { "ok": true }
 ```
 
-**`400 Bad Request`** — the body is missing or not an object:
+**`400 Bad Request`**: the body is missing or not an object:
 
 ```json
 { "error": "JSON body required" }
 ```
 
-**`400 Bad Request`** — `gatewayUrl` is present, non-empty, and not a `ws:`/`wss:` URL:
+**`400 Bad Request`**: `gatewayUrl` is present, non-empty, and not a `ws:`/`wss:` URL:
 
 ```json
 { "error": "gatewayUrl must be a ws:// or wss:// URL" }
 ```
 
-**`500 Internal Server Error`** — saving failed:
+**`500 Internal Server Error`**: saving failed:
 
 ```json
 { "error": "Failed to save settings" }
@@ -117,14 +117,14 @@ curl -X POST http://localhost:18790/api/settings \
 
 ## `GET /api/health`
 
-Returns the latest `BootReport`. The boot probe runs once at server start and the result is cached; if no report exists yet (a pre-boot request), the handler computes one on demand so the endpoint is always answerable — this is the one liveness surface that works with the Gateway down. The `ok` field (`= no fatal checks`) is the one-field summary a simple liveness probe can read.
+Returns the latest `BootReport`. The boot probe runs once at server start and the result is cached; if no report exists yet (a pre-boot request), the handler computes one on demand so the endpoint is always answerable; this is the one liveness surface that works with the Gateway down. The `ok` field (`= no fatal checks`) is the one-field summary a simple liveness probe can read.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the boot report (see [The BootReport shape](#the-bootreport-shape) below). `Date` fields serialize to ISO strings via JSON.
+**`200 OK`**: the boot report (see [The BootReport shape](#the-bootreport-shape) below). `Date` fields serialize to ISO strings via JSON.
 
 ```ts
 {
@@ -137,7 +137,7 @@ Returns the latest `BootReport`. The boot probe runs once at server start and th
 The response is passed through `redactObject` before send (the same redact-on-display applied to obs/audit/tools): a credential-shaped substring landing in any check `message`/`detail` is masked, while readable paths and config stay intact.
 </Note>
 
-**`500 Internal Server Error`** — only on the pre-boot path, if computing the report throws:
+**`500 Internal Server Error`**: only on the pre-boot path, if computing the report throws:
 
 ```json
 { "ok": false, "error": "<message>" }
@@ -155,14 +155,14 @@ curl http://localhost:18790/api/health
 
 Recomputes the boot report fresh (the "Re-run probe" action after the user fixes a problem). Same response shape as `GET /api/health`.
 
-- **Path/query params** — none.
-- **Request body** — none (ignored).
+- **Path/query params**: none.
+- **Request body**: none (ignored).
 
 ### Responses
 
-**`200 OK`** — the freshly-computed boot report, redacted (identical shape to `GET /api/health`).
+**`200 OK`**: the freshly-computed boot report, redacted (identical shape to `GET /api/health`).
 
-**`500 Internal Server Error`** — if recomputing throws:
+**`500 Internal Server Error`**: if recomputing throws:
 
 ```json
 { "ok": false, "error": "<message>" }
@@ -218,7 +218,7 @@ interface BootConfig {
 
 ### Fatal vs degraded
 
-Almost every check **degrades** (the server keeps running and the UI shows a banner) rather than being fatal. Only two failures are fatal — `clawbooHomeWritable` and `databaseIntegrity` — because nothing works without them. There are no migration/upgrade paths: a fatal boot means the install is broken, and the remedy is to reset `~/.clawboo` and re-run the onboarding wizard.
+Almost every check **degrades** (the server keeps running and the UI shows a banner) rather than being fatal. Only two failures are fatal: `clawbooHomeWritable` and `databaseIntegrity`, because nothing works without them. There are no migration/upgrade paths: a fatal boot means the install is broken, and the remedy is to reset `~/.clawboo` and re-run the onboarding wizard.
 
 `ok = report.fatal.length === 0`. A degraded-but-not-fatal install returns `ok: true` with a non-empty `degraded[]`.
 
@@ -234,7 +234,7 @@ Almost every check **degrades** (the server keeps running and the UI shows a ban
 | `apiPortFileMatches` | The on-disk api-port file matches the actual listening port (skipped when no port is supplied) | No |
 | `mcpServersHealthy` | Each in-process MCP server builds and answers a `tools/list` round-trip | No |
 | `openclawGatewayReachable` | The configured OpenClaw Gateway is reachable + synced (degrades to serving last-synced agents from SQLite; skipped when no `gatewayUrl` is set) | No |
-| `otelExporterReachable` | The OTel exporter initialized — only checked when an OTLP endpoint is configured | No |
+| `otelExporterReachable` | The OTel exporter initialized, only checked when an OTLP endpoint is configured | No |
 
 ### `config` (production-defaults posture)
 
@@ -256,9 +256,9 @@ Every error response on these routes is the standard envelope `{ error: string }
 ## See also
 
 - [System Health (UI panel over these routes)](/using/system-health)
-- [Production defaults & posture](/operating/production-defaults) — the `config` block's source of truth
-- [Configuration & file locations](/reference/configuration) — `~/.clawboo/settings.json`, the vault, the api-port file
-- [Environment variables](/reference/environment-variables) — `STUDIO_ACCESS_TOKEN`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `LOG_LEVEL`
-- [Security & access gate](/operating/security) — why the token is never returned, redaction-on-display
-- [System API](/reference/rest-api/system) — OpenClaw gateway lifecycle (start/stop/configure)
+- [Production defaults & posture](/operating/production-defaults), the `config` block's source of truth
+- [Configuration & file locations](/reference/configuration), `~/.clawboo/settings.json`, the vault, the api-port file
+- [Environment variables](/reference/environment-variables), `STUDIO_ACCESS_TOKEN`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `LOG_LEVEL`
+- [Security & access gate](/operating/security), why the token is never returned, redaction-on-display
+- [System API](/reference/rest-api/system), OpenClaw gateway lifecycle (start/stop/configure)
 - [REST API overview](/reference/rest-api/index)

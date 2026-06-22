@@ -2,12 +2,12 @@
 title: Changelog
 description: Release history of the clawboo CLI from the 0.1.0 name-claim placeholder through v0.2.0, the liberated cut.
 ---
-Release history for the published artifact — the **`clawboo` CLI**. Clawboo is a monorepo of 25 `@clawboo/*` workspace packages, but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
+Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a monorepo of 25 `@clawboo/*` workspace packages, but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
 
 Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which gates on the bundled-CLI clean-install smoke test and then runs `pnpm changeset publish`. The full mechanics are in [Release process](/internals/release-process).
 
 <Note>
-The current npm `latest` is **`clawboo@0.1.9`**. **v0.2.0 is committed but not yet tagged or published** — `git tag` shows `clawboo@0.1.0` through `clawboo@0.1.9`, and there is no tag at the v0.2.0 commit. Until the tag is pushed and `changeset publish` runs, `npx clawboo` installs 0.1.9. This documentation describes the v0.2.0 working tree (commit `03b206a`); the gap is tracked in [Known issues](/appendices/known-issues).
+The current npm `latest` is **`clawboo@0.1.9`**. **v0.2.0 is committed but not yet tagged or published**; `git tag` shows `clawboo@0.1.0` through `clawboo@0.1.9`, and there is no tag at the v0.2.0 commit. Until the tag is pushed and `changeset publish` runs, `npx clawboo` installs 0.1.9. This documentation describes the v0.2.0 working tree (commit `03b206a`); the gap is tracked in [Known issues](/appendices/known-issues).
 </Note>
 
 ## At a glance
@@ -24,29 +24,29 @@ The current npm `latest` is **`clawboo@0.1.9`**. **v0.2.0 is committed but not y
 | 0.1.7 | `clawboo@0.1.7` | published | Device pairing in the wizard + Windows hardening |
 | 0.1.8 | `clawboo@0.1.8` | published | Light/dark theme + design-system pass |
 | 0.1.9 | `clawboo@0.1.9` | published | Welcome redesign, lighter install, team colors |
-| 0.2.0 | _(untagged)_ | _not yet_ | The liberated cut — full multi-runtime orchestrator |
+| 0.2.0 | _(untagged)_ | _not yet_ | The liberated cut, full multi-runtime orchestrator |
 
 The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap.
 
 ---
 
-## 0.2.0 — the liberated cut (committed, untagged)
+## 0.2.0, the liberated cut (committed, untagged)
 
-The version that turns Clawboo from an OpenClaw control surface into a runtime-agnostic orchestrator. The headline: **native agents are built in** — paste a provider key, no external CLI, no Gateway. OpenClaw, Claude Code, Codex, and Hermes join as peer teammates in one chat, sharing one durable [board](/concepts/the-board), one tiered [memory](/concepts/memory), and one [capability dashboard](/using/capabilities-dashboard), all [governed](/concepts/governance) and [verified](/concepts/verification).
+The version that turns Clawboo from an OpenClaw control surface into a runtime-agnostic orchestrator. The headline: **native agents are built in**: paste a provider key, no external CLI, no Gateway. OpenClaw, Claude Code, Codex, and Hermes join as peer teammates in one chat, sharing one durable [board](/concepts/the-board), one tiered [memory](/concepts/memory), and one [capability dashboard](/using/capabilities-dashboard), all [governed](/concepts/governance) and [verified](/concepts/verification).
 
 What this cut brings over the 0.1.x line:
 
-- **Five runtimes** behind one `RuntimeAdapter` trait (`clawboo-native`, `openclaw`, `claude-code`, `codex`, `hermes`) — see [Runtimes overview](/runtimes/index).
-- **A durable task board** as the canonical coordination surface, with an atomic single-assignee claim and a board-driven orchestration path that replaced the prose/regex chat-relay engine — see [The board](/concepts/the-board) and [Delegation & orchestration](/concepts/delegation-and-orchestration).
-- **The MCP quartet** — four clawboo-hosted servers (tasks, memory, tools, teamchat) exposing the board/memory/tools/peer-chat as MCP tools an external agent can attach — see [MCP tools reference](/reference/mcp-tools).
-- **Verification (builder ≠ judge)** — a deterministic gate plus an independent critic, with a `completed_with_debt` outcome — see [Verification](/concepts/verification).
-- **Governance** — USD budgets with a kill-switch, tool-loop circuit breakers, depth/fan-out caps, and an audit log — see [Governance](/concepts/governance).
-- **Observability** — an append-only orchestration event log, traces, an error taxonomy, and a Ghost-Graph-over-event-log projection — see [Observability](/concepts/observability).
-- **Native-first onboarding** — the wizard's first real choice is which runtime to run, with the native path seeding a default leader + specialist team — see [Quickstart (native)](/getting-started/quickstart-native).
+- **Five runtimes** behind one `RuntimeAdapter` trait (`clawboo-native`, `openclaw`, `claude-code`, `codex`, `hermes`): see [Runtimes overview](/runtimes/index).
+- **A durable task board** as the canonical coordination surface, with an atomic single-assignee claim and a board-driven orchestration path that replaced the prose/regex chat-relay engine: see [The board](/concepts/the-board) and [Delegation & orchestration](/concepts/delegation-and-orchestration).
+- **The MCP quartet**: four clawboo-hosted servers (tasks, memory, tools, teamchat) exposing the board/memory/tools/peer-chat as MCP tools an external agent can attach: see [MCP tools reference](/reference/mcp-tools).
+- **Verification (builder ≠ judge)**: a deterministic gate plus an independent critic, with a `completed_with_debt` outcome: see [Verification](/concepts/verification).
+- **Governance**: USD budgets with a kill-switch, tool-loop circuit breakers, depth/fan-out caps, and an audit log: see [Governance](/concepts/governance).
+- **Observability**: an append-only orchestration event log, traces, an error taxonomy, and a Ghost-Graph-over-event-log projection: see [Observability](/concepts/observability).
+- **Native-first onboarding**: the wizard's first real choice is which runtime to run, with the native path seeding a default leader + specialist team: see [Quickstart (native)](/getting-started/quickstart-native).
 - **Per-runtime native homes** under `~/.clawboo/runtimes/<runtime>/<agentId>/`, an **encrypted credential vault** under `~/.clawboo/secrets/`, the **team-task scheduler** (Routines), and a release-cut security audit (case-folded access gate, loopback-exempt `/api/mcp/*`, default loopback bind).
 
 <Info>
-Schema model: there is **no migration ladder**. The `createDb` inline `CREATE TABLE IF NOT EXISTS` DDL is the sole schema source — a schema change is a hard reset, and there is no in-place upgrade from a 0.1.x database to 0.2.0. See [Data & state](/operating/data-and-state).
+Schema model: there is **no migration ladder**. The `createDb` inline `CREATE TABLE IF NOT EXISTS` DDL is the sole schema source; a schema change is a hard reset, and there is no in-place upgrade from a 0.1.x database to 0.2.0. See [Data & state](/operating/data-and-state).
 </Info>
 
 ---
@@ -55,12 +55,12 @@ Schema model: there is **no migration ladder**. The `createDb` inline `CREATE TA
 
 Welcome redesign, lighter install, and team color collections (changesets `53a05b2`, `6f718e2`).
 
-- **Calm Day-sky welcome** — a soft animated sky with drifting clouds (pure CSS/SVG) replaces the WebGL ShaderGradient atmosphere on the onboarding splash and home welcome, with a faint "boo-verse" of distant boo silhouettes drifting behind the clouds. The welcome is theme-independent (always the bright sky).
-- **Removed the WebGL/three.js stack** (`@shadergradient/react`, `@react-three/fiber`, `three`, `three-stdlib`) — smaller install/bundle, no GPU cost on first paint.
+- **Calm Day-sky welcome**: a soft animated sky with drifting clouds (pure CSS/SVG) replaces the WebGL ShaderGradient atmosphere on the onboarding splash and home welcome, with a faint "boo-verse" of distant boo silhouettes drifting behind the clouds. The welcome is theme-independent (always the bright sky).
+- **Removed the WebGL/three.js stack** (`@shadergradient/react`, `@react-three/fiber`, `three`, `three-stdlib`), smaller install/bundle, no GPU cost on first paint.
 - **Fresh installs default to light theme** so onboarding happens in light mode; switchable to light/dark/system afterward.
-- **Team color collections** — each team picks from 8 color palettes with per-team hue rotation, and the create-team preview matches the deployed palette.
+- **Team color collections**: each team picks from 8 color palettes with per-team hue rotation, and the create-team preview matches the deployed palette.
 - **Token-usage tracking by team and agent**; onboarding flow improvements; removed the unused Ollama-check API.
-- **Windows `/api/system/status` hang fixed** — the synchronous `where`/`which` binary probe (`findExecutable`) is now timeout-bounded, so a slow spawn under Windows Defender can no longer block the server's event loop and stall the onboarding DetectStep.
+- **Windows `/api/system/status` hang fixed**; the synchronous `where`/`which` binary probe (`findExecutable`) is now timeout-bounded, so a slow spawn under Windows Defender can no longer block the server's event loop and stall the onboarding DetectStep.
 
 ## 0.1.8
 
@@ -70,9 +70,9 @@ Light/dark theme with toggle + persisted preference; premium design-system pass 
 
 Device pairing in the onboarding wizard and Windows compatibility hardening (changesets `9309ee0`, `9038cab`).
 
-- **Device pairing fixed on fresh macOS installs** — `POST /api/system/approve-device` uses `spawnSync` for the `openclaw devices approve --latest` preview step so the CLI's preview-mode non-zero exit code no longer swallows the request-id stdout that the handler parses. The wizard's `StartGatewayStep` now catches `GatewayResponseError { code: 'NOT_PAIRED' }` and renders the in-product `DevicePairingApproval` card inline, so users no longer need a manual page refresh to escape the wizard on a fresh install with OpenClaw 2026.5.x.
-- **Windows `.cmd` spawn failures (round 1)** — Node 18.20.2+ refuses to launch `.cmd`/`.bat` files without `shell: true` (CVE-2024-27980 hardening). Added `shell: isWindows` to six `child_process` sites that target `.cmd` shims and wrapped the SSE-emitting sites in try/catch so synchronous spawn throws surface as clean SSE error events instead of crashing the request handler.
-- **Windows polish (round 2)** — added `windowsHide: isWindows` alongside every `shell: isWindows` (no more `cmd.exe` console popup); bumped the CLI dashboard poll to 45s for slow Windows cold-boot; raised gateway-client RPC timeouts (default 60s, per-call 120s on `agents.create`/`agents.files.set`); and added mid-launch Gateway-detection so a Retry click joins the existing launch instead of spawning a duplicate `openclaw` process. All round-2 options are no-ops on Unix.
+- **Device pairing fixed on fresh macOS installs**: `POST /api/system/approve-device` uses `spawnSync` for the `openclaw devices approve --latest` preview step so the CLI's preview-mode non-zero exit code no longer swallows the request-id stdout that the handler parses. The wizard's `StartGatewayStep` now catches `GatewayResponseError { code: 'NOT_PAIRED' }` and renders the in-product `DevicePairingApproval` card inline, so users no longer need a manual page refresh to escape the wizard on a fresh install with OpenClaw 2026.5.x.
+- **Windows `.cmd` spawn failures (round 1)**: Node 18.20.2+ refuses to launch `.cmd`/`.bat` files without `shell: true` (CVE-2024-27980 hardening). Added `shell: isWindows` to six `child_process` sites that target `.cmd` shims and wrapped the SSE-emitting sites in try/catch so synchronous spawn throws surface as clean SSE error events instead of crashing the request handler.
+- **Windows polish (round 2)**: added `windowsHide: isWindows` alongside every `shell: isWindows` (no more `cmd.exe` console popup); bumped the CLI dashboard poll to 45s for slow Windows cold-boot; raised gateway-client RPC timeouts (default 60s, per-call 120s on `agents.create`/`agents.files.set`); and added mid-launch Gateway-detection so a Retry click joins the existing launch instead of spawning a duplicate `openclaw` process. All round-2 options are no-ops on Unix.
 
 ## 0.1.6
 
@@ -86,8 +86,8 @@ In-dashboard device pairing approval for OpenClaw 2026.5+ (changeset `1cc97fe`).
 
 OpenClaw protocol-4 compatibility and Windows install support (changeset `68ebc29`).
 
-- **Protocol mismatch** — OpenClaw 2026.5.18 bumped the WS connect protocol from 3 to 4, but the gateway-client advertised `maxProtocol: 3` only, so fresh installs (which ran `npm install -g openclaw@latest`) hit a protocol mismatch at connect. The fix bumped `maxProtocol` to 4 (`minProtocol` stays at 3 for older OpenClaw) and pinned the install spec to `openclaw@^2026.5` so a future protocol 5 cannot silently break users.
-- **Windows spawn `ENOENT`** — `execFileSync('which', ...)` and `spawn('npm', ...)` are Unix-only (Windows npm is `npm.cmd`), causing `spawn npm ENOENT` at the Install step and a persistent "not installed" detection. The fix added a `platform.ts` helper (`findExecutable` for cross-platform `which`/`where`, `resolveShimName` to append `.cmd`), plus a `netstat`-based port-to-PID fallback. CI's clean-install smoke test now runs on a `[ubuntu-latest, windows-latest]` matrix.
+- **Protocol mismatch**: OpenClaw 2026.5.18 bumped the WS connect protocol from 3 to 4, but the gateway-client advertised `maxProtocol: 3` only, so fresh installs (which ran `npm install -g openclaw@latest`) hit a protocol mismatch at connect. The fix bumped `maxProtocol` to 4 (`minProtocol` stays at 3 for older OpenClaw) and pinned the install spec to `openclaw@^2026.5` so a future protocol 5 cannot silently break users.
+- **Windows spawn `ENOENT`**: `execFileSync('which', ...)` and `spawn('npm', ...)` are Unix-only (Windows npm is `npm.cmd`), causing `spawn npm ENOENT` at the Install step and a persistent "not installed" detection. The fix added a `platform.ts` helper (`findExecutable` for cross-platform `which`/`where`, `resolveShimName` to append `.cmd`), plus a `netstat`-based port-to-PID fallback. CI's clean-install smoke test now runs on a `[ubuntu-latest, windows-latest]` matrix.
 
 ## 0.1.3
 
@@ -99,7 +99,7 @@ SPA root-path fix in the bundled production server (changeset `e7b9363`). v0.1.1
 
 ## 0.1.1
 
-First real release — replaces the v0.0.0 / v0.1.0 placeholder builds (changeset `be71923`). Ships the v0.1.0 marketplace-redesign milestone:
+First real release, replaces the v0.0.0 / v0.1.0 placeholder builds (changeset `be71923`). Ships the v0.1.0 marketplace-redesign milestone:
 
 - 304 first-class agent catalog entries across 3 sources (agency-agents, awesome-openclaw, clawboo builtin) and 82 workflow team templates (5 builtin, 5 agency-workflows, 42 awesome-openclaw, 30 synthetic excellence partitions).
 - A 3-tab marketplace (Skills / Agents / Teams) with single-agent deploy flow.
@@ -110,7 +110,7 @@ First real release — replaces the v0.0.0 / v0.1.0 placeholder builds (changese
 - Local-DB ghost cleanup and per-agent KV cleanup on agent delete.
 
 <Note>
-The 0.1.1 orchestration model — prose/regex chat-relay with DelegationCards/PlanCards/WorkstreamCards — was superseded in v0.2.0 by board-driven orchestration over structured lifecycle events. The marketplace catalog (304 agents, 82 teams) carries forward and is still codegen'd by `scripts/ingest-marketplace-content.ts`, gated by `verify:ingest`. See [Codegen & ingestion](/internals/codegen-and-ingestion).
+The 0.1.1 orchestration model, prose/regex chat-relay with DelegationCards/PlanCards/WorkstreamCards, was superseded in v0.2.0 by board-driven orchestration over structured lifecycle events. The marketplace catalog (304 agents, 82 teams) carries forward and is still codegen'd by `scripts/ingest-marketplace-content.ts`, gated by `verify:ingest`. See [Codegen & ingestion](/internals/codegen-and-ingestion).
 </Note>
 
 ## 0.1.0
@@ -121,8 +121,8 @@ Name-claim placeholder. Published to reserve the `clawboo` name on npm; supersed
 
 ## See also
 
-- [Known issues](/appendices/known-issues) — the v0.2.0-committed-but-unpublished gap and other candid limitations
-- [Release process](/internals/release-process) — Changesets, `publish.yml`, the clean-install gate
-- [Installation](/getting-started/installation) — `npx clawboo` and what it launches
-- [What is Clawboo](/intro/what-is-clawboo) — positioning and the v0.2.0 wedge
-- [Glossary](/appendices/glossary) — canonical term definitions
+- [Known issues](/appendices/known-issues), the v0.2.0-committed-but-unpublished gap and other candid limitations
+- [Release process](/internals/release-process), Changesets, `publish.yml`, the clean-install gate
+- [Installation](/getting-started/installation), `npx clawboo` and what it launches
+- [What is Clawboo](/intro/what-is-clawboo), positioning and the v0.2.0 wedge
+- [Glossary](/appendices/glossary), canonical term definitions

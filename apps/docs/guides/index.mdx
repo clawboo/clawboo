@@ -2,22 +2,22 @@
 title: Guides (cookbook)
 description: Task-oriented walkthroughs that compose Clawboo features into end-to-end workflows.
 ---
-The reference and concept pages tell you what each piece of Clawboo does in isolation. These guides do the opposite: each one is a single, realistic workflow that wires several features together — a [team](/concepts/teams-and-planes) of mixed [runtimes](/runtimes/index), a [budget](/concepts/governance) with a hard cap, an [MCP](/operating/mcp-servers) attach to an outside agent — and walks it start to finish. Where a guide needs the precise shape of a route, store, or default, it links to the relevant [concept](/concepts/index), [using](/using/index), [operating](/operating/index), or [reference](/reference/index) page rather than restating it. Start with whichever outcome matches what you are trying to ship; each guide names its prerequisites up front.
+The reference and concept pages tell you what each piece of Clawboo does in isolation. These guides do the opposite: each one is a single, realistic workflow that wires several features together: a [team](/concepts/teams-and-planes) of mixed [runtimes](/runtimes/index), a [budget](/concepts/governance) with a hard cap, an [MCP](/operating/mcp-servers) attach to an outside agent, and walks it start to finish. Where a guide needs the precise shape of a route, store, or default, it links to the relevant [concept](/concepts/index), [using](/using/index), [operating](/operating/index), or [reference](/reference/index) page rather than restating it. Start with whichever outcome matches what you are trying to ship; each guide names its prerequisites up front.
 
 ## The guides
 
-- **[Build a multi-runtime team](/guides/multi-runtime-team)** — connect more than one of the five runtimes (`clawboo-native`, `openclaw`, `claude-code`, `codex`, `hermes`), deploy a team that mixes them, and watch them coordinate over the board and group chat.
-- **[Set up governance & budgets](/guides/governance-and-budgets)** — put a USD budget with a hard cap on an agent, mission, or team, layer on depth/fan-out/cost caps, and route risky delegations through the approval queue so a runaway run is stopped, not just logged.
-- **[Self-host securely](/guides/self-host-securely)** — keep the default loopback bind, turn on the access gate, understand the encrypted credential vault and redaction, and expose the dashboard safely if you must reach it off-machine.
-- **[Attach the MCP to an external agent](/guides/attach-mcp-external-agent)** — point an outside agent (a Claude Code, Codex, or any MCP client) at Clawboo's Tasks, Memory, Tools, and TeamChat servers so it joins your team as a peer over the shared plane.
-- **[Cross-runtime handoff](/guides/cross-runtime-handoff)** — pause a task on one runtime and resume it on another, carrying the worktree system-of-record and `AGENT_HANDOFF.json` so the second runtime picks up cold.
-- **[Recurring team work](/guides/recurring-team-work)** — schedule team-task work with Routines, understand the team-task vs runtime-own-life cron domains, and handle the error-halts-until-resumed posture.
+- **[Build a multi-runtime team](/guides/multi-runtime-team)**: connect more than one of the five runtimes (`clawboo-native`, `openclaw`, `claude-code`, `codex`, `hermes`), deploy a team that mixes them, and watch them coordinate over the board and group chat.
+- **[Set up governance & budgets](/guides/governance-and-budgets)**: put a USD budget with a hard cap on an agent, mission, or team, layer on depth/fan-out/cost caps, and route risky delegations through the approval queue so a runaway run is stopped, not just logged.
+- **[Self-host securely](/guides/self-host-securely)**: keep the default loopback bind, turn on the access gate, understand the encrypted credential vault and redaction, and expose the dashboard safely if you must reach it off-machine.
+- **[Attach the MCP to an external agent](/guides/attach-mcp-external-agent)**: point an outside agent (a Claude Code, Codex, or any MCP client) at Clawboo's Tasks, Memory, Tools, and TeamChat servers so it joins your team as a peer over the shared plane.
+- **[Cross-runtime handoff](/guides/cross-runtime-handoff)**: pause a task on one runtime and resume it on another, carrying the worktree system-of-record and `AGENT_HANDOFF.json` so the second runtime picks up cold.
+- **[Recurring team work](/guides/recurring-team-work)**: schedule team-task work with Routines, understand the team-task vs runtime-own-life cron domains, and handle the error-halts-until-resumed posture.
 
 ## See also
 
-- [Getting Started](/getting-started/index) — install and first run before you reach for a guide
-- [Core concepts](/concepts/index) — the model behind every workflow here
-- [Using Clawboo](/using/index) — per-feature how-tos the guides compose
-- [Operating Clawboo](/operating/index) — deployment, security, and MCP-as-teammate
-- [Reference](/reference/index) — the exact route, schema, and env-var shapes
-- [Glossary](/appendices/glossary) — canonical term definitions
+- [Getting Started](/getting-started/index), install and first run before you reach for a guide
+- [Core concepts](/concepts/index), the model behind every workflow here
+- [Using Clawboo](/using/index), per-feature how-tos the guides compose
+- [Operating Clawboo](/operating/index), deployment, security, and MCP-as-teammate
+- [Reference](/reference/index), the exact route, schema, and env-var shapes
+- [Glossary](/appendices/glossary), canonical term definitions

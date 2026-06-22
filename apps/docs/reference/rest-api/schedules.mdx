@@ -1,14 +1,14 @@
 ---
 title: Schedules API
-description: REST reference for the unified scheduler — list, create, update, pause/resume, delete, and force-run schedules across two sources.
+description: REST reference for the unified scheduler: list, create, update, pause/resume, delete, and force-run schedules across two sources.
 ---
-REST surface for the unified scheduler: one merged read/write view over two [schedule sources](/concepts/scheduling) — clawboo **Routines** (the `team-task` domain, fully managed) and the **OpenClaw Gateway cron** (the `runtime-own-life` domain, written through the Gateway's own operator RPC). A read always succeeds and reports per-source degradation as data; a write routes to the owning source by id and surfaces the typed scheduling errors as precise status codes.
+REST surface for the unified scheduler: one merged read/write view over two [schedule sources](/concepts/scheduling): clawboo **Routines** (the `team-task` domain, fully managed) and the **OpenClaw Gateway cron** (the `runtime-own-life` domain, written through the Gateway's own operator RPC). A read always succeeds and reports per-source degradation as data; a write routes to the owning source by id and surfaces the typed scheduling errors as precise status codes.
 
 <Note>
-The two sources are never conflated. A Routine row schedules *team work* (a board task fired on a cadence, for any runtime class); a Gateway-cron row schedules an OpenClaw agent's *own standalone life*. clawboo never registers a team task into the Gateway cron, and never auto-creates own-life crons — the Scheduler tab is an operator surface over them, not their owner.
+The two sources are never conflated. A Routine row schedules *team work* (a board task fired on a cadence, for any runtime class); a Gateway-cron row schedules an OpenClaw agent's *own standalone life*. clawboo never registers a team task into the Gateway cron, and never auto-creates own-life crons; the Scheduler tab is an operator surface over them, not their owner.
 </Note>
 
-Every record carries a **composite `id`** of the form `<source>:<rawId>` (`clawboo-routine:<ledger-row-id>` or `openclaw-gateway-cron:<gateway-job-id>`). The `:id` path segment on the mutation routes is URL-decoded and parsed back to its owning source — the write routes there. An id that matches no source returns **404**. All POST/PATCH bodies are parsed by `express.json({ limit: '2mb' })`.
+Every record carries a **composite `id`** of the form `<source>:<rawId>` (`clawboo-routine:<ledger-row-id>` or `openclaw-gateway-cron:<gateway-job-id>`). The `:id` path segment on the mutation routes is URL-decoded and parsed back to its owning source; the write routes there. An id that matches no source returns **404**. All POST/PATCH bodies are parsed by `express.json({ limit: '2mb' })`.
 
 ## Routes
 
@@ -55,21 +55,21 @@ The two live sources are fixed:
 | `openclaw-gateway-cron` | `runtime-own-life` | `external-write` | `openclaw` | the Gateway cron over the operator WS-RPC |
 
 <Note>
-There is no third source. Claude Code, Codex, Hermes, and clawboo-native have no live native scheduler — scheduling any of them *is* a clawboo Routine.
+There is no third source. Claude Code, Codex, Hermes, and clawboo-native have no live native scheduler; scheduling any of them *is* a clawboo Routine.
 </Note>
 
 ---
 
 ## `GET /api/schedules`
 
-The merged view. Fans `read()` across both sources and concatenates their records. A source that fails or is disconnected does not fail the request — it contributes a degraded `sources[]` entry instead (a warm Gateway-cron cache is served stale; otherwise its rows are simply absent until reconnect). This route always returns **200**.
+The merged view. Fans `read()` across both sources and concatenates their records. A source that fails or is disconnected does not fail the request; it contributes a degraded `sources[]` entry instead (a warm Gateway-cron cache is served stale; otherwise its rows are simply absent until reconnect). This route always returns **200**.
 
-- **Path/query params** — none.
-- **Request body** — none.
+- **Path/query params**: none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the merged records plus a per-source status array:
+**`200 OK`**: the merged records plus a per-source status array:
 
 ```ts
 {
@@ -96,12 +96,12 @@ curl http://localhost:18790/api/schedules
 
 ## `POST /api/schedules`
 
-Creates a schedule. The body is a `ScheduleCreateSpec`; the multiplexer routes the write to `spec.source`. Before the source is touched it enforces, in order: an observe-only source rejects with **403**, and a `team-task` create aimed at a `runtime-own-life` source rejects with **422** (defense-in-depth — the Gateway-cron source refuses it too). The owning source then performs its own validation.
+Creates a schedule. The body is a `ScheduleCreateSpec`; the multiplexer routes the write to `spec.source`. Before the source is touched it enforces, in order: an observe-only source rejects with **403**, and a `team-task` create aimed at a `runtime-own-life` source rejects with **422** (defense-in-depth; the Gateway-cron source refuses it too). The owning source then performs its own validation.
 
-For a `clawboo-routine` create: the cron spec is probed (an unparseable spec throws), a task template is built from `label` + `taskTemplate`, and a recurring spec bound to an existing `teamTaskId` is refused (a bound task is claimable exactly once, so a recurring fire would park in `error` forever — bind only one-shot `once@<iso>` specs). Binding to a task already owned by another firing owner is the **409** de-dup refusal.
+For a `clawboo-routine` create: the cron spec is probed (an unparseable spec throws), a task template is built from `label` + `taskTemplate`, and a recurring spec bound to an existing `teamTaskId` is refused (a bound task is claimable exactly once, so a recurring fire would park in `error` forever; bind only one-shot `once@<iso>` specs). Binding to a task already owned by another firing owner is the **409** de-dup refusal.
 
-- **Path/query params** — none.
-- **Request body** — a `ScheduleCreateSpec`. `source`, `domain`, `agentId`, and `cronSpec` are required; the rest are optional:
+- **Path/query params**: none.
+- **Request body**: a `ScheduleCreateSpec`. `source`, `domain`, `agentId`, and `cronSpec` are required; the rest are optional:
 
 ```ts
 {
@@ -120,13 +120,13 @@ For a `clawboo-routine` create: the cron spec is probed (an unparseable spec thr
 
 ### Responses
 
-**`201 Created`** — the schedule was registered:
+**`201 Created`**: the schedule was registered:
 
 ```ts
 { schedule: ScheduleRecord }
 ```
 
-**`400 Bad Request`** — the body is missing a required field, has an unknown `source`/`domain`, or fails a source-side validation. `code` is `invalid_body` for the shape check, `invalid_cron_spec` for an unparseable cron spec, `bound_recurring_schedule` for a recurring spec bound to an existing task, or `invalid task template` (with no `code`) for a zod-rejected template:
+**`400 Bad Request`**: the body is missing a required field, has an unknown `source`/`domain`, or fails a source-side validation. `code` is `invalid_body` for the shape check, `invalid_cron_spec` for an unparseable cron spec, `bound_recurring_schedule` for a recurring spec bound to an existing task, or `invalid task template` (with no `code`) for a zod-rejected template:
 
 ```json
 { "error": "source, domain, agentId, and cronSpec are required", "code": "invalid_body" }
@@ -144,37 +144,37 @@ For a `clawboo-routine` create: the cron spec is probed (an unparseable spec thr
 { "error": "invalid task template", "code": "invalid_body" }
 ```
 
-**`403 Forbidden`** — the target source is `observe-only` (no live source is observe-only today, but the gate exists):
+**`403 Forbidden`**: the target source is `observe-only` (no live source is observe-only today, but the gate exists):
 
 ```json
 { "error": "Schedule source \"<id>\" (observe-only) does not support \"create\"", "code": "unsupported_schedule_write" }
 ```
 
-**`404 Not Found`** — `spec.source` matches no registered source:
+**`404 Not Found`**: `spec.source` matches no registered source:
 
 ```json
 { "error": "Unknown schedule \"<create>\"", "code": "unknown_schedule" }
 ```
 
-**`409 Conflict`** — the bound `teamTaskId` is already scheduled by a different firing owner. This is a data refusal — do not retry:
+**`409 Conflict`**: the bound `teamTaskId` is already scheduled by a different firing owner. This is a data refusal; do not retry:
 
 ```json
 { "error": "Already scheduled by \"<owner>\" (team task <id>) — never retry this refusal", "code": "duplicate_firing_owner" }
 ```
 
-**`422 Unprocessable Entity`** — a `domain: 'team-task'` create was aimed at a `runtime-own-life` source (the Gateway cron):
+**`422 Unprocessable Entity`**: a `domain: 'team-task'` create was aimed at a `runtime-own-life` source (the Gateway cron):
 
 ```json
 { "error": "A team-task schedule cannot be registered into \"openclaw-gateway-cron\" — team-task cadence belongs to the Routines ledger", "code": "team_task_domain_violation" }
 ```
 
-**`503 Service Unavailable`** — the target is the Gateway-cron source and its operator connection is down:
+**`503 Service Unavailable`**: the target is the Gateway-cron source and its operator connection is down:
 
 ```json
 { "error": "gateway_disconnected", "code": "schedule_source_unavailable" }
 ```
 
-**`500 Internal Server Error`** — any other throw:
+**`500 Internal Server Error`**: any other throw:
 
 ```json
 { "error": "<message>" }
@@ -204,8 +204,8 @@ Pauses/resumes a schedule, or patches its cron spec, label, task template, or pa
 
 For a Routine: pause sets the row to `paused` (disarmed, `nextRunAt` cleared); resume re-arms it to `idle` with a freshly computed `nextRunAt`; a cron-spec patch recomputes `nextRunAt` only for an already-armed (`idle`) row. For the Gateway cron: pause/resume map to `cron.update { id, enabled }` (there is no separate enable/disable method), and a patch maps to `cron.update` with the changed fields.
 
-- **Path params** — `id` (composite schedule id; URL-decoded; 404 on no-source-match).
-- **Request body** — exactly one of:
+- **Path params**: `id` (composite schedule id; URL-decoded; 404 on no-source-match).
+- **Request body**: exactly one of:
 
 ```ts
 { action: 'pause' | 'resume' }
@@ -224,13 +224,13 @@ For a Routine: pause sets the row to `paused` (disarmed, `nextRunAt` cleared); r
 
 ### Responses
 
-**`200 OK`** — the schedule was updated; the fresh record is returned (a Gateway-cron update may return `schedule: null` when the best-effort read-back can't reload the job):
+**`200 OK`**: the schedule was updated; the fresh record is returned (a Gateway-cron update may return `schedule: null` when the best-effort read-back can't reload the job):
 
 ```ts
 { schedule: ScheduleRecord | null }
 ```
 
-**`400 Bad Request`** — the body is neither a valid `action` nor a `patch` object, or a patched `cronSpec` is unparseable:
+**`400 Bad Request`**: the body is neither a valid `action` nor a `patch` object, or a patched `cronSpec` is unparseable:
 
 ```json
 { "error": "body needs { action: 'pause' | 'resume' } or { patch }", "code": "invalid_body" }
@@ -240,31 +240,31 @@ For a Routine: pause sets the row to `paused` (disarmed, `nextRunAt` cleared); r
 { "error": "Invalid cron spec \"...\": ...", "code": "invalid_cron_spec" }
 ```
 
-**`403 Forbidden`** — the target source is `observe-only`:
+**`403 Forbidden`**: the target source is `observe-only`:
 
 ```json
 { "error": "Schedule source \"<id>\" (observe-only) does not support \"pause\"", "code": "unsupported_schedule_write" }
 ```
 
-**`404 Not Found`** — `:id` matches no source, or the id is unknown within its source:
+**`404 Not Found`**: `:id` matches no source, or the id is unknown within its source:
 
 ```json
 { "error": "Unknown schedule \"<id>\"", "code": "unknown_schedule" }
 ```
 
-**`409 Conflict`** — the requested pause/resume is illegal from the row's current status (Routine state machine):
+**`409 Conflict`**: the requested pause/resume is illegal from the row's current status (Routine state machine):
 
 ```json
 { "error": "Illegal schedule transition error → idle", "code": "illegal_schedule_transition" }
 ```
 
-**`503 Service Unavailable`** — the Gateway-cron source's operator connection is down:
+**`503 Service Unavailable`**: the Gateway-cron source's operator connection is down:
 
 ```json
 { "error": "gateway_disconnected", "code": "schedule_source_unavailable" }
 ```
 
-**`500 Internal Server Error`** — any other throw:
+**`500 Internal Server Error`**: any other throw:
 
 ```json
 { "error": "<message>" }
@@ -290,36 +290,36 @@ curl -X PATCH http://localhost:18790/api/schedules/clawboo-routine:<row-id> \
 
 Removes a schedule. For a Routine it deletes the ledger row; for the Gateway cron it calls `cron.remove`. The write routes to the source named in `:id`.
 
-- **Path params** — `id` (composite schedule id; URL-decoded; 404 on no-source-match).
-- **Request body** — none.
+- **Path params**: `id` (composite schedule id; URL-decoded; 404 on no-source-match).
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the schedule was removed:
+**`200 OK`**: the schedule was removed:
 
 ```json
 { "ok": true }
 ```
 
-**`403 Forbidden`** — the target source is `observe-only`:
+**`403 Forbidden`**: the target source is `observe-only`:
 
 ```json
 { "error": "Schedule source \"<id>\" (observe-only) does not support \"remove\"", "code": "unsupported_schedule_write" }
 ```
 
-**`404 Not Found`** — `:id` matches no source, or the id is unknown within its source:
+**`404 Not Found`**: `:id` matches no source, or the id is unknown within its source:
 
 ```json
 { "error": "Unknown schedule \"<id>\"", "code": "unknown_schedule" }
 ```
 
-**`503 Service Unavailable`** — the Gateway-cron source's operator connection is down:
+**`503 Service Unavailable`**: the Gateway-cron source's operator connection is down:
 
 ```json
 { "error": "gateway_disconnected", "code": "schedule_source_unavailable" }
 ```
 
-**`500 Internal Server Error`** — any other throw:
+**`500 Internal Server Error`**: any other throw:
 
 ```json
 { "error": "<message>" }
@@ -337,42 +337,42 @@ curl -X DELETE http://localhost:18790/api/schedules/openclaw-gateway-cron:<job-i
 
 Force-fires a schedule now. This is an enqueue-style acknowledgement, not a synchronous run: a Routine is moved to `queued` (the ticker picks it up); the Gateway cron is told `cron.run { id, mode: 'force' }`. Completion is observed elsewhere (the obs event log / Gateway cron-run polling), not in this response. The write routes to the source named in `:id`.
 
-- **Path params** — `id` (composite schedule id; URL-decoded; 404 on no-source-match).
-- **Request body** — none.
+- **Path params**: `id` (composite schedule id; URL-decoded; 404 on no-source-match).
+- **Request body**: none.
 
 ### Responses
 
-**`202 Accepted`** — the fire was enqueued:
+**`202 Accepted`**: the fire was enqueued:
 
 ```json
 { "ok": true }
 ```
 
-**`403 Forbidden`** — the target source is `observe-only`:
+**`403 Forbidden`**: the target source is `observe-only`:
 
 ```json
 { "error": "Schedule source \"<id>\" (observe-only) does not support \"run\"", "code": "unsupported_schedule_write" }
 ```
 
-**`404 Not Found`** — `:id` matches no source, or the id is unknown within its source:
+**`404 Not Found`**: `:id` matches no source, or the id is unknown within its source:
 
 ```json
 { "error": "Unknown schedule \"<id>\"", "code": "unknown_schedule" }
 ```
 
-**`409 Conflict`** — a Routine could not be queued from its current status:
+**`409 Conflict`**: a Routine could not be queued from its current status:
 
 ```json
 { "error": "Illegal schedule transition <status> → queued", "code": "illegal_schedule_transition" }
 ```
 
-**`503 Service Unavailable`** — the Gateway-cron source's operator connection is down:
+**`503 Service Unavailable`**: the Gateway-cron source's operator connection is down:
 
 ```json
 { "error": "gateway_disconnected", "code": "schedule_source_unavailable" }
 ```
 
-**`500 Internal Server Error`** — any other throw:
+**`500 Internal Server Error`**: any other throw:
 
 ```json
 { "error": "<message>" }
@@ -397,7 +397,7 @@ Every error response on these routes is the standard envelope plus a structural 
 | `bound_recurring_schedule` | 400 | A recurring spec was bound to an existing one-shot-only team task |
 | `unsupported_schedule_write` | 403 | The target source's manageability tier forbids the action |
 | `unknown_schedule` | 404 | The composite id matched no source, or is unknown within it |
-| `duplicate_firing_owner` | 409 | The bound team task already has a different firing owner — do not retry |
+| `duplicate_firing_owner` | 409 | The bound team task already has a different firing owner; do not retry |
 | `illegal_schedule_transition` | 409 | The pause/resume/run is illegal from the current status |
 | `team_task_domain_violation` | 422 | A `team-task` create was aimed at a `runtime-own-life` source |
 | `schedule_source_unavailable` | 503 | A write hit a source whose backing connection is down (Gateway cron) |
@@ -409,8 +409,8 @@ A zod-rejected task template returns `{ error: "invalid task template", code: "i
 
 - [Scheduling (Routines): team-task cron vs runtime-own-life cron](/concepts/scheduling)
 - [Recurring team work (Routines how-to)](/guides/recurring-team-work)
-- [Scheduler tab](/using/scheduler) — the UI over this surface
-- [The board](/concepts/the-board) — `teamTaskId`, atomic claim, the one-firing-owner guard
-- [@clawboo/scheduler](/reference/packages/scheduler) — `ScheduleRecord`, the source trait, the multiplexer
-- [System API](/reference/rest-api/system) — OpenClaw Gateway lifecycle (the cron source's backing connection)
+- [Scheduler tab](/using/scheduler), the UI over this surface
+- [The board](/concepts/the-board), `teamTaskId`, atomic claim, the one-firing-owner guard
+- [@clawboo/scheduler](/reference/packages/scheduler), `ScheduleRecord`, the source trait, the multiplexer
+- [System API](/reference/rest-api/system), OpenClaw Gateway lifecycle (the cron source's backing connection)
 - [REST API overview](/reference/rest-api/index)

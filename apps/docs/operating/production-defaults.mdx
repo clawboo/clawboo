@@ -1,13 +1,13 @@
 ---
 title: Production defaults & posture
-description: The values a fresh Clawboo install runs with — log level, budget posture, breaker thresholds, reaper TTLs — each justified, with override env vars.
+description: The values a fresh Clawboo install runs with: log level, budget posture, breaker thresholds, reaper TTLs, each justified, with override env vars.
 ---
 This page is the operator's reference for the values a fresh Clawboo install runs with out of the box, and why each was chosen. Clawboo is designed to be a first-impression product, not a lab harness: nothing throttles or pauses an agent until you opt in, observability is local-only unless you point it at a collector, and the safety backstops are tuned so a healthy run never trips one.
 
-The defaults live in two kinds of place. The net-new, server-level posture values (log level, budget posture, the gateway-probe timeout, OTel) are owned by a single readable catalog, `apps/web/server/lib/defaults.ts`. The subsystem-specific thresholds (circuit breakers, reaper TTLs, the worktree GC limits) stay as env-overridable constants in the packages that own them — `defaults.ts` references them for visibility rather than copying them, because a pure package cannot import an app module. Both kinds are documented below.
+The defaults live in two kinds of place. The net-new, server-level posture values (log level, budget posture, the gateway-probe timeout, OTel) are owned by a single readable catalog, `apps/web/server/lib/defaults.ts`. The subsystem-specific thresholds (circuit breakers, reaper TTLs, the worktree GC limits) stay as env-overridable constants in the packages that own them; `defaults.ts` references them for visibility rather than copying them, because a pure package cannot import an app module. Both kinds are documented below.
 
 <Note>
-Every value here is a per-process default today. Each is also the seam where a future hosted, multi-tenant deployment would read per-tenant config — without changing the default chosen now.
+Every value here is a per-process default today. Each is also the seam where a future hosted, multi-tenant deployment would read per-tenant config, without changing the default chosen now.
 </Note>
 
 ## At a glance
@@ -46,14 +46,14 @@ The referenced package-local defaults (the safety backstops and housekeeping tim
 | Board stale sweep interval | `300000 ms` (5 min) | How often the backstop runs | `CLAWBOO_BOARD_STALE_SWEEP_MS` |
 
 <Tip>
-Per-run overrides (`breakerConfig`, `maxRotations`, `disableMemoryAutoInject`) are fields on the `POST /api/runtimes/:id/run` body. Process-level overrides are env vars — see [Environment variables](/reference/environment-variables).
+Per-run overrides (`breakerConfig`, `maxRotations`, `disableMemoryAutoInject`) are fields on the `POST /api/runtimes/:id/run` body. Process-level overrides are env vars; see [Environment variables](/reference/environment-variables).
 </Tip>
 
 ## Logging
 
 **`logLevel: 'info'`.** The pino logger ships at `info`. `debug` is too verbose to be a sensible default for a shipped product. Override per process with the standard `LOG_LEVEL` env var, which `@clawboo/logger` reads once at module-eval time (guarded so a browser import never touches `process.env`).
 
-## Budget posture — track-and-warn, hard cap is opt-in
+## Budget posture, track-and-warn, hard cap is opt-in
 
 This is the load-bearing posture decision. **Budgets ship as `track-and-warn`.** Out of the box, nothing pauses an agent on spend. Cost is recorded and a warning event is emitted when a budget crosses a threshold, but the run continues. There is no global hard cap (`budgetHardCapUsdCents` is `null`), so until you create a `cap` budget for an agent, team, or globally, no spend ceiling is enforced.
 
@@ -64,27 +64,27 @@ The two budget modes behave differently inside the executor's per-cost-event che
 | `warn` (default) | Emit a soft-warning audit event | Emit a hard-warning event; run **continues** (status clamps away from `paused`) |
 | `cap` (opt-in) | Emit a soft-warning audit event | Auto-pause the budget; the executor aborts the run and releases the task |
 
-A new budget created without an explicit `mode` defaults to `warn`. Only a `cap` budget's 100% crossing trips the kill-switch — the executor checks `status === 'paused' && mode === 'cap'` per scope (agent, mission, team) and stops on the first paused cap. The `80%` soft-warning threshold (`budgetWarnSoftPct`) is shared with the governance budget math so the two never drift.
+A new budget created without an explicit `mode` defaults to `warn`. Only a `cap` budget's 100% crossing trips the kill-switch; the executor checks `status === 'paused' && mode === 'cap'` per scope (agent, mission, team) and stops on the first paused cap. The `80%` soft-warning threshold (`budgetWarnSoftPct`) is shared with the governance budget math so the two never drift.
 
 <Note>
 "Track-and-warn by default" means a fresh install will not surprise you by halting an agent. To enforce a spend ceiling, create a `cap`-mode budget in the Governance dashboard. See [governance](/concepts/governance) for the kill-switch, caps, and approval mechanics.
 </Note>
 
-## Observability — local-first, exporter opt-in
+## Observability, local-first, exporter opt-in
 
 **`otelEnabledByDefault: false`.** Clawboo's always-on local event log is the default trace store; no external collector is required to get traces, fleet health, or the Ghost-Graph projection. The OpenTelemetry SDK is lazy-imported and stays a no-op unless `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set. A no-collector boot never even requires the `@opentelemetry/*` packages. Point the env var at a Jaeger/OTLP collector to bridge the local log to your tracing stack.
 
 ## Gateway probe timeout
 
-**`gatewayProbeTimeoutMs: 1500`.** The boot probe checks whether the OpenClaw Gateway is reachable with a tight 1.5-second timeout. The check is optional: a miss marks the agent registry **stale** (degraded), never fatal — SQLite still serves the last-synced agents, so the dashboard renders fine with the Gateway down. This is a fixed constant (no env override); see [System Health](/using/system-health) for how degraded checks surface.
+**`gatewayProbeTimeoutMs: 1500`.** The boot probe checks whether the OpenClaw Gateway is reachable with a tight 1.5-second timeout. The check is optional: a miss marks the agent registry **stale** (degraded), never fatal; SQLite still serves the last-synced agents, so the dashboard renders fine with the Gateway down. This is a fixed constant (no env override); see [System Health](/using/system-health) for how degraded checks surface.
 
 ## Memory auto-injection
 
 At run start, the executor seeds the most-relevant memory facts for the task into the prompt's cache-safe volatile tier. **`memoryAutoInjectMaxChars: 1500`** bounds the seeded block (≈ a few hundred tokens) so it never crowds out the actual instruction, and **`memoryAutoInjectTopK: 5`** caps how many top-ranked facts are seeded. Auto-injection is on by default; a single run opts out with `disableMemoryAutoInject` on its run request. See [memory](/concepts/memory) for the shared/private memory tiers.
 
-## Circuit breakers — the no-progress backstop
+## Circuit breakers, the no-progress backstop
 
-The tool-loop circuit breakers are a deterministic, cross-runtime backstop distinct from the budget kill-switch (which stops on dollars) and a runtime's own max-turns. They halt a run that burns turns or tokens making no progress, or that repeats the same failing tool call, before the dollar ceiling is reached. The defaults are conservative — a healthy run never trips one — and live in `@clawboo/governance`:
+The tool-loop circuit breakers are a deterministic, cross-runtime backstop distinct from the budget kill-switch (which stops on dollars) and a runtime's own max-turns. They halt a run that burns turns or tokens making no progress, or that repeats the same failing tool call, before the dollar ceiling is reached. The defaults are conservative; a healthy run never trips one, and live in `@clawboo/governance`:
 
 | Threshold | Default | Trips when |
 |---|---|---|
@@ -101,12 +101,12 @@ The token-velocity ceiling needs at least two cost events spanning `velocityMinW
 
 When a run approaches its context-window limit, the executor rotates to a fresh successor session carrying a short handoff note rather than failing. The watermark and chain cap (`DEFAULT_ROTATION` in `@clawboo/executor`):
 
-- **`thresholdPct: 0.85`** — rotate at 85% of the runtime's reported context window.
-- **`maxRotations: 3`** — at most three successor sessions per task, bounding a pathological loop.
+- **`thresholdPct: 0.85`**: rotate at 85% of the runtime's reported context window.
+- **`maxRotations: 3`**: at most three successor sessions per task, bounding a pathological loop.
 
 A runtime that reports no context window never rotates on the watermark. Override the chain cap per run with `maxRotations` on the run request.
 
-## Housekeeping timers — reapers, sweeps, and GC
+## Housekeeping timers: reapers, sweeps, and GC
 
 Several best-effort background passes run at boot and on an interval. None blocks boot; all are unref'd. They are env-overridable except the worktree GC limits (fixed constants).
 
@@ -114,9 +114,9 @@ Several best-effort background passes run at boot and on an interval. None block
 
 **MCP liveness supervisor.** The in-process MCP servers are pre-warmed at boot and health-probed every `CLAWBOO_MCP_PROBE_MS` (default 60 s), rebuilding on failure with backoff.
 
-**Worktree GC.** At boot, stale worktrees are reaped: those older than 72 h, plus the oldest beyond a 25-count limit — but only if their task is not locked (`in_progress` / `in_review`), and commit-before-drop means no uncommitted work is lost. The 72 h age and 25 count are fixed constants in `@clawboo/worktrees`.
+**Worktree GC.** At boot, stale worktrees are reaped: those older than 72 h, plus the oldest beyond a 25-count limit, but only if their task is not locked (`in_progress` / `in_review`), and commit-before-drop means no uncommitted work is lost. The 72 h age and 25 count are fixed constants in `@clawboo/worktrees`.
 
-**Board stale-task sweep.** A backstop for an `in_progress` task whose driving client view closed. It runs one pass at boot plus an interval set by `CLAWBOO_BOARD_STALE_SWEEP_MS` (default 5 min), releasing a task whose `updatedAt` is older than `CLAWBOO_BOARD_STALE_TTL_MS` (default 60 min). The TTL is deliberately long — `tasks.updatedAt` is frozen at claim time and is not a liveness signal for the in-browser OpenClaw path, so a live client's own 8-minute idle watchdog fails a hung delegate long before this fires. This sweep only needs to catch a client that is gone and never returns.
+**Board stale-task sweep.** A backstop for an `in_progress` task whose driving client view closed. It runs one pass at boot plus an interval set by `CLAWBOO_BOARD_STALE_SWEEP_MS` (default 5 min), releasing a task whose `updatedAt` is older than `CLAWBOO_BOARD_STALE_TTL_MS` (default 60 min). The TTL is deliberately long; `tasks.updatedAt` is frozen at claim time and is not a liveness signal for the in-browser OpenClaw path, so a live client's own 8-minute idle watchdog fails a hung delegate long before this fires. This sweep only needs to catch a client that is gone and never returns.
 
 <Warning>
 The board stale TTL is a backstop, not a liveness signal. Lowering it risks falsely releasing a long-but-active run, because `tasks.updatedAt` does not advance during a run. Tune it down only if you have abandoned-task accumulation and accept that risk.
@@ -124,9 +124,9 @@ The board stale TTL is a backstop, not a liveness signal. Lowering it risks fals
 
 ## See also
 
-- [Environment variables](/reference/environment-variables) — full list of every override env var
-- [Governance](/concepts/governance) — budgets, the kill-switch, circuit breakers, caps, approvals
-- [System Health](/using/system-health) — how degraded/fatal checks surface at boot
-- [Verification](/concepts/verification) — the builder≠judge gate that decides when a task is done
-- [Deployment](/operating/deployment) — CLI, ports, state directory, bundled server
-- [Runtimes API](/reference/rest-api/runtimes) — the `POST /api/runtimes/:id/run` body with the per-run overrides
+- [Environment variables](/reference/environment-variables), full list of every override env var
+- [Governance](/concepts/governance), budgets, the kill-switch, circuit breakers, caps, approvals
+- [System Health](/using/system-health), how degraded/fatal checks surface at boot
+- [Verification](/concepts/verification), the builder≠judge gate that decides when a task is done
+- [Deployment](/operating/deployment), CLI, ports, state directory, bundled server
+- [Runtimes API](/reference/rest-api/runtimes), the `POST /api/runtimes/:id/run` body with the per-run overrides

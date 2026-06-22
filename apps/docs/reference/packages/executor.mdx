@@ -14,20 +14,20 @@ This is the substrate the whole multi-runtime executor is built on: a single `Ru
 
 Three barrels, each its own subpath in `package.json` `exports`:
 
-- `.` → `src/index.ts` — the app-safe barrel (trait, event union, registry, async queue, session rotation, integration plan). No test deps.
-- `./contract` → `src/contract.ts` — the adapter contract test suite. Imports `vitest`; never pulled through `.`.
-- `./tiers` → `src/tiers/index.ts` — KV-/prompt-cache discipline primitives.
+- `.` → `src/index.ts`: the app-safe barrel (trait, event union, registry, async queue, session rotation, integration plan). No test deps.
+- `./contract` → `src/contract.ts`: the adapter contract test suite. Imports `vitest`; never pulled through `.`.
+- `./tiers` → `src/tiers/index.ts`: KV-/prompt-cache discipline primitives.
 
 ## Public API
 
-### `.` — main barrel (`src/index.ts`)
+### `.`, main barrel (`src/index.ts`)
 
 #### Functions
 
 | Export | Signature | Contract |
 |---|---|---|
 | `assertExhaustive` | `(x: never) => never` | Compile-time exhaustiveness guard for a `switch` over `RuntimeEvent`; throws at runtime if reached. |
-| `resolveRuntimeIntegration` | `(caps: Capabilities) => RuntimeIntegrationPlan` | Pure: turns a runtime's declared capabilities into the integration plan the host branches on (never on a runtime id). Conservative default — an absent claim resolves to the one-shot path. |
+| `resolveRuntimeIntegration` | `(caps: Capabilities) => RuntimeIntegrationPlan` | Pure: turns a runtime's declared capabilities into the integration plan the host branches on (never on a runtime id). Conservative default: an absent claim resolves to the one-shot path. |
 | `createAsyncQueue` | `<T>(opts?: { max?: number }) => AsyncQueue<T>` | Single-consumer push/pull queue that bridges a callback event source into an `AsyncIterable`. Drop-oldest backpressure at `max` (default 1000). |
 | `shouldRotate` | `(t: RotationTrigger) => boolean` | True when the session has consumed `thresholdPct` of its context window. A non-positive `contextWindow` or `thresholdPct` disables the watermark. |
 | `buildRotationHandoffNote` | `(h: RotationHandoff) => string` | Renders the short structured handoff note threaded into a successor session's prompt (data, not transcript). |
@@ -43,21 +43,21 @@ Three barrels, each its own subpath in `package.json` `exports`:
 | `Usage` | interface | `{ inputTokens, outputTokens, cachedInputTokens? }` token usage for a run. |
 | `RuntimeAdapter` | interface | One interface over every runtime: `id`, `participantKind`, `capabilities()`, `health()`, `start()`, `events()`, `abort()`, `setModel()`, `writeContext()`, optional `sessionCodec`/`dispose()`. |
 | `RuntimeId` | type | Known runtime ids (`openclaw`/`claude-code`/`codex`/`hermes`) as autocomplete hints over an open `string` set. |
-| `ParticipantKind` | type | `'agent' \| 'human'` — reserved seam; nothing branches on `'human'` yet. |
+| `ParticipantKind` | type | `'agent' \| 'human'`, reserved seam; nothing branches on `'human'` yet. |
 | `Capabilities` | interface | What a runtime can do: `streaming`, `mcp`, `worktrees`, `resume`, `toolApproval`, `models[]`, optional `contextWindowTokens` + the native-preservation seam fields. |
-| `RuntimeClass` | type | `'wrapped-oneshot' \| 'connected-substrate' \| 'native'` — how a runtime composes with the host. |
+| `RuntimeClass` | type | `'wrapped-oneshot' \| 'connected-substrate' \| 'native'`: how a runtime composes with the host. |
 | `NativeHomeClaim` | interface | A runtime's CLAIM about its state home: `{ scope: 'per-identity' \| 'per-run'; persist: boolean }`. The host materializes the path. |
 | `HealthResult` | interface | `{ ok: boolean; message?: string }`. |
-| `TaskHandle` | interface | `{ taskId?, teamId? }` — board references for a run (both optional for ad-hoc runs). |
-| `StartOpts` | interface | `{ agentId, sessionKey, message, model?, context?, childToolBlocklist? }` — inputs to `start()`. |
+| `TaskHandle` | interface | `{ taskId?, teamId? }`, board references for a run (both optional for ad-hoc runs). |
+| `StartOpts` | interface | `{ agentId, sessionKey, message, model?, context?, childToolBlocklist? }`, inputs to `start()`. |
 | `RunHandle` | interface | `{ adapterId, sessionKey, runId }`. `runId` is late-bound (null until the first lifecycle frame). |
 | `SessionCodec` | interface | Optional `serialize(run)` / `restore(blob)` for session resume. |
 | `IntegrationHome` | union type | `{ kind: 'persistent'; scope: 'per-identity' } \| { kind: 'ephemeral' } \| { kind: 'connected' }`. |
 | `RuntimeIntegrationPlan` | interface | The normalized plan `resolveRuntimeIntegration` returns: `{ home, preserveSkills, preserveMemory, useGatewayChannels, coRunScheduler: false }`. |
 | `AsyncQueue<T>` | interface | `AsyncIterable<T>` with `push(value)`, `close()`, `readonly closed`. |
-| `RotationTrigger` | interface | `{ tokensUsed, contextWindow, thresholdPct }` — the watermark input. |
+| `RotationTrigger` | interface | `{ tokensUsed, contextWindow, thresholdPct }`, the watermark input. |
 | `RotationHandoff` | interface | The structured rotation handoff: `{ taskId, predecessorSessionKey, predecessorSessionId, reason, lastSummary, tokensUsed, rotationIndex }`. |
-| `RotateSessionOpts` | interface | Injected side-effects: `{ adapter, current, handoff, restart, recordRotation? }` — keeps `rotateSession` DB-free + runtime-agnostic. |
+| `RotateSessionOpts` | interface | Injected side-effects: `{ adapter, current, handoff, restart, recordRotation? }`, keeps `rotateSession` DB-free + runtime-agnostic. |
 
 #### Classes
 
@@ -71,7 +71,7 @@ Three barrels, each its own subpath in `package.json` `exports`:
 |---|---|---|
 | `DEFAULT_ROTATION` | `{ thresholdPct: 0.85, maxRotations: 3 } as const` | Conservative rotation defaults; `maxRotations` bounds the successor chain per task. |
 
-### `./tiers` — prompt-cache discipline (`src/tiers/index.ts`)
+### `./tiers`, prompt-cache discipline (`src/tiers/index.ts`)
 
 KV-/prompt-cache primitives: stable → context → volatile tier ordering, deterministically-sorted tool definitions, date-only timestamps. Pure + browser-safe.
 
@@ -80,23 +80,23 @@ KV-/prompt-cache primitives: stable → context → volatile tier ordering, dete
 | Export | Signature | Contract |
 |---|---|---|
 | `assembleTiers` | `(tiers: PromptTiers) => AssembledPrompt` | Joins `stable → context → volatile` so the frozen content is the cacheable head; reports `stablePrefix`, `stablePrefixBytes` (UTF-8), and suggested `cacheBreakpoints`. Empty tiers are skipped. |
-| `dateStamp` | `(d: Date) => string` | UTC `YYYY-MM-DD` only — never minute/second precision (fine-grained timestamps bust the KV prefix cache). |
+| `dateStamp` | `(d: Date) => string` | UTC `YYYY-MM-DD` only, never minute/second precision (fine-grained timestamps bust the KV prefix cache). |
 | `sortToolDefs` | `<T extends ToolDef>(defs: readonly T[]) => T[]` | Non-mutating sort by `name`. Tool-array order is a cache key; an unsorted list busts the tool-definitions prefix. |
 
 #### Types & interfaces
 
 | Export | Kind | Contract |
 |---|---|---|
-| `ToolDef` | interface | `{ name: string; [k: string]: unknown }` — a tool definition with the cache-stable `name` sort key. |
-| `PromptTiers` | interface | `{ stable, context, volatile }` — the three tiers ordered by change frequency. |
-| `CacheBreakpoint` | interface | `{ offset: number; label: 'stable' \| 'context' }` — a suggested `cache_control` byte offset. |
+| `ToolDef` | interface | `{ name: string; [k: string]: unknown }`, a tool definition with the cache-stable `name` sort key. |
+| `PromptTiers` | interface | `{ stable, context, volatile }`, the three tiers ordered by change frequency. |
+| `CacheBreakpoint` | interface | `{ offset: number; label: 'stable' \| 'context' }`, a suggested `cache_control` byte offset. |
 | `AssembledPrompt` | interface | `{ prompt, stablePrefix, stablePrefixBytes, cacheBreakpoints }`. |
 
 <Note>
 `cacheBreakpoints` are suggestions for an Anthropic-style consumer. OpenAI auto-prefix-caches and ignores them; OpenClaw's Gateway owns caching and ignores them too.
 </Note>
 
-### `./contract` — adapter contract suite (`src/contract.ts`)
+### `./contract`, adapter contract suite (`src/contract.ts`)
 
 The suite every `RuntimeAdapter` must pass. Imports `vitest`, so it lives only under this subpath and is never re-exported from the main barrel.
 
@@ -110,15 +110,15 @@ The suite every `RuntimeAdapter` must pass. Imports `vitest`, so it lives only u
 
 | Export | Kind | Contract |
 |---|---|---|
-| `RecordedCall` | interface | `{ method: string; params: unknown }` — a side-effect (setModel/abort/writeContext) the adapter issued, for assertions. |
+| `RecordedCall` | interface | `{ method: string; params: unknown }`, a side-effect (setModel/abort/writeContext) the adapter issued, for assertions. |
 | `ContractFrames` | interface | Abstract native-frame builders the harness supplies: `delta`, `toolCall`, `final`, `aborted`, `error`. |
 | `AdapterTestHarness` | interface | The runtime-specific glue the suite drives: `label`, `makeAdapter()`, `start(adapter)`, `emit(frame)`, `frames`, `recordedCalls()`. |
 
 ## Used by
 
-- **`@clawboo/adapter-openclaw`, `-native`, `-claude-code`, `-codex`, `-hermes`** — implement `RuntimeAdapter`, emit `RuntimeEvent`, declare `Capabilities`, and run the `./contract` suite (`RecordedCall` imported in each adapter's `testing/fake*Driver.ts`).
-- **`apps/web`** — `executorRunner.ts` imports `assembleTiers` from `./tiers` and drives the trait + rotation; `runtimes/native/conversation.ts` imports `dateStamp`. The runner uses `RuntimeRegistry`, `shouldRotate`/`rotateSession`/`DEFAULT_ROTATION`, and `resolveRuntimeIntegration`.
-- **`@clawboo/evals`** — depends on the executor surface for its harness.
+- **`@clawboo/adapter-openclaw`, `-native`, `-claude-code`, `-codex`, `-hermes`**, implement `RuntimeAdapter`, emit `RuntimeEvent`, declare `Capabilities`, and run the `./contract` suite (`RecordedCall` imported in each adapter's `testing/fake*Driver.ts`).
+- **`apps/web`**, `executorRunner.ts` imports `assembleTiers` from `./tiers` and drives the trait + rotation; `runtimes/native/conversation.ts` imports `dateStamp`. The runner uses `RuntimeRegistry`, `shouldRotate`/`rotateSession`/`DEFAULT_ROTATION`, and `resolveRuntimeIntegration`.
+- **`@clawboo/evals`**, depends on the executor surface for its harness.
 
 ## Source
 

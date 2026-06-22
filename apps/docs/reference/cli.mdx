@@ -2,7 +2,7 @@
 title: CLI reference
 description: The single npx clawboo launcher (only --version/--help) plus the four bundled MCP stdio bins.
 ---
-Clawboo ships one user-facing command and four MCP stdio binaries. The `clawboo` command is a thin launcher: it finds or starts the bundled dashboard server and opens a browser. There are **no subcommands** — onboarding, Gateway detection, runtime connection, and team deployment all happen in the web UI. The MCP bins are not launched by humans; an external agent runtime spawns them to attach Clawboo's board, memory, tools, and team-chat surfaces over stdio.
+Clawboo ships one user-facing command and four MCP stdio binaries. The `clawboo` command is a thin launcher: it finds or starts the bundled dashboard server and opens a browser. There are **no subcommands**; onboarding, Gateway detection, runtime connection, and team deployment all happen in the web UI. The MCP bins are not launched by humans; an external agent runtime spawns them to attach Clawboo's board, memory, tools, and team-chat surfaces over stdio.
 
 <Note>
 This documents the **v0.2.0 working tree** (commit `03b206a`). The current npm `latest` is **`clawboo@0.1.9`**, so `npx clawboo` installs 0.1.9 until the v0.2.0 tag is published. Differences are noted in [Known Issues](/appendices/known-issues).
@@ -24,7 +24,7 @@ All five are declared in the package's `bin` map and shipped in the published `d
 
 ## `clawboo`
 
-The launcher is built on Commander with a single default action — there are no `commander` subcommands registered, only the two flags Commander provides automatically (`--version` and `--help`). The runtime is Node 22+ (the package `engines` field requires `node >=22.0.0`).
+The launcher is built on Commander with a single default action; there are no `commander` subcommands registered, only the two flags Commander provides automatically (`--version` and `--help`). The runtime is Node 22+ (the package `engines` field requires `node >=22.0.0`).
 
 ### Flags
 
@@ -56,7 +56,7 @@ flowchart TD
 ```
 
 1. **Print the banner.** An ASCII logo, the tagline, and an intro line showing `Clawboo v<version>`.
-2. **Informational Gateway probe.** A TCP probe of `localhost:18789` (the OpenClaw Gateway's default port). The result is purely informational — it prints "OpenClaw Gateway detected" or "No Gateway detected — the dashboard will guide you through setup." It does not gate anything; the dashboard handles Gateway setup.
+2. **Informational Gateway probe.** A TCP probe of `localhost:18789` (the OpenClaw Gateway's default port). The result is purely informational; it prints "OpenClaw Gateway detected" or "No Gateway detected; the dashboard will guide you through setup." It does not gate anything; the dashboard handles Gateway setup.
 3. **Find a running dashboard.** `findRunningDashboard()` looks for an existing Clawboo server (see [Port discovery](#port-discovery)). If one is found, the launcher skips straight to opening the browser.
 4. **Start the server** if none is running, choosing one of two strategies:
    - **Bundled mode (primary):** if `server.js` exists next to the CLI entry, it is `fork`ed detached with `NODE_ENV=production`, `cwd` set to the CLI's own directory, and `CLAWBOO_MCP_BIN_DIR` pointed at the sibling `bin/` directory (so the server's `/api/mcp/config` can emit `node <bin>` stdio attach snippets). The child is `unref`'d so the CLI can exit while the server keeps running.
@@ -67,28 +67,28 @@ flowchart TD
 7. **Print next steps.** A success outro with pointers to the dashboard and docs.
 
 <Note>
-The CLI never connects to a Gateway itself, never reads a token, and never writes Clawboo state — the dashboard server owns all of that. The CLI's only job is to get a server running and open the page.
+The CLI never connects to a Gateway itself, never reads a token, and never writes Clawboo state; the dashboard server owns all of that. The CLI's only job is to get a server running and open the page.
 </Note>
 
 ### Port discovery
 
 `findRunningDashboard()` mirrors the server's port resolver and probes for a Clawboo dashboard in this priority order:
 
-1. **`CLAWBOO_API_PORT`** — if set to a valid port (1–65535), probe only that port.
-2. **Runtime port file** — read `<CLAWBOO_HOME>/api-port.txt` (default `~/.clawboo/api-port.txt`), which the server writes on successful bind, and probe it.
-3. **Range scan** — probe `18790`, then scan upward through **20 consecutive ports** (`18790`–`18809`).
+1. **`CLAWBOO_API_PORT`**: if set to a valid port (1–65535), probe only that port.
+2. **Runtime port file**: read `<CLAWBOO_HOME>/api-port.txt` (default `~/.clawboo/api-port.txt`), which the server writes on successful bind, and probe it.
+3. **Range scan**: probe `18790`, then scan upward through **20 consecutive ports** (`18790`–`18809`).
 
 The default port is **18790** (one above the OpenClaw Gateway's `18789`).
 
 Each probe is not a bare TCP check. `probeClawbooDashboard()` does a cheap TCP probe first, then an HTTP `GET /api/settings` and validates a Clawboo-shaped JSON body (the response must include both a `gatewayUrl` string and a `hasToken` boolean). This signature check is load-bearing: the fallback range `18790`–`18809` overlaps the OpenClaw Gateway's auxiliary ports (`18791`–`18792`) and Chrome's `--remote-debugging-port` (commonly `18800`), and a naive TCP probe would route the browser at one of those (a 401 page, a DevTools target list). The signature check rejects any non-Clawboo listener regardless of what else is bound in the range.
 
 <Warning>
-The launcher's resolution comment lists `CLAWBOO_API_URL` as an override, but no code reads it — only `CLAWBOO_API_PORT` is honored. Use `CLAWBOO_API_PORT`.
+The launcher's resolution comment lists `CLAWBOO_API_URL` as an override, but no code reads it; only `CLAWBOO_API_PORT` is honored. Use `CLAWBOO_API_PORT`.
 </Warning>
 
 ### Environment variables honored
 
-These are the only environment variables the `clawboo` launcher itself reads or sets. The bundled server it starts reads many more — see [Environment variables](/reference/environment-variables).
+These are the only environment variables the `clawboo` launcher itself reads or sets. The bundled server it starts reads many more; see [Environment variables](/reference/environment-variables).
 
 | Variable | Read / Set | Effect |
 |---|---|---|
@@ -117,14 +117,14 @@ CLAWBOO_API_PORT=18790 npx clawboo
 
 Each `clawboo-mcp-*` bin is a standalone Node script that runs one [MCP](/appendices/glossary) server over stdio. They exist so an external agent runtime (for example, a Codex or Claude Code process you configure yourself) can attach Clawboo's coordination surfaces as MCP tools without going through the dashboard. The dashboard server hosts the same servers in-process and over Streamable HTTP; the stdio bins are the standalone path.
 
-All four open the **shared** Clawboo SQLite database via `createDb(defaultDbPath())`. `defaultDbPath()` returns `~/.openclaw/clawboo/clawboo.db` unless `CLAWBOO_DB_PATH` overrides it. Opening the same file the in-process server serves is safe because the database is created in WAL mode with the multi-process contention recipe — a bin spawned by an external runtime and the Express server read and write the one file concurrently.
+All four open the **shared** Clawboo SQLite database via `createDb(defaultDbPath())`. `defaultDbPath()` returns `~/.openclaw/clawboo/clawboo.db` unless `CLAWBOO_DB_PATH` overrides it. Opening the same file the in-process server serves is safe because the database is created in WAL mode with the multi-process contention recipe; a bin spawned by an external runtime and the Express server read and write the one file concurrently.
 
 | Bin | MCP server | Notes |
 |---|---|---|
 | `clawboo-mcp-tasks` | Tasks (board) | Serves the durable board. |
 | `clawboo-mcp-memory` | Memory | Resolves an embedding provider once at boot (Ollama → OpenAI → none); vector/hybrid search degrades to FTS when no provider is available. |
-| `clawboo-mcp-tools` | Tools broker | Availability is evaluated from the bin's own env at boot — only satisfied tools register. Calls run the full broker pipeline (inspector chain → DB-mediated approval → execute → compact → audit). |
-| `clawboo-mcp-teamchat` | TeamChat | Unbound by default — an external attach passes `authorAgentId` + `teamId` in the tool args. Clawboo's own per-runtime attach binds the identity authoritatively via the HTTP URL (the anti-spoof path). |
+| `clawboo-mcp-tools` | Tools broker | Availability is evaluated from the bin's own env at boot; only satisfied tools register. Calls run the full broker pipeline (inspector chain → DB-mediated approval → execute → compact → audit). |
+| `clawboo-mcp-teamchat` | TeamChat | Unbound by default; an external attach passes `authorAgentId` + `teamId` in the tool args. Clawboo's own per-runtime attach binds the identity authoritatively via the HTTP URL (the anti-spoof path). |
 
 For the tool list and zod input shapes each server registers, see the [MCP tools reference](/reference/mcp-tools).
 
@@ -134,7 +134,7 @@ The bins are bundled **self-contained** (the MCP SDK, `@clawboo/db`, and drizzle
 
 ### Attaching from a runtime
 
-You normally do not invoke these by hand. The server's `GET /api/mcp/config?runtime=&server=&transport=stdio` emits a ready-to-paste attach snippet. For the stdio transport that requires the server to know where the built bins live — the `clawboo` launcher sets `CLAWBOO_MCP_BIN_DIR` to the sibling `bin/` directory on the bundled server, and the config endpoint joins that dir with `<server>.js` to produce a `{ command: "node", args: [<binPath>] }` invocation. See the [Tools & MCP API](/reference/rest-api/tools-and-mcp) for the config endpoint and the transport options.
+You normally do not invoke these by hand. The server's `GET /api/mcp/config?runtime=&server=&transport=stdio` emits a ready-to-paste attach snippet. For the stdio transport that requires the server to know where the built bins live; the `clawboo` launcher sets `CLAWBOO_MCP_BIN_DIR` to the sibling `bin/` directory on the bundled server, and the config endpoint joins that dir with `<server>.js` to produce a `{ command: "node", args: [<binPath>] }` invocation. See the [Tools & MCP API](/reference/rest-api/tools-and-mcp) for the config endpoint and the transport options.
 
 ### Honored environment variables
 
@@ -156,9 +156,9 @@ CLAWBOO_DB_PATH=/tmp/clawboo-test.db clawboo-mcp-tasks
 
 ## See also
 
-- [Installation](/getting-started/installation) — what `npx clawboo` launches and the prerequisites
-- [Deployment](/operating/deployment) — ports, the runtime port file, the bundled server, state dir
-- [Environment variables](/reference/environment-variables) — the full env-var surface (the server reads many more than the CLI)
-- [Configuration](/reference/configuration) — `settings.json` and file/dir locations
-- [MCP tools reference](/reference/mcp-tools) — the four MCP servers and their tool/input shapes
-- [Tools & MCP API](/reference/rest-api/tools-and-mcp) — the `/api/mcp/*` endpoints and `GET /api/mcp/config`
+- [Installation](/getting-started/installation), what `npx clawboo` launches and the prerequisites
+- [Deployment](/operating/deployment), ports, the runtime port file, the bundled server, state dir
+- [Environment variables](/reference/environment-variables), the full env-var surface (the server reads many more than the CLI)
+- [Configuration](/reference/configuration), `settings.json` and file/dir locations
+- [MCP tools reference](/reference/mcp-tools), the four MCP servers and their tool/input shapes
+- [Tools & MCP API](/reference/rest-api/tools-and-mcp), the `/api/mcp/*` endpoints and `GET /api/mcp/config`

@@ -1,16 +1,16 @@
 ---
 title: Teams API
-description: REST reference for teams and their sub-resources — CRUD, agent membership, the Know-Your-Team onboarding gate, team rules, and the peer-chat room.
+description: REST reference for teams and their sub-resources: CRUD, agent membership, the Know-Your-Team onboarding gate, team rules, and the peer-chat room.
 ---
 REST surface for [teams](/appendices/glossary) and everything scoped to a team: team CRUD, agent→team membership, the per-team "Know Your Team" onboarding flags, the durable team-rules text, and the mixed-runtime peer-chat room (read + the explicit exchange kickoff).
 
-Teams are stored in the SQLite `teams` table; agent membership is the nullable `agents.teamId` FK (one-to-one — an agent belongs to at most one team). Onboarding flags and team rules are NOT tables — they are JSON blobs in the `settings` key/value table under the keys `team-onboarding:<teamId>` and `team-rules:<teamId>`. The peer-chat room is the `team_chat` table (the same one the [TeamChat MCP server](/reference/rest-api/tools-and-mcp) writes).
+Teams are stored in the SQLite `teams` table; agent membership is the nullable `agents.teamId` FK (one-to-one: an agent belongs to at most one team). Onboarding flags and team rules are NOT tables; they are JSON blobs in the `settings` key/value table under the keys `team-onboarding:<teamId>` and `team-rules:<teamId>`. The peer-chat room is the `team_chat` table (the same one the [TeamChat MCP server](/reference/rest-api/tools-and-mcp) writes).
 
 <Note>
 Deleting a team **orphans** its agents (sets `agents.teamId = null`) rather than deleting them, and cleans up the team-scoped `settings` rows. The agents themselves are managed through the [agents API](/reference/rest-api/agents).
 </Note>
 
-All POST/PATCH/PUT routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Two different path-param names appear in this group: the team CRUD + onboarding routes use `:id`, while the team-rules routes use `:teamId` — both are the team id, the difference is purely the registered param name.
+All POST/PATCH/PUT routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Two different path-param names appear in this group: the team CRUD + onboarding routes use `:id`, while the team-rules routes use `:teamId`; both are the team id, the difference is purely the registered param name.
 
 ## Routes
 
@@ -35,18 +35,18 @@ All POST/PATCH/PUT routes read a JSON body parsed by `express.json({ limit: '2mb
 
 Lists every team with a computed `agentCount` (a `COUNT(*)` subquery over `agents.team_id`). Also returns the full agent→team assignment list so a client can patch its fleet store after hydration. Archived teams are excluded unless `includeArchived=true`.
 
-- **Path params** — none.
+- **Path params**: none.
 - **Query params**:
 
 | Param | Type | Default | Notes |
 |---|---|---|---|
 | `includeArchived` | string | `false` | `"true"` includes archived teams (`isArchived = 1`) |
 
-- **Request body** — none.
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`** — the team list plus assignments:
+**`200 OK`**: the team list plus assignments:
 
 ```ts
 {
@@ -67,7 +67,7 @@ Lists every team with a computed `agentCount` (a `COUNT(*)` subquery over `agent
 }
 ```
 
-**`500 Internal Server Error`** — any DB failure:
+**`500 Internal Server Error`**: any DB failure:
 
 ```json
 { "error": "<message>" }
@@ -84,9 +84,9 @@ curl 'http://localhost:18790/api/teams?includeArchived=true'
 
 ## `POST /api/teams`
 
-Creates a team. The server mints a `crypto.randomUUID()` id unless the body supplies a valid UUID `id` — the create-team UI seeds a client-side id so the Boo color-palette preview matches the deployed team (per-team color rotation is seeded off the team id). `name`, `icon`, and `color` are required; everything else is optional and stored as supplied (`null` when omitted).
+Creates a team. The server mints a `crypto.randomUUID()` id unless the body supplies a valid UUID `id`; the create-team UI seeds a client-side id so the Boo color-palette preview matches the deployed team (per-team color rotation is seeded off the team id). `name`, `icon`, and `color` are required; everything else is optional and stored as supplied (`null` when omitted).
 
-- **Path/query params** — none.
+- **Path/query params**: none.
 - **Request body**:
 
 ```ts
@@ -103,19 +103,19 @@ Creates a team. The server mints a `crypto.randomUUID()` id unless the body supp
 
 ### Responses
 
-**`400 Bad Request`** — body is missing or not an object:
+**`400 Bad Request`**: body is missing or not an object:
 
 ```json
 { "error": "invalid JSON" }
 ```
 
-**`400 Bad Request`** — a required field is missing:
+**`400 Bad Request`**: a required field is missing:
 
 ```json
 { "error": "name, icon, and color are required" }
 ```
 
-**`200 OK`** — the created team (note: **200**, not 201):
+**`200 OK`**: the created team (note: **200**, not 201):
 
 ```ts
 {
@@ -135,7 +135,7 @@ Creates a team. The server mints a `crypto.randomUUID()` id unless the body supp
 }
 ```
 
-**`500 Internal Server Error`** — the insert failed:
+**`500 Internal Server Error`**: the insert failed:
 
 ```json
 { "error": "<message>" }
@@ -155,7 +155,7 @@ curl -X POST http://localhost:18790/api/teams \
 
 Partially updates a team. Only the fields present in the body are written; `updatedAt` is always refreshed. `isArchived` is coerced to `0` or `1` from the body's truthiness. Returns the full updated row (including a recomputed `agentCount`).
 
-- **Path params** — `id` (team id).
+- **Path params**: `id` (team id).
 - **Request body** (all optional):
 
 ```ts
@@ -171,25 +171,25 @@ Partially updates a team. Only the fields present in the body are written; `upda
 
 ### Responses
 
-**`400 Bad Request`** — the `:id` segment is missing:
+**`400 Bad Request`**: the `:id` segment is missing:
 
 ```json
 { "error": "team id required" }
 ```
 
-**`400 Bad Request`** — the body is missing or not an object:
+**`400 Bad Request`**: the body is missing or not an object:
 
 ```json
 { "error": "invalid JSON" }
 ```
 
-**`404 Not Found`** — no team with that id:
+**`404 Not Found`**: no team with that id:
 
 ```json
 { "error": "team not found" }
 ```
 
-**`200 OK`** — the updated team:
+**`200 OK`**: the updated team:
 
 ```ts
 {
@@ -209,7 +209,7 @@ Partially updates a team. Only the fields present in the body are written; `upda
 }
 ```
 
-**`500 Internal Server Error`** — the update failed:
+**`500 Internal Server Error`**: the update failed:
 
 ```json
 { "error": "<message>" }
@@ -229,24 +229,24 @@ curl -X PATCH http://localhost:18790/api/teams/<team-id> \
 
 Deletes the team and orphans its agents. In one handler it (1) sets `teamId = null` on every agent in the team, (2) deletes the team-scoped `settings` rows (`team-rules:<teamId>` and `team-onboarding:<teamId>`), and (3) deletes the team row. The `boo_zero_team_briefs` table FK-cascades on the team delete, so per-team briefs clean themselves.
 
-- **Path params** — `id` (team id).
-- **Request body** — none.
+- **Path params**: `id` (team id).
+- **Request body**: none.
 
 ### Responses
 
-**`400 Bad Request`** — the `:id` segment is missing:
+**`400 Bad Request`**: the `:id` segment is missing:
 
 ```json
 { "error": "team id required" }
 ```
 
-**`200 OK`** — the team was deleted and its agents orphaned:
+**`200 OK`**: the team was deleted and its agents orphaned:
 
 ```json
 { "ok": true }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -268,7 +268,7 @@ curl -X DELETE http://localhost:18790/api/teams/<team-id>
 
 Assigns an agent to the team. This is an **upsert**: if the agent row does not exist it is created (with `status: 'idle'` and `gatewayId = agentId`); if it exists, only its `teamId` and `updatedAt` are set. The optional `agentName` is used as the display name when creating a new row (it defaults to the `agentId`).
 
-- **Path params** — `id` (team id).
+- **Path params**: `id` (team id).
 - **Request body**:
 
 ```ts
@@ -280,25 +280,25 @@ Assigns an agent to the team. This is an **upsert**: if the agent row does not e
 
 ### Responses
 
-**`400 Bad Request`** — the `:id` segment is missing:
+**`400 Bad Request`**: the `:id` segment is missing:
 
 ```json
 { "error": "team id required" }
 ```
 
-**`400 Bad Request`** — the body is missing/non-object or has no `agentId`:
+**`400 Bad Request`**: the body is missing/non-object or has no `agentId`:
 
 ```json
 { "error": "agentId is required" }
 ```
 
-**`200 OK`** — the agent was assigned (created or updated):
+**`200 OK`**: the agent was assigned (created or updated):
 
 ```json
 { "ok": true }
 ```
 
-**`500 Internal Server Error`** — the upsert failed:
+**`500 Internal Server Error`**: the upsert failed:
 
 ```json
 { "error": "<message>" }
@@ -316,26 +316,26 @@ curl -X POST http://localhost:18790/api/teams/<team-id>/agents \
 
 ## `DELETE /api/teams/:id/agents/:agentId`
 
-Removes an agent from a team by setting its `teamId` to `null` — the `:id` (team) segment is not used in the predicate. The agent row is not deleted.
+Removes an agent from a team by setting its `teamId` to `null`; the `:id` (team) segment is not used in the predicate. The agent row is not deleted.
 
-- **Path params** — `id` (team id, unused in the query), `agentId` (the agent to orphan).
-- **Request body** — none.
+- **Path params**: `id` (team id, unused in the query), `agentId` (the agent to orphan).
+- **Request body**: none.
 
 ### Responses
 
-**`400 Bad Request`** — the `:agentId` segment is missing:
+**`400 Bad Request`**: the `:agentId` segment is missing:
 
 ```json
 { "error": "agentId required" }
 ```
 
-**`200 OK`** — the agent's `teamId` was cleared:
+**`200 OK`**: the agent's `teamId` was cleared:
 
 ```json
 { "ok": true }
 ```
 
-**`500 Internal Server Error`** — the update failed:
+**`500 Internal Server Error`**: the update failed:
 
 ```json
 { "error": "<message>" }
@@ -351,20 +351,20 @@ curl -X DELETE http://localhost:18790/api/teams/<team-id>/agents/<agent-id>
 
 ## `GET /api/teams/:id/onboarding`
 
-Reads the per-team "Know Your Team" onboarding state. Both `agentsIntroduced` and `userIntroduced` must be true before the normal group-chat composer unlocks. `userIntroText` is the user's self-introduction — the source of truth injected into the team context preamble on every group-chat message. When no row exists, the default `{ false, false, '' }` is returned.
+Reads the per-team "Know Your Team" onboarding state. Both `agentsIntroduced` and `userIntroduced` must be true before the normal group-chat composer unlocks. `userIntroText` is the user's self-introduction, the source of truth injected into the team context preamble on every group-chat message. When no row exists, the default `{ false, false, '' }` is returned.
 
-- **Path params** — `id` (team id).
-- **Request body** — none.
+- **Path params**: `id` (team id).
+- **Request body**: none.
 
 ### Responses
 
-**`400 Bad Request`** — the `:id` segment is missing:
+**`400 Bad Request`**: the `:id` segment is missing:
 
 ```json
 { "error": "team id required" }
 ```
 
-**`200 OK`** — the onboarding state (defaults when unset):
+**`200 OK`**: the onboarding state (defaults when unset):
 
 ```ts
 {
@@ -374,7 +374,7 @@ Reads the per-team "Know Your Team" onboarding state. Both `agentsIntroduced` an
 }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -390,9 +390,9 @@ curl http://localhost:18790/api/teams/<team-id>/onboarding
 
 ## `PATCH /api/teams/:id/onboarding`
 
-Merge-updates the onboarding state and returns the full updated state. Only fields with the correct type are applied — a non-boolean `agentsIntroduced`/`userIntroduced` or non-string `userIntroText` is ignored and the current value is kept. `userIntroText` is truncated to 4000 characters.
+Merge-updates the onboarding state and returns the full updated state. Only fields with the correct type are applied; a non-boolean `agentsIntroduced`/`userIntroduced` or non-string `userIntroText` is ignored and the current value is kept. `userIntroText` is truncated to 4000 characters.
 
-- **Path params** — `id` (team id).
+- **Path params**: `id` (team id).
 - **Request body** (all optional, merged with current state):
 
 ```ts
@@ -405,19 +405,19 @@ Merge-updates the onboarding state and returns the full updated state. Only fiel
 
 ### Responses
 
-**`400 Bad Request`** — the `:id` segment is missing:
+**`400 Bad Request`**: the `:id` segment is missing:
 
 ```json
 { "error": "team id required" }
 ```
 
-**`400 Bad Request`** — the body is missing or not an object:
+**`400 Bad Request`**: the body is missing or not an object:
 
 ```json
 { "error": "invalid JSON" }
 ```
 
-**`200 OK`** — the merged, updated state:
+**`200 OK`**: the merged, updated state:
 
 ```ts
 {
@@ -427,7 +427,7 @@ Merge-updates the onboarding state and returns the full updated state. Only fiel
 }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -451,24 +451,24 @@ Reads the durable per-team rules text. The rules are captured either through the
 This route uses the param name `:teamId` (not `:id` like the routes above). The value is still the team id.
 </Note>
 
-- **Path params** — `teamId` (team id).
-- **Request body** — none.
+- **Path params**: `teamId` (team id).
+- **Request body**: none.
 
 ### Responses
 
-**`400 Bad Request`** — the `:teamId` segment is missing:
+**`400 Bad Request`**: the `:teamId` segment is missing:
 
 ```json
 { "error": "team id required" }
 ```
 
-**`200 OK`** — the rules text (empty when unset):
+**`200 OK`**: the rules text (empty when unset):
 
 ```ts
 { content: string }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -486,7 +486,7 @@ curl http://localhost:18790/api/team-rules/<team-id>
 
 Replaces the team-rules text. `content` is required and must be a string; it is rejected (not truncated) when it exceeds 4000 characters. Returns the stored value.
 
-- **Path params** — `teamId` (team id).
+- **Path params**: `teamId` (team id).
 - **Request body**:
 
 ```ts
@@ -495,37 +495,37 @@ Replaces the team-rules text. `content` is required and must be a string; it is 
 
 ### Responses
 
-**`400 Bad Request`** — the `:teamId` segment is missing:
+**`400 Bad Request`**: the `:teamId` segment is missing:
 
 ```json
 { "error": "team id required" }
 ```
 
-**`400 Bad Request`** — the body is missing or not an object:
+**`400 Bad Request`**: the body is missing or not an object:
 
 ```json
 { "error": "invalid JSON" }
 ```
 
-**`400 Bad Request`** — `content` is absent or not a string:
+**`400 Bad Request`**: `content` is absent or not a string:
 
 ```json
 { "error": "content (string) required" }
 ```
 
-**`400 Bad Request`** — `content` exceeds the 4000-character cap:
+**`400 Bad Request`**: `content` exceeds the 4000-character cap:
 
 ```json
 { "error": "content exceeds 4000 characters" }
 ```
 
-**`200 OK`** — the stored rules:
+**`200 OK`**: the stored rules:
 
 ```ts
 { content: string }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -543,29 +543,29 @@ curl -X PUT http://localhost:18790/api/team-rules/<team-id> \
 
 ## `GET /api/team-chat`
 
-Cursor-reads the team's mixed-runtime peer-chat room — the durable `team_chat` table where every member posts as a named peer. The model-facing write half is the [TeamChat MCP server](/reference/rest-api/tools-and-mcp) at `/api/mcp/teamchat`; this REST route is the UI-facing read. Pass `teamId` (the room resolves to `team:<teamId>`) or a `roomId` directly; one of the two is required. `sinceSeq` is the cursor (posts with `seq > sinceSeq`).
+Cursor-reads the team's mixed-runtime peer-chat room, the durable `team_chat` table where every member posts as a named peer. The model-facing write half is the [TeamChat MCP server](/reference/rest-api/tools-and-mcp) at `/api/mcp/teamchat`; this REST route is the UI-facing read. Pass `teamId` (the room resolves to `team:<teamId>`) or a `roomId` directly; one of the two is required. `sinceSeq` is the cursor (posts with `seq > sinceSeq`).
 
-- **Path params** — none.
+- **Path params**: none.
 - **Query params**:
 
 | Param | Type | Default | Notes |
 |---|---|---|---|
-| `teamId` | string | — | Resolves the room id to `team:<teamId>` |
-| `roomId` | string | — | An explicit room id (overrides `teamId`) |
+| `teamId` | string |, | Resolves the room id to `team:<teamId>` |
+| `roomId` | string |, | An explicit room id (overrides `teamId`) |
 | `sinceSeq` | string (number) | `0` | Return posts with `seq > sinceSeq`; non-finite falls back to `0` |
 | `limit` | string (number) | `1000` (data layer) | Cap the batch; ignored if non-finite |
 
-- **Request body** — none.
+- **Request body**: none.
 
 ### Responses
 
-**`400 Bad Request`** — neither `teamId` nor `roomId` was supplied:
+**`400 Bad Request`**: neither `teamId` nor `roomId` was supplied:
 
 ```json
 { "error": "teamId or roomId is required" }
 ```
 
-**`200 OK`** — the room posts in ascending `seq` order plus the next cursor:
+**`200 OK`**: the room posts in ascending `seq` order plus the next cursor:
 
 ```ts
 {
@@ -584,7 +584,7 @@ Cursor-reads the team's mixed-runtime peer-chat room — the durable `team_chat`
 }
 ```
 
-**`500 Internal Server Error`** — a DB failure:
+**`500 Internal Server Error`**: a DB failure:
 
 ```json
 { "error": "<message>" }
@@ -600,9 +600,9 @@ curl 'http://localhost:18790/api/team-chat?teamId=<team-id>&sinceSeq=0'
 
 ## `POST /api/team-chat/exchange`
 
-Kicks off ONE bounded peer-chat exchange for a team: it assembles the team's active members into chat participants, drives a bounded round of turns through the real runtime adapters, and projects the speaker-selection / turn-bound lifecycle into the observability event log. This is a deliberate, invokable trigger — not an autonomous loop. The runtime adapters attach their MCP client to this server's `/api/mcp/*` over a server-trusted loopback URL (never the client `Host`). The exchange is aborted between turns if the initiating request disconnects, and a per-room re-entrancy lock refuses an overlapping exchange.
+Kicks off ONE bounded peer-chat exchange for a team: it assembles the team's active members into chat participants, drives a bounded round of turns through the real runtime adapters, and projects the speaker-selection / turn-bound lifecycle into the observability event log. This is a deliberate, invokable trigger, not an autonomous loop. The runtime adapters attach their MCP client to this server's `/api/mcp/*` over a server-trusted loopback URL (never the client `Host`). The exchange is aborted between turns if the initiating request disconnects, and a per-room re-entrancy lock refuses an overlapping exchange.
 
-- **Path/query params** — none.
+- **Path/query params**: none.
 - **Request body**:
 
 ```ts
@@ -616,19 +616,19 @@ Kicks off ONE bounded peer-chat exchange for a team: it assembles the team's act
 
 ### Responses
 
-**`400 Bad Request`** — missing `teamId`:
+**`400 Bad Request`**: missing `teamId`:
 
 ```json
 { "error": "teamId is required" }
 ```
 
-**`409 Conflict`** — an exchange is already running for this room (the per-room lock refuses an overlapping kickoff):
+**`409 Conflict`**: an exchange is already running for this room (the per-room lock refuses an overlapping kickoff):
 
 ```json
 { "ok": false, "error": "an exchange is already running for this room" }
 ```
 
-**`200 OK`** — the exchange ran to a bound and returned its result:
+**`200 OK`**: the exchange ran to a bound and returned its result:
 
 ```ts
 {
@@ -642,19 +642,19 @@ Kicks off ONE bounded peer-chat exchange for a team: it assembles the team's act
 }
 ```
 
-**`404 Not Found`** — the team does not exist (the exchange returned `error: 'team not found'`):
+**`404 Not Found`**: the team does not exist (the exchange returned `error: 'team not found'`):
 
 ```json
 { "ok": false, "error": "team not found" }
 ```
 
-**`422 Unprocessable Entity`** — the exchange was refused for any other reason (e.g. `team has no agents`, `unknown first speaker: <id>`, `budget_paused:<scope>`):
+**`422 Unprocessable Entity`**: the exchange was refused for any other reason (e.g. `team has no agents`, `unknown first speaker: <id>`, `budget_paused:<scope>`):
 
 ```json
 { "ok": false, "error": "<reason>" }
 ```
 
-**`500 Internal Server Error`** — an unexpected throw:
+**`500 Internal Server Error`**: an unexpected throw:
 
 ```json
 { "error": "<message>" }
@@ -680,10 +680,10 @@ Every error response on these routes is the standard envelope `{ error: string }
 
 ## See also
 
-- [Using teams](/using/teams) — create, manage leaders, rules, and color collections in the UI
+- [Using teams](/using/teams): create, manage leaders, rules, and color collections in the UI
 - [Group chat + the Know-Your-Team gate](/using/group-chat)
-- [Mixed-runtime peer chat](/concepts/peer-chat) — rooms, speaker selection, `isUser=false`
-- [Agents API](/reference/rest-api/agents) — the agent registry these team-membership routes reference
-- [Tools & MCP API](/reference/rest-api/tools-and-mcp) — the TeamChat MCP server (`/api/mcp/teamchat`) write half
-- [Database schema](/reference/database-schema) — the `teams`, `agents`, `settings`, and `team_chat` tables
+- [Mixed-runtime peer chat](/concepts/peer-chat): rooms, speaker selection, `isUser=false`
+- [Agents API](/reference/rest-api/agents): the agent registry these team-membership routes reference
+- [Tools & MCP API](/reference/rest-api/tools-and-mcp): the TeamChat MCP server (`/api/mcp/teamchat`) write half
+- [Database schema](/reference/database-schema): the `teams`, `agents`, `settings`, and `team_chat` tables
 - [REST API overview](/reference/rest-api/index)

@@ -12,16 +12,16 @@ The whole surface is the **agent detail view** (`AgentDetailView`), backed by `/
 Agent file reads and writes go through the connected runtime. The editor and personality sliders are no-ops while the connection is down (`saving` never fires; the file PUT returns `503 gateway_disconnected`).
 </Note>
 
-- A connected runtime (OpenClaw Gateway, or a non-OpenClaw runtime — see [Connecting runtimes](/runtimes/connecting-runtimes)).
+- A connected runtime (OpenClaw Gateway, or a non-OpenClaw runtime, see [Connecting runtimes](/runtimes/connecting-runtimes)).
 - At least one Boo. If you have none, create one (see [Create a Boo](#create-a-boo)).
 
 ## Open the agent detail view
 
 Three entry points open the detail view (they all call `openAgent(agentId)`):
 
-- **The agent list** — click a Boo in the left column (`AgentListColumn`).
-- **The Ghost Graph** — right-click a Boo node → **Chat**, **Edit personality**, or **Edit files**. See [Ghost Graph](/using/ghost-graph).
-- **The fleet sidebar** — click a Boo's edit affordance.
+- **The agent list**: click a Boo in the left column (`AgentListColumn`).
+- **The Ghost Graph**: right-click a Boo node → **Chat**, **Edit personality**, or **Edit files**. See [Ghost Graph](/using/ghost-graph).
+- **The fleet sidebar**: click a Boo's edit affordance.
 
 The view is a 3-panel resizable layout under one shared 44 px header (the agent's avatar, name, connection dot, and the GitHub Star pill):
 
@@ -35,7 +35,7 @@ The view is a 3-panel resizable layout under one shared 44 px header (the agent'
 
 | Panel | What it is |
 |---|---|
-| **Chat** (left, 45%) | A 1:1 chat with this Boo. The panel's own header is suppressed — identity lives in the shared row above. |
+| **Chat** (left, 45%) | A 1:1 chat with this Boo. The panel's own header is suppressed; identity lives in the shared row above. |
 | **MiniGraph** (top-right, 55%) | A compact React Flow canvas of this Boo plus its skills and resources, with drag-to-install. |
 | **Inline editor** (bottom-right, 45%) | The tabbed editor: personality, permissions, activity, and the agent files. |
 
@@ -53,7 +53,7 @@ The inline editor's file tabs are a single CodeMirror 6 instance (Markdown highl
 | `IDENTITY.md` | IDENTITY | Name, vibe, and emoji. |
 | `TOOLS.md` | TOOLS | Local tool notes and conventions. Drives the skill nodes on the graph. |
 | `AGENTS.md` | AGENTS | Operating instructions, priorities, and routing rules. Drives the dependency edges on the graph. |
-| `USER.md` | USER | User profile and preferences (extra tab — shown when non-empty). |
+| `USER.md` | USER | User profile and preferences (extra tab, shown when non-empty). |
 | `HEARTBEAT.md` | HEARTBEAT | Checklist for heartbeat runs (extra tab). |
 | `MEMORY.md` | MEMORY | Durable per-agent memory (extra tab). |
 
@@ -65,7 +65,7 @@ The inline editor's file tabs are a single CodeMirror 6 instance (Markdown highl
 4. **Saving TOOLS.md or AGENTS.md** also triggers a Ghost Graph refresh, so new skill nodes or routing edges appear without a manual reload.
 
 <Tip>
-You don't have to save before switching agents or leaving the view — the editor saves all dirty files automatically on unmount (best-effort). Saving explicitly is still safer when the connection is flaky.
+You don't have to save before switching agents or leaving the view; the editor saves all dirty files automatically on unmount (best-effort). Saving explicitly is still safer when the connection is flaky.
 </Tip>
 
 ## Tune the personality
@@ -84,5 +84,5 @@ The **Personality** tab has five sliders, each 0–100. Moving a slider does not
 
 A commit writes to **two** places:
 
-1. **SQLite** (`POST /api/personality`) — the source of truth for the slider values. The handler stores a `{ values, customText }` JSON wrapper in the agent's `personality_config` column (upserting the agent row if it doesn't exist yet).
-2. **`SOUL.md`** (best-effort) — the sliders are rendered into Markdown sections and merged into `SOUL.md` below a `---` separator and a `
+1. **SQLite** (`POST /api/personality`): the source of truth for the slider values. The handler stores a `{ values, customText }` JSON wrapper in the agent's `personality_config` column (upserting the agent row if it doesn't exist yet).
+2. **`SOUL.md`** (best-effort): the sliders are rendered into Markdown sections and merged into `SOUL.md` below a `---` separator and a `

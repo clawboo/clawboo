@@ -5,12 +5,12 @@ description: OpenClaw RuntimeAdapter that wraps the Gateway client into the norm
 | | |
 |---|---|
 | **Version** | `0.1.0` |
-| **Purity** | pure (deps: `@clawboo/events`, `@clawboo/executor`, `@clawboo/gateway-client`, `@clawboo/logger`, `@clawboo/protocol`; reuses the SAME pure frame parsers the SPA pipeline uses — no Node/WS imports of its own) |
+| **Purity** | pure (deps: `@clawboo/events`, `@clawboo/executor`, `@clawboo/gateway-client`, `@clawboo/logger`, `@clawboo/protocol`; reuses the SAME pure frame parsers the SPA pipeline uses, no Node/WS imports of its own) |
 | **Purpose** | The reference [`RuntimeAdapter`](/internals/runtime-adapter): wraps the OpenClaw Gateway client so `start` delivers a message (`chat.send`), `events` normalizes the Gateway frame stream into the `RuntimeEvent` union, and `setModel`/`writeContext`/`abort` map onto the Gateway's typed helpers. |
 | **Workspace deps** | `@clawboo/events`, `@clawboo/executor`, `@clawboo/gateway-client`, `@clawboo/logger`, `@clawboo/protocol` |
 | **External deps** | none (runtime) · `tsup`, `typescript`, `vitest`, `@clawboo/tsconfig` (dev) |
 
-This is the first adapter behind the `RuntimeAdapter` seam, and the template the other four runtimes follow. It changes nothing about how OpenClaw runs — it only re-expresses a live Gateway session as the normalized lifecycle stream. The adapter depends on the structural [`OpenClawGatewayClient`](#types--interfaces) shape (not the concrete `GatewayClient` class), so a test double or the server's operator-client slice can be passed in.
+This is the first adapter behind the `RuntimeAdapter` seam, and the template the other four runtimes follow. It changes nothing about how OpenClaw runs; it only re-expresses a live Gateway session as the normalized lifecycle stream. The adapter depends on the structural [`OpenClawGatewayClient`](#types--interfaces) shape (not the concrete `GatewayClient` class), so a test double or the server's operator-client slice can be passed in.
 
 ## Public API
 
@@ -24,19 +24,19 @@ All exports come from `src/index.ts`. The package declares a single `.` export i
 
 **`OpenClawAdapter` members:**
 
-- `capabilities(): Capabilities` — returns `{ streaming: true, mcp: false, worktrees: false, resume: true, toolApproval: true, models: [], runtimeClass: 'connected-substrate', nativeSkills: 'preserve', nativeMemory: 'preserve', nativeChannels: 'gateway', nativeScheduler: true }`. `nativeHome` is deliberately omitted — the Gateway owns its own state dir. The `connected-substrate` class is what makes the one-shot executor runner refuse OpenClaw by construction: its runs ride the LIVE Gateway session over this adapter's long-lived client.
-- `health(): Promise<HealthResult>` — races `client.agents.list()` against a 2 s timeout; any throw → `{ ok: false, message }`, else `{ ok: true }`.
-- `start(_task: TaskHandle, opts: StartOpts): Promise<RunHandle>` — concatenates `opts.context` (if any) above `opts.message`, then calls the raw RPC `chat.send` with `{ sessionKey, message, deliver: false, idempotencyKey: crypto.randomUUID() }`. The `runId` is **not** returned here — it late-binds on the first streaming frame inside `events()`, so the handle is `{ adapterId: 'openclaw', sessionKey, runId: null }`. A `{ok:true}` ack that carries `accepted: false` or a no-run status (`no-active-run` / `no_active_run` / `dropped` / `rejected` / `no_session`) throws "acknowledged but did not start a run" so the caller can release/retry instead of blocking on frames that never come.
-- `events(run: RunHandle): AsyncIterable<RuntimeEvent>` — subscribes eagerly (on call, not on first pull) to `client.onEvent`, filters frames to `run.sessionKey`, late/re-binds `run.runId` from each frame, accumulates non-reasoning `text-delta` text, and yields the mapped stream via a bounded `createAsyncQueue` (`max: 1000`). It is a continuous session observer — it yields across multiple runs on the same long-lived session. Consumer termination (`return()`) unsubscribes.
-- `abort(run: RunHandle): Promise<void>` — two-tier teardown via `Promise.allSettled`: the surgical per-run `chat.abort(sessionKey, runId)` only when a `runId` is bound, PLUS the heavier `sessions.abort(sessionKey, runId?)` backstop ALWAYS (covers the runId-not-yet-bound race and queued/pending work).
-- `setModel(run: RunHandle, model: string): Promise<void>` — `sessions.patch(sessionKey, { model })`.
-- `writeContext(run: RunHandle, key: string, value: string): Promise<void>` — `agents.files.set(agentId, key, value)`, recovering `agentId` from the `agent:<agentId>:<session>` sessionKey shape.
+- `capabilities(): Capabilities`: returns `{ streaming: true, mcp: false, worktrees: false, resume: true, toolApproval: true, models: [], runtimeClass: 'connected-substrate', nativeSkills: 'preserve', nativeMemory: 'preserve', nativeChannels: 'gateway', nativeScheduler: true }`. `nativeHome` is deliberately omitted; the Gateway owns its own state dir. The `connected-substrate` class is what makes the one-shot executor runner refuse OpenClaw by construction: its runs ride the LIVE Gateway session over this adapter's long-lived client.
+- `health(): Promise<HealthResult>`: races `client.agents.list()` against a 2 s timeout; any throw → `{ ok: false, message }`, else `{ ok: true }`.
+- `start(_task: TaskHandle, opts: StartOpts): Promise<RunHandle>`: concatenates `opts.context` (if any) above `opts.message`, then calls the raw RPC `chat.send` with `{ sessionKey, message, deliver: false, idempotencyKey: crypto.randomUUID() }`. The `runId` is **not** returned here; it late-binds on the first streaming frame inside `events()`, so the handle is `{ adapterId: 'openclaw', sessionKey, runId: null }`. A `{ok:true}` ack that carries `accepted: false` or a no-run status (`no-active-run` / `no_active_run` / `dropped` / `rejected` / `no_session`) throws "acknowledged but did not start a run" so the caller can release/retry instead of blocking on frames that never come.
+- `events(run: RunHandle): AsyncIterable<RuntimeEvent>`: subscribes eagerly (on call, not on first pull) to `client.onEvent`, filters frames to `run.sessionKey`, late/re-binds `run.runId` from each frame, accumulates non-reasoning `text-delta` text, and yields the mapped stream via a bounded `createAsyncQueue` (`max: 1000`). It is a continuous session observer; it yields across multiple runs on the same long-lived session. Consumer termination (`return()`) unsubscribes.
+- `abort(run: RunHandle): Promise<void>`: two-tier teardown via `Promise.allSettled`: the surgical per-run `chat.abort(sessionKey, runId)` only when a `runId` is bound, PLUS the heavier `sessions.abort(sessionKey, runId?)` backstop ALWAYS (covers the runId-not-yet-bound race and queued/pending work).
+- `setModel(run: RunHandle, model: string): Promise<void>`: `sessions.patch(sessionKey, { model })`.
+- `writeContext(run: RunHandle, key: string, value: string): Promise<void>`: `agents.files.set(agentId, key, value)`, recovering `agentId` from the `agent:<agentId>:<session>` sessionKey shape.
 
 ### Functions
 
 | Export | Signature | Contract |
 |---|---|---|
-| `isTerminalFrame` | `(frame: EventFrame) => boolean` | True when a `chat` frame represents a run terminal — its parsed payload `state` is `final`, `aborted`, or `error`. Non-`chat` frames are never terminal. |
+| `isTerminalFrame` | `(frame: EventFrame) => boolean` | True when a `chat` frame represents a run terminal; its parsed payload `state` is `final`, `aborted`, or `error`. Non-`chat` frames are never terminal. |
 | `mapFrameToRuntimeEvents` | `(frame: EventFrame, ctx: MapContext, nextSeq: () => number, now?: () => number, accumulatedText?: string) => RuntimeEvent[]` | Pure frame→`RuntimeEvent` mapper. Stateless except for the optional `accumulatedText` (used to give an aborted run a non-empty summary, since the Gateway drops streamed text on abort). `chat` frames: a `delta` state emits assistant + reasoning `text-delta`; tool calls/results ride either delta or final; `final`→`done reason:'success'`, `aborted`→`done reason:'aborted'`, `error`→a fatal `error` + `done reason:'error'`. `agent` frames: lifecycle `start`/`end`→`status` (`running`/`turn-complete`), `error`→fatal `error`; data text→`text-delta` (channel `reasoning` when `isReasoningStream(stream)`, else `assistant`). Unknown events yield `[]`. Reuses the SAME pure parsers as the SPA (`parseChatPayload`, `parseAgentPayload`, `isReasoningStream`, `parseMessage`, `extractText`, `extractThinking`). |
 
 ### Types & interfaces
@@ -44,7 +44,7 @@ All exports come from `src/index.ts`. The package declares a single `.` export i
 | Export | Kind | Contract |
 |---|---|---|
 | `OpenClawGatewayClient` | interface | The structural slice of the Gateway client the adapter uses (the concrete `GatewayClient` is assignable; tests pass an in-memory double). Members: `onEvent(handler) => () => void` · `call<T>(method, params?): Promise<T>` (raw RPC, used for `chat.send`) · `agents.list()` + `agents.files.set(agentId, name, content)` · `sessions.patch(key, { model? })` + `sessions.abort(key, runId?)` · `chat.abort(sessionKey, runId)`. |
-| `MapContext` | interface | `{ runId: string \| null; sessionId: string \| null }` — the ids the mapper stamps onto every emitted `RuntimeEvent` base (`runId` is late-bound and may be `null` before binding). |
+| `MapContext` | interface | `{ runId: string \| null; sessionId: string \| null }`, the ids the mapper stamps onto every emitted `RuntimeEvent` base (`runId` is late-bound and may be `null` before binding). |
 
 <Note>
 The `Capabilities`, `HealthResult`, `RunHandle`, `RuntimeAdapter`, `RuntimeEvent`, `RuntimeEventBase`, `StartOpts`, and `TaskHandle` types referenced above are owned by [`@clawboo/executor`](/reference/packages/executor); `EventFrame`, `AgentsListResult`, and `SessionPatchResult` come from [`@clawboo/gateway-client`](/reference/packages/gateway-client). None are re-exported here.
@@ -52,11 +52,11 @@ The `Capabilities`, `HealthResult`, `RunHandle`, `RuntimeAdapter`, `RuntimeEvent
 
 ## Used by
 
-- `apps/web/src/features/group-chat/useBoardOrchestration.ts` — instantiates `new OpenClawAdapter(client)` as the `RuntimeAdapter` for the in-browser board-orchestration observer.
-- `apps/web/server/lib/teamChat/runTeamExchange.ts` — wraps the operator client in `OpenClawAdapter` to drive a peer-chat turn.
-- `apps/web/server/lib/routines/openclawDispatch.ts` — imports `OpenClawAdapter` + `OpenClawGatewayClient` for the connected-substrate routine dispatcher (uses the adapter's `start`/`events`/`abort` slice; `makeAdapter` is a test seam).
-- `apps/web/server/lib/routines/wakeBridge.ts` — probes a scheduled OpenClaw fire via `new OpenClawAdapter(operatorClient)`.
-- `apps/web/server/lib/agentSource/openClawAgentSource.ts` — exposes its operator client typed as `OpenClawGatewayClient`.
+- `apps/web/src/features/group-chat/useBoardOrchestration.ts`, instantiates `new OpenClawAdapter(client)` as the `RuntimeAdapter` for the in-browser board-orchestration observer.
+- `apps/web/server/lib/teamChat/runTeamExchange.ts`, wraps the operator client in `OpenClawAdapter` to drive a peer-chat turn.
+- `apps/web/server/lib/routines/openclawDispatch.ts`, imports `OpenClawAdapter` + `OpenClawGatewayClient` for the connected-substrate routine dispatcher (uses the adapter's `start`/`events`/`abort` slice; `makeAdapter` is a test seam).
+- `apps/web/server/lib/routines/wakeBridge.ts`, probes a scheduled OpenClaw fire via `new OpenClawAdapter(operatorClient)`.
+- `apps/web/server/lib/agentSource/openClawAgentSource.ts`, exposes its operator client typed as `OpenClawGatewayClient`.
 
 ## Source
 
@@ -64,8 +64,8 @@ The `Capabilities`, `HealthResult`, `RunHandle`, `RuntimeAdapter`, `RuntimeEvent
 
 ## See also
 
-- [@clawboo/executor](/reference/packages/executor) — the `RuntimeAdapter` trait + `RuntimeEvent` union this adapter implements.
-- [@clawboo/gateway-client](/reference/packages/gateway-client) — the `GatewayClient` whose structural slice this adapter wraps.
-- [RuntimeAdapter trait](/internals/runtime-adapter) — the cross-runtime contract.
-- [OpenClaw runtime](/runtimes/openclaw) — using the runtime end-to-end.
+- [@clawboo/executor](/reference/packages/executor), the `RuntimeAdapter` trait + `RuntimeEvent` union this adapter implements.
+- [@clawboo/gateway-client](/reference/packages/gateway-client), the `GatewayClient` whose structural slice this adapter wraps.
+- [RuntimeAdapter trait](/internals/runtime-adapter), the cross-runtime contract.
+- [OpenClaw runtime](/runtimes/openclaw), using the runtime end-to-end.
 - Sibling adapters: [@clawboo/adapter-claude-code](/reference/packages/adapter-claude-code), [@clawboo/adapter-codex](/reference/packages/adapter-codex), [@clawboo/adapter-hermes](/reference/packages/adapter-hermes), [@clawboo/adapter-native](/reference/packages/adapter-native).

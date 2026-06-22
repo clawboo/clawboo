@@ -1,10 +1,10 @@
 ---
 title: Marketplace catalog reference
-description: The agent and team catalog — schemas, ID convention, zero-loss invariant, three sources with pinned SHAs, and the codegen/ingestion pipeline.
+description: The agent and team catalog: schemas, ID convention, zero-loss invariant, three sources with pinned SHAs, and the codegen/ingestion pipeline.
 ---
-The marketplace ships a static, in-bundle catalog of **304 agents** and **82 teams**. Every entry is a committed TypeScript literal — the catalog is browsed and deployed entirely client-side, with no network fetch at runtime. Three of the agent sources (agency-agents, awesome-openclaw) and three of the team files are **codegen'd** from pinned upstream commits by `scripts/ingest-marketplace-content.ts`; the rest are hand-written. A CI gate (`pnpm verify:ingest`) re-derives the codegen'd files in memory and fails on drift.
+The marketplace ships a static, in-bundle catalog of **304 agents** and **82 teams**. Every entry is a committed TypeScript literal; the catalog is browsed and deployed entirely client-side, with no network fetch at runtime. Three of the agent sources (agency-agents, awesome-openclaw) and three of the team files are **codegen'd** from pinned upstream commits by `scripts/ingest-marketplace-content.ts`; the rest are hand-written. A CI gate (`pnpm verify:ingest`) re-derives the codegen'd files in memory and fails on drift.
 
-This page documents the **schemas** (`AgentCatalogEntry`, `TeamTemplate`), the **ID prefix convention**, the **zero-loss `identityTemplate` invariant**, the **three sources + their pinned SHAs**, and the **ingestion mechanism**. It does not enumerate individual entries — browse those in the marketplace UI (the Agents / Teams tabs) or read the committed files under `apps/web/src/features/marketplace/`.
+This page documents the **schemas** (`AgentCatalogEntry`, `TeamTemplate`), the **ID prefix convention**, the **zero-loss `identityTemplate` invariant**, the **three sources + their pinned SHAs**, and the **ingestion mechanism**. It does not enumerate individual entries; browse those in the marketplace UI (the Agents / Teams tabs) or read the committed files under `apps/web/src/features/marketplace/`.
 
 ## At a glance
 
@@ -89,7 +89,7 @@ The four template fields map one-to-one onto the four agent files written when a
 
 ## `TeamTemplate`
 
-A deployable team — metadata plus a list of catalog agent ids. Defined in `apps/web/src/features/teams/types.ts`. First-party teams reference agents by `agentIds` (the inline `agents` array is a deprecated back-compat path kept only so hypothetical user-defined templates still type-check).
+A deployable team, metadata plus a list of catalog agent ids. Defined in `apps/web/src/features/teams/types.ts`. First-party teams reference agents by `agentIds` (the inline `agents` array is a deprecated back-compat path kept only so hypothetical user-defined templates still type-check).
 
 ```ts
 interface TeamTemplate {
@@ -117,7 +117,7 @@ interface TeamTemplate {
 
 ### Resolving a team into deployable agents
 
-`resolveTeamAgents(profile)` (in `teamCatalog.ts`) is the single consumer-facing resolver. For a first-party `TeamTemplate` it walks `agentIds`, looks each one up in `AGENT_CATALOG`, and returns a `ResolvedAgent[]` carrying the full `soulTemplate` / `identityTemplate` / `toolsTemplate` and the team-specific `agentsTemplate` (from `team.routing[agentId]`, falling back to the agent's own `agentsTemplate`). A dangling id is silently skipped — `teamCoverage.test.ts` guards against that. The resolver also handles two legacy input shapes (inline `agents`, and the deprecated `TeamProfile` with shared `skills[]`).
+`resolveTeamAgents(profile)` (in `teamCatalog.ts`) is the single consumer-facing resolver. For a first-party `TeamTemplate` it walks `agentIds`, looks each one up in `AGENT_CATALOG`, and returns a `ResolvedAgent[]` carrying the full `soulTemplate` / `identityTemplate` / `toolsTemplate` and the team-specific `agentsTemplate` (from `team.routing[agentId]`, falling back to the agent's own `agentsTemplate`). A dangling id is silently skipped; `teamCoverage.test.ts` guards against that. The resolver also handles two legacy input shapes (inline `agents`, and the deprecated `TeamProfile` with shared `skills[]`).
 
 ```ts
 interface ResolvedAgent {
@@ -161,7 +161,7 @@ The hard guarantee, asserted for every entry by `agentCatalog.test.ts`:
 expect(e.identityTemplate.length).toBeGreaterThan(500)
 ```
 
-This is what lets the agent-detail modal render the entire original spec before deploy, and what makes a deploy lossless — `IDENTITY.md` receives the source content byte-for-byte (clawboo built-ins receive the synthesized manifest, which is structured around the original fields, not lossy of them).
+This is what lets the agent-detail modal render the entire original spec before deploy, and what makes a deploy lossless; `IDENTITY.md` receives the source content byte-for-byte (clawboo built-ins receive the synthesized manifest, which is structured around the original fields, not lossy of them).
 
 ---
 
@@ -173,7 +173,7 @@ The catalog draws from three sources, all MIT-licensed and (for the two upstream
 |---|---|---|---|---|
 | agency-agents | `agency-agents` | 179 agents | `github.com/msitarzewski/agency-agents` | `64eee9f8e04f69b04e78e150d771a443c64720be` |
 | awesome-openclaw-usecases | `awesome-openclaw` | 110 agents (from 42 usecase files) | `github.com/hesamsheikh/awesome-openclaw-usecases` | `659895e58e2105c6db8fbef39f446c8a786a480c` |
-| clawboo built-ins | `clawboo` | 15 agents | first-party (local TS) | — |
+| clawboo built-ins | `clawboo` | 15 agents | first-party (local TS) |, |
 
 The pinned SHAs are constants in `scripts/lib/ingest-helpers.ts` (`AGENCY_AGENTS_SHA`, `AWESOME_OPENCLAW_SHA`); both the ingest and verify scripts import them, and every generated entry's `sourceUrl` is a GitHub blob URL at the pinned commit.
 
@@ -217,13 +217,13 @@ The result is exported as `CLAWBOO_BUILTIN_AGENTS` → `CLAWBOO_AGENTS`. This fi
 | `teams/awesome-openclaw.ts` | 42 | codegen | hub-spoke; one team per usecase, members grouped by usecase slug |
 | `teams/synthetic.ts` | 30 | codegen | hub-spoke; partitions of agency agents not covered by a workflow team, chunked by domain, `isSynthetic: true` |
 
-The 30 synthetic "Excellence Teams" exist so that **every agency agent appears in at least one team** — the ingest script excludes workflow-covered agents, then partitions the remainder into per-domain clusters. `teams/index.ts` concatenates all four arrays into `TEAM_CATALOG` (it is hand-written and not verified, but the three generated arrays it imports are).
+The 30 synthetic "Excellence Teams" exist so that **every agency agent appears in at least one team**; the ingest script excludes workflow-covered agents, then partitions the remainder into per-domain clusters. `teams/index.ts` concatenates all four arrays into `TEAM_CATALOG` (it is hand-written and not verified, but the three generated arrays it imports are).
 
 ---
 
 ## Ingestion mechanism
 
-The catalog is **committed codegen** — not a runtime fetch, and not hand-maintained line-by-line. The chosen trade-off: a runtime fetch would break offline-first installs; hand-writing ~300-line entries × hundreds of agents is error-prone; committed codegen is auditable in PR diffs and reproducible.
+The catalog is **committed codegen**, not a runtime fetch, and not hand-maintained line-by-line. The chosen trade-off: a runtime fetch would break offline-first installs; hand-writing ~300-line entries × hundreds of agents is error-prone; committed codegen is auditable in PR diffs and reproducible.
 
 ```mermaid
 flowchart LR
@@ -239,9 +239,9 @@ flowchart LR
 pnpm ingest:marketplace   # → tsx scripts/ingest-marketplace-content.ts
 ```
 
-The script fetches both repos' git trees at the pinned SHAs, downloads the raw `.md` files (concurrency 10), processes each into entries, and writes **codegen'd files**: 13 agency domain files + `agency/index.ts` + `awesome-openclaw/usecases.ts` + `awesome-openclaw/index.ts` + `agents/index.ts`, plus the three team files (`agency-workflows.ts`, `awesome-openclaw.ts`, `synthetic.ts`). Every write goes through a `writeFormatted()` helper that runs Prettier (`parser: 'typescript'`, repo config) before flushing — without it the raw renderers emit double-quoted single-line strings that would drift against the formatted committed files.
+The script fetches both repos' git trees at the pinned SHAs, downloads the raw `.md` files (concurrency 10), processes each into entries, and writes **codegen'd files**: 13 agency domain files + `agency/index.ts` + `awesome-openclaw/usecases.ts` + `awesome-openclaw/index.ts` + `agents/index.ts`, plus the three team files (`agency-workflows.ts`, `awesome-openclaw.ts`, `synthetic.ts`). Every write goes through a `writeFormatted()` helper that runs Prettier (`parser: 'typescript'`, repo config) before flushing; without it the raw renderers emit double-quoted single-line strings that would drift against the formatted committed files.
 
-The clawboo built-ins (`agents/clawboo/*`), `teams/clawboo-builtin.ts`, and `teams/index.ts` are **not** part of the ingest pipeline — they are hand-written.
+The clawboo built-ins (`agents/clawboo/*`), `teams/clawboo-builtin.ts`, and `teams/index.ts` are **not** part of the ingest pipeline; they are hand-written.
 
 ### Verify (the CI gate)
 
@@ -253,8 +253,8 @@ pnpm verify:ingest   # → tsx scripts/verify-ingest.ts
 
 The gate runs in two places:
 
-- **`ci.yml`** — a dedicated `verify-ingest` job, parallel to `lint` / `typecheck` / `test` / `build`. Drift blocks PR merge.
-- **`publish.yml`** — a `pnpm verify:ingest` step before `pnpm build`. Drift blocks releases.
+- **`ci.yml`**: a dedicated `verify-ingest` job, parallel to `lint` / `typecheck` / `test` / `build`. Drift blocks PR merge.
+- **`publish.yml`**: a `pnpm verify:ingest` step before `pnpm build`. Drift blocks releases.
 
 Both the ingest renderers and the verifier share the logic in `scripts/lib/ingest-helpers.ts`, so they cannot diverge.
 
