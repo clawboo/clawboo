@@ -1,0 +1,50 @@
+---
+/**
+ * "Star on GitHub" CTA with a live stargazer count. The count is filled by the
+ * delegated script in BaseLayout (fetches api.github.com once, caches in
+ * sessionStorage, counts up, falls back gracefully). variant controls chrome.
+ */
+import Icon from './Icon.astro'
+import { links } from '../lib/site'
+interface Props {
+  variant?: 'pill' | 'solid'
+  label?: string
+  class?: string
+}
+const { variant = 'pill', label = 'Star', class: cls = '' } = Astro.props
+---
+<a
+  href={links.github}
+  target="_blank"
+  rel="noopener noreferrer"
+  class={`cb-star group inline-flex items-center gap-2 font-semibold whitespace-nowrap transition-[transform,box-shadow,border-color] duration-150 ease-out active:scale-[0.98] ${
+    variant === 'solid'
+      ? 'cb-star-solid h-12 rounded-xl px-6 text-[15px] text-white'
+      : 'h-11 rounded-xl border px-4 text-[14px] text-foreground hover:-translate-y-px'
+  } ${variant === 'pill' ? 'surface-raised-tier hover:border-[color:var(--amber)]' : ''} ${cls}`}
+  aria-label="Star Clawboo on GitHub"
+>
+  <Icon name="star" size={16} fill class="text-amber transition-transform duration-200 group-hover:scale-110" />
+  <span>{label}</span>
+  <span
+    data-gh-stars
+    class={`font-data rounded-md px-1.5 py-0.5 text-[12px] tabular-nums ${
+      variant === 'solid' ? 'bg-white/20' : 'bg-amber/15 text-amber'
+    }`}>★</span>
+</a>
+
+<style>
+  .cb-star-solid {
+    background-image: linear-gradient(135deg, #ff4d4d 0%, #c81d3b 100%);
+    box-shadow:
+      0 8px 24px rgb(var(--primary-rgb) / 0.3),
+      0 0 0 1px rgb(var(--primary-rgb) / 0.15),
+      inset 0 1px 0 rgb(255 255 255 / 0.18);
+  }
+  .cb-star-solid:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 12px 30px rgb(var(--primary-rgb) / 0.4),
+      0 0 0 1px rgb(var(--primary-rgb) / 0.2);
+  }
+</style>

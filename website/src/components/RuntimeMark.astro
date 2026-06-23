@@ -1,0 +1,66 @@
+---
+/**
+ * Runtime card: a lettermark tile (or the Boo logo for Native), name, one
+ * honest line, and a connect chip. Lettermarks (not reproduced logos) per the
+ * product's brand convention for non-Anthropic runtimes.
+ */
+import Icon from './Icon.astro'
+interface Props {
+  name: string
+  monogram?: string
+  img?: string
+  tagline: string
+  chip: string
+  chipTone?: 'mint' | 'muted'
+  accent: string
+  featured?: boolean
+}
+const { name, monogram, img, tagline, chip, chipTone = 'muted', accent, featured = false } =
+  Astro.props
+---
+<div
+  class={`cb-runtime surface-raised-tier flex h-full flex-col gap-3 rounded-2xl p-5 transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-1 ${
+    featured ? 'cb-runtime-featured' : ''
+  }`}
+  style={`--accent:${accent}`}
+>
+  <div class="flex items-center gap-3">
+    <div
+      class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+      style={`background:color-mix(in srgb, ${accent} 14%, transparent); border:1px solid color-mix(in srgb, ${accent} 35%, transparent)`}
+    >
+      {img ? (
+        <img src={img} alt="" width="26" height="24" aria-hidden="true" />
+      ) : (
+        <span class="font-display text-[16px] font-extrabold" style={`color:${accent}`}>{monogram}</span>
+      )}
+    </div>
+    <div class="min-w-0">
+      <div class="font-display text-[15px] font-bold leading-tight text-foreground">{name}</div>
+      <span
+        class={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+          chipTone === 'mint' ? 'bg-mint/15 text-mint' : 'bg-foreground/[0.06] text-foreground/55'
+        }`}
+      >
+        {chipTone === 'mint' ? <Icon name="check" size={11} /> : <Icon name="zap" size={11} />}
+        {chip}
+      </span>
+    </div>
+  </div>
+  <p class="text-[13px] leading-relaxed text-secondary">{tagline}</p>
+</div>
+
+<style>
+  .cb-runtime:hover {
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    box-shadow:
+      var(--shadow-floating),
+      0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  .cb-runtime-featured {
+    border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+    box-shadow:
+      var(--shadow-raised),
+      0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+</style>

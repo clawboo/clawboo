@@ -1,0 +1,40 @@
+---
+/**
+ * Copy-to-clipboard button. The global delegated handler in BaseLayout reads
+ * [data-copy], writes it to the clipboard, and toggles .copied for ~1.6s.
+ */
+import Icon from './Icon.astro'
+interface Props {
+  text: string
+  label?: string
+  class?: string
+}
+const { text, label, class: cls = '' } = Astro.props
+---
+<button
+  type="button"
+  class={`cb-copy group inline-flex items-center gap-1.5 ${cls}`}
+  data-copy={text}
+  aria-label={`Copy: ${text}`}
+>
+  <span class="cb-copy-idle inline-flex items-center gap-1.5">
+    <Icon name="copy" size={15} />
+    {label && <span>{label}</span>}
+  </span>
+  <span class="cb-copy-done items-center gap-1.5 text-mint">
+    <Icon name="check" size={15} />
+    <span>Copied</span>
+  </span>
+</button>
+
+<style>
+  .cb-copy-done {
+    display: none;
+  }
+  .cb-copy.copied .cb-copy-idle {
+    display: none;
+  }
+  .cb-copy.copied .cb-copy-done {
+    display: inline-flex;
+  }
+</style>

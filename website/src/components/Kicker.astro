@@ -1,0 +1,15 @@
+---
+/** Mono uppercase section label with a leading accent dot. */
+interface Props {
+  text: string
+  color?: string
+  class?: string
+}
+const { text, color = 'var(--primary)', class: cls = '' } = Astro.props
+---
+<span
+  class={`font-data inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground/55 ${cls}`}
+>
+  <span class="h-1.5 w-1.5 rounded-full" style={`background:${color}`}></span>
+  {text}
+</span>
