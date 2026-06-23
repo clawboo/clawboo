@@ -1,0 +1,166 @@
+/* ──────────────────────────────────────────────────────────────────
+   Clawboo design tokens.
+   VENDORED from apps/web/src/app/globals.css @ 4aabf2e (the :root light +
+   .dark blocks, verbatim). The marketing site shares the product's exact
+   color, surface, shadow, motion, and type-scale system so the brand reads
+   identically. Re-sync from globals.css if the product palette changes.
+   ────────────────────────────────────────────────────────────────── */
+
+/* LIGHT THEME (default — applied to :root) */
+:root {
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --foreground: #0f172a;
+  --foreground-rgb: 15 23 42;
+  --surface-rgb: 255 255 255;
+  --secondary: #64748b;
+
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #dc2a48;
+  --primary-foreground: #ffffff;
+  --primary-rgb: 220 42 72;
+
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+
+  --border: rgb(15 23 42 / 0.1);
+  --input: #f1f5f9;
+  --ring: #dc2a48;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+
+  --mint: #059669;
+  --mint-rgb: 5 150 105;
+  --amber: #d97706;
+  --amber-rgb: 217 119 6;
+  --blue: #1e3a8a;
+
+  --category-data: #2563eb;
+  --category-comm: var(--mint);
+  --category-code: #ea580c;
+  --category-file: var(--amber);
+  --category-web: #9333ea;
+  --category-other: #64748b;
+
+  --canvas: #fafbfc;
+  --canvas-rgb: 250 251 252;
+  --canvas-dot: rgb(15 23 42 / 0.07);
+
+  --surface-raised: #fdfdfe;
+  --surface-floating: rgb(255 255 255 / 0.85);
+  --surface-overlay: rgb(255 255 255 / 0.75);
+  --overlay-scrim: rgb(15 23 42 / 0.4);
+  --overlay-scrim-soft: rgb(15 23 42 / 0.18);
+  --code-block-bg: rgb(15 23 42 / 0.05);
+
+  --border-floating: rgb(15 23 42 / 0.08);
+  --border-overlay: rgb(15 23 42 / 0.1);
+
+  --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.02);
+  --shadow-floating: 0 4px 12px rgb(15 23 42 / 0.08), 0 8px 24px rgb(15 23 42 / 0.06);
+  --shadow-overlay: 0 12px 32px rgb(15 23 42 / 0.16), 0 24px 64px rgb(15 23 42 / 0.12);
+
+  --motion-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-emphasized: 300ms cubic-bezier(0.32, 0.72, 0, 1);
+  --motion-easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-easing-spring: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --terminal-bg: #0d1117;
+  --terminal-fg: #e8e8e8;
+
+  --scrollbar-thumb: rgb(15 23 42 / 0.18);
+  --scrollbar-thumb-hover: rgb(15 23 42 / 0.32);
+
+  --welcome-glow: rgb(220 42 72 / 0.06);
+
+  /* Day-sky hero pinned text (always-light backdrop in both themes). */
+  --sky-ink: rgb(30, 37, 64);
+  --sky-ink-soft: rgba(30, 37, 64, 0.78);
+  --sky-halo: 0 2px 24px rgba(255, 255, 255, 0.7), 0 1px 4px rgba(255, 255, 255, 0.8);
+  --sky-halo-soft: 0 1px 12px rgba(255, 255, 255, 0.7);
+
+  color-scheme: light;
+}
+
+/* DARK THEME (applied via .dark class on <html>) */
+.dark {
+  --background: #0a0e1a;
+  --surface: #111827;
+  --foreground: #e8e8e8;
+  --foreground-rgb: 232 232 232;
+  --surface-rgb: 17 24 39;
+  --secondary: #6b7280;
+
+  --card: #111827;
+  --card-foreground: #e8e8e8;
+  --popover: #111827;
+  --popover-foreground: #e8e8e8;
+
+  --primary: #e94560;
+  --primary-foreground: #ffffff;
+  --primary-rgb: 233 69 96;
+
+  --muted: #1f2937;
+  --muted-foreground: #6b7280;
+
+  --border: rgb(255 255 255 / 0.08);
+  --input: #1f2937;
+  --ring: #e94560;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+
+  --mint: #34d399;
+  --mint-rgb: 52 211 153;
+  --amber: #fbbf24;
+  --amber-rgb: 251 191 36;
+  --blue: #0f3460;
+
+  --category-data: #3b82f6;
+  --category-comm: var(--mint);
+  --category-code: #f97316;
+  --category-file: var(--amber);
+  --category-web: #a855f7;
+  --category-other: #6b7280;
+
+  --canvas: #0a0e1a;
+  --canvas-rgb: 10 14 26;
+  --canvas-dot: rgb(255 255 255 / 0.03);
+
+  --surface-raised: #141b2e;
+  --surface-floating: rgb(17 24 39 / 0.85);
+  --surface-overlay: rgb(20 27 46 / 0.75);
+  --overlay-scrim: rgb(0 0 0 / 0.6);
+  --overlay-scrim-soft: rgb(0 0 0 / 0.32);
+  --code-block-bg: rgb(0 0 0 / 0.32);
+
+  --border-floating: rgb(255 255 255 / 0.1);
+  --border-overlay: rgb(255 255 255 / 0.12);
+
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.25), 0 1px 1px rgb(0 0 0 / 0.15);
+  --shadow-floating: 0 8px 24px rgb(0 0 0 / 0.5), 0 4px 8px rgb(0 0 0 / 0.3);
+  --shadow-overlay: 0 24px 80px rgb(0 0 0 / 0.6), 0 12px 32px rgb(0 0 0 / 0.4);
+
+  --terminal-bg: #0d1117;
+  --terminal-fg: #e8e8e8;
+
+  --scrollbar-thumb: rgb(255 255 255 / 0.12);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 0.22);
+
+  --welcome-glow: rgb(233 69 96 / 0.1);
+
+  /* Night-sky hero text: light ink with a dark glow so it lifts off the dark
+     clouds (the day values in :root are dark ink with a white glow). */
+  --sky-ink: rgb(237, 241, 253);
+  --sky-ink-soft: rgba(237, 241, 253, 0.82);
+  --sky-halo: 0 2px 28px rgba(4, 8, 20, 0.85), 0 1px 5px rgba(4, 8, 20, 0.92);
+  --sky-halo-soft: 0 1px 16px rgba(4, 8, 20, 0.8);
+
+  color-scheme: dark;
+}

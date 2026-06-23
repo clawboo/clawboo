@@ -1,0 +1,91 @@
+---
+import Icon from './Icon.astro'
+import CopyButton from './CopyButton.astro'
+import { links, site } from '../lib/site'
+
+const columns = [
+  {
+    title: 'Product',
+    items: [
+      { label: 'Quickstart', href: '#how' },
+      { label: 'Runtimes', href: '#runtimes' },
+      { label: 'Features', href: '#features' },
+      { label: 'FAQ', href: '#faq' },
+    ],
+  },
+  {
+    title: 'Develop',
+    items: [
+      { label: 'GitHub', href: links.github, ext: true },
+      { label: 'npm', href: links.npm, ext: true },
+      { label: 'Docs', href: links.docs, ext: true },
+      { label: 'Contributing', href: links.contributing, ext: true },
+      { label: 'Security', href: links.security, ext: true },
+    ],
+  },
+  {
+    title: 'Community',
+    items: [
+      { label: 'Star the repo', href: links.stargazers, ext: true },
+      { label: 'Discussions', href: links.discussions, ext: true },
+      { label: 'Issues', href: links.issues, ext: true },
+    ],
+  },
+  {
+    title: 'Project',
+    items: [
+      { label: 'License: MIT', href: links.github + '/blob/main/LICENSE', ext: true },
+      { label: 'Code of conduct', href: links.conduct },
+      { label: 'conduct@claw.boo', href: links.conduct },
+    ],
+  },
+]
+---
+<footer class="relative border-t border-border bg-surface/40">
+  <div class="mx-auto max-w-7xl px-5 py-14 sm:px-8">
+    <div class="grid grid-cols-2 gap-8 sm:grid-cols-3 lg:grid-cols-5">
+      <div class="col-span-2 lg:col-span-1">
+        <a href="#hero" class="flex items-center gap-2.5" aria-label="Clawboo home">
+          <img src="/logo.svg" alt="Clawboo" width="30" height="28" />
+          <span class="font-display text-[18px] font-extrabold tracking-tight text-foreground">clawboo</span>
+        </a>
+        <p class="mt-3 max-w-[240px] text-[13px] leading-relaxed text-secondary">{site.tagline}</p>
+        <div class="mt-4">
+          <CopyButton text={site.install} label={site.install} class="font-data surface-raised-tier rounded-lg px-3 py-2 text-[12px] text-foreground/70 hover:text-foreground" />
+        </div>
+      </div>
+
+      {
+        columns.map((col) => (
+          <div>
+            <h3 class="text-[12px] font-semibold uppercase tracking-wider text-foreground/45">{col.title}</h3>
+            <ul class="mt-3 space-y-2">
+              {col.items.map((it) => (
+                <li>
+                  <a
+                    href={it.href}
+                    target={it.ext ? '_blank' : undefined}
+                    rel={it.ext ? 'noopener noreferrer' : undefined}
+                    class="inline-flex items-center gap-1 text-[13px] text-secondary transition-colors duration-150 hover:text-foreground"
+                  >
+                    {it.label}
+                    {it.ext && <Icon name="arrow-up-right" size={12} class="opacity-50" />}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="mt-12 flex flex-col items-center justify-between gap-4 border-t border-border pt-6 sm:flex-row">
+      <p class="text-[12px] text-secondary">MIT © Clawboo · © 2026 Clawboo. Built in the open.</p>
+      <div class="flex items-center gap-2">
+        <a href={links.github} target="_blank" rel="noopener noreferrer" aria-label="GitHub" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-foreground/60 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"><Icon name="github" size={18} /></a>
+        <a href={links.npm} target="_blank" rel="noopener noreferrer" aria-label="npm" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-foreground/60 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"><Icon name="package" size={18} /></a>
+        <a href={links.discussions} target="_blank" rel="noopener noreferrer" aria-label="Discussions" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-foreground/60 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"><Icon name="message" size={18} /></a>
+      </div>
+    </div>
+  </div>
+</footer>

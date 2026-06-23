@@ -1,0 +1,20 @@
+---
+/**
+ * The signature sky backdrop, theme-aware. Renders BOTH a day and a night
+ * SkyAtmosphere and lets CSS show the right one: the day clouds in light mode,
+ * the deep moonlit night clouds in dark mode. Both are server-rendered, so the
+ * `.dark` class (set before first paint) picks the correct one with no flash, no
+ * hydration mismatch (which a single JS-swapped island would cause).
+ */
+import { SkyAtmosphere } from './SkyAtmosphere.tsx'
+interface Props {
+  boos?: number
+}
+const { boos = 6 } = Astro.props
+---
+<div class="absolute inset-0 dark:hidden">
+  <SkyAtmosphere client:load mood="day" boos={boos} />
+</div>
+<div class="absolute inset-0 hidden dark:block">
+  <SkyAtmosphere client:load mood="night" boos={boos} clouds={0.6} definition={0.34} glow={0.5} />
+</div>

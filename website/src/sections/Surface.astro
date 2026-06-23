@@ -1,0 +1,56 @@
+---
+import Kicker from '../components/Kicker.astro'
+import Reveal from '../components/Reveal.astro'
+import Icon from '../components/Icon.astro'
+
+const stats = [
+  { value: '304', unit: 'first-class agents', sub: 'across 15 domains', icon: 'users' },
+  { value: '82', unit: 'workflow teams', sub: 'ready to run', icon: 'rocket' },
+  { value: '3-tab', unit: 'marketplace', sub: 'Skills, Agents, Teams', icon: 'layers' },
+  { value: '5', unit: 'runtimes', sub: 'coordinating as peers', icon: 'cpu' },
+  { value: '1', unit: 'shared memory', sub: 'every runtime reads + writes', icon: 'database' },
+  { value: 'Atlas', unit: 'org-graph', sub: 'with Ghost Graph halos', icon: 'network' },
+]
+---
+<section id="surface" class="relative overflow-hidden py-20 sm:py-28">
+  <div class="absolute inset-0 -z-10" style="background:radial-gradient(100% 60% at 50% 100%, rgb(var(--mint-rgb) / 0.05), transparent 55%)"></div>
+  <div class="mx-auto max-w-7xl px-5 sm:px-8">
+    <Reveal class="mx-auto max-w-3xl text-center">
+      <Kicker text="Shipped in v0.2.0" color="var(--mint)" />
+      <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
+        Not a demo. A working studio you can run today.
+      </h2>
+      <p class="mt-4 text-[16px] leading-relaxed text-secondary">
+        This is what ships in the current release. Clawboo is brand new and moves fast, so treat it as
+        an early, working v0.2.0, not a sealed 1.0.
+      </p>
+    </Reveal>
+
+    <div class="mt-12 grid grid-cols-2 gap-4 md:grid-cols-3">
+      {
+        stats.map((s, i) => (
+          <Reveal delay={i * 50} class="surface-raised-tier flex flex-col gap-1 rounded-2xl p-6">
+            <Icon name={s.icon} size={18} class="text-foreground/30" />
+            <div class="font-display mt-2 text-[34px] font-extrabold leading-none tracking-tight text-foreground tabular-nums sm:text-[40px]">
+              {s.value}
+            </div>
+            <div class="mt-1.5 text-[14px] font-semibold text-foreground/80">{s.unit}</div>
+            <div class="font-data text-[12px] text-secondary">{s.sub}</div>
+          </Reveal>
+        ))
+      }
+    </div>
+
+    <Reveal delay={120} class="mx-auto mt-8 max-w-3xl">
+      <div class="surface-raised-tier flex gap-3 rounded-xl p-4">
+        <Icon name="check" size={16} class="mt-0.5 shrink-0 text-amber" />
+        <p class="text-[13px] leading-relaxed text-secondary">
+          <span class="font-semibold text-foreground/80">Honest about what is still landing.</span>{' '}
+          Native peer-chat from the group-chat composer is not yet live in the UI, mixed-team
+          auto-seed is deferred, and human participants on the board and multi-tenant deployments are
+          on the roadmap, not shipped. Our bar for "it works" is end-to-end tests, not screenshots.
+        </p>
+      </div>
+    </Reveal>
+  </div>
+</section>

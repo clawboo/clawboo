@@ -1,0 +1,55 @@
+---
+import Kicker from '../components/Kicker.astro'
+import Reveal from '../components/Reveal.astro'
+import Icon from '../components/Icon.astro'
+
+const pillars = [
+  {
+    icon: 'shield',
+    accent: 'var(--mint)',
+    title: 'Verified',
+    body: 'Built-in verification for autonomous work. The builder is not the judge, so a completion is reviewed before it counts as done.',
+  },
+  {
+    icon: 'gauge',
+    accent: 'var(--amber)',
+    title: 'Governed',
+    body: 'Spend tracking and warnings, depth and fan-out caps, and approvals for sensitive steps. Hard spend caps that auto-pause a run are opt-in.',
+  },
+  {
+    icon: 'activity',
+    accent: 'var(--category-data)',
+    title: 'Observable',
+    body: 'OpenTelemetry traces, structured logs, and a clear error taxonomy, all on by default. You can see exactly what every agent did.',
+  },
+]
+---
+<section id="observability" class="relative mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28">
+  <Reveal class="mx-auto max-w-3xl text-center">
+    <Kicker text="Run it with confidence" color="var(--category-data)" />
+    <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
+      Autonomous, but never unaccountable.
+    </h2>
+    <p class="mt-4 text-[16px] leading-relaxed text-secondary">
+      Every autonomous completion is independently verified, spend is tracked with warnings, and
+      sensitive steps wait for approval. Traces, logs, and an error taxonomy are on from the start.
+    </p>
+  </Reveal>
+
+  <div class="mt-12 grid gap-4 md:grid-cols-3">
+    {
+      pillars.map((p, i) => (
+        <Reveal delay={i * 70} class="surface-raised-tier flex flex-col gap-3 rounded-2xl p-6">
+          <span
+            class="flex h-12 w-12 items-center justify-center rounded-xl"
+            style={`background:color-mix(in srgb, ${p.accent} 14%, transparent);color:${p.accent}`}
+          >
+            <Icon name={p.icon} size={22} />
+          </span>
+          <h3 class="font-display text-[18px] font-bold text-foreground">{p.title}</h3>
+          <p class="text-[14px] leading-relaxed text-secondary">{p.body}</p>
+        </Reveal>
+      ))
+    }
+  </div>
+</section>

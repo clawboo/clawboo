@@ -1,0 +1,18 @@
+---
+/**
+ * Scroll-reveal wrapper. Adds [data-reveal]; the shared IntersectionObserver in
+ * BaseLayout toggles .is-visible. `delay` staggers grouped children (ms).
+ */
+interface Props {
+  as?: string
+  delay?: number
+  class?: string
+  id?: string
+}
+const { as = 'div', delay = 0, class: cls = '', id } = Astro.props
+const Tag = as as any
+const style = delay ? `--reveal-delay:${delay}ms` : undefined
+---
+<Tag data-reveal id={id} class={cls} style={style}>
+  <slot />
+</Tag>

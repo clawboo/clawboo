@@ -1,0 +1,109 @@
+---
+import SignatureSky from '../components/atmosphere/SignatureSky.astro'
+import { BooSquad } from '../components/atmosphere/BooSquad.tsx'
+import InstallCommand from '../components/InstallCommand.astro'
+import GitHubStars from '../components/GitHubStars.astro'
+import Button from '../components/Button.astro'
+import Icon from '../components/Icon.astro'
+import { site, links } from '../lib/site'
+
+const trust = ['npm v0.2.0', 'MIT licensed', 'TypeScript strict', 'Node.js 22+']
+---
+<section
+  id="hero"
+  class="relative flex min-h-[100svh] flex-col overflow-hidden bg-[#8fb9ee] dark:bg-[#070d1e]"
+>
+  <!-- Signature sky backdrop: day clouds in light mode, deep night clouds in dark mode. -->
+  <SignatureSky />
+
+  <div class="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col items-center px-5 pt-28 text-center sm:px-8 sm:pt-32">
+    <span class="cb-ink-soft font-data inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em]">
+      <span class="h-1.5 w-1.5 rounded-full" style="background:#dc2a48"></span>
+      Open-source · MIT · Local-first
+    </span>
+
+    <h1 class="cb-ink font-display mx-auto mt-5 max-w-4xl text-balance text-[36px] font-extrabold leading-[1.04] sm:text-[56px] lg:text-[68px]">
+      Get a week of work done by morning.
+    </h1>
+
+    <p class="cb-ink font-display mx-auto mt-4 max-w-2xl text-[20px] font-bold leading-snug sm:text-[26px]">
+      Put a whole team of AI agents on it.
+    </p>
+
+    <p class="cb-ink-soft mx-auto mt-4 max-w-xl text-[16px] leading-relaxed sm:text-[18px]">
+      They actually work together, on one shared board and chat you watch live. Native is built in,
+      so paste one key and go.
+    </p>
+
+    <div class="mt-8">
+      <InstallCommand caption="Node.js 22+. No flags, no cloud account." onSky />
+    </div>
+
+    <div class="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+      <GitHubStars variant="solid" label="Star on GitHub" />
+      <Button href={links.docs} target="_blank" rel="noopener noreferrer" variant="secondary" size="lg" iconRight="arrow-up-right">
+        Read the docs
+      </Button>
+    </div>
+
+    <ul class="mt-7 flex flex-wrap items-center justify-center gap-x-2 gap-y-2">
+      {
+        trust.map((t, i) => (
+          <li class="flex items-center gap-2">
+            {i > 0 && <span class="cb-ink-faint hidden sm:inline">·</span>}
+            <span class="cb-ink-soft font-data inline-flex items-center gap-1.5 text-[12px]">
+              <Icon name="check" size={13} class="text-[#0c8a52] dark:text-[#5fe0a0]" />
+              {t}
+            </span>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+
+  <!-- Live Boo squad sits on the lower band of the sky. -->
+  <div class="relative z-10 mt-8 flex w-full justify-center overflow-hidden pb-2 sm:mt-4">
+    <BooSquad client:visible />
+  </div>
+
+  <!-- Soft fade into the page below. -->
+  <div
+    class="pointer-events-none absolute inset-x-0 bottom-0 z-[11] h-28"
+    style="background:linear-gradient(180deg, transparent, var(--background))"
+  >
+  </div>
+</section>
+
+<style>
+  /* Pinned-dark hero text (the sky is always light in both themes). */
+  .cb-ink {
+    color: var(--sky-ink);
+    text-shadow: var(--sky-halo);
+  }
+  .cb-ink-soft {
+    color: var(--sky-ink-soft);
+    text-shadow: var(--sky-halo-soft);
+  }
+  .cb-ink-faint {
+    color: rgba(30, 37, 64, 0.4);
+  }
+  /* Responsive scale for the foreground Boo squad. */
+  .clawboo-boo-squad {
+    transform-origin: center bottom;
+  }
+  @media (max-width: 1024px) {
+    .clawboo-boo-squad {
+      transform: scale(0.82);
+    }
+  }
+  @media (max-width: 768px) {
+    .clawboo-boo-squad {
+      transform: scale(0.62);
+    }
+  }
+  @media (max-width: 520px) {
+    .clawboo-boo-squad {
+      transform: scale(0.42);
+    }
+  }
+</style>
