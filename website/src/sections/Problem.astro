@@ -1,0 +1,106 @@
+---
+import Kicker from '../components/Kicker.astro'
+import Reveal from '../components/Reveal.astro'
+import Icon from '../components/Icon.astro'
+import { booAvatarToDataUrl, TINTS } from '../lib/boo-avatar'
+
+// Build-time Boo marks for the "after" panel. Force the classic friendly eye
+// shape (0) so the "happy team" never draws a seed-derived dizzy-X face.
+const team = [
+  { seed: 'boo-zero', isBooZero: true },
+  { seed: 'p-mint', tint: TINTS[1] },
+  { seed: 'p-amber', tint: TINTS[2] },
+  { seed: 'p-blue', tint: TINTS[3] },
+].map((m) => booAvatarToDataUrl({ ...m, eyeShape: 0 } as any))
+
+const tasks = [
+  { label: 'Research competitors', tone: 'var(--mint)' },
+  { label: 'Draft the landing copy', tone: 'var(--amber)' },
+  { label: 'Wire the API', tone: 'var(--category-data)' },
+]
+---
+<section id="problem" class="relative mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28">
+  <Reveal class="mx-auto max-w-3xl text-center">
+    <Kicker text="The problem" color="var(--amber)" />
+    <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
+      Your best agents do not talk to each other.
+    </h2>
+    <p class="mt-4 text-[16px] leading-relaxed text-secondary">
+      You already have strong coding agents. Each one is a brilliant soloist trapped in its own
+      terminal, with its own memory, its own tools, and no shared record of what got done. Hand work
+      between them and you are copying text and losing state. Clawboo is the layer that makes them one
+      team: one board of truth, one chat, one memory, and one capability inventory.
+    </p>
+  </Reveal>
+
+  <div class="mt-14 grid items-stretch gap-5 lg:grid-cols-[1fr_auto_1fr]">
+    <!-- BEFORE -->
+    <Reveal class="surface-raised-tier flex flex-col rounded-2xl p-6">
+      <span class="font-data text-[11px] font-semibold uppercase tracking-wider text-foreground/45">Today</span>
+      <h3 class="font-display mt-1 text-[18px] font-bold text-foreground">Four soloists, four terminals</h3>
+      <div class="mt-5 flex flex-1 flex-col gap-3">
+        {
+          ['claude code', 'codex', 'hermes', 'openclaw'].map((t) => (
+            <div class="rounded-xl border border-border bg-code-block px-3 py-2.5" style="background:var(--code-block-bg)">
+              <div class="font-data flex items-center gap-2 text-[12px] text-foreground/60">
+                <Icon name="terminal" size={13} class="text-foreground/40" />
+                {t}
+                <span class="ml-auto rounded bg-foreground/[0.06] px-1.5 py-0.5 text-[10px] text-foreground/40">isolated</span>
+              </div>
+            </div>
+          ))
+        }
+        <p class="font-data mt-1 text-[11px] text-foreground/40">No shared board. No shared memory. Copy-paste handoffs.</p>
+      </div>
+    </Reveal>
+
+    <!-- ARROW -->
+    <div class="flex items-center justify-center">
+      <div class="flex h-11 w-11 items-center justify-center rounded-full bg-primary/12 text-primary lg:rotate-0 rotate-90">
+        <Icon name="arrow-right" size={20} />
+      </div>
+    </div>
+
+    <!-- AFTER -->
+    <Reveal delay={80} class="cb-after relative flex flex-col overflow-hidden rounded-2xl p-6">
+      <span class="font-data text-[11px] font-semibold uppercase tracking-wider text-mint">With Clawboo</span>
+      <h3 class="font-display mt-1 text-[18px] font-bold text-foreground">One team, one board</h3>
+      <div class="mt-5 flex items-end justify-center gap-1">
+        {
+          team.map((src, i) => (
+            <img
+              src={src}
+              alt=""
+              aria-hidden="true"
+              width={i === 0 ? 56 : 44}
+              height={i === 0 ? 52 : 40}
+              style={`margin-bottom:${i === 0 ? 0 : 8}px;filter:drop-shadow(0 6px 12px rgba(20,30,60,0.18))`}
+            />
+          ))
+        }
+      </div>
+      <div class="mt-5 flex flex-1 flex-col gap-2">
+        {
+          tasks.map((t) => (
+            <div class="surface-raised-tier flex items-center gap-2.5 rounded-lg px-3 py-2">
+              <span class="h-2 w-2 rounded-full" style={`background:${t.tone}`}></span>
+              <span class="text-[12.5px] text-foreground/80">{t.label}</span>
+              <Icon name="check" size={13} class="ml-auto text-mint" />
+            </div>
+          ))
+        }
+        <p class="font-data mt-1 text-[11px] text-mint/80">Shared board · shared memory · structured handoffs.</p>
+      </div>
+    </Reveal>
+  </div>
+</section>
+
+<style>
+  .cb-after {
+    background:
+      radial-gradient(120% 80% at 50% -10%, rgb(var(--mint-rgb) / 0.1), transparent 60%),
+      var(--surface-raised);
+    border: 1px solid color-mix(in srgb, var(--mint) 28%, var(--border));
+    box-shadow: var(--shadow-raised);
+  }
+</style>

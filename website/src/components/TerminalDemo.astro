@@ -1,0 +1,122 @@
+---
+/**
+ * Typed terminal: types `npx clawboo`, then reveals a short, honest onboarding
+ * sequence line by line. Vanilla JS typewriter, IntersectionObserver-triggered.
+ * prefers-reduced-motion -> render everything instantly. Themed to --terminal-bg.
+ */
+import CopyButton from './CopyButton.astro'
+
+const command = 'npx clawboo'
+const lines = [
+  { text: 'Clawboo Native ready. No gateway, no cloud account.', tone: 'ok' },
+  { text: 'Provider key found. Anthropic, OpenAI, OpenRouter, or local Ollama.', tone: 'ok' },
+  { text: 'Starter team seeded. A leader and a specialist, ready to work.', tone: 'ok' },
+  { text: 'Dashboard at http://localhost:18790', tone: 'link' },
+]
+---
+<div class="cb-term surface-raised-tier overflow-hidden rounded-2xl" data-term>
+  <div class="flex items-center gap-2 border-b border-border/60 px-4 py-3">
+    <span class="flex gap-1.5" aria-hidden="true">
+      <span class="h-3 w-3 rounded-full" style="background:#ff5f57"></span>
+      <span class="h-3 w-3 rounded-full" style="background:#febc2e"></span>
+      <span class="h-3 w-3 rounded-full" style="background:#28c840"></span>
+    </span>
+    <span class="font-data ml-1 text-[11px] text-foreground/40">clawboo · zsh</span>
+    <span class="ml-auto"><CopyButton text={command} label="Copy" class="font-data text-[11px] text-foreground/50 hover:text-foreground" /></span>
+  </div>
+  <div
+    class="font-data px-4 py-4 text-[13px] leading-relaxed"
+    style="background:var(--terminal-bg);color:var(--terminal-fg)"
+  >
+    <div>
+      <span style="color:#7ee787">$</span>
+      <span data-term-cmd></span><span class="clawboo-caret" data-term-caret>▍</span>
+    </div>
+    <div data-term-out class="mt-1 space-y-1">
+      {
+        lines.map((l) => (
+          <div
+            class="cb-term-line"
+            data-tone={l.tone}
+            style="opacity:0;transform:translateY(4px)"
+          >
+            {l.tone === 'ok' && <span style="color:#7ee787">✓ </span>}
+            {l.tone === 'link' && <span style="color:#79c0ff">→ </span>}
+            <span set:html={l.text.replace('http://localhost:18790', '<span style="color:#79c0ff">http://localhost:18790</span>')} />
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</div>
+
+<script is:inline>
+  ;(function () {
+    var root = document.querySelector('[data-term]')
+    if (!root) return
+    var cmdEl = root.querySelector('[data-term-cmd]')
+    var caret = root.querySelector('[data-term-caret]')
+    var lines = root.querySelectorAll('.cb-term-line')
+    var CMD = 'npx clawboo'
+    var reduce =
+      window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    var started = false
+
+    function revealLines(i) {
+      if (i >= lines.length) {
+        if (caret) caret.style.display = 'none'
+        return
+      }
+      lines[i].style.transition = 'opacity .35s ease, transform .35s ease'
+      lines[i].style.opacity = '1'
+      lines[i].style.transform = 'translateY(0)'
+      setTimeout(function () {
+        revealLines(i + 1)
+      }, 360)
+    }
+
+    function run() {
+      if (started) return
+      started = true
+      if (reduce) {
+        if (cmdEl) cmdEl.textContent = CMD
+        lines.forEach(function (l) {
+          l.style.opacity = '1'
+          l.style.transform = 'none'
+        })
+        if (caret) caret.style.display = 'none'
+        return
+      }
+      var i = 0
+      function type() {
+        if (i <= CMD.length) {
+          if (cmdEl) cmdEl.textContent = CMD.slice(0, i)
+          i++
+          setTimeout(type, 62)
+        } else {
+          setTimeout(function () {
+            revealLines(0)
+          }, 420)
+        }
+      }
+      type()
+    }
+
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(
+        function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              run()
+              io.disconnect()
+            }
+          })
+        },
+        { threshold: 0.4 },
+      )
+      io.observe(root)
+    } else {
+      run()
+    }
+  })()
+</script>

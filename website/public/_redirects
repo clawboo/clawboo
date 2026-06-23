@@ -1,0 +1,4 @@
+# Cloudflare Pages redirects.
+# The apex (claw.boo) to www (www.claw.boo) canonical redirect is configured as
+# a Cloudflare custom-domain / redirect rule, not here, so both hostnames serve
+# this build. Add path-level redirects below as the site grows.

@@ -1,0 +1,88 @@
+---
+/**
+ * Button / link. variant: primary (brand-red gradient), secondary (glass
+ * outline), ghost (text). Renders an <a> when href is set, else a <button>.
+ */
+import Icon from './Icon.astro'
+interface Props {
+  href?: string
+  variant?: 'primary' | 'secondary' | 'ghost'
+  size?: 'sm' | 'md' | 'lg'
+  icon?: string
+  iconFill?: boolean
+  iconRight?: string
+  target?: string
+  rel?: string
+  class?: string
+  id?: string
+  type?: 'button' | 'submit'
+  'data-copy'?: string
+}
+const {
+  href,
+  variant = 'primary',
+  size = 'md',
+  icon,
+  iconFill = false,
+  iconRight,
+  target,
+  rel,
+  class: cls = '',
+  id,
+  type = 'button',
+  ...rest
+} = Astro.props
+
+const sizes: Record<string, string> = {
+  sm: 'h-9 px-3.5 text-[13px] gap-1.5 rounded-lg',
+  md: 'h-11 px-5 text-[14px] gap-2 rounded-xl',
+  lg: 'h-12 px-6 text-[15px] gap-2 rounded-xl',
+}
+const base =
+  'group inline-flex items-center justify-center font-semibold whitespace-nowrap select-none transition-[transform,box-shadow,background,border-color,color] duration-150 ease-out active:scale-[0.98] focus-visible:outline-2'
+const variants: Record<string, string> = {
+  primary: 'cb-btn-primary text-white',
+  secondary:
+    'surface-floating-tier text-foreground hover:-translate-y-px hover:border-[color:var(--primary)]',
+  ghost: 'text-foreground/70 hover:text-foreground hover:bg-foreground/[0.06]',
+}
+const className = `${base} ${sizes[size]} ${variants[variant]} ${cls}`
+const Tag = href ? 'a' : 'button'
+const iconSize = size === 'sm' ? 15 : 17
+---
+<Tag
+  class={className}
+  id={id}
+  href={href}
+  target={target}
+  rel={rel}
+  type={href ? undefined : type}
+  {...rest}
+>
+  {icon && <Icon name={icon} size={iconSize} fill={iconFill} />}
+  <slot />
+  {iconRight && (
+    <Icon
+      name={iconRight}
+      size={iconSize}
+      class="transition-transform duration-150 group-hover:translate-x-0.5"
+    />
+  )}
+</Tag>
+
+<style>
+  .cb-btn-primary {
+    background-image: linear-gradient(135deg, #ff4d4d 0%, #c81d3b 100%);
+    box-shadow:
+      0 8px 24px rgb(var(--primary-rgb) / 0.3),
+      0 0 0 1px rgb(var(--primary-rgb) / 0.15),
+      inset 0 1px 0 rgb(255 255 255 / 0.18);
+  }
+  .cb-btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 12px 30px rgb(var(--primary-rgb) / 0.4),
+      0 0 0 1px rgb(var(--primary-rgb) / 0.2),
+      inset 0 1px 0 rgb(255 255 255 / 0.22);
+  }
+</style>

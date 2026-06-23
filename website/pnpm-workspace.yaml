@@ -1,0 +1,5 @@
+# Marks website/ as its own pnpm root so it does not join the monorepo
+# workspace (whose globs are apps/*, packages/*, packages/adapters/*). pnpm
+# stops walking up at this file, so `pnpm install` here installs only this
+# project. This is what lets Cloudflare Pages build the website subdir alone.
+packages: []

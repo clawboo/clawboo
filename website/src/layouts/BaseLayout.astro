@@ -1,0 +1,221 @@
+---
+import { ClientRouter } from 'astro:transitions'
+import { site, links } from '../lib/site'
+import '../styles/global.css'
+
+interface Props {
+  title?: string
+  description?: string
+}
+const {
+  title = 'Clawboo: a TypeScript orchestrator for heterogeneous AI agent runtimes',
+  description = site.description,
+} = Astro.props
+
+const canonical = new URL(Astro.url.pathname, site.url).href
+const ogImage = new URL('/og-card.jpg', site.url).href
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Clawboo',
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'macOS, Linux, Windows',
+  description: site.description,
+  url: site.url,
+  license: 'https://opensource.org/licenses/MIT',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  sameAs: [links.github, links.npm],
+}
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <meta name="robots" content="index,follow" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a0e1a" media="(prefers-color-scheme: dark)" />
+
+    <!-- Open Graph / social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="clawboo" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:title" content="clawboo: deploy a team of AI agents and watch them collaborate live" />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1280" />
+    <meta property="og:image:height" content="600" />
+    <meta property="og:image:alt" content="clawboo: a team of ghost-lobster Boo agents on a calm day sky" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="clawboo: deploy a team of AI agents and watch them collaborate live" />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <!-- Fonts: DM Sans (body), Cabinet Grotesk (display), Geist Mono (local). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="preconnect" href="https://api.fontshare.com" />
+    <link
+      href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      href="/fonts/GeistMono-Variable.woff2"
+      crossorigin
+    />
+
+    <!-- No-FOUC theme init. Mirrors apps/web/index.html + ThemeProvider. -->
+    <script is:inline>
+      ;(function () {
+        try {
+          var stored = window.localStorage.getItem('clawboo.theme')
+          var pref = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'light'
+          var resolved =
+            pref === 'system'
+              ? window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+              : pref
+          if (resolved === 'dark') document.documentElement.classList.add('dark')
+          else document.documentElement.classList.remove('dark')
+        } catch (e) {}
+      })()
+    </script>
+
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+
+    <ClientRouter />
+  </head>
+  <body>
+    <slot />
+
+    <!-- Global behaviors: copy-to-clipboard, scroll-reveal, live star count. -->
+    <script is:inline>
+      ;(function () {
+        if (window.__cbClickBound) return
+        window.__cbClickBound = true
+        // Copy-to-clipboard (delegated).
+        document.addEventListener('click', function (e) {
+          var t = e.target.closest('[data-copy]')
+          if (!t) return
+          var text = t.getAttribute('data-copy')
+          var done = function () {
+            t.classList.add('copied')
+            setTimeout(function () {
+              t.classList.remove('copied')
+            }, 1600)
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(done)
+          } else {
+            done()
+          }
+        })
+      })()
+
+      function cbInit() {
+        // Scroll-reveal.
+        var reduce =
+          window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        var revealEls = document.querySelectorAll('[data-reveal]:not(.is-visible)')
+        if (reduce || !('IntersectionObserver' in window)) {
+          revealEls.forEach(function (el) {
+            el.classList.add('is-visible')
+          })
+        } else {
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (en) {
+                if (en.isIntersecting) {
+                  en.target.classList.add('is-visible')
+                  io.unobserve(en.target)
+                }
+              })
+            },
+            { threshold: 0.12, rootMargin: '0px 0px -8% 0px' },
+          )
+          revealEls.forEach(function (el) {
+            io.observe(el)
+          })
+        }
+
+        // Live GitHub star count.
+        var starEls = document.querySelectorAll('[data-gh-stars]')
+        if (!starEls.length) return
+        var fmt = function (n) {
+          if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k'
+          return String(n)
+        }
+        var paint = function (n) {
+          starEls.forEach(function (el) {
+            el.textContent = fmt(n)
+          })
+        }
+        var countUp = function (n) {
+          var reduceM =
+            window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          if (reduceM || n < 50) {
+            paint(n)
+            return
+          }
+          var start = performance.now()
+          var dur = 900
+          function tick(now) {
+            var p = Math.min(1, (now - start) / dur)
+            var eased = 1 - Math.pow(1 - p, 3)
+            paint(Math.round(eased * n))
+            if (p < 1) requestAnimationFrame(tick)
+          }
+          requestAnimationFrame(tick)
+        }
+        try {
+          var cached = sessionStorage.getItem('cb.stars')
+          if (cached) {
+            paint(parseInt(cached, 10))
+          }
+        } catch (e) {}
+        fetch('https://api.github.com/repos/clawboo/clawboo')
+          .then(function (r) {
+            return r.ok ? r.json() : null
+          })
+          .then(function (d) {
+            if (d && typeof d.stargazers_count === 'number') {
+              countUp(d.stargazers_count)
+              try {
+                sessionStorage.setItem('cb.stars', String(d.stargazers_count))
+              } catch (e) {}
+            } else {
+              starEls.forEach(function (el) {
+                if (el.textContent === '★') el.textContent = 'Star'
+              })
+            }
+          })
+          .catch(function () {
+            starEls.forEach(function (el) {
+              if (el.textContent === '★') el.textContent = 'GitHub'
+            })
+          })
+      }
+      document.addEventListener('astro:page-load', cbInit)
+    </script>
+  </body>
+</html>

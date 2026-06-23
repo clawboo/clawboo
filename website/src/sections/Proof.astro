@@ -1,0 +1,69 @@
+---
+import Kicker from '../components/Kicker.astro'
+import Reveal from '../components/Reveal.astro'
+import CopyButton from '../components/CopyButton.astro'
+import Icon from '../components/Icon.astro'
+
+const stats = [
+  { icon: 'clock', text: 'Ready in about a minute' },
+  { icon: 'terminal', text: 'Dashboard at localhost:18790' },
+  { icon: 'lock', text: 'Nothing leaves your machine' },
+]
+---
+<section id="proof" class="relative mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28">
+  <Reveal class="mx-auto max-w-3xl text-center">
+    <Kicker text="See it move" />
+    <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
+      One prompt, fanned out to specialists, tracked on the board, narrated in chat.
+    </h2>
+    <p class="mt-4 text-[16px] leading-relaxed text-secondary">
+      This is a real Clawboo session. A leader takes one request, delegates to specialists, and every
+      step lands on a durable board while the chat narrates it live. Nothing here is a mockup.
+    </p>
+  </Reveal>
+
+  <Reveal delay={80} class="mx-auto mt-12 max-w-5xl">
+    <div class="surface-raised-tier overflow-hidden rounded-2xl">
+      <div class="flex items-center gap-2 border-b border-border/60 bg-foreground/[0.02] px-4 py-2.5">
+        <span class="flex gap-1.5" aria-hidden="true">
+          <span class="h-3 w-3 rounded-full" style="background:#ff5f57"></span>
+          <span class="h-3 w-3 rounded-full" style="background:#febc2e"></span>
+          <span class="h-3 w-3 rounded-full" style="background:#28c840"></span>
+        </span>
+        <span class="font-data mx-auto rounded-md bg-foreground/[0.05] px-3 py-1 text-[11px] text-foreground/45">
+          localhost:18790
+        </span>
+      </div>
+      <video
+        class="block h-auto w-full"
+        autoplay
+        loop
+        muted
+        playsinline
+        preload="none"
+        poster="/demo/clawboo-demo-poster.webp"
+        width="1080"
+        height="608"
+        aria-label="A live Clawboo team session: one prompt is delegated to specialists, tracked on the board, and narrated in chat."
+      >
+        <source src="/demo/clawboo-demo.webm" type="video/webm" />
+        <source src="/demo/clawboo-demo.mp4" type="video/mp4" />
+      </video>
+    </div>
+  </Reveal>
+
+  <Reveal delay={140} class="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
+    {
+      stats.map((s) => (
+        <span class="font-data inline-flex items-center gap-2 text-[12px] text-secondary">
+          <Icon name={s.icon} size={14} class="text-mint" />
+          {s.text}
+        </span>
+      ))
+    }
+    <span class="font-data inline-flex items-center gap-2 text-[12px] text-foreground/70">
+      Run it yourself:
+      <CopyButton text="npx clawboo" label="npx clawboo" class="rounded-md bg-foreground/[0.06] px-2 py-1 text-foreground hover:bg-foreground/[0.1]" />
+    </span>
+  </Reveal>
+</section>

@@ -1,0 +1,55 @@
+---
+import Kicker from '../components/Kicker.astro'
+import Reveal from '../components/Reveal.astro'
+import ScreenshotFrame from '../components/ScreenshotFrame.astro'
+import GitHubStars from '../components/GitHubStars.astro'
+import Icon from '../components/Icon.astro'
+import teamSpace from '../assets/screenshots/team-space.png'
+
+const points = [
+  { icon: 'columns', text: 'Tasks survive restarts. Close the laptop, reopen it, and the work is exactly where you left it.' },
+  { icon: 'git-branch', text: 'Claims are race-free. Every delegation is a real board mutation, not a message someone has to remember to read.' },
+  { icon: 'message', text: 'Chat narrates the board. You watch the work happen instead of guessing what an agent did.' },
+]
+---
+<section id="board" class="relative overflow-hidden py-20 sm:py-28">
+  <div class="absolute inset-0 -z-10" style="background:radial-gradient(120% 60% at 50% 0%, rgb(var(--primary-rgb) / 0.05), transparent 55%)"></div>
+  <div class="mx-auto max-w-7xl px-5 sm:px-8">
+    <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
+      <Reveal>
+        <Kicker text="Canonical state" />
+        <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
+          A durable board fused with a live group chat.
+        </h2>
+        <p class="mt-4 text-[16px] leading-relaxed text-secondary">
+          The board is the canonical source of truth for task state. Chat is the narration. The board
+          is where decisions land, so a team of agents can hand work back and forth without losing the
+          thread.
+        </p>
+        <ul class="mt-7 flex flex-col gap-4">
+          {
+            points.map((p) => (
+              <li class="flex gap-3">
+                <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/12 text-primary">
+                  <Icon name={p.icon} size={16} />
+                </span>
+                <span class="text-[14.5px] leading-relaxed text-foreground/80">{p.text}</span>
+              </li>
+            ))
+          }
+        </ul>
+        <div class="mt-8">
+          <GitHubStars variant="solid" label="Star on GitHub" />
+        </div>
+      </Reveal>
+
+      <Reveal delay={100}>
+        <ScreenshotFrame
+          src={teamSpace}
+          alt="A Clawboo team space: the leader and three specialists in a team graph above a live chat, where one prompt is delegated, answered, and synthesized on the board."
+          sizes="(min-width: 1024px) 620px, 92vw"
+        />
+      </Reveal>
+    </div>
+  </div>
+</section>

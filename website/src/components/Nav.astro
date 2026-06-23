@@ -1,0 +1,128 @@
+---
+import Icon from './Icon.astro'
+import Button from './Button.astro'
+import GitHubStars from './GitHubStars.astro'
+import ThemeToggle from './ThemeToggle.astro'
+import { nav, links, site } from '../lib/site'
+---
+<header id="cb-nav" class="cb-nav fixed inset-x-0 top-0 z-50 transition-all duration-300">
+  <nav class="mx-auto flex h-16 max-w-7xl items-center gap-4 px-5 sm:px-8">
+    <a href="#hero" class="flex items-center gap-2.5" aria-label="Clawboo home">
+      <img src="/logo.svg" alt="Clawboo" width="30" height="28" class="clawboo-float" />
+      <span class="font-display text-[18px] font-extrabold tracking-tight text-foreground">clawboo</span>
+    </a>
+
+    <div class="ml-3 hidden items-center gap-1 lg:flex">
+      {
+        nav.map((item) => (
+          <a
+            href={item.href}
+            class="rounded-lg px-3 py-2 text-[14px] font-medium text-foreground/70 transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground"
+          >
+            {item.label}
+          </a>
+        ))
+      }
+      <a
+        href={links.docs}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-[14px] font-medium text-foreground/70 transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground"
+        >Docs <Icon name="arrow-up-right" size={13} /></a>
+    </div>
+
+    <div class="ml-auto hidden items-center gap-2.5 md:flex">
+      <ThemeToggle />
+      <GitHubStars variant="pill" />
+      <Button href="#how" variant="primary" size="md" icon="terminal" class="font-data">npx clawboo</Button>
+    </div>
+
+    <!-- Mobile cluster -->
+    <div class="ml-auto flex items-center gap-2 md:hidden">
+      <ThemeToggle />
+      <button
+        id="cb-menu-open"
+        type="button"
+        class="surface-raised-tier inline-flex h-10 w-10 items-center justify-center rounded-xl text-foreground"
+        aria-label="Open menu"
+      >
+        <Icon name="menu" size={20} />
+      </button>
+    </div>
+  </nav>
+</header>
+
+<!-- Mobile sheet -->
+<div id="cb-sheet" class="fixed inset-0 z-[60] hidden md:hidden" role="dialog" aria-modal="true">
+  <div id="cb-sheet-scrim" class="absolute inset-0" style="background:var(--overlay-scrim)"></div>
+  <div class="surface-overlay-tier absolute inset-x-3 top-3 rounded-2xl p-5">
+    <div class="flex items-center justify-between">
+      <span class="font-display text-[17px] font-extrabold text-foreground">clawboo</span>
+      <button id="cb-menu-close" type="button" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-foreground/70 hover:bg-foreground/[0.06]" aria-label="Close menu">
+        <Icon name="x" size={20} />
+      </button>
+    </div>
+    <div class="mt-4 flex flex-col">
+      {
+        nav.map((item) => (
+          <a href={item.href} data-sheet-link class="rounded-lg px-2 py-3 text-[16px] font-medium text-foreground/80 hover:bg-foreground/[0.05]">
+            {item.label}
+          </a>
+        ))
+      }
+      <a href={links.docs} target="_blank" rel="noopener noreferrer" data-sheet-link class="rounded-lg px-2 py-3 text-[16px] font-medium text-foreground/80 hover:bg-foreground/[0.05]">Docs</a>
+    </div>
+    <div class="mt-4 flex flex-col gap-2.5">
+      <GitHubStars variant="pill" class="w-full justify-center" />
+      <Button href="#how" variant="primary" size="lg" icon="terminal" class="w-full font-data" data-sheet-link>npx clawboo</Button>
+    </div>
+    <p class="font-data mt-4 text-center text-[11px] text-secondary">{site.tagline}</p>
+  </div>
+</div>
+
+<script is:inline>
+  ;(function () {
+    var nav = document.getElementById('cb-nav')
+    function onScroll() {
+      if (!nav) return
+      if (window.scrollY > 24) nav.classList.add('cb-nav-solid')
+      else nav.classList.remove('cb-nav-solid')
+    }
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+
+    var sheet = document.getElementById('cb-sheet')
+    var open = document.getElementById('cb-menu-open')
+    var close = document.getElementById('cb-menu-close')
+    var scrim = document.getElementById('cb-sheet-scrim')
+    function show() {
+      if (sheet) sheet.classList.remove('hidden')
+      document.body.style.overflow = 'hidden'
+    }
+    function hide() {
+      if (sheet) sheet.classList.add('hidden')
+      document.body.style.overflow = ''
+    }
+    if (open) open.addEventListener('click', show)
+    if (close) close.addEventListener('click', hide)
+    if (scrim) scrim.addEventListener('click', hide)
+    document.querySelectorAll('[data-sheet-link]').forEach(function (l) {
+      l.addEventListener('click', hide)
+    })
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') hide()
+    })
+  })()
+</script>
+
+<style>
+  .cb-nav {
+    border-bottom: 1px solid transparent;
+  }
+  .cb-nav-solid {
+    background: var(--surface-floating);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border-bottom-color: var(--border);
+  }
+</style>

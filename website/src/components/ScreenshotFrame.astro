@@ -1,0 +1,57 @@
+---
+/**
+ * Screenshot in a browser-chrome frame. Uses astro:assets <Picture> so the
+ * heavy PNGs ship as responsive avif/webp. Pass an imported image (from
+ * src/assets) as `src`.
+ */
+import { Picture } from 'astro:assets'
+import type { ImageMetadata } from 'astro'
+
+interface Props {
+  src: ImageMetadata
+  alt: string
+  caption?: string
+  address?: string
+  eager?: boolean
+  sizes?: string
+  class?: string
+}
+const {
+  src,
+  alt,
+  caption,
+  address = 'localhost:18790',
+  eager = false,
+  sizes = '(min-width: 1024px) 900px, 92vw',
+  class: cls = '',
+} = Astro.props
+---
+<figure class={`cb-shot ${cls}`}>
+  <div class="surface-raised-tier overflow-hidden rounded-2xl">
+    <div class="flex items-center gap-2 border-b border-border/60 bg-foreground/[0.02] px-4 py-2.5">
+      <span class="flex gap-1.5" aria-hidden="true">
+        <span class="h-3 w-3 rounded-full" style="background:#ff5f57"></span>
+        <span class="h-3 w-3 rounded-full" style="background:#febc2e"></span>
+        <span class="h-3 w-3 rounded-full" style="background:#28c840"></span>
+      </span>
+      <span
+        class="font-data mx-auto inline-flex max-w-[60%] items-center gap-1.5 truncate rounded-md bg-foreground/[0.05] px-3 py-1 text-[11px] text-foreground/45"
+      >
+        {address}
+      </span>
+    </div>
+    <Picture
+      src={src}
+      alt={alt}
+      formats={['avif', 'webp']}
+      widths={[640, 960, 1280, 1920]}
+      sizes={sizes}
+      loading={eager ? 'eager' : 'lazy'}
+      fetchpriority={eager ? 'high' : 'auto'}
+      class="block h-auto w-full"
+    />
+  </div>
+  {caption && (
+    <figcaption class="mt-3 text-center text-[13px] text-secondary">{caption}</figcaption>
+  )}
+</figure>

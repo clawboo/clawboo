@@ -1,0 +1,54 @@
+---
+/** Glass install-command pill: `$ npx clawboo` + copy button. */
+import Icon from './Icon.astro'
+import { site } from '../lib/site'
+interface Props {
+  caption?: string
+  onSky?: boolean
+  class?: string
+}
+const { caption, onSky = false, class: cls = '' } = Astro.props
+---
+<div class={`inline-flex flex-col items-center gap-2 ${cls}`}>
+  <button
+    type="button"
+    class="cb-install group surface-floating-tier inline-flex items-center gap-3 rounded-xl px-4 py-3"
+    data-copy={site.install}
+    aria-label="Copy install command"
+  >
+    <span class="font-data text-[15px] sm:text-[16px]">
+      <span class="text-mint">$</span>
+      <span class="text-foreground">{site.install}</span>
+    </span>
+    <span class="cb-copy-idle ml-1 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-foreground/[0.06] text-foreground/60 transition-colors group-hover:text-foreground">
+      <Icon name="copy" size={15} />
+    </span>
+    <span class="cb-copy-done ml-1 h-7 w-7 items-center justify-center rounded-lg bg-mint/15 text-mint">
+      <Icon name="check" size={15} />
+    </span>
+  </button>
+  {
+    caption && (
+      <span
+        class="font-data text-[12px]"
+        style={onSky
+          ? 'color:var(--sky-ink-soft);text-shadow:var(--sky-halo-soft)'
+          : 'color:var(--secondary)'}
+      >
+        {caption}
+      </span>
+    )
+  }
+</div>
+
+<style>
+  .cb-install .cb-copy-done {
+    display: none;
+  }
+  .cb-install.copied .cb-copy-idle {
+    display: none;
+  }
+  .cb-install.copied .cb-copy-done {
+    display: inline-flex;
+  }
+</style>
