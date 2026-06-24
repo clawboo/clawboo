@@ -20,3 +20,6 @@ coverage
 # Work-in-progress documentation site (not ready to publish; keep README screenshot assets)
 /docs/*
 !/docs/screenshots/
+
+# Astro generated cache + types (website/) — regenerated on build, must never be committed.
+website/.astro/

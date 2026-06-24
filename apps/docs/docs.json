@@ -1,0 +1,240 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Clawboo",
+  "colors": {
+    "primary": "#dc2a48",
+    "light": "#E94560",
+    "dark": "#E94560"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Introduction",
+            "pages": [
+              "intro/index",
+              "intro/what-is-clawboo",
+              "intro/how-it-works",
+              "intro/why-clawboo"
+            ]
+          },
+          {
+            "group": "Getting Started",
+            "pages": [
+              "getting-started/index",
+              "getting-started/installation",
+              "getting-started/quickstart-native",
+              "getting-started/quickstart-openclaw",
+              "getting-started/first-team",
+              "getting-started/dashboard-tour"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/index",
+              "concepts/agent-model",
+              "concepts/teams-and-planes",
+              "concepts/the-board",
+              "concepts/delegation-and-orchestration",
+              "concepts/peer-chat",
+              "concepts/memory",
+              "concepts/capabilities",
+              "concepts/verification",
+              "concepts/governance",
+              "concepts/observability",
+              "concepts/worktrees-and-handoff",
+              "concepts/scheduling",
+              "concepts/gateway-and-events",
+              "concepts/architecture-invariants"
+            ]
+          },
+          {
+            "group": "Runtimes",
+            "pages": [
+              "runtimes/index",
+              "runtimes/native",
+              "runtimes/openclaw",
+              "runtimes/claude-code",
+              "runtimes/codex",
+              "runtimes/hermes",
+              "runtimes/connecting-runtimes"
+            ]
+          },
+          {
+            "group": "Using Clawboo",
+            "pages": [
+              "using/index",
+              "using/agents",
+              "using/approvals",
+              "using/board",
+              "using/boo-zero",
+              "using/capabilities-dashboard",
+              "using/cost-and-budgets",
+              "using/ghost-graph",
+              "using/governance-dashboard",
+              "using/group-chat",
+              "using/marketplace",
+              "using/memory-browser",
+              "using/observability-dashboard",
+              "using/scheduler",
+              "using/system-health",
+              "using/system-maintenance",
+              "using/teams",
+              "using/theming"
+            ]
+          },
+          {
+            "group": "Operating",
+            "pages": [
+              "operating/index",
+              "operating/deployment",
+              "operating/security",
+              "operating/mcp-servers",
+              "operating/data-and-state",
+              "operating/production-defaults"
+            ]
+          },
+          {
+            "group": "Guides & Cookbook",
+            "pages": [
+              "guides/index",
+              "guides/attach-mcp-external-agent",
+              "guides/cross-runtime-handoff",
+              "guides/governance-and-budgets",
+              "guides/multi-runtime-team",
+              "guides/recurring-team-work",
+              "guides/self-host-securely"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/index",
+              "reference/cli",
+              "reference/configuration",
+              "reference/environment-variables",
+              "reference/database-schema",
+              "reference/mcp-tools",
+              "reference/marketplace-catalog",
+              "reference/events-and-errors"
+            ]
+          },
+          {
+            "group": "REST API",
+            "pages": [
+              "reference/rest-api/index",
+              "reference/rest-api/agents",
+              "reference/rest-api/board",
+              "reference/rest-api/capabilities",
+              "reference/rest-api/governance",
+              "reference/rest-api/memory",
+              "reference/rest-api/misc",
+              "reference/rest-api/observability",
+              "reference/rest-api/runtimes",
+              "reference/rest-api/schedules",
+              "reference/rest-api/settings",
+              "reference/rest-api/system",
+              "reference/rest-api/teams",
+              "reference/rest-api/tools-and-mcp"
+            ]
+          },
+          {
+            "group": "Packages",
+            "pages": [
+              "reference/packages/index",
+              "reference/packages/adapter-claude-code",
+              "reference/packages/adapter-codex",
+              "reference/packages/adapter-hermes",
+              "reference/packages/adapter-native",
+              "reference/packages/adapter-openclaw",
+              "reference/packages/agent-registry",
+              "reference/packages/boo-avatar",
+              "reference/packages/capability-registry",
+              "reference/packages/compaction",
+              "reference/packages/config",
+              "reference/packages/db",
+              "reference/packages/evals",
+              "reference/packages/events",
+              "reference/packages/executor",
+              "reference/packages/gateway-client",
+              "reference/packages/gateway-proxy",
+              "reference/packages/governance",
+              "reference/packages/logger",
+              "reference/packages/mcp",
+              "reference/packages/obs",
+              "reference/packages/protocol",
+              "reference/packages/scheduler",
+              "reference/packages/tsconfig",
+              "reference/packages/ui",
+              "reference/packages/worktrees"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Internals",
+        "groups": [
+          {
+            "group": "Internals & Contributing",
+            "pages": [
+              "internals/index",
+              "internals/monorepo-and-build",
+              "internals/runtime-adapter",
+              "internals/agent-source",
+              "internals/seams",
+              "internals/executor-runner",
+              "internals/board-internals",
+              "internals/event-pipeline",
+              "internals/testing",
+              "internals/release-process",
+              "internals/codegen-and-ingestion",
+              "internals/design-system"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Resources",
+        "groups": [
+          {
+            "group": "Appendices",
+            "pages": [
+              "appendices/glossary",
+              "appendices/known-issues",
+              "appendices/faq",
+              "appendices/changelog",
+              "appendices/contributing",
+              "appendices/license-and-notices"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "GitHub",
+      "href": "https://github.com/clawboo/clawboo"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/clawboo/clawboo"
+    }
+  }
+}

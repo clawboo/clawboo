@@ -1,0 +1,47 @@
+---
+title: "@clawboo/boo-avatar"
+description: Deterministic ghost-lobster SVG avatar generator for Clawboo agents. Pure, browser-safe, zero-dep.
+---
+- **Version** 0.1.0 · **Purity** pure zero-dep (browser-safe)
+- **Purpose** Generate a unique, deterministic ghost-lobster SVG avatar per agent seed (FNV-1a hash + xorshift32 PRNG).
+- **Workspace deps** none
+- **External deps** none (devDependency: `@clawboo/tsconfig`)
+
+A single flat barrel, no subpath exports. All consumers import from `@clawboo/boo-avatar`. The output SVG has a fixed `viewBox="0 0 100 92"`; the same `seed` always produces byte-identical SVG.
+
+## Public API
+
+### Functions
+
+- `generateBooAvatar(params: BooAvatarParams): string`: render the ghost-lobster SVG string. Hashes `seed` (FNV-1a) to seed an xorshift32 PRNG, then derives per-seed claw scale, antenna tips, pupil offsets, body opacity, eye shape, accessory, and tint. Render order: body → claws → antennae (on top) → eyes → accessory. `src/index.ts:176`
+- `booAvatarToDataUrl(params: BooAvatarParams): string`: convenience wrapper returning `data:image/svg+xml;base64,<btoa(svg)>` (relies on the browser `btoa`). `src/index.ts:257`
+- `resolveBooTint(seed: string, isBooZero = false): string`: resolve an agent's tint deterministically. Boo Zero gets the reserved OpenClaw Red (`TINTS[0]`); other agents skip index 0 and map into `TINTS[1..9]` via `1 + (|FNV-1a(seed)| % 9)`. Exported so consumers (e.g. DelegationCard) can accent UI with the exact colour the avatar paints with. `src/index.ts:62`
+
+### Types & interfaces
+
+- `EyeShape`: `0 | 1 | 2 | 3 | 4` (Classic / Surprised / Dot / Sleepy arc / Dizzy X). `src/index.ts:12`
+- `Accessory`: `'none' | 'glasses' | 'hat' | 'headphones' | 'crown'`. `src/index.ts:14`
+- `BooAvatarParams`: `{ seed: string; tint?: string; eyeShape?: EyeShape; accessory?: Accessory; isBooZero?: boolean }`. When `isBooZero` is true, tint forces `TINTS[0]` and accessory hard-locks to `'none'` unless explicitly overridden by `tint` / `accessory`. `src/index.ts:16`
+
+### Constants
+
+- `TINTS`: `readonly` 10-tint tuple: OpenClaw red (`#ff4d4d`, index 0), mint, amber, blue, purple, pink, sky, orange, lime, rose. `src/index.ts:27`
+
+<Note>
+The hash/PRNG helpers (`fnv1a`, `createRng`), colour helper (`darkenHex`), and the `renderEyes` / `renderAccessory` SVG builders are module-local and **not exported** from the barrel.
+</Note>
+
+## Used by
+
+- `@clawboo/ui`, wraps `generateBooAvatar` in the memoized `<BooAvatar>` React component, and re-exports `TINTS` + `resolveBooTint` so React consumers get them without a direct dependency.
+- `apps/web`, every agent-context render site uses `<BooAvatar>` (via `AgentBooAvatar`) and the re-exported `resolveBooTint` (chat tint accents, the `classic` team-color collection in `resolveTeamBooColor`, the team-palette tests).
+
+## Source
+
+Barrel: [`packages/boo-avatar/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/boo-avatar/src/index.ts) (single flat module; only the `.` export in `package.json`).
+
+## See also
+
+- [@clawboo/ui](/reference/packages/ui), the `<BooAvatar>` React wrapper + the `TINTS` / `resolveBooTint` re-exports.
+- [Agent model](/concepts/agent-model), Boo, Boo Zero, and where avatars surface.
+- [Design system](/internals/design-system), theming, tints, and surface tokens.

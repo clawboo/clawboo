@@ -1,0 +1,173 @@
+---
+title: Attaching Clawboo's MCP servers
+description: Attach the four hosted MCP servers (tasks, memory, tools, teamchat) to an external agent over stdio or Streamable HTTP.
+---
+Use this page when you want an external agent to act as a teammate inside Clawboo: read and claim board tasks, search shared memory, call brokered tools, and post in a team room. Clawboo hosts four [MCP](/appendices/glossary) servers, `tasks`, `memory`, `tools`, and `teamchat`, and the agent attaches them as MCP clients. The agent does not need to be a Clawboo runtime; anything that speaks MCP can attach.
+
+There are two transports for the same four servers:
+
+- **stdio**: Clawboo ships four standalone bins (`clawboo-mcp-tasks`, `clawboo-mcp-memory`, `clawboo-mcp-tools`, `clawboo-mcp-teamchat`). The consuming agent spawns one as a child process and talks JSON-RPC over stdin/stdout. Best for an agent on the same machine that owns its own process lifecycle.
+- **Streamable HTTP**: the running Clawboo server exposes the same four servers in-process at `/api/mcp/{tasks,memory,tools,teamchat}`. The agent connects over HTTP. Best when the agent is a separate process (or container) that talks to a long-running Clawboo.
+
+Both transports read and write the **same SQLite database**, which is the shared-services bus. A stdio bin spawned by an external agent and the in-process HTTP server operate on one board, one memory store, one tool-call audit.
+
+## Prerequisites
+
+<Note>
+Node 22+ is required to run the stdio bins (they are `node` scripts). For HTTP, a running Clawboo server is required (`npx clawboo`; see [Installation](/getting-started/installation)).
+</Note>
+
+- The four stdio bins ship in the `clawboo` npm package (`bin` entries), so a clean `npx clawboo` install has them. For HTTP, nothing extra is needed beyond a running server.
+- The external agent must already speak MCP (initialize → `tools/list` → `tools/call`). The tool surface per server is in [MCP tools reference](/reference/mcp-tools).
+
+## At a glance
+
+| Server | HTTP path | stdio bin | Example tools |
+|---|---|---|---|
+| `tasks` | `/api/mcp/tasks` | `clawboo-mcp-tasks` | `list_tasks`, `claim_task`, `update_task_status` |
+| `memory` | `/api/mcp/memory` | `clawboo-mcp-memory` | `memory_save`, `memory_search`, `memory_browse` |
+| `tools` | `/api/mcp/tools` | `clawboo-mcp-tools` | brokered tools (per descriptor) |
+| `teamchat` | `/api/mcp/teamchat` | `clawboo-mcp-teamchat` | `team_chat_post`, `team_chat_subscribe` |
+
+Each HTTP path accepts `POST` (the JSON-RPC request body), `GET` (the SSE event stream for a session), and `DELETE` (session teardown). The session is keyed by the `mcp-session-id` header; the first request must be an `initialize`, which mints the session id returned on subsequent calls.
+
+## Steps
+
+### 1. Get an attach snippet (recommended)
+
+Rather than hand-write config, ask Clawboo to emit it. `GET /api/mcp/config` builds a copy-pasteable attach block for a given runtime, server, and transport:
+
+```bash
+curl 'http://127.0.0.1:18790/api/mcp/config?runtime=claude-code&server=tasks&transport=http'
+```
+
+```json
+{
+  "ok": true,
+  "config": {
+    "id": "clawboo-tasks",
+    "transport": "http",
+    "snippet": "claude mcp add --transport http clawboo-tasks http://127.0.0.1:18790/api/mcp/tasks",
+    "structured": { "clawboo-tasks": { "type": "http", "url": "http://127.0.0.1:18790/api/mcp/tasks" } }
+  }
+}
+```
+
+`snippet` is the human copy-paste line; `structured` is the same attachment as an object (for programmatic config, e.g. Claude Code's inline `mcpServers`). The query params:
+
+| Param | Default | Values |
+|---|---|---|
+| `server` | `tasks` | `tasks`, `memory`, `tools`, `teamchat`; an unknown value returns `400 { "error": "unknown server: <x>" }` |
+| `runtime` | `claude-code` | `claude-code`, `codex`, `openclaw`; these are the three the snippet builder knows how to format |
+| `transport` | `http` | `http`, `stdio` |
+
+<Note>
+The snippet builder formats config for `claude-code`, `codex`, and `openclaw` only. To attach from `hermes`, `clawboo-native`, or any other MCP-speaking agent, use the HTTP URL (`<base>/api/mcp/<server>`) or the `node <bin>` invocation directly; the structure is the same; only the per-runtime wrapper differs.
+</Note>
+
+For `transport=http`, the base URL in the snippet is the server's **own bound port**, resolved from `app.locals.apiPort`, never from the request's `Host` header. A forged `Host` cannot redirect an agent's MCP traffic to another server. For `transport=stdio`, the snippet uses the path under `CLAWBOO_MCP_BIN_DIR` if the server was started with that env var (the CLI sets it for the bundled bins); otherwise it emits a `<path-to>/dist/bin/<server>.js` placeholder.
+
+### 2a. Attach over HTTP
+
+Point the agent's MCP client at `<clawboo-base>/api/mcp/<server>`. For Claude Code:
+
+```bash
+claude mcp add --transport http clawboo-tasks http://127.0.0.1:18790/api/mcp/tasks
+```
+
+The agent then runs `initialize` (which mints an `mcp-session-id`), `tools/list`, and `tools/call` against that URL. The session is stateful: subsequent POSTs and the GET event stream reuse the same `mcp-session-id`.
+
+### 2b. Attach over stdio
+
+The agent spawns the bin and talks JSON-RPC over stdio. For Claude Code:
+
+```bash
+claude mcp add clawboo-tasks -e CLAWBOO_DB_PATH=/Users/you/.clawboo/clawboo.db -- node /path/to/dist/bin/tasks.js
+```
+
+<Info>
+Set `CLAWBOO_DB_PATH` on a stdio attach so the bin opens the **same** database the server serves. The bins default to `~/.openclaw/clawboo/clawboo.db`, but the running server uses `~/.clawboo/clawboo.db` (under `resolveClawbooDir()`). Without the override, a stdio-attached agent would talk to a different, empty board. The `GET /api/mcp/config?transport=stdio` snippet embeds this for you (`-e CLAWBOO_DB_PATH=...` for Claude Code, an `env` table for Codex, an `env` object for OpenClaw).
+</Info>
+
+### 3. Scope the Memory server (the visibility binding)
+
+The `memory` server is the shared tier every runtime reads and writes. When attached for a specific run, bind its **visibility scope** so the agent can neither read another team's facts nor mis-tag a save. The scope rides the attach URL as query params:
+
+```
+http://127.0.0.1:18790/api/mcp/memory?scopeTeamId=<team-id>&scopeAgentId=<agent-id>
+```
+
+| Param | Effect |
+|---|---|
+| `scopeTeamId` | Binds searches/saves to that team |
+| `scopeAgentId` | Binds to that agent within the team |
+| `scopeTenantId` | Reserved tenant scope |
+
+When the scope params are present, the MCP session is bound at `initialize` and stays bound for that session. Absent params mean unbound (legacy behavior, identity comes from tool args). Only the `memory` URL carries scope params; `tasks` and `tools` URLs stay bare.
+
+### 4. Bind the TeamChat author (the anti-spoof binding)
+
+The `teamchat` server lets an agent post into a team room. To stop an agent from posting **as a teammate it is not**, the author identity is bound from the attach URL, written by Clawboo, not passed in tool args:
+
+```
+http://127.0.0.1:18790/api/mcp/teamchat?roomTeamId=<team-id>&postAuthorAgentId=<agent-id>
+```
+
+| Param | Effect |
+|---|---|
+| `roomTeamId` | The team room this attachment posts into (resolved to a room id) |
+| `postAuthorAgentId` | The author every post from this session is attributed to |
+
+Because the URL is Clawboo-written config and the binding is read server-side at session init, a `team_chat_post` tool call cannot override the author. When **both** params are present the session is bound; otherwise the attachment is unbound (the raw stdio bin / external attach passes identity in tool args). Both params are required for binding; supplying only one leaves it unbound.
+
+## Options / variations
+
+| Choice | stdio | HTTP |
+|---|---|---|
+| Who owns the process | The consuming agent (spawns + kills the bin) | Clawboo (long-running, in-process) |
+| Database path | Bin default `~/.openclaw/clawboo/clawboo.db`; **set `CLAWBOO_DB_PATH`** | Server's `~/.clawboo/clawboo.db` (always correct) |
+| Access gate | n/a (no HTTP) | Exempt on loopback for `/api/mcp/*` (see below) |
+| Memory / TeamChat binding | Pass identity in tool args (unbound) | Bind via URL query params (recommended) |
+| Best for | Same-machine agent owning its lifecycle | Separate process / container |
+
+## The access gate and loopback
+
+Clawboo's [access gate](/operating/security) is the only auth on a non-loopback bind. It blocks `/api/*` without a valid cookie when a `STUDIO_ACCESS_TOKEN` is set. The gate has one exemption for the MCP control plane:
+
+- A request to `/api/mcp/*` from a **loopback** peer (`127.0.0.1`, `::1`, or `::ffff:127.0.0.1`) is let through without a cookie. This is what lets a runtime Clawboo spawned on the same machine attach its MCP client; its environment is scrubbed of the token by design.
+- The prefix test is **case-folded**: the gate lower-cases the pathname before matching, so an uppercased `/API/mcp/` (or `/API/settings`) cannot evade the gate.
+- A **non-loopback** `/api/mcp/*` request still requires the cookie; the exemption is loopback-only, and a remote client cannot forge a loopback source on a real TCP handshake.
+
+<Info>
+The loopback exemption is keyed on the TCP peer address, not on a header. If you expose Clawboo to a network (a non-loopback bind), set `STUDIO_ACCESS_TOKEN` and attach over HTTP **with** the access cookie (or keep the attaching agent on loopback). See [Security](/operating/security) and [self-host securely](/guides/self-host-securely).
+</Info>
+
+## Verify it worked
+
+- **List tools**: over HTTP, send `initialize` then `tools/list` to `/api/mcp/tasks`; you should see `list_tasks`, `claim_task`, and the other task tools. Over stdio, the same handshake on the spawned `clawboo-mcp-tasks` bin returns the same list.
+- **Same board**: create a task in the Clawboo UI, then call `list_tasks` from the attached agent. The new task should appear. If it does not, the stdio bin is on the wrong DB path; re-check `CLAWBOO_DB_PATH`.
+- **Scoped memory**: with `scopeTeamId` bound, `memory_search` should only return that team's facts (plus global). A save lands under the bound scope.
+
+## Troubleshooting
+
+<Warning>
+**stdio agent sees an empty board.** The bin defaulted to `~/.openclaw/clawboo/clawboo.db` while the server uses `~/.clawboo/clawboo.db`. Set `CLAWBOO_DB_PATH` to the server's DB path on the attach (the `transport=stdio` config snippet embeds it).
+</Warning>
+
+<Warning>
+**`401` attaching over HTTP.** A `STUDIO_ACCESS_TOKEN` is set and the request is non-loopback (or the cookie is missing). Either attach from loopback (the `/api/mcp/*` exemption applies) or send the access cookie. An uppercased path will not bypass the gate; it is case-folded.
+</Warning>
+
+<Danger>
+**`400 { "error": "unknown server: <x>" }` from `/api/mcp/config`.** The `server` query param must be exactly one of `tasks`, `memory`, `tools`, `teamchat`. Likewise an attach POST without a prior `initialize` returns a JSON-RPC error ("No valid session; send an initialize request first").
+</Danger>
+
+## Related
+
+- [MCP tools reference](/reference/mcp-tools): the full tool list and zod input shapes per server
+- [`/api/tools` and `/api/mcp` reference](/reference/rest-api/tools-and-mcp): request/response shapes for the MCP routes
+- [Shared memory](/concepts/memory): the shared tier the `memory` server exposes
+- [Peer chat](/concepts/peer-chat): the team rooms the `teamchat` server posts into
+- [The board](/concepts/the-board): what the `tasks` server reads and mutates
+- [Security](/operating/security): the access gate, loopback exemption, and safe exposure
+- [Attach Clawboo's MCP to an external agent](/guides/attach-mcp-external-agent): a worked cookbook example

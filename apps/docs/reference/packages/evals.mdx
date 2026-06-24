@@ -1,0 +1,129 @@
+---
+title: "@clawboo/evals"
+description: Server-only eval harness for clawboo's own orchestration: capability/regression suites, code/model graders, pass@1 / pass^k, and the ±verifier × ±structured-state ablation scorecard.
+---
+- **Version** `0.1.0`
+- **Purity** server-only (private, `node:fs` + `node:os` for throwaway sqlite boards via `@clawboo/db`; `private: true`, never imported from the SPA bundle)
+- **Purpose** The eval harness turned inward on clawboo's OWN orchestration: a task drives the orchestration against a clean throwaway board, then GRADES the final board state + event log (the outcome, not the narration), reporting pass@1 / pass^k and the marginal-contribution ablation scorecard.
+- **Workspace deps** `@clawboo/db`, `@clawboo/executor`, `@clawboo/governance`, `@clawboo/obs`
+- **External deps** `zod` `^3.25.0`
+
+Each trial runs against its own temp-dir sqlite board (isolation; leftover state causes correlated failures). pass@1 = ≥1 of k trials succeeds; pass^k = all k succeed; pass^k is the production-readiness bar. The package exposes a single `.` entry point (no subpath exports); the barrel re-exports six modules: `./types`, `./env`, `./runner`, `./ablation`, `./graders`, `./tasks`.
+
+<Note>
+Scorecards + ablation results are written outside the repo. Graders come in three families (code / model / human); only code and model graders are implemented here; the model (LLM-as-judge) graders are non-deterministic + priced and run in the heavier on-demand suite, never the PR smoke subset.
+</Note>
+
+## Public API
+
+### Functions
+
+**env** (`./env`)
+
+| Signature | Contract |
+|---|---|
+| `makeBoardContext(flags?: EvalFlags): EvalContext` | Build a CLEAN context backed by a throwaway sqlite board in a fresh `mkdtemp` dir. Call once per trial. Defaults to `DEFAULT_FLAGS` (both subsystems on). |
+| `cleanupEvalContexts(): void` | Remove every temp board created since the last cleanup (call in `afterAll` / a route `finally`). |
+
+**runner** (`./runner`)
+
+| Signature | Contract |
+|---|---|
+| `runTask(task, makeCtx, opts?): Promise<TaskReport>` | Run one task K times, each against a fresh ctx (`makeCtx` MUST build a clean board). Grades the outcome; reports `passAt1` = passes/K and `passPowK = passAt1^k`. Default K=1; `binary` scoring needs all graders to pass, `weighted` needs mean ≥ threshold (default 0.7). A thrown `run` becomes a single failing `run-error` grader. |
+| `runSuite(tasks, makeCtx, opts?): Promise<SuiteReport>` | Run every task; macro-averages `passAt1` and `passPowK` across tasks. `k` defaults to `opts.k ?? opts.trials ?? 1`. |
+
+**graders/code** (`./graders` → `./code`); fast, objective, deterministic; inspect the board + event log, not the transcript.
+
+| Signature | Contract |
+|---|---|
+| `boardStateGrader(taskId: string, expectStatus: string[]): Grader` | Pass when the board task's status is one of `expectStatus` (`missing` when the task is absent). |
+| `logParseGrader(kind, minCount?, filter?): Grader` | Pass when an `OrchestrationEventKind` was recorded ≥ `minCount` times (default 1), optionally filtered by `taskId` (via `listEvents`). |
+| `readyGrader(taskId, shouldBeReady, teamId?): Grader` | Pass when the task's presence in `getReadyTasks` matches `shouldBeReady`, the dep-gate check. |
+| `outcomeGrader(name, predicate): Grader` | Free-form predicate over `(outcome, ctx)`; a `number` return is clamped to `[0,1]` (partial credit), a `boolean` maps to 1/0. Passes at score ≥ 1. |
+| `eventBudgetGrader(maxEvents, filter?): Grader` | Pass when the recorded event count ≤ `maxEvents` (a transcript-cost bound). |
+
+**graders/model** (`./graders` → `./model`), LLM-as-judge for subjective dimensions; nightly-only.
+
+| Signature | Contract |
+|---|---|
+| `llmJudgeGrader(opts: LlmJudgeOptions): Grader` | One isolated judge per dimension. Builds a judge prompt (`buildJudgePrompt`), drives the caller-supplied `RuntimeAdapter` reusing `@clawboo/obs` `driveStructuredJudge`, and parses `{ score, reason? }` against `z.number().min(0).max(1)`. Passes at `score ≥ threshold` (default 0.6); an unparsed verdict scores 0. |
+
+**ablation** (`./ablation`)
+
+| Signature | Contract |
+|---|---|
+| `runAblation(opts: RunAblationOptions): Promise<AblationScorecard>` | Hold the model fixed, run the 4 variants (`full` / `-verifier` / `-structured` / `none`), and compute each subsystem's marginal contribution to pass@1 (averaged over the other subsystem's two settings, controlled-variable exclusion). Default 3 trials. |
+
+### Types & interfaces
+
+**types** (`./types`)
+
+| Name | Shape / contract |
+|---|---|
+| `EvalSuite` | `'capability' \| 'regression'`. |
+| `EvalKind` | `'coding' \| 'research' \| 'coordination'`. |
+| `EvalFlags` | `{ verify: boolean; structuredState: boolean }`, the two harness subsystems the ablation toggles. |
+| `EvalContext` | `{ db: ClawbooDb; flags: EvalFlags }`, a clean throwaway board + the active flags. |
+| `TrialOutcome` | `{ summary?: string; data?: Record<string, unknown> }`, the final environment state (outcome, not claim). |
+| `GraderResult` | `{ name; passed: boolean; score: 0..1; detail? }`, one grader's verdict, with partial credit. |
+| `Grader` | `(ctx, outcome) => GraderResult \| Promise<GraderResult>`. |
+| `EvalTask` | `{ id; suite; kind; description; run(ctx) => Promise<TrialOutcome>; graders: Grader[]; referenceNote?; scoring?: 'binary' \| 'weighted'; threshold?; smoke?; tags? }`, `run` builds the clean env + drives the orchestration. |
+| `Trial` | `{ taskId; passed; score; graders: GraderResult[] }`, one attempt. |
+| `TaskReport` | `{ taskId; suite; kind; trials; passAt1; passPowK; meanScore }`, `passAt1` empirical, `passPowK = passAt1^k`. |
+| `SuiteReport` | `{ tasks: TaskReport[]; passAt1; passPowK; k }`, macro-averaged across tasks. |
+
+**runner** (`./runner`)
+
+| Name | Shape / contract |
+|---|---|
+| `RunOptions` | `{ trials?: number; k?: number }`, K trials per task (default 1); `k` exponent defaults to `trials`. |
+
+**graders/model** (`./graders` → `./model`)
+
+| Name | Shape / contract |
+|---|---|
+| `LlmJudgeOptions` | `{ name; dimension; rubric; makeAdapter(): RuntimeAdapter; model?; threshold? }`, one judge scores one dimension; the caller owns the reviewer adapter. |
+
+**ablation** (`./ablation`)
+
+| Name | Shape / contract |
+|---|---|
+| `AblationCell` | `{ variant; flags: EvalFlags; passAt1; passPowK }`, one variant's result. |
+| `AblationContribution` | `{ subsystem: 'verifier' \| 'structured-state'; deltaPassAt1 }`, mean pass@1 drop when removed. |
+| `AblationScorecard` | `{ baselinePassAt1; cells: AblationCell[]; contributions; trials }`, `baselinePassAt1` is the full-harness pass@1. |
+| `RunAblationOptions` | `{ tasks: EvalTask[]; makeCtx(flags): Promise<EvalContext>; trials? }`, `makeCtx` builds a clean ctx carrying the variant's flags. |
+
+### Constants
+
+| Name | Value / contract |
+|---|---|
+| `DEFAULT_FLAGS` | `{ verify: true, structuredState: true }`, the full-harness default (`./env`). |
+| `ALL_TASKS` | `[...REGRESSION_TASKS, ...CAPABILITY_TASKS]`, every task (`./tasks`). |
+| `SMOKE_TASKS` | `ALL_TASKS.filter((t) => t.smoke)`, the cheap, deterministic, no-live-model PR subset. |
+| `ABLATION_TASKS` | `CAPABILITY_TASKS`, the ablation-sensitive set (success depends on a toggled subsystem). |
+| `REGRESSION_TASKS` | 4 load-bearing-guarantee snapshots: `reg-claim-409-no-retry`, `reg-dep-gate`, `reg-report-up`, `reg-state-machine`. All smoke; target pass ≈100%. |
+| `CAPABILITY_TASKS` | 3 capability evals: `cap-cross-runtime-resume` (needs structured state), `cap-verification-catches-bug` (needs the verifier), `cap-delegation-fanout`. All smoke + code-graded. |
+
+### Classes
+
+None; this package exports only functions, types, and constants.
+
+## Used by
+
+- **`apps/web` (server)**, `api/evalSmoke.ts` (`POST /api/eval/smoke`) imports `SMOKE_TASKS`, `makeBoardContext`, `runSuite`, `cleanupEvalContexts` to run the deterministic suite on ephemeral boards on demand from the Observability dashboard. The SPA never imports the package directly; `apps/web/src/lib/evalsClient.ts` mirrors the `SuiteReport` / `TaskReport` shapes over REST.
+- **CI**, `.github/workflows/evals.yml` (`workflow_dispatch`) builds `@clawboo/evals` + its deps and runs the full suite + the ablation scorecard; the live-model graders activate only when provider keys are present as repo secrets.
+
+## Source
+
+Barrel: [`packages/evals/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/evals/src/index.ts) (re-exports `./types`, `./env`, `./runner`, `./ablation`, `./graders`, `./tasks`).
+
+## See also
+
+- [Verification (builder≠judge)](/concepts/verification), the `verify` subsystem the ablation toggles
+- [The board](/concepts/the-board), the `structured-state` subsystem the ablation toggles
+- [Observability dashboard](/using/observability-dashboard), where the smoke evals run from the UI
+- [Observability REST API](/reference/rest-api/observability), `POST /api/eval/smoke`
+- [`@clawboo/obs`](/reference/packages/obs), the structured-output judge drive reused by the model grader
+- [`@clawboo/db`](/reference/packages/db), the board the graders read
+- [Testing internals](/internals/testing)
+- [Package overview](/reference/packages/index)
