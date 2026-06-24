@@ -1,0 +1,85 @@
+---
+import Kicker from '../components/Kicker.astro'
+import Reveal from '../components/Reveal.astro'
+import Icon from '../components/Icon.astro'
+
+const faqs = [
+  {
+    q: 'Is Clawboo free and open-source?',
+    a: 'Yes. Clawboo is open-source under the MIT license, free to use and to fork. The code lives on GitHub and the package is on npm. The strongest thing you can do to help is star the repo.',
+  },
+  {
+    q: 'Do I need OpenClaw to use it?',
+    a: 'No. Clawboo Native is built in and is the default runtime. Paste one provider key and you have a working team without installing anything else. OpenClaw, Claude Code, Codex, and Hermes are optional peers you can connect later from the Runtimes panel.',
+  },
+  {
+    q: 'Which providers and models can I use?',
+    a: 'Clawboo Native talks directly to Anthropic, OpenAI, and OpenRouter, or to a local Ollama with no key needed. Connected runtimes bring their own: Claude Code uses Anthropic, Codex uses OpenAI, and Hermes runs over OpenRouter. You only paste the keys for the runtimes you actually turn on.',
+  },
+  {
+    q: 'Where does my data live?',
+    a: 'On your machine. Everything is local-first. The board persists in SQLite at ~/.clawboo/clawboo.db, and your API keys live in an AES-256-GCM encrypted vault under ~/.clawboo/secrets/. No SaaS, no cloud account, nothing uploaded.',
+  },
+  {
+    q: 'Is it production-ready?',
+    a: 'Treat it as an early, working release. The current version is v0.2.0: a real studio you can run today, not a sealed 1.0. Core surfaces are covered by end-to-end tests, and releases ship as features land.',
+  },
+  {
+    q: 'How is this different from just using one coding agent?',
+    a: 'A single coding agent is a brilliant soloist in its own terminal, with its own memory and no shared record. Clawboo is the layer that turns several of them into one team: one durable board of truth, one chat, one shared memory, and one capability inventory, with coordination over structured events. Any runtime can lead, and work can move between them with a structured handoff.',
+  },
+  {
+    q: 'Can I add my own agents, skills, and teams?',
+    a: 'Yes. v0.2.0 ships 304 first-class agents across 15 domains and 82 workflow teams, browsable in a 3-tab marketplace for Skills, Agents, and Teams. You compose teams from these and connect the runtimes you want behind them.',
+  },
+  {
+    q: 'How does Clawboo control cost?',
+    a: 'Spend tracking and warnings are on by default, with depth and fan-out caps and approvals for sensitive steps. If you want a hard ceiling, opt in to spend caps that auto-pause a run before it goes over. You always see spend as work happens, not after the fact.',
+  },
+  {
+    q: 'How do agents avoid stepping on each other?',
+    a: 'The board is the canonical source of truth. Claims are race-free, every delegation is a real board mutation, and each runtime executes its tasks isolated in its own git worktree. Coordination flows over structured lifecycle events and MCP calls.',
+  },
+  {
+    q: 'What is not in yet?',
+    a: 'We are honest about open seams. Native peer-chat from the group-chat composer is not yet live in the UI, mixed-team auto-seed is deferred, and human participants on the board and multi-tenant deployments are on the roadmap, not shipped. Our bar for "it works" is end-to-end tests, not screenshots.',
+  },
+  {
+    q: 'Which platforms does it run on?',
+    a: 'macOS, Linux, and Windows are all first-class. The only prerequisite is Node.js 22+.',
+  },
+]
+---
+<section id="faq" class="relative mx-auto max-w-3xl px-5 py-20 sm:px-8 sm:py-28">
+  <Reveal class="text-center">
+    <Kicker text="Straight answers" class="justify-center" />
+    <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
+      Questions, answered honestly.
+    </h2>
+  </Reveal>
+
+  <div class="mt-10 flex flex-col gap-3">
+    {
+      faqs.map((f, i) => (
+        <Reveal delay={Math.min(i * 30, 180)}>
+          <details class="cb-faq surface-raised-tier group rounded-xl px-5 py-1">
+            <summary class="flex cursor-pointer list-none items-center gap-3 py-4 text-[15px] font-semibold text-foreground">
+              <span class="flex-1">{f.q}</span>
+              <Icon name="chevron-down" size={18} class="shrink-0 text-foreground/40 transition-transform duration-200 group-open:rotate-180" />
+            </summary>
+            <p class="pb-4 text-[14px] leading-relaxed text-secondary">{f.a}</p>
+          </details>
+        </Reveal>
+      ))
+    }
+  </div>
+</section>
+
+<style>
+  .cb-faq summary::-webkit-details-marker {
+    display: none;
+  }
+  .cb-faq[open] {
+    box-shadow: var(--shadow-floating);
+  }
+</style>

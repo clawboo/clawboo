@@ -1,0 +1,114 @@
+---
+import Kicker from '../components/Kicker.astro'
+import Reveal from '../components/Reveal.astro'
+import RuntimeMark from '../components/RuntimeMark.astro'
+import ScreenshotFrame from '../components/ScreenshotFrame.astro'
+import Icon from '../components/Icon.astro'
+import { links } from '../lib/site'
+import runtimesImg from '../assets/screenshots/runtimes-panel.png'
+
+const runtimes = [
+  {
+    name: 'Clawboo Native',
+    img: '/logo.svg',
+    accent: '#e94560',
+    chip: 'Built in',
+    chipTone: 'mint' as const,
+    featured: true,
+    tagline:
+      'Built-in conversational runtime. Talks to Anthropic, OpenAI, OpenRouter, or a local Ollama directly.',
+  },
+  {
+    name: 'Claude Code',
+    monogram: 'C',
+    accent: '#d97757',
+    chip: 'Install + connect',
+    tagline: "Anthropic's coding agent on the Claude Agent SDK.",
+  },
+  {
+    name: 'Codex',
+    monogram: 'Cx',
+    accent: '#10a37f',
+    chip: 'Install + connect',
+    tagline: "OpenAI's coding agent CLI. One codex login.",
+  },
+  {
+    name: 'Hermes',
+    monogram: 'H',
+    accent: '#a78bfa',
+    chip: 'Install + connect',
+    tagline: 'Open-source runtime over OpenRouter. Keeps its self-improvement and skills.',
+  },
+  {
+    name: 'OpenClaw',
+    monogram: 'O',
+    accent: '#1f9ec4',
+    chip: 'Connect Gateway',
+    tagline: 'A local OpenClaw Gateway. Keeps its own channels and always-on heartbeat.',
+  },
+]
+---
+<section id="runtimes" class="relative mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28">
+  <Reveal class="mx-auto max-w-3xl text-center">
+    <Kicker text="One room, many runtimes" />
+    <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
+      Native agents built in. The best coding agents, one click away.
+    </h2>
+    <p class="mt-4 text-[16px] leading-relaxed text-secondary">
+      Native, Claude Code, Codex, Hermes, and OpenClaw are all named peers in one room, and any
+      runtime can lead. Coordination flows over structured lifecycle events and MCP calls, never
+      terminal-output scraping. Each runtime keeps its own native powers.
+    </p>
+  </Reveal>
+
+  <!-- Coordination plane pill -->
+  <Reveal delay={60} class="mt-10 flex justify-center">
+    <div class="surface-floating-tier inline-flex flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-full px-5 py-2.5">
+      <span class="font-data text-[11px] font-semibold uppercase tracking-wider text-primary">Shared plane</span>
+      {
+        ['Board', 'Chat', 'Memory', 'Capabilities'].map((p, i) => (
+          <span class="inline-flex items-center gap-3">
+            {i > 0 && <span class="text-foreground/25">·</span>}
+            <span class="text-[13px] font-medium text-foreground/80">{p}</span>
+          </span>
+        ))
+      }
+    </div>
+  </Reveal>
+
+  <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    {
+      runtimes.map((r, i) => (
+        <Reveal delay={i * 50}>
+          <RuntimeMark {...r} />
+        </Reveal>
+      ))
+    }
+    <Reveal delay={runtimes.length * 50}>
+      <a
+        href={links.docs}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="group surface-raised-tier flex h-full flex-col justify-center gap-2 rounded-2xl border-dashed p-5 transition-colors hover:border-[color:var(--primary)]"
+      >
+        <span class="font-display text-[15px] font-bold text-foreground">Behind one interface</span>
+        <p class="text-[13px] leading-relaxed text-secondary">
+          Every runtime executes board tasks isolated in its own git worktree, with a structured
+          handoff so work can move between runtimes.
+        </p>
+        <span class="mt-1 inline-flex items-center gap-1 text-[13px] font-semibold text-primary">
+          See the Runtimes guide
+          <Icon name="arrow-up-right" size={14} class="transition-transform group-hover:translate-x-0.5" />
+        </span>
+      </a>
+    </Reveal>
+  </div>
+
+  <Reveal delay={120} class="mx-auto mt-12 max-w-5xl">
+    <ScreenshotFrame
+      src={runtimesImg}
+      alt="The Clawboo Runtimes panel: Clawboo Native and Hermes connected, Claude Code and Codex ready to connect, and an OpenClaw Gateway healthy."
+      caption="Runtimes panel: Native is built in; connect Claude Code, Codex, Hermes, or a local OpenClaw Gateway in a click."
+    />
+  </Reveal>
+</section>

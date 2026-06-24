@@ -1,0 +1,80 @@
+---
+/**
+ * Theme toggle. Cycles light -> dark -> system, persisting to
+ * localStorage['clawboo.theme'] (same key + semantics as the product). The
+ * no-FOUC init script lives in BaseLayout; this only handles clicks + the icon.
+ *
+ * The button is rendered more than once (desktop nav + mobile cluster), so it is
+ * keyed by a data attribute, not an id, and a single guarded script wires every
+ * instance.
+ */
+import Icon from './Icon.astro'
+---
+<button
+  type="button"
+  data-theme-toggle
+  class="surface-raised-tier inline-flex h-10 w-10 items-center justify-center rounded-xl text-foreground/70 transition-colors duration-150 hover:text-foreground"
+  aria-label="Toggle color theme"
+  title="Toggle theme"
+>
+  <span class="cb-theme-light hidden"><Icon name="sun" size={18} /></span>
+  <span class="cb-theme-dark hidden"><Icon name="moon" size={18} /></span>
+  <span class="cb-theme-system hidden"><Icon name="monitor" size={18} /></span>
+</button>
+
+<script is:inline>
+  ;(function () {
+    if (window.__cbThemeBound) return
+    window.__cbThemeBound = true
+    var KEY = 'clawboo.theme'
+    var order = ['light', 'dark', 'system']
+    var map = { light: 'cb-theme-light', dark: 'cb-theme-dark', system: 'cb-theme-system' }
+    function get() {
+      try {
+        var s = localStorage.getItem(KEY)
+        return s === 'light' || s === 'dark' || s === 'system' ? s : 'light'
+      } catch (e) {
+        return 'light'
+      }
+    }
+    function resolved(pref) {
+      if (pref === 'system') {
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light'
+      }
+      return pref
+    }
+    function apply(pref) {
+      var root = document.documentElement
+      if (resolved(pref) === 'dark') root.classList.add('dark')
+      else root.classList.remove('dark')
+      document.querySelectorAll('[data-theme-toggle]').forEach(function (btn) {
+        order.forEach(function (p) {
+          var el = btn.querySelector('.' + map[p])
+          if (el) el.classList.toggle('hidden', p !== pref)
+        })
+      })
+    }
+    // Delegated click so it survives Astro view-transition DOM swaps.
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-theme-toggle]')
+      if (!btn) return
+      var next = order[(order.indexOf(get()) + 1) % order.length]
+      try {
+        localStorage.setItem(KEY, next)
+      } catch (e2) {}
+      apply(next)
+    })
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+        if (get() === 'system') apply('system')
+      })
+    }
+    apply(get())
+    // Re-apply the active icon after Astro view transitions swap the DOM.
+    document.addEventListener('astro:page-load', function () {
+      apply(get())
+    })
+  })()
+</script>

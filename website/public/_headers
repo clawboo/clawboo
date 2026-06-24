@@ -1,0 +1,17 @@
+# Cloudflare Pages headers for www.claw.boo
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+# Hashed build assets are immutable.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/demo/*
+  Cache-Control: public, max-age=2592000

@@ -1,0 +1,71 @@
+---
+import Kicker from '../components/Kicker.astro'
+import Reveal from '../components/Reveal.astro'
+import TerminalDemo from '../components/TerminalDemo.astro'
+import CopyButton from '../components/CopyButton.astro'
+
+const steps = [
+  {
+    num: '01',
+    title: 'Install and run',
+    body: 'Run npx clawboo. Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard.',
+    copy: true,
+  },
+  {
+    num: '02',
+    title: 'Pick a runtime, paste one key',
+    body: 'Clawboo Native is the default and runs agents in-process. Paste one key (Anthropic, OpenAI, or OpenRouter), or point it at a local Ollama with no key at all.',
+  },
+  {
+    num: '03',
+    title: 'Your team is ready',
+    body: 'Clawboo seeds a starter team and drops you into the dashboard at http://localhost:18790. Your team is ready in about a minute.',
+  },
+]
+---
+<section id="how" class="relative mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28">
+  <Reveal class="mx-auto max-w-3xl text-center">
+    <Kicker text="From zero to a team" />
+    <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
+      Three steps. About a minute.
+    </h2>
+    <p class="mt-4 text-[16px] leading-relaxed text-secondary">
+      No flags, no external CLI, no cloud account. Just Node.js 22+.
+    </p>
+  </Reveal>
+
+  <div class="mt-14 grid items-start gap-10 lg:grid-cols-2 lg:gap-14">
+    <div class="flex flex-col gap-3">
+      {
+        steps.map((s, i) => (
+          <Reveal delay={i * 70} class="surface-raised-tier flex gap-4 rounded-2xl p-5">
+            <span class="font-data text-[20px] font-bold leading-none text-primary/80">{s.num}</span>
+            <div class="flex-1">
+              <h3 class="font-display text-[17px] font-bold text-foreground">{s.title}</h3>
+              <p class="mt-1.5 text-[14px] leading-relaxed text-secondary">{s.body}</p>
+              {s.copy && (
+                <div class="mt-3">
+                  <CopyButton
+                    text="npx clawboo"
+                    label="npx clawboo"
+                    class="font-data rounded-lg bg-foreground/[0.06] px-3 py-1.5 text-[12.5px] text-foreground/80 hover:bg-foreground/[0.1]"
+                  />
+                </div>
+              )}
+            </div>
+          </Reveal>
+        ))
+      }
+      <Reveal delay={240}>
+        <p class="font-data px-1 text-[11px] leading-relaxed text-foreground/45">
+          The dashboard port is written to ~/.clawboo/api-port.txt and auto-falls-back through 18809
+          if 18790 is busy.
+        </p>
+      </Reveal>
+    </div>
+
+    <Reveal delay={120} class="lg:sticky lg:top-24">
+      <TerminalDemo />
+    </Reveal>
+  </div>
+</section>

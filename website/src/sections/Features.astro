@@ -1,0 +1,117 @@
+---
+import { Image } from 'astro:assets'
+import Kicker from '../components/Kicker.astro'
+import Reveal from '../components/Reveal.astro'
+import Icon from '../components/Icon.astro'
+import { links } from '../lib/site'
+import ghostGraph from '../assets/screenshots/ghost-graph.png'
+import sharedMemory from '../assets/screenshots/shared-memory.png'
+import capabilities from '../assets/screenshots/capabilities-panel.png'
+import agentDetail from '../assets/screenshots/agent-detail.png'
+
+const cards = [
+  {
+    icon: 'columns',
+    accent: 'var(--primary)',
+    title: 'A board you can trust',
+    body: 'A durable kanban fused with a live group chat. The board is the canonical source of truth, and chat is the narration. Tasks survive restarts, claims are race-free, and every delegation is a real board mutation.',
+  },
+  {
+    icon: 'message',
+    accent: 'var(--category-data)',
+    title: 'Every runtime, one room',
+    body: 'Mixed-runtime peer chat. Native, Claude Code, Codex, Hermes, and OpenClaw are all named peers, and any runtime can lead. Coordination flows over structured lifecycle events and MCP calls, never terminal-output scraping.',
+  },
+  {
+    icon: 'zap',
+    accent: 'var(--mint)',
+    title: 'Built in, or one click away',
+    body: 'Native agents built in, external runtimes one click away. Paste a provider key and Clawboo runs agents itself, or install and connect a coding-agent CLI from the Runtimes panel. Each runtime keeps its own native powers.',
+  },
+  {
+    icon: 'database',
+    accent: 'var(--category-web)',
+    title: 'One memory, one inventory',
+    body: 'One shared memory, one capability dashboard. Every runtime reads and writes the same tiered memory store and shows up in one unified skills and connectors inventory, while its private self-model stays its own.',
+  },
+  {
+    icon: 'shield',
+    accent: 'var(--amber)',
+    title: 'Verified and governed by default',
+    body: 'Built-in verification (the builder is not the judge), spend tracking and warnings, depth and fan-out caps, and approvals, plus OpenTelemetry traces and structured logs, all on by default. Hard spend caps that auto-pause are opt-in.',
+  },
+]
+
+const panels = [
+  { img: ghostGraph, title: 'The whole org at a glance', body: 'Atlas is the global org-graph; Ghost Graph halos show each team at a glance.', alt: 'Clawboo Atlas: a global org-graph of every team rendered as connected ghost-lobster nodes with team halos.' },
+  { img: sharedMemory, title: 'Context that carries over', body: 'One tiered store every runtime reads and writes. Private self-models stay private.', alt: 'The Clawboo shared memory panel: facts and procedures searchable across every runtime.' },
+  { img: capabilities, title: 'One inventory of every power', body: 'Skills, tools, and connectors across every runtime in a single dashboard.', alt: 'The Clawboo capabilities dashboard: skills, tools, and connectors grouped by runtime.' },
+  { img: agentDetail, title: '304 agents, fully specified', body: 'Every agent is a real, inspectable Boo with its own role, skills, and history.', alt: 'A Clawboo agent detail view: a single agent with its chat, personality, and files.' },
+]
+---
+<section id="features" class="relative mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28">
+  <Reveal class="mx-auto max-w-3xl text-center">
+    <Kicker text="What you get" />
+    <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
+      One coordination plane. Every runtime keeps its edge.
+    </h2>
+    <p class="mt-4 text-[16px] leading-relaxed text-secondary">
+      Five ideas do the heavy lifting. Each one maps to something you can see and click in the
+      dashboard.
+    </p>
+  </Reveal>
+
+  <div class="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    {
+      cards.map((c, i) => (
+        <Reveal delay={i * 50} class={`cb-feat surface-raised-tier flex flex-col gap-3 rounded-2xl p-6 transition-[transform,box-shadow] duration-200 hover:-translate-y-1 ${i === 0 ? 'lg:row-span-1' : ''}`}>
+          <span
+            class="flex h-11 w-11 items-center justify-center rounded-xl"
+            style={`background:color-mix(in srgb, ${c.accent} 14%, transparent);color:${c.accent}`}
+          >
+            <Icon name={c.icon} size={20} />
+          </span>
+          <h3 class="font-display text-[17px] font-bold text-foreground">{c.title}</h3>
+          <p class="text-[14px] leading-relaxed text-secondary">{c.body}</p>
+        </Reveal>
+      ))
+    }
+    <Reveal delay={cards.length * 50} class="surface-raised-tier flex flex-col justify-center gap-3 rounded-2xl p-6">
+      <h3 class="font-display text-[17px] font-bold text-foreground">See it all in the docs</h3>
+      <p class="text-[14px] leading-relaxed text-secondary">Every surface above is documented, from the board state machine to the verification gate.</p>
+      <a href={links.docs} target="_blank" rel="noopener noreferrer" class="group mt-1 inline-flex items-center gap-1 text-[14px] font-semibold text-primary">
+        Read the docs <Icon name="arrow-up-right" size={15} class="transition-transform group-hover:translate-x-0.5" />
+      </a>
+    </Reveal>
+  </div>
+
+  <!-- Screenshot panel cards -->
+  <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    {
+      panels.map((p, i) => (
+        <Reveal delay={i * 50} class="cb-feat surface-raised-tier flex flex-col overflow-hidden rounded-2xl transition-[transform,box-shadow] duration-200 hover:-translate-y-1">
+          <div class="overflow-hidden border-b border-border/60 bg-foreground/[0.02]">
+            <Image
+              src={p.img}
+              alt={p.alt}
+              widths={[360, 560, 720]}
+              sizes="(min-width: 1024px) 300px, 90vw"
+              loading="lazy"
+              class="block aspect-[16/10] w-full object-cover object-top"
+            />
+          </div>
+          <div class="flex flex-col gap-1.5 p-4">
+            <h3 class="font-display text-[15px] font-bold text-foreground">{p.title}</h3>
+            <p class="text-[13px] leading-relaxed text-secondary">{p.body}</p>
+          </div>
+        </Reveal>
+      ))
+    }
+  </div>
+</section>
+
+<style>
+  .cb-feat:hover {
+    box-shadow: var(--shadow-floating);
+  }
+</style>

@@ -1,0 +1,162 @@
+@import 'tailwindcss';
+@import './tokens.css';
+@import './animations.css';
+
+/* Geist Mono — local woff2 (preloaded in BaseLayout head). */
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Dark variant: class .dark applied to <html> before paint. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  /* Core brand colors (resolved from the CSS variables in tokens.css). */
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-text: var(--foreground);
+  --color-secondary: var(--secondary);
+  --color-blue: var(--blue);
+  --color-mint: var(--mint);
+  --color-amber: var(--amber);
+
+  --color-category-data: var(--category-data);
+  --color-category-comm: var(--category-comm);
+  --color-category-code: var(--category-code);
+  --color-category-file: var(--category-file);
+  --color-category-web: var(--category-web);
+  --color-category-other: var(--category-other);
+
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--primary);
+  --color-accent-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-floating: var(--surface-floating);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-code-block: var(--code-block-bg);
+  --color-border-floating: var(--border-floating);
+  --color-border-overlay: var(--border-overlay);
+
+  --shadow-tier-raised: var(--shadow-raised);
+  --shadow-tier-floating: var(--shadow-floating);
+  --shadow-tier-overlay: var(--shadow-overlay);
+
+  /* Fonts. */
+  --font-display: 'Cabinet Grotesk', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+
+  /* Type scale — fills the gaps in Tailwind's default scale.
+     Generates text-micro / text-compact / text-section / text-page / text-hero. */
+  --text-micro: 11px;
+  --text-micro--line-height: 14px;
+  --text-compact: 13px;
+  --text-compact--line-height: 18px;
+  --text-section: 22px;
+  --text-section--line-height: 28px;
+  --text-page: 28px;
+  --text-page--line-height: 34px;
+  --text-hero: 40px;
+  --text-hero--line-height: 46px;
+
+  --radius: 0.5rem;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 88px; /* clears the sticky 64px nav on anchor jumps */
+}
+
+html,
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  overflow-x: hidden;
+}
+
+* {
+  border-color: var(--border);
+}
+
+/* Scrollbars — token-driven, mode-aware. */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* Surface elevation tiers — bundle bg + border + shadow + blur. */
+.surface-raised-tier {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-raised);
+}
+.surface-floating-tier {
+  background: var(--surface-floating);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--border-floating);
+  box-shadow: var(--shadow-floating);
+}
+.surface-overlay-tier {
+  background: var(--surface-overlay);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid var(--border-overlay);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* Numeric / metric columns — mono + tabular figures. */
+.font-data {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* Display headings convenience. */
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+/* Global keyboard focus ring. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: inherit;
+}

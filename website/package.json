@@ -1,0 +1,34 @@
+{
+  "name": "clawboo-website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Marketing website for Clawboo (www.claw.boo). Standalone Astro project, not part of the pnpm workspace.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/react": "^4.2.0",
+    "@astrojs/sitemap": "^3.2.1",
+    "@tailwindcss/vite": "^4.0.0",
+    "astro": "^5.2.0",
+    "framer-motion": "^11.18.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "sharp": "^0.33.5"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
