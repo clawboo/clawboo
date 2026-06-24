@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "generate": "node ../../scripts/build-mintlify-docs.mjs",
-    "build": "node ../../scripts/build-mintlify-docs.mjs",
+    "build": "echo 'apps/docs ships pre-generated .mdx (Mintlify deploys these). To rebuild from docs/, run: pnpm --filter @clawboo/docs generate'",
     "dev": "node ../../scripts/build-mintlify-docs.mjs && mint dev --port 3111",
     "check-links": "mint broken-links",
     "lint": "echo 'skip'",
