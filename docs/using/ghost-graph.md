@@ -1,6 +1,6 @@
 ---
 title: Using the Ghost Graph and Atlas
-description: Read and edit your fleet's org graph: dual-shape Boo nodes, peacock skill expand, team halos, connect mode, and the Atlas global view.
+description: "Read and edit your fleet's org graph: dual-shape Boo nodes, peacock skill expand, team halos, connect mode, and the Atlas global view."
 ---
 
 Use this page when you want to _see_ how your agents relate: who reports to whom, which skills each Boo carries, and what each one is doing right now. Clawboo renders this as a React Flow canvas in two scopes: **Atlas** (the global all-teams org graph) and the per-team **Ghost Graph** (embedded inside a team's group chat). Both are the same `GhostGraph` component driven by a `scope` prop; what differs is which agents they show and a couple of Atlas-only controls.

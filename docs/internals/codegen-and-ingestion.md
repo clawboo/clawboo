@@ -1,6 +1,6 @@
 ---
 title: Codegen and ingestion
-description: How the marketplace catalog is generated from pinned upstream repos, the zero-loss identityTemplate invariant, and the verify:ingest drift gate that keeps committed codegen honest.
+description: 'How the marketplace catalog is generated from pinned upstream repos, the zero-loss identityTemplate invariant, and the verify:ingest drift gate that keeps committed codegen honest.'
 ---
 
 The marketplace catalog, 304 deployable agents and 82 teams, is **committed codegen**. None of it is fetched at runtime, and none of it is hand-maintained entry by entry. Instead, `scripts/ingest-marketplace-content.ts` reads two upstream GitHub repos at pinned commits, parses each `.md` file into a typed catalog entry, renders the entries as TypeScript source, runs that source through Prettier, and writes it to disk. The generated files (~20 of them under `apps/web/src/features/marketplace/`) are committed to git and imported directly by the app. A second script, `scripts/verify-ingest.ts`, re-runs the same render pipeline in memory and diffs the result against the committed files; that diff is a CI gate on every PR and every release.

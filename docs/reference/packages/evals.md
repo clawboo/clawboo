@@ -1,6 +1,6 @@
 ---
-title: "@clawboo/evals"
-description: Server-only eval harness for clawboo's own orchestration: capability/regression suites, code/model graders, pass@1 / pass^k, and the ±verifier × ±structured-state ablation scorecard.
+title: '@clawboo/evals'
+description: "Server-only eval harness for clawboo's own orchestration: capability/regression suites, code/model graders, pass@1 / pass^k, and the ±verifier × ±structured-state ablation scorecard."
 ---
 
 - **Version** `0.1.0`

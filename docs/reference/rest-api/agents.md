@@ -1,6 +1,6 @@
 ---
 title: Agents API
-description: REST reference for the agent registry-of-record: list, create, sync, per-agent reads, files, sessions, delete, and ghost cleanup.
+description: 'REST reference for the agent registry-of-record: list, create, sync, per-agent reads, files, sessions, delete, and ghost cleanup.'
 ---
 
 REST surface for the [agent registry-of-record](/appendices/glossary). SQLite is the source of truth for who exists; an `AgentSource` syncs each upstream (the OpenClaw Gateway, the in-process native runtime) INTO SQLite. Reads serve SQLite, so the agent list, an agent record, and an agent's files keep answering even when the Gateway connection is down; a `stale` flag marks that case. Writes (create), file PUTs, and live session lists delegate to the owning source and return **503** when the source needs a live upstream that is disconnected.

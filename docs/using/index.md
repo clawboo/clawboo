@@ -1,5 +1,5 @@
 ---
-title: Using Clawboo: the feature map
+title: 'Using Clawboo: the feature map'
 description: A navigation index to every Clawboo dashboard feature, grouped by where it lives in the UI.
 ---
 

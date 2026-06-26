@@ -1,6 +1,6 @@
 ---
 title: Clawboo Native runtime
-description: The clawboo-native in-process conversational harness: provider SDKs direct, no Gateway, jailed file tools, in-process MCP, and how to connect a key.
+description: 'The clawboo-native in-process conversational harness: provider SDKs direct, no Gateway, jailed file tools, in-process MCP, and how to connect a key.'
 ---
 
 `clawboo-native` is Clawboo's own [runtime](/appendices/glossary): an in-process conversational harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, Ollama) with **no OpenClaw Gateway** in the loop. It is one of the five runtimes, a co-equal peer beside `openclaw`, `claude-code`, `codex`, and `hermes`; there is no conversion or export between a native agent and any other runtime's agent.

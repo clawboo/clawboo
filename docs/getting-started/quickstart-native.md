@@ -1,5 +1,5 @@
 ---
-title: Quickstart: the native runtime (no Gateway)
+title: 'Quickstart: the native runtime (no Gateway)'
 description: Run npx clawboo, choose the native runtime, paste a provider key, and land in a working two-agent team with no OpenClaw Gateway.
 ---
 

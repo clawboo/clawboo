@@ -1,6 +1,6 @@
 ---
 title: Capabilities API
-description: REST reference for the unified capability inventory: list every runtime's skills, tools, and connectors, and act on the manageable ones.
+description: "REST reference for the unified capability inventory: list every runtime's skills, tools, and connectors, and act on the manageable ones."
 ---
 
 REST surface for the unified [capability inventory](/concepts/capabilities): one merged stream of every skill, tool, and connector across all five runtimes, plus a single manageability-gated action endpoint. `GET /api/capabilities` is the one read both the Ghost Graph and the Capabilities dashboard consume; `POST /api/capabilities/:action` installs a curated skill or connector, toggles a manageable capability, or resolves a pending tool-call approval.

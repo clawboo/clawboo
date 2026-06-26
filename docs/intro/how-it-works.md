@@ -1,6 +1,6 @@
 ---
 title: How Clawboo works
-description: An end-to-end architecture overview: the CLI, the bundled server and SPA, the durable board, the runtime seam, and the MCP spine.
+description: 'An end-to-end architecture overview: the CLI, the bundled server and SPA, the durable board, the runtime seam, and the MCP spine.'
 ---
 
 Clawboo is a single `npx clawboo` command that becomes a local mission-control dashboard for a fleet of AI agents. Under that one command sits a small, deliberate stack: a bundled Express server serving a Vite single-page app, a SQLite database that is the durable source of truth for task coordination, a uniform interface (`RuntimeAdapter`) that lets one orchestrator drive five different agent runtimes, four Model Context Protocol servers that those runtimes share, and an append-only event log that every visualization is a projection of.

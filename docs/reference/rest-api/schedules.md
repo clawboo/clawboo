@@ -1,6 +1,6 @@
 ---
 title: Schedules API
-description: REST reference for the unified scheduler: list, create, update, pause/resume, delete, and force-run schedules across two sources.
+description: 'REST reference for the unified scheduler: list, create, update, pause/resume, delete, and force-run schedules across two sources.'
 ---
 
 REST surface for the unified scheduler: one merged read/write view over two [schedule sources](/concepts/scheduling): clawboo **Routines** (the `team-task` domain, fully managed) and the **OpenClaw Gateway cron** (the `runtime-own-life` domain, written through the Gateway's own operator RPC). A read always succeeds and reports per-source degradation as data; a write routes to the owning source by id and surfaces the typed scheduling errors as precise status codes.

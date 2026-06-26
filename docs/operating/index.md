@@ -1,6 +1,6 @@
 ---
 title: Operating Clawboo
-description: Operator overview: where Clawboo runs, how to expose it safely, where data lives, and what the defaults are.
+description: 'Operator overview: where Clawboo runs, how to expose it safely, where data lives, and what the defaults are.'
 ---
 
 This section is for the person who runs the Clawboo server, on a laptop, a shared box, or behind a reverse proxy, rather than the person clicking around the dashboard. Clawboo is a single Node process: a bundled Express server that serves the SPA, exposes the REST API, hosts the four [MCP servers](/reference/mcp-tools) in-process, and owns one SQLite file plus an encrypted secrets vault under `~/.clawboo`. By default it binds **loopback (`127.0.0.1`)** with no authentication, which is the right posture for a single-user machine; exposing it on a network is an explicit opt-in that requires the access gate. The pages below cover the four operator concerns in order: where it runs, how to expose it safely, what attaches to it, and where the state lives, and the reference pages give the exact knobs.

@@ -1,6 +1,6 @@
 ---
 title: Release process
-description: How Clawboo ships: Changesets, the CI gate, the Version-PR publish flow, and why a release is the CLI's npm publish with the libs inlined.
+description: "How Clawboo ships: Changesets, the CI gate, the Version-PR publish flow, and why a release is the CLI's npm publish with the libs inlined."
 ---
 
 A Clawboo release is the publish of **one npm package**: the `clawboo` CLI in `apps/cli`. Every `@clawboo/*` library in the workspace is `private: true` and never reaches npm on its own; the libraries it needs are _inlined_ into the CLI's shipped bundle. The release machinery is Changesets for versioning + changelog, a CI gate that mirrors the publish steps, and a two-phase `publish.yml` (open a Version PR, then publish on its merge).

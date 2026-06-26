@@ -1,6 +1,6 @@
 ---
-title: "@clawboo/scheduler"
-description: Pure scheduling primitives: cron-spec parsing, next-occurrence math, the TaskTemplate schema, and the ScheduleSource trait + ScheduleRecord + multiplexer.
+title: '@clawboo/scheduler'
+description: 'Pure scheduling primitives: cron-spec parsing, next-occurrence math, the TaskTemplate schema, and the ScheduleSource trait + ScheduleRecord + multiplexer.'
 ---
 
 |                    |                                                                                                                                                                              |

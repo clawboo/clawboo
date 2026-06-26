@@ -1,6 +1,6 @@
 ---
 title: Memory API
-description: REST reference for the memory resource group: search, save facts and procedures, browse, and inspect the active embedding provider.
+description: 'REST reference for the memory resource group: search, save facts and procedures, browse, and inspect the active embedding provider.'
 ---
 
 REST surface for the shared [memory](/concepts/memory) tier: search the 2-tier store (declarative **facts** + versioned **procedures**), save a fact or a procedure, browse what is stored, and inspect which embedding provider backs vector/hybrid search. This is the UI-facing half of the memory dual surface; the model-facing half is the [Memory MCP server](/reference/rest-api/tools-and-mcp). Both halves share one `SqliteMemoryStore` over the same SQLite file, so a fact saved here is searchable from a runtime's Memory tool and vice versa.

@@ -1,6 +1,6 @@
 ---
 title: Memory
-description: Clawboo's two memory tiers: one shared Memory-MCP store every runtime reads and writes, plus each runtime's preserved private native memory.
+description: "Clawboo's two memory tiers: one shared Memory-MCP store every runtime reads and writes, plus each runtime's preserved private native memory."
 ---
 
 Clawboo gives a team two kinds of memory. There is **one shared store**: declarative facts and versioned procedures in SQLite, served over a Memory [MCP](/appendices/glossary) server, that every [runtime](/appendices/glossary) reads and writes. And there is **each runtime's own private native memory**: Hermes's `MEMORY.md`, Claude Code's project memory, clawboo-native's session store, which Clawboo preserves but never touches and never syncs.

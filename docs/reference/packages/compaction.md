@@ -1,6 +1,6 @@
 ---
-title: "@clawboo/compaction"
-description: Pass-through-safe, failure-preserving tool-output compaction: cuts verbose tool output before it re-enters context, never compressing away an error.
+title: '@clawboo/compaction'
+description: 'Pass-through-safe, failure-preserving tool-output compaction: cuts verbose tool output before it re-enters context, never compressing away an error.'
 ---
 
 - **Version** `0.1.0`

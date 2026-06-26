@@ -1,6 +1,6 @@
 ---
-title: "@clawboo/db"
-description: SQLite + Drizzle ORM data layer: schema, board, memory, tools, governance, events, sessions, routines, team-chat.
+title: '@clawboo/db'
+description: 'SQLite + Drizzle ORM data layer: schema, board, memory, tools, governance, events, sessions, routines, team-chat.'
 ---
 
 **Version** 0.1.0 · **Purity** server-only (`better-sqlite3` native binding) · **Purpose** the single SQLite + Drizzle data layer: schema, connection, and every domain repository (board, memory, tools broker, governance, event log, sessions, routines, team-chat). It is the cross-process bus: the Express server and the MCP stdio bins open the same file.

@@ -1,6 +1,6 @@
 ---
 title: Environment variables
-description: Every environment variable Clawboo reads: state paths, ports, secrets, runtime keys, OpenClaw interop, logging, and operational tuning.
+description: 'Every environment variable Clawboo reads: state paths, ports, secrets, runtime keys, OpenClaw interop, logging, and operational tuning.'
 ---
 
 A complete, code-grounded list of every environment variable Clawboo actually reads. Each entry names the variable, what reads it, its purpose, and its default. Variables not listed here are not consulted by Clawboo.

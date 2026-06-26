@@ -1,6 +1,6 @@
 ---
-title: "@clawboo/config"
-description: Settings loader and persistence for Clawboo: resolves state dirs, env overrides, and OpenClaw config fallback.
+title: '@clawboo/config'
+description: 'Settings loader and persistence for Clawboo: resolves state dirs, env overrides, and OpenClaw config fallback.'
 ---
 
 - **Version** 0.1.0 · **Purity** server-only (uses `node:fs` / `node:os` / `node:path`)

@@ -1,6 +1,6 @@
 ---
 title: The RuntimeAdapter trait
-description: The executor seam every runtime implements: the RuntimeAdapter trait, the normalized RuntimeEvent union, the registry, the contract suite, and the KV-cache tiers.
+description: 'The executor seam every runtime implements: the RuntimeAdapter trait, the normalized RuntimeEvent union, the registry, the contract suite, and the KV-cache tiers.'
 ---
 
 `@clawboo/executor` is the substrate that lets Clawboo drive five heterogeneous agent runtimes through one interface. It defines the `RuntimeAdapter` trait (the seam an adapter implements), the normalized `RuntimeEvent` union (the lifecycle stream every adapter emits), the `RuntimeRegistry` (the open set of available adapters), a single-consumer `AsyncQueue` primitive, the `runAdapterContract` test suite every adapter must pass, and the `./tiers` KV-cache prompt-assembly discipline. The package is pure: no workspace dependencies, no `node:*` imports, so it builds browser-safe and ships inlined into the CLI bundle.

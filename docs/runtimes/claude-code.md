@@ -1,6 +1,6 @@
 ---
 title: Claude Code runtime
-description: Connect and run the Claude Code runtime: capabilities, the ANTHROPIC_API_KEY vault flow, install, and the SDK-backed driver.
+description: 'Connect and run the Claude Code runtime: capabilities, the ANTHROPIC_API_KEY vault flow, install, and the SDK-backed driver.'
 ---
 
 Use this page when you want a [Boo](/appendices/glossary) backed by **Claude Code**, Anthropic's coding agent. Clawboo wraps the [Claude Agent SDK](https://docs.claude.com/en/docs/claude-code/overview) so a Claude Code run executes a durable board task in its own [worktree](/appendices/glossary), reports up, and resumes across runs.

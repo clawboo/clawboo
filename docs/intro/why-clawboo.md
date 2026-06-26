@@ -1,6 +1,6 @@
 ---
 title: Why Clawboo
-description: What Clawboo adds over running runtimes standalone or stitching them yourself: one team room, race-free coordination, deep integration, independent verification, governance, and observability.
+description: 'What Clawboo adds over running runtimes standalone or stitching them yourself: one team room, race-free coordination, deep integration, independent verification, governance, and observability.'
 ---
 
 You can already run a coding agent on its own. You can run several of them. What you cannot easily do is make _different_ agent runtimes, one on the native harness, one on OpenClaw, one on Hermes, work as one team without writing the coordination layer yourself: a shared room they can all speak in, a way to hand work between them without double-firing, and guardrails that hold when twelve of them write the same database at once.

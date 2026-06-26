@@ -1,6 +1,6 @@
 ---
 title: Schedule recurring team work
-description: A walkthrough for putting a team task on a clock with Routines: cron, one-shot, presets, the one-firing-owner invariant, error-halts, and pause/resume/run-now.
+description: 'A walkthrough for putting a team task on a clock with Routines: cron, one-shot, presets, the one-firing-owner invariant, error-halts, and pause/resume/run-now.'
 ---
 
 This guide composes Clawboo's scheduler into a real workflow: you'll create a **Routine** that fires a team task on a clock, understand why a failing Routine parks itself instead of retrying, and pause, resume, run, or delete it from one surface. Use it when you want a nightly report, a morning briefing, or a one-off future run to happen without anyone sitting at the dashboard to kick it off.

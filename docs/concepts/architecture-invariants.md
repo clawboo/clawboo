@@ -1,6 +1,6 @@
 ---
 title: Architecture invariants
-description: The load-bearing rules every Clawboo change preserves: registry of record, same-origin Gateway access, the pure event pipeline, and idempotent schema.
+description: 'The load-bearing rules every Clawboo change preserves: registry of record, same-origin Gateway access, the pure event pipeline, and idempotent schema.'
 ---
 
 An invariant is a rule the codebase is built to hold no matter what changes around it. Clawboo has a small set of them. They are not style preferences; break one and a whole class of bug becomes possible: a stale agent list that survives a Gateway outage stops being stale; a graph edge stops mapping to anything real; the browser starts talking to credentials it should never see.

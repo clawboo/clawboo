@@ -1,6 +1,6 @@
 ---
 title: Package overview
-description: The 25 @clawboo/* workspace packages: version, purity, purpose, dependency graph, and build order.
+description: 'The 25 @clawboo/* workspace packages: version, purity, purpose, dependency graph, and build order.'
 ---
 
 Clawboo is a TurboRepo + pnpm-workspaces monorepo. Every shared library lives under the `@clawboo/*` scope in `packages/`; all of them are **internal** (`private: true`); the only published npm artifact is the `clawboo` CLI (`apps/cli`), which inlines every `@clawboo/*` package it needs into its bundle (`dist/`). The two consumers are `apps/web` (the dashboard + Express API) and `apps/cli` (`npx clawboo`). Packages divide cleanly into **pure / browser-safe** ones (no `node:*` imports, safe to bundle into the Vite SPA or run in a worker) and **server-only** ones (touch `node:fs`/`node:http`/`better-sqlite3` and may only run in the Express server, the bundled CLI server, or the MCP stdio bins). Dependencies flow one way: apps depend on packages, packages depend on packages, and packages never import apps. `@clawboo/tsconfig` is the shared TypeScript-config root (a devDependency everywhere, no runtime edge).

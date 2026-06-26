@@ -1,6 +1,6 @@
 ---
 title: Scheduling
-description: Routines: Clawboo's durable team-task scheduler, its rebuildable ticker, the two cron domains, the one-firing-owner invariant, and the error-halts policy.
+description: "Routines: Clawboo's durable team-task scheduler, its rebuildable ticker, the two cron domains, the one-firing-owner invariant, and the error-halts policy."
 ---
 
 A **Routine** is a scheduled team task: a cron-shaped trigger that, on each fire, materializes a [board](/concepts/the-board) task and dispatches it through the same executor pipeline a delegated task would use. Routines are how a team gets recurring or future-dated work, a morning briefing, a nightly report, a one-shot reminder, without anyone sitting at the dashboard to kick it off.
