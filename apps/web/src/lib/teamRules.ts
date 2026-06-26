@@ -4,7 +4,7 @@
 // Why this exists
 // ---------------
 // The user's corrections ("they are not sub agents", "don't do work
-// yourself") sit only in chat history. After a 7-hour gap they're outside
+// yourself") sit only in chat history. After a long gap they're outside
 // the last-8-messages window in `buildTeamContextPreamble` and effectively
 // gone. Without a durable persistence layer, the user has to repeat the
 // same correction every session — and the team makes the same mistake.

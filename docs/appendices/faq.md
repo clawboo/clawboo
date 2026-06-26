@@ -1,0 +1,116 @@
+---
+title: Frequently asked questions
+description: Common questions about Clawboo: runtimes, data location, local-first behavior, cost, safe network exposure, and resetting.
+---
+
+Short, grounded answers to the questions that come up most. Each answer links to the page that covers the topic in full.
+
+<Note>
+These docs describe Clawboo **v0.2.0**, the current release.
+</Note>
+
+## Do I need OpenClaw to use Clawboo?
+
+No. OpenClaw is one of the five [runtimes](/runtimes/index), not a hard dependency. The built-in **Clawboo Native** runtime ships inside the server (`builtIn: true`, nothing to install) and needs only a provider API key; paste an Anthropic, OpenAI, or OpenRouter key and you have a working team with no OpenClaw Gateway anywhere. The native-first onboarding flow does exactly this: it seeds a leader + specialist team and drops you straight into chat.
+
+OpenClaw remains a first-class secondary path if you already run it, see the [OpenClaw runtime](/runtimes/openclaw) page. For the no-Gateway flow, see [Quickstart (native)](/getting-started/quickstart-native).
+
+## Which runtimes are supported?
+
+Five, defined in the runtime descriptor:
+
+| Runtime        | id               | Built-in?                | Auth                   |
+| -------------- | ---------------- | ------------------------ | ---------------------- |
+| Clawboo Native | `clawboo-native` | Yes (in-process)         | provider API key       |
+| OpenClaw       | `openclaw`       | No (connected substrate) | Gateway device pairing |
+| Claude Code    | `claude-code`    | No (`npm`)               | `ANTHROPIC_API_KEY`    |
+| Codex          | `codex`          | No (`npm`)               | OAuth (`codex login`)  |
+| Hermes         | `hermes`         | No (`pip`/`pipx`)        | `OPENROUTER_API_KEY`   |
+
+A team can mix runtimes, one agent on Native, another on Claude Code, another on OpenClaw, and they coordinate over the shared board and peer chat. See the [runtimes overview](/runtimes/index) for the full capability matrix and [connecting runtimes](/runtimes/connecting-runtimes) for install/connect.
+
+## Is my data sent anywhere?
+
+Clawboo is local-first. The server binds to loopback by default, stores everything on your machine, and makes no telemetry or analytics calls. The only outbound network traffic is what a runtime makes to **the model provider you chose**: the native runtime calls `api.anthropic.com`, `api.openai.com`, OpenRouter (`https://openrouter.ai/api/v1`), or your local Ollama, with the key you supplied. That is the same call any agent runtime makes; Clawboo is the orchestrator in front of it, not a relay through a Clawboo-hosted service.
+
+When you paste a provider key into the native "Test connection" affordance, the key is used for exactly one GET to the provider's models endpoint to validate it and is **never persisted** by that endpoint; it is not written to the vault, logged, or echoed back. See [security](/operating/security) and the [runtimes API healthcheck](/reference/rest-api/runtimes).
+
+## Where is my data stored?
+
+Everything Clawboo owns lives under `~/.clawboo/` (override with the `CLAWBOO_HOME` environment variable). That directory holds the SQLite database `clawboo.db` (the agent registry, board, memory, chat history, settings, governance ledger, and event log, 27 tables in one file), `settings.json`, the encrypted secrets vault, the proxy device identity, the API-port file, and task worktrees.
+
+Clawboo only ever _reads_ OpenClaw's `~/.openclaw/` directory for interop; it never writes there. The full file/dir map, backup instructions, and the WAL-sidecar detail are in [data and state](/operating/data-and-state).
+
+## How do I expose Clawboo on a network safely?
+
+By default the server binds to loopback `127.0.0.1`, so a fresh install is not reachable from other hosts. Widening the bind is an explicit opt-in: set the `HOST` (or `HOSTNAME`) environment variable. When you do, **always** also set `STUDIO_ACCESS_TOKEN`.
+
+The token activates the access gate: every `/api/*` route then requires a valid cookie, set once by opening `/?access_token=<token>`. The gate compares tokens in constant time, folds path case before its prefix check (so `/API/...` cannot evade it), and restricts the token charset to `[A-Za-z0-9._~-]`. If you bind to a non-loopback interface _without_ a token, the server logs a loud SECURITY warning at boot rather than silently exposing the dashboard.
+
+<Warning>
+A non-loopback bind with no `STUDIO_ACCESS_TOKEN` leaves the dashboard and every API route reachable by anyone on your network with no authentication. Set the token before widening the bind.
+</Warning>
+
+The one deliberate carve-out: a loopback request to `/api/mcp/*` is exempt from the gate, because the server's own spawned runtimes attach their MCP clients over `http://127.0.0.1:<port>/api/mcp/*` with no cookie. A non-loopback `/api/mcp/*` request still requires the cookie. The full threat model is in [security](/operating/security); the operator walkthrough is in [self-host securely](/guides/self-host-securely).
+
+## Does Clawboo cost money?
+
+Clawboo itself is free and open source (MIT licensed). What costs money is the **model provider's API usage**, the tokens your agents consume against Anthropic, OpenAI, OpenRouter, or whichever provider you connected. A local Ollama model is free to run but is billed as `null`/estimated rather than real USD because there is no provider invoice.
+
+Clawboo tracks per-agent and per-team spend in the [cost dashboard](/using/cost-and-budgets) and lets you set USD budgets. Out of the box budgets ship as **track-and-warn**: spend is recorded and you get a threshold warning, but nothing pauses a run until you opt into a hard cap. See [governance](/concepts/governance) and the [budgets guide](/guides/governance-and-budgets).
+
+## Can agents run unattended?
+
+Yes, with guardrails. **Routines** schedule recurring team-task work on a cron expression (or a one-shot `once@<iso>`); the schedule is a durable ledger row, so it survives restarts and a boot-resume reconstructs every active routine from the database. See [scheduling](/concepts/scheduling) and the [recurring team work guide](/guides/recurring-team-work).
+
+Pair Routines with [governance](/concepts/governance) before leaving a fleet unattended: budgets (track-and-warn by default, hard-cap opt-in), tool-loop circuit breakers, depth/fan-out/cost caps, and approval gates are the controls that keep an unsupervised run from running away. Verification ([builder ≠ judge](/concepts/verification)) keeps "done" meaning _verified_ rather than merely claimed.
+
+## How do I reset Clawboo?
+
+There is no schema migration ladder; a schema change is a hard reset of the local database, which `createDb()` re-bootstraps on the next connect. So "reset" means delete the database file.
+
+- **Reset just the data** (keep keys + settings): stop the server, then `rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm`.
+- **Full reset** (everything, including provider keys): `rm -rf ~/.clawboo` then `npx clawboo`.
+
+The full reset is destructive; it removes the vault, the proxy device identity, and all teams/board/chat/memory data. Back up `~/.clawboo` first if any of it matters. Full instructions and the WAL-sidecar caveat are in [data and state → hard reset](/operating/data-and-state#hard-reset).
+
+## What's the difference between Atlas and the Ghost Graph?
+
+They are two scopes of the same node-graph surface (`GhostGraphScope = 'atlas' | 'team'`):
+
+- **Ghost Graph (team scope)** renders one team: its Boos, their skills, and the routing edges between them. It is embedded inside the team's group chat.
+- **Atlas (atlas scope)** is the global, all-teams view: Boo Zero presides at the top over per-team rows. You reach it from the dedicated Atlas nav button.
+
+So "the Ghost Graph" usually means the per-team canvas, and "Atlas" is the zoomed-out, whole-fleet org chart. Both share the same rendering, layout, and team-halo machinery. See [using the Ghost Graph](/using/ghost-graph) and the [glossary](/appendices/glossary).
+
+## Can I use a local model?
+
+Yes, via the native runtime and Ollama. Point the native runtime at a local Ollama instance; it rides the OpenAI-compatible client with a base URL (default `http://localhost:11434/v1`, override with `OLLAMA_BASE_URL`). Ollama is keyless, so no API key is needed; the trade-off is that its cost is reported as estimated rather than real USD, since there is no provider invoice. Configure it during native onboarding or in the model picker. See the [native runtime](/runtimes/native) page.
+
+## Is Clawboo multi-user or multi-tenant?
+
+No: it is single-tenant and local-first today. There is one implicit tenant. Several tables carry a `tenant_id` column, but it is a **dormant seam** for a future multi-tenant / Postgres swap, not a wired-up feature.
+
+<Note>
+Multi-tenant `tenantId` and human `participantKind` are **future seams, not built**. The shipped product is a single-user dashboard. Don't plan a multi-user deployment on the current release.
+</Note>
+
+## Do I have to keep the dashboard open for agents to work?
+
+The agent runs happen server-side, so an in-flight run completes even if you close the browser tab; but the Express server process must stay up. Scheduled [Routines](/concepts/scheduling) and background services (the board orphan reconciler, worktree GC, the MCP liveness supervisor, the approval reaper) run inside that server process. If you stop the server, scheduled work pauses until it restarts, at which point boot-resume re-arms the routines.
+
+## How do agents on different runtimes coordinate?
+
+Through the **shared plane**: the durable [board](/concepts/the-board), [peer chat](/concepts/peer-chat), and the shared [Memory MCP](/concepts/memory) tier. Each runtime keeps its own private plane (its native memory, channels, and built-ins), but coordination, who does what, what's done, what the team knows, flows over surfaces Clawboo owns. A delegation becomes a durable board task with an atomic single-assignee claim; a peer-chat post is narration tagged `isUser=false` so it can never be mistaken for a user instruction. See [delegation and orchestration](/concepts/delegation-and-orchestration).
+
+## My agent says "done" but the work is broken; what stops that?
+
+Verification. Clawboo separates the builder from the judge: a completed file-mutating task runs a deterministic gate (the task's verify command) and, on a risky or large diff, an independent critic review in a read-only worktree. A task only reaches `done` with a promotable verdict; otherwise it is sent back or marked `completed_with_debt`. The gate is intrinsic to the board's state machine, not opt-in. See [verification](/concepts/verification).
+
+## See also
+
+- [Known issues](/appendices/known-issues), candid limitations and the v0.2.0-vs-0.1.9 gap
+- [Glossary](/appendices/glossary), canonical definitions of Boo, Boo Zero, Atlas, the board, runtimes, and more
+- [Getting started](/getting-started/index), the two install paths
+- [Operating Clawboo](/operating/index), deployment, security, data, and defaults
+- [Runtimes](/runtimes/index), the five runtimes and their capability matrix

@@ -400,7 +400,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       patchQueue.dispose()
       handler.dispose()
       clearAllWakeRecords()
-      // Stream-start anchors live in the chat store (Round 5) — they're
+      // Stream-start anchors live in the chat store — they're
       // already wiped per-session via `clearStreamStart` at commit time
       // and via `clearTranscript` for session resets. No global cleanup
       // needed here.

@@ -122,10 +122,9 @@ async function wakeTeamAgents(
   /**
    * Boo Zero agent reference — when one of the agents being woken IS Boo
    * Zero, we MUST prefix its wake message with `buildBooZeroRulesBlock` so
-   * the LLM has its identity + behavioral rules in context. The 7-hour
-   * cascade in production happened because Boo Zero's wake messages had
-   * neither identity nor rules — the LLM defaulted to "Mythos" and
-   * produced unsolicited greetings. Team-member wakes don't need this
+   * the LLM has its identity + behavioral rules in context. Without them,
+   * a woken Boo Zero drifts — adopting a different name and producing
+   * unsolicited greetings. Team-member wakes don't need this
    * (their AGENTS.md carries the rules).
    */
   booZeroAgent: AgentState | null,
@@ -173,7 +172,7 @@ async function wakeTeamAgents(
     // When the agent being woken IS Boo Zero, prefix with the rules block so
     // the LLM has its identity + behavioral rules in context. Without this
     // the 08:18 AM production cascade fires: Boo Zero's wake produces
-    // unsolicited intros + name drift ("Mythos"). Team-member wakes already
+    // unsolicited intros + name drift. Team-member wakes already
     // carry the rules via their team AGENTS.md so they don't need this
     // injection.
     const isBooZeroWake = booZeroAgent !== null && agent.id === booZeroAgent.id
@@ -401,7 +400,7 @@ export async function sendGroupChatMessage(params: GroupChatSendParams): Promise
   // the team chat (target may be a team member OR Boo Zero). This is what
   // makes user corrections survive across sessions: when the user types
   // `/rule don't do work yourself` it persists here and is injected on
-  // every future turn even after a 7-hour gap.
+  // every future turn even after a long gap.
   const teamRulesContent = await fetchTeamRules(teamId)
   const teamRulesBlock = buildTeamRulesBlock(teamRulesContent)
 

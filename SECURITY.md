@@ -25,7 +25,7 @@ compromised runtime attempting to read another's state. Reports that match this 
 
 ### Exposing the dashboard beyond loopback
 
-If you deliberately widen the bind (set `HOST=0.0.0.0` or a LAN address — e.g. to reach the dashboard from
+If you deliberately widen the bind (set `HOST=0.0.0.0` or a LAN address, e.g. to reach the dashboard from
 another machine), the API is then reachable by other hosts on that network. In that case **set an access
 token**: export `STUDIO_ACCESS_TOKEN=<a long random string>` before starting the server. With a token set,
 every `/api/*` route and the gateway WebSocket require it (open `/?access_token=<token>` once to set the

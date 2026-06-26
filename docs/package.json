@@ -1,0 +1,12 @@
+{
+  "name": "@clawboo/docs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "mint dev --port 3111",
+    "check-links": "mint broken-links",
+    "build": "echo 'docs is a hand-authored Mintlify site — Mintlify deploys this directory directly; no build step.'",
+    "lint": "echo 'skip'",
+    "typecheck": "echo 'skip'"
+  }
+}

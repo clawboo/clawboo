@@ -5,7 +5,7 @@
 // The Clawboo display-name override lives in SQLite and overlays the
 // Gateway-side `agent.name` in the UI. But the LLM's persisted identity
 // (the SOUL.md / IDENTITY.md it sees on every turn) still carries whatever
-// name OpenClaw set during onboarding ("Mythos" in production, or the
+// name OpenClaw set during onboarding (a custom name, or the
 // literal slug "main"). When the override and the persisted identity
 // disagree, the LLM drifts — calls itself one name in one breath and the
 // other in the next.

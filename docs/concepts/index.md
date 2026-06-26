@@ -1,0 +1,29 @@
+---
+title: Core concepts
+description: The concept map for Clawboo's orchestration model, agents, teams, the board, delegation, memory, governance, and the invariants that hold them together.
+---
+
+This section explains how Clawboo's pieces fit together: who the agents are, how teams are organized into a shared plane and per-runtime private planes, how the durable board drives delegation, and how verification, governance, and observability keep multi-agent work honest. Read these to understand the _why_ behind the [Using](/using/index) and [Reference](/reference/index) sections, each page links down to the routes, packages, and UI that implement it. Start with the [agent model](/concepts/agent-model) and [teams and planes](/concepts/teams-and-planes), then follow delegation through [the board](/concepts/the-board).
+
+## The concept set
+
+- [The agent model](/concepts/agent-model): Boo, Boo Zero, and the five runtime classes.
+- [Teams and planes](/concepts/teams-and-planes): teams plus the shared-plane / private-plane split.
+- [The board](/concepts/the-board): the durable task board: state machine, atomic claim, dependencies.
+- [Delegation and orchestration](/concepts/delegation-and-orchestration): board-driven delegation via structured tags.
+- [Peer chat](/concepts/peer-chat): mixed-runtime peer rooms and speaker selection.
+- [Memory](/concepts/memory): the shared Memory-MCP tier and per-runtime private memory.
+- [Capabilities](/concepts/capabilities): the unified capability inventory and manageability tiers.
+- [Verification](/concepts/verification): builder≠judge, the deterministic gate, and the critic.
+- [Governance](/concepts/governance): budgets, circuit breakers, caps, and approvals.
+- [Observability](/concepts/observability): the event log, traces, and fleet-health projection.
+- [Worktrees and handoff](/concepts/worktrees-and-handoff): the per-task system-of-record and cross-runtime handoff.
+- [Scheduling](/concepts/scheduling): Routines: team-task cron vs runtime-own-life cron.
+- [Gateway and events](/concepts/gateway-and-events): the OpenClaw Gateway flow and the Bridge→Policy→Handler pipeline.
+- [Architecture invariants](/concepts/architecture-invariants): the rules every change preserves.
+
+## See also
+
+- [How it works](/intro/how-it-works)
+- [Reference](/reference/index)
+- [Glossary](/appendices/glossary)

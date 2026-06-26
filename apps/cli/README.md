@@ -41,7 +41,7 @@ The npm package ships only the dashboard and the agent catalog. Nothing you do a
 
 ## Full docs
 
-Architecture, screenshots, configuration, and contributing guide: [main repo README](https://github.com/clawboo/clawboo#readme).
+Full documentation: **[docs.claw.boo](https://docs.claw.boo)**. Source, architecture, and contributing guide: [main repo README](https://github.com/clawboo/clawboo#readme).
 
 ## License
 

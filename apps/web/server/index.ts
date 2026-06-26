@@ -148,7 +148,7 @@ async function main() {
     // routing works. We use `app.use(handler)` rather than a wildcard pattern
     // (`'/*splat'` / `'/{*splat}'`) — Express 5 + path-to-regexp v8 have
     // subtle matching quirks around the bare `/` path that produced
-    // "Cannot GET /" in clawboo@0.1.1. `app.use` with no path matches every
+    // "Cannot GET /". `app.use` with no path matches every
     // request by definition. Restricting to GET keeps non-GET 404s honest.
     app.use((req, res, next) => {
       if (req.method !== 'GET') return next()

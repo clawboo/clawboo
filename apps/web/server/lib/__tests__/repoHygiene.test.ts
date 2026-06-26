@@ -67,16 +67,17 @@ const CODE_EXT = new Set(['.ts', '.tsx', '.mjs', '.js', '.cjs', '.css'])
 
 // Build-session shorthand + external build-aid path fragments. Tested on EVERY
 // line of EVERY scanned file. (Self-match-safe: the `S` here is followed by `[`,
-// never a digit — see the bracket; the four path fragments appear literally,
-// which is why both guard files self-exclude.)
+// never a digit.) The build-aid names are assembled from fragments so this public
+// guard file never contains the literal scratch-tool strings it scans for; the
+// assembled patterns are identical at runtime.
 export const ANY_LINE_PATTERNS: readonly RegExp[] = [
   /\b[sS][0-9]{2}\b/, // build-session code, S00–S99 / s00–s99
   /\bSESSION-[0-9]/, // case-sensitive: lowercase session-1 is a domain sessionKey
   /\bSession[- ][0-9]/, // case-sensitive, same reason
-  /internal-docs/i,
-  /scratchrepo/i,
-  /users-you-ai-plans/i,
-  /clawboo-orchestrator-run/i,
+  new RegExp('clawboo' + '-build-docs', 'i'),
+  new RegExp('trust' + 'claw', 'i'),
+  new RegExp('users-[a-z0-9._-]+-claude' + '-plans', 'i'),
+  new RegExp('clawboo-orchestrator-' + 'SESSION', 'i'),
 ]
 
 // Build-phase marker — comment lines of code files only.
@@ -181,14 +182,14 @@ describe('repo hygiene guard: the broadened scan actually catches planted leaks'
       [
         'const label = "s13"',
         '// Phase 7 — build marker',
-        'const where = "scratchrepo/scratch"',
+        'const where = "' + 'trust' + 'claw' + '/scratch"',
         '',
       ].join('\n'),
     )
     const offenders = collectHygieneOffenders(tmp, ['scripts'], SOURCE_EXT, [])
     expect(offenders.some((o) => o.includes('s13'))).toBe(true)
     expect(offenders.some((o) => /Phase 7/.test(o))).toBe(true)
-    expect(offenders.some((o) => o.includes('scratchrepo'))).toBe(true)
+    expect(offenders.some((o) => o.includes('trust' + 'claw'))).toBe(true)
 
     // The Phase pattern is comment-scoped: the same text in a STRING literal is
     // NOT a leak (proves persona prose / fixtures don't false-positive).

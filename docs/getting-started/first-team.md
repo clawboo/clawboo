@@ -1,0 +1,113 @@
+---
+title: Deploy your first team
+description: Deploy a team of agents, run the Know-Your-Team gate, send a message in group chat, and watch a delegation land on the board.
+---
+
+By the end of this tutorial you'll have a team of agents in Clawboo, you'll have run the one-time "Know Your Team" introduction flow, and you'll have sent a message in group chat and watched the team leader delegate a task onto the durable board.
+
+A _team_ is a named group of Boos (agents) that collaborate in one shared chat room. Clawboo gives you two ways to deploy one: pick a ready-made template from the marketplace catalog (82 teams, 304 agents), or, on the native-first path, let onboarding seed a starter team for you. This tutorial covers both, then walks the same group-chat-and-board collaboration loop that follows either.
+
+<Note>
+These docs describe Clawboo **v0.2.0**, the current release.
+</Note>
+
+## Prerequisites
+
+<Note>
+- A running Clawboo dashboard. If you haven't installed it yet, start with [Quickstart, native](/getting-started/quickstart-native) (no Gateway) or [Quickstart, OpenClaw](/getting-started/quickstart-openclaw).
+- At least one connected runtime. Either path in this tutorial works:
+  - **Native**: you pasted a provider key during native onboarding, and a starter team was already seeded for you.
+  - **OpenClaw**: your OpenClaw Gateway is connected, so you can deploy a marketplace-template team of OpenClaw agents.
+</Note>
+
+<Info>
+Live in-chat delegation onto the board, step 5 below, currently runs over the OpenClaw runtime. The in-browser orchestration observer attaches to the live Gateway connection. A native-only team (no Gateway) lands in chat the same way, but its composer is currently read-only. If you're on the native path, follow steps 1–4 to understand the deploy + gate flow; add an OpenClaw runtime to drive a live delegation.
+</Info>
+
+## Steps
+
+### 1. Get a team
+
+You either already have one (native path) or you deploy one now (OpenClaw path).
+
+**Native path: your team was seeded for you.** During native onboarding, Clawboo created a team named "My First Team" with two `clawboo-native` agents (a Team Lead and a Coder) and pre-satisfied the introduction flow, so you landed straight in the team's group chat. Skip to [step 3](#3-run-the-know-your-team-gate); your team already exists and is introduced.
+
+**OpenClaw path: deploy a marketplace template.** In the onboarding wizard, the **Choose your team** step shows five ready-made starter crews (Marketing, Dev, Research, YouTube, Student). Click one.
+
+If you're already in the dashboard, open the **+ Create team** button in the leftmost sidebar (or the **Deploy** button on any team card in the Marketplace), pick a template, then customize its name, icon, and color.
+
+**Expected result:** the wizard (or modal) advances to a deploy screen showing one ghost avatar per agent in the template.
+
+### 2. Watch the team deploy
+
+Clawboo now creates the team and its agents in order:
+
+1. **`POST /api/teams`** creates the team row (name, icon, color, the template id).
+2. For each agent in the template, **`createAgent`** writes its four agent files: `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, and a collaboration-protocol `AGENTS.md`, then **`POST /api/teams/:id/agents`** assigns it to the team. The protocol file teaches each agent the team roster and the structured `<delegate to="@Name">task</delegate>` syntax it uses to route work.
+3. If the template defines `@mention` routing, agent-to-agent coordination is auto-enabled.
+
+Each ghost in the deploy screen lights up with a green check as its agent is created, and a progress bar tracks `N / N Boos created`. The screen briefly reads **"All N Boos ready"**, then the wizard hands you off.
+
+**Expected result:** you land directly in your new team's group chat. There is no extra "done" popup; deploying a team lands you in its chat.
+
+### 3. Run the "Know Your Team" gate
+
+The first time you open a team's group chat, a one-time onboarding gate fills the window _instead of_ the chat. This is the **Know Your Team** flow, and it runs once per team.
+
+<Note>
+The gate exists to prevent a message cascade: it introduces agents one at a time with the orchestration engine unmounted, so introductions can't trigger routing or spurious delegations.
+</Note>
+
+The gate has three phases:
+
+1. **Welcome**: a "Meet your team" card showing each agent's avatar and a **Know Your Team** button. If Boo Zero (the universal team leader) is identified, a "Led by ..." badge appears. Click **Know Your Team**.
+2. **Introducing**: Clawboo sends each agent a strict, one-at-a-time introduction prompt (no @mentions, no teammate references). Each card flips from "Thinking…" to the agent's one-or-two-sentence introduction with a green check. A header reads `N of N done`.
+3. **Your turn**: a textarea asks you to introduce yourself ("your name, what you're working on, how you'd like the team to help"). Type a short intro and click **Continue to Team Space**.
+
+Your introduction is persisted to SQLite as the source of truth and injected into the team's context preamble on every future message, so every agent always sees it. Boo Zero replies in-character to acknowledge it.
+
+**Expected result:** the gate closes and the settled **team space** opens, the team's [Ghost Graph](/using/group-chat) on top, the group chat below.
+
+### 4. Send a message in group chat
+
+You're now in normal group chat. Type a request into the composer at the bottom and send it.
+
+Your message routes to the team's leader by default (Boo Zero, or the first team member). To address a specific agent, start your message with `@AgentName`; the longest-prefix match against the roster wins, and the @mention is stripped before delivery.
+
+**Expected result:** the leader starts responding, its reply streaming live into the transcript with its own avatar and name.
+
+### 5. Watch a delegation land on the board
+
+When the leader decides a request needs hands-on work, it emits a structured `<delegate to="@Name">task</delegate>` directive in its response. Clawboo's orchestration engine, which observes every team member's session, turns that directive into a durable [board](/concepts/the-board) task; it does _not_ scrape prose for intent.
+
+For each delegation, the engine:
+
+1. **Creates a board task** and **atomically claims** it for the target agent (a lost claim is a conflict, never retried).
+2. **Delivers the task** to that agent's session through a non-destructive queue (a busy agent's task waits for its turn boundary; it never interrupts an in-flight run).
+3. **Reports the result back** when the agent finishes: the task moves to `done` and a report-up summary lands on the board.
+
+You see this in the chat as a **Board task** card, a labeled row with a status pill that flips live from **Queued** to **Working** to **Done**, plus the assignee's avatar and name. The board is the source of truth; the card is a read-only projection of it, so it survives a page refresh. Completed tasks are also batched into a `[Task Update]` narration delivered back to the leader for synthesis.
+
+**Expected result:** at least one Board task card appears inline in the chat, its status pill advancing to **Done**, and the leader synthesizes the teammate's work back to you.
+
+## What you should see
+
+The settled team space puts the team's Ghost Graph on top and the group chat below, with Board task cards interleaved into the conversation as delegations land:
+
+![Clawboo team space: a team's Ghost Graph on top and group chat below](/images/team-space.png)
+
+The Ghost Graph itself renders the team as an org chart, the leader at the top, teammates below, and the `@mention` routing from each agent's `AGENTS.md` drawn as edges:
+
+![Clawboo Ghost Graph: agents as Boo nodes connected by delegation edges](/images/ghost-graph.png)
+
+## What just happened
+
+Deploying a team created real agent records in SQLite, the [registry of record](/appendices/glossary) for which agents and teams exist, and wrote each agent's collaboration protocol into its `AGENTS.md`, which is what teaches the leader the `<delegate>` syntax and seeds the Ghost Graph's edges. The Know-Your-Team gate ran once to introduce the agents to you and you to them, persisting your introduction so every future message carries it. Then, in chat, the leader's structured delegation became a durable board task: the orchestration engine derives tasks from typed signals rather than parsing prose, claims each task race-free, and reflects the result back, which is why the work survives a refresh and the leader is never left waiting on a silent teammate.
+
+## Next steps
+
+- [The board](/concepts/the-board), the durable, race-free coordination substrate behind every delegation
+- [Delegation and orchestration](/concepts/delegation-and-orchestration), how structured signals become board tasks
+- [Peer chat](/concepts/peer-chat), how mixed-runtime agents talk to each other as named peers
+- [Using group chat](/using/group-chat), the group-chat surface in depth, including the gate
+- [Tour the dashboard: Atlas, Ghost Graph, and the view modes](/getting-started/dashboard-tour)

@@ -5,18 +5,17 @@
  * End-to-end smoke test that simulates `npx clawboo` on a real user's
  * machine and asserts the bundled CLI reaches a working Clawboo dashboard.
  *
- * Catches the class of bug v0.1.1 and v0.1.2 shipped broken:
+ * Guards two regression classes:
  *
- *   v0.1.1: bundled server returned "Cannot GET /" because the Express 5
- *     SPA catch-all pattern '/{*splat}' didn't match the bare /.
+ *   1. The bundled server must serve the SPA at the bare `/` (an Express 5
+ *      SPA catch-all that doesn't match `/` returns "Cannot GET /").
  *
- *   v0.1.2: CLI's `findRunningDashboard()` did a TCP-only probe, so when
- *     port 18790 was free but 18791 was held by another service (OpenClaw
- *     Gateway aux port, Chrome --remote-debugging-port, etc.), the CLI
- *     mistook 18791 for Clawboo and routed the browser there — user saw
- *     "Unauthorized" instead of the dashboard.
+ *   2. The CLI must HTTP-verify a port is Clawboo before opening the browser:
+ *      a TCP-only probe would mistake another service on a nearby port
+ *      (an OpenClaw Gateway aux port, Chrome's --remote-debugging-port, etc.)
+ *      for Clawboo and route the browser to an "Unauthorized" page.
  *
- * Test scenario (the EXACT condition v0.1.2 shipped broken under):
+ * Test scenario:
  *   1. Bind port 18791 with a fake service that returns 401 "Unauthorized"
  *      — mimics OpenClaw Gateway's auxiliary port behavior.
  *   2. Spawn the bundled CLI in an isolated state dir with no env-var
@@ -356,7 +355,7 @@ async function main() {
   // Even though :18791 is "alive" (TCP), the CLI must reject it because
   // the HTTP signature probe sees non-Clawboo content.
   if (clawbooPort === FAKE_PORT) {
-    fail(`CLI routed browser to fake :${FAKE_PORT} — this is the v0.1.2 bug!`)
+    fail(`CLI routed browser to fake :${FAKE_PORT} — port verification regressed`)
     return
   }
   log(`✓ CLI correctly skipped fake :${FAKE_PORT}`)

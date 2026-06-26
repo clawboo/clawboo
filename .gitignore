@@ -17,9 +17,9 @@ playwright-report
 coverage
 .DS_Store
 
-# Work-in-progress documentation site (not ready to publish; keep README screenshot assets)
-/docs/*
-!/docs/screenshots/
+# docs/ is the Mintlify docs site (hand-edited .md, deployed as-is — see docs/README.md).
+# Only the internal authoring/research memos under docs/_meta/ stay local-only.
+/docs/_meta/
 
 # Astro generated cache + types (website/) — regenerated on build, must never be committed.
 website/.astro/

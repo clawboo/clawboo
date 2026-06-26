@@ -20,7 +20,7 @@
 <!-- Required for user-facing changes to packages/* or apps/cli. -->
 <!-- Run `pnpm changeset` and commit the generated file. -->
 
-- [ ] Added changeset (or not needed — docs/CI/web-only change)
+- [ ] Added changeset (or not needed: docs/CI/web-only change)
 
 ## Checklist
 

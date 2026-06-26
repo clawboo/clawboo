@@ -11,7 +11,7 @@ export const links = {
   discussions: 'https://github.com/clawboo/clawboo/discussions',
   issues: 'https://github.com/clawboo/clawboo/issues',
   npm: 'https://www.npmjs.com/package/clawboo',
-  docs: 'https://github.com/clawboo/clawboo#readme',
+  docs: 'https://docs.claw.boo',
   quickstart: 'https://github.com/clawboo/clawboo#quickstart',
   contributing: 'https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md',
   security: 'https://github.com/clawboo/clawboo/blob/main/SECURITY.md',

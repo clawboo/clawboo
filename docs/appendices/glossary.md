@@ -1,0 +1,143 @@
+---
+title: Glossary
+description: Canonical definitions of Clawboo's core terms, each linked to the page that explains it.
+---
+
+Definitions of the vocabulary used throughout the Clawboo docs. Each entry is a one- or two-sentence definition with a link to the page that goes deeper. Terms are grouped by area; within a group they are roughly ordered from most-foundational to most-specific.
+
+<Note>
+These docs describe Clawboo **v0.2.0**, the current release.
+</Note>
+
+## Agents and runtimes
+
+**Boo**: Clawboo's name for an agent: one participant in a team, rendered as a ghost-lobster avatar. Every Boo is backed by a real agent record from an [AgentSource](#agentsource); there are no decorative agents. See [the agent model](/concepts/agent-model).
+
+**Boo Zero**: the universal team leader. It is identified from the OpenClaw Gateway's `defaultId`, falling back to the first teamless agent, then the first agent overall. Boo Zero is teamless in the database but participates in every team via team-scoped sessions. See [the agent model](/concepts/agent-model) and [Boo Zero briefs](/using/boo-zero).
+
+**runtime**: the engine that actually runs an agent. Clawboo supports five: `openclaw`, `clawboo-native`, `claude-code`, `codex`, and `hermes`. Each is wrapped behind one [RuntimeAdapter](#runtimeadapter) interface so a team can mix runtimes. See [runtimes overview](/runtimes/index).
+
+**the 5 runtimes**: `openclaw` (the OpenClaw Gateway), `clawboo-native` (the in-process harness), `claude-code`, `codex`, and `hermes`. The four non-OpenClaw runtimes are declared in `descriptor.ts`; OpenClaw is the fifth, handled separately because it is a connected substrate rather than a CLI/SDK Clawboo spawns. See [runtimes overview](/runtimes/index).
+
+**native runtime**: `clawboo-native`, Clawboo's own in-process conversational harness. It talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, Ollama), runs with no OpenClaw Gateway, and is `builtIn` (ships inside the server, nothing to install; connect by pasting a provider key). See [the native runtime](/runtimes/native).
+
+**RuntimeAdapter**: the single TypeScript interface every runtime implements (`id`, `participantKind`, `capabilities()`, `health()`, `start()`, `events()`, `abort()`, `setModel()`, `writeContext()`). Adapters wrap a black-box runtime and normalize its native signals into a [RuntimeEvent](#runtimeevent) stream; Clawboo supervises and relays, it does not reimplement runtime loops. See [the RuntimeAdapter trait](/internals/runtime-adapter).
+
+**RuntimeEvent**: the normalized 7-variant lifecycle union every adapter emits: `text-delta`, `tool-call`, `tool-result`, `status`, `cost`, `done`, and `error`. It is what lets one orchestrator drive heterogeneous runtimes off a single event shape. See [the RuntimeAdapter trait](/internals/runtime-adapter).
+
+**AgentSource**: the registry seam that answers "where does the agent list come from?" Reads are SQLite-backed (so they work even when the upstream is down); writes, file I/O, and sessions go to the upstream and mirror into SQLite. `AgentSource` is about _who exists_; `RuntimeAdapter` is about _how agents run_; the two must not entangle. See [the AgentSource registry of record](/internals/agent-source).
+
+**registry of record**: the principle that SQLite is the canonical store of which agents and teams exist. The OpenClaw Gateway is one `AgentSource` synced _into_ SQLite, not the source of truth for the registry. See [the AgentSource registry of record](/internals/agent-source).
+
+## Teams and planes
+
+**team**: a named group of Boos. A team has a leader (Boo Zero by default), an emoji/color, durable rules, and a shared room. Teams are the unit of collaboration. See [teams and planes](/concepts/teams-and-planes).
+
+**shared plane**: everything Clawboo owns and coordinates across runtimes: the registry, the board, team chat, scheduling, shared memory, the tools broker, verification, governance, the event log, and the worktree system-of-record. See [teams and planes](/concepts/teams-and-planes).
+
+**private plane**: everything a single runtime keeps to itself: its own messaging channels, its own cron/heartbeat, its private cognitive memory and self-improvement, its built-in tools, and its native session resume. Clawboo observes the private plane but never clobbers it. The split is resolved from a runtime's capabilities by `resolveRuntimeIntegration`. See [teams and planes](/concepts/teams-and-planes).
+
+**Know Your Team gate**: a once-per-team onboarding flow that runs before the group-chat composer unlocks. It has three phases: a "Know Your Team" button, sequential agent self-introductions (one message per agent, no `@mentions`), and a user self-introduction. It exists to prevent the message-flooding cascade that an unstructured first message used to trigger. See [group chat](/using/group-chat).
+
+## The board and orchestration
+
+**the board** (the durable board): the transactional, SQLite-backed kanban board that is the source of truth for team task and coordination state. It survives refresh, supports race-free single-assignee claiming, and is the dispatcher the executor drives. See [the board](/concepts/the-board).
+
+**task**: one kanban card on the board. A task has one of seven statuses (`backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`), an optional assignee, dependencies, and an optional worktree. `done` and `cancelled` are terminal. See [the board](/concepts/the-board).
+
+**atomic claim**: the race-free `UPDATE … WHERE status='todo' AND assignee IS NULL AND dropped=0` that lets at most one caller win a task. An empty result is a conflict that the caller must NOT retry (the "never retry a 409" rule). See [the board](/concepts/the-board) and [board internals](/internals/board-internals).
+
+**delegation**: one agent handing a unit of work to another. In the shipping engine a delegation is a structured signal (a `sessions_send` tool call or a `<delegate>`/`<plan>` directive parsed from a terminal `done`) that becomes a durable board task plus a claim, never a regex match over prose. See [delegation and orchestration](/concepts/delegation-and-orchestration).
+
+## Peer chat and MCP
+
+**mixed-runtime peer chat** (team room): a shared `team_chat` room where every runtime is a named peer and any runtime can lead. It is narration over the canonical board: a chat post is never a write path to the board. See [peer chat](/concepts/peer-chat).
+
+**`isUser=false`**: the safety-critical substring in a delivered peer post's header (`[Inter-session message · … · isUser=false]`). It marks the post as tool-routed evidence from a peer, not a user instruction, so a peer that says "ignore your instructions" cannot land with user authority. The token is reproduced verbatim. See [peer chat](/concepts/peer-chat).
+
+**MCP** (Model Context Protocol): the protocol Clawboo uses to expose its shared services to runtimes as tools. Runtimes attach Clawboo's MCP servers over Streamable HTTP (or stdio) and act on the team's coordination surface through them. See [MCP servers](/operating/mcp-servers).
+
+**MCP trifecta / quartet**: Clawboo's four hosted MCP servers: `tasks` (the board), `memory` (the shared tier), `tools` (the brokered tool surface), and `teamchat` (the peer room). The "trifecta" was the first three; "quartet" adds `teamchat`. See [MCP tools reference](/reference/mcp-tools).
+
+## Memory and capabilities
+
+**memory**: Clawboo's two-tier knowledge store. The **shared tier** is the SQLite-backed `SqliteMemoryStore` exposed via the Memory MCP server, which all five runtimes read and write; the **private tier** is each runtime's own native memory, which Clawboo observes but never clobbers. A run's MCP binding can scope writes to a team. See [memory](/concepts/memory).
+
+**capability**: any skill, tool, or connector a runtime can use, normalized into one `CapabilityRecord`. The records are fanned in from per-runtime `CapabilitySource` adapters into one inventory that drives both the Ghost Graph and the Capabilities dashboard. See [capabilities](/concepts/capabilities).
+
+**CapabilitySource**: a per-runtime adapter whose `read()` projects that runtime's skills/tools/connectors into `CapabilityRecord`s. Five exist (native, hermes, claude-code, codex, openclaw); a multiplexer merges them and treats a source's failure as data, not an error. See [capabilities](/concepts/capabilities).
+
+**manageability tier**: the per-capability field that decides whether Clawboo can write to it: `managed` (Clawboo owns the row), `external-write` (the runtime owns the store, Clawboo writes through it), `runtime-of-record` (Clawboo drives changes through the runtime's API), or `observe-only` (read-only). The UI and the write path are a pure function of this tier. See [capabilities](/concepts/capabilities).
+
+## Verification
+
+**verification**: the gate that makes "done" mean _verified_. A task carrying a non-promotable verdict cannot transition to `done`. See [verification](/concepts/verification).
+
+**builder≠judge**: the principle that the agent that did the work never certifies its own work. The only signals are the deterministic gate (an exit code) and an independent read-only critic; a generator never self-certifies. See [verification](/concepts/verification).
+
+**deterministic gate**: the strongest verification signal: Clawboo runs the task's verify command and reads its exit code. A red gate is always a `fail`. See [verification](/concepts/verification).
+
+**critic**: the read-only independent reviewer that runs on a green gate when a diff is risky or large. It emits structured findings; a blocking finding turns the attempt into a `fail` and routes the fix back. See [verification](/concepts/verification).
+
+**completed_with_debt**: a verification status reserved for a green deterministic gate left with unresolved (non-blocking) critic findings after the fix loop is exhausted, so the task never deadlocks. It is promotable to `done` only when the latest attempt's deterministic gate was green; it never covers a failing build or test. See [verification](/concepts/verification).
+
+## Governance
+
+**governance**: the guardrail layer that makes a runaway agent impossible, not just visible: budgets, circuit breakers, caps, and approvals. See [governance](/concepts/governance).
+
+**budget** (kill-switch): a USD spending limit recorded in integer cents. `recordSpend` is atomic; a `cap`-mode budget auto-pauses at 100% (the kill-switch that aborts the run), while a `warn`-mode budget only tracks spend and emits warnings at the crossings without ever pausing. A budget with no row is uncapped. See [governance](/concepts/governance) and [cost and budgets](/using/cost-and-budgets).
+
+**circuit breaker**: a deterministic, cross-runtime backstop that stops a run burning turns or tokens with no progress. It trips on `iteration-cap`, `repeat-failure`, `no-progress`, `token-velocity`, or `repeat-policy-denied`, keyed on typed `RuntimeEvent` fields rather than scraped prose. See [governance](/concepts/governance).
+
+**cap**: a hard ceiling enforced in code: delegation depth (default max 2), per-turn fan-out, and per-node cost. The depth cap is the single-reduce-point + report-up-by-default discipline. See [governance](/concepts/governance).
+
+**approval**: a human gate on a risky tool call or delegation, resolved via the Approvals queue (allow-once / always / deny). It is a Clawboo-native DB-mediated handshake, distinct from OpenClaw's own exec-approval flow. See [approvals](/using/approvals).
+
+## Observability
+
+**observability**: the layer that makes the orchestrator measurable and debuggable: an append-only event log, traces, a Ghost-Graph projection, and a fleet-health triage. See [observability](/concepts/observability).
+
+**event log**: the append-only, SQLite-backed stream of orchestration events (each with a monotonic `seq`). It is the always-on local trace store; replaying it deterministically reproduces the projected graph state. See [observability](/concepts/observability).
+
+**trace**: one mission's events grouped by `traceId`, reconstructed into a span tree. When an OTLP endpoint is configured the same trace is exported to Jaeger; otherwise the event log is the trace store. See [observability](/concepts/observability).
+
+**fleet health**: the triage taxonomy projected from the event log: `working`, `idle`, `stalled` (quiet past a threshold while an execution is open), and `zombie` (quiet long enough that the process is almost certainly dead). See [observability](/concepts/observability).
+
+## Worktrees, handoff, scheduling
+
+**worktree**: a per-task git worktree on its own branch, provisioned outside the user's repo, giving a file-mutating task an isolated world any runtime can pick up. It provides concurrency isolation, not a privilege boundary. See [worktrees and handoff](/concepts/worktrees-and-handoff).
+
+**system-of-record**: the durable, on-disk scaffold committed into each worktree root (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`) so a cold runtime can answer "what is this / how to run / how to verify / where are we" from files alone. See [worktrees and handoff](/concepts/worktrees-and-handoff).
+
+**AGENT_HANDOFF**: `AGENT_HANDOFF.json`, the structured, zod-validated clock-out artifact written into a worktree (done/broken/next-step, commands, evidence, native session id). It is the cross-runtime bridge: one runtime can pause and a different runtime can reconstruct state from this file. See [worktrees and handoff](/concepts/worktrees-and-handoff).
+
+**Routine**: a scheduled team-task. Routines are Clawboo's own cron for team work, distinct from a runtime's own-life cron; trying to register a team-task schedule into a runtime-own-life source is refused. See [scheduling](/concepts/scheduling) and [the scheduler](/using/scheduler).
+
+**scheduler**: the engine that fires Routines: a durable `scheduled_runs` ledger as source of truth plus a rebuildable in-process ticker. A fire is dispatched through the standard executor pipeline. See [scheduling](/concepts/scheduling).
+
+## Gateway and events
+
+**Gateway**: the OpenClaw Gateway, the runtime + upstream the `openclaw` runtime talks to. The browser never connects to it directly; it goes through Clawboo's same-origin proxy, which injects auth server-side. See [the Gateway and events](/concepts/gateway-and-events) and [the OpenClaw runtime](/runtimes/openclaw).
+
+**Bridge→Policy→Handler**: the three-layer pipeline every Gateway event flows through: the **Bridge** classifies a raw frame (`classifyEvent`), the **Policy** is a pure function deriving intents (`derivePolicy`), and the **Handler** dispatches to state (`createEventHandler`). No event takes a shortcut around it. See [the Gateway and events](/concepts/gateway-and-events) and [the event pipeline](/internals/event-pipeline).
+
+**device pairing**: OpenClaw 2026.5.x requires a human to approve a new device before its WebSocket connect succeeds; an unapproved connect returns `NOT_PAIRED`. Clawboo surfaces a one-click approval that shells out to the OpenClaw CLI. See [the OpenClaw runtime](/runtimes/openclaw).
+
+## UI surfaces
+
+**Ghost Graph**: the React Flow canvas that renders a team's Boos, their skills/resources as orbital nodes, and their delegation edges, with optional team halos and click-to-expand. See [the Ghost Graph](/using/ghost-graph).
+
+**Atlas**: the global, all-teams view of the Ghost Graph: Boo Zero presides at the top over per-team rows. Reached via the dedicated Atlas nav button. See [the Ghost Graph](/using/ghost-graph).
+
+**marketplace**: the in-app catalog of 304 first-class agents and 82 workflow teams across three MIT-licensed sources. The catalog is codegen'd from pinned upstream commits and gated by a `verify:ingest` check; deploying an entry writes its full source verbatim to the agent's files. See [the marketplace](/using/marketplace) and [the marketplace catalog reference](/reference/marketplace-catalog).
+
+## Security
+
+**vault** (secrets vault): Clawboo's encrypted-at-rest store for runtime credentials. Each value is encrypted with AES-256-GCM under a local master key; the key-resolution chain is process env → vault → OpenClaw's `.env`. It is defense in depth: a wrong or lost master key fails closed, protecting against casual inspection and a leaked vault file. See [security](/operating/security).
+
+## See also
+
+- [Core concepts overview](/concepts/index)
+- [Reference map](/reference/index)
+- [Known issues](/appendices/known-issues)
+- [FAQ](/appendices/faq)

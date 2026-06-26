@@ -1,0 +1,147 @@
+---
+title: Contributing to Clawboo
+description: Clone, run the dev stack, pass the local gate, add a changeset, and respect the architecture invariants.
+---
+Use this page when you want to make a change to Clawboo and open a pull request. It summarizes the contributor workflow and points at the canonical sources: the repo's [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md) is the authority on process; the [Internals section](/internals/index) explains *why* the code is shaped the way it is.
+
+<Note>
+The single source of truth for process is [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md) at the repo root. This page is a guided tour of it with cross-links into the rest of the docs. If the two ever disagree, `CONTRIBUTING.md` and the root `package.json` win.
+</Note>
+
+## Prerequisites
+
+- **Node.js 22+** and **pnpm 9+** (the root `package.json` declares `engines.node >=22.0.0` and `engines.pnpm >=9.0.0`; the pinned package manager is `pnpm@9.15.0`).
+- No external runtime is required to develop or test. Clawboo runs agents natively; paste a provider key and the in-process [`clawboo-native`](/runtimes/native) harness handles execution. Connecting [OpenClaw](/runtimes/openclaw), [Claude Code](/runtimes/claude-code), [Codex](/runtimes/codex), or [Hermes](/runtimes/hermes) is only needed when you are working on those adapters.
+
+## Steps
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/clawboo/clawboo.git
+cd clawboo
+pnpm install
+```
+
+`pnpm install` resolves the whole workspace, the four globs `packages/*`, `packages/adapters/*`, `apps/*`, and `docs` (see [Monorepo and build](/internals/monorepo-and-build) for the layout).
+
+### 2. Run the dev stack
+
+```bash
+pnpm dev
+```
+
+The root `dev` script runs `turbo dev`. For the dashboard, `apps/web`'s dev orchestrator picks a free API port first, then starts the Express API and the Vite SPA on the same port so there is no race. It prints a banner like:
+
+```
+[clawboo-dev] API port: 18790  ·  UI port: 5173
+```
+
+- The **Vite SPA** serves on `:5173`.
+- The **Express API** binds the resolved port: default **`18790`**, with an auto-fallback that scans up to 20 consecutive ports if `18790` is busy. Pin it with `CLAWBOO_API_PORT` (see [Environment variables](/reference/environment-variables)).
+
+Clawboo stores all of its state under `~/.clawboo/` (auto-created on first run). To point a dev instance at a throwaway directory, set [`CLAWBOO_HOME`](/reference/environment-variables). There are **no feature flags**; every subsystem ships on, so there is nothing to enable.
+
+<Tip>
+Governance ships in track-and-warn mode: budgets record spend and warn at thresholds, but nothing auto-pauses a run until you set a hard cap. See [Production defaults](/operating/production-defaults).
+</Tip>
+
+### 3. Make your change on a branch
+
+Clawboo follows [GitHub Flow](https://docs.github.com/en/get-started/using-git/github-flow): branch from `main`, push, open a PR, and squash-merge once CI is green. Use a descriptive prefix:
+
+| Prefix | For |
+|---|---|
+| `feat/` | A new feature or surface |
+| `fix/` | A bug fix |
+| `chore/` | Tooling, deps, housekeeping |
+| `docs/` | Documentation only |
+| `test/` | Tests only |
+| `refactor/` | Non-behavioral restructuring |
+
+### 4. Run the local gate before pushing
+
+Run the same checks CI runs, in this order. They are all root scripts in `package.json`:
+
+```bash
+pnpm build                              # turbo build — all packages and apps
+pnpm typecheck                          # tsc --noEmit across the monorepo
+pnpm lint                               # ESLint flat config across all packages
+pnpm test                               # Vitest unit tests (node + jsdom projects)
+pnpm e2e                                # Playwright e2e (incl. board round-trip + eval smoke)
+pnpm verify:ingest                      # marketplace codegen drift gate
+pnpm assemble && pnpm test:clean-install  # bundle the CLI and smoke-test a clean install
+```
+
+What each one guards:
+
+- **`pnpm test`** runs two Vitest projects: a node project for pure logic (`*.test.ts`) and a jsdom project for React components (`*.test.tsx`, RTL + MSW + jest-dom + jest-axe). See [Testing](/internals/testing).
+- **`pnpm e2e`** runs Playwright end-to-end, including the durable-board round-trip and the eval smoke suite.
+- **`pnpm verify:ingest`** re-derives the codegen'd marketplace catalog (304 agents, 82 teams) and fails on any drift from the committed files. If you touched ingestion, regenerate with `pnpm ingest:marketplace` first. See [Codegen and ingestion](/internals/codegen-and-ingestion).
+- **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI and boots it as a clean install to catch first-run regressions. This is the same gate the release workflow runs: see [Release process](/internals/release-process).
+
+<Tip>
+Running the full gate locally avoids review back-and-forth. At minimum, every PR must pass `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`; new surfaces should also pass `pnpm e2e`.
+</Tip>
+
+### 5. Add a changeset for user-facing changes
+
+Clawboo uses [Changesets](https://github.com/changesets/changesets) for versions and changelogs. Any change that affects a **published** package needs one:
+
+```bash
+pnpm changeset
+```
+
+The interactive CLI asks which packages changed, the bump type (`patch` / `minor` / `major`), and a one-line summary, then writes a file under `.changeset/`. Commit it alongside your code.
+
+<Info>
+Every `@clawboo/*` library is `private: true`; only the `clawboo` CLI publishes to npm, with the libraries inlined into its bundle. So in practice a changeset matters when your change reaches the `clawboo` CLI's bundled behavior. **Documentation-only, CI-only, and `apps/web`-only changes do not need a changeset**; the dashboard package (`@clawboo/web`) and `@clawboo/docs` are in the changeset `ignore` list, and the dashboard is not published.
+</Info>
+
+### 6. Open the pull request
+
+Push your branch and open a PR. The PR template walks the checklist. Keep it to **one concern per PR**; split unrelated changes. Add a test for anything you add (unit logic in Vitest, components in the jsdom project, new end-to-end behavior in Playwright). CI must be green before review, and PRs are squash-merged into `main`.
+
+## Code guidelines
+
+These are enforced by review and, where possible, by lint:
+
+- **TypeScript strict.** No `any`, no `@ts-ignore`, no leaking `unknown`.
+- **No `console.log`.** Log through [`@clawboo/logger`](/reference/packages/logger) (pino).
+- **Lucide icons only**, never emoji in the UI.
+- **Theme tokens, never raw hex**: use the CSS variables and Tailwind tokens (brand marks are the only exception). See the [design system](/internals/design-system).
+- **Pure where it claims to be.** Policy and projection functions stay side-effect-free and unit-testable.
+- **No secrets in logs, responses, or storage.** A credential's *presence* may be shown (the env-var name plus true/false), never its *value*. See [Security](/operating/security).
+
+## Architecture invariants to respect
+
+A change must not break the [seven architecture invariants](/concepts/architecture-invariants). The ones most likely to bite a first contribution:
+
+- **The registry is the source of truth for who exists; the Gateway is the source of truth for how OpenClaw agents run.** Reads go through an [`AgentSource`](/internals/agent-source), not directly off the Gateway client.
+- **Packages never import apps.** Dependency flow is one-way (`apps/web` → `packages/**`, `packages/adapters/*` → `@clawboo/executor`). See the [package dependency graph](/reference/packages/index).
+- **A teammate is a [`RuntimeAdapter`](/internals/runtime-adapter).** New runtimes implement the trait and emit the normalized `RuntimeEvent` union rather than special-casing the orchestrator.
+- **The board is canonical for task/coordination state.** Prefer board mutations over prose-scanning heuristics: see [Board internals](/internals/board-internals) and [Delegation and orchestration](/concepts/delegation-and-orchestration).
+- **Schema changes are a hard reset.** There is no migration ladder; `createDb`'s inline `CREATE TABLE IF NOT EXISTS` DDL is the sole source of the schema. Changing it means a fresh `~/.clawboo`, not an in-place migration. See the [database schema reference](/reference/database-schema).
+
+<Warning>
+The [Internals](/internals/index) pages flag "caution surfaces": files that encode load-bearing fixes (cascade prevention, stop-generation, history-hydration gating, deterministic plan keys). Read the relevant internals page before changing one, so you preserve the invariant or replace it with a documented reason.
+</Warning>
+
+## Release process
+
+Releases are automated and maintainer-only: when changesets land on `main`, the `publish.yml` workflow opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the `clawboo` CLI. No manual `npm publish`. The clean-install gate (`pnpm test:clean-install`) runs in the workflow before publish. See [Release process](/internals/release-process) for the full pipeline.
+
+## License
+
+By contributing, you agree your contributions are licensed under the [MIT License](https://github.com/clawboo/clawboo/blob/main/LICENSE). See [License and notices](/appendices/license-and-notices).
+
+## See also
+
+- [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md), the canonical process doc this page summarizes
+- [Internals overview](/internals/index), the contributor's map of the monorepo
+- [Monorepo and build](/internals/monorepo-and-build), workspaces, build order, and commands
+- [Testing](/internals/testing), the unit / e2e / clean-install / evals strategy
+- [Release process](/internals/release-process), Changesets and the publish workflow
+- [Architecture invariants](/concepts/architecture-invariants), the rules a change must not break
+- [Environment variables](/reference/environment-variables), `CLAWBOO_HOME`, `CLAWBOO_API_PORT`, and the rest
+- [Design system](/internals/design-system), tokens, surfaces, motion, theming

@@ -90,7 +90,7 @@ export function GroupChatPanel({
   // ── History-hydration gate ──────────────────────────────────────────────
   // `useBoardOrchestration` must NOT process historical entries that arrive
   // via `/api/chat-history` hydration as if they were new — that's the root
-  // cause of the "7-hour-later cascade of intros / wake messages" we saw in
+  // cause of the cascade of intros / wake messages we saw in
   // production. The hook seeds its baseline on mount; if it mounts before
   // hydration completes, the seed reads `0` and every hydrated entry trips
   // the subscription's "new entries" branch.
@@ -198,7 +198,7 @@ export function GroupChatPanel({
   // ── Load persisted history for all participants (team-scoped sessionKeys) ──
   // Tracks completion via `historyHydrated`: `useBoardOrchestration` is gated
   // on this flag so it doesn't see the hydration-time appends as "new"
-  // entries and replay stale wake/relay messages (the 7-hour-cascade bug).
+  // entries and replay stale wake/relay messages (the wake-replay cascade bug).
   // The 5s safety timeout is a fallback — if a fetch hangs forever we still
   // want orchestration to come online eventually.
   //

@@ -1,0 +1,170 @@
+# Clawboo
+
+> Clawboo is an open-source, local-first multi-agent mission-control dashboard and orchestrator, installed via `npx clawboo`. Deploy a team of agents across five runtimes (clawboo-native, OpenClaw, Claude Code, Codex, Hermes), watch them collaborate live in group chat and on a durable kanban board, and govern them with builder-not-judge verification, USD budgets, circuit breakers, and an always-on observability event log.
+
+This file indexes the Clawboo documentation for language models. Paths are relative to the documentation root. Documents Clawboo v0.2.0, the current published release (npm `latest` = `clawboo@0.2.0`).
+
+## Introduction
+
+- [Clawboo documentation](intro/index.md): Clawboo is an open-source, local-first multi-agent mission-control dashboard and orchestrator you install with npx clawboo.
+- [How Clawboo works](intro/how-it-works.md): An end-to-end architecture overview — the CLI, the bundled server and SPA, the durable board, the runtime seam, and the MCP spine.
+- [What is Clawboo](intro/what-is-clawboo.md): A TypeScript orchestrator for heterogeneous AI agent runtimes — the three design wedges that distinguish it from running runtimes standalone.
+- [Why Clawboo](intro/why-clawboo.md): What Clawboo adds over running runtimes standalone or stitching them yourself — one team room, race-free coordination, deep integration, independent verification, governance, and observability.
+
+## Getting Started
+
+- [Getting started](getting-started/index.md): The two install paths — native-first (paste a key, no Gateway) or the OpenClaw Gateway — plus prerequisites.
+- [Dashboard tour](getting-started/dashboard-tour.md): A map of the Clawboo dashboard — the three-column shell, the view modes, Atlas vs the per-team Ghost Graph, and every nav panel.
+- [Deploy your first team](getting-started/first-team.md): Deploy a team of agents, run the Know-Your-Team gate, send a message in group chat, and watch a delegation land on the board.
+- [Install Clawboo](getting-started/installation.md): Run npx clawboo to launch the dashboard. Prerequisites, what the launcher does, port discovery, and where Clawboo keeps its state.
+- [Quickstart — the native runtime (no Gateway)](getting-started/quickstart-native.md): Run npx clawboo, choose the native runtime, paste a provider key, and land in a working two-agent team with no OpenClaw Gateway.
+- [Quickstart — the OpenClaw Gateway](getting-started/quickstart-openclaw.md): Run npx clawboo, let onboarding detect, install, and configure OpenClaw, start the Gateway, approve the device, then deploy a team.
+
+## Core Concepts
+
+- [Core concepts](concepts/index.md): The concept map for Clawboo's orchestration model — agents, teams, the board, delegation, memory, governance, and the invariants that hold them together.
+- [The agent model](concepts/agent-model.md): What a Boo is, how Boo Zero leads, and how a runtime-agnostic agent record maps onto the five runtime classes.
+- [Architecture invariants](concepts/architecture-invariants.md): The load-bearing rules every Clawboo change preserves — registry of record, same-origin Gateway access, the pure event pipeline, and idempotent schema.
+- [Capabilities](concepts/capabilities.md): The unified capability inventory — one CapabilityRecord stream fanned from five per-runtime sources, with manageability tiers that decide what Clawboo can change.
+- [Delegation and orchestration](concepts/delegation-and-orchestration.md): How Clawboo turns structured delegation signals from runtime events into durable board mutations instead of scraping prose.
+- [Gateway and events](concepts/gateway-and-events.md): The OpenClaw Gateway flow through the same-origin WS proxy, and the Bridge→Policy→Handler event pipeline that turns raw frames into UI state.
+- [Governance](concepts/governance.md): USD budgets with an auto-pause kill-switch, tool-loop circuit breakers, depth/fan-out/cost caps, and the delegation approval handshake.
+- [Memory](concepts/memory.md): Clawboo's two memory tiers — one shared Memory-MCP store every runtime reads and writes, plus each runtime's preserved private native memory.
+- [Observability](concepts/observability.md): Clawboo's always-on orchestration event log, the projections it feeds, the error taxonomy, and the lazy OpenTelemetry bridge.
+- [Peer chat](concepts/peer-chat.md): The mixed-runtime team room where every runtime is a named peer, with bounded speaker selection and isUser=false evidence tagging.
+- [Scheduling](concepts/scheduling.md): Routines — Clawboo's durable team-task scheduler, its rebuildable ticker, the two cron domains, the one-firing-owner invariant, and the error-halts policy.
+- [Teams and planes](concepts/teams-and-planes.md): How teams group agents, and the split between the shared coordination plane and each runtime's private plane.
+- [The board](concepts/the-board.md): Clawboo's durable, transactional task-coordination substrate — state machine, atomic claim, dependencies, and crash recovery.
+- [Verification](concepts/verification.md): Builder≠judge — a deterministic gate plus an independent read-only critic that make "done" mean verified, with completed_with_debt as a graceful exit.
+- [Worktrees and handoff](concepts/worktrees-and-handoff.md): The per-task git-worktree system-of-record and the runtime-agnostic AGENT_HANDOFF.json that lets one runtime pick up another's work.
+
+## Runtimes
+
+- [Runtimes overview](runtimes/index.md): The five runtimes Clawboo can drive, the three runtime classes, and the full capability matrix that decides how each one is integrated.
+- [Claude Code runtime](runtimes/claude-code.md): Connect and run the Claude Code runtime — capabilities, the ANTHROPIC_API_KEY vault flow, install, and the SDK-backed driver.
+- [Codex runtime](runtimes/codex.md): The codex runtime — spawns codex exec, authenticates via ChatGPT OAuth, synthesizes text-deltas, reports no USD cost, and carries a thread id.
+- [Connecting runtimes](runtimes/connecting-runtimes.md): Install, connect, disconnect, and health-check the non-OpenClaw runtimes from the Runtimes panel.
+- [Hermes runtime](runtimes/hermes.md): Connect and run the Hermes CLI as a one-shot worker on Clawboo's board with a persistent, compounding per-identity home.
+- [Clawboo Native runtime](runtimes/native.md): The clawboo-native in-process conversational harness — provider SDKs direct, no Gateway, jailed file tools, in-process MCP, and how to connect a key.
+- [OpenClaw](runtimes/openclaw.md): Connect the OpenClaw runtime — a connected substrate driven over the Gateway, with device pairing, registry sync, and global memory scope.
+
+## Using Clawboo
+
+- [Using Clawboo — the feature map](using/index.md): A navigation index to every Clawboo dashboard feature, grouped by where it lives in the UI.
+- [Working with agents](using/agents.md): Open the agent detail view, edit the four agent files, tune the personality sliders, and create or delete a Boo.
+- [Review and resolve approvals](using/approvals.md): Use the Approvals panel to allow or deny pending exec approvals and the shared tool/delegation queue, team-scoped.
+- [Using the board](using/board.md): Read and work the durable kanban board — columns, task cards, the team filter, the task-detail drawer, and the chat-fused board.
+- [Configuring Boo Zero](using/boo-zero.md): Set Boo Zero's display name, global brief, and per-team brief and rules — the universal team leader's identity and behavior.
+- [Capabilities dashboard](using/capabilities-dashboard.md): Use the Capabilities dashboard to browse the unified capability inventory and enable or disable the rows your runtimes let you manage.
+- [Cost and budgets](using/cost-and-budgets.md): Track token usage on the Cost dashboard and set USD budgets (warn or cap) per agent, mission, or team from Governance.
+- [Using the Ghost Graph and Atlas](using/ghost-graph.md): Read and edit your fleet's org graph — dual-shape Boo nodes, peacock skill expand, team halos, connect mode, and the Atlas global view.
+- [Use the Governance dashboard](using/governance-dashboard.md): Set budgets, raise caps, resume paused scopes, review the enforced-in-code caps, the approval queue, and the forensic audit log.
+- [Using group chat](using/group-chat.md): Open a team's Group Chat, pass the Know-Your-Team gate, send messages, route with @mentions, and watch delegations land on the board.
+- [Browse and deploy from the Marketplace](using/marketplace.md): Search, inspect, and deploy single agents or whole teams from Clawboo's 304-agent / 82-team / 30-skill catalog.
+- [Browse and search shared memory](using/memory-browser.md): Use the Memory panel to search, save, and browse the facts and procedures your team's runtimes share.
+- [Using the Observability dashboard](using/observability-dashboard.md): Read traces, error taxonomy, fleet health, the delegation graph, and run the smoke evals from the Observability panel.
+- [Schedule recurring team work](using/scheduler.md): Use the Scheduler tab to create, pause, run, and delete Routines and OpenClaw cron from one unified surface.
+- [Check System Health](using/system-health.md): Read the boot-probe checklist, the degraded/fatal banner, resolved runtime state, and re-run the probe from the System Health panel.
+- [System maintenance](using/system-maintenance.md): Manage OpenClaw from the System panel — gateway control, default model, API keys, agent coordination, and updates.
+- [Create and manage teams](using/teams.md): Create a team from a marketplace template or empty, set leaders and rules, pick color collections, and archive or delete it.
+- [Theming](using/theming.md): Switch Clawboo between light, dark, and system theme, and how the preference is resolved, persisted, and applied without a flash.
+
+## Operating Clawboo
+
+- [Operating Clawboo](operating/index.md): Operator overview — where Clawboo runs, how to expose it safely, where data lives, and what the defaults are.
+- [Data and state](operating/data-and-state.md): Where Clawboo stores everything, how to back it up, and how the hard-reset model works.
+- [Deploying Clawboo](operating/deployment.md): Run Clawboo via npx, in dev mode, or as a bundled server — covering ports, state dir, host binding, and reverse-proxy setup.
+- [Attaching Clawboo's MCP servers](operating/mcp-servers.md): Attach the four hosted MCP servers (tasks, memory, tools, teamchat) to an external agent over stdio or Streamable HTTP.
+- [Production defaults & posture](operating/production-defaults.md): The values a fresh Clawboo install runs with — log level, budget posture, breaker thresholds, reaper TTLs — each justified, with override env vars.
+- [Security model and safe exposure](operating/security.md): How Clawboo authenticates, isolates secrets, and redacts output — and how to expose the dashboard safely.
+
+## Reference
+
+- [Reference](reference/index.md): Index of Clawboo's factual reference — REST API, CLI, configuration, env vars, database schema, MCP tools, marketplace catalog, events, and packages.
+- [CLI reference](reference/cli.md): The single npx clawboo launcher (only --version/--help) plus the four bundled MCP stdio bins.
+- [Configuration reference](reference/configuration.md): settings.json schema, the ~/.clawboo state directory, every file Clawboo owns, and OpenClaw interop reads.
+- [Database schema reference](reference/database-schema.md): The 27 SQLite tables Clawboo persists, their columns, indexes, and how the schema is bootstrapped without a migration ladder.
+- [Environment variables](reference/environment-variables.md): Every environment variable Clawboo reads — state paths, ports, secrets, runtime keys, OpenClaw interop, logging, and operational tuning.
+- [Orchestration events and error taxonomy](reference/events-and-errors.md): Reference for the append-only orchestration event kinds and the runtime error classification used across observability.
+- [Marketplace catalog reference](reference/marketplace-catalog.md): The agent and team catalog — schemas, ID convention, zero-loss invariant, three sources with pinned SHAs, and the codegen/ingestion pipeline.
+- [MCP tools reference](reference/mcp-tools.md): The four clawboo-hosted MCP servers (tasks, memory, tools, teamchat) and every tool each exposes, with its zod input schema.
+
+## Reference — REST API
+
+- [REST API overview](reference/rest-api/index.md): Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 124 routes.
+- [Agents API](reference/rest-api/agents.md): REST reference for the agent registry-of-record — list, create, sync, per-agent reads, files, sessions, delete, and ghost cleanup.
+- [Board API](reference/rest-api/board.md): REST reference for the durable board — tasks, atomic claim, status gate, comments, executions, deps, and per-task worktrees.
+- [Capabilities API](reference/rest-api/capabilities.md): REST reference for the unified capability inventory — list every runtime's skills, tools, and connectors, and act on the manageable ones.
+- [Governance API](reference/rest-api/governance.md): REST reference for governance — list/set USD budgets, resume a paused scope, read the forensic audit log, and route a delegation approval.
+- [Memory API](reference/rest-api/memory.md): REST reference for the memory resource group — search, save facts and procedures, browse, and inspect the active embedding provider.
+- [Misc resources API](reference/rest-api/misc.md): REST reference for cost records, chat history, graph layout, personality, skills, exec settings, fleet summary, and Boo Zero context.
+- [Observability API](reference/rest-api/observability.md): REST reference for the orchestration event log — feed, traces, errors, fleet health, graph projection, SSE live-tail, client mirror, and eval smoke run.
+- [Runtimes API](reference/rest-api/runtimes.md): REST reference for the runtimes resource group — list, install, connect, healthcheck, run, and seed a native team.
+- [Schedules API](reference/rest-api/schedules.md): REST reference for the unified scheduler — list, create, update, pause/resume, delete, and force-run schedules across two sources.
+- [Settings & Health API](reference/rest-api/settings.md): REST reference for /api/settings (gateway URL + token) and /api/health (the boot probe / System Health surface).
+- [System API](reference/rest-api/system.md): REST reference for /api/system/* — OpenClaw status, install, configure, gateway lifecycle, config, device pairing, and models.
+- [Teams API](reference/rest-api/teams.md): REST reference for teams and their sub-resources — CRUD, agent membership, the Know-Your-Team onboarding gate, team rules, and the peer-chat room.
+- [Tools & MCP API](reference/rest-api/tools-and-mcp.md): REST reference for the tools broker (list, approvals, audit) and the in-process Streamable-HTTP MCP transport plus attach-config endpoint.
+
+## Reference — Packages
+
+- [Package overview](reference/packages/index.md): The 25 @clawboo/* workspace packages — version, purity, purpose, dependency graph, and build order.
+- [@clawboo/adapter-claude-code](reference/packages/adapter-claude-code.md): Claude Code RuntimeAdapter that maps the Claude Agent SDK lifecycle into the normalized executor event stream.
+- [@clawboo/adapter-codex](reference/packages/adapter-codex.md): Codex RuntimeAdapter that maps the codex exec event stream into the normalized executor event stream.
+- [@clawboo/adapter-hermes](reference/packages/adapter-hermes.md): Hermes RuntimeAdapter that drives the Hermes CLI as a board worker, mapped into the normalized executor event stream.
+- [@clawboo/adapter-native](reference/packages/adapter-native.md): The pure RuntimeAdapter for clawboo's in-process native conversational harness, plus its AgentConfig schema and native→RuntimeEvent mapper.
+- [@clawboo/adapter-openclaw](reference/packages/adapter-openclaw.md): OpenClaw RuntimeAdapter that wraps the Gateway client into the normalized executor lifecycle stream.
+- [@clawboo/agent-registry](reference/packages/agent-registry.md): The AgentSource trait, neutral agent/team/session record types, and the AgentRegistry multiplexer — the agent-registry-of-record seam.
+- [@clawboo/boo-avatar](reference/packages/boo-avatar.md): Deterministic ghost-lobster SVG avatar generator for Clawboo agents. Pure, browser-safe, zero-dep.
+- [@clawboo/capability-registry](reference/packages/capability-registry.md): Neutral CapabilityRecord types plus the CapabilitySource trait and read-fan-in multiplexer for the unified capability inventory.
+- [@clawboo/compaction](reference/packages/compaction.md): Pass-through-safe, failure-preserving tool-output compaction — cuts verbose tool output before it re-enters context, never compressing away an error.
+- [@clawboo/config](reference/packages/config.md): Settings loader and persistence for Clawboo — resolves state dirs, env overrides, and OpenClaw config fallback.
+- [@clawboo/db](reference/packages/db.md): SQLite + Drizzle ORM data layer — schema, board, memory, tools, governance, events, sessions, routines, team-chat.
+- [@clawboo/evals](reference/packages/evals.md): Server-only eval harness for clawboo's own orchestration — capability/regression suites, code/model graders, pass@1 / pass^k, and the ±verifier × ±structured-state ablation scorecard.
+- [@clawboo/events](reference/packages/events.md): The Bridge → Policy → Handler event pipeline that turns raw Gateway frames into Zustand store mutations.
+- [@clawboo/executor](reference/packages/executor.md): The RuntimeAdapter trait, the normalized RuntimeEvent lifecycle union, the adapter contract suite, and KV-cache prompt-tier primitives.
+- [@clawboo/gateway-client](reference/packages/gateway-client.md): WebSocket client for the OpenClaw Gateway — typed RPC, event subscription, reconnect, and Ed25519 device auth.
+- [@clawboo/gateway-proxy](reference/packages/gateway-proxy.md): Same-origin WebSocket proxy for the OpenClaw Gateway with server-side token + Ed25519 device-auth injection.
+- [@clawboo/governance](reference/packages/governance.md): Pure verification (builder≠judge) and governance primitives — verdict schemas, severity policy, budget cent-math, caps, and circuit-breaker reducer.
+- [@clawboo/logger](reference/packages/logger.md): Pino structured logger plus the display/log-layer credential redactor shared across Clawboo packages and the Express server.
+- [@clawboo/mcp](reference/packages/mcp.md): Protocol adapters exposing Clawboo's Tasks / Memory / Tools / TeamChat MCP servers over stdio and in-process Streamable HTTP.
+- [@clawboo/obs](reference/packages/obs.md): Pure observability primitives — typed orchestration-event schema, runtime-error taxonomy, graph + fleet-health projection reducers, metric folds, and the structured-output judge drive.
+- [@clawboo/protocol](reference/packages/protocol.md): Message parser, transcript types, and agent file definitions for Clawboo. Pure, browser-safe, zero-dep.
+- [@clawboo/scheduler](reference/packages/scheduler.md): Pure scheduling primitives — cron-spec parsing, next-occurrence math, the TaskTemplate schema, and the ScheduleSource trait + ScheduleRecord + multiplexer.
+- [@clawboo/tsconfig](reference/packages/tsconfig.md): Shared TypeScript compiler-option presets (base, react, node) every Clawboo package and app extends via the tsconfig "extends" field.
+- [@clawboo/ui](reference/packages/ui.md): Shared React UI primitives — the BooAvatar component, the cn class merger, the cva re-export, and the design-token constant.
+- [@clawboo/worktrees](reference/packages/worktrees.md): Server-only per-task git-worktree lifecycle, system-of-record scaffold, and structured cross-runtime AGENT_HANDOFF.json bridge.
+
+## Internals & Contributing
+
+- [Internals overview](internals/index.md): A contributor's map of Clawboo's monorepo — the packages, the seams, and the internals deep-dives that explain how it all fits together.
+- [AgentSource (registry of record)](internals/agent-source.md): The AgentSource trait, the neutral record types, the registry multiplexer, and the two concrete sources that make SQLite the agent registry of record.
+- [Board internals](internals/board-internals.md): The board data-access layer — the atomic claim, the transactional state machine, the SQLite contention recipe, recursive CTEs, and crash recovery.
+- [Codegen and ingestion](internals/codegen-and-ingestion.md): How the marketplace catalog is generated from pinned upstream repos, the zero-loss identityTemplate invariant, and the verify:ingest drift gate that keeps committed codegen honest.
+- [Design system](internals/design-system.md): How Clawboo's theme, surface tiers, motion, type scale, brand palette, and reusable UI primitives fit together — grounded in globals.css.
+- [Event pipeline internals](internals/event-pipeline.md): How @clawboo/events turns raw OpenClaw Gateway frames into store updates through pure Bridge and Policy layers and a stateful Handler with a RAF patch queue.
+- [The executor runner](internals/executor-runner.md): How the server drives one board task through a runtime end-to-end — claim, worktree, prompt assembly, governance, rotation, verify, and handoff.
+- [Monorepo and build](internals/monorepo-and-build.md): How Clawboo's TurboRepo + pnpm-workspaces monorepo is laid out, the build order, what publishes, and the root commands.
+- [Release process](internals/release-process.md): How Clawboo ships — Changesets, the CI gate, the Version-PR publish flow, and why a release is the CLI's npm publish with the libs inlined.
+- [The RuntimeAdapter trait](internals/runtime-adapter.md): The executor seam every runtime implements — the RuntimeAdapter trait, the normalized RuntimeEvent union, the registry, the contract suite, and the KV-cache tiers.
+- [The CapabilitySource and ScheduleSource seams](internals/seams.md): The two read-fan-out multiplexers — CapabilitySource and ScheduleSource — that mirror AgentSource and merge per-source adapters into one normalized record stream.
+- [Testing strategy](internals/testing.md): How Clawboo verifies itself — the two Vitest projects, sandboxed Playwright e2e, the clean-install smoke gate, the eval harness, and the standing repo guards.
+
+## Guides & Cookbook
+
+- [Guides (cookbook)](guides/index.md): Task-oriented walkthroughs that compose Clawboo features into end-to-end workflows.
+- [Attach Clawboo's MCP to an external agent](guides/attach-mcp-external-agent.md): A worked walkthrough — pick a server and transport, fetch the attach snippet, wire it into Claude Code, Codex, or a custom MCP client, and bind scope safely.
+- [Cross-runtime handoff](guides/cross-runtime-handoff.md): Pause a file-mutating board task on one runtime and resume it cold on another, using the per-task worktree and AGENT_HANDOFF.json.
+- [Set up governance — budgets, caps, and approvals](guides/governance-and-budgets.md): A walkthrough for putting a USD budget on a team, watching the kill-switch pause at the cap, and resolving risky-delegation approvals.
+- [Build a multi-runtime team](guides/multi-runtime-team.md): Connect two or three runtimes, put agents from each on one team, and dispatch work that flows across them via the shared board, chat, and memory.
+- [Schedule recurring team work](guides/recurring-team-work.md): A walkthrough for putting a team task on a clock with Routines — cron, one-shot, presets, the one-firing-owner invariant, error-halts, and pause/resume/run-now.
+- [Self-host Clawboo securely](guides/self-host-securely.md): Keep the loopback default, or widen the bind safely with an access token, a reverse proxy, and TLS — with the honest single-tenant caveats.
+
+## Appendices
+
+- [Changelog](appendices/changelog.md): Release history of the clawboo CLI from the 0.1.0 name-claim placeholder through v0.2.0, the liberated cut.
+- [Contributing to Clawboo](appendices/contributing.md): Clone, run the dev stack, pass the local gate, add a changeset, and respect the architecture invariants.
+- [Frequently asked questions](appendices/faq.md): Common questions about Clawboo — runtimes, data location, local-first behavior, cost, safe network exposure, and resetting.
+- [Glossary](appendices/glossary.md): Canonical definitions of Clawboo's core terms, each linked to the page that explains it.
+- [Known issues & limitations](appendices/known-issues.md): Code-verified list of Clawboo's genuine current limitations, deferrals, and dormant seams — not fixed bugs.
+- [License & third-party notices](appendices/license-and-notices.md): Clawboo is MIT-licensed. Summary of the bundled runtime stack, their licenses, and the MIT-licensed upstream marketplace content.

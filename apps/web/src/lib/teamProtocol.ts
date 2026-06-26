@@ -308,7 +308,7 @@ ${rules}
  * The previous wake body asked agents to introduce themselves AND listed
  * teammates as `@AgentName` — both of
  * those triggered a cascade of intros and false-positive delegations
- * (the 11-message "Welcome aboard X" flood seen in production — see
+ * (the "Welcome aboard X" intro flood — see
  * the "Group Chat Onboarding Gate — Cascade Fix" notes in the internal
  * architecture docs).
  *
@@ -361,9 +361,9 @@ export const SKIP_ACK_TOKEN = '__skipped__'
 const OPENCLAW_CONTROL_TOKENS = new Set<string>(['ANNOUNCE_SKIP', 'NO_REPLY', 'NO'])
 
 // OpenClaw Gateway has a known truncation bug that strips `NO_REPLY` to
-// variable lengths. Round 4 caught `NO_REPLY` and the fully-stripped `NO`;
-// Round 5 production showed `NO_RE` leaking through (Academic Psychologist
-// Boo emitted it twice). This regex matches any underscore-form prefix:
+// variable lengths — `NO_REPLY`, the fully-stripped `NO`, and partial
+// prefixes like `NO_RE` can all appear. This regex matches any
+// underscore-form prefix:
 //   NO_, NO_R, NO_RE, NO_REP, NO_REPL, NO_REPLY
 // Natural language doesn't write these underscore-form prefixes, so the
 // false-positive risk is zero. Bare `NO` is still matched by the canonical

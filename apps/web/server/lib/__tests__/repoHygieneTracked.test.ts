@@ -51,22 +51,25 @@ function insideGitWorkTree(root: string): boolean {
 }
 
 // Written so this file matches none of the S-code / session-marker forms itself
-// (e.g. the bracket after `S` is never a digit). The four path fragments DO appear
-// literally — handled by the self-exclusion pathspec.
+// (e.g. the bracket after `S` is never a digit). The build-aid names are assembled
+// from fragments (below), so this file does not contain the literal scratch-tool names.
+// The build-aid names are assembled from fragments so this public guard file does
+// not itself contain the literal scratch-tool strings it scans for (identical at
+// runtime; the regex-shape patterns above are generic and reveal nothing).
 const PATTERNS = [
   String.raw`\b[sS][0-9]{2}\b`,
   String.raw`SESSION-[0-9]`,
   String.raw`\bSession[- ][0-9]`,
-  'internal-docs',
-  'scratchrepo',
-  'users-you-ai-plans',
-  'clawboo-orchestrator-run',
+  'clawboo' + '-build-docs',
+  'trust' + 'claw',
+  'users-[a-z0-9._-]+-claude' + '-plans',
+  'clawboo-orchestrator-' + 'SESSION',
 ]
 
 // Only the single marketplace file that carries a real engineering-standard token
 // (a Canadian steel-design code) is excluded — not the whole agents tree, so a
 // real leak planted in any other persona file is still caught. The two
-// hygiene-guard files hold the patterns literally.
+// hygiene-guard files assemble the patterns from fragments (no literal names).
 const EXCLUDES = [
   ':!apps/web/src/features/marketplace/agents/agency/specialized.ts',
   ':!apps/web/server/lib/__tests__/repoHygiene.test.ts',

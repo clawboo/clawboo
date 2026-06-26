@@ -96,7 +96,7 @@ function defaultHeight(nodeType: string | undefined): number {
 // One real user session ended up with Boo Zero at y=-2268 and members at
 // y=2656 — total vertical span ≈ 4900 ELK units.
 //
-// **New rule** (Round 2 follow-up):
+// **Rule:**
 //   1. **Only ever stretch the X axis.** A wider-than-natural layout fills
 //      horizontal empty bands without harming Boo prominence. The vertical
 //      stretch was the harmful direction.

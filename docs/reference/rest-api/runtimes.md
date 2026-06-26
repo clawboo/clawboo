@@ -1,0 +1,465 @@
+---
+title: Runtimes API
+description: REST reference for the runtimes resource group: list, install, connect, healthcheck, run, and seed a native team.
+---
+
+REST surface for the four non-OpenClaw [runtimes](/appendices/glossary) (`claude-code`, `codex`, `hermes`, `clawboo-native`): list their capabilities and connection state, install a runtime CLI, connect or disconnect a provider key, verify a key before use, and drive a board task on a chosen runtime. This group also covers `POST /api/onboarding/seed-native-team`, which mints a default native leader + specialist team for the first-run flow.
+
+<Note>
+OpenClaw is the fifth runtime but it is NOT in this group; it is a connected substrate driven over the Gateway, not a CLI you install or a key you paste. These routes 404 the `openclaw` id (it is not a member of `NonOpenClawRuntimeId`). See [System API](/reference/rest-api/system) for OpenClaw lifecycle and [Agents API](/reference/rest-api/agents) for the agent registry.
+</Note>
+
+The `:id` path segment is validated against the runtime set on every route except `seed-native-team`. An unknown id returns **404** `{ error: "unknown runtime '<id>'" }`. All POST routes read a JSON body parsed by `express.json({ limit: '2mb' })`.
+
+## Routes
+
+| Method | Path                               | Summary                                                       | Stream? |
+| ------ | ---------------------------------- | ------------------------------------------------------------- | ------- |
+| GET    | `/api/runtimes`                    | List runtimes with capabilities, health, and connection state | No      |
+| POST   | `/api/runtimes/:id/install`        | Install the runtime CLI                                       | SSE     |
+| POST   | `/api/runtimes/:id/connect`        | Store a provider key in the encrypted vault                   | No      |
+| POST   | `/api/runtimes/:id/disconnect`     | Clear the stored credential                                   | No      |
+| POST   | `/api/runtimes/:id/healthcheck`    | Verify a pasted native provider key (no persistence)          | No      |
+| POST   | `/api/runtimes/:id/run`            | Drive a board task on the runtime end to end                  | No      |
+| POST   | `/api/onboarding/seed-native-team` | Mint a default native leader + specialist team                | No      |
+
+<Info>
+`POST /api/runtimes/:id/install` is **Server-Sent Events**, not request/response. It is documented below with an event-stream catalog (event `type` → payload), not a JSON response body. A built-in runtime (`clawboo-native`) short-circuits with a plain JSON **400** before the stream opens.
+</Info>
+
+---
+
+## `GET /api/runtimes`
+
+Lists every runtime with its capabilities, live health, and install/auth status. The `runtimes[]` entries lead with the back-compat fields (`id`, `participantKind`, `capabilities`, `health`) followed by the install/auth status fields. The sibling `available[]` array advertises the full catalog so a UI can render "available to add" cards for runtimes the user has not connected.
+
+- **Path/query params**: none.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: the runtime list plus the descriptor catalog:
+
+```ts
+{
+  runtimes: Array<{
+    // back-compat shape (leading fields)
+    id: 'claude-code' | 'codex' | 'hermes' | 'clawboo-native'
+    participantKind: 'agent' | 'human'
+    capabilities: {
+      streaming: boolean
+      mcp: boolean
+      worktrees: boolean
+      resume: boolean
+      toolApproval: boolean
+      models: string[]
+      contextWindowTokens?: number
+      runtimeClass?: 'wrapped-oneshot' | 'connected-substrate' | 'native'
+      nativeHome?: { scope: 'per-identity' | 'per-run'; persist: boolean }
+      nativeSkills?: 'preserve' | 'none'
+      nativeMemory?: 'preserve' | 'none'
+      nativeChannels?: 'gateway' | 'none'
+      nativeScheduler?: boolean
+    }
+    health: { ok: boolean; message?: string }
+    // install/auth status fields (spread from runtimeStatus)
+    name: string
+    installed: boolean
+    binPath: string | null
+    builtIn: boolean
+    authKind: 'api-key' | 'oauth' | 'none'
+    envVar: string | null
+    hasCredential: boolean
+    hasVaultCredential: boolean
+    installCommand: string | null
+    docsUrl: string
+    connectionState: 'not-installed' | 'needs-auth' | 'needs-login' | 'ready' | 'unknown'
+  }>
+  available: Array<{
+    id: string
+    name: string
+    healthBin: string | null
+    packageManager: 'npm' | 'pip' | null
+    installCommand: string | null
+    builtIn: boolean
+    authKind: 'api-key' | 'oauth' | 'none'
+    envVar: string | null
+    docsUrl: string
+    headlessAuth: boolean
+  }>
+}
+```
+
+`installed` is `true` for the built-in `clawboo-native` (it ships inside the server) and otherwise reflects whether `healthBin` resolves on `PATH` or a known user-install dir. `hasCredential` is presence-only; the secret value is never read into the response. `hasVaultCredential` is the same presence check but **vault-only** (via `getRuntimeSecret`): it ignores a key that resolves only from a bare `process.env` var, so it reflects a deliberate connect. The onboarding-landing decision (`GatewayBootstrap.hasConnectedRuntime`) reads `hasVaultCredential`, not `hasCredential`, so an env-var-only environment is not mistaken for a connected runtime. `connectionState` is derived as: `not-installed` if not installed; otherwise `ready` for `authKind: 'none'`, `needs-login` for `oauth` (Codex), and `ready`/`needs-auth` for `api-key` depending on `hasCredential`.
+
+**`500 Internal Server Error`**: any failure constructing an adapter or probing health:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl http://localhost:18790/api/runtimes
+```
+
+---
+
+## `POST /api/runtimes/:id/install`
+
+Installs the runtime's CLI. npm runtimes (`claude-code`, `codex`) run `npm install -g <pkg>`; the pip runtime (`hermes`) prefers `pipx install <pkg>` and falls back to `python -m pip install --user`, retrying once with `--break-system-packages` on a PEP-668 externally-managed environment. The built-in `clawboo-native` returns a plain **400** before any stream opens.
+
+- **Path params**: `id` (runtime id; 404 on unknown).
+- **Request body**: none.
+
+### Responses
+
+**`400 Bad Request`**: the runtime is built in (no stream opens):
+
+```json
+{ "error": "Clawboo Native is built in — nothing to install" }
+```
+
+**`200 OK` + `text/event-stream`**: for an installable runtime the handler sets `Content-Type: text/event-stream`, flushes headers, and streams SSE frames. Each frame is `data: <json>\n\n`. The active child process is killed if the client closes the connection.
+
+#### Event catalog
+
+| `type`     | When                                                              | Payload fields                                     |
+| ---------- | ----------------------------------------------------------------- | -------------------------------------------------- |
+| `progress` | Install start, and on the PEP-668 retry                           | `step` (`'installing'` \| `'retrying'`), `message` |
+| `output`   | Per non-empty stdout/stderr line                                  | `line`                                             |
+| `error`    | Tooling missing, permission denied, spawn throw, or non-zero exit | `code`, `message`                                  |
+| `complete` | Process exits 0                                                   | `success: true`, optional `warning`                |
+
+The terminal `error` `code` values:
+
+| `code`           | Meaning                                                           |
+| ---------------- | ----------------------------------------------------------------- |
+| `NPM_MISSING`    | `npm` not found (npm runtimes)                                    |
+| `PYTHON_MISSING` | Python 3 with pip/pipx not found (Hermes)                         |
+| `EACCES`         | Permission denied (stderr matched `EACCES` / "permission denied") |
+| `SPAWN_THROW`    | The spawn call threw synchronously                                |
+| `SPAWN_ERROR`    | The child emitted an `error` event                                |
+| `EXIT_<code>`    | Non-zero process exit (e.g. `EXIT_1`)                             |
+
+On success the handler emits `complete` with `success: true`; if `healthBin` still does not resolve, `complete` carries a `warning` advising a server restart.
+
+Example frames:
+
+```text
+data: {"type":"progress","step":"installing","message":"Installing Claude Code…"}
+
+data: {"type":"output","line":"added 1 package in 3s"}
+
+data: {"type":"complete","success":true}
+```
+
+### Example
+
+```bash
+curl -N -X POST http://localhost:18790/api/runtimes/claude-code/install
+```
+
+---
+
+## `POST /api/runtimes/:id/connect`
+
+Stores a provider key in the encrypted vault and marks the runtime connected. Behavior branches on the descriptor's `authKind`: an `oauth` runtime (Codex) cannot be connected with a pasted key and returns the terminal login command; an `api-key` runtime writes the key to its vault slot. The native runtime is multi-provider; the optional `provider` field routes the key to the correct env var. The key is never echoed in the response.
+
+- **Path params**: `id` (runtime id; 404 on unknown).
+- **Request body**:
+
+```ts
+{
+  apiKey?: string     // required for api-key runtimes (non-ollama)
+  provider?: string   // clawboo-native only: routes the key to the provider's env var
+}
+```
+
+### Responses
+
+**`200 OK`**: `oauth` runtime (Codex): a key-less no-op returning the login command:
+
+```ts
+{ ok: true, connectionState: 'needs-login', loginCommand: 'codex login' }
+```
+
+**`200 OK`**: `authKind: 'none'`, or no `envVar`, or a keyless native provider (`provider: 'ollama'`): nothing stored, state re-derived:
+
+```ts
+{ ok: true, connectionState: 'not-installed' | 'needs-auth' | 'needs-login' | 'ready' | 'unknown' }
+```
+
+**`400 Bad Request`**: an `api-key` runtime with a missing or blank `apiKey`:
+
+```json
+{ "error": "apiKey is required" }
+```
+
+**`200 OK`**: key stored, state re-derived (typically `ready`):
+
+```ts
+{ ok: true, connectionState: 'ready' }
+```
+
+<Tip>
+For `clawboo-native`, omit `provider` to store under `ANTHROPIC_API_KEY`, or pass `provider: "openai"` / `"openrouter"` to store under that provider's env var. An unrecognized provider falls back to the descriptor's default `envVar`.
+</Tip>
+
+### Example
+
+```bash
+# Claude Code (api-key)
+curl -X POST http://localhost:18790/api/runtimes/claude-code/connect \
+  -H 'Content-Type: application/json' \
+  -d '{"apiKey":"sk-ant-..."}'
+
+# Native, choosing OpenRouter
+curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
+  -H 'Content-Type: application/json' \
+  -d '{"apiKey":"sk-or-...","provider":"openrouter"}'
+```
+
+---
+
+## `POST /api/runtimes/:id/disconnect`
+
+Clears the stored credential for the runtime. The binary stays installed and the runtime stays available; the card returns to `needs-auth` (the vault slot is empty). For a runtime with no `envVar` (Codex), this is a no-op on storage.
+
+- **Path params**: `id` (runtime id; 404 on unknown).
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: credential cleared, state re-derived:
+
+```ts
+{ ok: true, connectionState: 'needs-auth' | 'needs-login' | 'ready' | 'not-installed' | 'unknown' }
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/runtimes/hermes/disconnect
+```
+
+---
+
+## `POST /api/runtimes/:id/healthcheck`
+
+Verifies a pasted provider key for the native runtime with a single authenticated GET to the provider's models/health endpoint, before seeding a team. The key is used for exactly one fetch; it is never persisted to the vault, never logged, and never echoed. A bad key or unreachable provider resolves to `{ ok: false, error }` (the handler does not throw into the request).
+
+<Info>
+This route is native-only. Any other `:id` (still a valid runtime) returns **400**.
+</Info>
+
+- **Path params**: `id` (runtime id; 404 on unknown; **400** if not `clawboo-native`).
+- **Request body**:
+
+```ts
+{
+  provider?: string   // 'anthropic' | 'openai' | 'openrouter' | 'ollama'
+  apiKey?: string      // required for all providers except ollama
+}
+```
+
+Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/models`; `openai` → `https://api.openai.com/v1/models`; `openrouter` → `https://openrouter.ai/api/v1/models`; `ollama` → `<OLLAMA_BASE_URL>/api/tags` (keyless). The fetch is bounded by an 8-second timeout.
+
+### Responses
+
+**`400 Bad Request`**: `:id` is not the native runtime:
+
+```json
+{ "ok": false, "error": "healthcheck is only supported for the native runtime" }
+```
+
+**`400 Bad Request`**: unknown provider:
+
+```json
+{ "ok": false, "error": "unknown provider '<provider>'" }
+```
+
+**`400 Bad Request`**: non-ollama provider with a blank `apiKey`:
+
+```json
+{ "ok": false, "error": "apiKey is required" }
+```
+
+**`200 OK`**: provider reachable and the key authenticated:
+
+```json
+{ "ok": true }
+```
+
+**`200 OK`**: provider rejected the key or returned an error (note: still HTTP 200, the failure is in the body):
+
+```ts
+{ ok: false, error: 'Invalid API key.' }            // 401/403 from the provider
+{ ok: false, error: 'Provider returned <status>.' } // other non-2xx
+{ ok: false, error: 'Could not reach <provider> (timed out).' } // 8s abort
+{ ok: false, error: 'Could not reach <provider>.' }            // network error
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/runtimes/clawboo-native/healthcheck \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"anthropic","apiKey":"sk-ant-..."}'
+```
+
+---
+
+## `POST /api/runtimes/:id/run`
+
+Drives a board task on the runtime end to end: claim → worktree → run → report-up, via the server-side executor runner. The runtime's MCP client attaches to this server's `/api/mcp/*` endpoints over a server-trusted loopback URL (never the client-supplied `Host`). Any connected provider key is injected from the vault into the spawned process env. If the client disconnects before the run finishes, the run (and its subprocess) is aborted and the task released.
+
+- **Path params**: `id` (runtime id; 404 on unknown).
+- **Request body**:
+
+```ts
+{
+  taskId: string                    // required
+  assigneeAgentId?: string          // default = the runtime id; must match /^[A-Za-z0-9_-]+$/
+  repoPath?: string | null          // git repo to branch the worktree from
+  kind?: string                     // task kind → isolation; default 'code'
+  model?: string | null             // model override for the run
+  keepForResume?: boolean           // pause-for-handoff: keep worktree + release task
+  disableMemoryAutoInject?: boolean // skip run-start memory injection
+  maxRotations?: number             // bound the session-rotation chain
+  breakerConfig?: object            // per-run circuit-breaker overrides (zod-validated; ignored if invalid)
+  parentTraceparent?: string | null // W3C traceparent to nest this run's trace
+}
+```
+
+The result returned on the `200`/`409`/`404`/`422` paths is the executor runner's `RunTaskResult`. The handler maps the `!ok` reasons to status codes: `not_found` → **404**, `conflict` → **409**, and every other failure reason (`too_deep`, `connected_substrate`, `budget_paused`) → **422**.
+
+### Responses
+
+**`400 Bad Request`**: missing `taskId`:
+
+```json
+{ "error": "taskId is required" }
+```
+
+**`400 Bad Request`**: `assigneeAgentId` is not a bare identifier (`/^[A-Za-z0-9_-]+$/`):
+
+```json
+{ "error": "invalid assigneeAgentId" }
+```
+
+**`200 OK`**: the task ran (the success branch of `RunTaskResult`):
+
+```ts
+{
+  ok: true
+  runtimeId: string
+  execId: string
+  doneReason: 'success' | 'max_turns' | 'aborted' | 'error'
+  status: string
+  summary: string
+  costUsd: number | null
+  usedWorktree: boolean
+  degradations: string[]
+}
+```
+
+**`404 Not Found`**: the task does not exist (`reason: 'not_found'`):
+
+```json
+{ "ok": false, "reason": "not_found" }
+```
+
+**`409 Conflict`**: the task could not be atomically claimed (another worker won; `reason: 'conflict'`). Per the board's atomic-claim contract, a 409 is data; do not retry it:
+
+```json
+{ "ok": false, "reason": "conflict" }
+```
+
+**`422 Unprocessable Entity`**: the run was refused for a board/runtime reason (`reason` is one of `too_deep`, `connected_substrate`, `budget_paused`):
+
+```ts
+{ ok: false, reason: 'too_deep' | 'connected_substrate' | 'budget_paused' }
+```
+
+`too_deep` = the delegation depth ceiling was hit; `connected_substrate` = the runtime is a connected substrate (it cannot be dispatched through this path); `budget_paused` = a budget kill-switch is paused.
+
+**`500 Internal Server Error`**: an unexpected throw inside the run:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/runtimes/claude-code/run \
+  -H 'Content-Type: application/json' \
+  -d '{"taskId":"<task-uuid>","repoPath":"/path/to/repo","kind":"code"}'
+```
+
+---
+
+## `POST /api/onboarding/seed-native-team`
+
+Mints a default native team, a leader (`tasks` tool enabled, capable model) and a specialist (cheap model), so a first-run user who just connected a provider key lands in a working team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). The team row is inserted first (the agents' `teamId` FK requires it), the agents are created with that `teamId`, the leader is recorded, and the "Know Your Team" onboarding flags are pre-satisfied so the user lands straight in chat.
+
+<Note>
+This route is not under `/api/runtimes` and takes no `:id` segment. It is grouped here because it is the native runtime's first-run seed step.
+</Note>
+
+- **Path/query params**: none.
+- **Request body**:
+
+```ts
+{
+  provider?: string  // 'anthropic' | 'openai' | 'openrouter' | 'ollama'; default 'anthropic'
+  model?: string     // optional leader-model override (the specialist keeps its default)
+}
+```
+
+Per-provider model defaults: `anthropic` → leader `claude-sonnet-4-6` / specialist `claude-haiku-4-5`; `openai` → `gpt-4o` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`.
+
+### Responses
+
+**`400 Bad Request`**: `provider` is not one of the four known providers:
+
+```json
+{ "error": "unknown provider '<provider>'" }
+```
+
+**`201 Created`**: the team and its two agents were created:
+
+```ts
+{ teamId: string, leaderAgentId: string, specialistAgentId: string }
+```
+
+**`500 Internal Server Error`**: a failure creating the team or agents:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/onboarding/seed-native-team \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"anthropic"}'
+```
+
+---
+
+## Error envelope
+
+Every error response on these routes is the standard envelope `{ error: string }`, except the `healthcheck` route, which uses `{ ok: false, error: string }` (its success shape is `{ ok: true }`), and the `run` route's `!ok` branches, which return `{ ok: false, reason: <string> }`.
+
+## See also
+
+- [Runtimes overview + capability matrix](/runtimes/index)
+- [Connecting runtimes (install/connect/disconnect, the encrypted vault)](/runtimes/connecting-runtimes)
+- [The board](/concepts/the-board), `taskId`, atomic claim, the 409-no-retry contract
+- [Board API](/reference/rest-api/board), create the task you pass to `:id/run`
+- [Tools & MCP API](/reference/rest-api/tools-and-mcp), the `/api/mcp/*` endpoints a run attaches to
+- [REST API overview](/reference/rest-api/index)

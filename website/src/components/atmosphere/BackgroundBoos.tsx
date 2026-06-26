@@ -1,5 +1,5 @@
 /**
- * VENDORED from apps/web/src/features/atmosphere/BackgroundBoos.tsx @ 4aabf2e.
+ * VENDORED from apps/web/src/features/atmosphere/BackgroundBoos.tsx.
  * EDITS vs source: the `@clawboo/ui` BooAvatar import is replaced with a local
  * inline BooAvatar that renders the vendored generator as an <img> data-URL
  * (no workspace dep, no dangerouslySetInnerHTML). Motion logic is verbatim.

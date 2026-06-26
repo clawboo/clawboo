@@ -1,0 +1,216 @@
+---
+title: "@clawboo/db"
+description: SQLite + Drizzle ORM data layer: schema, board, memory, tools, governance, events, sessions, routines, team-chat.
+---
+
+**Version** 0.1.0 · **Purity** server-only (`better-sqlite3` native binding) · **Purpose** the single SQLite + Drizzle data layer: schema, connection, and every domain repository (board, memory, tools broker, governance, event log, sessions, routines, team-chat). It is the cross-process bus: the Express server and the MCP stdio bins open the same file.
+
+**Workspace deps** `@clawboo/compaction`, `@clawboo/governance`, `@clawboo/obs`
+**External deps** `better-sqlite3`, `drizzle-orm`, `zod`, `@noble/ed25519`
+
+<Note>
+This is the registry of record. The 27 Drizzle-typed tables + the inline `CREATE TABLE IF NOT EXISTS` bootstrap in `createDb` make a fresh file immediately usable; the inline DDL is the **sole** schema source; there is no migration ladder (no `db:migrate` / `db:generate` scripts; a schema change is a hard reset of the local DB). SQLite-native columns (team, personality, runtime, capabilities) are never clobbered by a Gateway re-sync.
+</Note>
+
+The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schema`, `db`, and nine domain sub-modules (`board`, `capabilities`, `memory`, `tools`, `governance`, `events`, `sessions`, `routines`, `teamChat`) via `export *`. There are no `package.json` subpath `exports`; everything is reachable from `@clawboo/db`.
+
+## Public API
+
+### Functions
+
+**Connection (`db.ts`)**
+
+| Export           | Signature                                  | Contract                                                                                                                             |
+| ---------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `createDb`       | `(dbPath: string) => ClawbooDb`            | Open/initialise the SQLite DB; applies WAL + contention pragmas + inline DDL bootstrap so the file works without running migrations. |
+| `defaultDbPath`  | `() => string`                             | Resolve `CLAWBOO_DB_PATH` env, else `~/.openclaw/clawboo/clawboo.db`.                                                                |
+| `getSetting`     | `(db, key: string) => string \| null`      | Read one `settings` KV value.                                                                                                        |
+| `setSetting`     | `(db, key: string, value: string) => void` | Upsert one `settings` KV value.                                                                                                      |
+| `integrityCheck` | `(db) => string`                           | Run `PRAGMA integrity_check` and return its result string.                                                                           |
+| `listTableNames` | `(db) => string[]`                         | List the SQLite table names present.                                                                                                 |
+
+**Board, repository (`board/repository.ts`)**
+
+| Export                                                                                                                | Signature                                                            | Contract                                                                                                                                                              |
+| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createTask`                                                                                                          | `(db, input: CreateTaskInput) => DbTask`                             | Insert a kanban card.                                                                                                                                                 |
+| `createSubtask`                                                                                                       | `(db, parentTaskId, input) => DbTask`                                | Insert a child task linked by `parentTaskId`.                                                                                                                         |
+| `getTask`                                                                                                             | `(db, taskId) => DbTask \| null`                                     | Read one task.                                                                                                                                                        |
+| `listTasks`                                                                                                           | `(db, filter?: ListTasksFilter) => DbTask[]`                         | List tasks (team/status/dropped filters).                                                                                                                             |
+| `claimTask`                                                                                                           | `(db, taskId, assigneeAgentId, assigneeRuntime?) => ClaimResult`     | Atomic single-assignee claim of a `todo` task; loser gets `{ ok:false, reason:'conflict' }` and MUST NOT retry.                                                       |
+| `releaseTask`                                                                                                         | `(db, taskId) => void`                                               | Release an `in_progress` task back to `todo`, clearing assignee + stale verdict.                                                                                      |
+| `updateStatus`                                                                                                        | `(db, taskId, to, opts?: UpdateStatusOptions) => UpdateStatusResult` | State-machine-checked transition; the intrinsic `→done` verification gate rejects a non-promotable verdict (`reason:'verification_required'`) unless `humanOverride`. |
+| `updateTaskFields`                                                                                                    | `(db, taskId, fields: TaskFields) => DbTask \| null`                 | Patch metadata fields.                                                                                                                                                |
+| `blockTask` / `unblockTask`                                                                                           | `(db, taskId) => UpdateStatusResult`                                 | Transition to/from `blocked`.                                                                                                                                         |
+| `dropTask`                                                                                                            | `(db, taskId) => void`                                               | Soft-delete (`dropped=1`).                                                                                                                                            |
+| `linkDep`                                                                                                             | `(db, taskId, dependsOnTaskId) => void`                              | Add a blocks/blocked-by edge (composite-PK de-duped).                                                                                                                 |
+| `getDependents`                                                                                                       | `(db, taskId) => DbTask[]`                                           | Transitive downstream dependents (recursive CTE).                                                                                                                     |
+| `cancelDependents`                                                                                                    | `(db, taskId) => DbTask[]`                                           | Cancel the still-pending dependents of a failed/blocked task.                                                                                                         |
+| `getReadyTasks`                                                                                                       | `(db, filter?) => DbTask[]`                                          | Tasks with no unmet blockers (the ready-pump source).                                                                                                                 |
+| `getAncestors`                                                                                                        | `(db, taskId) => AncestorRow[]`                                      | The parent chain (recursive CTE, zod-validated), backs the depth cap.                                                                                                 |
+| `addComment` / `getComments`                                                                                          | comment CRUD                                                         | Per-task discussion / system notes.                                                                                                                                   |
+| `createWorkspace` / `getWorkspaceForTask` / `updateWorkspaceStatus` / `listActiveWorkspaces` / `setTaskWorkspaceRefs` | worktree rows                                                        | Per-task git-worktree isolation records.                                                                                                                              |
+| `createExecutionProcess`                                                                                              | `(db, input: CreateExecInput) => DbExecutionProcess`                 | Open one run row for a task.                                                                                                                                          |
+| `completeExecutionProcess`                                                                                            | `(db, …, outcome: CompleteExecOutcome) => …`                         | Close a run with status + token/cost ledger.                                                                                                                          |
+| `listExecutions`                                                                                                      | `(db, taskId) => DbExecutionProcess[]`                               | Run history for a task.                                                                                                                                               |
+| `reconcileOrphans`                                                                                                    | `(db) => ReconcileResult`                                            | Boot: a `running` exec orphaned by a crash → `failed` + task released (tombstoned, idempotent).                                                                       |
+| `reconcileStaleInProgress`                                                                                            | `(db, olderThanMs) => ReconcileResult`                               | TTL backstop: time out + release a stale `in_progress` task.                                                                                                          |
+
+**Board, state machine (`board/state-machine.ts`)**
+
+| Export          | Signature                                       | Contract                                                  |
+| --------------- | ----------------------------------------------- | --------------------------------------------------------- |
+| `canTransition` | `(from: TaskStatus, to: TaskStatus) => boolean` | Legal-transition predicate (`done`/`cancelled` terminal). |
+| `isLocked`      | `(status) => boolean`                           | True for `in_progress`/`in_review`.                       |
+| `isTerminal`    | `(status) => boolean`                           | True for `done`/`cancelled`.                              |
+| `isTaskStatus`  | `(value: unknown) => value is TaskStatus`       | Type guard.                                               |
+
+**Board, contention (`board/contention.ts`)**
+
+| Export           | Signature                              | Contract                                         |
+| ---------------- | -------------------------------------- | ------------------------------------------------ |
+| `isBusyError`    | `(err: unknown) => boolean`            | True for `SQLITE_BUSY`.                          |
+| `withWriteRetry` | `<T>(fn: () => T) => T`                | Jittered retry of a write on `SQLITE_BUSY` only. |
+| `immediateWrite` | `<T>(db, cb: (tx: BoardTx) => T) => T` | Run `cb` inside a `BEGIN IMMEDIATE` transaction. |
+
+**Board, verification (`board/verification.ts`)**
+
+| Export                | Signature                                          | Contract                                           |
+| --------------------- | -------------------------------------------------- | -------------------------------------------------- |
+| `setTaskVerification` | `(db, taskId, result: VerificationResult) => void` | Write the typed verdict JSON cell (zod-validated). |
+| `getTaskVerification` | `(db, taskId) => VerificationResult \| null`       | Read the verdict cell.                             |
+
+**Capabilities (`capabilities/repository.ts`)**
+
+| Export               | Signature                                                 | Contract                                                                                                                      |
+| -------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `upsertCapabilities` | `(db, sourceId, rows: DbCapabilityInsert[]) => void`      | Source-scoped reconcile in one `immediateWrite`; replaces only this source's rows (a re-read never deletes another source's). |
+| `listCapabilities`   | `(db, filter?: ListCapabilitiesFilter) => DbCapability[]` | Filterable inventory read (runtime/kind/scope/agent).                                                                         |
+| `getCapability`      | `(db, id) => DbCapability \| null`                        | Read one capability row.                                                                                                      |
+
+**Memory, embedding + summary (`memory/embedding.ts`, `memory/summary.ts`)**
+
+| Export                                        | Signature                                                    | Contract                                                                                                           |
+| --------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `cosineSimilarity`                            | `(a: number[], b: number[]) => number`                       | Cosine similarity for vector search.                                                                               |
+| `serializeEmbedding` / `deserializeEmbedding` | Float32 LE BLOB ↔ `number[]`                                 | Embedding column codec.                                                                                            |
+| `resolveEmbeddingProvider`                    | `(opts?: ResolveEmbeddingOpts) => EmbeddingProvider \| null` | Pick Ollama → OpenAI → deterministic, else null (FTS-only fallback).                                               |
+| `buildStructuredSummary`                      | `(input: StructuredSummaryInput) => string`                  | Render the fixed compaction template (Goal/Constraints/Progress/Decisions/FilesTouched/NextSteps/CriticalContext). |
+
+**Tools broker (`tools/*`)**
+
+| Export                                                                                                                     | Signature                                                 | Contract                                                                                                             |
+| -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `evaluateAvailability`                                                                                                     | `(…) => AvailabilityResult`                               | Declarative `requires` (auth/config/env/plugin) gate; a hidden tool is omitted from `tools/list`.                    |
+| `defaultAvailabilityContext`                                                                                               | `(opts?: DefaultAvailabilityOpts) => AvailabilityContext` | Build the availability context.                                                                                      |
+| `runInspectors`                                                                                                            | `(…) => ChainOutcome`                                     | Inspector chain (security → scope → clamp → risk) → Allow / Deny / RequireApproval / RewriteArgs.                    |
+| `securityInspector` / `scopeInspector` / `argClampInspector` / `riskClassifierInspector`                                   | `Inspector`                                               | The four builtin inspectors.                                                                                         |
+| `defaultInspectors`                                                                                                        | `Inspector[]`                                             | The ordered builtin chain.                                                                                           |
+| `scanForInjection`                                                                                                         | `(text) => InjectionFinding[]`                            | Prompt/skill injection scanner.                                                                                      |
+| `isSkillSafe`                                                                                                              | `(text) => boolean`                                       | Convenience injection check.                                                                                         |
+| `signProvenance` / `verifyProvenance` / `provenancePayload`                                                                | Ed25519 provenance                                        | Sign/verify a tool descriptor; enforcement is off by default.                                                        |
+| `b64urlToBytes` / `bytesToB64url`                                                                                          | base64url codec                                           | Provenance encoding helpers.                                                                                         |
+| `scrubSecrets` / `scrubArgsSummary` / `scrubResultSummary`                                                                 | secret masking                                            | Storage-layer scrub (`[REDACTED]`) with a `SAFE_COUNT_KEYS` token-count allowlist.                                   |
+| `executeBrokeredCall`                                                                                                      | `(…) => Promise<BrokeredResult>`                          | The one pipeline both the Tools MCP server + REST share (availability → inspectors → approval → audit → compaction). |
+| `createApproval` / `getApproval` / `listPendingApprovals` / `resolveApproval` / `waitForApproval` / `expireStaleApprovals` | DB-mediated approval handshake                            | Cross-process tool-call approvals.                                                                                   |
+| `writeAuditBefore` / `writeAuditAfter` / `listAudit`                                                                       | tool-call audit                                           | Before+after audit rows (scrubbed).                                                                                  |
+| `seedBuiltinTools` / `setToolEnabled` / `isToolEnabled` / `persistDescriptorMetadata` / `getDescriptorMetadata`            | registry persistence                                      | Descriptor + enabled-state CRUD.                                                                                     |
+
+**Governance (`governance/*`)**
+
+| Export                      | Signature                                                                    | Contract                                                                                                                                    |
+| --------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `recordSpend`               | `(db, scope: BudgetScope, scopeId, deltaCents) => RecordSpendResult \| null` | Atomic micro-cent spend accumulate; returns the crossing (`cap`-mode auto-pauses at 100%, `warn`-mode never pauses); null = uncapped scope. |
+| `getBudget` / `listBudgets` | budget reads                                                                 | Read budget rows.                                                                                                                           |
+| `setBudgetLimit`            | `(db, input: SetBudgetLimitInput) => DbBudget`                               | Set/raise a cap (raising re-opens a paused budget).                                                                                         |
+| `resumeBudget`              | `(db, …, opts?: ResumeBudgetOptions) => …`                                   | Human force-active a paused budget.                                                                                                         |
+| `appendAudit`               | `(db, input: AppendAuditInput) => DbGovernanceAudit`                         | Append-only forensic audit (summary scrubbed).                                                                                              |
+| `listGovernanceAudit`       | `(db, filter?: ListGovernanceAuditFilter) => …`                              | Filter audit by agent/event-type/since.                                                                                                     |
+| `priorAllowAlways`          | `(db, { agentId, scopeKey }) => boolean`                                     | Sticky "always-approve per scope" lookup.                                                                                                   |
+
+**Events (`events/*`)**
+
+| Export        | Signature                                                   | Contract                                                                                                  |
+| ------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `appendEvent` | `(db, input: AppendEventInput) => DbOrchestrationEvent`     | Append one orchestration event (`seq` SQLite-assigned, `data` scrubbed, unknown kind coerced to `error`). |
+| `listEvents`  | `(db, filter?: ListEventsFilter) => DbOrchestrationEvent[]` | Read the event log in `seq` order (team/task/agent/trace/`afterSeq` filters).                             |
+
+**Sessions, rotation lineage (`sessions/index.ts`)**
+
+| Export                 | Signature                                                        | Contract                                                                                                        |
+| ---------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `recordRotation`       | `(db, input: RecordRotationInput) => { predecessor, successor }` | Upsert predecessor + insert a linked successor session in one `BEGIN IMMEDIATE` (idempotent on the unique key). |
+| `getSessionBySourceId` | `(db, sourceId, sourceSessionId) => DbSession \| undefined`      | Look up a session by its source + stream key.                                                                   |
+| `getSessionLineage`    | `(db, sessionId) => DbSession[]`                                 | Walk the rotation chain (newest-first).                                                                         |
+
+**Routines, scheduled-runs ledger (`routines/*`)**
+
+| Export                                                             | Signature                                                              | Contract                                                      |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `registerScheduledRun`                                             | `(db, input: RegisterScheduledRunInput) => RegisterScheduledRunResult` | Register a Routine with the one-firing-owner de-dup guard.    |
+| `getScheduledRun` / `listScheduledRuns`                            | ledger reads                                                           | Read scheduled runs.                                          |
+| `minNextRunAt`                                                     | `(db) => number \| null`                                               | Earliest `next_run_at` (arms the ticker).                     |
+| `queueDueRuns` / `listQueuedRuns`                                  | due-pass                                                               | Move due `idle` runs → `queued`, then read them.              |
+| `claimScheduledRun`                                                | `(db, id) => …`                                                        | Atomic `queued → claimed` (null on lost race; never retried). |
+| `markRunRunning` / `recordRunOutcome` / `setScheduledRunStatus`    | lifecycle writers                                                      | Drive a fire through `running → idle`/`error`.                |
+| `queueRunNow`                                                      | `(db, id) => …`                                                        | Force-fire (`idle → queued`).                                 |
+| `updateScheduledRun` / `deleteScheduledRun`                        | CRUD                                                                   | Patch / remove a Routine.                                     |
+| `reconcileScheduledRuns`                                           | `(db) => …`                                                            | Boot-resume: re-arm/park orphaned runs.                       |
+| `canRoutineTransition` / `isAutoFireable` / `isScheduledRunStatus` | predicates                                                             | Routine state-machine helpers + type guard.                   |
+
+**Team-chat room substrate (`teamChat/index.ts`)**
+
+| Export               | Signature                                    | Contract                                                                                 |
+| -------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `resolveRoomForTeam` | `(teamId) => string`                         | The default room id (`team:<teamId>`).                                                   |
+| `postToRoom`         | `(db, input: PostToRoomInput) => DbTeamChat` | Append a post; assigns the next per-room `seq` (`MAX(seq)+1`) in a `BEGIN IMMEDIATE` tx. |
+| `readRoom`           | `(db, input: ReadRoomInput) => DbTeamChat[]` | Cursor read in `seq` order; `excludeAuthorId` IS the per-poster echo guard.              |
+| `roomMaxSeq`         | `(db, roomId) => number`                     | Unfiltered head `seq` of a room (0 when empty).                                          |
+
+### Types & interfaces
+
+- **Drizzle row types** (per table, select + insert): `DbAgent`/`DbAgentInsert`, `DbApprovalHistory(+Insert)`, `DbBooZeroTeamBrief(+Insert)`, `DbBudget(+Insert)`, `DbCapability(+Insert)`, `DbChatMessage(+Insert)`, `DbCostRecord(+Insert)`, `DbExecutionProcess(+Insert)`, `DbGovernanceAudit(+Insert)`, `DbGraphLayout(+Insert)`, `DbMemoryFact(+Insert)`, `DbMemoryProcedure(+Insert)`, `DbOrchestrationEvent(+Insert)`, `DbScheduledRun(+Insert)`, `DbSession(+Insert)`, `DbSetting(+Insert)`, `DbSkill(+Insert)`, `DbTask(+Insert)`, `DbTaskComment(+Insert)`, `DbTaskDep(+Insert)`, `DbTeam(+Insert)`, `DbTeamChat(+Insert)`, `DbTeamProfile(+Insert)`, `DbToolCallApproval(+Insert)`, `DbToolCallAudit(+Insert)`, `DbToolRegistry(+Insert)`, `DbWorkspace(+Insert)`.
+- **Connection**, `ClawbooDb` (the Drizzle instance type).
+- **Board**, `Scope`, `CreateTaskInput`, `ListTasksFilter`, `ClaimReason`, `ClaimResult`, `UpdateStatusReason`, `UpdateStatusResult`, `UpdateStatusOptions`, `TaskFields`, `WorkspaceStatus`, `CreateExecInput`, `CompleteExecOutcome`, `ReconcileResult`, `BoardTx`, `TaskStatus`. Zod body/result types: `CreateTaskBody`, `UpdateTaskBody`, `ClaimBody`, `CommentBody`, `CreateExecutionBody`, `CompleteExecutionBody`, `LinkDepBody`, `ProvisionWorkspaceBody`, `WorkspaceActionBody`, `AncestorRow`.
+- **Capabilities**, `ListCapabilitiesFilter`.
+- **Memory**, `MemoryStore`, `EmbeddingProvider`, `Fact`, `Procedure`, `MemoryScope`, `MemorySearchResult`, `SearchMode`, `SearchOpts`, `BrowseOpts`, `SaveFactInput`, `SaveProcedureInput`, `ResolveEmbeddingOpts`, `StructuredSummaryInput`. Zod body types: `SaveFactBody`, `SaveProcedureBody`, `SaveMemoryBody`, `SearchMemoryBody`, `BrowseMemoryBody`, `MemoryScopeBody`.
+- **Tools**, `ToolDescriptor`, `ToolCall`, `ToolCallContext`, `ToolOwner`, `ToolRisk`, `ToolProvenance`, `AvailabilityContext`, `AvailabilityRequirement`, `AvailabilityResult`, `DefaultAvailabilityOpts`, `Inspector`, `InspectorDecision`, `ChainOutcome`, `InjectionFinding`, `InjectionSeverity`, `ProvenanceResult`, `ProvenanceVerifyOpts`, `BrokeredResult`, `BrokerOptions`, `ApprovalDecision`, `ApprovalResolution`, `VisibleTool`, `ListToolsQuery`, `ResolveApprovalBody`.
+- **Governance**, `BudgetScope`, `BudgetMode`, `RecordSpendResult`, `SetBudgetLimitInput`, `ResumeBudgetOptions`, `GovernanceEventType`, `AppendAuditInput`, `ListGovernanceAuditFilter`, `SetBudgetBody`.
+- **Events**, `AppendEventInput`, `ListEventsFilter`.
+- **Sessions**, `RecordRotationInput`.
+- **Routines**, `ScheduledRunStatus`, `RegisterScheduledRunInput`, `RegisterScheduledRunResult`, `ListScheduledRunsFilter`, `RoutineScope`, `RunOutcome`, `SetStatusResult`, `UpdateScheduledRunPatch`.
+- **Team-chat**, `TeamChatKind`, `PostToRoomInput`, `ReadRoomInput`.
+
+### Classes
+
+- `SqliteMemoryStore`, the local-first `MemoryStore` (FTS5 + optional Float32-BLOB vector index + hybrid blend; embedding best-effort, degrades to FTS).
+- `DeterministicEmbeddingProvider` / `OllamaEmbeddingProvider` / `OpenAiEmbeddingProvider`, the three `EmbeddingProvider` implementations.
+- `ToolRegistry`, in-memory broker tool registry; `createBuiltinRegistry()` seeds it.
+
+### Constants
+
+- **Schema**, the 27 Drizzle table objects: `agents`, `approvalHistory`, `booZeroTeamBriefs`, `budgets`, `capabilities`, `chatMessages`, `costRecords`, `executionProcesses`, `governanceAudit`, `graphLayouts`, `memoryFacts`, `memoryProcedures`, `orchestrationEvents`, `scheduledRuns`, `sessions`, `settings`, `skills`, `taskComments`, `taskDeps`, `tasks`, `teamChat`, `teams`, `teamProfiles`, `toolCallApprovals`, `toolCallAudit`, `toolRegistry`, `workspaces`.
+- **Board**, `TASK_STATUSES`, plus the zod schemas `taskStatusSchema`, `createTaskBody`, `updateTaskBody`, `claimBody`, `commentBody`, `createExecutionBody`, `completeExecutionBody`, `linkDepBody`, `provisionWorkspaceBody`, `workspaceActionBody`, `ancestorRowSchema`, `ancestorRowsSchema`.
+- **Memory**, zod schemas `memoryScopeSchema`, `searchModeSchema`, `saveFactBody`, `saveProcedureBody`, `saveMemoryBody`, `searchMemoryBody`, `browseMemoryBody`.
+- **Tools**, `BUILTIN_TOOLS`, `echoTool`, `memoryNoteTool`, `webSearchTool`, `deletePathTool`; zod schemas `listToolsQuery`, `resolveApprovalBody`.
+- **Governance**, zod schemas `budgetScopeSchema`, `budgetModeSchema`, `setBudgetBody`, `resumeBudgetBody`.
+- **Routines**, `SCHEDULED_RUN_STATUSES`.
+
+## Used by
+
+- **`apps/web`**, the Express server (`server/`, `server/api/`, `server/lib/**`) and three browser sites (`src/stores`, `src/features/approvals`, `src/features/connection`).
+- **`@clawboo/mcp`**, the Tasks / Memory / Tools / TeamChat MCP servers + the stdio bins.
+- **`@clawboo/evals`**, the eval harness graders/tasks (throwaway boards).
+
+## Source
+
+Barrel: [`packages/db/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/db/src/index.ts). Schema: `packages/db/src/schema.ts`. Sub-modules: `board/`, `capabilities/`, `memory/`, `tools/`, `governance/`, `events/`, `sessions/`, `routines/`, `teamChat/`. Connection + inline schema DDL: `db.ts` (the sole schema source; there is no migration ladder).
+
+## See also
+
+- [Database schema reference](/reference/database-schema), the 27 tables + ERD.
+- [The board](/concepts/the-board), state machine, atomic claim, deps.
+- [Memory](/concepts/memory), shared Memory-MCP tier.
+- [Governance](/concepts/governance), budgets, kill-switch, audit.
+- [Observability](/concepts/observability), the event log.
+- [`@clawboo/governance`](/reference/packages/governance) · [`@clawboo/obs`](/reference/packages/obs) · [`@clawboo/mcp`](/reference/packages/mcp), consumers/upstreams of this layer.

@@ -490,10 +490,9 @@ export function GatewayBootstrap() {
         const booZeroId = identifyBooZero(mapped, result.defaultId)
         useBooZeroStore.getState().setBooZeroAgentId(booZeroId)
 
-        // Phase E: Clawboo-side display-name override for Boo Zero. The
-        // user's Gateway agent name might be the literal slug "main" or a
-        // custom name they picked in OpenClaw onboarding ("Mythos" was
-        // seen in production). Clawboo's policy: lock the display name to
+        // Clawboo-side display-name override for Boo Zero. The user's
+        // Gateway agent name might be the literal slug "main" or a custom
+        // name picked in OpenClaw onboarding. Clawboo's policy: lock the display name to
         // "Boo Zero" by default; user can change it anytime in the System
         // panel ("Boo Zero" section). The override lives in SQLite —
         // Gateway-side identity is never touched.

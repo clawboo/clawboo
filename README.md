@@ -28,6 +28,8 @@
   &nbsp;·&nbsp;
   <a href="#configuration">Configuration</a>
   &nbsp;·&nbsp;
+  <a href="https://docs.claw.boo">Docs</a>
+  &nbsp;·&nbsp;
   <a href="https://github.com/clawboo/clawboo/discussions">Discussions</a>
 </p>
 

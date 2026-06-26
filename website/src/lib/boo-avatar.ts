@@ -1,5 +1,5 @@
 /**
- * VENDORED from packages/boo-avatar/src/index.ts @ 4aabf2e — verbatim.
+ * VENDORED from packages/boo-avatar/src/index.ts — verbatim.
  * Pure, zero-dependency, browser-safe. Re-sync if the product mascot changes
  * (scripts/sync-brand.sh).
  *

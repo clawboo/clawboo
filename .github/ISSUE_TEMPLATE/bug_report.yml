@@ -36,22 +36,27 @@ body:
     attributes:
       label: Clawboo version
       description: Run `npx clawboo --version` or check package.json
-      placeholder: '0.1.0'
+      placeholder: '0.2.0'
 
   - type: dropdown
     id: area
     attributes:
       label: Affected area
       options:
-        - Ghost Graph
-        - Chat Panel
-        - Fleet Sidebar
-        - Cost Dashboard
+        - Onboarding / Setup
+        - Native runtime
+        - Connected runtimes (Claude Code / Codex / Hermes / OpenClaw)
+        - Group Chat
+        - Board (tasks)
+        - Atlas / Ghost Graph
+        - Capabilities
+        - Marketplace
+        - Memory
+        - Governance & budgets
+        - Observability
         - Scheduler
         - Approvals
-        - Skill Marketplace
-        - Gateway Connection
-        - CLI
+        - CLI / install
         - Other
     validations:
       required: true

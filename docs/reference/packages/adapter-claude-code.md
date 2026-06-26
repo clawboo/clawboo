@@ -1,0 +1,71 @@
+---
+title: '@clawboo/adapter-claude-code'
+description: Claude Code RuntimeAdapter that maps the Claude Agent SDK lifecycle into the normalized executor event stream.
+---
+
+|                    |                                                                                                                                                                                                                                        |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Version**        | `0.1.0`                                                                                                                                                                                                                                |
+| **Purity**         | pure (deps: `@clawboo/executor` only; no Node/SDK imports, the heavy SDK/spawn driver lives server-side)                                                                                                                               |
+| **Purpose**        | The Claude Code [`RuntimeAdapter`](/internals/runtime-adapter): boots a run, maps each native Claude Agent SDK frame into the normalized `RuntimeEvent` union, and delegates abort/setModel/writeContext to a per-run injected driver. |
+| **Workspace deps** | `@clawboo/executor`                                                                                                                                                                                                                    |
+| **External deps**  | none (runtime) · `tsup`, `typescript`, `vitest`, `@clawboo/tsconfig` (dev)                                                                                                                                                             |
+
+This package is the contract-testable shell. It does **not** import the Claude Agent SDK, a fresh `ClaudeCodeDriver` is minted per run via the injected `driverFactory`, and the real SDK-backed driver (`createClaudeCodeDriver`) lives in `apps/web/server/lib/runtimes/`. Mirrors the OpenClaw reference adapter pattern, generalized to a one-shot spawned/SDK runtime.
+
+## Public API
+
+All exports come from `src/index.ts`. The package declares a single `.` export in `package.json` (no subpath barrels).
+
+### Classes
+
+| Export              | Signature                                           | Contract                                                                                                                                                                                                                                       |
+| ------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ClaudeCodeAdapter` | `class ClaudeCodeAdapter implements RuntimeAdapter` | The adapter. Constructed with `(driverFactory: ClaudeCodeDriverFactory, healthCheck?: () => Promise<HealthResult>)`. `id = 'claude-code'`, `participantKind = 'agent'`. Holds a per-run driver map + a per-run captured native session-id map. |
+
+**`ClaudeCodeAdapter` members:**
+
+- `capabilities(): Capabilities`, returns `{ streaming: true, mcp: true, worktrees: true, resume: true, toolApproval: true, models: ['sonnet','opus','haiku'], contextWindowTokens: 200000, runtimeClass: 'wrapped-oneshot', nativeSkills: 'none', nativeMemory: 'none', nativeChannels: 'none', nativeScheduler: false }`. `nativeHome` is omitted, the SDK runs against the user's real HOME/Keychain auth, so nothing native accrues per identity.
+- `sessionCodec: SessionCodec`, serializes `{ sessionKey, sessionId }` (the native session id captured during the run, falling back to `runId`); `restore` rebuilds a `RunHandle` from the blob. Rotation does not replay the transcript, the codec only carries the session id for lineage + optional resume.
+- `health(): Promise<HealthResult>`, races the injected `healthCheck` against a 2 s timeout; any throw → `{ ok: false, message }`.
+- `start(_task: TaskHandle, opts: StartOpts): Promise<RunHandle>`, mints a driver via `driverFactory(opts)`, stores it by `opts.sessionKey`, calls `driver.start()`, returns `{ adapterId: 'claude-code', sessionKey, runId: null }`. The `runId` late-binds in `events()` from the first native frame carrying a session id.
+- `events(run: RunHandle): AsyncIterable<RuntimeEvent>`, subscribes to the run's driver stream, late-binds `runId`, accumulates non-reasoning `text-delta` text, and yields the mapped normalized stream via a bounded `createAsyncQueue` (`max: 1000`). Consumer termination (`return()`) unsubscribes the driver. Returns an empty (closed) queue if no driver is registered for the run.
+- `abort(run: RunHandle): Promise<void>`, delegates to the run's driver `abort()`.
+- `setModel(run: RunHandle, model: string): Promise<void>`, delegates to the run's driver `setModel()`.
+- `writeContext(run: RunHandle, key: string, value: string): Promise<void>`, delegates to the run's driver `writeContext()`.
+
+### Functions
+
+| Export           | Signature                                                                                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mapClaudeEvent` | `(ev: ClaudeNativeEvent, ctx: MapContext, nextSeq: () => number, now?: () => number, accumulated?: string) => RuntimeEvent[]` | Pure native→`RuntimeEvent` mapper. Each native event yields zero or more normalized events with a monotonic `seq`. `init`→`status` (phase `init`); `text`→`text-delta` (channel defaults `assistant`, empty text dropped); `tool-call`/`tool-result` pass through; `result` emits an optional `cost` event (real `costUsd`, **not** estimated) then a terminal `done`/`error`. `aborted`→`done reason:'aborted'`; `maxTurns`→`done reason:'max_turns'` (a clean "out of room" terminal, distinct from error, so the host can rotate); `ok`→`done reason:'success'`; otherwise a fatal `error` + `done reason:'error'`. Unknown native types are dropped, never crash the stream. |
+| `claudeNativeId` | `(ev: ClaudeNativeEvent) => string \| undefined`                                                                              | Recovers the native session id from the frames that carry one, `init.sessionId` or `result.sessionId`; `undefined` otherwise.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+
+### Types & interfaces
+
+| Export                    | Kind                | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ClaudeNativeEvent`       | discriminated union | A lightly-normalized native frame off the Claude Agent SDK `query()` stream. Variants: `init { sessionId, model? }` · `text { text, channel? }` · `tool-call { id, name, input }` · `tool-result { id, name, output, isError? }` · `result { ok, summary, costUsd?, usage?, model?, sessionId?, aborted?, maxTurns?, errorMessage? }`. `costUsd` is a real USD figure (passed straight through). `maxTurns` marks `result.subtype === 'error_max_turns'`, a clean turn-ceiling terminal. |
+| `ClaudeCodeDriver`        | interface           | The injected per-run seam (analogous to OpenClaw's `OpenClawGatewayClient`). Methods: `start(): Promise<void>` · `onEvent(handler) => () => void` (subscribe, returns unsubscribe) · `abort(): Promise<void>` · `setModel(model): Promise<void>` · `writeContext(key, value): Promise<void>`. One instance per run (an SDK query is one-shot).                                                                                                                                           |
+| `ClaudeCodeDriverFactory` | type alias          | `(opts: StartOpts) => ClaudeCodeDriver`, fresh driver per run; the adapter calls it in `start()`.                                                                                                                                                                                                                                                                                                                                                                                        |
+| `MapContext`              | interface           | `{ runId: string \| null; sessionId: string \| null }`, the ids the mapper stamps onto every emitted `RuntimeEvent` base.                                                                                                                                                                                                                                                                                                                                                                |
+
+<Note>
+The `Capabilities`, `HealthResult`, `RunHandle`, `RuntimeAdapter`, `RuntimeEvent`, `SessionCodec`, `StartOpts`, `TaskHandle`, and `Usage` types referenced above are owned by [`@clawboo/executor`](/reference/packages/executor), not re-exported here.
+</Note>
+
+## Used by
+
+- `apps/web/server/lib/runtimes/index.ts`, instantiates `ClaudeCodeAdapter`, injecting `createClaudeCodeDriver` (the real SDK-backed driver) and a CLI health probe.
+- `apps/web/server/lib/runtimes/claudeCodeDriver.ts`, imports the `ClaudeCodeDriver` + `ClaudeNativeEvent` types to implement the server-side driver against the Claude Agent SDK.
+
+## Source
+
+`packages/adapters/claude-code/src/index.ts` (barrel; re-exports `./adapter`, `./types`, `./mapClaudeEvent`).
+
+## See also
+
+- [@clawboo/executor](/reference/packages/executor), the `RuntimeAdapter` trait + `RuntimeEvent` union this adapter implements.
+- [RuntimeAdapter trait](/internals/runtime-adapter), the cross-runtime contract.
+- [Claude Code runtime](/runtimes/claude-code), using the runtime end-to-end.
+- Sibling adapters: [@clawboo/adapter-codex](/reference/packages/adapter-codex), [@clawboo/adapter-hermes](/reference/packages/adapter-hermes), [@clawboo/adapter-native](/reference/packages/adapter-native), [@clawboo/adapter-openclaw](/reference/packages/adapter-openclaw).

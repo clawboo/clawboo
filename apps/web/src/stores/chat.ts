@@ -72,7 +72,7 @@ export const useChatStore = create<ChatStore>((set) => ({
       // entryId via `crypto.randomUUID()` — entryId dedup misses, and the
       // store ends up with N copies of the same message.
       //
-      // Upstream root cause (Round 2, Phase A): the `commitChat` case in
+      // Upstream root cause: the `commitChat` case in
       // `packages/events/src/handler.ts` does NOT guard against stale
       // terminal events for already-closed runs (the `closedRuns` guard
       // exists only for `updateAgentStatus`). When the Gateway emits
@@ -123,10 +123,10 @@ export const useChatStore = create<ChatStore>((set) => ({
         fresh.push(e)
       }
 
-      // Optional diagnostic (Phase A4) — enable in browser DevTools with
+      // Optional diagnostic — enable in browser DevTools with
       //   localStorage.setItem('clawboo:debug-triple-render', 'true')
-      // to capture the actual upstream source of duplicates the next time
-      // production hits this path. Off by default.
+      // to capture the upstream source of duplicates if this path is hit.
+      // Off by default.
       if (
         typeof window !== 'undefined' &&
         droppedByContent.length > 0 &&

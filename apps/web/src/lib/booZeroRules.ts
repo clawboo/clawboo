@@ -2,13 +2,12 @@
 //
 // Why this exists
 // ---------------
-// Production showed Boo Zero (the universal team leader) drifting badly:
-//   • Calling itself "Mythos" instead of its display name (identity drift)
-//   • Doing teammate work itself instead of delegating (forbidden directly
-//     by the user, twice in the same chat)
+// Without a hard-coded anchor, Boo Zero (the universal team leader) drifts:
+//   • Identity drift: adopting a custom name instead of its display name
+//   • Doing teammate work itself instead of delegating
 //   • Reaching for built-in sub-agent / task-orchestration primitives (the wrong delegation path)
 //   • Claiming teammates "timed out" while they were still mid-response
-//   • Producing unsolicited intros 7 hours later on chat reopen
+//   • Producing unsolicited intros on chat reopen
 //
 // `buildGlobalBrief` in `booZeroBrief.ts` documents most of these rules, but
 // the brief is ONLY surfaced in the maintenance UI — no code path injects it
@@ -23,15 +22,15 @@
 // user-editable Notes section in `buildGlobalBrief` continues to be
 // optional add-on context that the user can use for team-specific guidance.
 //
-// Size budget: ~5 KB (~1.2 K tokens) after the Round 8D expansion that added
+// Size budget: ~5 KB (~1.2 K tokens), covering
 // the "Multi-step pipelines" + "<plan> blocks" sections (continue-on-relay
 // rule + explicit plan syntax). Prompt caching applies because the block is
 // stable per `displayName`, so the marginal cost approaches zero after the
-// first turn. The expanded block is load-bearing because production showed
-// (a) Boo Zero emitting prose `---` separators instead of `<delegate>` tags,
-// and (b) Boo Zero abandoning multi-step pipelines because Round 4/5 told
-// it to stay silent on relays — anti-pattern examples + the explicit
-// continue-on-relay exception are the only way the LLM reliably progresses.
+// first turn. The expanded block is load-bearing because the LLM otherwise
+// (a) emits prose `---` separators instead of `<delegate>` tags, and
+// (b) abandons multi-step pipelines under the silence-on-relay rule —
+// anti-pattern examples + the explicit continue-on-relay exception are the
+// only way the LLM reliably progresses.
 
 export interface BooZeroRulesParams {
   /**

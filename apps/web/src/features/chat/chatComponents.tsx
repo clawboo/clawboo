@@ -670,7 +670,7 @@ export const StreamingCard = memo(function StreamingCard({
                 task={segment.task}
               />
             ) : (
-              // Round 6 (Layer 6B): render streaming prose with the same
+              // Render streaming prose with the same
               // ReactMarkdown pipeline used by `AssistantTurnCard` so bold /
               // lists / code blocks / links format progressively as text
               // streams in — instead of staying as raw text until commit.

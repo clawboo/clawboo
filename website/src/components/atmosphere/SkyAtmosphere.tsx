@@ -1,5 +1,5 @@
 /**
- * VENDORED from apps/web/src/features/atmosphere/SkyAtmosphere.tsx @ 4aabf2e.
+ * VENDORED from apps/web/src/features/atmosphere/SkyAtmosphere.tsx.
  * Verbatim (the product's signature welcome backdrop). Re-sync if it changes.
  *
  * A calm Day sky with soft drifting clouds (procedural SVG fractal-noise, three
