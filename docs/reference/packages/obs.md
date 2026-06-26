@@ -1,6 +1,6 @@
 ---
-title: "@clawboo/obs"
-description: Pure observability primitives: typed orchestration-event schema, runtime-error taxonomy, graph + fleet-health projection reducers, metric folds, and the structured-output judge drive.
+title: '@clawboo/obs'
+description: 'Pure observability primitives: typed orchestration-event schema, runtime-error taxonomy, graph + fleet-health projection reducers, metric folds, and the structured-output judge drive.'
 ---
 
 - **Version** `0.1.0`

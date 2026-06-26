@@ -1,5 +1,5 @@
 ---
-title: Set up governance: budgets, caps, and approvals
+title: 'Set up governance: budgets, caps, and approvals'
 description: A walkthrough for putting a USD budget on a team, watching the kill-switch pause at the cap, and resolving risky-delegation approvals.
 ---
 

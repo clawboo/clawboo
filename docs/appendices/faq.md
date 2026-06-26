@@ -1,6 +1,6 @@
 ---
 title: Frequently asked questions
-description: Common questions about Clawboo: runtimes, data location, local-first behavior, cost, safe network exposure, and resetting.
+description: 'Common questions about Clawboo: runtimes, data location, local-first behavior, cost, safe network exposure, and resetting.'
 ---
 
 Short, grounded answers to the questions that come up most. Each answer links to the page that covers the topic in full.

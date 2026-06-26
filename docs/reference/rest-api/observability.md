@@ -1,6 +1,6 @@
 ---
 title: Observability API
-description: REST reference for the orchestration event log: feed, traces, errors, fleet health, graph projection, SSE live-tail, client mirror, and eval smoke run.
+description: 'REST reference for the orchestration event log: feed, traces, errors, fleet health, graph projection, SSE live-tail, client mirror, and eval smoke run.'
 ---
 
 REST surface over the durable orchestration event log: query the raw event feed, reconstruct a single trace with metrics, pull the harness-bug error feed, read the fleet-health triage, fold the event-sourced delegation graph, live-tail the log over Server-Sent Events, and mirror client-observed runtime events back into the log. This group also covers `POST /api/eval/smoke`, the on-demand deterministic eval run.

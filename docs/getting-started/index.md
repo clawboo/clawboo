@@ -1,6 +1,6 @@
 ---
 title: Getting started
-description: The two install paths: native-first (paste a key, no Gateway) or the OpenClaw Gateway, plus prerequisites.
+description: 'The two install paths: native-first (paste a key, no Gateway) or the OpenClaw Gateway, plus prerequisites.'
 ---
 
 Clawboo runs the same way for everyone: one command, `npx clawboo`, which launches a local dashboard and walks you through a first-run wizard. The only real choice the wizard asks is **how you want your agents to run**. This page explains the two paths so you can pick before you start.

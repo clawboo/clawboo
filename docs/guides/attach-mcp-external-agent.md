@@ -1,6 +1,6 @@
 ---
 title: Attach Clawboo's MCP to an external agent
-description: A worked walkthrough: pick a server and transport, fetch the attach snippet, wire it into Claude Code, Codex, or a custom MCP client, and bind scope safely.
+description: 'A worked walkthrough: pick a server and transport, fetch the attach snippet, wire it into Claude Code, Codex, or a custom MCP client, and bind scope safely.'
 ---
 
 Use this guide when you want an agent that Clawboo does **not** run, a standalone Claude Code session, a Codex CLI, or your own [MCP](/appendices/glossary) client, to join a Clawboo team by attaching one of the four hosted MCP servers (`tasks`, `memory`, `tools`, `teamchat`). Once attached, the external agent reads and claims [board](/concepts/the-board) tasks, searches [shared memory](/concepts/memory), calls brokered tools, and posts in a [team room](/concepts/peer-chat), over the same SQLite store every Clawboo runtime shares.

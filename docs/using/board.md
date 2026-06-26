@@ -1,6 +1,6 @@
 ---
 title: Using the board
-description: Read and work the durable kanban board: columns, task cards, the team filter, the task-detail drawer, and the chat-fused board.
+description: 'Read and work the durable kanban board: columns, task cards, the team filter, the task-detail drawer, and the chat-fused board.'
 ---
 
 Use this page when you want to see what your team is actually doing; the durable kanban [board](/concepts/the-board) is Clawboo's transactional record of every task, who owns it, whether it verified, and what it cost. The board is canonical; the group chat is narration of it. This page covers the **Board** panel (its columns and cards), the per-task **detail drawer**, and the **chat-fused board** that interleaves task cards directly into group chat.

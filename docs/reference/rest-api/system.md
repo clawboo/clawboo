@@ -1,6 +1,6 @@
 ---
 title: System API
-description: REST reference for /api/system/*: OpenClaw status, install, configure, gateway lifecycle, config, device pairing, and models.
+description: 'REST reference for /api/system/*: OpenClaw status, install, configure, gateway lifecycle, config, device pairing, and models.'
 ---
 
 REST surface for the OpenClaw side of the host: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. These routes are how the onboarding wizard and the System maintenance panel drive OpenClaw from the dashboard.

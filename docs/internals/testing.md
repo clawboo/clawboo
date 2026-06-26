@@ -1,6 +1,6 @@
 ---
 title: Testing strategy
-description: How Clawboo verifies itself: the two Vitest projects, sandboxed Playwright e2e, the clean-install smoke gate, the eval harness, and the standing repo guards.
+description: 'How Clawboo verifies itself: the two Vitest projects, sandboxed Playwright e2e, the clean-install smoke gate, the eval harness, and the standing repo guards.'
 ---
 
 Clawboo is a team-first orchestrator: many agents write one SQLite file, five [runtimes](/appendices/glossary) execute heterogeneous work, and the whole thing ships as a single bundled CLI that has to boot on a stranger's machine. Each of those facts has a matching test layer. This page explains the layers, why each exists, and the invariants the standing guard tests freeze in place; so you can extend the suite without re-learning the same lessons the suite was written to encode.

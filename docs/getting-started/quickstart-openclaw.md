@@ -1,5 +1,5 @@
 ---
-title: Quickstart: the OpenClaw Gateway
+title: 'Quickstart: the OpenClaw Gateway'
 description: Run npx clawboo, let onboarding detect, install, and configure OpenClaw, start the Gateway, approve the device, then deploy a team.
 ---
 

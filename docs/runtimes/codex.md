@@ -1,6 +1,6 @@
 ---
 title: Codex runtime
-description: The codex runtime: spawns codex exec, authenticates via ChatGPT OAuth, synthesizes text-deltas, reports no USD cost, and carries a thread id.
+description: 'The codex runtime: spawns codex exec, authenticates via ChatGPT OAuth, synthesizes text-deltas, reports no USD cost, and carries a thread id.'
 ---
 
 `codex` is the [runtime](/appendices/glossary) that drives OpenAI's `codex exec` CLI: Clawboo installs the `codex` binary, spawns it per board task in an isolated home, and reshapes its `--json` event stream into the normalized [RuntimeEvent](/appendices/glossary) stream every other runtime emits. It is one of the five runtimes, a co-equal peer beside `openclaw`, `clawboo-native`, `claude-code`, and `hermes`.

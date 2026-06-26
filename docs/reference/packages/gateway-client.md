@@ -1,6 +1,6 @@
 ---
-title: "@clawboo/gateway-client"
-description: WebSocket client for the OpenClaw Gateway: typed RPC, event subscription, reconnect, and Ed25519 device auth.
+title: '@clawboo/gateway-client'
+description: 'WebSocket client for the OpenClaw Gateway: typed RPC, event subscription, reconnect, and Ed25519 device auth.'
 ---
 
 |                    |                                                                                                                                                                                               |

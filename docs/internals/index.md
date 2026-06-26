@@ -1,6 +1,6 @@
 ---
 title: Internals overview
-description: A contributor's map of Clawboo's monorepo: the packages, the seams, and the internals deep-dives that explain how it all fits together.
+description: "A contributor's map of Clawboo's monorepo: the packages, the seams, and the internals deep-dives that explain how it all fits together."
 ---
 
 This section is for people working **on** Clawboo, not just with it. Each page is a deep-dive into one part of the machine: the design, the seam or trait it hangs on, the rationale, and the invariants you have to preserve when you change it. They are grounded in the real package and module source, not the README.

@@ -1,6 +1,6 @@
 ---
 title: Marketplace catalog reference
-description: The agent and team catalog: schemas, ID convention, zero-loss invariant, three sources with pinned SHAs, and the codegen/ingestion pipeline.
+description: 'The agent and team catalog: schemas, ID convention, zero-loss invariant, three sources with pinned SHAs, and the codegen/ingestion pipeline.'
 ---
 
 The marketplace ships a static, in-bundle catalog of **304 agents** and **82 teams**. Every entry is a committed TypeScript literal; the catalog is browsed and deployed entirely client-side, with no network fetch at runtime. Two of the agent sources (agency-agents, awesome-openclaw) and three of the team files are **codegen'd** from pinned upstream commits by `scripts/ingest-marketplace-content.ts`; the rest are hand-written. A CI gate (`pnpm verify:ingest`) re-derives the codegen'd files in memory and fails on drift.

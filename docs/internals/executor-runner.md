@@ -1,6 +1,6 @@
 ---
 title: The executor runner
-description: How the server drives one board task through a runtime end-to-end: claim, worktree, prompt assembly, governance, rotation, verify, and handoff.
+description: 'How the server drives one board task through a runtime end-to-end: claim, worktree, prompt assembly, governance, rotation, verify, and handoff.'
 ---
 
 The executor runner is the server-side integration glue that drives a single board task through a runtime, from claim to terminal. It lives in `apps/web/server/lib/executorRunner.ts`, and it is the un-flagged graduation of the idea that **a teammate is a [`RuntimeAdapter`](/internals/runtime-adapter)**: given a task id, an assignee, and an adapter factory, it atomically claims the task, opens an execution row, acquires an isolated [worktree](/concepts/worktrees-and-handoff) when the runtime can use one, assembles a tiered prompt, drives the adapter's normalized event stream, enforces [governance](/concepts/governance) on every cost event, rotates the session when it runs out of room, runs the [verification](/concepts/verification) gate, and writes a cross-runtime handoff.

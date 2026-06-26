@@ -1,6 +1,6 @@
 ---
 title: System maintenance
-description: Manage OpenClaw from the System panel: gateway control, default model, API keys, agent coordination, and updates.
+description: 'Manage OpenClaw from the System panel: gateway control, default model, API keys, agent coordination, and updates.'
 ---
 
 Use the **System** panel when you want to operate the OpenClaw [Gateway](/appendices/glossary) and its config from inside the dashboard instead of the terminal: start/stop/restart the Gateway, pick the default model, store provider API keys, toggle agent-to-agent coordination, and check for OpenClaw updates. The panel manages **OpenClaw only**; the other runtimes (`clawboo-native`, `claude-code`, `codex`, `hermes`) are managed from the [Runtimes](/runtimes/connecting-runtimes) panel.

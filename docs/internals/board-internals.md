@@ -1,6 +1,6 @@
 ---
 title: Board internals
-description: The board data-access layer: the atomic claim, the transactional state machine, the SQLite contention recipe, recursive CTEs, and crash recovery.
+description: 'The board data-access layer: the atomic claim, the transactional state machine, the SQLite contention recipe, recursive CTEs, and crash recovery.'
 ---
 
 [The board](/concepts/the-board) is Clawboo's durable task-coordination substrate. This page is the implementation deep-dive for people working _on_ it: the single data-access layer that owns every board write, the conditional-UPDATE claim that makes single-assignee work race-free, the state machine that enforces legal transitions inside a write transaction, the SQLite contention recipe that keeps many concurrent writers honest, the recursive CTEs that walk the dependency and parent graphs, and the two reconciliation passes that recover stuck work.

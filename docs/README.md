@@ -9,9 +9,12 @@ truth, exactly what ships to [docs.claw.boo](https://docs.claw.boo).
 - `*.md` / `*.mdx` — the pages (129 total). Mintlify-flavored Markdown: YAML frontmatter
   (`title` / `description`), callout components (`<Note>` / `<Tip>` / `<Info>` / `<Warning>` /
   `<Danger>`), and root-relative links such as `/concepts/the-board`. Almost every page is `.md`;
-  a couple are `.mdx` where Mintlify's plain-`.md` resolver doesn't pick the page up. **If a page's
-  inbound links start failing `mint broken-links`, rename it `.md` → `.mdx`** (no other change needed —
-  the nav uses extensionless paths).
+  a couple are `.mdx` where a page genuinely needs MDX/JSX. **Frontmatter must be valid YAML: wrap any
+  `title` / `description` value containing a colon (or a leading `@`, backtick, or other YAML-special
+  character) in double quotes.** An unquoted `: ` is parsed as a nested mapping, so the page fails to
+  build and Mintlify serves it as a 404. `mint broken-links` does NOT catch this (it only checks links);
+  only a full build does, so verify with `mint dev` before opening a PR. The extension is irrelevant:
+  the same frontmatter breaks `.md` and `.mdx` identically, so never "fix" a broken page by renaming it.
 - `docs.json` — theme + the four-tab navigation (Documentation / Reference / Internals / Resources).
   Hand-maintained: when you add a page, add its path to the right group's `pages` array.
 - `images/` — screenshots, referenced by pages as `/images/<name>`.

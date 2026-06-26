@@ -1,6 +1,6 @@
 ---
 title: Board API
-description: REST reference for the durable board: tasks, atomic claim, status gate, comments, executions, deps, and per-task worktrees.
+description: 'REST reference for the durable board: tasks, atomic claim, status gate, comments, executions, deps, and per-task worktrees.'
 ---
 
 REST surface over the durable [board](/concepts/the-board), the transactional source of truth for team/task coordination. These routes create and list tasks, atomically claim a task for a single assignee, transition status through the state machine (with the intrinsic verification gate), record the execution ledger, link dependency chains, cancel a dead downstream chain, and provision / inspect / pause / complete a task's per-task git worktree (its system-of-record).

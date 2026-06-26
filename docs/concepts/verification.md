@@ -1,6 +1,6 @@
 ---
 title: Verification
-description: Builder≠judge: a deterministic gate plus an independent read-only critic that make "done" mean verified, with completed_with_debt as a graceful exit.
+description: 'Builder≠judge: a deterministic gate plus an independent read-only critic that make "done" mean verified, with completed_with_debt as a graceful exit.'
 ---
 
 Verification is the rule that makes `done` mean _verified_. A code task that mutated files can reach `done` only when two independent checks agree: a **deterministic gate** (the task's own build/test/lint command, judged by its exit code) passes, and, on a green gate, for a risky or large change, a read-only **critic** (an independent reviewer that cannot push) raises no blocking finding. The principle underneath is **builder≠judge**: the agent that did the work never certifies its own work. A generator self-grading is a known failure mode; Clawboo's only signals into `done` are a machine truth (an exit code) and a structurally-independent reviewer.

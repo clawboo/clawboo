@@ -1,6 +1,6 @@
 ---
 title: The board
-description: Clawboo's durable, transactional task-coordination substrate: state machine, atomic claim, dependencies, and crash recovery.
+description: "Clawboo's durable, transactional task-coordination substrate: state machine, atomic claim, dependencies, and crash recovery."
 ---
 
 The board is Clawboo's durable, transactional source of truth for task coordination. It is a set of SQLite tables, `tasks`, `task_deps`, `task_comments`, `workspaces`, and `execution_processes`, fronted by a single data-access layer that every other subsystem goes through. When a team delegates work, the work becomes a board task; when an agent picks up work, it atomically claims a board task; when a run completes, the outcome lands on the board. Refresh the page, restart the server, run twelve agents at once against one database file; the board survives all of it.

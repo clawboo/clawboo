@@ -1,6 +1,6 @@
 ---
 title: Runtimes API
-description: REST reference for the runtimes resource group: list, install, connect, healthcheck, run, and seed a native team.
+description: 'REST reference for the runtimes resource group: list, install, connect, healthcheck, run, and seed a native team.'
 ---
 
 REST surface for the four non-OpenClaw [runtimes](/appendices/glossary) (`claude-code`, `codex`, `hermes`, `clawboo-native`): list their capabilities and connection state, install a runtime CLI, connect or disconnect a provider key, verify a key before use, and drive a board task on a chosen runtime. This group also covers `POST /api/onboarding/seed-native-team`, which mints a default native leader + specialist team for the first-run flow.

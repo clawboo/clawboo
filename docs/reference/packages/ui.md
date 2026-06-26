@@ -1,6 +1,6 @@
 ---
-title: "@clawboo/ui"
-description: Shared React UI primitives: the BooAvatar component, the cn class merger, the cva re-export, and the design-token constant.
+title: '@clawboo/ui'
+description: 'Shared React UI primitives: the BooAvatar component, the cn class merger, the cva re-export, and the design-token constant.'
 ---
 
 - **Version** 0.1.0 · **Purity** browser-safe (React component package; ships JSX)

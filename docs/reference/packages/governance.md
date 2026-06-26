@@ -1,6 +1,6 @@
 ---
-title: "@clawboo/governance"
-description: Pure verification (builder≠judge) and governance primitives: verdict schemas, severity policy, budget cent-math, caps, and circuit-breaker reducer.
+title: '@clawboo/governance'
+description: 'Pure verification (builder≠judge) and governance primitives: verdict schemas, severity policy, budget cent-math, caps, and circuit-breaker reducer.'
 ---
 
 - **Version** `0.1.0`

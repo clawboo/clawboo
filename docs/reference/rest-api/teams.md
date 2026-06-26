@@ -1,6 +1,6 @@
 ---
 title: Teams API
-description: REST reference for teams and their sub-resources: CRUD, agent membership, the Know-Your-Team onboarding gate, team rules, and the peer-chat room.
+description: 'REST reference for teams and their sub-resources: CRUD, agent membership, the Know-Your-Team onboarding gate, team rules, and the peer-chat room.'
 ---
 
 REST surface for [teams](/appendices/glossary) and everything scoped to a team: team CRUD, agent→team membership, the per-team "Know Your Team" onboarding flags, the durable team-rules text, and the mixed-runtime peer-chat room (read + the explicit exchange kickoff).

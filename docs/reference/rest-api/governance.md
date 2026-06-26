@@ -1,6 +1,6 @@
 ---
 title: Governance API
-description: REST reference for governance: list/set USD budgets, resume a paused scope, read the forensic audit log, and route a delegation approval.
+description: 'REST reference for governance: list/set USD budgets, resume a paused scope, read the forensic audit log, and route a delegation approval.'
 ---
 
 REST surface for Clawboo's spend [governance](/concepts/governance): the hard USD budget kill-switch (list / set / resume budgets), the append-only forensic audit log, the delegation-approval handshake, and the persisted approval-decision history. The budget kill-switch and audit are always on; budgets are uncapped by default (a budget row exists only when you create one), so no USD is enforced until you set a cap.

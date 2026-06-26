@@ -1,6 +1,6 @@
 ---
 title: Production defaults & posture
-description: The values a fresh Clawboo install runs with: log level, budget posture, breaker thresholds, reaper TTLs, each justified, with override env vars.
+description: 'The values a fresh Clawboo install runs with: log level, budget posture, breaker thresholds, reaper TTLs, each justified, with override env vars.'
 ---
 
 This page is the operator's reference for the values a fresh Clawboo install runs with out of the box, and why each was chosen. Clawboo is designed to be a first-impression product, not a lab harness: nothing throttles or pauses an agent until you opt in, observability is local-only unless you point it at a collector, and the safety backstops are tuned so a healthy run never trips one.
