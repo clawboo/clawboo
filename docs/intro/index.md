@@ -31,10 +31,20 @@ These docs describe Clawboo **v0.2.0**, the current release.
 
 ## Where to go next
 
-- **[Getting Started](/getting-started/index)**: the two install paths: native-first (paste a key, no Gateway) or OpenClaw. Start with [installation](/getting-started/installation) and the [native quickstart](/getting-started/quickstart-native).
-- **[Concepts](/concepts/index)**: the mental model: the [agent model](/concepts/agent-model), [teams and planes](/concepts/teams-and-planes), [the board](/concepts/the-board), [verification](/concepts/verification), and the [architecture invariants](/concepts/architecture-invariants).
-- **[Runtimes](/runtimes/index)**: the capability matrix and how to [connect a runtime](/runtimes/connecting-runtimes).
-- **[Reference](/reference/index)**: the [REST API](/reference/rest-api/index), [database schema](/reference/database-schema), [environment variables](/reference/environment-variables), [MCP tools](/reference/mcp-tools), and the [CLI](/reference/cli).
+<Columns cols={2}>
+  <Card title="Getting Started" icon="rocket" href="/getting-started/index">
+    Two install paths: native-first (paste a key, no Gateway) or the OpenClaw Gateway. Start with installation and the native quickstart.
+  </Card>
+  <Card title="Core Concepts" icon="layers" href="/concepts/index">
+    The mental model: the agent model, teams and planes, the board, verification, and the architecture invariants.
+  </Card>
+  <Card title="Runtimes" icon="cpu" href="/runtimes/index">
+    The five-runtime capability matrix and how to connect each one as a peer teammate.
+  </Card>
+  <Card title="Reference" icon="book-open" href="/reference/index">
+    The REST API, database schema, environment variables, MCP tools, and the CLI.
+  </Card>
+</Columns>
 
 ## See also
 

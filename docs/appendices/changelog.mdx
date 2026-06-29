@@ -10,21 +10,25 @@ Clawboo follows [Changesets](https://github.com/changesets/changesets). A change
 The current npm `latest` is **`clawboo@0.2.0`**, the version these docs describe, so `npx clawboo` installs v0.2.0.
 </Note>
 
+<Warning>
+Every `0.1.x` release (0.1.0 through 0.1.9) is **deprecated** on npm. The 0.1.x line is OpenClaw-only and predates the v0.2.0 native-first multi-runtime rewrite, so it no longer works reliably against current OpenClaw. Install the supported release with `npm install -g clawboo@latest`, or just run `npx clawboo`.
+</Warning>
+
 ## At a glance
 
 | Version | Tag | npm | Theme |
 |---|---|---|---|
-| 0.1.0 | `clawboo@0.1.0` | published | Initial package scaffold |
-| 0.1.1 | `clawboo@0.1.1` | published | First real release (v0.1.0 marketplace milestone) |
-| 0.1.2 | `clawboo@0.1.2` | published | SPA root-path fix (`Cannot GET /`) |
-| 0.1.3 | `clawboo@0.1.3` | published | CLI port discovery: HTTP-verify Clawboo identity |
-| 0.1.4 | `clawboo@0.1.4` | published | OpenClaw protocol-4 + Windows install support |
-| 0.1.5 | `clawboo@0.1.5` | published | In-dashboard device pairing (OpenClaw 2026.5+) |
-| 0.1.6 | `clawboo@0.1.6` | published | Bootstrap: verify install state, don't trust localStorage |
-| 0.1.7 | `clawboo@0.1.7` | published | Device pairing in the wizard + Windows hardening |
-| 0.1.8 | `clawboo@0.1.8` | published | Light/dark theme + design-system pass |
-| 0.1.9 | `clawboo@0.1.9` | published | Welcome redesign, lighter install, team colors |
 | 0.2.0 | `clawboo@0.2.0` | published | The liberated cut, full multi-runtime orchestrator |
+| 0.1.9 | `clawboo@0.1.9` | deprecated | Welcome redesign, lighter install, team colors |
+| 0.1.8 | `clawboo@0.1.8` | deprecated | Light/dark theme + design-system pass |
+| 0.1.7 | `clawboo@0.1.7` | deprecated | Device pairing in the wizard + Windows hardening |
+| 0.1.6 | `clawboo@0.1.6` | deprecated | Bootstrap: verify install state, don't trust localStorage |
+| 0.1.5 | `clawboo@0.1.5` | deprecated | In-dashboard device pairing (OpenClaw 2026.5+) |
+| 0.1.4 | `clawboo@0.1.4` | deprecated | OpenClaw protocol-4 + Windows install support |
+| 0.1.3 | `clawboo@0.1.3` | deprecated | CLI port discovery: HTTP-verify Clawboo identity |
+| 0.1.2 | `clawboo@0.1.2` | deprecated | SPA root-path fix (`Cannot GET /`) |
+| 0.1.1 | `clawboo@0.1.1` | deprecated | First real release (v0.1.0 marketplace milestone) |
+| 0.1.0 | `clawboo@0.1.0` | deprecated | Initial package scaffold |
 
 The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap.
 

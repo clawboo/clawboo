@@ -151,3 +151,7 @@ The wizard walked the full OpenClaw setup: it detected your environment, install
 - [The OpenClaw runtime in depth: connections, channels, memory scope](/runtimes/openclaw)
 - [System API reference: status, install, configure, gateway, device](/reference/rest-api/system)
 - [Concept: the agent model and the five runtime classes](/concepts/agent-model)
+
+<Card title="Enjoying Clawboo? Star it on GitHub" icon="star" href="https://github.com/clawboo/clawboo">
+  Clawboo is free and open source. A star is the best way to support the project and helps other people find it.
+</Card>
