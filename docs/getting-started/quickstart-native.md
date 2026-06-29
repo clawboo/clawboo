@@ -99,3 +99,7 @@ Choosing the native runtime connected your provider key to `clawboo-native`, Cla
 - [The native runtime in depth](/runtimes/native)
 - [Connect more runtimes (Claude Code, Codex, Hermes)](/runtimes/connecting-runtimes)
 - [Concept: the agent model and the five runtime classes](/concepts/agent-model)
+
+<Card title="Enjoying Clawboo? Star it on GitHub" icon="star" href="https://github.com/clawboo/clawboo">
+  Clawboo is free and open source. A star is the best way to support the project and helps other people find it.
+</Card>

@@ -363,7 +363,12 @@ async function run(): Promise<void> {
       chalk.cyan.underline(dashboardUrl) +
       '\n' +
       chalk.gray('  Docs:      ') +
-      chalk.cyan.underline('https://clawboo.dev/docs'),
+      chalk.cyan.underline('https://docs.claw.boo') +
+      '\n\n' +
+      chalk.gray('  ') +
+      chalk.yellow('★') +
+      chalk.gray(' If Clawboo is useful, please star it: ') +
+      chalk.cyan.underline('https://github.com/clawboo/clawboo'),
   )
 }
 

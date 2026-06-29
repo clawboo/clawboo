@@ -1,16 +1,56 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
+  "theme": "maple",
   "name": "Clawboo",
   "colors": {
     "primary": "#dc2a48",
-    "light": "#E94560",
-    "dark": "#E94560"
+    "light": "#e94560",
+    "dark": "#e94560"
   },
   "favicon": "/favicon.svg",
   "logo": {
     "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "dark": "/logo/dark.svg",
+    "href": "/"
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "fonts": {
+    "heading": {
+      "family": "Cabinet Grotesk",
+      "weight": 800,
+      "source": "/fonts/CabinetGrotesk-Extrabold.woff2",
+      "format": "woff2"
+    },
+    "body": {
+      "family": "DM Sans"
+    }
+  },
+  "appearance": {
+    "default": "system",
+    "strict": false
+  },
+  "background": {
+    "decoration": "gradient",
+    "color": {
+      "light": "#f8fafc",
+      "dark": "#0a0e1a"
+    }
+  },
+  "styling": {
+    "eyebrows": "breadcrumbs",
+    "codeblocks": {
+      "theme": {
+        "light": "github-dark",
+        "dark": "github-dark"
+      }
+    }
+  },
+  "_banner": {
+    "_comment": "Disabled (key prefixed with _). Rename to \"banner\" to re-enable. Best used for a real announcement (a release, a launch), not a second star ask.",
+    "content": "New to Clawboo? Get a team running in about 60 seconds with the [native quickstart](/getting-started/quickstart-native).",
+    "dismissible": true
   },
   "navigation": {
     "tabs": [
@@ -226,15 +266,51 @@
     ]
   },
   "navbar": {
+    "links": [
+      {
+        "type": "github",
+        "href": "https://github.com/clawboo/clawboo"
+      }
+    ],
     "primary": {
       "type": "button",
-      "label": "GitHub",
+      "label": "Star on GitHub",
       "href": "https://github.com/clawboo/clawboo"
     }
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/clawboo/clawboo"
-    }
+      "github": "https://github.com/clawboo/clawboo",
+      "website": "https://www.claw.boo"
+    },
+    "links": [
+      {
+        "header": "Product",
+        "items": [
+          { "label": "Install", "href": "https://www.npmjs.com/package/clawboo" },
+          { "label": "Website", "href": "https://www.claw.boo" },
+          { "label": "Changelog", "href": "/appendices/changelog" }
+        ]
+      },
+      {
+        "header": "Docs",
+        "items": [
+          { "label": "Quickstart", "href": "/getting-started/index" },
+          { "label": "Core Concepts", "href": "/concepts/index" },
+          { "label": "REST API", "href": "/reference/rest-api/index" }
+        ]
+      },
+      {
+        "header": "Community",
+        "items": [
+          { "label": "GitHub", "href": "https://github.com/clawboo/clawboo" },
+          { "label": "Contributing", "href": "/appendices/contributing" },
+          { "label": "License", "href": "/appendices/license-and-notices" }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "timestamp": true
   }
 }

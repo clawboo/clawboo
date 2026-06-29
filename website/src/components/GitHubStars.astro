@@ -17,6 +17,7 @@ const { variant = 'pill', label = 'Star', class: cls = '' } = Astro.props
   href={links.github}
   target="_blank"
   rel="noopener noreferrer"
+  data-ph="star_click"
   class={`cb-star group inline-flex items-center gap-2 font-semibold whitespace-nowrap transition-[transform,box-shadow,border-color] duration-150 ease-out active:scale-[0.98] ${
     variant === 'solid'
       ? 'cb-star-solid h-12 rounded-xl px-6 text-[15px] text-white'
