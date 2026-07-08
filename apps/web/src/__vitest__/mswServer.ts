@@ -15,8 +15,16 @@ import { setupServer } from 'msw/node'
 // one cross-origin call the panels make on mount (GitHubStarButton lives in many
 // headers); handling it here means panel tests never hit the real network and
 // onUnhandledRequest:'error' can stay strict for same-origin /api/* calls.
+//
+// `/api/tools/approvals` is the one same-origin exception: it's a ubiquitous 3s
+// background poll now that the Board's "Needs approval" column + the in-chat tray
+// (+ the Governance queue) all render it, so any test that mounts the board or a
+// chat would otherwise trip onUnhandledRequest into a flaky unhandled request. A
+// benign empty default keeps it silent; a test that asserts on approvals overrides
+// it with its own `server.use(http.get('/api/tools/approvals', ...))`.
 export const server = setupServer(
   http.get('https://api.github.com/repos/clawboo/clawboo', () =>
     HttpResponse.json({ stargazers_count: 0 }),
   ),
+  http.get('/api/tools/approvals', () => HttpResponse.json({ ok: true, approvals: [] })),
 )

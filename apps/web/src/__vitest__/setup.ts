@@ -40,3 +40,10 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     disconnect(): void {}
   } as unknown as typeof ResizeObserver
 }
+
+// jsdom has no layout, so `Element.scrollIntoView` is undefined — the chat panels'
+// auto-scroll (`bottomRef.current?.scrollIntoView()`) throws in a RAF callback,
+// which vitest surfaces as an unhandled error. A no-op shim is enough for render.
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = function scrollIntoView(): void {}
+}
