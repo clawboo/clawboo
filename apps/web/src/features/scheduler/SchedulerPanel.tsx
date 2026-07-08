@@ -8,12 +8,18 @@
 // record's nextRunAt/lastRunAt/status, refreshed on the same 8s cadence.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, Clock, Pause, Play, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { Button, IconButton } from '@/features/shared/Button'
+import { Chip } from '@/features/shared/Chip'
 import { EmptyState } from '@/features/shared/EmptyState'
+import { FormattedAlert } from '@/features/shared/FormattedAlert'
+import { PanelHeader } from '@/features/shared/PanelHeader'
+import { Select } from '@/features/shared/Select'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
-import { listAgents } from '@/lib/agentSourceClient'
+import { listAgents } from '@clawboo/control-client'
 import { formatRelative } from '@/lib/formatRelative'
 import {
   createSchedule,
@@ -26,12 +32,12 @@ import {
   type ScheduleSourceReadStatus,
 } from '@/lib/schedulesClient'
 import { useToastStore } from '@/stores/toast'
+import { confirm } from '@/stores/confirm'
 
 import { canScheduleOwnLife, formatScheduleLabel } from './scheduleHelpers'
 import { RuntimeGlyph } from '../runtimes/runtimeDepth'
 import { RUNTIME_CATALOG, type RuntimeId } from '../runtimes/runtimeCatalog'
 
-const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 const BRANDED = new Set<string>(['clawboo-native', 'claude-code', 'codex', 'hermes'])
 
 // Cron-EXPRESSION presets. A cron expression is the one cronSpec dialect BOTH
@@ -122,44 +128,32 @@ function ScheduleRow({ rec, onChanged }: { rec: ScheduleRecord; onChanged: () =>
   return (
     <div
       data-testid={`schedule-row-${rec.id}`}
-      className="surface-raised-tier rounded-xl"
-      style={{ padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 11 }}
+      className="flex items-center gap-3 rounded-2xl border border-border bg-surface p-4 transition-colors hover:border-border-strong"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
     >
       <RuntimeGlyph id={rec.runtime} size={28} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--foreground)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] font-semibold text-foreground">
             {rec.label || rec.agentId}
           </span>
           <StatusPill tone={pill.tone} label={pill.label} />
         </div>
-        <div style={{ display: 'flex', gap: 8, fontSize: 11, color: muted(0.5), marginTop: 2 }}>
-          <span className="font-mono" style={{ color: muted(0.6) }}>
-            {humanCron(rec.cronSpec)}
-          </span>
+        <div className="font-data mt-0.5 flex gap-2 text-[11px] text-foreground/50">
+          <span className="text-foreground/60">{humanCron(rec.cronSpec)}</span>
           <span>· {rec.nextRunAt ? untilLabel(rec.nextRunAt) : 'not scheduled'}</span>
           {rec.lastRunAt ? <span>· ran {formatRelative(rec.lastRunAt)}</span> : null}
         </div>
         {rec.lastError ? (
-          <div style={{ fontSize: 10.5, color: 'var(--primary)', marginTop: 2 }}>
-            {rec.lastError}
-          </div>
+          <div className="mt-1 text-[10.5px] text-destructive">{rec.lastError}</div>
         ) : null}
       </div>
 
       {writable ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-          <IconBtn
-            testid={`schedule-${rec.id}-toggle`}
+        <div className="flex flex-shrink-0 items-center gap-0.5">
+          <IconButton
+            size="sm"
+            data-testid={`schedule-${rec.id}-toggle`}
             label={toggleVerb}
             disabled={busy}
             onClick={() =>
@@ -169,73 +163,51 @@ function ScheduleRow({ rec, onChanged }: { rec: ScheduleRecord; onChanged: () =>
               )
             }
           >
-            {paused ? <Play size={13} /> : <Pause size={13} />}
-          </IconBtn>
-          <IconBtn
-            testid={`schedule-${rec.id}-run`}
+            {paused ? <Play size={14} strokeWidth={2} /> : <Pause size={14} strokeWidth={2} />}
+          </IconButton>
+          <IconButton
+            size="sm"
+            data-testid={`schedule-${rec.id}-run`}
             label="Run now"
             disabled={busy}
             onClick={() => void run(() => runScheduleNow(rec.id), 'Fired now')}
           >
-            <RefreshCw size={13} />
-          </IconBtn>
-          <IconBtn
-            testid={`schedule-${rec.id}-delete`}
+            <RefreshCw size={14} strokeWidth={2} />
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            data-testid={`schedule-${rec.id}-delete`}
             label="Delete"
-            danger
             disabled={busy}
+            className="text-destructive hover:text-destructive"
             onClick={() => {
-              const what =
-                rec.domain === 'runtime-own-life'
-                  ? "this Gateway cron job? It removes the agent's own scheduled wake on the OpenClaw Gateway."
-                  : 'this scheduled routine? It is removed permanently.'
-              if (!window.confirm(`Delete ${what}`)) return
-              void run(() => deleteSchedule(rec.id), 'Deleted')
+              const ownLife = rec.domain === 'runtime-own-life'
+              void (async () => {
+                if (
+                  !(await confirm({
+                    title: ownLife ? 'Delete this Gateway cron job?' : 'Delete this scheduled routine?',
+                    message: ownLife
+                      ? "It removes the agent's own scheduled wake on the OpenClaw Gateway."
+                      : 'It is removed permanently.',
+                    confirmLabel: 'Delete',
+                    tone: 'danger',
+                  }))
+                )
+                  return
+                void run(() => deleteSchedule(rec.id), 'Deleted')
+              })()
             }}
           >
-            <Trash2 size={13} />
-          </IconBtn>
+            <Trash2 size={14} strokeWidth={2} />
+          </IconButton>
         </div>
       ) : (
-        <span style={{ fontSize: 10, color: muted(0.4), flexShrink: 0 }}>read-only</span>
+        <span className="flex-shrink-0 font-mono text-[9.5px] uppercase tracking-[0.14em] text-foreground/40">
+          read-only
+        </span>
       )}
     </div>
-  )
-}
-
-function IconBtn({
-  children,
-  onClick,
-  label,
-  disabled,
-  danger,
-  testid,
-}: {
-  children: React.ReactNode
-  onClick: () => void
-  label: string
-  disabled?: boolean
-  danger?: boolean
-  testid?: string
-}) {
-  return (
-    <button
-      type="button"
-      data-testid={testid}
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="rounded-md p-1.5 transition-colors hover:bg-foreground/[0.06] disabled:opacity-40"
-      style={{
-        color: danger ? 'var(--primary)' : muted(0.55),
-        background: 'transparent',
-        border: 'none',
-        cursor: 'pointer',
-      }}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -292,6 +264,20 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
     if (!isOpenClaw && intent === 'own-life') setIntent('team-task')
   }, [isOpenClaw, intent])
 
+  // Close on Escape — capture phase so it beats the app-shell Esc handler
+  // (which would otherwise close the parent Settings modal instead of this
+  // dialog when the Scheduler panel is opened from Settings).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [onClose])
+
   async function submit(): Promise<void> {
     if (!selected) return
     setBusy(true)
@@ -325,13 +311,16 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
     }
   }
 
-  return (
+  // Portalled to <body> so the fixed scrim/dialog resolve against the viewport
+  // (not clipped when the Scheduler panel is rendered inside the Settings
+  // modal's glass container). z above the settings scrim (z-70).
+  return createPortal(
     <div
       onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 60,
+        zIndex: 80,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -344,106 +333,108 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
         aria-label="Create schedule"
         data-testid="schedule-dialog"
         onClick={(e) => e.stopPropagation()}
-        className="surface-overlay-tier rounded-xl"
+        className="rounded-2xl border border-border bg-surface"
         style={{
           width: 'min(440px, 100%)',
-          padding: 18,
+          padding: 22,
           display: 'flex',
           flexDirection: 'column',
-          gap: 14,
+          gap: 16,
+          boxShadow: 'var(--shadow-overlay)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)' }}>
-            Schedule…
-          </span>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
+          <span
+            className="font-display"
             style={{
-              border: 'none',
-              background: 'transparent',
-              color: muted(0.5),
-              cursor: 'pointer',
-              display: 'flex',
-            }}
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <Field label="Agent">
-          <select
-            data-testid="schedule-agent"
-            value={agentId}
-            onChange={(e) => setAgentId(e.target.value)}
-            aria-label="Agent"
-            className="w-full rounded-lg px-3 py-2 text-[12px] outline-none"
-            style={{
-              background: 'rgb(var(--foreground-rgb) / 0.04)',
-              border: `1px solid ${muted(0.12)}`,
+              fontSize: 16,
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
               color: 'var(--foreground)',
             }}
           >
-            {agents.length === 0 ? (
-              <option key="__none" value="">
-                No agents
-              </option>
-            ) : (
-              agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} · {runtimeName(a.runtime)}
-                </option>
-              ))
-            )}
-          </select>
+            New schedule
+          </span>
+          <IconButton size="sm" variant="ghost" label="Close" onClick={onClose}>
+            <X size={16} strokeWidth={2} />
+          </IconButton>
+        </div>
+
+        <Field label="Agent">
+          <Select
+            data-testid="schedule-agent"
+            value={agentId}
+            onChange={(value) => setAgentId(value)}
+            aria-label="Agent"
+            className="w-full"
+            options={
+              agents.length === 0
+                ? [{ value: '', label: 'No agents' }]
+                : agents.map((a) => ({
+                    value: a.id,
+                    label: `${a.name} · ${runtimeName(a.runtime)}`,
+                  }))
+            }
+          />
         </Field>
 
         <Field label="Schedule">
-          <div style={{ display: 'flex', gap: 8 }}>
-            <IntentChip
-              active={intent === 'team-task'}
-              onClick={() => setIntent('team-task')}
-              title="A team task"
-              sub="clawboo Routine"
-            />
-            <IntentChip
-              active={intent === 'own-life'}
-              onClick={() => isOpenClaw && setIntent('own-life')}
-              disabled={!isOpenClaw}
-              title="Its own life"
-              sub={isOpenClaw ? 'Gateway cron' : 'OpenClaw only'}
-            />
+          {/* Two-option toggle styled like a segmented control. The own-life
+              option is genuinely DISABLED for non-OpenClaw runtimes (an invalid
+              choice must read as disabled, not be clickable-but-ignored). */}
+          <div
+            role="group"
+            aria-label="Schedule intent"
+            className="inline-flex items-center gap-1 rounded-xl border border-border bg-foreground/[0.03] p-1"
+          >
+            {(
+              [
+                { id: 'team-task', label: 'A team task' },
+                { id: 'own-life', label: 'Its own life' },
+              ] as const
+            ).map((opt) => {
+              const active = intent === opt.id
+              const disabled = opt.id === 'own-life' && !isOpenClaw
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setIntent(opt.id)}
+                  className={[
+                    'inline-flex h-8 items-center rounded-lg px-3 text-[12.5px] font-medium transition-all duration-150',
+                    disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer',
+                    active
+                      ? 'bg-surface text-foreground shadow-[var(--shadow-raised)]'
+                      : 'text-foreground/55 hover:text-foreground/80',
+                  ].join(' ')}
+                >
+                  {opt.label}
+                  {disabled ? ' · OpenClaw only' : ''}
+                </button>
+              )
+            })}
           </div>
-          {intent === 'own-life' ? (
-            <p style={{ fontSize: 10.5, color: muted(0.5), marginTop: 6, lineHeight: 1.5 }}>
-              Writes a Gateway cron job — needs the OpenClaw Gateway connected and this device
-              paired.
-            </p>
-          ) : null}
+          <p className="mt-2 text-[11px] leading-relaxed text-foreground/50">
+            {intent === 'own-life'
+              ? 'Writes a Gateway cron job — needs the OpenClaw Gateway connected and this device paired.'
+              : intent === 'team-task'
+                ? 'Fires a clawboo Routine as a team task.'
+                : null}
+          </p>
         </Field>
 
         <Field label="Runs">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {CRON_PRESETS.map((p) => (
-              <button
+              <Chip
                 key={p.cron}
-                type="button"
+                active={cron === p.cron}
                 onClick={() => setCron(p.cron)}
-                className="rounded-md px-2.5 py-1 text-[11px] transition-colors"
-                style={{
-                  color: cron === p.cron ? 'var(--mint)' : muted(0.6),
-                  background:
-                    cron === p.cron
-                      ? 'rgb(var(--mint-rgb) / 0.12)'
-                      : 'rgb(var(--foreground-rgb) / 0.05)',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
+                size="sm"
               >
                 {p.label}
-              </button>
+              </Chip>
             ))}
           </div>
         </Field>
@@ -455,77 +446,34 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
             onChange={(e) => setLabel(e.target.value)}
             placeholder={intent === 'own-life' ? 'Morning briefing' : 'Nightly cleanup'}
             aria-label="Label"
-            className="w-full rounded-lg px-3 py-2 text-[12px] outline-none"
-            style={{
-              background: 'rgb(var(--foreground-rgb) / 0.04)',
-              border: `1px solid ${muted(0.12)}`,
-              color: 'var(--foreground)',
-            }}
+            className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-[13px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
           />
         </Field>
 
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          fullWidth
           data-testid="schedule-submit"
           disabled={busy || !selected}
+          loading={busy}
           onClick={() => void submit()}
-          className="rounded-lg px-3 py-2 text-[12px] font-semibold transition-[filter,transform] active:scale-[0.98] disabled:opacity-50"
-          style={{
-            background: 'var(--primary)',
-            color: 'var(--primary-foreground)',
-            border: 'none',
-            cursor: 'pointer',
-          }}
         >
           {busy ? 'Creating…' : 'Create schedule'}
-        </button>
+        </Button>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      <label
-        className="font-mono uppercase"
-        style={{ fontSize: 10, letterSpacing: '0.06em', color: muted(0.5) }}
-      >
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      <label className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
         {label}
       </label>
       {children}
     </div>
-  )
-}
-
-function IntentChip({
-  active,
-  onClick,
-  title,
-  sub,
-  disabled,
-}: {
-  active: boolean
-  onClick: () => void
-  title: string
-  sub: string
-  disabled?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="flex-1 rounded-lg px-3 py-2 text-left transition-colors disabled:opacity-40"
-      style={{
-        border: `1px solid ${active ? 'var(--mint)' : muted(0.12)}`,
-        background: active ? 'rgb(var(--mint-rgb) / 0.1)' : 'transparent',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-      }}
-    >
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>{title}</div>
-      <div style={{ fontSize: 10, color: muted(0.5) }}>{sub}</div>
-    </button>
   )
 }
 
@@ -573,113 +521,61 @@ export function SchedulerPanel() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div
-        style={{
-          height: 44,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Clock size={15} style={{ color: 'var(--mint)' }} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
-            Scheduler
-          </span>
-          <span
-            className="tabular-nums"
-            style={{
-              fontSize: 10,
-              fontFamily: 'var(--font-geist-mono, monospace)',
-              color: 'var(--primary)',
-              background: 'rgb(var(--primary-rgb) / 0.12)',
-              borderRadius: 20,
-              padding: '2px 8px',
-            }}
-          >
-            {schedules.length} schedules
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            type="button"
-            data-testid="schedule-create-open"
-            onClick={() => setShowDialog(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold"
-            style={{
-              background: 'var(--primary)',
-              color: 'var(--primary-foreground)',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <Plus size={12} /> Schedule
-          </button>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            aria-label="Refresh"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              fontSize: 11,
-              color: muted(0.5),
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <RefreshCw size={12} /> Refresh
-          </button>
-          <GitHubStarButton />
-        </div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 760 }}>
-          {degraded.map((s) => (
-            <div
-              key={s.sourceId}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                fontSize: 11.5,
-                color: 'var(--amber)',
-                background: 'rgb(var(--amber-rgb) / 0.1)',
-                borderRadius: 8,
-                padding: '8px 12px',
-              }}
+      <PanelHeader
+        title="Scheduler"
+        subtitle="Team-task routines + runtime cron, one surface"
+        icon={Clock}
+        size="md"
+        border
+        actions={
+          <>
+            <span className="font-data rounded-full bg-foreground/[0.06] px-2.5 py-0.5 text-[11px] font-semibold text-foreground/55">
+              {schedules.length} schedules
+            </span>
+            <Button
+              variant="primary"
+              size="sm"
+              data-testid="schedule-create-open"
+              onClick={() => setShowDialog(true)}
             >
-              <AlertTriangle size={14} />
+              <Plus size={14} strokeWidth={2} /> Schedule
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => void refresh()}>
+              <RefreshCw size={13} strokeWidth={2} /> Refresh
+            </Button>
+            <GitHubStarButton />
+          </>
+        }
+      />
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 780 }}>
+          {degraded.map((s) => (
+            <FormattedAlert key={s.sourceId} tone="warning" icon={AlertTriangle}>
               {s.sourceId === 'openclaw-gateway-cron'
                 ? 'OpenClaw Gateway cron is unavailable (Gateway disconnected) — showing the last-known list.'
                 : `${s.sourceId} is degraded${s.reason ? ` (${s.reason})` : ''}.`}
-            </div>
+            </FormattedAlert>
           ))}
 
           {groups.map((g) => (
             <div key={g.domain}>
-              <div style={{ marginBottom: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>
+              <div style={{ marginBottom: 12 }}>
+                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
                   {DOMAIN_META[g.domain].title}
                 </span>
-                <span style={{ fontSize: 11, color: muted(0.45), marginLeft: 8 }}>
+                <span style={{ marginLeft: 10 }} className="text-[11.5px] text-foreground/40">
                   {DOMAIN_META[g.domain].hint}
                 </span>
               </div>
               {g.rows.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {g.rows.map((rec) => (
                     <ScheduleRow key={rec.id} rec={rec} onChanged={() => void refresh()} />
                   ))}
                 </div>
               ) : (
-                <div style={{ fontSize: 11.5, color: muted(0.4), padding: '4px 2px' }}>
+                <div className="px-0.5 py-1 text-[12px] text-foreground/40">
                   Nothing scheduled here yet.
                 </div>
               )}
