@@ -40,22 +40,22 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
           GitHub Star right. 44 px tall + 12 px horizontal padding so the
           Star pill lands at exactly the same screen coordinates
           (top:6 right:12 within the row) as every other view. */}
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-background px-3">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-surface px-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <AgentBooAvatar agentId={agent.id} size={28} />
           <h2
-            className="truncate text-[15px] font-semibold text-text"
-            style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
+            className="truncate text-[15px] font-semibold text-foreground"
+            style={{ letterSpacing: '-0.01em' }}
           >
             {agent.name}
           </h2>
           {!agent.sessionKey && (
-            <span className="font-mono text-[10px] uppercase tracking-wider text-amber/70">
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber/80">
               No session
             </span>
           )}
           <span
-            className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-secondary/45"
+            className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45"
             aria-label={`Connection: ${connectionStatus}`}
           >
             <span
@@ -63,7 +63,7 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
                 'inline-block h-1.5 w-1.5 rounded-full',
                 connectionStatus === 'connected'
                   ? 'bg-mint shadow-[0_0_6px_rgb(var(--mint-rgb)/0.6)]'
-                  : 'bg-amber/60',
+                  : 'bg-amber/70',
               ].join(' ')}
             />
             {connectionStatus === 'connected' ? 'Connected' : connectionStatus}

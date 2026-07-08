@@ -1,4 +1,4 @@
-import { readAgentFile } from '@/lib/agentSourceClient'
+import { readAgentFile } from '@clawboo/control-client'
 import { fetchCapabilities, groupAgentCapabilities } from '@/lib/capabilitiesClient'
 import type { CapabilityRecord } from '@clawboo/capability-registry'
 import { useEffect, useMemo, useState } from 'react'

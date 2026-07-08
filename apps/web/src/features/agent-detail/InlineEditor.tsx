@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, Save } from 'lucide-react'
+import { Save } from 'lucide-react'
 import {
   EditorView,
   keymap,
@@ -24,6 +24,8 @@ import { useFleetStore } from '@/stores/fleet'
 import { DisplayNameEditor } from '@/features/boo-zero/DisplayNameEditor'
 import { GlobalBriefEditor } from '@/features/boo-zero/GlobalBriefEditor'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
+import { Button } from '@/features/shared/Button'
+import { Spinner } from '@/features/shared/Spinner'
 
 // ─── Tab types ───────────────────────────────────────────────────────────────
 
@@ -224,17 +226,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
       }}
     >
       {/* Tab bar */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 0,
-          padding: '0 8px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-          background: 'var(--card)',
-          flexShrink: 0,
-        }}
-      >
+      <div className="flex shrink-0 items-center gap-0.5 border-b border-border bg-card px-2">
         {allTabs.map((tab) => {
           const isActive = tab === activeTab
           const dirty = isAgentFileTab(tab) && isDirty(tab)
@@ -243,79 +235,41 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
               key={tab}
               type="button"
               onClick={() => setActiveTab(tab)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '7px 11px',
-                border: 'none',
-                borderBottom: isActive ? '2px solid var(--primary)' : '2px solid transparent',
-                background: 'transparent',
-                color: isActive ? 'var(--foreground)' : 'rgb(var(--foreground-rgb) / 0.45)',
-                fontSize: 11,
-                fontWeight: isActive ? 600 : 500,
-                fontFamily: 'var(--font-mono)',
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-                cursor: 'pointer',
-                transition: 'color var(--motion-fast), border-color var(--motion-fast)',
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.8)'
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.45)'
-              }}
+              className={[
+                'relative -mb-px inline-flex items-center gap-1.5 px-2.5 pb-2 pt-2.5 font-mono text-[11px] uppercase tracking-[0.14em]',
+                'transition-colors duration-150 cursor-pointer',
+                isActive
+                  ? 'font-semibold text-foreground'
+                  : 'font-medium text-foreground/45 hover:text-foreground/75',
+              ].join(' ')}
             >
               {getTabLabel(tab)}
               {dirty && (
-                <span
-                  style={{
-                    width: 5,
-                    height: 5,
-                    borderRadius: '50%',
-                    background: 'var(--amber)',
-                    flexShrink: 0,
-                  }}
-                />
+                <span className="h-[5px] w-[5px] shrink-0 rounded-full bg-amber" />
               )}
+              <span
+                aria-hidden
+                className="absolute inset-x-0 -bottom-px h-0.5 rounded-full transition-opacity duration-150"
+                style={{ background: 'var(--primary)', opacity: isActive ? 1 : 0 }}
+              />
             </button>
           )
         })}
 
         {/* Save button — only for file tabs */}
         {isFileTab && (
-          <button
-            type="button"
-            disabled={!isFileDirty || saving}
-            onClick={onSaveClick}
-            style={{
-              marginLeft: 'auto',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '5px 10px',
-              borderRadius: 6,
-              border: 'none',
-              background: isFileDirty ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.06)',
-              color: isFileDirty ? '#fff' : 'rgb(var(--foreground-rgb) / 0.4)',
-              boxShadow: isFileDirty ? '0 4px 12px rgb(var(--primary-rgb) / 0.25)' : 'none',
-              fontSize: 11,
-              fontWeight: 500,
-              letterSpacing: '0.03em',
-              cursor: isFileDirty ? 'pointer' : 'default',
-              opacity: saving ? 0.6 : 1,
-              transition: 'background var(--motion-fast), box-shadow var(--motion-fast)',
-              fontFamily: 'var(--font-mono)',
-            }}
-          >
-            {saving ? (
-              <Loader2 style={{ width: 12, height: 12 }} className="animate-spin" strokeWidth={2} />
-            ) : (
-              <Save style={{ width: 12, height: 12 }} strokeWidth={2} />
-            )}
-            Save
-          </button>
+          <div className="ml-auto py-1">
+            <Button
+              variant={isFileDirty ? 'primary' : 'secondary'}
+              size="sm"
+              loading={saving}
+              disabled={!isFileDirty || saving}
+              onClick={onSaveClick}
+            >
+              {!saving && <Save size={13} strokeWidth={2} />}
+              Save
+            </Button>
+          </div>
         )}
       </div>
 
@@ -323,20 +277,10 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
         {loading && (
           <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              color: 'rgb(var(--foreground-rgb) / 0.4)',
-              fontSize: 12,
-              zIndex: 1,
-              background: 'var(--background)',
-            }}
+            className="absolute inset-0 z-[1] flex items-center justify-center gap-2 text-[12px] text-foreground/40"
+            style={{ background: 'var(--background)' }}
           >
-            <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" strokeWidth={2} />
+            <Spinner size={14} />
             Loading…
           </div>
         )}
@@ -378,27 +322,13 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
             }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <h3
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'rgb(var(--foreground-rgb) / 0.85)',
-                }}
-              >
+              <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
                 Display name
               </h3>
               <DisplayNameEditor agentId={agentId} currentName={liveAgentName} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <h3
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'rgb(var(--foreground-rgb) / 0.85)',
-                }}
-              >
+              <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
                 Global brief
               </h3>
               <GlobalBriefEditor />
@@ -417,20 +347,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
       </div>
 
       {/* Footer */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '4px 12px',
-          borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-          background: 'var(--card)',
-          fontSize: 10,
-          color: 'rgb(var(--foreground-rgb) / 0.35)',
-          fontFamily: 'var(--font-mono)',
-          flexShrink: 0,
-        }}
-      >
+      <div className="flex shrink-0 items-center justify-between border-t border-border bg-card px-3 py-1 font-mono text-[10px] tracking-wide text-foreground/35">
         <span>
           {activeTab === 'personality'
             ? `${agentName} · Personality`
@@ -443,7 +360,9 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
                   : AGENT_FILE_META[activeTab].hint}
         </span>
         <span>
-          {anyDirty ? 'Unsaved' : 'Saved'}
+          <span className={anyDirty ? 'text-amber' : 'text-mint'}>
+            {anyDirty ? 'Unsaved' : 'Saved'}
+          </span>
           {isFileTab && (
             <>
               {' · '}

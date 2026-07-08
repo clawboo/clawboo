@@ -30,11 +30,17 @@ import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { AgentModelSelector } from './AgentModelSelector'
 import { useMiniGraphData } from './useMiniGraphData'
+import { NATIVE_MODEL_GROUPS } from '@/lib/nativeModelCatalog'
+import { setNativeAgentModel } from '@clawboo/control-client'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData } from '@/features/graph/types'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const BOO_CENTER = { x: 200, y: 100 }
+// Native selector: we can't verify connected native providers client-side, so pass an
+// empty set (size 0 ⇒ AgentModelSelector greys out nothing) rather than the OpenClaw
+// configured-providers, which would wrongly grey a native provider.
+const NATIVE_EMPTY_PROVIDERS = new Set<string>()
 // Offset from each Boo's React Flow `node.position` (top-left of the
 // envelope) to its visual center. The Boo renders centered inside its
 // envelope (BOO_FOOTPRINT = 340 in `nodes/BooNode.tsx`), so the center is
@@ -600,7 +606,20 @@ export function MiniGraph({ agentId }: { agentId: string }) {
       if (!agent) return
       // Update fleet store immediately
       useFleetStore.getState().updateAgentModel(agent.id, model)
-      // Persist to openclaw.json
+      // Native agents: persist to the AgentConfig via the native route (no Gateway
+      // session — the next run reads primaryModel). Native has no "revert to default",
+      // so `model` is always a concrete id here (the selector hides the Default row).
+      if (agent.runtime === 'clawboo-native') {
+        if (model) {
+          try {
+            await setNativeAgentModel(agent.id, model)
+          } catch {
+            addToast({ message: 'Failed to save model', type: 'error' })
+          }
+        }
+        return
+      }
+      // OpenClaw: persist to openclaw.json + apply to the live session.
       try {
         await fetch('/api/system/openclaw-config', {
           method: 'PATCH',
@@ -643,6 +662,13 @@ export function MiniGraph({ agentId }: { agentId: string }) {
             currentModel={agent.model ?? null}
             defaultModel={defaultModel}
             onModelChange={handleModelChange}
+            {...(agent.runtime === 'clawboo-native'
+              ? {
+                  groups: NATIVE_MODEL_GROUPS,
+                  configuredProviders: NATIVE_EMPTY_PROVIDERS,
+                  hideDefault: true,
+                }
+              : {})}
           />
         </div>
       )}
