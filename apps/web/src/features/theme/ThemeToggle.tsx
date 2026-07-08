@@ -1,45 +1,56 @@
-import { Moon, Sun, Monitor } from 'lucide-react'
+import { Monitor, Moon, Sun } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+
 import { useTheme } from './useTheme'
 import type { ThemePreference } from './ThemeProvider'
 
-const ORDER: ThemePreference[] = ['light', 'dark', 'system']
-
-const LABELS: Record<ThemePreference, string> = {
-  light: 'Light',
-  dark: 'Dark',
-  system: 'System',
-}
-
-function Icon({ theme, className }: { theme: ThemePreference; className?: string }) {
-  if (theme === 'light') return <Sun className={className} strokeWidth={2} />
-  if (theme === 'dark') return <Moon className={className} strokeWidth={2} />
-  return <Monitor className={className} strokeWidth={2} />
-}
+// A macOS-style 3-way segmented theme switch: System / Light / Dark. The active
+// segment (the current PREFERENCE, not the resolved mode) is a raised surface chip
+// on a subtle track — the same tokens as the shared SegmentedControl, icon-only.
+const OPTIONS: { id: ThemePreference; label: string; icon: LucideIcon }[] = [
+  { id: 'system', label: 'System', icon: Monitor },
+  { id: 'light', label: 'Light', icon: Sun },
+  { id: 'dark', label: 'Dark', icon: Moon },
+]
 
 export function ThemeToggle() {
   const { theme, resolvedTheme, setTheme } = useTheme()
 
-  const next: ThemePreference = ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length]!
-
-  const title =
-    theme === 'system'
-      ? `Theme: System (${resolvedTheme}). Click for ${LABELS[next]}.`
-      : `Theme: ${LABELS[theme]}. Click for ${LABELS[next]}.`
-
   return (
-    <button
-      type="button"
+    <div
+      role="radiogroup"
+      aria-label="Theme"
       data-testid="theme-toggle"
-      onClick={() => setTheme(next)}
-      title={title}
-      aria-label={title}
-      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium text-text/70 transition-all duration-150 hover:bg-foreground/5 hover:text-text/90"
+      // The track is the recessed base (`bg-background`, darker than the surface it sits
+      // on) so the active surface chip reads as RAISED above it in BOTH themes.
+      className="mt-1 flex w-fit items-center gap-0.5 self-start rounded-lg border border-border bg-background p-0.5"
     >
-      <Icon theme={theme} className="h-3.5 w-3.5" />
-      <span>{LABELS[theme]}</span>
-      <span className="ml-auto text-[10px] uppercase tracking-wider text-secondary/60">
-        {theme === 'system' ? resolvedTheme : ''}
-      </span>
-    </button>
+      {OPTIONS.map((o) => {
+        const active = o.id === theme
+        const Icon = o.icon
+        // System's tooltip surfaces the resolved mode (Light/Dark) it's tracking.
+        const label = o.id === 'system' ? `System (${resolvedTheme})` : o.label
+        return (
+          <button
+            key={o.id}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            aria-label={`Theme: ${label}`}
+            title={label}
+            data-testid={`theme-option-${o.id}`}
+            onClick={() => setTheme(o.id)}
+            className={[
+              'flex h-7 w-8 items-center justify-center rounded-md transition-all duration-150 cursor-pointer',
+              active
+                ? 'bg-surface text-foreground shadow-[var(--shadow-raised)]'
+                : 'text-foreground/45 hover:bg-foreground/[0.05] hover:text-foreground/75',
+            ].join(' ')}
+          >
+            <Icon size={15} strokeWidth={2} aria-hidden />
+          </button>
+        )
+      })}
+    </div>
   )
 }
