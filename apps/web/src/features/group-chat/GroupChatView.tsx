@@ -30,14 +30,12 @@ import { useTeamOnboarding } from './useTeamOnboarding'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
-import { useConnectionStore } from '@/stores/connection'
 import { useBooZeroStore } from '@/stores/booZero'
 import { buildTeamSessionKey } from '@/lib/sessionUtils'
 
 export function GroupChatView({ teamId }: { teamId: string }) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
   const agents = useFleetStore((s) => s.agents)
-  const client = useConnectionStore((s) => s.client)
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const booZeroAgent = useMemo(
@@ -48,7 +46,6 @@ export function GroupChatView({ teamId }: { teamId: string }) {
   const {
     agentsIntroduced,
     userIntroduced,
-    userIntroText,
     isLoading,
     markAgentsIntroduced,
     markUserIntroduced,
@@ -90,7 +87,7 @@ export function GroupChatView({ teamId }: { teamId: string }) {
         {isLoading ? (
           // Hydrating onboarding state — a full-window neutral beat with NO
           // graph, so a still-onboarding team never flashes the split first.
-          <div className="h-full bg-bg" />
+          <div className="h-full bg-background" />
         ) : !onboardingComplete ? (
           // Onboarding — the gate fills the whole window (no graph on top).
           <div className="h-full">
@@ -99,7 +96,6 @@ export function GroupChatView({ teamId }: { teamId: string }) {
               team={team}
               teamAgents={teamAgents}
               booZeroAgent={booZeroAgent}
-              client={client}
               agentsIntroduced={agentsIntroduced}
               userIntroduced={userIntroduced}
               onMarkAgentsIntroduced={markAgentsIntroduced}
@@ -111,11 +107,7 @@ export function GroupChatView({ teamId }: { teamId: string }) {
           // session, the split plays its "open" animation (graph grows down
           // from the top into its slot; chat settles below).
           <div className="h-full">
-            <TeamSpaceSplit
-              teamId={teamId}
-              userIntroText={userIntroText}
-              animateOpen={sawGateRef.current}
-            />
+            <TeamSpaceSplit teamId={teamId} animateOpen={sawGateRef.current} />
           </div>
         )}
       </div>

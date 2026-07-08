@@ -16,6 +16,7 @@ import { MessagesSquare, Settings } from 'lucide-react'
 import { useGraphStore } from '@/features/graph/store'
 import type { Team } from '@/stores/team'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { Button } from '@/features/shared/Button'
 import { TeamSettingsSheet } from './TeamSettingsSheet'
 import { TeamChatRoom } from './TeamChatRoom'
 
@@ -54,7 +55,7 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
           screen coordinates (top:6 right:12) across every view. Team icon
           shrunk 30→24 px and the count pill moved inline (no vertical stack)
           to fit comfortably in 44 px. */}
-      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border px-3">
+      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-surface px-3">
         {team && (
           <span
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[14px]"
@@ -64,15 +65,12 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
           </span>
         )}
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <h2
-            className="truncate text-[13px] font-semibold text-text"
-            style={{ fontFamily: 'var(--font-body)' }}
-          >
+          <h2 className="truncate text-[13px] font-semibold tracking-[-0.01em] text-foreground">
             {team?.name ?? 'Group Chat'}
           </h2>
-          {/* Accent-red pill badge — count of Boos + skills */}
+          {/* Neutral count pill — Boos + skills (accent reserved for active state, not inert counts) */}
           {hasGraph ? (
-            <span className="shrink-0 rounded-full bg-primary/12 px-2 py-0.5 text-[10px] font-medium leading-4 text-primary">
+            <span className="font-data shrink-0 rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-semibold leading-4 text-foreground/55">
               {booCount} Boo{booCount !== 1 ? 's' : ''}
               {skillCount > 0 && ` · ${skillCount} skill${skillCount !== 1 ? 's' : ''}`}
             </span>
@@ -88,30 +86,30 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
             Hidden when no team is active (the "Group Chat" fallback is a
             non-team-scoped view, so there's nothing to configure). */}
         {team && (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setRoomOpen(true)}
             aria-label={`${team.name} — team room`}
             title="Team room — peers, any runtime can lead"
             data-testid="team-room-button"
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-foreground/[0.04] px-2.5 text-[11px] font-medium text-text/70 transition hover:bg-foreground/[0.08] hover:text-text"
           >
-            <MessagesSquare size={13} strokeWidth={1.75} />
+            <MessagesSquare size={14} strokeWidth={2} />
             Team room
-          </button>
+          </Button>
         )}
         {team && (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setSettingsOpen(true)}
             aria-label={`${team.name} — brief & rules`}
             title="Team brief & rules"
             data-testid="team-settings-button"
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-foreground/[0.04] px-2.5 text-[11px] font-medium text-text/70 transition hover:bg-foreground/[0.08] hover:text-text"
           >
-            <Settings size={13} strokeWidth={1.75} />
+            <Settings size={14} strokeWidth={2} />
             Brief &amp; Rules
-          </button>
+          </Button>
         )}
         {/* GitHub Star CTA — integrated into the team header so this view
             doesn't need the global AppTopBar (which is hidden for groupChat
