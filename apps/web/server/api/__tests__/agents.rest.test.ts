@@ -8,11 +8,12 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createDb, teams } from '@clawboo/db'
+import { agents, createDb, getSetting, teams } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDbPath } from '../../lib/db'
+import { runtimeAgentFileKey } from '../../lib/agentSource/runtimeAgentFileStore'
 import {
   agentsListGET,
   agentGET,
@@ -23,8 +24,10 @@ import {
   agentFilePUT,
   agentSessionsGET,
   agentsRegistryHealthGET,
+  agentModelPATCH,
 } from '../agents'
-import { teamsGET } from '../teams'
+import { loadAgentConfig } from '../../lib/runtimes/native/agentConfigStore'
+import { teamsGET, teamsPOST } from '../teams'
 import { settingsGET } from '../settings'
 import { governanceAuditGET } from '../governanceAudit'
 import { boardListGET } from '../board'
@@ -194,10 +197,107 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     expect(after.status()).toBe(404)
   })
 
+  it('PATCH /api/agents/:id/model persists a native agent model; 404 for non-native + unknown', async () => {
+    // Create a native agent, then re-point its model.
+    const create = mockRes()
+    await agentsCreatePOST(
+      req({ body: { name: 'Model Peer', sourceId: 'clawboo-native' } }),
+      create.res,
+    )
+    const id = (create.body() as { agent: { id: string } }).agent.id
+
+    const patch = mockRes()
+    await agentModelPATCH(
+      req({ params: { agentId: id }, body: { model: 'claude-haiku-4-5' } }),
+      patch.res,
+    )
+    expect(patch.status()).toBe(200)
+    expect(patch.body()).toEqual({ ok: true, model: 'claude-haiku-4-5' })
+    // The AgentConfig KV row carries the new primaryModel.
+    const db = createDb(getDbPath())
+    expect(loadAgentConfig(db, id)?.primaryModel).toBe('claude-haiku-4-5')
+
+    // The OpenClaw-seeded agent (a1) is not native → 404 (model change is native-only).
+    const nonNative = mockRes()
+    await agentModelPATCH(req({ params: { agentId: 'a1' }, body: { model: 'x' } }), nonNative.res)
+    expect(nonNative.status()).toBe(404)
+
+    // Unknown agent → 404.
+    const unknown = mockRes()
+    await agentModelPATCH(req({ params: { agentId: 'nope' }, body: { model: 'x' } }), unknown.res)
+    expect(unknown.status()).toBe(404)
+
+    // Empty model → 400.
+    const empty = mockRes()
+    await agentModelPATCH(req({ params: { agentId: id }, body: { model: '  ' } }), empty.res)
+    expect(empty.status()).toBe(400)
+  })
+
   it('POST /api/agents 400s an unknown sourceId', async () => {
     const r = mockRes()
     await agentsCreatePOST(req({ body: { name: 'X', sourceId: 'not-a-source' } }), r.res)
     expect(r.status()).toBe(400)
+  })
+
+  // ── Multi-source: a coding-runtime record source (claude-code) ─────────────
+  it('POST /api/agents with sourceId claude-code round-trips offline (create → GET → files → DELETE)', async () => {
+    const create = mockRes()
+    await agentsCreatePOST(req({ body: { name: 'Coder Peer', sourceId: 'claude-code' } }), create.res)
+    expect(create.status()).toBe(201)
+    const created = (create.body() as { agent: { id: string; sourceId: string; runtime: string } })
+      .agent
+    expect(created).toMatchObject({ sourceId: 'claude-code', runtime: 'claude-code' })
+
+    // GET aggregates all registered sources.
+    const list = mockRes()
+    await agentsListGET(req(), list.res)
+    const body = list.body() as { agents: Array<{ sourceId: string }> }
+    expect(body.agents.map((a) => a.sourceId).sort()).toEqual(['claude-code', 'openclaw'])
+
+    // File PUT/GET route to the coding source (work offline) + persist to the
+    // runtime-file KV.
+    const filePut = mockRes()
+    await agentFilePUT(
+      req({ params: { agentId: created.id, name: 'SOUL.md' }, body: { content: '# coder' } }),
+      filePut.res,
+    )
+    expect(filePut.status()).toBe(200)
+    const db = createDb(getDbPath())
+    const fileKey = runtimeAgentFileKey(created.id, 'SOUL.md')
+    expect(getSetting(db, fileKey)).toBe('# coder')
+
+    // cleanup-ghosts (scoped to openclaw) spares the coding row.
+    const sweep = mockRes()
+    agentsCleanupPOST(req({ body: { liveAgentIds: ['a1'] } }), sweep.res)
+    expect((sweep.body() as { deleted: number }).deleted).toBe(0)
+
+    // DELETE routes to the coding source + wipes the runtime-file KV.
+    const del = mockRes()
+    await agentsDELETE(req({ params: { agentId: created.id } }), del.res)
+    expect(del.status()).toBe(200)
+    const after = mockRes()
+    await agentGET(req({ params: { agentId: created.id } }), after.res)
+    expect(after.status()).toBe(404)
+    expect(getSetting(db, fileKey)).toBeNull()
+  })
+
+  it('POST /api/teams {serverOrchestrated:true} sets the explicit flag (leaderless native team)', () => {
+    const create = mockRes()
+    teamsPOST(
+      req({
+        body: { name: 'Native Team', icon: '🚀', color: '#fff', serverOrchestrated: true },
+      }),
+      create.res,
+    )
+    const team = (create.body() as { team: { id: string; serverOrchestrated: boolean } }).team
+    expect(team.serverOrchestrated).toBe(true)
+    // GET re-reads the flag (no agents needed → inference alone would be false).
+    const get = mockRes()
+    teamsGET(req(), get.res)
+    const got = (
+      get.body() as { teams: Array<{ id: string; serverOrchestrated: boolean }> }
+    ).teams.find((t) => t.id === team.id)
+    expect(got?.serverOrchestrated).toBe(true)
   })
 
   it('cleanup-ghosts spares native agents (the Gateway live-id list scopes to openclaw rows)', async () => {

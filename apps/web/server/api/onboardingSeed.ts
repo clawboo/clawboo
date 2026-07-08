@@ -21,32 +21,46 @@ import { createDb, setSetting, teams } from '@clawboo/db'
 
 import { getRegistry } from '../lib/agentSource'
 import { getDbPath } from '../lib/db'
+import { getTenantId } from '../lib/tenant'
+// Per-provider model picks live in the shared native-defaults helper (the native
+// AgentSource's provider auto-resolution uses the same map).
+import { MODEL_DEFAULTS } from '../lib/runtimes/native/nativeProviderDefaults'
+import { SETTING_NATIVE_LEADER_MODEL } from '../lib/teamChat/booZero'
+import { serverOrchestratedSettingKey } from '../lib/teamChat/resolveServerOrchestrated'
 
-// Per-provider model picks: a capable model for the leader, a cheap one for the
-// specialist. All entries are in the native pricing table (honest USD) except
-// Ollama (local, estimated). A custom provider is rejected before we get here.
-const MODEL_DEFAULTS: Record<string, { leader: string; specialist: string }> = {
-  anthropic: { leader: 'claude-sonnet-4-6', specialist: 'claude-haiku-4-5' },
-  openai: { leader: 'gpt-4o', specialist: 'gpt-4o-mini' },
-  openrouter: { leader: 'anthropic/claude-haiku-4.5', specialist: 'openai/gpt-4o-mini' },
-  ollama: { leader: 'llama3.2', specialist: 'llama3.2' },
-}
-
-// The leader coordinates by delegating to teammates through the durable Tasks
-// board — it does NOT do every task itself. Kept self-contained (no external
+// The leader coordinates by delegating to teammates with the `delegate` tool —
+// it does NOT do every task itself, and it does NOT touch the board directly (the
+// server orchestrator observes the `delegate` tool-call and owns the board: create
+// → run → report back). Teach the tool by NAME only — no `<delegate to="...">`
+// example (the leader's own summary echoing that XML shape would trip the
+// orchestrator's "didn't parse, re-issue" nudge). Kept self-contained (no external
 // doc references) so it ships verbatim into the agent's stable prompt tier.
-const LEADER_PROMPT =
-  'You are the lead of a small agent team. When a request needs hands-on work, ' +
-  'break it into clear tasks and delegate them to your teammates using the ' +
-  'Tasks board tool rather than doing everything yourself. Coordinate, keep the ' +
-  'plan moving, and reply with a short, plain summary of what the team did and ' +
-  "what's next. You and your teammates share one memory — save durable facts so " +
-  'the team can recall them later.'
+// Exported so the client (CreateTeamModal's native path) can drift-guard its own
+// copy against this canonical text (a test asserts equality) — the server can't
+// be imported by the browser bundle, so the modal duplicates these constants.
+export const LEADER_PROMPT =
+  'You are the lead of a small agent team. Answer simple questions and quick ' +
+  'clarifications yourself, directly — do NOT delegate or create a task for something ' +
+  'you can answer or already know. Delegate ONLY genuine hands-on, multi-step work ' +
+  '(writing code, research, producing or changing a deliverable) by calling the ' +
+  "`delegate` tool with the teammate's name and a clear, self-contained task. Your " +
+  'teammates do the work and report their results back to you; rely on the task ' +
+  'updates they send rather than re-doing their work. When you delegate, just call ' +
+  'the `delegate` tool(s) and stop — do NOT narrate the hand-off or say the team is ' +
+  'working on it (the user already sees each task appear on the board). Never narrate ' +
+  'your own tool use or internal state (memory, board, searches) to the user; use them ' +
+  'silently, and if your memory is empty just proceed. Only after the task updates come ' +
+  'back do you reply, with one short, plain summary of what the team produced; suggest ' +
+  'a next step only when there is a clear, non-obvious one, and never append a menu of ' +
+  'options or ask for a priority every turn. You and your teammates share one memory — ' +
+  'save durable facts so the team can recall them later.'
 
-const SPECIALIST_PROMPT =
+export const SPECIALIST_PROMPT =
   'You are a capable coding specialist on a small team. Pick up the task you are ' +
   'given, do the work using the available tools, and report back a short summary ' +
-  'of what you did, what you verified, and any follow-ups. Save durable facts to ' +
+  'of what you did, what you verified, and any follow-ups. You report to your team ' +
+  'lead, not the user — you cannot reach the user, so if a detail is missing make a ' +
+  'reasonable assumption and note it rather than asking. Save durable facts to ' +
   'the shared memory so your teammates can build on them.'
 
 interface SeedBody {
@@ -77,6 +91,7 @@ export async function onboardingSeedNativeTeamPOST(req: Request, res: Response):
     const db = createDb(getDbPath())
     const now = Date.now()
     const teamId = crypto.randomUUID()
+    const tenantId = getTenantId(req)
 
     // Team first — the agents' teamId FK requires it.
     db.insert(teams)
@@ -89,6 +104,7 @@ export async function onboardingSeedNativeTeamPOST(req: Request, res: Response):
         colorCollectionId: 'classic',
         templateId: null,
         leaderAgentId: null,
+        tenantId,
         createdAt: now,
         updatedAt: now,
       })
@@ -99,12 +115,18 @@ export async function onboardingSeedNativeTeamPOST(req: Request, res: Response):
     const leader = await nativeSource.createAgent({
       name: 'Team Lead',
       teamId,
+      tenantId,
       execConfig: {
         primaryProvider: provider,
         primaryModel: leaderModel,
         envVar,
         systemPrompt: LEADER_PROMPT,
-        tools: { memory: true, tools: true, tasks: true, teamchat: false },
+        // Trust-first: the engine OWNS the board, so the leader does NOT get the
+        // Tasks MCP (create_task etc.) — it would race the engine's claim (→409) or
+        // create an unrun orphan. The leader delegates via the `delegate` signal
+        // tool (added by the native driver for team runs) and sees results as the
+        // `[Task Update]` reflections the engine delivers. Memory + tools stay on.
+        tools: { memory: true, tools: true, tasks: false, teamchat: false },
         participantKind: 'agent',
         budgetUsd: null,
       },
@@ -113,6 +135,7 @@ export async function onboardingSeedNativeTeamPOST(req: Request, res: Response):
     const specialist = await nativeSource.createAgent({
       name: 'Coder',
       teamId,
+      tenantId,
       execConfig: {
         primaryProvider: provider,
         primaryModel: specialistModel,
@@ -136,6 +159,13 @@ export async function onboardingSeedNativeTeamPOST(req: Request, res: Response):
       `team-onboarding:${teamId}`,
       JSON.stringify({ agentsIntroduced: true, userIntroduced: true, userIntroText: '' }),
     )
+    // A native team is SERVER-orchestrated: its team chat runs the persistent
+    // server engine (client-independent), not the legacy browser path.
+    setSetting(db, serverOrchestratedSettingKey(teamId), 'true')
+    // Remember the chosen leader model so the universal Boo Zero (created lazily by
+    // ensureNativeBooZero, a DIFFERENT agent from this team's "Team Lead") runs on it
+    // instead of the auto-resolved per-provider default.
+    setSetting(db, SETTING_NATIVE_LEADER_MODEL, JSON.stringify({ provider, model: leaderModel }))
 
     res.status(201).json({ teamId, leaderAgentId: leader.id, specialistAgentId: specialist.id })
   } catch (err) {

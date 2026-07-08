@@ -1,8 +1,16 @@
 import crypto from 'node:crypto'
 import type { Request, Response } from 'express'
-import { createDb, teams, agents, settings } from '@clawboo/db'
-import { eq, inArray, sql } from 'drizzle-orm'
+import { createDb, setSetting, teams, agents, settings } from '@clawboo/db'
+import { eq, inArray, like, sql } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
+import { nativeTeamSessionKeysForTeamLike } from '../lib/teamChat/nativeTeamSession'
+import { getTenantId } from '../lib/tenant'
+import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
+import {
+  resolveServerOrchestrated,
+  serverOrchestratedSettingKey,
+} from '../lib/teamChat/resolveServerOrchestrated'
+import { getTeamOrchestrator, hasTeamOrchestrator } from '../lib/teamChat/teamOrchestrator'
 
 // ─── GET /api/teams ──────────────────────────────────────────────────────────
 // Returns all teams with an agentCount for each, plus agent→team assignments.
@@ -37,7 +45,15 @@ export function teamsGET(req: Request, res: Response): void {
       .all()
       .filter((a) => a.teamId !== null) as { agentId: string; teamId: string }[]
 
-    res.json({ teams: rows, assignments })
+    // Tell the client which teams the SERVER orchestrator owns (native, Gateway-free)
+    // so `GroupChatPanel` renders them via the REST + SSE thin-client path instead of
+    // the browser board-orchestration path. OpenClaw teams read false → legacy path.
+    const teamsWithFlag = rows.map((t) => ({
+      ...t,
+      serverOrchestrated: resolveServerOrchestrated(db, t.id),
+    }))
+
+    res.json({ teams: teamsWithFlag, assignments })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -57,6 +73,12 @@ interface CreateBody {
    *  Boo palette with the SAME id the deployed team will use (per-team color
    *  rotation). Validated as a UUID; ignored otherwise. */
   id?: string
+  /** When true, write the explicit `team-server-orchestrated:<id>` flag so the
+   *  team runs the persistent SERVER engine from the moment it exists — set by
+   *  CreateTeamModal for a native/mixed team. Relying on runtime inference is
+   *  racy at create time (0 agents ⇒ inferred false) and for keyword-less
+   *  leaders (leaderAgentId never set). Absent/false ⇒ inference (OpenClaw). */
+  serverOrchestrated?: boolean
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -90,10 +112,16 @@ export function teamsPOST(req: Request, res: Response): void {
         colorCollectionId: colorCollectionId ?? null,
         templateId: templateId ?? null,
         leaderAgentId: leaderAgentId ?? null,
+        tenantId: getTenantId(req),
         createdAt: now,
         updatedAt: now,
       })
       .run()
+
+    // Deterministic server-orchestration for native/mixed teams (see CreateBody).
+    if (body.serverOrchestrated === true) {
+      setSetting(db, serverOrchestratedSettingKey(id), 'true')
+    }
 
     res.json({
       team: {
@@ -106,6 +134,7 @@ export function teamsPOST(req: Request, res: Response): void {
         leaderAgentId: leaderAgentId ?? null,
         isArchived: 0,
         agentCount: 0,
+        serverOrchestrated: resolveServerOrchestrated(db, id),
         createdAt: now,
         updatedAt: now,
       },
@@ -190,6 +219,8 @@ export function teamsPATCH(req: Request, res: Response): void {
 // behind in the key/value store:
 //   - `team-rules:<teamId>`     — user-captured rules
 //   - `team-onboarding:<teamId>` — onboarding flags + user intro text
+//   - `native-team-session:<agentId>:<teamId>` — native leader session-resume
+//     pointers (one per team member; the amnesia-fix continuity handles)
 // The `boo_zero_team_briefs` table FK-cascades on team delete (see schema),
 // so that one cleans itself.
 
@@ -213,6 +244,11 @@ export function teamsDELETE(req: Request, res: Response): void {
     db.delete(settings)
       .where(inArray(settings.key, [`team-rules:${teamId}`, `team-onboarding:${teamId}`]))
       .run()
+
+    // Sweep every member's native leader session-resume pointer for this team
+    // (`native-team-session:<agentId>:<teamId>`) — team ids are UUIDs so a stale
+    // pointer would never be re-read, but drop it for hygiene.
+    db.delete(settings).where(like(settings.key, nativeTeamSessionKeysForTeamLike(teamId))).run()
 
     // Delete the team (boo_zero_team_briefs FK-cascades).
     db.delete(teams).where(eq(teams.id, teamId)).run()
@@ -282,6 +318,76 @@ export function teamAgentDELETE(req: Request, res: Response): void {
 
     db.update(agents).set({ teamId: null }).where(eq(agents.id, agentId)).run()
 
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── POST /api/teams/:id/chat ────────────────────────────────────────────────
+// Ingest a user message into the team's SERVER orchestrator. Returns 202
+// IMMEDIATELY — the cascade proceeds DETACHED (it must survive the POST ending,
+// so `req.on('close')` is deliberately NOT wired to abort it; closing the client
+// must not kill the run). Gated to server-orchestrated teams — the
+// double-orchestration firewall: a browser-orchestrated (OpenClaw) team 404s, so
+// the server engine can never run alongside the browser engine for one team.
+
+export function teamChatIngestPOST(req: Request, res: Response): void {
+  const teamId = req.params['id'] as string | undefined
+  if (!teamId) {
+    res.status(400).json({ error: 'team id required' })
+    return
+  }
+  const body = req.body as
+    | { message?: unknown; targetAgentId?: unknown; entryId?: unknown }
+    | undefined
+  const message = typeof body?.message === 'string' ? body.message.trim() : ''
+  if (!message) {
+    res.status(400).json({ error: 'message required' })
+    return
+  }
+  const targetAgentId = typeof body?.targetAgentId === 'string' ? body.targetAgentId : null
+  // A client-provided entryId lets the optimistic user bubble and the SSE-replayed
+  // user entry share one id → the thin client dedups by entryId (no double-render).
+  const userEntryId = typeof body?.entryId === 'string' ? body.entryId : undefined
+  try {
+    const db = createDb(getDbPath())
+    if (!resolveServerOrchestrated(db, teamId)) {
+      res.status(404).json({ error: 'team is not server-orchestrated' })
+      return
+    }
+    const mcpBaseUrl = loopbackMcpBaseUrl(req)
+    // Fire-and-forget: the orchestrator owns the long-running cascade. Not awaited
+    // (the 202 returns now); not aborted on client disconnect.
+    void getTeamOrchestrator(teamId, { mcpBaseUrl }).enqueueUserMessage({
+      stimulus: message,
+      targetAgentId,
+      userEntryId,
+    })
+    res.status(202).json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── POST /api/teams/:id/chat/stop ───────────────────────────────────────────
+// User Stop: bump the orchestrator's stop generation + abort in-flight runs (a
+// clean release to `todo`, never a failure reflection). A no-op when no
+// orchestrator is live (idle-evicted / never started).
+
+export function teamChatStopPOST(req: Request, res: Response): void {
+  const teamId = req.params['id'] as string | undefined
+  if (!teamId) {
+    res.status(400).json({ error: 'team id required' })
+    return
+  }
+  try {
+    const db = createDb(getDbPath())
+    if (!resolveServerOrchestrated(db, teamId)) {
+      res.status(404).json({ error: 'team is not server-orchestrated' })
+      return
+    }
+    if (hasTeamOrchestrator(teamId)) getTeamOrchestrator(teamId).stop()
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })

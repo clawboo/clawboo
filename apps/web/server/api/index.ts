@@ -26,8 +26,11 @@ import {
   teamsDELETE,
   teamAgentPOST,
   teamAgentDELETE,
+  teamChatIngestPOST,
+  teamChatStopPOST,
 } from './teams'
 import { teamChatGET, teamChatExchangePOST } from './teamChat'
+import { teamChatStreamGET } from './teamChatStream'
 import {
   agentsDELETE,
   agentsCleanupPOST,
@@ -36,11 +39,14 @@ import {
   agentsCreatePOST,
   agentsSyncPOST,
   agentGET,
+  agentModelPATCH,
   agentFileGET,
   agentFilePUT,
   agentSessionsGET,
 } from './agents'
+import { agentChatIngestPOST, agentChatStopPOST, agentChatStreamGET } from './agentChat'
 import { teamOnboardingGET, teamOnboardingPATCH } from './teamOnboarding'
+import { teamActivitySummaryGET } from './teamActivity'
 import { teamRulesGET, teamRulesPUT } from './teamRules'
 import {
   teamBriefGET,
@@ -92,6 +98,7 @@ import {
   runtimesRunPOST,
 } from './runtimes'
 import { onboardingSeedNativeTeamPOST } from './onboardingSeed'
+import { onboardingStateGET } from './onboardingState'
 import { budgetsListGET, budgetsResumePOST, budgetsSetPOST } from './budgets'
 import { governanceAuditGET } from './governanceAudit'
 import { delegationApprovalPOST } from './delegationApproval'
@@ -175,6 +182,19 @@ router.delete('/api/teams/:id/agents/:agentId', teamAgentDELETE)
 router.get('/api/teams/:id/onboarding', teamOnboardingGET)
 router.patch('/api/teams/:id/onboarding', teamOnboardingPATCH)
 
+// A compact "what has this team been doing" snapshot (brief + board + recent chat),
+// injected into Boo Zero's personal chat when the user @-mentions the team.
+router.get('/api/teams/:id/activity-summary', teamActivitySummaryGET)
+
+// Server-side team-chat orchestration (the persistent, client-independent engine).
+// Gated to server-orchestrated (native) teams; OpenClaw stays on the browser path
+// until its cutover. Stop is registered before the bare /chat (more specific first).
+router.post('/api/teams/:id/chat/stop', teamChatStopPOST)
+router.post('/api/teams/:id/chat', teamChatIngestPOST)
+// Live chat transport — SSE tail of the team transcript (committed turns + live
+// token deltas). A pure reader: orchestration runs to completion with no client.
+router.get('/api/teams/:id/chat/stream', teamChatStreamGET)
+
 // Mixed-runtime peer chat — the durable team-room read (the model-facing write
 // half is the TeamChat MCP server at /api/mcp/teamchat). POST /exchange is the
 // explicit kickoff for one bounded leader/peer exchange (runtime adapters drive
@@ -199,10 +219,18 @@ router.post('/api/agents/sync', agentsSyncPOST)
 router.get('/api/agents/registry/health', agentsRegistryHealthGET)
 router.post('/api/agents/cleanup-ghosts', agentsCleanupPOST)
 router.get('/api/agents/:agentId', agentGET)
+router.patch('/api/agents/:agentId/model', agentModelPATCH)
 router.delete('/api/agents/:agentId', agentsDELETE)
 router.get('/api/agents/:agentId/files/:name', agentFileGET)
 router.put('/api/agents/:agentId/files/:name', agentFilePUT)
 router.get('/api/agents/:agentId/sessions', agentSessionsGET)
+
+// A clawboo-native agent's 1:1 PERSONAL chat (the Boo-Zero personal chat). The
+// native equivalent of the Gateway 1:1 chat path — ingest drives ONE conversational
+// turn server-side; the SSE tails `agent:<id>:native`. 404s a non-native agent.
+router.post('/api/agents/:agentId/chat/stop', agentChatStopPOST)
+router.get('/api/agents/:agentId/chat/stream', agentChatStreamGET)
+router.post('/api/agents/:agentId/chat', agentChatIngestPOST)
 
 // Boo Zero context — per-team briefs + global brief.
 // Per-team briefs are SQLite-backed and FK-cascade on team delete; the
@@ -275,8 +303,11 @@ router.post('/api/runtimes/:id/healthcheck', runtimesHealthcheckPOST)
 router.post('/api/runtimes/:id/run', runtimesRunPOST)
 
 // Onboarding — seed a default native leader + specialist team (the native
-// first-run lands here straight after connecting a provider key).
+// first-run lands here straight after connecting a provider key). The state
+// route aggregates the first-run signals (configured/hasNative/hasTeam/
+// hasConnectedRuntime) so a thin client skips the multi-call decision dance.
 router.post('/api/onboarding/seed-native-team', onboardingSeedNativeTeamPOST)
+router.get('/api/onboarding/state', onboardingStateGET)
 
 // Governance. Budget kill-switch caps + the forensic audit.
 router.get('/api/governance/budgets', budgetsListGET)

@@ -1,8 +1,10 @@
 import type { Request, Response } from 'express'
-import { createDb, chatMessages } from '@clawboo/db'
+import { createDb, chatMessages, setSetting } from '@clawboo/db'
 import { eq, and, asc } from 'drizzle-orm'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { getDbPath } from '../lib/db'
+import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
+import { nativeTeamSessionSettingKey } from '../lib/teamChat/nativeTeamSession'
 
 // ─── GET /api/chat-history?sessionKey=<key>&limit=<n> ─────────────────────────
 // Returns the last N transcript entries for a session, ordered by timestamp ASC.
@@ -102,6 +104,17 @@ export async function chatHistoryDELETE(req: Request, res: Response): Promise<vo
   try {
     const db = createDb(getDbPath())
     await db.delete(chatMessages).where(and(eq(chatMessages.sessionKey, sessionKey)))
+    // A native 1:1 chat carries conversation continuity in a resumable harness session
+    // (see driveAgentChat). Clearing its history = a fresh conversation, so drop the
+    // resume pointer too — else the model would still "remember" the deleted turns.
+    const nativeMatch = sessionKey.match(/^agent:(.+):native$/)
+    if (nativeMatch) setSetting(db, nativeChatSessionSettingKey(nativeMatch[1]!), '')
+    // A native TEAM session (`agent:<id>:team:<teamId>`) carries the same resumable
+    // continuity for the leader/user-facing turn. Clearing its history = a fresh
+    // conversation, so drop the per-(agent, team) resume pointer too (else the leader
+    // would still "remember" the wiped turns).
+    const teamMatch = sessionKey.match(/^agent:(.+):team:(.+)$/)
+    if (teamMatch) setSetting(db, nativeTeamSessionSettingKey(teamMatch[1]!, teamMatch[2]!), '')
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })
