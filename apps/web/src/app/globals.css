@@ -45,6 +45,7 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-destructive: var(--destructive);
@@ -77,8 +78,11 @@
   --color-canvas-control-hover: var(--canvas-control-hover);
 
   /* ── Fonts ── */
-  --font-display: var(--font-cabinet-grotesk, 'Cabinet Grotesk', sans-serif);
-  --font-body: var(--font-dm-sans, 'DM Sans', sans-serif);
+  /* Inter is the UI + display font (the premium reference system). Display
+     headings use it at heavy weights (700–800) + tight negative tracking;
+     body/nav/controls use 400–600. Geist Mono stays for technical values. */
+  --font-display: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-geist-mono, ui-monospace, 'Geist Mono', monospace);
 
   /* ── Type scale ──
@@ -129,9 +133,20 @@
   --muted: #f1f5f9;
   --muted-foreground: #64748b;
 
-  --border: rgb(15 23 42 / 0.1);
+  /* Hairline border — a touch softer than before for the premium reference feel. */
+  --border: rgb(15 23 42 / 0.08);
+  --border-strong: rgb(15 23 42 / 0.14);
   --input: #f1f5f9;
   --ring: #dc2a48;
+
+  /* Colorful gradient accents — for the "modern" feature/use-case tiles
+     (the premium gradient cards). Deep, saturated. */
+  --grad-violet: linear-gradient(145deg, #6366f1 0%, #4338ca 100%);
+  --grad-rose: linear-gradient(145deg, #f43f5e 0%, #be123c 100%);
+  --grad-amber: linear-gradient(145deg, #f59e0b 0%, #b45309 100%);
+  --grad-emerald: linear-gradient(145deg, #10b981 0%, #047857 100%);
+  --grad-sky: linear-gradient(145deg, #0ea5e9 0%, #0369a1 100%);
+  --grad-slate: linear-gradient(145deg, #334155 0%, #0f172a 100%);
 
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
@@ -236,6 +251,7 @@
   --muted-foreground: #6b7280;
 
   --border: rgb(255 255 255 / 0.08);
+  --border-strong: rgb(255 255 255 / 0.16);
   --input: #1f2937;
   --ring: #e94560;
 
@@ -307,17 +323,33 @@
 
 html,
 body {
-  --font-dm-sans: 'DM Sans';
   --font-geist-mono: 'Geist Mono';
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-body);
+  /* Inter reads best with a hair of negative tracking at UI sizes + its
+     contextual/ligature features on — this is the clean modern grotesk feel. */
+  letter-spacing: -0.006em;
+  font-feature-settings:
+    'liga' 1,
+    'calt' 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 * {
   border-color: var(--border);
+}
+
+/* Monospace / tabular text keeps normal tracking (the body's slight negative
+   tracking is for Inter proportional text only). */
+.font-mono,
+.font-data,
+code,
+kbd,
+pre,
+samp {
+  letter-spacing: normal;
 }
 
 /* Scrollbars — token-driven, mode-aware */
@@ -345,24 +377,6 @@ body {
 }
 .react-flow__node-boo .group {
   pointer-events: auto !important;
-}
-
-/* React Flow controls — token-driven, mode-aware */
-.react-flow__controls-button {
-  background: var(--canvas-control) !important;
-  border: none !important;
-  border-bottom: 1px solid var(--canvas-control-border) !important;
-  fill: var(--muted-foreground) !important;
-}
-.react-flow__controls-button:hover {
-  background: var(--canvas-control-hover) !important;
-  fill: var(--foreground) !important;
-}
-.react-flow__controls-button:last-child {
-  border-bottom: none !important;
-}
-.react-flow__controls-button svg {
-  fill: inherit !important;
 }
 
 /* ────────────────────────────────────────────────────────────────
