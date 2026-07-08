@@ -8,10 +8,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ExternalLink, Loader2, X } from 'lucide-react'
+import { ArrowRight, Check, ExternalLink, Loader2, X } from 'lucide-react'
 import { useSystemStore } from '@/stores/system'
 import type { SystemInfo } from '@/stores/system'
-import { StepIndicator } from '../StepIndicator'
+import { NATIVE_STEPS } from '../StepIndicator'
+import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -149,40 +150,59 @@ export function DetectStep({
       ]
 
   return (
-    <div className="surface-overlay-tier w-full max-w-[420px] rounded-2xl">
-      <div className="p-8">
-        <StepIndicator current="setup" />
-
-        <h2
-          className="text-[20px] font-bold text-text mb-1"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          System Check
-        </h2>
-        <p className="text-[12px] text-secondary mb-6">Checking your environment for OpenClaw…</p>
-
-        {/* ── Checklist ──────────────────────────────────────── */}
-        <div className="flex flex-col gap-3 mb-6">
-          {checklist.map((item, i) => {
-            const revealed = info ? i < revealCount : true
-            const showLoader = detecting || (!info && item.status === 'loading') || !revealed
-
-            return (
+    <OnboardingScreen
+      step="runtimes"
+      steps={NATIVE_STEPS}
+      title="System check"
+      subtitle="Checking your environment for OpenClaw. This is the advanced path — most people can skip it and stay on Clawboo Native."
+      footer={
+        <div className="flex flex-col items-center gap-4">
+          <AnimatePresence initial={false}>
+            {ctaLabel && revealCount >= 3 && (
               <motion.div
-                key={item.label}
-                initial={{ opacity: 0, x: -12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{
-                  type: 'spring',
-                  stiffness: 320,
-                  damping: 30,
-                  delay: i * 0.1,
-                }}
-                className="flex items-center gap-3"
+                key="cta"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 30 }}
+                className="w-full"
               >
-                {/* Icon */}
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-foreground/5">
-                  <AnimatePresence mode="wait">
+                <OnboardingPrimary onClick={handleCta} className="w-full">
+                  {ctaLabel} <ArrowRight size={16} />
+                </OnboardingPrimary>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <OnboardingGhost onClick={onAdvancedConnect} className="text-[13px]">
+            Connect to a remote gateway <ArrowRight size={14} />
+          </OnboardingGhost>
+        </div>
+      }
+    >
+      {/* ── Checklist ──────────────────────────────────────── */}
+      <div
+        className="flex flex-col rounded-2xl border border-border bg-surface"
+        style={{ boxShadow: 'var(--shadow-raised)' }}
+      >
+        {checklist.map((item, i) => {
+          const revealed = info ? i < revealCount : true
+          const showLoader = detecting || (!info && item.status === 'loading') || !revealed
+
+          return (
+            <motion.div
+              key={item.label}
+              initial={{ opacity: 0, x: -12 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{
+                type: 'spring',
+                stiffness: 320,
+                damping: 30,
+                delay: i * 0.1,
+              }}
+              className="flex items-center gap-3 px-4 py-3.5 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border"
+            >
+              {/* Icon */}
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground/5">
+                <AnimatePresence mode="wait">
                     {showLoader ? (
                       <motion.div
                         key="loader"
@@ -271,11 +291,11 @@ export function DetectStep({
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.15 }}
-              className="mb-4 overflow-hidden"
+              className="mt-4 overflow-hidden"
             >
               <div
                 role="alert"
-                className="rounded-lg border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-snug text-destructive"
+                className="rounded-xl border border-destructive/20 bg-destructive/8 px-4 py-3 text-[13px] leading-snug text-destructive"
               >
                 Node.js 22 or later is required.{' '}
                 <a
@@ -291,38 +311,6 @@ export function DetectStep({
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* ── CTA button ─────────────────────────────────────── */}
-        <AnimatePresence initial={false}>
-          {ctaLabel && revealCount >= 3 && (
-            <motion.div
-              key="cta"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-            >
-              <button
-                type="button"
-                onClick={handleCta}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98]"
-              >
-                {ctaLabel}
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Advanced connect link ──────────────────────────── */}
-        <p className="mt-5 text-center">
-          <button
-            type="button"
-            onClick={onAdvancedConnect}
-            className="font-mono text-[11px] text-secondary/35 underline underline-offset-2 transition hover:text-secondary"
-          >
-            Connect to remote gateway &rarr;
-          </button>
-        </p>
-      </div>
-    </div>
+    </OnboardingScreen>
   )
 }

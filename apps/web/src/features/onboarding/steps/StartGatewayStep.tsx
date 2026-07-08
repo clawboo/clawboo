@@ -14,10 +14,11 @@ import {
   GatewayResponseError,
   resolveProxyGatewayUrl,
 } from '@clawboo/gateway-client'
-import { consumeSSE } from '@/lib/sseClient'
+import { consumeApiSSE } from '@clawboo/control-client'
 import { useSystemStore } from '@/stores/system'
 import { DevicePairingApproval } from '@/features/connection/DevicePairingApproval'
-import { StepIndicator } from '../StepIndicator'
+import { NATIVE_STEPS } from '../StepIndicator'
+import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -98,7 +99,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
     setGatewayControlStatus('starting')
 
     controllerRef.current?.abort()
-    controllerRef.current = consumeSSE(
+    controllerRef.current = consumeApiSSE(
       '/api/system/gateway',
       {
         method: 'POST',
@@ -163,12 +164,35 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
   const isRunning = phase === 'starting' || phase === 'connecting'
 
   return (
-    <div className="surface-overlay-tier w-full max-w-[420px] rounded-2xl">
-      <div className="flex flex-col items-center p-8">
-        <StepIndicator current="setup" />
-
+    <OnboardingScreen
+      step="runtimes"
+      steps={NATIVE_STEPS}
+      align="center"
+      title="Start the Gateway"
+      subtitle="Bringing up the OpenClaw Gateway and connecting Clawboo to it. This runs on its own — no action needed unless something goes wrong."
+      footer={
+        <div className="flex justify-center">
+          {phase === 'error' ? (
+            <div className="flex w-full flex-col items-center gap-3">
+              <OnboardingPrimary onClick={handleRetry} className="w-full">
+                <RotateCcw size={15} strokeWidth={2.5} />
+                Retry
+              </OnboardingPrimary>
+              <OnboardingGhost onClick={onBack}>
+                <ArrowLeft size={14} /> Back
+              </OnboardingGhost>
+            </div>
+          ) : (
+            <OnboardingGhost onClick={onBack}>
+              <ArrowLeft size={14} /> Back
+            </OnboardingGhost>
+          )}
+        </div>
+      }
+    >
+      <div className="flex flex-col items-center">
         {/* ── Pulsing mascot ────────────────────────────────── */}
-        <div className="relative mb-6">
+        <div className="relative">
           {/* Glow */}
           <div className="pointer-events-none absolute -inset-8 bg-[radial-gradient(circle,rgb(var(--primary-rgb) / 0.15),transparent)]" />
           <motion.img
@@ -206,7 +230,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.2 }}
-              className="mb-1 flex items-center gap-2"
+              className="mt-6 flex items-center gap-2"
             >
               {phase === 'connected' && <Check className="h-4 w-4 text-mint" strokeWidth={2.5} />}
               {isRunning && (
@@ -238,7 +262,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.18 }}
-              className="mt-2 mb-4 w-full overflow-hidden"
+              className="mt-6 w-full overflow-hidden text-left"
             >
               <DevicePairingApproval onApproved={() => void autoConnect()} />
             </motion.div>
@@ -250,7 +274,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
           <button
             type="button"
             onClick={() => setShowLog((v) => !v)}
-            className="mt-2 mb-3 flex items-center gap-1 font-mono text-[10px] text-secondary/30 transition hover:text-secondary/60"
+            className="mt-4 flex items-center gap-1 font-mono text-[10px] text-secondary/30 transition hover:text-secondary/60"
           >
             {showLog ? 'Hide' : 'Show'} log
             <ChevronDown
@@ -268,11 +292,18 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.15 }}
-              className="mb-4 w-full overflow-hidden"
+              className="mt-4 w-full overflow-hidden text-left"
             >
-              <div className="max-h-[180px] overflow-y-auto rounded-lg border border-border bg-[#0d1117] p-3">
+              <div
+                className="max-h-[180px] overflow-y-auto rounded-xl border border-border p-4"
+                style={{ background: 'var(--terminal-bg, #0d1117)' }}
+              >
                 {gatewayLog.map((line, i) => (
-                  <div key={i} className="font-mono text-[11px] leading-relaxed text-secondary/60">
+                  <div
+                    key={i}
+                    className="font-mono text-[12px] leading-relaxed"
+                    style={{ color: 'rgb(201 209 217 / 0.72)' }}
+                  >
                     {line}
                   </div>
                 ))}
@@ -291,40 +322,18 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.15 }}
-              className="mb-4 w-full overflow-hidden"
+              className="mt-6 w-full overflow-hidden text-left"
             >
               <div
                 role="alert"
-                className="rounded-lg border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-snug text-destructive"
+                className="rounded-xl border border-destructive/20 bg-destructive/8 px-4 py-3 text-[13px] leading-snug text-destructive"
               >
                 {errorMessage}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* ── Actions ────────────────────────────────────────── */}
-        {phase === 'error' && (
-          <div className="flex w-full flex-col gap-3">
-            <button
-              type="button"
-              onClick={handleRetry}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98]"
-            >
-              <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.5} />
-              Retry
-            </button>
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center justify-center gap-1 font-mono text-[11px] text-secondary/35 underline underline-offset-2 transition hover:text-secondary"
-            >
-              <ArrowLeft className="h-3 w-3" />
-              Back
-            </button>
-          </div>
-        )}
       </div>
-    </div>
+    </OnboardingScreen>
   )
 }

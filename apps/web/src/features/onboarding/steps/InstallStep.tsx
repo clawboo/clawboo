@@ -9,9 +9,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, Check, ChevronDown, Loader2, RotateCcw } from 'lucide-react'
-import { consumeSSE } from '@/lib/sseClient'
+import { consumeApiSSE } from '@clawboo/control-client'
 import { useSystemStore } from '@/stores/system'
-import { StepIndicator } from '../StepIndicator'
+import { NATIVE_STEPS } from '../StepIndicator'
+import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,7 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
     setVersion(null)
 
     controllerRef.current?.abort()
-    controllerRef.current = consumeSSE(
+    controllerRef.current = consumeApiSSE(
       '/api/system/install-openclaw',
       { method: 'POST' },
       {
@@ -106,56 +107,78 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
   const isEacces = errorCode === 'EACCES'
 
   return (
-    <div className="surface-overlay-tier w-full max-w-lg rounded-2xl">
-      <div className="p-8">
-        <StepIndicator current="setup" />
-
-        {/* ── Header ───────────────────────────────────────────── */}
-        <div className="mb-1 flex items-center gap-2">
-          <h2
-            className="text-[20px] font-bold text-text"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            Installing OpenClaw
-          </h2>
+    <OnboardingScreen
+      step="runtimes"
+      steps={NATIVE_STEPS}
+      title="Installing OpenClaw"
+      subtitle={
+        <span className="inline-flex items-center gap-2">
           {installStatus === 'installing' && (
-            <Loader2 className="h-4 w-4 animate-spin text-accent" strokeWidth={2.5} />
+            <Loader2
+              className="h-4 w-4 animate-spin"
+              style={{ color: 'var(--primary)' }}
+              strokeWidth={2.5}
+            />
           )}
           {installStatus === 'success' && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-            >
-              <Check className="h-4 w-4 text-mint" strokeWidth={2.5} />
-            </motion.div>
+            <Check className="h-4 w-4" style={{ color: 'var(--mint)' }} strokeWidth={2.5} />
           )}
-        </div>
-        <p className="text-[12px] text-secondary mb-5">
-          {installStatus === 'success' ? `Installed! v${version}` : 'This may take a minute…'}
-        </p>
+          {installStatus === 'success'
+            ? `Installed — v${version}.`
+            : installStatus === 'error'
+              ? 'The install ran into a problem.'
+              : 'This may take a minute — pulling openclaw from npm.'}
+        </span>
+      }
+      footer={
+        installStatus === 'error' ? (
+          <div className="flex flex-col items-center gap-3">
+            <OnboardingPrimary onClick={handleRetry} className="w-full">
+              <RotateCcw size={15} strokeWidth={2.5} /> Retry
+            </OnboardingPrimary>
+            <OnboardingGhost onClick={onBack}>
+              <ArrowLeft size={14} /> Back
+            </OnboardingGhost>
+          </div>
+        ) : undefined
+      }
+    >
+      {/* ── Terminal log ──────────────────────────────────────── */}
+      <div
+        className="max-h-[280px] overflow-y-auto rounded-xl border border-border p-4"
+        style={{ background: 'var(--terminal-bg, #0d1117)' }}
+      >
+        {installLog.length === 0 && (
+          <div
+            className="font-mono text-[12px] leading-relaxed"
+            style={{ color: 'rgb(201 209 217 / 0.55)' }}
+          >
+            Starting install…
+          </div>
+        )}
+        {installLog.map((line, i) => (
+          <div
+            key={i}
+            className="font-mono text-[12px] leading-relaxed"
+            style={{ color: 'rgb(201 209 217 / 0.72)' }}
+          >
+            {line}
+          </div>
+        ))}
+        <div ref={logEndRef} />
+      </div>
 
-        {/* ── Terminal log ──────────────────────────────────────── */}
-        <div className="mb-4 max-h-[240px] overflow-y-auto rounded-lg border border-border bg-[#0d1117] p-3">
-          {installLog.map((line, i) => (
-            <div key={i} className="font-mono text-[11px] leading-relaxed text-[#c9d1d9]/70">
-              {line}
-            </div>
-          ))}
-          <div ref={logEndRef} />
-        </div>
-
-        {/* ── EACCES error panel ─────────────────────────────── */}
-        <AnimatePresence initial={false}>
-          {installStatus === 'error' && isEacces && (
-            <motion.div
-              key="eacces"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.15 }}
-              className="mb-4 overflow-hidden"
-            >
+      {/* ── EACCES error panel ─────────────────────────────── */}
+      <AnimatePresence initial={false}>
+        {installStatus === 'error' && isEacces && (
+          <motion.div
+            key="eacces"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="mt-4 overflow-hidden"
+          >
               <div
                 role="alert"
                 className="rounded-lg border border-destructive/20 bg-destructive/8 px-3 py-2.5 text-[12px] leading-snug text-destructive"
@@ -219,40 +242,17 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.15 }}
-              className="mb-4 overflow-hidden"
+              className="mt-4 overflow-hidden"
             >
               <div
                 role="alert"
-                className="rounded-lg border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-snug text-destructive"
+                className="rounded-xl border border-destructive/20 bg-destructive/8 px-4 py-3 text-[13px] leading-snug text-destructive"
               >
                 {errorMessage}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* ── Actions ────────────────────────────────────────── */}
-        {installStatus === 'error' && (
-          <div className="flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={handleRetry}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98]"
-            >
-              <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.5} />
-              Retry
-            </button>
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center justify-center gap-1 font-mono text-[11px] text-secondary/35 underline underline-offset-2 transition hover:text-secondary"
-            >
-              <ArrowLeft className="h-3 w-3" />
-              Back
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
+    </OnboardingScreen>
   )
 }

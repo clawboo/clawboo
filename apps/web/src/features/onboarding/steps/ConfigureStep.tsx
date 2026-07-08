@@ -6,13 +6,16 @@
  * openclaw.json, .env, and auto-saves Clawboo settings.
  */
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { MODEL_GROUPS } from '@/lib/modelCatalog'
-import { StepIndicator } from '../StepIndicator'
+import { NATIVE_STEPS } from '../StepIndicator'
+import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
 import { ProviderIcon, PROVIDER_BRAND, type ProviderId } from '../ProviderIcon'
 import { ModelDropdown } from '../ModelDropdown'
+
+const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -134,19 +137,6 @@ const MORE_PROVIDERS: ProviderOption[] = [
   },
 ]
 
-// Selected-state styling derived from each provider's brand accent — replaces
-// the old per-provider Tailwind tint classes + non-theme-aware `ring-white`.
-// `currentColor` accents (Ollama / xAI) resolve to the theme foreground, giving
-// a neutral selected tint for those monochrome brands.
-function selectedTint(id: ProviderId): CSSProperties {
-  const c = PROVIDER_BRAND[id].color
-  return {
-    borderColor: `color-mix(in srgb, ${c} 55%, transparent)`,
-    background: `color-mix(in srgb, ${c} 12%, transparent)`,
-    boxShadow: `0 0 0 1px color-mix(in srgb, ${c} 35%, transparent)`,
-  }
-}
-
 const ALL_PROVIDERS: ProviderOption[] = [...PRIMARY_PROVIDERS, ...MORE_PROVIDERS]
 
 // ─── Provider → model-catalog mapping ────────────────────────────────────────
@@ -258,259 +248,269 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
   }, [provider, apiKey, model, submitting, canSubmit, onConfigured])
 
   return (
-    <div className="surface-overlay-tier w-full max-w-xl rounded-2xl">
-      <div className="p-8">
-        <StepIndicator current="setup" />
-
-        <h2
-          className="text-[20px] font-bold text-text mb-1"
-          style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
-        >
-          Set Up OpenClaw
-        </h2>
-        <p className="text-[12px] text-secondary mb-6">
-          Choose your AI model provider and enter your API key.
-        </p>
-
-        {/* ── Primary provider cards ─────────────────────────── */}
-        <div className="mb-5 grid grid-cols-2 gap-3">
-          {PRIMARY_PROVIDERS.map((p) => {
-            const isSelected = provider === p.id
-
-            return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => {
-                  setProvider(p.id)
-                  setError(null)
-                  if (!p.needsKey) setApiKey('')
-                }}
-                disabled={submitting}
-                style={isSelected ? selectedTint(p.id) : undefined}
-                className={[
-                  'group relative flex flex-col items-start rounded-xl border p-4 text-left',
-                  'transition-[border-color,background-color,box-shadow,transform] duration-200',
-                  isSelected
-                    ? 'border-transparent'
-                    : 'border-border bg-background/40 hover:-translate-y-px hover:border-foreground/15 hover:bg-background/70',
-                  submitting ? 'opacity-50 cursor-not-allowed' : '',
-                ].join(' ')}
-              >
-                {isSelected && (
-                  <span
-                    className="absolute right-3 top-3 flex h-4 w-4 items-center justify-center rounded-full"
-                    style={{ background: PROVIDER_BRAND[p.id].color, color: 'var(--background)' }}
-                  >
-                    <Check className="h-2.5 w-2.5" strokeWidth={3} />
-                  </span>
-                )}
-                <ProviderIcon id={p.id} size={36} />
-                <span className="mt-2.5 text-[14px] font-semibold text-text">{p.name}</span>
-                <span className="mt-0.5 text-[11px] leading-snug text-secondary/70">
-                  {p.description}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-
-        {/* ── More providers ──────────────────────────────────── */}
-        <p className="mb-2.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary/40">
-          More providers
-        </p>
-        <div className="mb-5 grid grid-cols-2 gap-2">
-          {MORE_PROVIDERS.map((p) => {
-            const isSelected = provider === p.id
-
-            return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => {
-                  setProvider(p.id)
-                  setError(null)
-                  if (!p.needsKey) setApiKey('')
-                }}
-                disabled={submitting}
-                style={isSelected ? selectedTint(p.id) : undefined}
-                className={[
-                  'flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left',
-                  'transition-[border-color,background-color,box-shadow] duration-150',
-                  isSelected
-                    ? 'border-transparent'
-                    : 'border-border bg-background/25 hover:border-foreground/15 hover:bg-background/60',
-                  submitting ? 'opacity-50 cursor-not-allowed' : '',
-                ].join(' ')}
-              >
-                <ProviderIcon id={p.id} size={22} />
-                <span
-                  className={[
-                    'text-[12px] font-medium',
-                    isSelected ? 'text-text' : 'text-text/70',
-                  ].join(' ')}
-                >
-                  {p.name}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-
-        {/* ── API key input ─────────────────────────────────── */}
-        <AnimatePresence initial={false}>
-          {selected && selected.needsKey && (
-            <motion.div
-              key="api-key"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.15 }}
-              className="mb-5 overflow-hidden"
-            >
-              <div className="flex flex-col gap-1.5">
-                <label className="font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary">
-                  API Key
-                </label>
-                <div className="relative">
-                  <input
-                    type={showApiKey ? 'text' : 'password'}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={selected.placeholder}
-                    spellCheck={false}
-                    autoComplete="off"
-                    disabled={submitting}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && canSubmit) {
-                        e.preventDefault()
-                        void handleSubmit()
-                      }
-                    }}
-                    className="h-10 w-full rounded-lg border border-border bg-background px-3 pr-10 font-mono text-[13px] text-text outline-none transition placeholder:text-secondary/30 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30 disabled:opacity-50"
-                  />
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    onClick={() => setShowApiKey((v) => !v)}
-                    aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
-                    className="absolute inset-y-0 right-2 flex items-center text-secondary/40 transition hover:text-secondary"
-                  >
-                    {showApiKey ? (
-                      <EyeOff className="h-4 w-4" strokeWidth={1.75} />
-                    ) : (
-                      <Eye className="h-4 w-4" strokeWidth={1.75} />
-                    )}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Model picker ───────────────────────────────────── */}
-        <AnimatePresence initial={false}>
-          {selected && availableModels && availableModels.length > 0 && (
-            <motion.div
-              key="model-picker"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.15 }}
-              className="mb-5 overflow-hidden"
-            >
-              <div className="flex flex-col gap-1.5">
-                <label className="flex items-center justify-between font-mono text-[10px] font-semibold uppercase tracking-widest text-secondary">
-                  <span>Default Model</span>
-                  <span className="font-mono text-[9px] font-normal text-secondary/50 normal-case tracking-wider">
-                    used for new agents
-                  </span>
-                </label>
-                <ModelDropdown
-                  aria-label="Default model"
-                  value={model}
-                  onChange={setModel}
-                  disabled={submitting}
-                  options={availableModels.map((m) => ({ id: m.id, label: m.label }))}
-                />
-                <p className="font-mono text-[10px] text-secondary/40">
-                  You can change this anytime from System → Default Model.
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Ollama hint ────────────────────────────────────── */}
-        <AnimatePresence initial={false}>
-          {provider === 'ollama' && (
-            <motion.p
-              key="ollama-hint"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.15 }}
-              className="mb-5 overflow-hidden font-mono text-[10px] text-amber/60"
-            >
-              Make sure Ollama is running locally on port 11434.
-            </motion.p>
-          )}
-        </AnimatePresence>
-
-        {/* ── Error ──────────────────────────────────────────── */}
-        <AnimatePresence initial={false}>
-          {error && (
-            <motion.div
-              key="error"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.15 }}
-              className="mb-4 overflow-hidden"
-            >
-              <div
-                role="alert"
-                className="rounded-lg border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-snug text-destructive"
-              >
-                {error}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Submit button ──────────────────────────────────── */}
-        <button
-          type="button"
-          onClick={() => void handleSubmit()}
-          disabled={!canSubmit || submitting}
-          className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {submitting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.5} />
-              Configuring…
-            </>
-          ) : (
-            <>
-              Configure & Start
-              <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
-            </>
-          )}
-        </button>
-
-        {/* ── Back link ──────────────────────────────────────── */}
-        <p className="mt-5 text-center">
-          <button
-            type="button"
-            onClick={onBack}
-            disabled={submitting}
-            className="flex items-center justify-center gap-1 mx-auto font-mono text-[11px] text-secondary/35 underline underline-offset-2 transition hover:text-secondary disabled:opacity-50"
+    <OnboardingScreen
+      testId="configure-openclaw-step"
+      step="runtimes"
+      steps={NATIVE_STEPS}
+      size="lg"
+      title="Configure OpenClaw"
+      subtitle="Choose your AI model provider and paste an API key. Clawboo will write your OpenClaw config and start the gateway."
+      footer={
+        <div className="flex items-center justify-between">
+          <OnboardingGhost onClick={onBack} disabled={submitting}>
+            <ArrowLeft size={15} /> Back
+          </OnboardingGhost>
+          <OnboardingPrimary
+            onClick={() => void handleSubmit()}
+            disabled={!canSubmit || submitting}
           >
-            <ArrowLeft className="h-3 w-3" />
-            Back
-          </button>
-        </p>
+            {submitting ? <Loader2 size={16} className="animate-spin" /> : null}
+            {submitting ? 'Configuring…' : 'Configure & Start'}
+            {!submitting && <ArrowRight size={16} />}
+          </OnboardingPrimary>
+        </div>
+      }
+    >
+      {/* Primary provider cards */}
+      <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Provider">
+        {PRIMARY_PROVIDERS.map((p) => {
+          const isSelected = provider === p.id
+
+          return (
+            <button
+              key={p.id}
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              onClick={() => {
+                setProvider(p.id)
+                setError(null)
+                if (!p.needsKey) setApiKey('')
+              }}
+              disabled={submitting}
+              className={[
+                'group relative flex flex-col items-start rounded-2xl border p-4 text-left',
+                'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                isSelected
+                  ? ''
+                  : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
+                submitting ? 'opacity-50' : '',
+              ].join(' ')}
+              style={{
+                cursor: submitting ? 'not-allowed' : 'pointer',
+                ...(isSelected
+                  ? {
+                      borderColor: 'var(--primary)',
+                      background: 'rgb(var(--primary-rgb) / 0.05)',
+                      boxShadow: '0 0 0 1px var(--primary)',
+                    }
+                  : { boxShadow: 'var(--shadow-raised)' }),
+              }}
+            >
+              {isSelected && (
+                <span
+                  className="absolute right-3 top-3 flex h-4 w-4 items-center justify-center rounded-full"
+                  style={{ background: PROVIDER_BRAND[p.id].color, color: 'var(--background)' }}
+                >
+                  <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                </span>
+              )}
+              <ProviderIcon id={p.id} size={36} />
+              <span
+                className="mt-2.5 text-[14px] font-semibold"
+                style={{ color: 'var(--foreground)' }}
+              >
+                {p.name}
+              </span>
+              <span className="mt-0.5 text-[12px] leading-snug" style={{ color: muted(0.5) }}>
+                {p.description}
+              </span>
+            </button>
+          )
+        })}
       </div>
-    </div>
+
+      {/* More providers */}
+      <p
+        className="mb-2.5 mt-6 font-mono text-[11px] uppercase tracking-[0.14em]"
+        style={{ color: muted(0.5) }}
+      >
+        More providers
+      </p>
+      <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="More providers">
+        {MORE_PROVIDERS.map((p) => {
+          const isSelected = provider === p.id
+
+          return (
+            <button
+              key={p.id}
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              onClick={() => {
+                setProvider(p.id)
+                setError(null)
+                if (!p.needsKey) setApiKey('')
+              }}
+              disabled={submitting}
+              className={[
+                'flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left',
+                'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                isSelected
+                  ? ''
+                  : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
+                submitting ? 'opacity-50' : '',
+              ].join(' ')}
+              style={{
+                cursor: submitting ? 'not-allowed' : 'pointer',
+                ...(isSelected
+                  ? {
+                      borderColor: 'var(--primary)',
+                      background: 'rgb(var(--primary-rgb) / 0.05)',
+                      boxShadow: '0 0 0 1px var(--primary)',
+                    }
+                  : { boxShadow: 'var(--shadow-raised)' }),
+              }}
+            >
+              <ProviderIcon id={p.id} size={22} />
+              <span
+                className="text-[13px] font-medium"
+                style={{ color: isSelected ? 'var(--foreground)' : muted(0.7) }}
+              >
+                {p.name}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* API key input */}
+      <AnimatePresence initial={false}>
+        {selected && selected.needsKey && (
+          <motion.div
+            key="api-key"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="mt-6 overflow-hidden"
+          >
+            <div className="flex flex-col gap-2">
+              <label
+                htmlFor="openclaw-api-key-input"
+                className="font-mono text-[11px] uppercase tracking-[0.14em]"
+                style={{ color: muted(0.5) }}
+              >
+                API Key
+              </label>
+              <div className="relative">
+                <input
+                  id="openclaw-api-key-input"
+                  type={showApiKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={selected.placeholder}
+                  spellCheck={false}
+                  autoComplete="off"
+                  disabled={submitting}
+                  aria-label="OpenClaw provider API key"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && canSubmit) {
+                      e.preventDefault()
+                      void handleSubmit()
+                    }
+                  }}
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-3.5 pr-11 font-mono text-[14px] text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:opacity-50 placeholder:text-foreground/30"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowApiKey((v) => !v)}
+                  aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-foreground/40 transition-colors hover:text-foreground/70"
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
+                >
+                  {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Model picker */}
+      <AnimatePresence initial={false}>
+        {selected && availableModels && availableModels.length > 0 && (
+          <motion.div
+            key="model-picker"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="mt-5 overflow-hidden"
+          >
+            <div className="flex flex-col gap-2">
+              <label
+                className="flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.14em]"
+                style={{ color: muted(0.5) }}
+              >
+                <span>Default Model</span>
+                <span className="font-mono text-[10px] normal-case tracking-wider" style={{ color: muted(0.4) }}>
+                  used for new agents
+                </span>
+              </label>
+              <ModelDropdown
+                aria-label="Default model"
+                value={model}
+                onChange={setModel}
+                disabled={submitting}
+                options={availableModels.map((m) => ({ id: m.id, label: m.label }))}
+              />
+              <p className="font-mono text-[10px]" style={{ color: muted(0.4) }}>
+                You can change this anytime from System → Default Model.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Ollama hint */}
+      <AnimatePresence initial={false}>
+        {provider === 'ollama' && (
+          <motion.p
+            key="ollama-hint"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="mt-5 overflow-hidden text-[13px] leading-relaxed"
+            style={{ color: muted(0.55) }}
+          >
+            No key needed — make sure Ollama is running locally on port 11434.
+          </motion.p>
+        )}
+      </AnimatePresence>
+
+      {/* Error */}
+      <AnimatePresence initial={false}>
+        {error && (
+          <motion.div
+            key="error"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="mt-5 overflow-hidden"
+          >
+            <div
+              role="alert"
+              className="rounded-xl border border-destructive/20 bg-destructive/8 px-3 py-2 text-[13px] leading-snug text-destructive"
+            >
+              {error}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </OnboardingScreen>
   )
 }

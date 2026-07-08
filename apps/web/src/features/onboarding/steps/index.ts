@@ -10,11 +10,8 @@ export type { ConfigureStepProps } from './ConfigureStep'
 export { StartGatewayStep } from './StartGatewayStep'
 export type { StartGatewayStepProps } from './StartGatewayStep'
 
-export { ConnectAgentsStep } from './ConnectAgentsStep'
-export type { ConnectAgentsStepProps } from './ConnectAgentsStep'
-
-export { ChooseRuntimeStep } from './ChooseRuntimeStep'
-export type { ChooseRuntimeStepProps } from './ChooseRuntimeStep'
+export { AddRuntimesStep } from './AddRuntimesStep'
+export type { AddRuntimesStepProps } from './AddRuntimesStep'
 
 export { ConfigureNativeStep } from './ConfigureNativeStep'
 export type { ConfigureNativeStepProps } from './ConfigureNativeStep'
