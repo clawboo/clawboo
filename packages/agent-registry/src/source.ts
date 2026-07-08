@@ -36,6 +36,12 @@ export interface CreateAgentInput {
   avatarSeed?: string | null
   /** Optional agent files written at create time (SOUL/IDENTITY/TOOLS/AGENTS/CLAWBOO). */
   files?: Partial<Record<string, string>>
+  /**
+   * The owning tenant for the created row (multi-tenant seam). Resolved once at the
+   * REST handler via `getTenantId(req)` and threaded here (the sources have no
+   * request). `null`/omitted = the single implicit tenant (byte-identical today).
+   */
+  tenantId?: string | null
 }
 
 export interface UpdateAgentInput {

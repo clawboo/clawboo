@@ -46,6 +46,10 @@ export interface AgentRecord {
   teamId: string | null
   personalityConfig: unknown | null
   execConfig: unknown | null
+  /** The agent's configured model. For a clawboo-native agent this is the
+   *  AgentConfig `primaryModel` (surfaced so the UI's model selector shows it);
+   *  omitted for sources whose model lives elsewhere (OpenClaw = Gateway-side). */
+  model?: string | null
 
   // ── Classification (dormant seams) ──────────────────────────
   participantKind: ParticipantKind
