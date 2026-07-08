@@ -48,77 +48,43 @@ function RedirectLink({
       onClick={onClick}
       disabled={disabled}
       title={disabled ? disabledReason : title}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: 12,
-        background: 'rgb(var(--foreground-rgb) / 0.03)',
-        border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-        borderRadius: 8,
-        textAlign: 'left',
-        cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.55 : 1,
-        transition: 'background 0.15s ease, border-color 0.15s ease',
-      }}
-      onMouseEnter={(e) => {
-        if (!disabled) {
-          e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
-          e.currentTarget.style.borderColor = 'rgb(var(--primary-rgb) / 0.4)'
-        }
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.03)'
-        e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.08)'
-      }}
+      className={[
+        'group flex items-center gap-3.5 rounded-2xl border border-border bg-surface p-4 text-left',
+        'transition-[transform,border-color,box-shadow] duration-150',
+        disabled ? 'cursor-default opacity-55' : 'cursor-pointer hover:-translate-y-px hover:border-border-strong',
+      ].join(' ')}
+      style={{ boxShadow: 'var(--shadow-raised)' }}
     >
       <span
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
         style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          background: iconTinted ? 'rgb(var(--primary-rgb) / 0.12)' : 'transparent',
-          color: iconTinted ? 'var(--primary)' : 'inherit',
-          flexShrink: 0,
+          background: iconTinted ? 'rgb(var(--primary-rgb) / 0.12)' : 'rgb(var(--foreground-rgb) / 0.05)',
+          color: iconTinted ? 'var(--primary)' : 'var(--foreground)',
         }}
       >
         {icon}
       </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="min-w-0 flex-1">
         <div
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            color: 'var(--foreground)',
-            marginBottom: 2,
-          }}
+          className="mb-0.5 text-[13px] font-semibold text-foreground"
+          style={{ letterSpacing: '-0.01em' }}
         >
           {title}
         </div>
-        <div style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.55)', lineHeight: 1.45 }}>
-          {description}
-        </div>
+        <div className="text-[12px] leading-relaxed text-foreground/55">{description}</div>
         {disabled && disabledReason && (
-          <div style={{ fontSize: 10, color: 'var(--amber)', marginTop: 4 }}>{disabledReason}</div>
+          <div className="mt-1 text-[11px] text-amber">{disabledReason}</div>
         )}
       </div>
       <span
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 4,
-          fontSize: 11,
-          fontWeight: 500,
-          color: disabled
-            ? 'rgb(var(--foreground-rgb) / 0.35)'
-            : 'rgb(var(--foreground-rgb) / 0.7)',
-          flexShrink: 0,
-        }}
+        className={[
+          'inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium transition-colors',
+          disabled
+            ? 'text-foreground/35'
+            : 'text-foreground/80 group-hover:border-primary/40 group-hover:text-primary',
+        ].join(' ')}
       >
-        {cta} <ArrowRight size={12} />
+        {cta} <ArrowRight size={13} />
       </span>
     </button>
   )

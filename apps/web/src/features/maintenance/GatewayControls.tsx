@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Loader2, ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, Play, RotateCw, Square } from 'lucide-react'
 import { useSystemStore } from '@/stores/system'
-import { consumeSSE } from '@/lib/sseClient'
+import { consumeApiSSE } from '@clawboo/control-client'
+import { Button } from '@/features/shared/Button'
+import { StatusPill } from '@/features/shared/StatusPill'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -82,7 +84,7 @@ export function GatewayControls() {
       store.setGatewayControlStatus('starting')
 
       sseRef.current?.abort()
-      sseRef.current = consumeSSE(
+      sseRef.current = consumeApiSSE(
         '/api/system/gateway',
         {
           method: 'POST',
@@ -131,176 +133,73 @@ export function GatewayControls() {
   }, [refreshStatus])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div className="flex flex-col gap-4">
       {/* Status row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        {/* Pulsing dot */}
-        <span style={{ position: 'relative', display: 'inline-flex', width: 10, height: 10 }}>
-          {isRunning && (
-            <span
-              style={{
-                position: 'absolute',
-                inset: 0,
-                borderRadius: '50%',
-                background: 'var(--mint)',
-                animation: 'pulse 1.4s ease-out infinite',
-                opacity: 0.5,
-              }}
-            />
-          )}
-          <span
-            style={{
-              position: 'relative',
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              background: isRunning ? 'var(--mint)' : 'rgb(var(--primary-rgb) / 0.7)',
-            }}
-          />
-        </span>
-
-        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)' }}>
-          {isRunning ? 'Running' : 'Stopped'}
-        </span>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <StatusPill
+          tone={isRunning ? 'working' : 'idle'}
+          label={isRunning ? 'Running' : 'Stopped'}
+        />
 
         {info?.gateway.port && (
-          <span
-            style={{
-              fontSize: 11,
-              color: 'rgb(var(--foreground-rgb) / 0.4)',
-              fontFamily: 'var(--font-geist-mono, monospace)',
-            }}
-          >
-            :{info.gateway.port}
-          </span>
+          <span className="font-data text-[12px] text-foreground/45">:{info.gateway.port}</span>
         )}
 
         {isRunning && formatUptime(info?.gateway.uptimeMs ?? null) && (
-          <span style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
-            uptime {formatUptime(info?.gateway.uptimeMs ?? null)}
+          <span className="text-[12px] text-foreground/40">
+            uptime{' '}
+            <span className="font-data">{formatUptime(info?.gateway.uptimeMs ?? null)}</span>
           </span>
         )}
       </div>
 
       {/* Buttons */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          type="button"
+      <div className="flex gap-2">
+        <Button
+          variant="primary"
+          size="sm"
           disabled={isRunning || isBusy}
+          loading={gatewayControlStatus === 'starting'}
           onClick={() => handleStartOrRestart('start')}
-          style={{
-            height: 32,
-            padding: '0 12px',
-            fontSize: 11,
-            fontWeight: 600,
-            borderRadius: 8,
-            border: 'none',
-            cursor: isRunning || isBusy ? 'default' : 'pointer',
-            background: isRunning || isBusy ? 'rgb(var(--mint-rgb) / 0.15)' : 'var(--mint)',
-            color: isRunning || isBusy ? 'rgb(var(--mint-rgb) / 0.4)' : 'var(--background)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            transition: 'all 0.15s',
-          }}
         >
-          {gatewayControlStatus === 'starting' && (
-            <Loader2 style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
-          )}
+          {gatewayControlStatus !== 'starting' && <Play size={14} strokeWidth={2} />}
           Start
-        </button>
+        </Button>
 
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           disabled={!isRunning || isBusy}
+          loading={gatewayControlStatus === 'stopping'}
           onClick={() => void handleStop()}
-          style={{
-            height: 32,
-            padding: '0 12px',
-            fontSize: 11,
-            fontWeight: 600,
-            borderRadius: 8,
-            border: 'none',
-            cursor: !isRunning || isBusy ? 'default' : 'pointer',
-            background: !isRunning || isBusy ? 'rgb(var(--amber-rgb) / 0.15)' : 'var(--amber)',
-            color: !isRunning || isBusy ? 'rgb(var(--amber-rgb) / 0.4)' : 'var(--background)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            transition: 'all 0.15s',
-          }}
         >
-          {gatewayControlStatus === 'stopping' && (
-            <Loader2 style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
-          )}
+          {gatewayControlStatus !== 'stopping' && <Square size={14} strokeWidth={2} />}
           Stop
-        </button>
+        </Button>
 
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          size="sm"
           disabled={!isRunning || isBusy}
           onClick={() => handleStartOrRestart('restart')}
-          style={{
-            height: 32,
-            padding: '0 12px',
-            fontSize: 11,
-            fontWeight: 600,
-            borderRadius: 8,
-            border: 'none',
-            cursor: !isRunning || isBusy ? 'default' : 'pointer',
-            background: !isRunning || isBusy ? 'rgb(var(--primary-rgb) / 0.15)' : 'var(--primary)',
-            color: !isRunning || isBusy ? 'rgb(var(--primary-rgb) / 0.4)' : '#fff',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            transition: 'all 0.15s',
-          }}
         >
+          <RotateCw size={14} strokeWidth={2} />
           Restart
-        </button>
+        </Button>
       </div>
 
       {/* Collapsible log */}
       {gatewayLog.length > 0 && (
         <div>
-          <button
-            type="button"
-            onClick={() => setShowLog((v) => !v)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 11,
-              color: 'rgb(var(--foreground-rgb) / 0.4)',
-              padding: 0,
-            }}
-          >
-            {showLog ? (
-              <ChevronUp style={{ width: 12, height: 12 }} />
-            ) : (
-              <ChevronDown style={{ width: 12, height: 12 }} />
-            )}
+          <Button variant="ghost" size="sm" onClick={() => setShowLog((v) => !v)}>
+            {showLog ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             {showLog ? 'Hide log' : 'Show log'}
-          </button>
+          </Button>
 
           {showLog && (
             <div
-              style={{
-                marginTop: 8,
-                background: 'rgb(var(--foreground-rgb) / 0.03)',
-                border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                borderRadius: 8,
-                padding: '10px 12px',
-                maxHeight: 180,
-                overflowY: 'auto',
-                fontFamily: 'var(--font-geist-mono, monospace)',
-                fontSize: 11,
-                lineHeight: 1.6,
-                color: 'rgb(var(--foreground-rgb) / 0.55)',
-              }}
+              className="font-data mt-2 max-h-[180px] overflow-y-auto rounded-xl border border-border p-3 text-[11px] leading-relaxed text-foreground/60"
+              style={{ background: 'var(--terminal-bg)', color: 'rgba(201,209,217,0.72)' }}
             >
               {gatewayLog.map((line, i) => (
                 <div key={i}>{line}</div>
@@ -310,14 +209,6 @@ export function GatewayControls() {
           )}
         </div>
       )}
-
-      {/* CSS animation for pulsing dot */}
-      <style>{`
-        @keyframes pulse {
-          0% { transform: scale(1); opacity: 0.6; }
-          100% { transform: scale(2); opacity: 0; }
-        }
-      `}</style>
     </div>
   )
 }

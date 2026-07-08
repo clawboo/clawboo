@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Check, ChevronDown, ChevronRight } from 'lucide-react'
-import { findModelLabel } from '@/lib/modelCatalog'
+import { Button } from '@/features/shared/Button'
+import { SearchInput } from '@/features/shared/SearchInput'
+import { findModelLabel, formatProviderName } from '@/lib/modelCatalog'
 import { useModelCatalog } from '@/lib/useModelCatalog'
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -20,7 +22,6 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
   const [customInput, setCustomInput] = useState('')
   const [showCustom, setShowCustom] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const searchRef = useRef<HTMLInputElement>(null)
 
   // Close on click outside or Escape
   useEffect(() => {
@@ -32,14 +33,21 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
       }
     }
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape') {
+        // Capture phase + stopPropagation so Esc closes THIS dropdown, not a
+        // parent overlay (e.g. the Settings modal) whose own document-level Esc
+        // handler would otherwise also fire.
+        e.stopPropagation()
+        e.preventDefault()
+        setOpen(false)
+      }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleEscape)
+    document.addEventListener('keydown', handleEscape, true)
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleEscape)
+      document.removeEventListener('keydown', handleEscape, true)
     }
   }, [open])
 
@@ -50,7 +58,6 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
       setCustomInput('')
       setShowCustom(false)
       setHoveredProvider(null)
-      setTimeout(() => searchRef.current?.focus(), 0)
     }
   }, [open])
 
@@ -118,8 +125,8 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
           fontSize: 12,
           fontWeight: 500,
           borderRadius: 8,
-          border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-          background: 'rgb(var(--foreground-rgb) / 0.04)',
+          border: `1px solid ${open ? 'var(--border-strong)' : 'var(--border)'}`,
+          background: 'var(--surface)',
           color: currentModel ? 'var(--mint)' : 'rgb(var(--foreground-rgb) / 0.45)',
           cursor: 'pointer',
           transition: 'all 0.15s',
@@ -152,13 +159,14 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
         >
           {/* Level 1: Provider list */}
           <div
-            className="surface-floating-tier"
+            className="border border-border bg-popover"
             style={{
               minWidth: 190,
               maxHeight: 420,
               overflowY: 'auto',
-              borderRadius: 10,
+              borderRadius: 12,
               padding: '6px 0',
+              boxShadow: 'var(--shadow-floating)',
             }}
           >
             {/* Current custom model (pinned) */}
@@ -179,7 +187,7 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                     border: 'none',
                     cursor: 'pointer',
                     textAlign: 'left',
-                    fontFamily: 'var(--font-geist-mono, monospace)',
+                    fontFamily: 'var(--font-mono)',
                   }}
                 >
                   <span
@@ -203,25 +211,15 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
               </>
             )}
 
-            {/* Search */}
-            <div style={{ padding: '4px 8px 6px' }}>
-              <input
-                ref={searchRef}
-                type="text"
+            {/* Search — the shared primitive (leading icon + clear + brand focus ring) */}
+            <div className="px-2 pb-1.5 pt-1">
+              <SearchInput
+                size="sm"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search..."
-                style={{
-                  width: '100%',
-                  padding: '5px 8px',
-                  fontSize: 11,
-                  color: 'var(--foreground)',
-                  background: 'rgb(var(--foreground-rgb) / 0.04)',
-                  border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-                  borderRadius: 6,
-                  outline: 'none',
-                  fontFamily: 'var(--font-geist-mono, monospace)',
-                }}
+                onChange={setSearch}
+                placeholder="Search models…"
+                autoFocus
+                aria-label="Search models"
               />
             </div>
 
@@ -270,14 +268,14 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                       gap: 6,
                     }}
                   >
-                    <span>{group.provider}</span>
+                    <span>{formatProviderName(group.provider)}</span>
                     {!hasKey && (
                       <span
                         style={{
                           fontSize: 9,
-                          fontFamily: 'var(--font-geist-mono, monospace)',
+                          fontFamily: 'var(--font-mono)',
                           fontWeight: 600,
-                          letterSpacing: '0.08em',
+                          letterSpacing: '0.1em',
                           textTransform: 'uppercase',
                           padding: '1px 5px',
                           borderRadius: 4,
@@ -335,14 +333,15 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
           {/* Level 2: Model list or Custom input */}
           {(activeGroup || showCustom) && (
             <div
-              className="surface-floating-tier"
+              className="border border-border bg-popover"
               style={{
                 minWidth: 230,
                 maxHeight: 380,
                 overflowY: 'auto',
-                borderRadius: 10,
+                borderRadius: 12,
                 padding: '6px 0',
                 marginLeft: 4,
+                boxShadow: 'var(--shadow-floating)',
               }}
             >
               {activeGroup && (
@@ -355,10 +354,10 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                       letterSpacing: '0.08em',
                       color: 'rgb(var(--foreground-rgb) / 0.35)',
                       padding: '6px 14px 4px',
-                      fontFamily: 'var(--font-geist-mono, monospace)',
+                      fontFamily: 'var(--font-mono)',
                     }}
                   >
-                    {activeGroup.provider}
+                    {formatProviderName(activeGroup.provider)}
                   </div>
                   {!activeGroupConfigured && (
                     <div
@@ -366,9 +365,9 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                         fontSize: 10,
                         color: 'var(--amber)',
                         padding: '2px 14px 8px',
-                        fontFamily: 'var(--font-geist-mono, monospace)',
+                        fontFamily: 'var(--font-mono)',
                         fontWeight: 600,
-                        letterSpacing: '0.08em',
+                        letterSpacing: '0.14em',
                         textTransform: 'uppercase',
                       }}
                     >
@@ -382,38 +381,17 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                         key={model.id}
                         type="button"
                         onClick={activeGroupConfigured ? () => handleSelect(model.id) : undefined}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          width: '100%',
-                          padding: '6px 14px',
-                          fontSize: 12,
-                          color: !activeGroupConfigured
-                            ? 'rgb(var(--foreground-rgb) / 0.45)'
-                            : isSelected
-                              ? 'var(--mint)'
-                              : 'var(--foreground)',
-                          background: isSelected ? 'rgb(var(--mint-rgb) / 0.08)' : 'transparent',
-                          border: 'none',
-                          cursor: activeGroupConfigured ? 'pointer' : 'default',
-                          textAlign: 'left',
-                          transition: 'background 0.1s',
-                          opacity: activeGroupConfigured ? 1 : 0.4,
-                        }}
-                        onMouseEnter={(e) => {
-                          if (activeGroupConfigured && !isSelected)
-                            e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.04)'
-                        }}
-                        onMouseLeave={(e) => {
-                          if (activeGroupConfigured && !isSelected)
-                            e.currentTarget.style.background = 'transparent'
-                        }}
+                        className={[
+                          'flex w-full items-center gap-2 px-3.5 py-1.5 text-left text-[12px] transition-colors',
+                          isSelected
+                            ? 'bg-mint/[0.08] text-mint'
+                            : activeGroupConfigured
+                              ? 'cursor-pointer text-foreground hover:bg-foreground/[0.06]'
+                              : 'cursor-default text-foreground/45 opacity-40',
+                        ].join(' ')}
                       >
-                        <span style={{ flex: 1 }}>{model.label}</span>
-                        {isSelected && (
-                          <Check style={{ width: 14, height: 14, color: 'var(--mint)' }} />
-                        )}
+                        <span className="flex-1">{model.label}</span>
+                        {isSelected && <Check className="h-3.5 w-3.5 text-mint" />}
                       </button>
                     )
                   })}
@@ -427,10 +405,10 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                       fontSize: 10,
                       fontWeight: 600,
                       textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
+                      letterSpacing: '0.14em',
                       color: 'rgb(var(--foreground-rgb) / 0.35)',
                       marginBottom: 8,
-                      fontFamily: 'var(--font-geist-mono, monospace)',
+                      fontFamily: 'var(--font-mono)',
                     }}
                   >
                     Custom Model
@@ -445,49 +423,23 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
                       }}
                       placeholder="provider/model-id"
                       autoFocus
-                      style={{
-                        flex: 1,
-                        padding: '6px 8px',
-                        fontSize: 11,
-                        color: 'var(--foreground)',
-                        background: 'rgb(var(--foreground-rgb) / 0.04)',
-                        border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-                        borderRadius: 6,
-                        outline: 'none',
-                        fontFamily: 'var(--font-geist-mono, monospace)',
-                      }}
+                      className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 font-mono text-[11px] text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15"
                     />
-                    <button
-                      type="button"
+                    <Button
+                      variant="primary"
+                      size="sm"
                       disabled={!customInput.trim() || !customInput.includes('/')}
                       onClick={handleCustomSubmit}
-                      style={{
-                        padding: '0 10px',
-                        fontSize: 11,
-                        fontWeight: 600,
-                        borderRadius: 6,
-                        border: 'none',
-                        background:
-                          !customInput.trim() || !customInput.includes('/')
-                            ? 'rgb(var(--mint-rgb) / 0.15)'
-                            : 'var(--mint)',
-                        color:
-                          !customInput.trim() || !customInput.includes('/')
-                            ? 'rgb(var(--mint-rgb) / 0.4)'
-                            : 'var(--background)',
-                        cursor:
-                          !customInput.trim() || !customInput.includes('/') ? 'default' : 'pointer',
-                      }}
                     >
                       Use
-                    </button>
+                    </Button>
                   </div>
                   <div
                     style={{
                       fontSize: 10,
                       color: 'rgb(var(--foreground-rgb) / 0.45)',
                       marginTop: 6,
-                      fontFamily: 'var(--font-geist-mono, monospace)',
+                      fontFamily: 'var(--font-mono)',
                     }}
                   >
                     e.g. openrouter/minimax/minimax-m2.5
