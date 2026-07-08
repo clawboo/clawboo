@@ -6,13 +6,15 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { motion } from 'framer-motion'
-import { Brain, ListChecks, Lock, RefreshCw, Search, SearchX, Users } from 'lucide-react'
+import { Brain, Cpu, ListChecks, Lock, RefreshCw, Search, SearchX, Users } from 'lucide-react'
 
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
+import { PanelHeader } from '@/features/shared/PanelHeader'
+import { SegmentedControl } from '@/features/shared/SegmentedControl'
 import { Skeleton } from '@/features/shared/Skeleton'
-import { Spinner } from '@/features/shared/Spinner'
 import { StatusPill } from '@/features/shared/StatusPill'
 import { useToastStore } from '@/stores/toast'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
@@ -34,14 +36,8 @@ const MODES: SearchMode[] = ['fts', 'vector', 'hybrid']
 function Card({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="surface-raised-tier"
-      style={{
-        borderRadius: 10,
-        padding: '10px 12px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-      }}
+      className="flex flex-col gap-1.5 rounded-2xl border border-border bg-surface p-4 transition-colors hover:border-border-strong"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
     >
       {children}
     </div>
@@ -55,40 +51,16 @@ function ScopeBadge({ agentId, teamId }: { agentId: string | null; teamId: strin
   return <StatusPill tone="idle" label={label} style={{ flexShrink: 0 }} />
 }
 
-const KICKER = 'font-mono text-[11px] font-semibold uppercase tracking-wider'
+const KICKER = 'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className={KICKER} style={{ color: muted(0.4) }}>
-      {children}
-    </div>
-  )
+  return <div className={KICKER}>{children}</div>
 }
 
-// Shared input chrome. bg is var(--input) (visible in light mode, unlike the
-// old white-on-white var(--surface)); focus lifts the border to the brand
-// accent with a soft ring. onFocus/onBlur swap inline styles so the treatment
-// works on plain <input>/<textarea> without a wrapper.
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  fontSize: 12,
-  padding: '8px 10px',
-  borderRadius: 7,
-  border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-  background: 'var(--input)',
-  color: 'var(--foreground)',
-  outline: 'none',
-  transition: 'border-color var(--motion-fast), box-shadow var(--motion-fast)',
-}
-
-function focusInput(el: HTMLInputElement | HTMLTextAreaElement) {
-  el.style.borderColor = 'var(--primary)'
-  el.style.boxShadow = '0 0 0 3px rgb(var(--primary-rgb) / 0.12)'
-}
-function blurInput(el: HTMLInputElement | HTMLTextAreaElement) {
-  el.style.borderColor = 'rgb(var(--foreground-rgb) / 0.1)'
-  el.style.boxShadow = 'none'
-}
+// Shared input chrome — token-driven, with the standard brand focus ring (no
+// imperative onFocus/onBlur style mutation). bg-input stays visible in light.
+const INPUT_CLASS =
+  'w-full rounded-xl border border-border bg-input px-4 py-2.5 text-[14px] text-foreground outline-none transition placeholder:text-foreground/35 focus:border-primary focus:ring-4 focus:ring-primary/15'
 
 export function MemoryPanel() {
   const addToast = useToastStore((s) => s.addToast)
@@ -163,97 +135,42 @@ export function MemoryPanel() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div
-        style={{
-          height: 44,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Brain size={15} style={{ color: 'var(--mint)' }} />
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              fontFamily: 'var(--font-display)',
-              letterSpacing: '-0.01em',
-              color: 'var(--foreground)',
-            }}
-          >
-            Memory
-          </span>
-          <span
-            className="font-data"
-            style={{
-              fontSize: 10,
-              color: 'var(--primary)',
-              background: 'rgb(var(--primary-rgb) / 0.12)',
-              borderRadius: 20,
-              padding: '2px 8px',
-            }}
-          >
-            {facts.length} facts · {procedures.length} procs
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => void refreshBrowse()}
-            aria-label="Refresh"
-            className="memory-refresh-btn"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              height: 30,
-              padding: '0 11px',
-              borderRadius: 7,
-              fontSize: 11,
-              fontWeight: 500,
-              color: muted(0.6),
-              background: 'transparent',
-              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-              cursor: 'pointer',
-              transition:
-                'background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
-              e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.2)'
-              e.currentTarget.style.color = 'var(--foreground)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.1)'
-              e.currentTarget.style.color = muted(0.6)
-            }}
-          >
-            <RefreshCw size={12} /> Refresh
-          </button>
-          <GitHubStarButton />
-        </div>
-      </div>
+      <PanelHeader
+        title="Memory"
+        subtitle={`${facts.length} facts · ${procedures.length} procedures`}
+        icon={Brain}
+        border
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void refreshBrowse()}
+              aria-label="Refresh"
+              className="memory-refresh-btn"
+            >
+              <RefreshCw size={14} strokeWidth={2} /> Refresh
+            </Button>
+            <GitHubStarButton />
+          </>
+        }
+      />
 
-      <div data-testid="memory-panel" style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+      <div
+        data-testid="memory-panel"
+        style={{ flex: 1, overflow: 'auto' }}
+        className="px-6 py-5"
+      >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 760 }}>
           {/* Browse-load failure — distinct from a genuinely-empty store. */}
           {!browseOk && (
             <div data-testid="memory-fetch-error">
               <FormattedAlert tone="error">
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="flex items-center gap-2">
                   Couldn&apos;t load the memory store.
-                  <button
-                    type="button"
-                    onClick={() => void refreshBrowse()}
-                    style={{ textDecoration: 'underline', cursor: 'pointer', color: 'inherit' }}
-                  >
+                  <Button variant="ghost" size="sm" onClick={() => void refreshBrowse()}>
                     Retry
-                  </button>
+                  </Button>
                 </span>
               </FormattedAlert>
             </div>
@@ -264,16 +181,16 @@ export function MemoryPanel() {
             data-testid="memory-shared-banner"
             style={{
               display: 'flex',
-              gap: 9,
+              gap: 10,
               alignItems: 'flex-start',
-              borderRadius: 10,
-              padding: '10px 12px',
+              borderRadius: 16,
+              padding: '12px 14px',
               background: 'rgb(var(--mint-rgb) / 0.08)',
               border: '1px solid rgb(var(--mint-rgb) / 0.2)',
             }}
           >
-            <Users size={15} style={{ color: 'var(--mint)', flexShrink: 0, marginTop: 1 }} />
-            <div style={{ fontSize: 11, color: muted(0.65), lineHeight: 1.55 }}>
+            <Users size={16} style={{ color: 'var(--mint)', flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 12, color: muted(0.65), lineHeight: 1.55 }}>
               <strong style={{ color: 'var(--foreground)' }}>One shared memory.</strong> Every
               runtime on the team reads and writes this store through the Memory tool — it's the
               team's source of truth. Each runtime ALSO keeps its own private self-model, which
@@ -301,99 +218,81 @@ export function MemoryPanel() {
           </div>
 
           {/* Provider */}
-          <div style={{ fontSize: 11, color: muted(0.5) }}>
-            Embedding provider:{' '}
-            <span className="font-data" style={{ color: muted(0.75) }}>
-              {provider ? `${provider.id} · ${provider.dimensions}d` : 'FTS-only'}
-            </span>
-            {!provider && (
-              <span style={{ color: 'var(--amber)', marginLeft: 8 }}>
-                vector / hybrid search degrade to keyword (FTS)
+          <div
+            className="rounded-2xl border border-border bg-surface p-4"
+            style={{ boxShadow: 'var(--shadow-raised)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              <span
+                aria-hidden
+                className="flex shrink-0 items-center justify-center rounded-lg"
+                style={{
+                  width: 28,
+                  height: 28,
+                  color: muted(0.55),
+                  background: 'rgb(var(--foreground-rgb) / 0.05)',
+                }}
+              >
+                <Cpu size={15} strokeWidth={2} />
               </span>
+              <div className="min-w-0">
+                <div className={KICKER}>Embedding provider</div>
+                <div className="font-data mt-0.5 text-[13px] text-foreground">
+                  {provider ? `${provider.id} · ${provider.dimensions}d` : 'FTS-only'}
+                </div>
+              </div>
+              {!provider && (
+                <span style={{ marginLeft: 'auto' }}>
+                  <StatusPill tone="warning" label="FTS fallback" />
+                </span>
+              )}
+            </div>
+            {!provider && (
+              <p style={{ fontSize: 11, color: muted(0.5), marginTop: 8, lineHeight: 1.55 }}>
+                No embedding provider — vector / hybrid search degrade to keyword (FTS).
+              </p>
             )}
           </div>
 
           {/* Search */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <SectionLabel>Search</SectionLabel>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input
-                data-testid="memory-search-input"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void runSearch()
-                }}
-                onFocus={(e) => focusInput(e.currentTarget)}
-                onBlur={(e) => blurInput(e.currentTarget)}
-                placeholder="Search the memory store…"
-                style={{ ...inputStyle, flex: 1 }}
-              />
-              <button
-                type="button"
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div className="relative flex-1">
+                <Search
+                  size={15}
+                  strokeWidth={2}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-foreground/35"
+                />
+                <input
+                  data-testid="memory-search-input"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void runSearch()
+                  }}
+                  placeholder="Search the memory store…"
+                  className={`${INPUT_CLASS} pl-10`}
+                />
+              </div>
+              <Button
                 data-testid="memory-search-run"
                 onClick={() => void runSearch()}
-                disabled={searching}
+                loading={searching}
+                variant="primary"
+                size="md"
                 className="memory-action-btn"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  padding: '8px 12px',
-                  borderRadius: 7,
-                  border: '1px solid rgb(var(--mint-rgb) / 0.3)',
-                  background: 'rgb(var(--mint-rgb) / 0.12)',
-                  color: 'var(--mint)',
-                  cursor: searching ? 'default' : 'pointer',
-                  opacity: searching ? 0.6 : 1,
-                  transition: 'background var(--motion-fast)',
-                }}
-                onMouseEnter={(e) => {
-                  if (searching) return
-                  e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.2)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.12)'
-                }}
               >
-                {searching ? <Spinner size={13} /> : <Search size={13} />} Search
-              </button>
+                {searching ? null : <Search size={15} strokeWidth={2} />} Search
+              </Button>
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {MODES.map((m) => {
-                const isActive = mode === m
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMode(m)}
-                    className="font-data"
-                    style={{
-                      fontSize: 11,
-                      padding: '3px 10px',
-                      borderRadius: 20,
-                      border: `1px solid ${isActive ? 'rgb(var(--mint-rgb) / 0.4)' : 'rgb(var(--foreground-rgb) / 0.12)'}`,
-                      background: isActive ? 'rgb(var(--mint-rgb) / 0.12)' : 'transparent',
-                      color: isActive ? 'var(--mint)' : muted(0.55),
-                      cursor: 'pointer',
-                      transition: 'background var(--motion-fast), border-color var(--motion-fast)',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (isActive) return
-                      e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
-                    }}
-                    onMouseLeave={(e) => {
-                      if (isActive) return
-                      e.currentTarget.style.background = 'transparent'
-                    }}
-                  >
-                    {m}
-                  </button>
-                )
-              })}
-            </div>
+            <SegmentedControl<SearchMode>
+              options={MODES.map((m) => ({ id: m, label: m }))}
+              value={mode}
+              onChange={setMode}
+              size="sm"
+              aria-label="Search mode"
+            />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 }}>
               {results.map((r, i) => (
@@ -448,62 +347,35 @@ export function MemoryPanel() {
               data-testid="memory-fact-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              onFocus={(e) => focusInput(e.currentTarget)}
-              onBlur={(e) => blurInput(e.currentTarget)}
               placeholder="Title"
-              style={inputStyle}
+              className={INPUT_CLASS}
             />
             <textarea
               data-testid="memory-fact-content"
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              onFocus={(e) => focusInput(e.currentTarget)}
-              onBlur={(e) => blurInput(e.currentTarget)}
               placeholder="Content"
               rows={3}
-              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+              className={`${INPUT_CLASS} resize-y`}
             />
             <input
               value={tags}
               onChange={(e) => setTags(e.target.value)}
-              onFocus={(e) => focusInput(e.currentTarget)}
-              onBlur={(e) => blurInput(e.currentTarget)}
               placeholder="Tags (comma-separated)"
-              style={inputStyle}
+              className={INPUT_CLASS}
             />
             <div>
-              <button
-                type="button"
+              <Button
                 data-testid="memory-save-fact"
                 onClick={() => void onSave()}
                 disabled={saveDisabled}
+                loading={saving}
+                variant="primary"
+                size="md"
                 className="memory-action-btn"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  padding: '8px 14px',
-                  borderRadius: 7,
-                  border: '1px solid rgb(var(--mint-rgb) / 0.3)',
-                  background: 'rgb(var(--mint-rgb) / 0.12)',
-                  color: 'var(--mint)',
-                  cursor: saveDisabled ? 'default' : 'pointer',
-                  opacity: saveDisabled ? 0.5 : 1,
-                  transition: 'background var(--motion-fast)',
-                }}
-                onMouseEnter={(e) => {
-                  if (saveDisabled) return
-                  e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.2)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.12)'
-                }}
               >
-                {saving && <Spinner size={12} />}
                 {saving ? 'Saving…' : 'Save fact'}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -556,9 +428,9 @@ export function MemoryPanel() {
                             key={t}
                             className="font-data"
                             style={{
-                              fontSize: 10,
-                              padding: '1px 6px',
-                              borderRadius: 4,
+                              fontSize: 10.5,
+                              padding: '2px 8px',
+                              borderRadius: 6,
                               background: muted(0.06),
                               color: muted(0.6),
                             }}
