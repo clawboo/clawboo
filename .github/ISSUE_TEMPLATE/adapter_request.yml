@@ -1,0 +1,42 @@
+name: Runtime / adapter request
+description: Propose support for a new agent runtime or coding agent as a Clawboo teammate
+title: '[Adapter]: '
+labels: ['enhancement', 'area: connected-runtimes']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Clawboo ships a built-in native runtime plus Claude Code, Codex, Hermes, and OpenClaw as peer teammates. Use this to propose another one.
+  - type: input
+    id: runtime
+    attributes:
+      label: Which runtime or agent?
+      description: Name plus a link to its repo or docs.
+      placeholder: e.g. Aider - https://github.com/Aider-AI/aider
+    validations:
+      required: true
+  - type: textarea
+    id: interface
+    attributes:
+      label: How do you run it headlessly?
+      description: The CLI command, SDK, or API it exposes for a single non-interactive turn.
+    validations:
+      required: true
+  - type: dropdown
+    id: capabilities
+    attributes:
+      label: What can it do?
+      multiple: true
+      options:
+        - Streaming output
+        - Tool / function calling
+        - MCP support
+        - Session resume
+        - Reports token usage / cost
+    validations:
+      required: false
+  - type: textarea
+    id: why
+    attributes:
+      label: Why add it?
+      description: What would it bring to a Clawboo team that the current runtimes do not?

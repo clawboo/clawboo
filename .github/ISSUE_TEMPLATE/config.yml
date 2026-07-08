@@ -1,1 +1,8 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & ideas (Discussions)
+    url: https://github.com/clawboo/clawboo/discussions
+    about: Ask a question, share a team template, or propose an idea. Not sure if something is a bug? Start here.
+  - name: Documentation
+    url: https://docs.claw.boo
+    about: Read the docs before filing. Your answer may already be there.

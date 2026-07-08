@@ -1,0 +1,42 @@
+name: Setup & install help
+description: Trouble getting `npx clawboo` running or connecting a runtime
+title: '[Setup]: '
+labels: ['question', 'area: onboarding']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open-ended questions, [Discussions](https://github.com/clawboo/clawboo/discussions) is often faster. Use this for a specific, reproducible setup or install problem.
+  - type: textarea
+    id: what
+    attributes:
+      label: What are you trying to do, and what happens instead?
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command you ran
+      placeholder: npx clawboo
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Node and Clawboo versions
+      placeholder: 'node -v ; npx clawboo --version'
+  - type: textarea
+    id: logs
+    attributes:
+      label: Terminal output / logs
+      description: Paste any error output. It will be formatted as code automatically.
+      render: shell
