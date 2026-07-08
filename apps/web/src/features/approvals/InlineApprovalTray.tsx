@@ -1,12 +1,16 @@
 import { useMemo } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import { useApprovalsStore } from '@/stores/approvals'
-import { useFleetStore } from '@/stores/fleet'
+
+import type { ApprovalRequest } from '@/stores/approvals'
 import { useViewStore } from '@/stores/view'
 import { InlineApprovalCard } from './InlineApprovalCard'
+import { ToolApprovalCard } from './ToolApprovalCard'
+import { usePendingApprovals, type ToolApproval } from './usePendingApprovals'
 
 // ─── InlineApprovalTray ────────────────────────────────────────────────────
-// Renders up to 3 inline approval cards scoped to the current chat context.
+// Renders pending approvals (BOTH OpenClaw exec AND MCP tool / delegation) right
+// above the composer for the current chat — the Claude/ChatGPT pattern where the
+// gate appears where it was asked. Scoped to this agent (1:1) or team (group).
 // Returns null when empty — zero DOM footprint.
 
 const MAX_INLINE_CARDS = 3
@@ -16,81 +20,59 @@ interface InlineApprovalTrayProps {
   teamId?: string // Group chat: filter to agents in this team
 }
 
+type TrayItem =
+  | { key: string; ts: number; kind: 'exec'; exec: ApprovalRequest }
+  | { key: string; ts: number; kind: 'tool'; tool: ToolApproval }
+
 export function InlineApprovalTray({ agentId, teamId }: InlineApprovalTrayProps) {
-  const pendingApprovals = useApprovalsStore((s) => s.pendingApprovals)
-  const agents = useFleetStore((s) => s.agents)
-
-  // Build team agent ID set for group chat scoping
-  const teamAgentIds = useMemo(() => {
-    if (!teamId) return null
-    return new Set(agents.filter((a) => a.teamId === teamId).map((a) => a.id))
-  }, [agents, teamId])
-
   const showAgentName = Boolean(teamId)
+  // Exec + tool/delegation approvals scoped to this chat. A tool approval not
+  // attributable to any agent (agentId null) does not belong to a specific chat, so
+  // it stays out of the tray (it still shows on the Board's "Needs approval" column).
+  const { exec, tool, total, resolveTool } = usePendingApprovals(
+    agentId ? { agentId } : teamId ? { teamId } : {},
+  )
 
-  const filteredApprovals = useMemo(() => {
-    const all = Array.from(pendingApprovals.values())
+  const items = useMemo<TrayItem[]>(() => {
+    const merged: TrayItem[] = [
+      ...exec.map(
+        (a): TrayItem => ({ key: `exec-${a.id}`, ts: a.createdAtMs, kind: 'exec', exec: a }),
+      ),
+      ...tool.map((a): TrayItem => ({ key: `tool-${a.id}`, ts: a.createdAt, kind: 'tool', tool: a })),
+    ]
+    return merged.sort((a, b) => a.ts - b.ts)
+  }, [exec, tool])
 
-    let scoped
-    if (agentId) {
-      // 1:1 chat: only approvals for this agent
-      scoped = all.filter((a) => a.agentId === agentId)
-    } else if (teamAgentIds) {
-      // Group chat: approvals for any team member
-      scoped = all.filter((a) => a.agentId && teamAgentIds.has(a.agentId))
-    } else {
-      // Safety: no scope provided — show nothing
-      return []
-    }
+  // Safety: no scope provided → show nothing (never leak every team's approvals).
+  if ((!agentId && !teamId) || total === 0) return null
 
-    return scoped.sort((a, b) => a.createdAtMs - b.createdAtMs)
-  }, [pendingApprovals, agentId, teamAgentIds])
-
-  // Nothing to show — zero DOM footprint
-  if (filteredApprovals.length === 0) return null
-
-  const visibleApprovals = filteredApprovals.slice(0, MAX_INLINE_CARDS)
-  const overflowCount = filteredApprovals.length - MAX_INLINE_CARDS
+  const visible = items.slice(0, MAX_INLINE_CARDS)
+  const overflow = total - visible.length
 
   return (
-    <div
-      style={{
-        borderTop: '1px solid rgb(var(--amber-rgb) / 0.15)',
-        padding: '8px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        flexShrink: 0,
-      }}
-    >
+    <div className="flex flex-shrink-0 flex-col gap-2 border-t border-border px-4 py-2.5">
       <AnimatePresence mode="popLayout">
-        {visibleApprovals.map((approval) => (
-          <InlineApprovalCard key={approval.id} approval={approval} showAgentName={showAgentName} />
-        ))}
+        {visible.map((it) =>
+          it.kind === 'exec' ? (
+            <InlineApprovalCard key={it.key} approval={it.exec} showAgentName={showAgentName} />
+          ) : (
+            <ToolApprovalCard
+              key={it.key}
+              approval={it.tool}
+              onResolve={resolveTool}
+              showAgentName={showAgentName}
+              compact
+            />
+          ),
+        )}
       </AnimatePresence>
 
-      {overflowCount > 0 && (
+      {overflow > 0 && (
         <button
-          onClick={() => useViewStore.getState().navigateTo('approvals')}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'rgb(var(--amber-rgb) / 0.5)',
-            fontSize: 10,
-            fontWeight: 500,
-            cursor: 'pointer',
-            padding: '2px 0',
-            textAlign: 'center',
-            transition: 'color 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = 'var(--amber)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = 'rgb(var(--amber-rgb) / 0.5)'
-          }}
+          onClick={() => useViewStore.getState().navigateTo('board')}
+          className="cursor-pointer rounded-md py-1 text-center text-[10px] font-medium text-foreground/45 transition hover:text-primary"
         >
-          +{overflowCount} more — view all
+          +{overflow} more — view on the board
         </button>
       )}
     </div>
