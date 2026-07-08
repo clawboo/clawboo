@@ -5,12 +5,11 @@ import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useViewStore } from '@/stores/view'
 import { useToastStore } from '@/stores/toast'
+import { useMarketplaceStore } from '@/stores/marketplace'
+import { confirm } from '@/stores/confirm'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
-import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
 import { TeamContextMenu } from '@/features/teams/TeamContextMenu'
 import { refreshTeamAgentsMd } from '@/lib/createAgent'
-import { hydrateTeams } from '@/lib/hydrateTeams'
-import { useGraphStore } from '@/features/graph/store'
 
 // ─── MascotIcon ──────────────────────────────────────────────────────────────
 
@@ -29,9 +28,9 @@ function MascotIcon({
       onContextMenu={onContextMenu}
       title="All Agents"
       className={[
-        'flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] p-0 transition-all duration-150',
+        'flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] p-0 transition-all duration-150',
         selected
-          ? 'border-2 border-primary bg-primary/12'
+          ? 'border-2 border-primary bg-primary/10'
           : 'border-2 border-transparent bg-foreground/[0.04] hover:bg-foreground/[0.07]',
       ].join(' ')}
     >
@@ -55,20 +54,26 @@ function TeamIcon({
 }) {
   return (
     <div className="relative flex items-center">
-      {/* Discord-style selected pill on left edge */}
+      {/* Selected indicator pill on the left edge — brand red. */}
       {selected && (
-        <div className="absolute h-5 w-1 rounded-r bg-foreground" style={{ left: -8 }} />
+        <div
+          className="absolute h-5 w-1 rounded-r-full"
+          style={{ left: -8, background: 'var(--primary)' }}
+        />
       )}
       <button
         onClick={onClick}
         onContextMenu={onContextMenu}
         title={team.name}
         className={[
-          'flex h-10 w-10 shrink-0 items-center justify-center border-none p-0 text-xl leading-none transition-all duration-150',
-          selected ? 'rounded-[12px]' : 'rounded-[20px] hover:rounded-[12px]',
+          'flex h-10 w-10 shrink-0 items-center justify-center border-none p-0 text-xl leading-none transition-all duration-200 cursor-pointer',
+          selected ? 'rounded-[13px]' : 'rounded-[20px] hover:rounded-[14px]',
           team.color ? '' : 'bg-foreground/[0.06]',
         ].join(' ')}
-        style={team.color ? { background: team.color } : undefined}
+        style={{
+          ...(team.color ? { background: team.color } : {}),
+          ...(selected ? { boxShadow: '0 0 0 2px var(--primary)' } : {}),
+        }}
       >
         {team.icon}
       </button>
@@ -82,23 +87,18 @@ export function TeamSidebar() {
   const teams = useTeamStore((s) => s.teams)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
   const selectTeam = useTeamStore((s) => s.selectTeam)
-  const [showCreateModal, setShowCreateModal] = useState(false)
   const [contextMenu, setContextMenu] = useState<{
     x: number
     y: number
     team: Team
   } | null>(null)
 
-  const handleTeamCreated = useCallback(async () => {
-    setShowCreateModal(false)
-    await hydrateTeams()
-    useGraphStore.getState().triggerRefresh()
-    const newTeamId = useTeamStore.getState().selectedTeamId
-    if (newTeamId) {
-      useViewStore.getState().openGroupChat(newTeamId)
-    } else {
-      useViewStore.getState().navigateTo('graph')
-    }
+  // Creating a team is now a Marketplace journey: the "+" navigates to the
+  // Teams tab (the one canonical, richer team showcase) instead of opening a
+  // second, duplicate template picker.
+  const openTeamMarketplace = useCallback(() => {
+    useMarketplaceStore.getState().setMarketplaceTab('teams')
+    useViewStore.getState().navigateTo('marketplace')
   }, [])
 
   const handleArchiveTeam = useCallback(async () => {
@@ -137,16 +137,18 @@ export function TeamSidebar() {
     if (!contextMenu) return
     const { team } = contextMenu
 
+    setContextMenu(null)
+
     if (
-      !window.confirm(
-        `Delete team "${team.name}"? Agents will be kept but unassigned from this team.`,
-      )
+      !(await confirm({
+        title: `Delete "${team.name}"?`,
+        message: 'Agents will be kept but unassigned from this team.',
+        confirmLabel: 'Delete team',
+        tone: 'danger',
+      }))
     ) {
-      setContextMenu(null)
       return
     }
-
-    setContextMenu(null)
 
     try {
       await fetch(`/api/teams/${team.id}`, { method: 'DELETE' })
@@ -180,16 +182,18 @@ export function TeamSidebar() {
     const teamAgents = useFleetStore.getState().agents.filter((a) => a.teamId === team.id)
 
     const agentCountText = teamAgents.length === 1 ? '1 agent' : `${teamAgents.length} agents`
+    setContextMenu(null)
+
     if (
-      !window.confirm(
-        `Delete team "${team.name}" and ${agentCountText}? This will permanently remove the agents from the Gateway.`,
-      )
+      !(await confirm({
+        title: `Delete "${team.name}" and ${agentCountText}?`,
+        message: 'This will permanently remove the agents from the Gateway.',
+        confirmLabel: 'Delete everything',
+        tone: 'danger',
+      }))
     ) {
-      setContextMenu(null)
       return
     }
-
-    setContextMenu(null)
 
     let deletedCount = 0
     try {
@@ -310,7 +314,7 @@ export function TeamSidebar() {
   return (
     <div
       data-testid="team-sidebar"
-      className="flex h-full w-[60px] shrink-0 flex-col items-center gap-2 border-r border-border bg-muted/60 pb-3 pt-3 dark:bg-[#080B14]"
+      className="flex h-full w-[60px] shrink-0 flex-col items-center gap-2 border-r border-border bg-background pb-3 pt-3"
     >
       <MascotIcon
         selected={selectedTeamId === null}
@@ -328,7 +332,7 @@ export function TeamSidebar() {
       <div className="w-8 shrink-0 border-t border-border" />
 
       {/* Team icons */}
-      <div className="flex w-full flex-1 flex-col items-center gap-2 overflow-y-auto px-2.5">
+      <div className="flex w-full flex-1 flex-col items-center gap-2 overflow-y-auto px-2.5 py-2">
         {activeTeams.map((team) => (
           <TeamIcon
             key={team.id}
@@ -346,11 +350,12 @@ export function TeamSidebar() {
         ))}
       </div>
 
-      {/* Add team button */}
+      {/* Add team button — opens the Marketplace Teams showcase (the single
+          canonical place to browse + deploy a team, or start one from scratch). */}
       <button
-        title="Create team"
-        onClick={() => setShowCreateModal(true)}
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-dashed border-border bg-transparent p-0 text-secondary/40 transition-all duration-150 hover:border-primary/40 hover:text-primary/70"
+        title="Create a team"
+        onClick={openTeamMarketplace}
+        className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] border border-dashed border-border-strong bg-transparent p-0 text-foreground/40 transition-all duration-150 hover:border-primary hover:text-primary hover:bg-primary/[0.06]"
       >
         <Plus size={16} strokeWidth={2} />
       </button>
@@ -368,7 +373,7 @@ export function TeamSidebar() {
             useViewStore.getState().toggleColumnCollapsed()
           }
         }}
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border-none bg-transparent p-0 text-secondary/40 transition-all duration-150 hover:text-foreground/70"
+        className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] border-none bg-transparent p-0 text-foreground/40 transition-all duration-150 hover:bg-foreground/[0.05] hover:text-foreground/70"
       >
         {columnCollapsed || isBooZero ? (
           <PanelLeftOpen size={16} strokeWidth={2} />
@@ -381,7 +386,7 @@ export function TeamSidebar() {
       {mascotMenu && (
         <div
           ref={mascotMenuRef}
-          className="fixed z-[60] min-w-[160px] rounded-lg border border-border bg-popover py-1 shadow-lg"
+          className="fixed z-[60] min-w-[168px] rounded-xl border border-border bg-popover py-1.5 shadow-[var(--shadow-floating)]"
           style={{ left: mascotMenu.x, top: mascotMenu.y }}
         >
           <button
@@ -394,7 +399,7 @@ export function TeamSidebar() {
               }
               setMascotMenu(null)
             }}
-            className="block w-full whitespace-nowrap border-none bg-transparent px-3.5 py-2 text-left text-xs text-popover-foreground transition-colors hover:bg-foreground/5"
+            className="block w-full cursor-pointer whitespace-nowrap border-none bg-transparent px-3.5 py-2 text-left text-[13px] text-popover-foreground transition-colors hover:bg-foreground/[0.06]"
           >
             Show all agents
           </button>
@@ -414,12 +419,6 @@ export function TeamSidebar() {
           onDeleteWithAgents={handleDeleteTeamWithAgents}
         />
       )}
-
-      <CreateTeamModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onCreated={handleTeamCreated}
-      />
     </div>
   )
 }

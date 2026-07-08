@@ -1,19 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { GhostGraphPanel } from '@/features/graph/GhostGraphPanel'
-import { SchedulerPanel } from '@/features/scheduler/SchedulerPanel'
-import { ApprovalsPanel } from '@/features/approvals/ApprovalsPanel'
-import { CostDashboard } from '@/app/cost/CostDashboard'
-import { MarketplacePanel } from '@/features/marketplace/MarketplacePanel'
-import { MaintenancePanel } from '@/features/maintenance'
-import { ObsPanel } from '@/features/obs'
-import { BoardPanel } from '@/features/board/BoardPanel'
-import { RuntimesPanel } from '@/features/runtimes/RuntimesPanel'
-import { FleetHealth } from '@/features/fleet/FleetHealth'
-import { MemoryPanel } from '@/features/memory/MemoryPanel'
-import { CapabilitiesPanel } from '@/features/capabilities/CapabilitiesPanel'
-import { GovernancePanel } from '@/features/governance/GovernancePanel'
-import { SystemHealthPanel } from '@/features/health'
+import { NAV_PANELS } from './navPanels'
 import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
 import { AgentDetailView } from '@/features/agent-detail'
 import { GroupChatView } from '@/features/group-chat/GroupChatView'
@@ -23,6 +10,7 @@ import { useEditorStore } from '@/stores/editor'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import type { NavView } from '@/stores/view'
 
 // ─── View transition config ─────────────────────────────────────────────────
@@ -33,27 +21,6 @@ const VIEW_STYLE = {
   flex: 1,
   flexDirection: 'column' as const,
   overflow: 'hidden' as const,
-}
-
-// Nav view → component mapping. The `'graph'` slot renders Atlas — the
-// global all-teams view with Boo Zero at the top of the hierarchy. The
-// team-scoped Ghost Graph still lives inside `GroupChatView` (rendered
-// with the default `scope === 'team'`).
-const NAV_PANELS: Record<NavView, () => ReactNode> = {
-  graph: () => <GhostGraphPanel scope="atlas" />,
-  fleet: () => <FleetHealth />,
-  scheduler: () => <SchedulerPanel />,
-  approvals: () => <ApprovalsPanel />,
-  cost: () => <CostDashboard />,
-  marketplace: () => <MarketplacePanel />,
-  system: () => <MaintenancePanel />,
-  obs: () => <ObsPanel />,
-  board: () => <BoardPanel />,
-  runtimes: () => <RuntimesPanel />,
-  memory: () => <MemoryPanel />,
-  governance: () => <GovernancePanel />,
-  capabilities: () => <CapabilitiesPanel />,
-  health: () => <SystemHealthPanel />,
 }
 
 export function ContentArea() {
@@ -114,8 +81,14 @@ export function ContentArea() {
       // Skip if inside a CodeMirror editor
       if ((e.target as HTMLElement)?.closest?.('.cm-editor')) return
 
-      // Escape — deselect agent, go to welcome (only if no overlay is open)
+      // Escape — close the Settings modal first if it's open, else deselect
+      // agent / go to welcome (only if no other overlay is open)
       if (e.key === 'Escape') {
+        if (useSettingsModalStore.getState().open) {
+          e.preventDefault()
+          useSettingsModalStore.getState().close()
+          return
+        }
         if (useEditorStore.getState().isOpen) return
         if (
           viewMode.type === 'agent' ||
@@ -129,19 +102,20 @@ export function ContentArea() {
         return
       }
 
-      // Cmd/Ctrl+1-6 — quick nav to views
+      // Cmd/Ctrl+, — open the Settings modal (the universal settings shortcut)
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === ',') {
+        e.preventDefault()
+        useSettingsModalStore.getState().openSettings()
+        return
+      }
+
+      // Cmd/Ctrl+1-4 — quick nav to the sidebar work surfaces (Approvals folded
+      // into the Board, so it's no longer a standalone shortcut).
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         const num = parseInt(e.key, 10)
-        if (num >= 1 && num <= 6) {
+        if (num >= 1 && num <= 4) {
           e.preventDefault()
-          const views: NavView[] = [
-            'graph',
-            'marketplace',
-            'approvals',
-            'scheduler',
-            'cost',
-            'system',
-          ]
+          const views: NavView[] = ['graph', 'fleet', 'marketplace', 'board']
           useViewStore.getState().navigateTo(views[num - 1]!)
         }
       }
