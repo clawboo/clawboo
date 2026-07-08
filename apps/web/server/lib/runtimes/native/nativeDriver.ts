@@ -13,11 +13,13 @@ import path from 'node:path'
 import type { NativeDriver, NativeEvent } from '@clawboo/adapter-native'
 import { chatMessages, createDb, type ClawbooDb } from '@clawboo/db'
 import type { StartOpts } from '@clawboo/executor'
+import { isTeamSessionKey } from '@clawboo/team-orchestration'
 
 import { getDbPath } from '../../db'
 import type { RuntimeRunContext } from '../types'
 import { loadAgentConfigOrDefault } from './agentConfigStore'
 import { Conversation } from './conversation'
+import { buildDelegateTool } from './delegateTool'
 import { buildFileTools } from './fileTools'
 import { connectMcpBridge, type McpBridge } from './mcpBridge'
 import { createRoutedClient, type RoutedProviderClient } from './routeCall'
@@ -79,7 +81,13 @@ export function createNativeDriver(
   const db = deps.db ?? createDb(getDbPath())
 
   const push = (ev: NativeEvent): void => {
-    if (ev.type === 'result' && ev.ok) persistNativeChatEntry(db, opts.agentId, ev.summary)
+    // Persist the agent's reply into its 1:1 history — UNLESS this run is a
+    // team-chat run (sessionKey `agent:<id>:team:<teamId>`). For a team run the
+    // server orchestrator already persists the terminal under the team key (via
+    // serverDeliver.persistTurn → persistTeamChatEntry); writing it here too would
+    // leak the team turn into the agent's 1:1 chat panel (a live ChatPanel surface).
+    if (ev.type === 'result' && ev.ok && !isTeamSessionKey(opts.sessionKey))
+      persistNativeChatEntry(db, opts.agentId, ev.summary)
     if (!subscribed) {
       buffered.push(ev)
       return
@@ -109,7 +117,15 @@ export function createNativeDriver(
         config,
         client,
         mcp,
-        localTools: buildFileTools(ctx.cwd ?? null),
+        // Private-plane file tools (cwd-jailed) + the team-delegation SIGNAL tool.
+        // The `delegate` tool is present ONLY for a team run (`agent:<id>:team:<teamId>`),
+        // where the server orchestrator is guaranteed to be draining this run's events
+        // and will turn a `delegate` tool-call into a durable board task. In a 1:1 run
+        // there is no orchestrator, so the tool is (correctly) absent.
+        localTools: [
+          ...buildFileTools(ctx.cwd ?? null),
+          ...(isTeamSessionKey(opts.sessionKey) ? [buildDelegateTool()] : []),
+        ],
         opts,
         ctx,
         db,

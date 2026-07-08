@@ -14,10 +14,11 @@ import { createDb, type ClawbooDb } from '@clawboo/db'
 import type { StartOpts } from '@clawboo/executor'
 
 import type { RuntimeRunContext } from '../../types'
-import { Conversation } from '../conversation'
+import { boundResumedTranscript, Conversation } from '../conversation'
 import { buildFileTools } from '../fileTools'
 import type { McpBridge } from '../mcpBridge'
-import type { ProviderStreamEvent, ProviderTurnParams } from '../providers/types'
+import { isContextOverflowMessage } from '../providers/types'
+import type { NeutralMessage, ProviderStreamEvent, ProviderTurnParams } from '../providers/types'
 import type { RoutedProviderClient } from '../routeCall'
 import { loadSessionTranscript } from '../sessionStore'
 
@@ -411,6 +412,49 @@ describe('Conversation turn loop', () => {
     })
   })
 
+  it('compacts a large tool result before it re-enters the model transcript (obs keeps the full output)', async () => {
+    // A large, highly compressible tool output — the class of "read a whole file"
+    // result that, re-sent every turn, would inflate the prompt past the window.
+    const bigOutput = Array.from({ length: 500 }, () => 'repeated line of tool output content').join(
+      '\n',
+    )
+    const bigMcp: McpBridge = {
+      async listTools() {
+        return [{ name: 'big_read', description: 'reads a lot', inputSchema: { type: 'object' } }]
+      },
+      owns: (name) => name === 'big_read',
+      async callTool() {
+        return { output: bigOutput, isError: false }
+      },
+      async close() {},
+    }
+    const scripted = scriptedClient([
+      [{ type: 'tool-call', id: 'tc1', name: 'big_read', input: {} }, usage(10, 5)],
+      [{ type: 'text', delta: 'read it' }, usage(20, 5)],
+    ])
+    const conversation = new Conversation({
+      config: { ...DEFAULT_AGENT_CONFIG, id: OPTS.agentId },
+      client: scripted.client,
+      mcp: bigMcp,
+      localTools: buildFileTools(cwd),
+      opts: OPTS,
+      ctx: { cwd, homeDir: path.join(sandbox, 'home') },
+      db,
+      emit: (ev) => events.push(ev),
+    })
+    await conversation.run()
+
+    // The obs/UI emit keeps the FULL output…
+    const emitted = events.find((e) => e.type === 'tool-result') as { output: string }
+    expect(emitted.output).toBe(bigOutput)
+    // …but turn 2's MODEL transcript carries a COMPACTED tool-result (smaller).
+    const turn2 = scripted.seenParams[1]
+    const lastMsg = turn2?.messages[turn2.messages.length - 1]
+    const toolResult = lastMsg?.content[0] as { type: string; output: string }
+    expect(toolResult.type).toBe('tool-result')
+    expect(toolResult.output.length).toBeLessThan(bigOutput.length)
+  })
+
   it('a provider error surfaces as a typed error terminal', async () => {
     const scripted: Scripted = {
       seenParams: [],
@@ -432,5 +476,135 @@ describe('Conversation turn loop', () => {
       ok: false,
       errorCode: 'auth',
     })
+  })
+
+  it('a context-overflow provider error surfaces as a CLEAN, typed context_overflow terminal (no raw /reset remediation)', async () => {
+    const scripted: Scripted = {
+      seenParams: [],
+      setModelCalls: [],
+      client: {
+        activeModel: () => 'claude-haiku-4-5',
+        activeProvider: () => 'anthropic',
+        setModel: () => {},
+        // eslint-disable-next-line require-yield
+        async *streamTurn() {
+          const { ProviderError } = await import('../providers/types')
+          throw new ProviderError(
+            'Context overflow: prompt too large for the model. Try /reset (or /new) to start a fresh session, or use a larger-context model.',
+            'bad_request',
+            400,
+          )
+        },
+      },
+    }
+    await makeConversation(scripted).run()
+    const result = events[events.length - 1] as {
+      type: string
+      ok: boolean
+      errorCode?: string
+      errorMessage?: string
+    }
+    expect(result).toMatchObject({ type: 'result', ok: false, errorCode: 'context_overflow' })
+    // the raw provider remediation (CLI-only, inapplicable to a team run) is NOT surfaced
+    expect(result.errorMessage).not.toContain('/reset')
+    expect(result.errorMessage).not.toContain('larger-context')
+    expect(result.errorMessage).toContain('context window')
+  })
+})
+
+describe('isContextOverflowMessage', () => {
+  it('matches the common provider overflow phrasings', () => {
+    for (const msg of [
+      'Context overflow: prompt too large for the model. Try /reset (or /new)',
+      "This model's maximum context length is 200000 tokens. However, your messages resulted in 250000 tokens.",
+      'prompt is too long: 250000 tokens > 200000 maximum',
+      'input length and max_tokens exceed context limit',
+      'too many tokens in the request',
+    ]) {
+      expect(isContextOverflowMessage(msg)).toBe(true)
+    }
+  })
+
+  it('does NOT match an unrelated bad-request / validation error', () => {
+    for (const msg of [
+      'invalid request: missing required field "name"',
+      '400 Bad Request: malformed JSON',
+      'authentication failed: invalid x-api-key',
+    ]) {
+      expect(isContextOverflowMessage(msg)).toBe(false)
+    }
+  })
+})
+
+describe('boundResumedTranscript', () => {
+  const userText = (t: string): NeutralMessage => ({
+    role: 'user',
+    content: [{ type: 'text', text: t }],
+  })
+  const assistantText = (t: string): NeutralMessage => ({
+    role: 'assistant',
+    content: [{ type: 'text', text: t }],
+  })
+  const assistantCall = (id: string): NeutralMessage => ({
+    role: 'assistant',
+    content: [{ type: 'tool-call', id, name: 'x', input: {} }],
+  })
+  const toolResult = (id: string, out: string): NeutralMessage => ({
+    role: 'user',
+    content: [{ type: 'tool-result', id, output: out, isError: false }],
+  })
+  // A turn-group = a user-text opener + an assistant tool-call + its tool-result.
+  const group = (n: number, size = 60): NeutralMessage[] => [
+    userText(`Q${n} ${'x'.repeat(size)}`),
+    assistantCall(`c${n}`),
+    toolResult(`c${n}`, 'y'.repeat(size)),
+  ]
+
+  /** No tool-result may appear before its matching tool-call in the slice. */
+  function pairSafe(messages: NeutralMessage[]): boolean {
+    const seenCalls = new Set<string>()
+    for (const m of messages) {
+      for (const part of m.content) {
+        if (part.type === 'tool-call') seenCalls.add(part.id)
+        if (part.type === 'tool-result' && !seenCalls.has(part.id)) return false
+      }
+    }
+    return true
+  }
+
+  it('returns the transcript unchanged (same reference) when under budget', () => {
+    const msgs = [userText('a'), assistantText('b')]
+    expect(boundResumedTranscript(msgs, 10_000)).toBe(msgs)
+  })
+
+  it('trims whole turn-groups from the front, keeping the recent window, pair-safe', () => {
+    const msgs = [...group(1), ...group(2), ...group(3)]
+    const out = boundResumedTranscript(msgs, 250)
+    // Fewer messages than the input (something was trimmed)…
+    expect(out.length).toBeLessThan(msgs.length)
+    // …the slice starts at a user-TEXT boundary (never an orphaned tool-result or a
+    // dangling assistant), so no tool-call/result pair is split…
+    expect(out[0]?.role).toBe('user')
+    expect(out[0]?.content[0]?.type).toBe('text')
+    // …and no tool-result precedes its tool-call.
+    expect(pairSafe(out)).toBe(true)
+  })
+
+  it('keeps at least the most recent group even if it alone exceeds the budget', () => {
+    const msgs = [...group(1, 30), userText(`Q2 ${'z'.repeat(500)}`), assistantText('done')]
+    const out = boundResumedTranscript(msgs, 50)
+    expect(out[0]?.content[0]).toMatchObject({ type: 'text' })
+    // The most recent group survived.
+    const kept = out
+      .flatMap((m) => m.content)
+      .some((c) => c.type === 'text' && c.text.startsWith('Q2 '))
+    expect(kept).toBe(true)
+    expect(pairSafe(out)).toBe(true)
+  })
+
+  it('leaves a single-group transcript untouched (no safe internal boundary)', () => {
+    const msgs = [userText(`only ${'x'.repeat(2000)}`), assistantCall('c1'), toolResult('c1', 'y')]
+    // Only one user-text group start → nothing safe to trim, returned unchanged.
+    expect(boundResumedTranscript(msgs, 10)).toBe(msgs)
   })
 })
