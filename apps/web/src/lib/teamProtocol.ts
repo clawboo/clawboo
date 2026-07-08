@@ -1,3 +1,19 @@
+// The broken-shape assistant-turn filter + its control-token constants moved to
+// @clawboo/team-orchestration (shared with the server-side single chat writer so a
+// thin client that skips the render filter still never persists a control token).
+// Imported for local use AND re-exported at the bottom so existing
+// `@/lib/teamProtocol` consumers (chatComponents, teamProtocol.test.ts) keep
+// working unchanged.
+import {
+  RESUME_ACK_TOKEN,
+  SKIP_ACK_TOKEN,
+  MIN_SUBSTANTIVE_LENGTH,
+  isOpenclawControlToken,
+  isClawbooControlToken,
+  isLikelyRefusal,
+  shouldDropAssistantTurn,
+} from '@clawboo/team-orchestration'
+
 export type TeammateDef = { name: string; role: string }
 
 export type BuildTeamAgentsMdParams = {
@@ -300,137 +316,6 @@ ${rules}
 `
 }
 
-/**
- * Silent re-init body for sleepy team-agent sessions.
- *
- * **Why this exists**: OpenClaw agents go cold after idle TTL. Before
- * resuming agent-to-agent work, we need a chat.send to wake the session.
- * The previous wake body asked agents to introduce themselves AND listed
- * teammates as `@AgentName` — both of
- * those triggered a cascade of intros and false-positive delegations
- * (the "Welcome aboard X" intro flood — see
- * the "Group Chat Onboarding Gate — Cascade Fix" notes in the internal
- * architecture docs).
- *
- * This replacement says "you're resuming, stay quiet, the next message
- * is the real one". It pairs with the new `### Resuming sessions` rule
- * in `buildTeamAgentsMd` which deterministically loads into the agent's
- * context every turn — so even if the LLM ignores the in-message hint,
- * AGENTS.md tells it the same thing.
- *
- * Used by `groupChatSendOperation.wakeTeamAgents` (user-message-time wake).
- */
-/**
- * The literal token an agent should emit in response to a resume wake-up.
- * Filtered out of the merged transcript renderer so it never pollutes the
- * visible chat.
- */
-export const RESUME_ACK_TOKEN = '__resumed__'
-
-// ─── Render-time defensive filters ─────────────────────────────────────────
-//
-// Production showed three distinct families of broken-shape assistant turns
-// leaking into the visible chat:
-//
-//   1. OpenClaw protocol control tokens — `ANNOUNCE_SKIP`, `NO_REPLY`, and the
-//      stripped variant `NO`. These are emitted by the Gateway's agent-to-
-//      agent coordination layer (see OpenClaw issue tracker). The Gateway
-//      does NOT pre-filter them — Clawboo reads raw event streams, so the
-//      renderer is the right place.
-//   2. Clawboo control tokens — `__resumed__` (already filtered) and the new
-//      `__skipped__` canonical "no contribution" signal we instruct agents
-//      to use when they have nothing substantive to add.
-//   3. Short refusal-shape responses from team agents during normal turns —
-//      bare "Sorry", "Nope", "Cannot", "Unable". Onboarding has its own
-//      retry logic (`TeamOnboardingGate.tsx`); this catches everything else.
-//      Note: bare "NO" is covered by category 1 (the stripped NO_REPLY)
-//      rather than this refusal regex.
-//
-// `shouldDropAssistantTurn` is the single render-time entry point, wired into
-// `chatComponents.groupEntriesToBlocks` (UI render) so broken-shape turns never
-// reach the visible chat.
-
-/**
- * Canonical Clawboo "no substantive contribution" token. We instruct agents
- * in `buildTeamAgentsMd` to emit ONLY this string when they have nothing to
- * add to a delegation or relay. Filtered out of the visible chat so the
- * transcript stays clean.
- */
-export const SKIP_ACK_TOKEN = '__skipped__'
-
-const OPENCLAW_CONTROL_TOKENS = new Set<string>(['ANNOUNCE_SKIP', 'NO_REPLY', 'NO'])
-
-// OpenClaw Gateway has a known truncation bug that strips `NO_REPLY` to
-// variable lengths — `NO_REPLY`, the fully-stripped `NO`, and partial
-// prefixes like `NO_RE` can all appear. This regex matches any
-// underscore-form prefix:
-//   NO_, NO_R, NO_RE, NO_REP, NO_REPL, NO_REPLY
-// Natural language doesn't write these underscore-form prefixes, so the
-// false-positive risk is zero. Bare `NO` is still matched by the canonical
-// set entry above to keep the existing semantics.
-const NO_REPLY_PREFIX_RE = /^NO_R?E?P?L?Y?$/i
-
-export function isOpenclawControlToken(text: string): boolean {
-  const trimmed = text.trim()
-  if (OPENCLAW_CONTROL_TOKENS.has(trimmed.toUpperCase())) return true
-  if (NO_REPLY_PREFIX_RE.test(trimmed)) return true
-  return false
-}
-
-export function isClawbooControlToken(text: string): boolean {
-  const t = text.trim()
-  return t === RESUME_ACK_TOKEN || t === SKIP_ACK_TOKEN
-}
-
-// Refusal regex used for short bare refusals in normal team turns. NOTE: the
-// onboarding-time regex in `TeamOnboardingGate.tsx` ALSO matches `no|nope`;
-// here we only match the longer refusal openers because bare `NO` is already
-// covered by `isOpenclawControlToken` (it's the stripped `NO_REPLY` variant
-// per OpenClaw issue tracker). Matching `no` here would over-trigger on
-// legitimate sentences starting with "No problem".
-const REFUSAL_RE = /^(nope|sorry|can'?t|cannot|unable)\b/i
-
-/** Threshold below which a refusal-shape text is treated as a leak. */
-export const MIN_SUBSTANTIVE_LENGTH = 25
-
-/**
- * True when the text is a short refusal-shape response (likely a leak from a
- * confused agent). The length floor (`MIN_SUBSTANTIVE_LENGTH`) prevents
- * over-triggering on legitimate longer responses that begin with the same
- * opener (e.g., "Sorry — I think we should re-frame this; ...").
- */
-export function isLikelyRefusal(text: string): boolean {
-  const t = text.trim()
-  return t.length < MIN_SUBSTANTIVE_LENGTH && REFUSAL_RE.test(t)
-}
-
-/**
- * Single render-time gate for dropping broken-shape assistant turns. Returns
- * true if the renderer should skip the entry entirely (control tokens AND
- * short refusal-shape leaks). The merged transcript renderer in
- * `chatComponents.groupEntriesToBlocks` calls this.
- */
-export function shouldDropAssistantTurn(text: string): boolean {
-  return isOpenclawControlToken(text) || isClawbooControlToken(text) || isLikelyRefusal(text)
-}
-
-export function buildSilentResumeWakeMessage(params: {
-  agentName: string
-  teamName: string
-}): string {
-  const { agentName, teamName } = params
-  // Structural prompt — the LLM ignores prose "stay quiet" instructions
-  // more reliably than it ignores a literal-string contract. Pair with
-  // the AGENTS.md "Resuming sessions" rule (for team members) and the
-  // Boo Zero rules block (for the leader).
-  return `[RESUME_SIGNAL — this is NOT a user message]
-Your session is being reactivated as ${agentName} on team "${teamName}". This message is a warm-up ping, not work for you.
-
-REQUIRED RESPONSE: Reply with EXACTLY the single token \`${RESUME_ACK_TOKEN}\` and nothing else. No greeting. No introduction. No emoji. No acknowledgement beyond that one word.
-
-The next message you receive will be the actual instruction. Pick up the work then.`
-}
-
 export function buildTeamContextPreamble(params: BuildTeamContextPreambleParams): string | null {
   const { entries, targetAgentName, maxMessages = 8, maxChars = 1200, userIntroText } = params
 
@@ -663,80 +548,23 @@ The user message you're seeing may be wrapped in some structured blocks:
 }
 
 // ─── Self-documenting [Team Update] envelope ────────────────────────────────
+// Moved to @clawboo/team-orchestration (shared with the server orchestrator);
+// re-exported here so existing `@/lib/teamProtocol` imports keep working.
+export {
+  buildTaskUpdateMessage,
+  type TaskUpdateItem,
+  type TaskUpdateOutcome,
+} from '@clawboo/team-orchestration'
 
-/**
- * Terminal outcome of a board task, as reflected back to the leader. `'done'`
- * (or omitted) is a successful completion; the others are failures the leader
- * must act on rather than keep waiting for.
- */
-export type TaskUpdateOutcome = 'done' | 'error' | 'aborted' | 'timeout' | 'max_turns'
-
-export interface TaskUpdateItem {
-  /** Resolved assignee name (agent or, later, a human). */
-  by: string
-  /** Task title, for context. */
-  title?: string
-  /** Condensed report-up (success) or the failure reason/detail. */
-  summary: string
-  /** Terminal outcome. Omitted / `'done'` renders as a successful ✓ entry. */
-  outcome?: TaskUpdateOutcome
-}
-
-const TASK_FAILURE_LABEL: Record<Exclude<TaskUpdateOutcome, 'done'>, string> = {
-  error: 'failed with an error',
-  aborted: 'was stopped before finishing',
-  timeout: 'went silent — timed out with no response',
-  max_turns: 'ran out of room before finishing',
-}
-
-function isTaskFailure(outcome?: TaskUpdateOutcome): outcome is Exclude<TaskUpdateOutcome, 'done'> {
-  return outcome != null && outcome !== 'done'
-}
-
-/** The human label for a failed outcome, or null when the task succeeded. */
-function taskFailureLabel(outcome?: TaskUpdateOutcome): string | null {
-  return isTaskFailure(outcome) ? TASK_FAILURE_LABEL[outcome] : null
-}
-
-/**
- * Build a `[Task Update]` envelope reflecting terminated BOARD tasks back to the
- * leader so it can synthesize OR react to a failure (the chat-fused board's
- * round-trip). The summaries come from durable task rows (the report-up comment /
- * execution summary / failure reason), not chat scrollback. Deliberately
- * participant-kind-agnostic — it says "a task finished/failed", never "your
- * teammate agent", so a human-completed task reflects identically.
- *
- * A FAILED entry (`outcome` other than `'done'`) is the fix for the
- * "delegating agent left standing" bug: the leader is told a delegate failed or
- * went silent — with the reason — and instructed to decide what to do next
- * instead of waiting forever (the anti-blind-retry framing from the
- * observability literature).
- */
-export function buildTaskUpdateMessage(items: TaskUpdateItem[]): string {
-  if (items.length === 0) return ''
-  const failures = items.filter((i) => isTaskFailure(i.outcome))
-  const plural = items.length === 1 ? 'task' : 'tasks'
-  const headerLines = [
-    `[Task Update] — ${items.length} ${plural} on the board reached a terminal state (not a fresh user message).`,
-    'These are board-sourced results. Synthesize across them ONLY when the user is waiting on a combined answer, or when you need a unified takeaway to drive the next step. Do NOT acknowledge them individually.',
-  ]
-  if (failures.length > 0) {
-    headerLines.push(
-      `⚠ ${failures.length} of these did NOT complete (the ⚠ entries below). Decide what to do next — retry, reassign to another teammate, or tell the user it failed and why. Do NOT keep silently waiting on them.`,
-    )
-  }
-  const sections = [headerLines.join('\n'), '---']
-  for (const item of items) {
-    const failLabel = taskFailureLabel(item.outcome)
-    const failed = failLabel != null
-    let header = failed ? `⚠ ${item.by} — DID NOT COMPLETE (${failLabel})` : `✓ ${item.by}`
-    if (item.title) {
-      const ctx = item.title.length > 80 ? item.title.slice(0, 80) + '...' : item.title
-      header += ` — "${ctx}"`
-    }
-    sections.push(header)
-    sections.push(item.summary || (failed ? '(no output was produced before it stopped)' : ''))
-    sections.push('---')
-  }
-  return sections.join('\n')
+// ─── Broken-shape assistant-turn filter ─────────────────────────────────────
+// Moved to @clawboo/team-orchestration (shared with the server-side chat writer);
+// re-exported so existing `@/lib/teamProtocol` consumers keep working.
+export {
+  RESUME_ACK_TOKEN,
+  SKIP_ACK_TOKEN,
+  MIN_SUBSTANTIVE_LENGTH,
+  isOpenclawControlToken,
+  isClawbooControlToken,
+  isLikelyRefusal,
+  shouldDropAssistantTurn,
 }

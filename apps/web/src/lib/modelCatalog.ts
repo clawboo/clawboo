@@ -194,3 +194,33 @@ export function findProviderForModel(id: string): string | null {
   const slashIdx = id.indexOf('/')
   return slashIdx > 0 ? id.slice(0, slashIdx) : null
 }
+
+// Canonical provider display names, derived from the static catalog (keyed by a
+// space/case-insensitive slug) so the catalog stays the single source of truth
+// for casing. The live `/api/system/models` groups come from the OpenClaw CLI,
+// which emits lowercase provider ids (e.g. "huggingface", "minimax") — this maps
+// them back to the catalog's proper casing ("Hugging Face", "MiniMax").
+const PROVIDER_SLUG = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]/g, '')
+const CANONICAL_PROVIDER_NAMES: Record<string, string> = MODEL_GROUPS.reduce<Record<string, string>>(
+  (acc, g) => {
+    acc[PROVIDER_SLUG(g.provider)] = g.provider
+    return acc
+  },
+  {},
+)
+
+/**
+ * Normalize a provider name to its canonical display casing. Falls back to a
+ * title-cased form for providers the catalog doesn't know, so a dropdown never
+ * shows a jarring bare-lowercase provider next to properly-cased siblings.
+ */
+export function formatProviderName(provider: string): string {
+  const canonical = CANONICAL_PROVIDER_NAMES[PROVIDER_SLUG(provider)]
+  if (canonical) return canonical
+  // Unknown provider: title-case each word, leaving all-caps tokens (e.g. "AI") intact.
+  return provider
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((w) => (w === w.toUpperCase() ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ')
+}

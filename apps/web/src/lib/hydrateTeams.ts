@@ -21,6 +21,7 @@ export async function hydrateTeams(): Promise<void> {
         leaderAgentId: string | null
         isArchived: number
         agentCount: number
+        serverOrchestrated?: boolean
       }[]
       assignments?: { agentId: string; teamId: string }[]
     }
@@ -30,6 +31,9 @@ export async function hydrateTeams(): Promise<void> {
           ...t,
           color: normalizeTeamColor(t.color),
           isArchived: !!t.isArchived,
+          // Every team is server-orchestrated after the OpenClaw cutover; the server
+          // always returns the field, so this fallback only guards a partial response.
+          serverOrchestrated: t.serverOrchestrated ?? true,
         })),
       )
       if (!useTeamStore.getState().selectedTeamId) {

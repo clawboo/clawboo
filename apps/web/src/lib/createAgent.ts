@@ -7,7 +7,7 @@
  * AgentFiles bag into the filename-keyed payload the REST surface expects.
  */
 
-import { createAgentRecord, readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
+import { createAgentRecord, readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import { buildClawbooHelpDoc, buildTeamAgentsMd, type TeammateDef } from './teamProtocol'
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
@@ -45,11 +45,28 @@ function toFilePayload(files?: AgentFiles): Record<string, string> | undefined {
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Create one agent (server-side: Gateway create + workspace resolution + file
- * writes + SQLite mirror) and return the new agent's id.
+ * Create one agent (server-side: the chosen AgentSource resolves the workspace,
+ * writes the files, and mirrors SQLite) and return the new agent's id.
+ *
+ * `sourceId` selects the runtime that owns the record — omit for the server
+ * default (`openclaw`), `'clawboo-native'` for a native agent, or a coding
+ * runtime id (`'claude-code'`/`'codex'`/`'hermes'`). `execConfig` is the
+ * source-specific config carrier (native: the AgentConfig — systemPrompt, tools,
+ * modelTier; coding runtimes ignore it). Both trail the original 2-arg signature
+ * so existing positional callers are unaffected.
  */
-export async function createAgent(name: string, files?: AgentFiles): Promise<string> {
-  const record = await createAgentRecord({ name, files: toFilePayload(files) })
+export async function createAgent(
+  name: string,
+  files?: AgentFiles,
+  sourceId?: string,
+  execConfig?: unknown,
+): Promise<string> {
+  const record = await createAgentRecord({
+    name,
+    files: toFilePayload(files),
+    ...(sourceId ? { sourceId } : {}),
+    ...(execConfig !== undefined ? { execConfig } : {}),
+  })
   const agentId = record.id.trim()
   if (!agentId) throw new Error('AgentSource did not return an id for the created agent.')
   return agentId

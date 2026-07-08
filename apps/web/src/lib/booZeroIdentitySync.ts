@@ -29,7 +29,7 @@
 // unreliable for persistence in older runtimes. When it works, great; when
 // it doesn't, the per-turn rules block keeps the identity anchored anyway.
 
-import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
+import { readAgentFile, writeAgentFile } from '@clawboo/control-client'
 
 /**
  * Rewrite the first `# <heading>` line of an existing SOUL.md to `# <name>`.
