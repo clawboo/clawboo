@@ -1,7 +1,13 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Search, SearchX } from 'lucide-react'
+import { Blocks, Bot, SearchX, ShoppingBag, Users, Wrench } from 'lucide-react'
 import { Select } from '@/features/shared/Select'
+import { Button } from '@/features/shared/Button'
+import { Chip } from '@/features/shared/Chip'
+import { EmptyState } from '@/features/shared/EmptyState'
+import { PanelHeader } from '@/features/shared/PanelHeader'
+import { SearchInput } from '@/features/shared/SearchInput'
+import { Tabs } from '@/features/shared/Tabs'
 import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
 import { useTeamStore } from '@/stores/team'
@@ -11,6 +17,7 @@ import { useGraphStore } from '@/features/graph/store'
 import { SKILL_CATALOG, searchCatalog } from './catalog'
 import type { CatalogSkill } from './catalog'
 import { AgentPickerDropdown } from './AgentPickerDropdown'
+import { CollapsiblePillRow, type PillOption } from './CollapsiblePillRow'
 import type { SkillCategory } from '@/features/graph/types'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
 import type {
@@ -18,17 +25,17 @@ import type {
   ProfileLike,
   AgentCatalogEntry,
   AgentDomain,
-  TemplateSource,
+  TemplateCategory,
 } from '@/features/teams/types'
-import {
-  TEAM_CATALOG,
-  TEMPLATE_CATEGORIES,
-  SOURCE_META,
-  searchTeamCatalog,
-  getAgentsForSkill,
-} from './teamCatalog'
+import { TEAM_CATALOG, getAgentsForSkill } from './teamCatalog'
 import { AGENT_CATALOG, searchAgentCatalog } from './agents'
-import { TeamTemplateCard } from './TeamTemplateCard'
+import { HeroTile } from './HeroTile'
+import {
+  TeamShowcaseGrid,
+  teamCategoryOptions,
+  filterTeams,
+  TEAM_SOURCE_ENTRIES,
+} from './TeamShowcaseGrid'
 import { TeamTemplateDetail } from './TeamTemplateDetail'
 import { AgentCard } from './AgentCard'
 import { AgentTemplateDetail } from './AgentTemplateDetail'
@@ -121,92 +128,8 @@ async function installSkillFromMarketplace(
   }
 }
 
-// ─── EmptyState ─────────────────────────────────────────────────────────────
-
-function EmptyState({
-  title,
-  hint,
-  onClear,
-}: {
-  title: string
-  hint: string
-  onClear?: () => void
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingTop: 60,
-        gap: 12,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          width: 56,
-          height: 56,
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: 999,
-          background: 'rgb(var(--foreground-rgb) / 0.04)',
-        }}
-      >
-        <SearchX size={26} strokeWidth={1.5} color="rgb(var(--foreground-rgb) / 0.35)" />
-      </div>
-      <span
-        style={{
-          fontSize: 14,
-          fontWeight: 600,
-          color: 'rgb(var(--foreground-rgb) / 0.6)',
-          fontFamily: 'var(--font-display)',
-          letterSpacing: '-0.01em',
-        }}
-      >
-        {title}
-      </span>
-      <span
-        style={{
-          fontSize: 12,
-          color: 'rgb(var(--foreground-rgb) / 0.4)',
-          textAlign: 'center',
-          maxWidth: 280,
-          lineHeight: 1.6,
-        }}
-      >
-        {hint}
-      </span>
-      {onClear && (
-        <button
-          type="button"
-          onClick={onClear}
-          style={{
-            marginTop: 4,
-            padding: '6px 14px',
-            fontSize: 12,
-            fontWeight: 500,
-            color: 'rgb(var(--foreground-rgb) / 0.75)',
-            background: 'rgb(var(--foreground-rgb) / 0.06)',
-            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-            borderRadius: 8,
-            cursor: 'pointer',
-            transition: 'var(--motion-fast)',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.1)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.06)'
-          }}
-        >
-          Clear filters
-        </button>
-      )}
-    </div>
-  )
-}
+// ─── Hero tile ───────────────────────────────────────────────────────────────
+// A single colorful, tokenized promo tile at the head of each tab's grid.
 
 // ─── SkillCard ───────────────────────────────────────────────────────────────
 
@@ -227,56 +150,24 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18, delay: Math.min(index * 0.03, 0.5) }}
-      style={{
-        position: 'relative',
-        background: 'var(--card)',
-        border: '1px solid rgb(var(--foreground-rgb) / 0.05)',
-        borderRadius: 10,
-        padding: '14px 16px',
-        transition: 'border-color 0.15s',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.12)'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.05)'
-      }}
+      className="group relative flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
     >
       {/* Top row: dot + name + source badge */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: cat.color,
-            flexShrink: 0,
-          }}
-        />
+      <div className="flex items-center gap-2">
         <span
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: 'var(--foreground)',
-            flex: 1,
-            minWidth: 0,
-          }}
-        >
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: cat.color }}
+        />
+        <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-foreground">
           {skill.name}
         </span>
         <span
+          className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
           style={{
-            fontSize: 9,
-            fontWeight: 600,
             color: src.color,
             background: `${src.color}18`,
-            border: `1px solid ${src.color}35`,
-            borderRadius: 4,
-            padding: '1px 6px',
-            whiteSpace: 'nowrap',
+            borderColor: `${src.color}35`,
             letterSpacing: '0.03em',
           }}
         >
@@ -286,9 +177,8 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
 
       {/* Description */}
       <div
+        className="text-[12.5px] text-foreground/55"
         style={{
-          fontSize: 12,
-          color: 'rgb(var(--foreground-rgb) / 0.55)',
           lineHeight: 1.5,
           display: '-webkit-box',
           WebkitLineClamp: 2,
@@ -300,106 +190,49 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
       </div>
 
       {/* Trust bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div
-          style={{
-            flex: 1,
-            height: 4,
-            borderRadius: 999,
-            background: 'rgb(var(--foreground-rgb) / 0.06)',
-            overflow: 'hidden',
-          }}
-        >
+      <div className="flex items-center gap-2">
+        <div className="h-1 flex-1 overflow-hidden rounded-full bg-foreground/[0.06]">
           <div
+            className="h-full rounded-full"
             style={{
               width: `${skill.trustScore}%`,
-              height: '100%',
-              borderRadius: 999,
               background: trustColor(skill.trustScore),
               transition: 'width var(--motion-base)',
             }}
           />
         </div>
-        <span
-          style={{ fontSize: 10, color: 'rgb(var(--foreground-rgb) / 0.35)', whiteSpace: 'nowrap' }}
-        >
+        <span className="font-data whitespace-nowrap text-[10px] text-foreground/40">
           {skill.trustScore}%
         </span>
       </div>
 
       {/* Bottom row: author + version + install */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span
-          style={{
-            fontSize: 10,
-            color: 'rgb(var(--foreground-rgb) / 0.35)',
-            flex: 1,
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-[10.5px] text-foreground/40">
           {skill.author}
           {skill.version && (
-            <span style={{ marginLeft: 6, color: 'rgb(var(--foreground-rgb) / 0.25)' }}>
-              v{skill.version}
-            </span>
+            <span className="font-data ml-1.5 text-foreground/25">v{skill.version}</span>
           )}
         </span>
         {agentCount > 0 && (
           <button
             onClick={onAgentCountClick}
             title="Browse agents using this skill"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              padding: 0,
-              fontSize: 10,
-              color: 'rgb(var(--mint-rgb) / 0.65)',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              textDecoration: 'none',
-              transition: 'color 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'rgb(var(--mint-rgb) / 0.95)'
-              e.currentTarget.style.textDecoration = 'underline'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'rgb(var(--mint-rgb) / 0.65)'
-              e.currentTarget.style.textDecoration = 'none'
-            }}
+            className="cursor-pointer whitespace-nowrap border-none bg-transparent p-0 text-[10.5px] text-mint/70 transition-colors hover:text-mint hover:underline"
           >
             Used by {agentCount} agent{agentCount === 1 ? '' : 's'}
           </button>
         )}
-        <button
+        <Button
+          variant="primary"
+          size="sm"
           onClick={(e) => {
             e.stopPropagation()
             setShowPicker((v) => !v)
           }}
-          style={{
-            background: 'rgb(var(--mint-rgb) / 0.15)',
-            border: '1px solid rgb(var(--mint-rgb) / 0.35)',
-            color: 'var(--mint)',
-            fontSize: 11,
-            fontWeight: 600,
-            padding: '4px 12px',
-            borderRadius: 6,
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            whiteSpace: 'nowrap',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.25)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.15)'
-          }}
         >
           Install
-        </button>
+        </Button>
       </div>
 
       {/* Agent picker */}
@@ -415,23 +248,6 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
     </motion.div>
   )
 }
-
-// ─── Source filter entries ───────────────────────────────────────────────────
-
-const SOURCE_ENTRIES: { key: TemplateSource | 'all'; label: string; color: string }[] = [
-  { key: 'all', label: 'All', color: 'var(--foreground)' },
-  { key: 'clawboo', label: SOURCE_META.clawboo.label, color: SOURCE_META.clawboo.color },
-  {
-    key: 'agency-agents',
-    label: SOURCE_META['agency-agents'].label,
-    color: SOURCE_META['agency-agents'].color,
-  },
-  {
-    key: 'awesome-openclaw',
-    label: SOURCE_META['awesome-openclaw'].label,
-    color: SOURCE_META['awesome-openclaw'].color,
-  },
-]
 
 // ─── Agent domain metadata ───────────────────────────────────────────────────
 
@@ -452,6 +268,21 @@ const AGENT_DOMAIN_META: Record<AgentDomain, { label: string; color: string }> =
   openclaw: { label: 'OpenClaw', color: 'var(--primary)' },
   clawboo: { label: 'Clawboo', color: 'var(--mint)' },
 }
+
+// The mainstream professional domains people filter by most — shown inline in
+// the domain bar; every other (nicher / source-specific) domain folds under the
+// "+N more" toggle. Deliberately curated rather than sorted by agent count:
+// the source-domains (OpenClaw has 110 agents) would otherwise dominate "top by
+// count" and bury the domains users actually browse by.
+const POPULAR_DOMAIN_ORDER: AgentDomain[] = [
+  'engineering',
+  'marketing',
+  'design',
+  'product',
+  'sales',
+  'support',
+  'specialized',
+]
 
 // ─── MarketplacePanel ────────────────────────────────────────────────────────
 
@@ -485,26 +316,18 @@ export function MarketplacePanel() {
   // Modal state
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [prefilledProfile, setPrefilledProfile] = useState<ProfileLike | null>(null)
+  // "Start from scratch" opens CreateTeamModal directly on a blank customize step.
+  const [startBlankTeam, setStartBlankTeam] = useState(false)
   const [detailTemplate, setDetailTemplate] = useState<TeamTemplate | null>(null)
   const [detailAgent, setDetailAgent] = useState<AgentCatalogEntry | null>(null)
 
-  // Filtered teams
-  const filteredTeams = useMemo(() => {
-    let results = teamSearchQuery ? searchTeamCatalog(teamSearchQuery) : [...TEAM_CATALOG]
-    if (teamCategoryFilter !== 'all') {
-      results = results.filter((t) => t.category === teamCategoryFilter)
-    }
-    if (teamSourceFilter !== 'all') {
-      results = results.filter((t) => t.source === teamSourceFilter)
-    }
-    return results
-  }, [teamSearchQuery, teamCategoryFilter, teamSourceFilter])
-
-  // Active template categories (only those with >=1 template)
-  const activeCategories = useMemo(() => {
-    const catSet = new Set(TEAM_CATALOG.map((t) => t.category))
-    return TEMPLATE_CATEGORIES.filter((c) => catSet.has(c.key))
-  }, [])
+  // Filtered teams + category options — the shared helpers, so the Marketplace
+  // and the first-run team modal filter identically.
+  const filteredTeams = useMemo(
+    () => filterTeams(teamSearchQuery, teamCategoryFilter, teamSourceFilter),
+    [teamSearchQuery, teamCategoryFilter, teamSourceFilter],
+  )
+  const teamCategoryOpts = useMemo(() => teamCategoryOptions(), [])
 
   // Distinct agent domains present in the catalog, ordered by first-seen
   const distinctDomains = useMemo(() => {
@@ -518,6 +341,20 @@ export function MarketplacePanel() {
     }
     return ordered
   }, [])
+
+  // Domain filter options, popular-first: the curated mainstream domains lead,
+  // then every remaining present domain in catalog order. Fed to the collapsible
+  // pill row (popular inline, the rest under "+N more").
+  const domainOptions = useMemo<PillOption[]>(() => {
+    const present = new Set(distinctDomains)
+    const popular = POPULAR_DOMAIN_ORDER.filter((d) => present.has(d))
+    const rest = distinctDomains.filter((d) => !POPULAR_DOMAIN_ORDER.includes(d))
+    return [...popular, ...rest].map((d) => ({
+      key: d,
+      label: AGENT_DOMAIN_META[d].label,
+      color: AGENT_DOMAIN_META[d].color,
+    }))
+  }, [distinctDomains])
 
   // Filtered agents
   const filteredAgents = useMemo(() => {
@@ -579,240 +416,92 @@ export function MarketplacePanel() {
   const isTeamsTab = marketplaceTab === 'teams'
   const isSkillsTab = marketplaceTab === 'skills'
 
-  const tabButton = (tab: 'skills' | 'agents' | 'teams', label: string, count: number) => {
-    const active = marketplaceTab === tab
-    return (
-      <button
-        key={tab}
-        onClick={() => setMarketplaceTab(tab)}
-        style={{
-          background: active ? 'rgb(var(--mint-rgb) / 0.15)' : 'transparent',
-          border: active
-            ? '1px solid rgb(var(--mint-rgb) / 0.35)'
-            : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-          color: active ? 'var(--mint)' : 'rgb(var(--foreground-rgb) / 0.45)',
-          borderRadius: 12,
-          padding: '2px 10px',
-          fontSize: 11,
-          fontWeight: 500,
-          cursor: 'pointer',
-          transition: 'all 0.15s',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {label} ({count})
-      </button>
-    )
-  }
-
   return (
-    <div
-      style={{
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--background)',
-      }}
-    >
-      {/* Toolbar */}
-      <div
-        style={{
-          // Height bumped from 36 → 44 to give the integrated GitHub Star
-          // pill (32 px) comfortable breathing room. The AppTopBar is
-          // hidden for `nav: 'marketplace'` so this row is the only top
-          // chrome; consistent height with Atlas/Agent Detail headers.
-          height: 44,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--foreground)',
-              fontFamily: 'var(--font-display)',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            Marketplace
-          </span>
+    <div className="flex h-full flex-col bg-background">
+      {/* Header */}
+      <PanelHeader
+        title="Marketplace"
+        icon={ShoppingBag}
+        size="md"
+        border
+        actions={
+          <>
+            {/* Sort (skills tab only) */}
+            {isSkillsTab && (
+              <Select
+                size="sm"
+                aria-label="Sort skills"
+                value={sortBy}
+                onChange={(v) => setSortBy(v as 'name' | 'trust' | 'category')}
+                options={[
+                  { value: 'name', label: 'Name A–Z' },
+                  { value: 'trust', label: 'Trust Score' },
+                  { value: 'category', label: 'Category' },
+                ]}
+              />
+            )}
+            {/* GitHub Star CTA — integrated into the header so this view
+                doesn't need the global AppTopBar (which is hidden for
+                nav:'marketplace'). */}
+            <GitHubStarButton />
+          </>
+        }
+      />
 
-          {/* Tab toggle */}
-          <div style={{ display: 'flex', gap: 4 }}>
-            {tabButton('skills', 'Skills', SKILL_CATALOG.length)}
-            {tabButton('agents', 'Agents', AGENT_CATALOG.length)}
-            {tabButton('teams', 'Teams', TEAM_CATALOG.length)}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* Sort (skills tab only) */}
-          {isSkillsTab && (
-            <Select
-              size="sm"
-              aria-label="Sort skills"
-              value={sortBy}
-              onChange={(v) => setSortBy(v as 'name' | 'trust' | 'category')}
-              options={[
-                { value: 'name', label: 'Name A–Z' },
-                { value: 'trust', label: 'Trust Score' },
-                { value: 'category', label: 'Category' },
-              ]}
-            />
-          )}
-          {/* GitHub Star CTA — integrated into the toolbar so this view
-              doesn't need the global AppTopBar (which is hidden for
-              nav:'marketplace'). */}
-          <GitHubStarButton />
-        </div>
+      {/* Tabs — Teams lead (the headline surface), then Agents, then Skills.
+          `pt-3` gives the tab row breathing room below the header hairline so the
+          space above the labels matches the space below them. */}
+      <div className="shrink-0 px-6 pt-3">
+        <Tabs
+          value={marketplaceTab}
+          onChange={(id) => setMarketplaceTab(id)}
+          tabs={[
+            { id: 'teams', label: 'Teams', icon: Users, count: TEAM_CATALOG.length },
+            { id: 'agents', label: 'Agents', icon: Bot, count: AGENT_CATALOG.length },
+            { id: 'skills', label: 'Skills', icon: Wrench, count: SKILL_CATALOG.length },
+          ]}
+        />
       </div>
 
       {/* Filter bar */}
-      <div
-        style={{
-          flexShrink: 0,
-          padding: '8px 12px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.04)',
-        }}
-      >
+      <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
         {isTeamsTab && (
           <>
             {/* Team search */}
-            <div style={{ position: 'relative' }}>
-              <Search
-                size={14}
-                style={{
-                  position: 'absolute',
-                  left: 10,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'rgb(var(--foreground-rgb) / 0.3)',
-                  pointerEvents: 'none',
-                }}
-              />
-              <input
-                type="text"
-                placeholder="Search teams…"
-                value={teamSearchQuery}
-                onChange={(e) => setTeamSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '6px 10px 6px 32px',
-                  background: 'rgb(var(--foreground-rgb) / 0.04)',
-                  border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                  borderRadius: 6,
-                  color: 'var(--foreground)',
-                  fontSize: 12,
-                  outline: 'none',
-                }}
-              />
-            </div>
+            <SearchInput
+              size="sm"
+              placeholder="Search teams…"
+              value={teamSearchQuery}
+              onChange={setTeamSearchQuery}
+            />
 
-            {/* Team category pills */}
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              <button
-                onClick={() => setTeamCategoryFilter('all')}
-                style={{
-                  background:
-                    teamCategoryFilter === 'all'
-                      ? 'rgb(var(--foreground-rgb) / 0.12)'
-                      : 'transparent',
-                  border:
-                    teamCategoryFilter === 'all'
-                      ? '1px solid rgb(var(--foreground-rgb) / 0.3)'
-                      : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                  color:
-                    teamCategoryFilter === 'all'
-                      ? 'var(--foreground)'
-                      : 'rgb(var(--foreground-rgb) / 0.45)',
-                  borderRadius: 12,
-                  padding: '3px 10px',
-                  fontSize: 11,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                All
-              </button>
-              {activeCategories.map((cat) => {
-                const isActive = teamCategoryFilter === cat.key
-                return (
-                  <button
-                    key={cat.key}
-                    onClick={() => setTeamCategoryFilter(cat.key)}
-                    style={{
-                      background: isActive ? `${cat.color}20` : 'transparent',
-                      border: isActive
-                        ? `1px solid ${cat.color}55`
-                        : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                      color: isActive ? cat.color : 'rgb(var(--foreground-rgb) / 0.45)',
-                      borderRadius: 12,
-                      padding: '3px 10px',
-                      fontSize: 11,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      transition: 'all 0.15s',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {cat.label}
-                  </button>
-                )
-              })}
-            </div>
+            {/* Team category pills — popular inline, the rest under "+N more" */}
+            <CollapsiblePillRow
+              aria-label="Filter teams by category"
+              options={teamCategoryOpts}
+              activeKey={teamCategoryFilter}
+              onSelect={(k) => setTeamCategoryFilter(k as TemplateCategory | 'all')}
+            />
 
             {/* Team source pills */}
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {SOURCE_ENTRIES.map((src) => {
-                const isActive = teamSourceFilter === src.key
-                return (
-                  <button
-                    key={src.key}
-                    onClick={() => setTeamSourceFilter(src.key)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      background: isActive ? `${src.color}20` : 'transparent',
-                      border: isActive
-                        ? `1px solid ${src.color}55`
-                        : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                      color: isActive ? src.color : 'rgb(var(--foreground-rgb) / 0.45)',
-                      borderRadius: 12,
-                      padding: '3px 10px',
-                      fontSize: 11,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      transition: 'all 0.15s',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {src.key !== 'all' && (
-                      <div
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          background: src.color,
-                          flexShrink: 0,
-                        }}
-                      />
-                    )}
-                    {src.label}
-                  </button>
-                )
-              })}
+            <div className="flex flex-wrap gap-1.5">
+              {TEAM_SOURCE_ENTRIES.map((src) => (
+                <Chip
+                  key={src.key}
+                  size="sm"
+                  active={teamSourceFilter === src.key}
+                  accent={src.key === 'all' ? undefined : src.color}
+                  onClick={() => setTeamSourceFilter(src.key)}
+                >
+                  {src.key !== 'all' && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: src.color }}
+                    />
+                  )}
+                  {src.label}
+                </Chip>
+              ))}
             </div>
           </>
         )}
@@ -820,133 +509,40 @@ export function MarketplacePanel() {
         {isAgentsTab && (
           <>
             {/* Agent search */}
-            <div style={{ position: 'relative' }}>
-              <Search
-                size={14}
-                style={{
-                  position: 'absolute',
-                  left: 10,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'rgb(var(--foreground-rgb) / 0.3)',
-                  pointerEvents: 'none',
-                }}
-              />
-              <input
-                type="text"
-                placeholder="Search agents…"
-                value={agentSearchQuery}
-                onChange={(e) => setAgentSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '6px 10px 6px 32px',
-                  background: 'rgb(var(--foreground-rgb) / 0.04)',
-                  border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                  borderRadius: 6,
-                  color: 'var(--foreground)',
-                  fontSize: 12,
-                  outline: 'none',
-                }}
-              />
-            </div>
+            <SearchInput
+              size="sm"
+              placeholder="Search agents…"
+              value={agentSearchQuery}
+              onChange={setAgentSearchQuery}
+            />
 
-            {/* Agent domain pills */}
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              <button
-                onClick={() => setAgentDomainFilter('all')}
-                style={{
-                  background:
-                    agentDomainFilter === 'all'
-                      ? 'rgb(var(--foreground-rgb) / 0.12)'
-                      : 'transparent',
-                  border:
-                    agentDomainFilter === 'all'
-                      ? '1px solid rgb(var(--foreground-rgb) / 0.3)'
-                      : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                  color:
-                    agentDomainFilter === 'all'
-                      ? 'var(--foreground)'
-                      : 'rgb(var(--foreground-rgb) / 0.45)',
-                  borderRadius: 12,
-                  padding: '3px 10px',
-                  fontSize: 11,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                All
-              </button>
-              {distinctDomains.map((domain) => {
-                const meta = AGENT_DOMAIN_META[domain]
-                const isActive = agentDomainFilter === domain
-                return (
-                  <button
-                    key={domain}
-                    onClick={() => setAgentDomainFilter(domain)}
-                    style={{
-                      background: isActive ? `${meta.color}20` : 'transparent',
-                      border: isActive
-                        ? `1px solid ${meta.color}55`
-                        : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                      color: isActive ? meta.color : 'rgb(var(--foreground-rgb) / 0.45)',
-                      borderRadius: 12,
-                      padding: '3px 10px',
-                      fontSize: 11,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      transition: 'all 0.15s',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {meta.label}
-                  </button>
-                )
-              })}
-            </div>
+            {/* Agent domain pills — popular inline, the rest under "+N more" */}
+            <CollapsiblePillRow
+              aria-label="Filter agents by domain"
+              options={domainOptions}
+              activeKey={agentDomainFilter}
+              onSelect={(k) => setAgentDomainFilter(k as AgentDomain | 'all')}
+            />
 
             {/* Agent source pills */}
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {SOURCE_ENTRIES.map((src) => {
-                const isActive = agentSourceFilter === src.key
-                return (
-                  <button
-                    key={src.key}
-                    onClick={() => setAgentSourceFilter(src.key)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      background: isActive ? `${src.color}20` : 'transparent',
-                      border: isActive
-                        ? `1px solid ${src.color}55`
-                        : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                      color: isActive ? src.color : 'rgb(var(--foreground-rgb) / 0.45)',
-                      borderRadius: 12,
-                      padding: '3px 10px',
-                      fontSize: 11,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      transition: 'all 0.15s',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {src.key !== 'all' && (
-                      <div
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          background: src.color,
-                          flexShrink: 0,
-                        }}
-                      />
-                    )}
-                    {src.label}
-                  </button>
-                )
-              })}
+            <div className="flex flex-wrap gap-1.5">
+              {TEAM_SOURCE_ENTRIES.map((src) => (
+                <Chip
+                  key={src.key}
+                  size="sm"
+                  active={agentSourceFilter === src.key}
+                  accent={src.key === 'all' ? undefined : src.color}
+                  onClick={() => setAgentSourceFilter(src.key)}
+                >
+                  {src.key !== 'all' && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: src.color }}
+                    />
+                  )}
+                  {src.label}
+                </Chip>
+              ))}
             </div>
           </>
         )}
@@ -954,62 +550,27 @@ export function MarketplacePanel() {
         {isSkillsTab && (
           <>
             {/* Skill search */}
-            <div style={{ position: 'relative' }}>
-              <Search
-                size={14}
-                style={{
-                  position: 'absolute',
-                  left: 10,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'rgb(var(--foreground-rgb) / 0.3)',
-                  pointerEvents: 'none',
-                }}
-              />
-              <input
-                type="text"
-                placeholder="Search skills…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '6px 10px 6px 32px',
-                  background: 'rgb(var(--foreground-rgb) / 0.04)',
-                  border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                  borderRadius: 6,
-                  color: 'var(--foreground)',
-                  fontSize: 12,
-                  outline: 'none',
-                }}
-              />
-            </div>
+            <SearchInput
+              size="sm"
+              placeholder="Search skills…"
+              value={searchQuery}
+              onChange={setSearchQuery}
+            />
 
             {/* Skill category pills */}
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <div className="flex flex-wrap gap-1.5">
               {(Object.keys(CATEGORY_META) as (SkillCategory | 'all')[]).map((key) => {
-                const isActive = categoryFilter === key
                 const { color, label } = CATEGORY_META[key]
                 return (
-                  <button
+                  <Chip
                     key={key}
+                    size="sm"
+                    active={categoryFilter === key}
+                    accent={key === 'all' ? undefined : color}
                     onClick={() => setCategoryFilter(key)}
-                    style={{
-                      background: isActive ? `${color}20` : 'transparent',
-                      border: isActive
-                        ? `1px solid ${color}55`
-                        : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                      color: isActive ? color : 'rgb(var(--foreground-rgb) / 0.45)',
-                      borderRadius: 12,
-                      padding: '3px 10px',
-                      fontSize: 11,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      transition: 'all 0.15s',
-                      whiteSpace: 'nowrap',
-                    }}
                   >
                     {label}
-                  </button>
+                  </Chip>
                 )
               })}
             </div>
@@ -1018,65 +579,60 @@ export function MarketplacePanel() {
       </div>
 
       {/* Grid */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: 12,
-        }}
-      >
-        {isTeamsTab &&
-          (filteredTeams.length === 0 ? (
-            <EmptyState
-              title="No teams match your search"
-              hint="Try a different keyword or clear the filters."
-              onClear={() => {
-                setTeamSearchQuery('')
-                setTeamCategoryFilter('all')
-                setTeamSourceFilter('all')
-              }}
-            />
-          ) : (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-                gap: 10,
-              }}
-            >
-              {filteredTeams.map((profile) => (
-                <TeamTemplateCard
-                  key={profile.id}
-                  profile={profile}
-                  onDeploy={(p) => {
-                    setPrefilledProfile(p)
-                    setShowCreateModal(true)
-                  }}
-                  onDetails={(t) => setDetailTemplate(t)}
-                />
-              ))}
-            </div>
-          ))}
+      <div className="flex-1 overflow-y-auto p-6">
+        {isTeamsTab && (
+          <TeamShowcaseGrid
+            teams={filteredTeams}
+            onSelectTeam={(p) => {
+              setPrefilledProfile(p)
+              setShowCreateModal(true)
+            }}
+            onDetails={(t) => setDetailTemplate(t)}
+            onStartFromScratch={() => {
+              setPrefilledProfile(null)
+              setStartBlankTeam(true)
+              setShowCreateModal(true)
+            }}
+            onClearFilters={() => {
+              setTeamSearchQuery('')
+              setTeamCategoryFilter('all')
+              setTeamSourceFilter('all')
+            }}
+          />
+        )}
 
         {isAgentsTab &&
           (filteredAgents.length === 0 ? (
             <EmptyState
+              icon={SearchX}
               title="No agents match your search"
-              hint="Try a different keyword or clear the filters."
-              onClear={() => {
-                setAgentSearchQuery('')
-                setAgentDomainFilter('all')
-                setAgentSourceFilter('all')
-              }}
+              helper="Try a different keyword or clear the filters."
+              action={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setAgentSearchQuery('')
+                    setAgentDomainFilter('all')
+                    setAgentSourceFilter('all')
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
             />
           ) : (
             <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-                gap: 10,
-              }}
+              className="grid gap-4"
+              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}
             >
+              <HeroTile
+                gradient="var(--grad-rose)"
+                icon={Bot}
+                eyebrow="First-class agents"
+                title="Handpicked agents"
+                subtitle="Browse hundreds of specialists and deploy one to its own team."
+              />
               {filteredAgents.map((agent, i) => (
                 <AgentCard
                   key={agent.id}
@@ -1092,21 +648,34 @@ export function MarketplacePanel() {
         {isSkillsTab &&
           (filteredSkills.length === 0 ? (
             <EmptyState
+              icon={SearchX}
               title="No skills match your search"
-              hint="Try a different keyword or clear the category filter."
-              onClear={() => {
-                setSearchQuery('')
-                setCategoryFilter('all')
-              }}
+              helper="Try a different keyword or clear the category filter."
+              action={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery('')
+                    setCategoryFilter('all')
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
             />
           ) : (
             <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                gap: 10,
-              }}
+              className="grid gap-4"
+              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}
             >
+              <HeroTile
+                gradient="var(--grad-emerald)"
+                icon={Blocks}
+                eyebrow="Capability catalog"
+                title="Skills for every agent"
+                subtitle="Install trusted, injection-scanned capabilities onto your Boos."
+              />
               {filteredSkills.map((skill, i) => (
                 <SkillCard key={skill.id} skill={skill} index={i} />
               ))}
@@ -1154,10 +723,12 @@ export function MarketplacePanel() {
         onClose={() => {
           setShowCreateModal(false)
           setPrefilledProfile(null)
+          setStartBlankTeam(false)
         }}
         onCreated={() => {
           setShowCreateModal(false)
           setPrefilledProfile(null)
+          setStartBlankTeam(false)
           // CreateTeamModal selects the newly-created team before firing
           // onCreated — switch the user into its group chat so they can
           // immediately use the team they just deployed from the marketplace.
@@ -1167,6 +738,7 @@ export function MarketplacePanel() {
           }
         }}
         initialProfile={prefilledProfile}
+        startBlank={startBlankTeam}
       />
     </div>
   )
