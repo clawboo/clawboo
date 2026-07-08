@@ -3,10 +3,10 @@ title: Known issues & limitations
 description: Code-verified list of Clawboo's genuine current limitations, deferrals, and dormant seams, not fixed bugs.
 ---
 
-This page lists the **genuine current limitations** of Clawboo v0.2.0. Every item is confirmed against current source; these are deliberate deferrals, dormant seams, and runtime-imposed constraints, **not** bugs awaiting a fix. Each entry states the impact and a workaround where one exists.
+This page lists the **genuine current limitations** of Clawboo v0.2.1. Every item is confirmed against current source; these are deliberate deferrals, dormant seams, and runtime-imposed constraints, **not** bugs awaiting a fix. Each entry states the impact and a workaround where one exists.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## Not on this list (already fixed)

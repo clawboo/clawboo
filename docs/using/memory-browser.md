@@ -15,7 +15,7 @@ This is the UI half of a dual surface: the panel talks to `/api/memory*`, and th
 The Memory panel is always available; it does not require a [runtime](/appendices/glossary) to be connected. An empty store renders empty-state cards rather than an error.
 </Note>
 
-- Open the dashboard. The Memory panel is reached from the **Memory** nav button (the brain icon) in the sidebar's secondary navigation.
+- Open the dashboard. The Memory panel is reached from **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Memory** under the Workspace group (the brain icon).
 - Nothing else is required to browse or save a fact by hand. Vector and hybrid search additionally benefit from an embedding provider being reachable (see [Search modes](#search-modes)).
 
 ## Where it lives

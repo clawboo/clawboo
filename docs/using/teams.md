@@ -12,7 +12,7 @@ For a guided first run, start with [Deploy your first team](/getting-started/fir
 ## Prerequisites
 
 <Note>
-A team is a Clawboo-native record, but **deploying agents into a template team writes agent files through a connected runtime**. The deploy loop calls `createAgent`, which needs a live connection (the OpenClaw Gateway client, or a native source). Creating an *empty* team and a team from a *template with zero agents* both work without one; deploying a populated template does not.
+A team is a Clawboo-native record. Deploying a populated template creates each agent through the runtime you pick for it: a **Clawboo Native** or coding-runtime agent is created server-side with no OpenClaw Gateway, while an agent you put on **OpenClaw** needs a live Gateway connection. Because an unavailable OpenClaw suggestion degrades to Clawboo Native, a marketplace team still deploys fully native when the Gateway is offline. Creating an *empty* team and a template with zero agents both work with nothing connected.
 </Note>
 
 - The dashboard is open and connected (see [Connecting runtimes](/runtimes/connecting-runtimes) or the OpenClaw quickstart).
@@ -20,36 +20,42 @@ A team is a Clawboo-native record, but **deploying agents into a template team w
 
 ## Steps
 
-### 1. Open the create-team modal
+### 1. Open the team browser
 
-In the team sidebar, click the dashed **+** button (`title="Create team"`). This opens `CreateTeamModal`, a four-step flow: **pick → customize → deploy → complete**. The same modal opens from the marketplace's team "Deploy" button and from the welcome screen; those entry points pass a pre-filled profile and skip straight to **customize**.
+In the team sidebar, click the dashed **+** button (`title="Create a team"`). It takes you to the **Marketplace → Teams** tab, the one canonical place to browse and deploy a team. Press **Deploy** on any team card (or the **Start from scratch** card, for a blank team) to open `CreateTeamModal` at its **customize** step.
+
+The modal is a four-step flow (**pick → customize → deploy → complete**), but the **pick** step only appears on the first-run welcome screen, before you have any teams; every other entry, the marketplace **Deploy** buttons and **Start from scratch**, jumps straight to **customize**. When the pick step does show, it renders the same team showcase described next.
 
 ![The team space: Ghost Graph above, group chat below](/images/team-space.png)
 
-### 2. Pick a template (or start empty)
+### 2. Browse the team showcase
 
-The **pick** step lists the browsable team catalog with a search box and two filter rows:
+The Teams tab, and the first-run pick step, list the team catalog with a search box and two filter rows:
 
-- **Category pills**: only categories that actually have templates render.
-- **Source pills**: `All`, `Agency Agents`, `Awesome OpenClaw`, `Clawboo`, each with a colored dot.
+- **Category pills**: the popular categories inline, the rest folded under a **+N more** toggle; only categories that actually have templates render.
+- **Source pills**: `All`, `Clawboo`, `Agency Agents`, `Awesome OpenClaw`, each with a colored dot.
 
-Below the filters, a **Fan / Grid** toggle switches the view. It defaults to `auto`: a filtered set of 12 or fewer templates renders as a focus-pick fan; more than 12 renders as a scannable grid. Tapping `Fan` or `Grid` locks your choice for the rest of the modal session.
-
-Click a template card to advance to **customize** pre-filled with that template's name, icon, and color. Click **Start empty** to advance with a blank `New Team` / `👻` placeholder and no agents.
+Press **Deploy** on a team card to advance to **customize** pre-filled with that template's name, icon, and color. Press the **Start from scratch** card to advance with a blank `New Team` / `👻` placeholder and no agents.
 
 ### 3. Customize the team
 
 The **customize** step has three sections:
 
-| Field               | What it sets                                                                             | Stored as                   |
-| ------------------- | ---------------------------------------------------------------------------------------- | --------------------------- |
-| **Name**            | The team's display name                                                                  | `teams.name`                |
-| **Team badge**      | The icon (tap the badge to open the icon picker) and accent color (icon + halo tint)     | `teams.icon`, `teams.color` |
-| **Teammate colors** | A _color collection_ that colors every teammate's Boo avatar, with a live roster preview | `teams.colorCollectionId`   |
+| Field                   | What it sets                                                                             | Stored as                    |
+| ----------------------- | ---------------------------------------------------------------------------------------- | ---------------------------- |
+| **Name**                | The team's display name                                                                  | `teams.name`                 |
+| **Team badge**          | The icon (tap the badge to open the icon picker) and accent color (icon + halo tint)     | `teams.icon`, `teams.color`  |
+| **Teammate colors**     | A _color collection_ that colors every teammate's Boo avatar, with a live roster preview | `teams.colorCollectionId`    |
+| **Runtime (per agent)** | The runtime each roster agent runs on, chosen from a per-row dropdown                     | `agents.runtime` (at create) |
+| **Model (per agent)**   | The model an agent runs on, from a dropdown next to its runtime (Native and OpenClaw only) | native `AgentConfig.primaryModel`; OpenClaw `agents.list[]` override |
 
 The accent color and the teammate color collection are independent: the accent tints the team badge and its [Ghost Graph](/using/ghost-graph) halo, while the collection decides how the member Boos are colored. The roster preview seeds its palette with a client-minted team id so the colors you see here match the deployed team exactly (per-team hue rotation).
 
 The eight color collections are `vivid-pop`, `dusty-pastel-pro`, `coastal-mist`, `executive-jewel`, `sharp-saas`, `soft-neutral-editorial`, `monochrome-accent`, and `classic`. `classic` is the default and uses the legacy per-Boo tints (it ignores the hue-rotation seed).
+
+Every agent in the roster preview also carries its own **runtime** dropdown, Clawboo Native, OpenClaw, or any connected coding runtime (Claude Code, Codex, Hermes), so one team can mix runtimes; there is no separate "native team vs OpenClaw team" choice. Each row defaults to a smart suggestion (a marketplace team suggests OpenClaw, a blank team suggests Clawboo Native) that degrades to Clawboo Native with an inline note when the suggested runtime is not connected, so the deploy always succeeds. A genuine leadership role is badged **Leader**, but every agent, the leader included, picks its own runtime; clicking a disabled OpenClaw option opens the OpenClaw setup flow in Settings.
+
+Agents on **Clawboo Native** and **OpenClaw** also get an inline **model** dropdown beside the runtime pill (the coding runtimes run the delegated task with their own SDK defaults, so they have no picker). It defaults to **Recommended** (native leaves the model to the tier default; OpenClaw leaves it to the team's default model), and each runtime shows its own catalog, so a native pick lands on `AgentConfig.primaryModel` while an OpenClaw pick writes a per-agent override into `openclaw.json`. Switching a row's runtime clears its model pick, since a model id belongs to one runtime's catalog. You can change any agent's model later from its [detail view](/using/agents).
 
 The footer button is the primary action; its label changes with context: **Create team** (empty), **Deploy team** (template), or **Create agent** (single-agent deploy from the marketplace's agent "Deploy" button).
 
@@ -160,7 +166,7 @@ Both delete actions prompt with a `window.confirm` first. **Delete team only** k
 ## Troubleshooting
 
 <Warning>
-**"Deploy team" does nothing / errors.** Deploying a populated template needs a live connection; `createAgent` writes agent files through the connected runtime. If the modal jumps back to the customize step with an error, check that you are connected (the modal's confirm handler returns early when there is no client). Creating an *empty* team does not need a connection.
+**"Deploy team" errors with "Connect an OpenClaw Gateway".** This blocks only when you put an agent explicitly on **OpenClaw** while the Gateway is offline, so you do not create a broken OpenClaw member. Either connect the Gateway (click the disabled OpenClaw option to open its setup flow) or switch those agents to another runtime. A team with no OpenClaw agents, and any agent that degraded to Clawboo Native, deploys with no Gateway. An *empty* team needs nothing connected.
 </Warning>
 
 <Warning>

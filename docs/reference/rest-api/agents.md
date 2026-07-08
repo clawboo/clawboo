@@ -25,6 +25,7 @@ Per-agent routes are multi-source: each operation routes to the source that OWNS
 | GET    | `/api/agents/:agentId/files/:name` | Read one agent file                                   | No      |
 | PUT    | `/api/agents/:agentId/files/:name` | Write one agent file                                  | No      |
 | GET    | `/api/agents/:agentId/sessions`    | List the agent's live sessions                        | No      |
+| PATCH  | `/api/agents/:agentId/model`       | Change a native agent's model (native-only, 404 else) | No      |
 
 The `AgentRecord` shape (returned by `GET /api/agents`, `GET /api/agents/:agentId`, and inside the create `201`):
 
@@ -67,7 +68,7 @@ interface AgentRecord {
 
 ## `GET /api/agents`
 
-The primary fleet read. Aggregates `listAgents()` across EVERY registered source (OpenClaw + native), all SQLite-backed, so the list answers even when the Gateway connection is down. `defaultId`, `mainKey`, `stale`, and `lastSyncedAt` are OpenClaw-derived (Boo Zero and the Gateway session keys are OpenClaw concepts); `stale` is `true` whenever the server-side OpenClaw connection is not `connected`.
+The primary fleet read. Aggregates `listAgents()` across EVERY registered source (OpenClaw + native), all SQLite-backed, so the list answers even when the Gateway connection is down. `defaultId` is the runtime-neutral Boo Zero (`resolveBooZero`: an explicit override, then the native Boo Zero, then the OpenClaw default), so a native-first install identifies its native Boo Zero. `mainKey`, `stale`, and `lastSyncedAt` stay OpenClaw-derived; `stale` is `true` whenever the server-side OpenClaw connection is not `connected`.
 
 - **Path params**: none.
 - **Query params**:
@@ -85,7 +86,7 @@ The primary fleet read. Aggregates `listAgents()` across EVERY registered source
 
 ```ts
 {
-  defaultId: string   // OpenClaw source defaultId (Boo Zero); '' if unset
+  defaultId: string   // the runtime-neutral Boo Zero (resolveBooZero); '' if unset
   mainKey: string     // OpenClaw main session key; 'main' if unset
   agents: AgentRecord[]
   stale: boolean      // true when the server-side OpenClaw connection !== 'connected'
@@ -577,6 +578,49 @@ Lists the agent's live sessions. The OpenClaw source delegates LIVE to the Gatew
 
 ```bash
 curl http://localhost:18790/api/agents/<agent-id>/sessions
+```
+
+---
+
+## `PATCH /api/agents/:agentId/model`
+
+Changes a **native** agent's model. It rewrites the stored `AgentConfig.primaryModel` (the next run reads it), so it needs no Gateway. This route is native-only: an OpenClaw agent changes its model through the OpenClaw config path (`PATCH /api/system/openclaw-config` `{ agentModel }`), so this route returns **404** for a non-native agent.
+
+- **Path params**: `agentId`.
+- **Request body**: `{ model: string }` (a native-catalog model id, e.g. `claude-sonnet-4-6`).
+
+### Responses
+
+**`200 OK`**: the model was saved:
+
+```json
+{ "ok": true, "model": "claude-sonnet-4-6" }
+```
+
+**`400 Bad Request`**: missing `agentId` segment, or an empty `model`:
+
+```json
+{ "error": "model (non-empty string) required" }
+```
+
+**`404 Not Found`**: unknown agent, or a non-native agent (model change via this route is native-only):
+
+```json
+{ "error": "model change via this route is native-only" }
+```
+
+**`500 Internal Server Error`**: any other failure:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X PATCH http://localhost:18790/api/agents/<agent-id>/model \
+  -H 'content-type: application/json' \
+  -d '{ "model": "claude-sonnet-4-6" }'
 ```
 
 ---

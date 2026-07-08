@@ -14,11 +14,11 @@ The System panel is built for the OpenClaw path. If you are running native-only 
 </Note>
 
 - OpenClaw installed (the System Info section shows the detected version, or "Not installed").
-- The dashboard running (`npx clawboo`); the System panel is a nav view inside it.
+- The dashboard running (`npx clawboo`); the System panel lives in the Settings modal.
 
 ## Where it lives
 
-Open it from the **System** nav button in the left sidebar (the gear / `Settings` icon, in the secondary nav group), or press **Cmd/Ctrl + 6**. The panel is a single scrollable column of sections separated by thin dividers: Gateway, Default Model, API Keys, Boo Zero, Agent Coordination, Command Approval, and System.
+Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **System** under the System group. The panel is a single scrollable column of sections separated by thin dividers: Gateway, Default Model, API Keys, Boo Zero, Agent Coordination, Command Approval, and System.
 
 ## Steps
 

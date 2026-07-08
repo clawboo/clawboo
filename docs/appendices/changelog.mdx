@@ -1,13 +1,13 @@
 ---
 title: Changelog
-description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.2.0.
+description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.2.1.
 ---
 Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a monorepo of 25 `@clawboo/*` workspace packages, but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
 
 Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which gates on the bundled-CLI clean-install smoke test and then runs `pnpm changeset publish`. The full mechanics are in [Release process](/internals/release-process).
 
 <Note>
-The current npm `latest` is **`clawboo@0.2.0`**, the version these docs describe, so `npx clawboo` installs v0.2.0.
+The current npm `latest` is **`clawboo@0.2.1`**, the version these docs describe, so `npx clawboo` installs v0.2.1.
 </Note>
 
 <Warning>
@@ -18,6 +18,7 @@ Every `0.1.x` release (0.1.0 through 0.1.9) is **deprecated** on npm. The 0.1.x 
 
 | Version | Tag | npm | Theme |
 |---|---|---|---|
+| 0.2.1 | `clawboo@0.2.1` | published | Native team chat live, server-side persistent orchestration, mixed-runtime teams, UI refresh |
 | 0.2.0 | `clawboo@0.2.0` | published | The liberated cut, full multi-runtime orchestrator |
 | 0.1.9 | `clawboo@0.1.9` | deprecated | Welcome redesign, lighter install, team colors |
 | 0.1.8 | `clawboo@0.1.8` | deprecated | Light/dark theme + design-system pass |
@@ -30,7 +31,24 @@ Every `0.1.x` release (0.1.0 through 0.1.9) is **deprecated** on npm. The 0.1.x 
 | 0.1.1 | `clawboo@0.1.1` | deprecated | First real release (v0.1.0 marketplace milestone) |
 | 0.1.0 | `clawboo@0.1.0` | deprecated | Initial package scaffold |
 
-The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap.
+The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap, and 0.2.1 finishes the native-first team experience it opened.
+
+---
+
+## 0.2.1
+
+A patch on the liberated cut that finishes the native-first team experience it opened: a native team now chats and delegates end to end with no OpenClaw Gateway, team orchestration moved server-side so work survives closing the browser, teams can mix runtimes, and the dashboard got a visual and navigation refresh.
+
+- **Native team chat, live**: a native-only team (no Gateway) now sends from the group-chat composer and streams responses back. The earlier read-only limitation is gone; the composer works whenever the team has agents. See [Using group chat](/using/group-chat).
+- **Server-side, persistent orchestration**: every team's delegation engine runs on the server, per team, over one shared core, and the browser is a thin client over REST + SSE (`POST` / `GET` / `POST` on `/api/teams/:id/chat`, `/stream`, `/stop`). A cascade continues with no client connected and survives a tab close or a server restart. See [Delegation and orchestration](/concepts/delegation-and-orchestration).
+- **Native multi-agent delegation**: a native leader hands work to teammates through a structured `delegate` signal the engine observes, so the claim, run, and report-up loop fires for native teams exactly as it does for OpenClaw. See [The board](/concepts/the-board).
+- **Mixed-runtime teams**: build one team from agents on different runtimes (a Native leader, a Claude Code specialist, an OpenClaw teammate). You pick each member's runtime when you create the team, and they coordinate in one room over the shared board and peer chat. See the [multi-runtime team guide](/guides/multi-runtime-team).
+- **Native-first onboarding**: the wizard no longer asks you to pick a runtime up front. Native is the default: paste a provider key, get a seeded leader + specialist team, and optionally connect OpenClaw, Claude Code, Codex, or Hermes in the same flow or later from the Runtimes panel in Settings. See [Quickstart (native)](/getting-started/quickstart-native).
+- **Peer-chat room**: a read-only view of a team's durable room, where every runtime posts as a named peer, opens from the team header. See [Peer chat](/concepts/peer-chat).
+- **Rules and self-intro reach the agents**: a `/rule` line and your onboarding self-introduction are injected into every team turn's context, so a correction and who-you-are persist across the conversation rather than rolling out of the recent-message window. Risky delegations are gated on the leader's approval queue before they run, and board task cards update live as a cascade lands. See [Using group chat](/using/group-chat).
+- **UI refresh**: the app moved to the Inter typeface with a refreshed component set, and the management surfaces (Runtimes, Memory, Capabilities, Scheduler, Tokens Used, Observability, Governance, System, System Health) moved into a **Settings modal**, opened from the gear at the bottom of the sidebar or with `Cmd/Ctrl+,`, leaving a calmer sidebar of Atlas, Fleet, Marketplace, Board, and Approvals. See the [dashboard tour](/getting-started/dashboard-tour).
+
+The 304-agent, 82-team marketplace catalog, the MCP quartet, verification, governance, and observability all carry forward from 0.2.0 unchanged. There is no schema migration between 0.2.0 and 0.2.1; the [no-migration-ladder](/operating/data-and-state) reset caveat is the same.
 
 ---
 

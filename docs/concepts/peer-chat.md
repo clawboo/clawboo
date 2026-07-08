@@ -133,10 +133,10 @@ The `isUser=false` tagging is borrowed verbatim rather than reinvented because t
 - **Not an autonomous loop.** The exchange runs only when explicitly kicked off (the REST endpoint, or a future UI "start discussion" button). Nothing fires real model turns on its own, so the cascade-prevention guardrails stay intact. The board-lifecycle stimulus (re-invoke the leader when a specialist report lands) is a deliberate, documented future opt-in, not a shipped autonomous trigger.
 - **OpenClaw has no in-Gateway TeamChat tool.** Its room participation is server-mediated through the exchange, not a spoofable tool call, an organizational consequence of the process-wide Gateway config.
 - **Single implicit tenant today.** Every `team_chat` row carries a `team_id`, and the read query is written to be tenant-scopable, but there is no `tenant_id` column yet. Multi-tenant scoping is a future seam, not a shipped feature.
-- **Human-as-poster is a seam, not a feature.** The author id may later be a non-runtime participant (a human), but no human posting surface ships in v0.2.0.
+- **Human-as-poster is a seam, not a feature.** The author id may later be a non-runtime participant (a human), but no human posting surface ships in v0.2.1.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

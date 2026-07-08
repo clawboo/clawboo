@@ -157,11 +157,11 @@ Clawboo is single-tenant and local-first by design. The access gate makes a _del
 
 - **The token is all-or-nothing.** Everyone who has it has full operator access. There are no per-user accounts, roles, or scopes, and no per-user revocation; rotate by changing the env var and restarting.
 - **The vault is defense in depth, not targeted-attacker-proof.** It defeats commodity infostealers and the accidental backup or sharing of the vault file, but it does not protect against a process running as you. See [Security → the vault](/operating/security#the-encrypted-secrets-vault).
-- **Single-tenant only.** The `tenant_id` columns across the schema are a dormant future seam; no per-tenant isolation or scoping is active in v0.2.0.
+- **Single-tenant only.** The `tenant_id` columns across the schema are a dormant future seam; no per-tenant isolation or scoping is active in v0.2.1.
 - **OpenClaw shared memory is registered globally.** Because OpenClaw agents are cross-team, Clawboo registers the shared [Memory](/concepts/memory) MCP server for the OpenClaw runtime at _global_ scope rather than per-run/per-team scope (the other four runtimes get per-run team scope). In a multi-tenant world that would need narrowing; it is a documented multi-tenant deferral, not a leak in the single-tenant model Clawboo ships today.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

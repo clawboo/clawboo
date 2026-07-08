@@ -6,7 +6,7 @@ description: Base URL, the SPA proxy, the access gate, the WS upgrade, the error
 The Clawboo dashboard server (`apps/web/server/index.ts`) is an Express app wrapped in a raw `http.Server` so it can also handle the WebSocket upgrade for the Gateway proxy. Every JSON route lives under `/api/`, is registered in one router (`apps/web/server/api/index.ts`), and returns the standard `{ error: string }` envelope on failure. This page covers the cross-cutting facts: base URL, the proxy, auth, body limits, the error shape, and the streaming endpoints, then links to the per-resource reference pages.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## Base URL

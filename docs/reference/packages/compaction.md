@@ -57,7 +57,7 @@ Failure-preserving is enforced at the package boundary, not by trusting each rul
 
 - **`@clawboo/db`**; `tools/broker.ts` runs `compactToolOutput(call.name, raw).text` over a brokered tool call's result (unless `opts.compact === false`), so the broker pipeline compacts tool output before it returns.
 - **`apps/web` (server)**; `lib/executorRunner.ts` passes `compactToolResultMarkdown(text).text` as the runner's `compact` dep, applied to a child's report-up summary before it becomes a board comment / `[Task Update]`.
-- **`apps/web` (SPA)**; `features/group-chat/useBoardOrchestration.ts` wires `compactToolResultMarkdown(text).text` as the board orchestrator's `compact` dep.
+- **`apps/web` (server)**; `lib/teamChat/teamOrchestrator.ts` wires `compactToolResultMarkdown(text).text` as the server-side team orchestrator's `compact` dep.
 
 ## Source
 

@@ -224,7 +224,7 @@ Two things keep this honest:
 So the _spirit_ of "forward-only" holds exactly: the committed schema is never destructively rewritten in place, the DDL is additive and idempotent, and the type layer stays in lockstep. The _mechanism_ changed: instead of a stack of `.sql` files applied in order, a single idempotent DDL block runs on every connection, and a schema change targets a fresh database rather than migrating in place.
 
 <Danger>
-Because there is no migration ladder, a schema change at this stage is a **hard reset** of the local DB, not an in-place upgrade. In v0.2.0 this is acceptable; it is the part of this invariant most likely to change when real data needs preserving across schema versions.
+Because there is no migration ladder, a schema change at this stage is a **hard reset** of the local DB, not an in-place upgrade. In v0.2.1 this is acceptable; it is the part of this invariant most likely to change when real data needs preserving across schema versions.
 </Danger>
 
 ## Design rationale and trade-offs
@@ -241,16 +241,16 @@ The one-way dependency graph (4) buys independently-buildable, browser-safe pack
 
 Real-state-only edges (5) and real-record-only Boos (6) buy a canvas you can trust: what you see maps to what the system will do. The cost is the synthetic-edge tagging and the source-scoped cleanup that keep "real" honest in a multi-source world.
 
-The idempotent schema (7) buys a zero-friction fresh install, `createDb` produces a usable database with no migration step, at the cost of no in-place upgrade path, a deliberate v0.2.0 trade-off.
+The idempotent schema (7) buys a zero-friction fresh install, `createDb` produces a usable database with no migration step, at the cost of no in-place upgrade path, a deliberate v0.2.1 trade-off.
 
 ## Boundaries and non-goals
 
 - **Invariants are structural, not behavioral.** They guarantee the _shape_ of the system (who is canonical, who talks to whom, which way dependencies point). They do not, by themselves, guarantee that a feature behaves correctly; that is what tests and the cascade-prevention machinery are for.
 - **Some invariants are OpenClaw-specific and have generalized.** Invariants 1, 2, 3, and 6 were originally phrased around the single OpenClaw runtime. As the multi-runtime board path became the default, they generalized: a teammate is now a `RuntimeAdapter` (not only an OpenClaw agent), and a future non-OpenClaw runtime emits a normalized lifecycle-event stream server-side rather than flowing through the Gateway WS bridge. The generalized forms above are the current ones.
-- **The schema invariant will likely evolve again.** "No migration ladder, hard reset on change" is a v0.2.0 posture. Preserving real data across schema versions is a planned future requirement.
+- **The schema invariant will likely evolve again.** "No migration ladder, hard reset on change" is a v0.2.1 posture. Preserving real data across schema versions is a planned future requirement.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

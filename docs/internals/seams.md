@@ -189,11 +189,11 @@ A fire is _just another task dispatch_ through the standard pipeline, so budgets
 
 - **Not stores.** The seams route and merge; they own no canonical rows. The capability `capabilities` table is a disconnect-tolerance cache of the merged read; the schedule sources project over the `scheduled_runs` ledger and the live Gateway.
 - **Not a place to special-case a runtime.** The whole point is that the UI and write path are a pure function of `manageability` + `writable` (capabilities) or `manageability` + `domain` (schedules). A new runtime declares its records' or its source's tiers; nothing in the panel or the multiplexer learns its name.
-- **Single implicit tenant today.** `CapabilityRecord.tenantId` and the schedule `tenantId` seam are dormant, always `null` in v0.2.0. The `'human'` `CapabilityRuntime` and the human-participant Routine (`NotImplementedError`) are reachable seams, not shipped features.
+- **Single implicit tenant today.** `CapabilityRecord.tenantId` and the schedule `tenantId` seam are dormant, always `null` in v0.2.1. The `'human'` `CapabilityRuntime` and the human-participant Routine (`NotImplementedError`) are reachable seams, not shipped features.
 - **Some writes are follow-ups, not bugs.** OpenClaw MCP/plugin `config.patch` toggles and a durable Codex managed home are documented future work; those records are surfaced honestly as non-`writable` or `pending-auth` rather than offered with a dead button.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

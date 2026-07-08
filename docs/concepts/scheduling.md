@@ -162,11 +162,11 @@ The error-halts policy trades autonomy for safety: a recurring Routine that fail
 
 - **Not a runtime's own scheduler.** Clawboo never fires a team task into a runtime's own-life cron, and never auto-creates own-life crons. The Gateway-cron source is an operator surface over schedules the Gateway owns, not their owner.
 - **No native scheduler for the one-shot runtimes.** Claude Code, Codex, Hermes, and native have no live scheduler Clawboo drives; scheduling them is a Clawboo Routine. `hermes gateway` is deliberately never launched.
-- **Human participants are a seam, not a feature.** A Routine targeting a `participantKind: 'human'` agent reaches a typed `NotImplementedError`; the intended future shape is a scheduled board ping, not a spawned process. It is reachable and typed, but not built in v0.2.0.
+- **Human participants are a seam, not a feature.** A Routine targeting a `participantKind: 'human'` agent reaches a typed `NotImplementedError`; the intended future shape is a scheduled board ping, not a spawned process. It is reachable and typed, but not built in v0.2.1.
 - **Single implicit tenant today.** Every ledger row carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

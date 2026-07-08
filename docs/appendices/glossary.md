@@ -6,14 +6,14 @@ description: Canonical definitions of Clawboo's core terms, each linked to the p
 Definitions of the vocabulary used throughout the Clawboo docs. Each entry is a one- or two-sentence definition with a link to the page that goes deeper. Terms are grouped by area; within a group they are roughly ordered from most-foundational to most-specific.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## Agents and runtimes
 
 **Boo**: Clawboo's name for an agent: one participant in a team, rendered as a ghost-lobster avatar. Every Boo is backed by a real agent record from an [AgentSource](#agentsource); there are no decorative agents. See [the agent model](/concepts/agent-model).
 
-**Boo Zero**: the universal team leader. It is identified from the OpenClaw Gateway's `defaultId`, falling back to the first teamless agent, then the first agent overall. Boo Zero is teamless in the database but participates in every team via team-scoped sessions. See [the agent model](/concepts/agent-model) and [Boo Zero briefs](/using/boo-zero).
+**Boo Zero**: the universal team leader, runtime-neutral and native by default. It is identified from the registry's `defaultId` (`resolveBooZero`: an explicit override, then the native Boo Zero, then the OpenClaw default), falling back to the first teamless agent, then the first agent overall. The same Boo Zero leads every team regardless of runtime. Boo Zero is teamless in the database but participates in every team via team-scoped sessions. See [the agent model](/concepts/agent-model) and [Boo Zero briefs](/using/boo-zero).
 
 **runtime**: the engine that actually runs an agent. Clawboo supports five: `openclaw`, `clawboo-native`, `claude-code`, `codex`, and `hermes`. Each is wrapped behind one [RuntimeAdapter](#runtimeadapter) interface so a team can mix runtimes. See [runtimes overview](/runtimes/index).
 
@@ -37,7 +37,7 @@ These docs describe Clawboo **v0.2.0**, the current release.
 
 **private plane**: everything a single runtime keeps to itself: its own messaging channels, its own cron/heartbeat, its private cognitive memory and self-improvement, its built-in tools, and its native session resume. Clawboo observes the private plane but never clobbers it. The split is resolved from a runtime's capabilities by `resolveRuntimeIntegration`. See [teams and planes](/concepts/teams-and-planes).
 
-**Know Your Team gate**: a once-per-team onboarding flow that runs before the group-chat composer unlocks. It has three phases: a "Know Your Team" button, sequential agent self-introductions (one message per agent, no `@mentions`), and a user self-introduction. It exists to prevent the message-flooding cascade that an unstructured first message used to trigger. See [group chat](/using/group-chat).
+**Know Your Team gate**: a once-per-team onboarding flow that runs before the group-chat composer unlocks. It has two phases: a "Meet your team" welcome (roster plus the leader), then a user self-introduction that is persisted and injected into every team turn's context. Cascade prevention lives in the server orchestrator, so the gate no longer needs an agent-introduction round. See [group chat](/using/group-chat).
 
 ## The board and orchestration
 

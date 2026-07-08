@@ -65,6 +65,10 @@ const tokens = {
 } as const
 ```
 
+<Note>
+The `fonts.display` / `fonts.body` stacks in this const are a **legacy value**; the running app renders **Inter** for both display and body via `--font-display` / `--font-body` in `apps/web`'s `globals.css`, which override this component-layer token. `fonts.mono` (Geist Mono) is current. See [the design system](/internals/design-system).
+</Note>
+
 <Tip>
 `@clawboo/web` re-exports `cn` / `cva` / `VariantProps` from its own `src/lib/utils.ts`, so most app code imports them from `@/lib/utils` rather than directly from `@clawboo/ui`.
 </Tip>

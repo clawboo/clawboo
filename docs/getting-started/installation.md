@@ -6,7 +6,7 @@ description: Run npx clawboo to launch the dashboard. Prerequisites, what the la
 By the end of this tutorial you'll have the Clawboo dashboard running locally and open in your browser, ready for the onboarding wizard. Installation is a single command; there is nothing to configure first.
 
 <Note>
-These docs describe Clawboo **v0.2.0**. The current `npx clawboo` installs and runs **v0.1.9**. Differences are noted in [Known Issues](/appendices/known-issues).
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## Prerequisites
@@ -33,9 +33,9 @@ If it prints `v22.x` or higher, you're set. If not, install a current Node from 
 npx clawboo
 ```
 
-`npx` downloads the `clawboo` package (currently `0.2.0`) on first run and executes its CLI entry point. There is no separate "install" step and nothing is added to your global `node_modules`; `npx` caches the package and runs it.
+`npx` downloads the `clawboo` package (currently `0.2.1`) on first run and executes its CLI entry point. There is no separate "install" step and nothing is added to your global `node_modules`; `npx` caches the package and runs it.
 
-**Expected result:** the terminal prints the Clawboo ASCII logo and a version line like `Clawboo v0.1.9`, then begins starting the dashboard.
+**Expected result:** the terminal prints the Clawboo ASCII logo and a version line like `Clawboo v0.2.1`, then begins starting the dashboard.
 
 ### 2. Watch the launch sequence
 

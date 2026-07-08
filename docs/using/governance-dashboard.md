@@ -5,7 +5,7 @@ description: Set budgets, raise caps, resume paused scopes, review the enforced-
 
 Use the Governance dashboard when you want to put a USD spend limit on your agents, resume a scope that was auto-paused at its cap, clear the tool/delegation approvals that are blocking a run, or read the forensic audit log of what happened. It is the human-facing surface for Clawboo's trust controls.
 
-The panel lives at the **Governance** nav view (`GovernancePanel`), backed by `/api/governance/*`. It has four sections, top to bottom: **Budgets**, **Caps (enforced in code)**, **Approval queue**, and **Audit log**. This page documents what each does, the options, and how to verify.
+The panel lives in the **Settings** modal (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), under **Governance** in the Insights group (`GovernancePanel`), backed by `/api/governance/*`. It has four sections, top to bottom: **Budgets**, **Caps (enforced in code)**, **Approval queue**, and **Audit log**. This page documents what each does, the options, and how to verify.
 
 For the concepts behind these controls, the budget kill-switch, circuit breakers, and `builder≠judge` verification, see [Governance](/concepts/governance). For the raw request/response shapes, see the [`/api/governance` reference](/reference/rest-api/governance).
 

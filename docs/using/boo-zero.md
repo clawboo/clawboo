@@ -12,7 +12,7 @@ There are two places to configure Boo Zero, split by scope:
 
 ## Who Boo Zero is
 
-Boo Zero is the primary OpenClaw agent, identified at connect time. Identification priority: the Gateway's `defaultId`, then the first teamless agent (`teamId === null`), then the first agent overall. The resolved id lives in `useBooZeroStore.booZeroAgentId`.
+Boo Zero is the runtime-neutral universal leader, identified at connect time, and by default it is a Clawboo-native agent. The client resolves it from the registry's `defaultId` (from `GET /api/agents`, which the server computes as `resolveBooZero`: an explicit override, then the native Boo Zero, then the OpenClaw default), then falls back to the first teamless agent (`teamId === null`), then the first agent overall. The resolved id lives in `useBooZeroStore.booZeroAgentId`. The same Boo Zero leads every team regardless of the team's runtime mix.
 
 Boo Zero is **teamless in the database** (`teamId === null`) but **participates in every team** via team-scoped sessions. In any team's [Ghost Graph](/using/ghost-graph), Boo Zero is pulled in as the universal leader even though it has no team membership; the `TeamHaloLayer` deliberately omits it from any team's hull because its `teamId` stays `null`.
 

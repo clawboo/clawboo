@@ -15,7 +15,7 @@ The source of truth for every actual token value is `globals.css`, which is what
 
 ```mermaid
 flowchart TD
-    subgraph tokens["globals.css — the contract"]
+    subgraph tokens["globals.css: the contract"]
         root[":root → light values"]
         dark[".dark → dark overrides"]
         theme["@theme inline → maps --color-* to var(--*)"]
@@ -112,7 +112,7 @@ Accessibility is built in. A global `@media (prefers-reduced-motion: reduce)` ru
 
 ## Type scale
 
-Three font families, each a token: `--font-display` (Cabinet Grotesk, loaded from the Fontshare CDN), `--font-body` (DM Sans, Google Fonts CDN), and `--font-mono` (Geist Mono, a local `@font-face` from a woff2). The `@theme inline` block exposes them as the `font-display`, `font-body`, and `font-mono` Tailwind families.
+Two typefaces across three tokens: `--font-display` and `--font-body` both resolve to **Inter** (loaded from Google Fonts), distinguished by weight and letter-spacing rather than by family, and `--font-mono` (Geist Mono, a local `@font-face` from a woff2) is used for code and data. The `@theme inline` block exposes them as the `font-display`, `font-body`, and `font-mono` Tailwind families.
 
 The type scale fills the gaps Tailwind's default leaves. Tailwind already ships `text-xs` (12), `text-sm` (14), `text-base` (16), `text-lg` (18), `text-2xl` (24); the custom tokens add the steps Clawboo needs:
 
@@ -124,7 +124,7 @@ The type scale fills the gaps Tailwind's default leaves. Tailwind already ships 
 | `--text-page`    | 28 / 34            | `text-page`       | Page titles                                    |
 | `--text-hero`    | 40 / 46            | `text-hero`       | Welcome hero, marketing-grade headlines        |
 
-A typography rule of thumb runs through the codebase: titles ≥ 18px use `--font-display` with negative letter-spacing; body and small headings stay DM Sans; code, tool-call lines, timestamps, and metric columns stay Geist Mono. A `.font-data` utility class bundles mono + `tabular-nums` so numeric columns (cost, token counts, ports, durations) align and don't jitter as values update.
+A typography rule of thumb runs through the codebase: titles ≥ 18px use `--font-display` (Inter, bold) with negative letter-spacing; body and small headings use `--font-body` (Inter, regular); code, tool-call lines, timestamps, and metric columns stay Geist Mono. A `.font-data` utility class bundles mono + `tabular-nums` so numeric columns (cost, token counts, ports, durations) align and don't jitter as values update.
 
 ## Brand palette and team color collections
 
@@ -188,7 +188,7 @@ Two principles run through all of them. **They are token-driven**, every color i
 - **`globals.css` is the single source of truth.** Every token value comes from `globals.css`; this page documents what ships.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

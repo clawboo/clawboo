@@ -6,7 +6,7 @@ description: Run Clawboo via npx, in dev mode, or as a bundled server, covering 
 Use this page when you want to run the Clawboo dashboard server: locally with `npx clawboo`, from the monorepo in dev mode, or on a remote/headless box behind a reverse proxy. Clawboo is a single Express server that serves both the SPA and every `/api/*` route, plus a WebSocket proxy at `/api/gateway/ws`.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## Prerequisites

@@ -134,7 +134,7 @@ function sourceForAgent(agentId: string): AgentSource {
 }
 ```
 
-A read or write for a specific agent resolves to whichever source owns that row. An unknown id falls back to the default (OpenClaw) source so its `404` semantics still hold. The `GET /api/agents` aggregate read calls `listAgents()` on **every** registered source and flattens the lists, but keeps `defaultId` / `mainKey` / `stale` OpenClaw-derived, because Boo Zero and the Gateway session keys are OpenClaw concepts a native record doesn't have.
+A read or write for a specific agent resolves to whichever source owns that row. An unknown id falls back to the default (OpenClaw) source so its `404` semantics still hold. The `GET /api/agents` aggregate read calls `listAgents()` on **every** registered source and flattens the lists. `mainKey` / `stale` stay OpenClaw-derived (the Gateway's main session key and connection status), but `defaultId` is the runtime-neutral `resolveBooZero` (an explicit override, then the native Boo Zero, then the OpenClaw default), so a native-first install identifies its native Boo Zero.
 
 ## OpenClawAgentSource, the Gateway source
 
@@ -167,11 +167,13 @@ flowchart LR
 
 ### Connection lifecycle and resync triggers
 
-`start()` opens the connection; if no `gatewayUrl` is configured it just sits `disconnected` (reads still serve SQLite). On a successful connect it runs an initial `sync()`, best-effort registers Clawboo's shared MCP servers in the Gateway config, then subscribes to two streams. The `onStatus` callback flips the `connection` state and triggers a debounced resync on reconnect. The `onGatewayEvent` callback re-fires the (750 ms-debounced) sync on `presence`, `heartbeat`, or `agent` broadcast frames, so the registry tracks live fleet changes without polling.
+`start()` opens the connection; if no `gatewayUrl` is configured it just sits `disconnected` (reads still serve SQLite). On a successful connect it runs an initial `sync()`, best-effort registers Clawboo's shared MCP servers in the Gateway config, then subscribes to two streams. That same connect-time config patch also unions the sub-agent-spawning tools (`sessions_spawn`, `sessions_yield`) into the Gateway's top-level `tools.deny` (idempotently, merged with any user denials), so a server-orchestrated OpenClaw agent can't bypass its team by launching its own throwaway sub-agents. See [delegation and orchestration](/concepts/delegation-and-orchestration). The `onStatus` callback flips the `connection` state and triggers a debounced resync on reconnect. The `onGatewayEvent` callback re-fires the (750 ms-debounced) sync on `presence`, `heartbeat`, or `agent` broadcast frames, so the registry tracks live fleet changes without polling.
 
 There is a careful division of reconnect ownership: `OpenClawAgentSource` owns _only_ the initial-connect-failure retry (2 s → 60 s capped backoff, `.unref()`'d so it never holds the process open). Once a connection has opened, the `GatewayClient`'s own reconnect loop owns post-open drops. The two are gated on disjoint conditions so they never race.
 
-The source also exposes an **operator surface** beyond the `AgentSource` trait, `operatorCall`, `onGatewayBroadcast`, and `operatorClient`, used by the scheduler (cron) and the connected-substrate dispatch path. These ride the same single paired connection; they are why OpenClaw is the one runtime the host drives over a live connection rather than a spawned process.
+The source also exposes an **operator surface** beyond the `AgentSource` trait, `operatorCall`, `onGatewayBroadcast`, `operatorClient`, and `reconnectAndWait`, used by the scheduler (cron), the connected-substrate dispatch path, and server-orchestrated team chat. These ride the same single paired connection; they are why OpenClaw is the one runtime the host drives over a live connection rather than a spawned process.
+
+`reconnectAndWait(timeoutMs)` is the delivery-resilience primitive: when a server-orchestrated team send finds the operator connection down, the team orchestrator reconnects, waits (bounded) for the operator to come back, and retries the delivery once, persisting a visible "could not reach your OpenClaw agents" message only if that still fails. This works because the Gateway process is spawned to **outlive the Clawboo server** (its stdio goes to a `gateway.log` file, not the parent's pipes), so restarting the server no longer takes the Gateway down with it.
 
 ## ClawbooNativeAgentSource, SQLite as upstream
 
@@ -214,10 +216,10 @@ The native source pays a different price for the same benefit: by being its own 
 - **Not the runtime.** A source owns _who exists_; it never executes a turn. Execution is `RuntimeAdapter` in `@clawboo/executor`. The two layers stay separate by design.
 - **Not the board.** The board references agents by id and owns only task state. No agent identity, files, or session state live there.
 - **One-to-one team membership.** An agent row has a single `teamId`. A many-to-many membership model is a documented deferred seam, not a shipped feature.
-- **`participantKind` and `tenantId` are dormant.** No human-participant path and no active per-tenant scoping exist in v0.2.0. Both are reserved fields.
+- **`participantKind` and `tenantId` are dormant.** No human-participant path and no active per-tenant scoping exist in v0.2.1. Both are reserved fields.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

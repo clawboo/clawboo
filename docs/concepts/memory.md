@@ -141,11 +141,11 @@ Making the SQLite store the single scrub choke point, rather than scrubbing at e
 
 - **Not a per-runtime memory sync.** Clawboo preserves each runtime's private native memory and never copies it into the shared store. Cross-runtime knowledge sharing happens only through facts the model explicitly saves.
 - **OpenClaw's shared facts are global, not team-scoped.** OpenClaw agents are cross-team and the Gateway's config is process-wide, so the OpenClaw MCP attach can't carry a per-run team scope. This is an organizational boundary for the local-first single-user model, not a security one; a per-runtime team binding for OpenClaw is a future seam.
-- **Single implicit tenant today.** `memory_facts` and `memory_procedures` carry a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.2.0. The store's tenant scoping path exists; it is not wired to a tenant boundary yet.
+- **Single implicit tenant today.** `memory_facts` and `memory_procedures` carry a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.2.1. The store's tenant scoping path exists; it is not wired to a tenant boundary yet.
 - **Scrub is heuristic, not exhaustive.** The redactor masks credential-shaped values; it is not a guarantee against every form of sensitive content reaching the store.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

@@ -166,10 +166,10 @@ SQLite is a deliberate choice: it ships in-process, needs no server, and, with t
 
 - **Not a general-purpose project tracker.** The board exists to coordinate agent execution, not to replace a human-facing issue tracker. Its statuses, transitions, and recovery passes are tuned for runtime-driven work.
 - **Not the agent or session registry.** The board references agents and sessions by id and owns no agent identity, agent files, or live session state. Those belong to the registry of record and the runtime.
-- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.2.0. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.2.1. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

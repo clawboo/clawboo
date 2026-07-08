@@ -220,7 +220,7 @@ The cost is a second concurrency boundary (the per-identity home mutex) layered 
 - **Best-effort lineage and handoff.** Session-codec serialization, rotation lineage, and the native-session-id persistence never fail a completed run; losing native resume degrades gracefully to the prose handoff, which is the designed cross-runtime path anyway.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

@@ -83,7 +83,7 @@ Boo Zero's identity is determined at hydration from live fleet data, so it can c
 Every `AgentRecord` and every `RuntimeAdapter` carries a `participantKind` of `'agent' | 'human'`. Today every participant is an `agent`; nothing in the shipped code branches on this field. It is a deliberate, reserved seam so that a person can later become a first-class task assignee, delegation target, or approver behind the **same** interface, without baking "executor == automated agent" into the trait, the board's assignee model, or the lifecycle event stream.
 
 <Info>
-`participantKind: 'human'` is a **future seam, not a shipped feature** in v0.2.0. There is no human-participant path yet. The field exists so the surrounding machinery (registry, board, events) doesn't have to be rewritten when one is added.
+`participantKind: 'human'` is a **future seam, not a shipped feature** in v0.2.1. There is no human-participant path yet. The field exists so the surrounding machinery (registry, board, events) doesn't have to be rewritten when one is added.
 </Info>
 
 ## How a Boo relates to a runtime
@@ -133,12 +133,12 @@ The cost is indirection: a Boo and its runtime are two layers, and a change to a
 ## Boundaries and non-goals
 
 - **A Boo is not its runtime.** The record carries a `runtime` tag and execution config, but the execution loop, the live session, and the runtime's private on-disk state belong to the runtime. The board references the agent by id; it does not own agent identity or session state.
-- **`participantKind: 'human'` is dormant.** No human-participant path exists in v0.2.0. The field is a seam.
+- **`participantKind: 'human'` is dormant.** No human-participant path exists in v0.2.1. The field is a seam.
 - **`tenantId` is dormant.** Every record carries a `tenantId`, but there is no active per-tenant scoping, a single implicit tenant today.
 - **Boo Zero is identified, not declared.** It is whatever the three-step priority resolves to at hydration, not a persisted leader flag. Change the runtime's default agent and Boo Zero can change.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

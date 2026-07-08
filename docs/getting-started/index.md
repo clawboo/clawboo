@@ -3,10 +3,10 @@ title: Getting started
 description: 'The two install paths: native-first (paste a key, no Gateway) or the OpenClaw Gateway, plus prerequisites.'
 ---
 
-Clawboo runs the same way for everyone: one command, `npx clawboo`, which launches a local dashboard and walks you through a first-run wizard. The only real choice the wizard asks is **how you want your agents to run**. This page explains the two paths so you can pick before you start.
+Clawboo runs the same way for everyone: one command, `npx clawboo`, which launches a local dashboard and walks you through a first-run wizard. Onboarding is **native-first**: you paste one provider key and land in a working team, with no runtime to pick up front. The OpenClaw Gateway and the coding-agent runtimes are **opt-in**, connected during the optional Add-runtimes step or later from Settings. This page explains the fast native path and the OpenClaw path so you can choose which quickstart to follow.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## Prerequisites
@@ -29,44 +29,44 @@ The launcher prints the Clawboo logo, does a quick **informational** probe of th
 
 The Gateway probe is purely informational; a "No Gateway detected" result does not block anything; the dashboard simply guides you through setup either way. See [Installation](/getting-started/installation) for the full launch sequence (port discovery, bundled vs dev server, the browser-open step).
 
-## The first choice: how your agents run
+## How onboarding flows
 
-After the welcome splash, the wizard asks **"How do you want your agents to run?"** and offers a recommended native card first, then a divider reading "Or bring your own runtime", then secondary cards for OpenClaw, Claude Code, Hermes, and Codex. Your pick decides the rest of onboarding:
+After the welcome splash, the wizard takes you straight to **Connect Clawboo Native**: pick a provider, paste a key (or point at a local Ollama), and Clawboo seeds a starter team. An optional **Add more runtimes** step then lets you connect OpenClaw or a coding-agent runtime as peers, and a final **Your team is ready** screen drops you into the dashboard. There is no up-front "pick a runtime" question; native is the default and everything else is additive.
 
 ```mermaid
 flowchart TD
     A[npx clawboo] --> B[Welcome splash]
-    B --> C{How do you want<br/>your agents to run?}
-    C -->|Clawboo Native| D[Paste a provider key]
-    D --> E[Seed a starter team]
-    E --> F[Land in the dashboard<br/>native mode, no Gateway]
-    C -->|OpenClaw| G[Detect / install / configure /<br/>start the Gateway]
-    G --> H[Deploy a team<br/>over the Gateway]
-    C -->|Claude Code · Codex · Hermes| I[Connect the runtime<br/>then add a team later]
+    B --> C[Connect Clawboo Native<br/>paste a provider key]
+    C --> D[Seed a starter team]
+    D --> E{Add more runtimes?<br/>optional}
+    E -->|Skip| G[Your team is ready<br/>native mode, no Gateway]
+    E -->|Connect a runtime| F[OpenClaw · Claude Code<br/>Codex · Hermes]
+    F --> G
 ```
 
-|                      | Native-first (recommended)                                           | OpenClaw Gateway                                                                       |
+Both quickstarts share this spine; they differ only in whether you connect the OpenClaw Gateway along the way.
+
+|                      | Native (the fast path)                                               | With the OpenClaw Gateway                                                              |
 | -------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| **Best for**         | Getting a team running in ~60 seconds                                | Running OpenClaw agents on a local Gateway                                             |
-| **What you provide** | One provider API key (or a local Ollama)                             | A provider key, entered during Gateway config                                          |
+| **Best for**         | Getting a team running in ~60 seconds                                | Also running OpenClaw agents on a local Gateway                                        |
+| **What you provide** | One provider API key (or a local Ollama)                             | The same, plus OpenClaw setup in the Add-runtimes step                                 |
 | **Extra software**   | None: the native runtime ships inside Clawboo                        | The `openclaw` CLI + a running local Gateway (the wizard can install/start it for you) |
-| **Wizard branch**    | `chooseRuntime → configureNative → nativeReady`                      | `chooseRuntime → detect → install → configure → startGateway → team → deploy`          |
-| **End state**        | A seeded two-agent team in native mode, no GatewayClient             | A team deployed over the live Gateway                                                  |
+| **End state**        | A seeded native team, no GatewayClient                               | A seeded native team plus a connected OpenClaw runtime you can add to a team           |
 | **Walkthrough**      | [Quickstart: the native runtime](/getting-started/quickstart-native) | [Quickstart: OpenClaw](/getting-started/quickstart-openclaw)                           |
 
 <Tip>
-The choice is not permanent. Every runtime is a peer; you can add OpenClaw, Claude Code, Codex, or Hermes later from the **Runtimes** panel, and mix runtimes within a team. The wizard prompt even says so: "You can add or switch runtimes anytime from the Runtimes panel." See [Connecting runtimes](/runtimes/connecting-runtimes).
+Nothing is permanent. Every runtime is a peer; you can add OpenClaw, Claude Code, Codex, or Hermes anytime from **Settings**, then the **Runtimes** panel, and mix runtimes within one team. See [Connecting runtimes](/runtimes/connecting-runtimes).
 </Tip>
 
-### Path 1: Native-first (recommended)
+### The native path (the fast route)
 
-Pick the **Clawboo Native** card. Clawboo's [native runtime](/appendices/glossary) (`clawboo-native`) is an in-process harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, or a local Ollama), so there is nothing extra to install and no Gateway. You paste a provider key, optionally test it, then click **Create my team**; Clawboo stores the key in its encrypted vault and seeds a starter team (a leader plus a specialist, both native, sharing one memory). You land directly in that team's group chat.
+Clawboo's [native runtime](/appendices/glossary) (`clawboo-native`) is an in-process harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, or a local Ollama), so there is nothing extra to install and no Gateway. You paste a provider key, optionally test it, then click **Create my team**; Clawboo stores the key in its encrypted vault and seeds a starter team (a leader plus a specialist, both native, sharing one memory). You land directly in that team's group chat.
 
 This is the fastest route to a running team. Follow it step by step in the [native quickstart](/getting-started/quickstart-native).
 
-### Path 2: With the OpenClaw Gateway
+### The OpenClaw path (opt-in)
 
-Pick the **OpenClaw** card if you want to run OpenClaw agents on a local Gateway. The wizard enters its detection step, which checks Node.js, whether the `openclaw` CLI is installed, and whether a Gateway is running. From there it can install OpenClaw, write its config and provider key, start the Gateway, and then deploy a team over it.
+Want to run OpenClaw agents on a local Gateway? Connect OpenClaw from the wizard's **Add more runtimes** step (a "Set up OpenClaw" detour that detects, installs, configures, and starts the Gateway, then returns you to the wizard) or later from **Settings**, then the **Runtimes** panel. The detour checks Node.js, whether the `openclaw` CLI is installed, and whether a Gateway is running, and can install OpenClaw, write its config and provider key, and start the Gateway for you. Once it is connected you can deploy or add OpenClaw agents to a team.
 
 This path involves more moving parts (a separate CLI and a long-lived Gateway process) but unlocks OpenClaw's own agents and channels. Follow it step by step in the [OpenClaw quickstart](/getting-started/quickstart-openclaw).
 
