@@ -1,17 +1,30 @@
-// Styled select primitive.
+// Styled select primitive — a custom, fully on-brand dropdown (NOT a native
+// `<select>`, whose popup list is drawn by the OS and can't be themed).
 //
-// Wraps the native `<select>` element so we keep its full keyboard / a11y
-// behavior (arrow keys, type-ahead, mobile native picker, screen reader
-// semantics) but layers on premium chrome: token-driven background, surface
-// tier visuals, custom Lucide chevron overlay, focus ring.
+// Mirrors the app's other pickers (`ModelDropdown` / `AgentModelSelector`): a
+// pill trigger + a `bg-popover` popover with check-marked rows, arrow-key
+// navigation, outside-click / Escape close. The popover is rendered through a
+// portal to `document.body` with FIXED positioning anchored to the trigger rect
+// (so it escapes every ancestor's `overflow: hidden` / clipped rounded corners),
+// and flips ABOVE the trigger when there isn't room below.
 //
-// API mirrors the native element — pass `value` + `onChange` and either an
-// `options` array OR raw `<option>` children. Use this anywhere a vanilla
-// `<select>` would otherwise look browser-default.
+// The API is unchanged from the old native wrapper — pass `value` + `onChange`
+// and either an `options` array OR raw `<option>` children (whose content may be
+// any ReactNode, e.g. an emoji + name). Use this anywhere a vanilla `<select>`
+// would otherwise render the OS-default listbox.
 
-import { ChevronDown } from 'lucide-react'
-import { useState } from 'react'
-import type { ChangeEvent, CSSProperties, ReactNode, SelectHTMLAttributes } from 'react'
+import {
+  Children,
+  isValidElement,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
+import type { CSSProperties, ReactElement, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Check, ChevronDown } from 'lucide-react'
 
 export type SelectSize = 'sm' | 'md'
 
@@ -21,27 +34,70 @@ export interface SelectOption {
   disabled?: boolean
 }
 
-export interface SelectProps extends Omit<
-  SelectHTMLAttributes<HTMLSelectElement>,
-  'onChange' | 'size'
-> {
+// Internal shape — a children-parsed option carries a ReactNode label (e.g. an
+// emoji + team name), so the normalized form widens `label` beyond `string`.
+interface NormalizedOption {
+  value: string
+  label: ReactNode
+  disabled?: boolean
+}
+
+export interface SelectProps {
   /** Convenience prop — pass an array of options or use `children` directly. */
   options?: SelectOption[]
   value: string
   onChange: (value: string) => void
-  /** Compact (sm = 26 px) vs default (md = 32 px) heights. */
+  /** Compact (sm = 26 px) vs default (md = 32 px) trigger heights. */
   size?: SelectSize
+  /** Optional fixed menu width (px). Defaults to the trigger width; pass a larger
+   *  value when the trigger is compact but the option labels are long, so the menu
+   *  stays readable (it's clamped to the viewport so it never overflows the edge). */
+  menuWidth?: number
+  /** Raw `<option>` elements (labels may be any ReactNode). */
   children?: ReactNode
   className?: string
   style?: CSSProperties
+  disabled?: boolean
+  'aria-label'?: string
+  'data-testid'?: string
+  id?: string
 }
 
 const SIZE_STYLES: Record<
   SelectSize,
-  { height: number; fontSize: number; pl: number; pr: number }
+  { height: number; fontSize: number; pl: number; pr: number; chevron: number }
 > = {
-  sm: { height: 26, fontSize: 11, pl: 8, pr: 24 },
-  md: { height: 32, fontSize: 12, pl: 10, pr: 28 },
+  sm: { height: 26, fontSize: 11, pl: 8, pr: 22, chevron: 12 },
+  md: { height: 32, fontSize: 12, pl: 10, pr: 26, chevron: 14 },
+}
+
+interface MenuPosition {
+  left: number
+  width: number
+  top?: number
+  bottom?: number
+  maxHeight: number
+}
+
+const MENU_DESIRED_HEIGHT = 264
+const MENU_GAP = 4
+
+// Parse `<option>` children into the normalized option shape. Handles the two
+// forms consumers use — a mapped array of `<option>` and inline `<option>`
+// literals — flattening fragments via `Children.toArray`.
+function optionsFromChildren(children: ReactNode): NormalizedOption[] {
+  const out: NormalizedOption[] = []
+  Children.toArray(children).forEach((child) => {
+    if (!isValidElement(child) || child.type !== 'option') return
+    const props = (child as ReactElement<{ value?: string; disabled?: boolean; children?: ReactNode }>)
+      .props
+    out.push({
+      value: String(props.value ?? ''),
+      label: props.children,
+      disabled: props.disabled,
+    })
+  })
+  return out
 }
 
 export function Select({
@@ -49,84 +105,283 @@ export function Select({
   value,
   onChange,
   size = 'md',
+  menuWidth,
   children,
   className,
   style,
   disabled,
-  ...rest
+  'aria-label': ariaLabel,
+  'data-testid': dataTestId,
+  id,
 }: SelectProps) {
   const dims = SIZE_STYLES[size]
-  const [hovered, setHovered] = useState(false)
-  const active = hovered && !disabled
+  const normalized: NormalizedOption[] = options ?? optionsFromChildren(children)
 
-  function handleChange(event: ChangeEvent<HTMLSelectElement>) {
-    onChange(event.target.value)
-  }
+  const [open, setOpen] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [pos, setPos] = useState<MenuPosition | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  const selectedIndex = normalized.findIndex((o) => o.value === value)
+  const selected = selectedIndex >= 0 ? normalized[selectedIndex] : undefined
+  // Mirror the native <select>, which shows the first option when the value
+  // matches none — never a blank trigger.
+  const displayLabel = selected?.label ?? normalized[0]?.label ?? ''
+
+  const computePosition = useCallback(() => {
+    const el = triggerRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - r.bottom
+    const spaceAbove = r.top
+    const estimatedHeight = Math.min(MENU_DESIRED_HEIGHT, normalized.length * 34 + 12)
+    const openUp = spaceBelow < estimatedHeight + MENU_GAP + 8 && spaceAbove > spaceBelow
+    const maxHeight = Math.max(
+      120,
+      Math.min(MENU_DESIRED_HEIGHT, (openUp ? spaceAbove : spaceBelow) - 12),
+    )
+    // The menu may be wider than a compact trigger (menuWidth); keep it left-anchored
+    // to the trigger but clamp so it never overflows the viewport's right edge.
+    const width = menuWidth && menuWidth > r.width ? menuWidth : r.width
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - 8 - width))
+    setPos({
+      left,
+      width,
+      maxHeight,
+      ...(openUp ? { bottom: window.innerHeight - r.top + MENU_GAP } : { top: r.bottom + MENU_GAP }),
+    })
+  }, [normalized.length, menuWidth])
+
+  useLayoutEffect(() => {
+    if (open) computePosition()
+  }, [open, computePosition])
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation() // don't also close a parent modal behind the dropdown
+        setOpen(false)
+      }
+    }
+    const onReflow = () => computePosition()
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKey, true)
+    window.addEventListener('resize', onReflow)
+    window.addEventListener('scroll', onReflow, true)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('resize', onReflow)
+      window.removeEventListener('scroll', onReflow, true)
+    }
+  }, [open, computePosition])
+
+  // Sync the keyboard highlight to the current value each time we open.
+  useEffect(() => {
+    if (open) setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0)
+  }, [open, selectedIndex])
+
+  const choose = useCallback(
+    (opt: NormalizedOption) => {
+      if (opt.disabled) return
+      onChange(opt.value)
+      setOpen(false)
+    },
+    [onChange],
+  )
+
+  // Skip disabled options when arrowing.
+  const step = useCallback(
+    (from: number, dir: 1 | -1) => {
+      let i = from
+      for (let n = 0; n < normalized.length; n++) {
+        i = Math.min(Math.max(i + dir, 0), normalized.length - 1)
+        if (!normalized[i]?.disabled) return i
+        if (i === 0 || i === normalized.length - 1) break
+      }
+      return from
+    },
+    [normalized],
+  )
+
+  const onTriggerKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (disabled) return
+      if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault()
+        setOpen(true)
+        return
+      }
+      if (!open) return
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setActiveIndex((i) => step(i, 1))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setActiveIndex((i) => step(i, -1))
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        const opt = normalized[activeIndex]
+        if (opt) choose(opt)
+      }
+    },
+    [open, disabled, normalized, activeIndex, choose, step],
+  )
 
   return (
-    <span
+    <div
       className={className}
-      style={{
-        position: 'relative',
-        display: 'inline-block',
-        ...style,
-      }}
+      style={{ position: 'relative', display: 'inline-block', ...style }}
     >
-      <select
-        value={value}
-        onChange={handleChange}
+      <button
+        ref={triggerRef}
+        type="button"
+        id={id}
         disabled={disabled}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        data-testid={dataTestId}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        onKeyDown={onTriggerKeyDown}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         style={{
-          appearance: 'none',
-          WebkitAppearance: 'none',
-          MozAppearance: 'none',
-          // Fill the wrapper so the absolutely-positioned chevron always sits at
-          // the field's right edge. Without this the native <select> shrinks to
-          // its text content while the chevron stays pinned to the (wider)
-          // wrapper edge — the "arrow floating far from the field" bug whenever a
-          // width is passed (e.g. style={{ width: '100%' }}).
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 6,
           width: '100%',
           height: dims.height,
           paddingLeft: dims.pl,
-          paddingRight: dims.pr,
-          background: `rgb(var(--foreground-rgb) / ${active ? 0.08 : 0.05})`,
-          border: `1px solid rgb(var(--foreground-rgb) / ${active ? 0.2 : 0.1})`,
-          borderRadius: 6,
+          paddingRight: dims.pr - 8,
+          background: 'var(--surface)',
+          border: `1px solid ${(open || focused) && !disabled ? 'var(--primary)' : 'var(--border)'}`,
+          borderRadius: 8,
           color: 'rgb(var(--foreground-rgb) / 0.85)',
           fontSize: dims.fontSize,
           fontFamily: 'var(--font-body)',
           fontWeight: 500,
+          textAlign: 'left',
           cursor: disabled ? 'not-allowed' : 'pointer',
           outline: 'none',
-          transition: 'border-color var(--motion-fast), background var(--motion-fast)',
+          boxShadow:
+            (open || focused) && !disabled ? '0 0 0 4px rgb(var(--primary-rgb) / 0.15)' : 'none',
+          transition:
+            'border-color var(--motion-fast), background var(--motion-fast), box-shadow var(--motion-fast)',
           opacity: disabled ? 0.5 : 1,
           minWidth: 0,
         }}
-        {...rest}
       >
-        {options
-          ? options.map((opt) => (
-              <option key={opt.value} value={opt.value} disabled={opt.disabled}>
-                {opt.label}
-              </option>
-            ))
-          : children}
-      </select>
-      <ChevronDown
-        aria-hidden
-        size={size === 'sm' ? 12 : 14}
-        strokeWidth={2}
-        style={{
-          position: 'absolute',
-          right: size === 'sm' ? 6 : 8,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          pointerEvents: 'none',
-          color: 'rgb(var(--foreground-rgb) / 0.5)',
-        }}
-      />
-    </span>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {displayLabel}
+        </span>
+        <ChevronDown
+          aria-hidden
+          size={dims.chevron}
+          strokeWidth={2}
+          style={{
+            flexShrink: 0,
+            color: 'rgb(var(--foreground-rgb) / 0.5)',
+            transform: open ? 'rotate(180deg)' : 'none',
+            transition: 'transform var(--motion-fast)',
+          }}
+        />
+      </button>
+
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="listbox"
+            aria-label={ariaLabel}
+            className="border border-border bg-popover"
+            style={{
+              position: 'fixed',
+              left: pos.left,
+              width: pos.width,
+              ...(pos.top !== undefined ? { top: pos.top } : {}),
+              ...(pos.bottom !== undefined ? { bottom: pos.bottom } : {}),
+              zIndex: 1000,
+              maxHeight: pos.maxHeight,
+              overflowY: 'auto',
+              borderRadius: 10,
+              padding: '5px 0',
+              boxShadow: 'var(--shadow-floating)',
+            }}
+          >
+            {normalized.map((opt, idx) => {
+              const isSelected = opt.value === value
+              const isActive = idx === activeIndex
+              return (
+                <button
+                  key={`${opt.value}-${idx}`}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  aria-disabled={opt.disabled || undefined}
+                  onClick={() => choose(opt)}
+                  onMouseEnter={() => !opt.disabled && setActiveIndex(idx)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    padding: '7px 12px',
+                    fontSize: dims.fontSize,
+                    fontFamily: 'var(--font-body)',
+                    textAlign: 'left',
+                    border: 'none',
+                    cursor: opt.disabled ? 'not-allowed' : 'pointer',
+                    color: opt.disabled ? 'rgb(var(--foreground-rgb) / 0.4)' : 'var(--foreground)',
+                    background: isSelected
+                      ? 'rgb(var(--primary-rgb) / 0.07)'
+                      : isActive && !opt.disabled
+                        ? 'rgb(var(--foreground-rgb) / 0.06)'
+                        : 'transparent',
+                    transition: 'background var(--motion-fast)',
+                  }}
+                >
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontWeight: isSelected ? 600 : 400,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {opt.label}
+                  </span>
+                  {isSelected && (
+                    <Check
+                      style={{ width: 14, height: 14, color: 'var(--primary)', flexShrink: 0 }}
+                    />
+                  )}
+                </button>
+              )
+            })}
+          </div>,
+          document.body,
+        )}
+    </div>
   )
 }
