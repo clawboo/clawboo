@@ -10,10 +10,12 @@ import { createLogger } from '@clawboo/logger'
 import { createDb, reconcileOrphans, reconcileStaleInProgress, seedBuiltinTools } from '@clawboo/db'
 
 import { apiRouter } from './api/index'
+import { attachIdentity } from './lib/auth'
 import { getDbPath } from './lib/db'
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { startMcpSupervisor } from './lib/mcpSupervisor'
 import { startApprovalReaper } from './lib/approvalReaper'
+import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { getRegistry } from './lib/agentSource'
 import { resolveApiPort, writeApiPortFile, removeApiPortFile } from './lib/portUtils'
@@ -123,6 +125,12 @@ async function main() {
     next()
   })
 
+  // Identity middleware — the single SaaS-readiness chokepoint. No-op pass-through
+  // today (populates req.tenantId / req.userId with the single implicit tenant, both
+  // null); the place a future hosted build verifies the request identity. Runs after
+  // the access gate so unauthenticated requests are rejected before identity work.
+  app.use(attachIdentity)
+
   // Per-request logging
   app.use((req, res, next) => {
     const start = Date.now()
@@ -207,6 +215,18 @@ async function main() {
   // isToolEnabled falls back to true). Idempotent — a re-seed preserves a prior
   // user disable. Best-effort; never blocks boot.
   safeStart('tools-registry-seed', () => seedBuiltinTools(createDb(getDbPath())))
+
+  // ── Default-native Boo Zero ─────────────────────────────────────────────────
+  // Ensure a native-first install has its runtime-neutral universal leader — a
+  // teamless clawboo-native Boo Zero — so native teams get a real coordinator and the
+  // graph reflects it immediately (not only after the first message). Self-gated (a
+  // native team member exists + a native key is connected + none is designated); a
+  // no-op for a pure-OpenClaw / no-key install. Best-effort; never blocks boot.
+  safeStart('native-boo-zero', () => {
+    void ensureNativeBooZero(createDb(getDbPath()), getRegistry().nativeSource).catch(
+      () => undefined,
+    )
+  })
 
   // ── MCP liveness supervisor ─────────────────────────────────────────────────
   // Pre-warm the in-process MCP servers + health-probe them (rebuild-on-failure
