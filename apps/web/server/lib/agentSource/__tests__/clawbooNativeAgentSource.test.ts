@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
 
 import { agents, createDb, getBudget, getSetting, type ClawbooDb } from '@clawboo/db'
 
@@ -56,6 +57,9 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
       status: 'idle',
       participantKind: 'agent',
       tenantId: null,
+      // The record surfaces the AgentConfig's primaryModel so the fleet + agent-detail
+      // model selector can show/persist a native agent's chosen model.
+      model: 'claude-haiku-4-5',
     })
     expect(created.sessionKey).toBe(`agent:${created.id}:native`)
 
@@ -70,6 +74,59 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
 
     await source.archiveAgent(created.id)
     expect(await source.getAgent(created.id)).toBeNull()
+  })
+
+  it('auto-resolves the provider from the connected key when execConfig omits one (modelTier stripped)', async () => {
+    const saved = {
+      ANTHROPIC_API_KEY: process.env['ANTHROPIC_API_KEY'],
+      OPENAI_API_KEY: process.env['OPENAI_API_KEY'],
+      OPENROUTER_API_KEY: process.env['OPENROUTER_API_KEY'],
+      OLLAMA_BASE_URL: process.env['OLLAMA_BASE_URL'],
+    }
+    delete process.env['ANTHROPIC_API_KEY']
+    delete process.env['OPENROUTER_API_KEY']
+    delete process.env['OLLAMA_BASE_URL']
+    process.env['OPENAI_API_KEY'] = 'sk-openai-test'
+    try {
+      const created = await source.createAgent({
+        name: 'Auto',
+        execConfig: {
+          systemPrompt: 'hi',
+          modelTier: 'leader',
+          tools: { memory: true, tools: true, tasks: false, teamchat: false },
+        },
+      })
+      const cfg = loadAgentConfig(db, created.id)
+      expect(cfg?.primaryProvider).toBe('openai')
+      expect(cfg?.primaryModel).toBe('gpt-4o')
+      expect(cfg?.envVar).toBe('OPENAI_API_KEY')
+      expect(cfg?.tools.tasks).toBe(false)
+      // `modelTier` is a non-schema hint — stripped from BOTH the stored config
+      // and the row's execConfig carrier.
+      expect(cfg && 'modelTier' in (cfg as unknown as Record<string, unknown>)).toBe(false)
+      const rowExec = created.execConfig as Record<string, unknown> | null
+      expect(rowExec && 'modelTier' in rowExec).toBe(false)
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
+  it('honors an explicit provider (the onboarding seed path is unchanged)', async () => {
+    const created = await source.createAgent({
+      name: 'Explicit',
+      execConfig: {
+        primaryProvider: 'anthropic',
+        primaryModel: 'claude-haiku-4-5',
+        envVar: 'ANTHROPIC_API_KEY',
+        systemPrompt: 'x',
+      },
+    })
+    const cfg = loadAgentConfig(db, created.id)
+    expect(cfg?.primaryProvider).toBe('anthropic')
+    expect(cfg?.primaryModel).toBe('claude-haiku-4-5')
   })
 
   it('file round-trip through the KV namespace (missing read is empty)', async () => {
@@ -188,5 +245,31 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
   it('health is always connected and sync is a zero-result no-op', async () => {
     expect(await source.health()).toMatchObject({ ok: true, connection: 'connected' })
     expect(await source.sync()).toMatchObject({ upserted: 0, archived: 0 })
+  })
+
+  // ── Multi-tenant seam (SaaS-readiness) ──────────────────────────────────────
+
+  it('carries an explicit tenantId onto the row, the AgentConfig, and the budget', async () => {
+    const a = await source.createAgent({
+      name: 'Tenant Boo',
+      tenantId: 'acme',
+      execConfig: { budgetUsd: 2 },
+    })
+    // The returned record AND the raw agents row both carry the tenant.
+    expect(a.tenantId).toBe('acme')
+    const row = db.select({ tenantId: agents.tenantId }).from(agents).where(eq(agents.id, a.id)).get()
+    expect(row?.tenantId).toBe('acme')
+    // The co-written AgentConfig blob + the minted budget row carry it too.
+    expect(loadAgentConfig(db, a.id)?.tenantId).toBe('acme')
+    expect(getBudget(db, 'agent', a.id)?.tenantId).toBe('acme')
+  })
+
+  it('defaults tenantId to null when unspecified (byte-identical single-tenant no-op)', async () => {
+    const a = await source.createAgent({ name: 'No Tenant Boo', execConfig: { budgetUsd: 2 } })
+    expect(a.tenantId).toBeNull()
+    const row = db.select({ tenantId: agents.tenantId }).from(agents).where(eq(agents.id, a.id)).get()
+    expect(row?.tenantId).toBeNull()
+    expect(loadAgentConfig(db, a.id)?.tenantId).toBeNull()
+    expect(getBudget(db, 'agent', a.id)?.tenantId).toBeNull()
   })
 })

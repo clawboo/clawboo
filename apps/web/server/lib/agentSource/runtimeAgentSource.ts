@@ -1,10 +1,12 @@
-// The native runtime's AgentSource — a PEER of the OpenClaw source in the same
-// registry. There is no remote substrate: SQLite IS the upstream, so reads and
-// writes are direct, `start()`/`sync()` are no-ops, and the source is always
-// "connected". Agent files + the per-agent AgentConfig live in settings-KV
-// rows (the per-agent-prefix convention the agents REST sweep also knows);
-// sessions come from the `sessions` table the native harness populates. Every
-// write carries the dormant tenantId (null today).
+// A generic SQLite-backed AgentSource for the executor-driven coding runtimes
+// (claude-code / codex / hermes). It's a PEER of the OpenClaw + native sources:
+// SQLite IS the upstream, so reads/writes are direct, start()/sync() are no-ops,
+// and it's always "connected". One instance is registered per runtime id.
+//
+// Unlike the native source there is NO AgentConfig here — the coding drivers read
+// no per-agent config/files; the server engine (serverDeliver) runs them from the
+// agent row's `runtime` + the vault key + the delegated task as the stimulus. The
+// files written at create time are stored only for the agent detail editor.
 
 import { randomUUID } from 'node:crypto'
 
@@ -17,19 +19,18 @@ import {
   type AgentSource,
   type CreateAgentInput,
   type HealthResult,
+  type RuntimeId,
   type SessionRecord,
   type SyncResult,
   type TeamRecord,
   type UpdateAgentInput,
 } from '@clawboo/agent-registry'
-import { agentConfigSchema, DEFAULT_AGENT_CONFIG, type AgentConfig } from '@clawboo/adapter-native'
 import {
   agents,
   approvalHistory,
   costRecords,
   createDb,
   sessions,
-  setBudgetLimit,
   settings,
   teams,
   type ClawbooDb,
@@ -38,20 +39,15 @@ import {
 import { and, eq, isNull, like, sql } from 'drizzle-orm'
 
 import {
-  loadAgentConfig,
-  nativeConfigKey,
-  nativeFileKey,
-  readNativeAgentFile,
-  saveAgentConfig,
-  writeNativeAgentFile,
-} from '../runtimes/native/agentConfigStore'
-import { resolveConnectedNativeDefaults } from '../runtimes/native/nativeProviderDefaults'
-import { nativeTeamSessionKeysForAgentLike } from '../teamChat/nativeTeamSession'
+  readRuntimeAgentFile,
+  runtimeAgentFileKey,
+  writeRuntimeAgentFile,
+} from './runtimeAgentFileStore'
 
-const SOURCE_ID = 'clawboo-native'
-
-export interface ClawbooNativeAgentSourceDeps {
+export interface RuntimeAgentSourceDeps {
   getDbPath: () => string
+  /** The runtime id this source owns (claude-code / codex / hermes). */
+  runtimeId: RuntimeId
 }
 
 function parseJson(value: string | null): unknown | null {
@@ -73,12 +69,14 @@ function slugifyName(name: string): string {
   )
 }
 
-export class ClawbooNativeAgentSource implements AgentSource {
-  readonly id = SOURCE_ID
+export class RuntimeAgentSource implements AgentSource {
+  readonly id: RuntimeId
 
   private readonly listeners = new Set<(e: AgentEvent) => void>()
 
-  constructor(private readonly deps: ClawbooNativeAgentSourceDeps) {}
+  constructor(private readonly deps: RuntimeAgentSourceDeps) {
+    this.id = deps.runtimeId
+  }
 
   private db(): ClawbooDb {
     return createDb(this.deps.getDbPath())
@@ -88,7 +86,7 @@ export class ClawbooNativeAgentSource implements AgentSource {
     for (const listener of [...this.listeners]) listener(e)
   }
 
-  private mapRow(row: DbAgent, db: ClawbooDb): AgentRecord {
+  private mapRow(row: DbAgent): AgentRecord {
     return {
       id: row.id,
       sourceId: row.sourceId,
@@ -98,14 +96,11 @@ export class ClawbooNativeAgentSource implements AgentSource {
       avatarUrl: null,
       avatarSeed: row.avatarSeed ?? null,
       status: row.status as AgentRecordStatus,
-      sessionKey: `agent:${row.id}:native`,
+      sessionKey: `agent:${row.id}:${this.id}`,
       isDefault: false,
       teamId: row.teamId ?? null,
       personalityConfig: parseJson(row.personalityConfig),
       execConfig: parseJson(row.execConfig),
-      // Surface the AgentConfig's model so the client's model selector shows the
-      // native agent's real model (the config is the source of truth for native).
-      model: loadAgentConfig(db, row.id)?.primaryModel ?? null,
       participantKind: (row.participantKind as AgentRecord['participantKind']) ?? 'agent',
       runtime: row.runtime,
       capabilities: parseJson(row.capabilities),
@@ -120,21 +115,21 @@ export class ClawbooNativeAgentSource implements AgentSource {
 
   async listAgents(opts?: { includeArchived?: boolean; teamId?: string }): Promise<AgentRecord[]> {
     const db = this.db()
-    let rows = db.select().from(agents).where(eq(agents.sourceId, SOURCE_ID)).all()
+    let rows = db.select().from(agents).where(eq(agents.sourceId, this.id)).all()
     if (!opts?.includeArchived) rows = rows.filter((r) => r.archivedAt == null)
     if (opts?.teamId) rows = rows.filter((r) => r.teamId === opts.teamId)
-    return rows.map((r) => this.mapRow(r, db))
+    return rows.map((r) => this.mapRow(r))
   }
 
   async getAgent(id: string): Promise<AgentRecord | null> {
     const db = this.db()
     const row = db.select().from(agents).where(eq(agents.id, id)).get()
     // Scoped — a foreign source's row is not this source's agent.
-    return row && row.sourceId === SOURCE_ID ? this.mapRow(row, db) : null
+    return row && row.sourceId === this.id ? this.mapRow(row) : null
   }
 
-  /** Teams are clawboo-owned (not source-owned) — same shared-table read as
-   *  the OpenClaw source. */
+  /** Teams are clawboo-owned (not source-owned) — same shared-table read as the
+   *  other sources. */
   async listTeams(opts?: { includeArchived?: boolean }): Promise<TeamRecord[]> {
     const db = this.db()
     const rows = db.select().from(teams).all()
@@ -162,17 +157,16 @@ export class ClawbooNativeAgentSource implements AgentSource {
     })
   }
 
-  /** Native sessions are SQLite rows the harness upserts — never throws. */
   async listSessions(agentId: string): Promise<SessionRecord[]> {
     const db = this.db()
     const rows = db
       .select()
       .from(sessions)
-      .where(and(eq(sessions.sourceId, SOURCE_ID), eq(sessions.agentId, agentId)))
+      .where(and(eq(sessions.sourceId, this.id), eq(sessions.agentId, agentId)))
       .all()
     return rows.map((s) => ({
       id: s.id,
-      sourceId: SOURCE_ID,
+      sourceId: this.id,
       sourceSessionId: s.sourceSessionId,
       agentId: s.agentId ?? agentId,
       teamId: s.teamId ?? null,
@@ -192,58 +186,33 @@ export class ClawbooNativeAgentSource implements AgentSource {
   async createAgent(input: CreateAgentInput): Promise<AgentRecord> {
     const db = this.db()
     const now = Date.now()
-    const id = `native-${slugifyName(input.name)}-${randomUUID().slice(0, 6)}`
+    const id = `${this.id}-${slugifyName(input.name)}-${randomUUID().slice(0, 6)}`
 
-    // The AgentConfig rides CreateAgentInput.execConfig (the registry input's
-    // free-form config carrier); SOUL.md doubles as the systemPrompt fallback.
-    // `modelTier` is a NON-schema hint (the zod parse strips it): when the caller
-    // omits an explicit `primaryProvider` (e.g. CreateTeamModal, which doesn't know
-    // which key the user connected), the provider/model/envVar are auto-resolved
-    // from the first connected vault key so the agent runs on whatever the user
-    // connected — an anthropic default with only an OpenAI key would fail at run
-    // time. An explicit provider (the onboarding seed) bypasses this untouched.
-    const rawExec =
+    const execConfig =
       input.execConfig && typeof input.execConfig === 'object'
         ? (input.execConfig as Record<string, unknown>)
-        : {}
-    const { modelTier, ...execConfig } = rawExec as { modelTier?: unknown } & Record<string, unknown>
-    const hasExplicitProvider =
-      typeof execConfig['primaryProvider'] === 'string' && execConfig['primaryProvider'].length > 0
-    const resolvedProvider = hasExplicitProvider
-      ? {}
-      : resolveConnectedNativeDefaults(modelTier === 'leader' ? 'leader' : 'specialist')
+        : null
+    const participantKind =
+      execConfig && typeof execConfig['participantKind'] === 'string'
+        ? (execConfig['participantKind'] as string)
+        : 'agent'
     const files = input.files ?? {}
-    const config: AgentConfig = agentConfigSchema.parse({
-      ...DEFAULT_AGENT_CONFIG,
-      ...resolvedProvider,
-      ...execConfig,
-      id,
-      name: input.name,
-      systemPrompt:
-        typeof execConfig['systemPrompt'] === 'string' && execConfig['systemPrompt']
-          ? execConfig['systemPrompt']
-          : (files['SOUL.md'] ?? DEFAULT_AGENT_CONFIG.systemPrompt),
-      createdAt: now,
-      updatedAt: now,
-      tenantId: input.tenantId ?? null,
-    })
 
     db.insert(agents)
       .values({
         id,
         name: input.name,
-        // Legacy non-null column from the Gateway era — native rows self-reference.
+        // Legacy non-null column from the Gateway era — self-reference.
         gatewayId: id,
-        sourceId: SOURCE_ID,
+        sourceId: this.id,
         sourceAgentId: id,
         status: 'idle',
-        participantKind: config.participantKind,
-        runtime: SOURCE_ID,
+        participantKind,
+        runtime: this.id,
         teamId: input.teamId ?? null,
         personalityConfig:
           input.personalityConfig != null ? JSON.stringify(input.personalityConfig) : null,
-        // Store the cleaned carrier (the non-schema `modelTier` hint stripped).
-        execConfig: input.execConfig != null ? JSON.stringify(execConfig) : null,
+        execConfig: execConfig != null ? JSON.stringify(execConfig) : null,
         avatarSeed: input.avatarSeed ?? null,
         tenantId: input.tenantId ?? null,
         createdAt: now,
@@ -251,18 +220,8 @@ export class ClawbooNativeAgentSource implements AgentSource {
       })
       .run()
 
-    saveAgentConfig(db, config)
     for (const [name, content] of Object.entries(files)) {
-      if (typeof content === 'string' && content) writeNativeAgentFile(db, id, name, content)
-    }
-    if (config.budgetUsd != null && config.budgetUsd > 0) {
-      setBudgetLimit(db, {
-        scope: 'agent',
-        scopeId: id,
-        limitUsdCents: Math.round(config.budgetUsd * 100),
-        mode: 'cap',
-        tenantId: input.tenantId ?? null,
-      })
+      if (typeof content === 'string' && content) writeRuntimeAgentFile(db, id, name, content)
     }
 
     const record = await this.getAgent(id)
@@ -288,52 +247,26 @@ export class ClawbooNativeAgentSource implements AgentSource {
     if (patch.displayName !== undefined) set['name'] = patch.displayName
     db.update(agents).set(set).where(eq(agents.id, id)).run()
 
-    // An execConfig patch re-validates + rewrites the stored AgentConfig.
-    if (
-      patch.execConfig !== undefined &&
-      patch.execConfig &&
-      typeof patch.execConfig === 'object'
-    ) {
-      const base = loadAgentConfig(db, id) ?? { ...DEFAULT_AGENT_CONFIG, id, createdAt: now }
-      const merged = agentConfigSchema.parse({
-        ...base,
-        ...(patch.execConfig as Record<string, unknown>),
-        id,
-        updatedAt: now,
-        tenantId: null,
-      })
-      saveAgentConfig(db, merged)
-    }
-
     const record = await this.getAgent(id)
     if (!record) throw new Error(`updateAgent: agent ${id} not found after update`)
     this.emit({ kind: 'agent-upserted', at: now, agent: record })
     return record
   }
 
-  /** Hard delete (house semantics — the archivedAt tombstone marks sync-detected
-   *  upstream absence, which a substrate-less source cannot have): the agents
-   *  row, its FK children, its sessions, and its per-agent KV rows. */
+  /** Hard delete (house semantics): the agents row, its FK children, its
+   *  sessions, and its per-agent file-KV rows (prefix sweep, all file names). */
   async archiveAgent(id: string): Promise<void> {
     const db = this.db()
     db.delete(costRecords).where(eq(costRecords.agentId, id)).run()
     db.delete(approvalHistory).where(eq(approvalHistory.agentId, id)).run()
     db.delete(sessions)
-      .where(and(eq(sessions.sourceId, SOURCE_ID), eq(sessions.agentId, id)))
+      .where(and(eq(sessions.sourceId, this.id), eq(sessions.agentId, id)))
       .run()
     db.delete(settings)
-      .where(eq(settings.key, nativeConfigKey(id)))
-      .run()
-    db.delete(settings)
-      .where(like(settings.key, `${nativeFileKey(id, '')}%`))
-      .run()
-    // The agent's native leader session-resume pointers, one per team it leads
-    // (Boo Zero leads many). Orphan-harmless, but swept for hygiene.
-    db.delete(settings)
-      .where(like(settings.key, nativeTeamSessionKeysForAgentLike(id)))
+      .where(like(settings.key, `${runtimeAgentFileKey(id, '')}%`))
       .run()
     db.delete(agents)
-      .where(and(eq(agents.id, id), eq(agents.sourceId, SOURCE_ID)))
+      .where(and(eq(agents.id, id), eq(agents.sourceId, this.id)))
       .run()
     this.emit({ kind: 'agent-archived', at: Date.now(), agentId: id })
   }
@@ -341,13 +274,13 @@ export class ClawbooNativeAgentSource implements AgentSource {
   // ── Files (settings-KV; the registry's AGENT_FILE_NAMES namespace) ────────
 
   async readFile(agentId: string, name: AgentFileName): Promise<string> {
-    return readNativeAgentFile(this.db(), agentId, name)
+    return readRuntimeAgentFile(this.db(), agentId, name)
   }
 
   async writeFile(agentId: string, name: AgentFileName, content: string): Promise<void> {
     if (!(AGENT_FILE_NAMES as readonly string[]).includes(name))
       throw new Error(`unknown agent file: ${name}`)
-    writeNativeAgentFile(this.db(), agentId, name, content)
+    writeRuntimeAgentFile(this.db(), agentId, name, content)
   }
 
   // ── Lifecycle / observability ──────────────────────────────────────────────
