@@ -5,6 +5,8 @@ import { CornerDownRight, KanbanSquare, RefreshCw } from 'lucide-react'
 import { useTeamStore } from '@/stores/team'
 import { fetchBoardResult, type BoardTask } from '@/lib/boardClient'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { PanelHeader } from '@/features/shared/PanelHeader'
+import { Button } from '@/features/shared/Button'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
@@ -13,8 +15,12 @@ import { Spinner } from '@/features/shared/Spinner'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
 
 import { TaskDetailDrawer } from './TaskDetailDrawer'
+import { ApprovalsColumn } from './ApprovalsColumn'
 
-const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
+const SECTION_LABEL =
+  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
+const COUNT_PILL =
+  'font-data rounded-full bg-foreground/[0.06] px-2.5 py-0.5 text-[11px] font-semibold text-foreground/55'
 
 const COLUMNS: { id: string; label: string }[] = [
   { id: 'backlog', label: 'Backlog' },
@@ -56,61 +62,31 @@ function TaskCard({ task, onClick }: { task: BoardTask; onClick: () => void }) {
   const runtime = String(task['assigneeRuntime'] ?? 'openclaw')
   const cost = typeof task['costUsd'] === 'number' ? (task['costUsd'] as number) : null
   const verdict = verdictStatus(task)
-  const [hovered, setHovered] = useState(false)
   return (
     <button
       type="button"
       data-testid="board-card"
       onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className="surface-raised-tier"
-      style={{
-        display: 'block',
-        width: '100%',
-        textAlign: 'left',
-        borderRadius: 10,
-        padding: '9px 11px',
-        cursor: 'pointer',
-        boxShadow: hovered ? 'var(--shadow-floating)' : undefined,
-        borderColor: hovered ? 'var(--border-floating)' : undefined,
-        background: hovered ? 'rgb(var(--foreground-rgb) / 0.03)' : undefined,
-        transition:
-          'box-shadow var(--motion-fast), border-color var(--motion-fast), background var(--motion-fast)',
-      }}
+      className="group block w-full cursor-pointer rounded-2xl border border-border bg-surface p-4 text-left transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
     >
       <div
-        style={{
-          fontSize: 13,
-          fontWeight: 600,
-          color: 'var(--foreground)',
-          lineHeight: 1.35,
-          marginBottom: 7,
-        }}
+        className="text-[13px] font-semibold text-foreground"
+        style={{ lineHeight: 1.35, letterSpacing: '-0.01em', marginBottom: 9 }}
       >
         {task.title ?? '(untitled)'}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+      <div className="flex flex-wrap items-center gap-2">
         <StatusPill tone="idle" label={runtime} />
         {verdict && (
           <StatusPill tone={VERDICT_META[verdict].tone} label={VERDICT_META[verdict].label} />
         )}
         {cost != null && (
-          <span className="font-data" style={{ fontSize: 11, color: muted(0.5) }}>
-            ${cost.toFixed(3)}
-          </span>
+          <span className="font-data text-[11px] text-foreground/50">${cost.toFixed(3)}</span>
         )}
         {task['parentTaskId'] ? (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 3,
-              fontSize: 11,
-              color: muted(0.4),
-            }}
-          >
-            <CornerDownRight size={11} /> sub
+          <span className="inline-flex items-center gap-1 text-[11px] text-foreground/40">
+            <CornerDownRight size={11} strokeWidth={2} /> sub
           </span>
         ) : null}
       </div>
@@ -180,159 +156,91 @@ export function BoardPanel() {
   )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div
-        style={{
-          height: 44,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <KanbanSquare size={15} style={{ color: 'var(--mint)' }} />
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              fontFamily: 'var(--font-display)',
-              letterSpacing: '-0.01em',
-              color: 'var(--foreground)',
-            }}
-          >
-            Board
-          </span>
-          <span
-            className="font-data"
-            style={{
-              fontSize: 11,
-              color: 'var(--primary)',
-              background: 'rgb(var(--primary-rgb) / 0.12)',
-              borderRadius: 20,
-              padding: '2px 8px',
-            }}
-          >
-            {tasks.length} tasks
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Select
-            size="sm"
-            aria-label="Filter by team"
-            value={teamFilter}
-            onChange={(value) => setTeamFilter(value)}
-          >
-            <option value="all">All teams</option>
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.icon} {t.name}
-              </option>
-            ))}
-          </Select>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            aria-label="Refresh"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              height: 30,
-              padding: '0 10px',
-              borderRadius: 7,
-              fontSize: 11,
-              color: muted(0.5),
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'background var(--motion-fast), color var(--motion-fast)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
-              e.currentTarget.style.color = 'var(--foreground)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.color = muted(0.5)
-            }}
-          >
-            {refreshing ? <Spinner size={12} /> : <RefreshCw size={12} />} Refresh
-          </button>
-          <GitHubStarButton />
-        </div>
-      </div>
+    <div className="flex h-full flex-col">
+      <PanelHeader
+        title="Board"
+        icon={KanbanSquare}
+        size="md"
+        border
+        actions={
+          <>
+            <span className={COUNT_PILL}>{tasks.length} tasks</span>
+            <Select
+              size="sm"
+              aria-label="Filter by team"
+              value={teamFilter}
+              onChange={(value) => setTeamFilter(value)}
+            >
+              <option value="all">All teams</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.icon} {t.name}
+                </option>
+              ))}
+            </Select>
+            <Button variant="secondary" size="sm" onClick={() => void refresh()} aria-label="Refresh">
+              {refreshing ? <Spinner size={13} /> : <RefreshCw size={13} strokeWidth={2} />}
+              Refresh
+            </Button>
+            <GitHubStarButton />
+          </>
+        }
+      />
 
-      <div style={{ flex: 1, overflow: 'auto', padding: 14 }}>
-        {!loaded ? (
-          // Skeleton columns until the first fetch resolves (mirrors the
-          // RuntimesPanel `!loaded` pattern — empty columns shouldn't flash first).
-          <div
-            data-testid="board-skeleton"
-            style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}
-          >
-            {COLUMNS.map((col) => (
-              <div
-                key={col.id}
-                style={{ flex: '0 0 240px', display: 'flex', flexDirection: 'column', gap: 8 }}
-              >
-                <Skeleton width="50%" height={11} />
-                <Skeleton height={56} radius={10} />
-                <Skeleton height={56} radius={10} />
-              </div>
-            ))}
-          </div>
-        ) : !fetchOk ? (
-          // The fetch FAILED — distinct from a genuinely empty board (which would
-          // otherwise show "No tasks" in every column with no hint of an error).
-          <div data-testid="board-fetch-error" style={{ maxWidth: 460 }}>
-            <FormattedAlert tone="error">
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                Couldn’t load the board.
-                <button
-                  type="button"
-                  onClick={() => void refresh()}
-                  style={{ textDecoration: 'underline', cursor: 'pointer', color: 'inherit' }}
+      <div className="flex-1 overflow-auto px-6 py-5">
+        <div className="flex min-h-full items-start gap-4">
+          {/* Approvals are decoupled from the board-task fetch (an exec store + a
+              /api/tools/approvals poll), so this column ALWAYS renders as the first
+              column — a /api/board outage never hides a pending, time-sensitive gate.
+              Scoped to the team filter; a rail when empty, auto-expands on a new gate. */}
+          <ApprovalsColumn teamFilter={teamFilter} />
+          {!loaded ? (
+            // Skeleton columns until the first fetch resolves (mirrors the
+            // RuntimesPanel `!loaded` pattern — empty columns shouldn't flash first).
+            <div
+              data-testid="board-skeleton"
+              style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}
+            >
+              {COLUMNS.map((col) => (
+                <div
+                  key={col.id}
+                  style={{ flex: '0 0 264px', display: 'flex', flexDirection: 'column', gap: 10 }}
                 >
-                  Retry
-                </button>
-              </span>
-            </FormattedAlert>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', gap: 12, minHeight: '100%', alignItems: 'flex-start' }}>
-            {columns.map((col) => {
+                  <Skeleton width="50%" height={11} />
+                  <Skeleton height={72} radius={16} />
+                  <Skeleton height={72} radius={16} />
+                </div>
+              ))}
+            </div>
+          ) : !fetchOk ? (
+            // The fetch FAILED — distinct from a genuinely empty board (which would
+            // otherwise show "No tasks" in every column with no hint of an error).
+            <div data-testid="board-fetch-error" className="max-w-[460px]">
+              <FormattedAlert tone="error">
+                <span className="flex items-center gap-2">
+                  Couldn’t load the board.
+                  <Button variant="ghost" size="sm" onClick={() => void refresh()}>
+                    Retry
+                  </Button>
+                </span>
+              </FormattedAlert>
+            </div>
+          ) : (
+            columns.map((col) => {
               const items = byStatus[col.id] ?? []
               return (
                 <div
                   key={col.id}
                   data-testid={`board-column-${col.id}`}
-                  style={{ flex: '0 0 240px', display: 'flex', flexDirection: 'column', gap: 8 }}
+                  className="flex w-[264px] shrink-0 flex-col gap-2.5 rounded-2xl border border-border bg-foreground/[0.02] p-3"
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '0 2px',
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: muted(0.6),
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                      }}
-                    >
-                      {col.label}
+                  <div className="flex items-center justify-between px-1">
+                    <span className={SECTION_LABEL}>{col.label}</span>
+                    <span className="font-data rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-semibold text-foreground/50">
+                      {items.length}
                     </span>
-                    <span style={{ fontSize: 10, color: muted(0.35) }}>{items.length}</span>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  <div className="flex flex-col gap-2.5">
                     {items.map((t, i) => (
                       <motion.div
                         key={t.id}
@@ -344,23 +252,16 @@ export function BoardPanel() {
                       </motion.div>
                     ))}
                     {items.length === 0 && (
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: muted(0.3),
-                          padding: '12px 2px',
-                          textAlign: 'center',
-                        }}
-                      >
+                      <div className="py-3.5 text-center text-[11px] text-foreground/30">
                         No tasks
                       </div>
                     )}
                   </div>
                 </div>
               )
-            })}
-          </div>
-        )}
+            })
+          )}
+        </div>
       </div>
 
       <AnimatePresence>
