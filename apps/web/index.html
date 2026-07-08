@@ -37,14 +37,14 @@
     />
     <meta name="twitter:image" content="https://www.claw.boo/og-card.jpg" />
 
-    <!-- DM Sans — body font -->
+    <!-- Inter — the UI + display font (matches the premium reference design system).
+         Body/nav/buttons use 400–600; display headings use 600–800 at tight tracking. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
-
-    <!-- Cabinet Grotesk — display font -->
-    <link rel="preconnect" href="https://api.fontshare.com" />
-    <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap"
+      rel="stylesheet"
+    />
 
     <!-- Theme init — runs synchronously before React mounts to prevent FOUC.
          Reads localStorage('clawboo.theme'); fresh installs (no stored value)
