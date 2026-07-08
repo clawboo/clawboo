@@ -20,7 +20,6 @@
 // (the one-shot heartbeat-restore path); a persistent runtime resumes its prior
 // session via the stored native id, so it is not re-initialized.
 
-import { OpenClawAdapter } from '@clawboo/adapter-openclaw'
 import {
   agents,
   resolveRoomForTeam,
@@ -41,6 +40,7 @@ import type { RuntimeRunContext } from '../runtimes/types'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
+import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import { resolveRuntimeKey } from '../secretsVault'
 import { dispatchChatTurn } from './dispatchChatTurn'
 import {
@@ -139,15 +139,17 @@ function defaultAdapterFactoryFor(
   const runtime = participant.runtime
   if (isRuntimeId(runtime)) return adapterFactoryFor(runtime)
   if (runtime === 'openclaw') {
-    const client = deps.getOperatorClient()
-    if (!client) {
+    // Shared with serverDeliver's openclaw arm so the connected-substrate construction
+    // can't drift between the two server-side team paths.
+    const adapter = buildOpenClawServerAdapter(deps.getOperatorClient)
+    if (!adapter) {
       deps.log.warn(
         { runtime, agentId: participant.agentId },
         'team-chat: operator client unavailable; skipping openclaw participant',
       )
       return null
     }
-    return () => new OpenClawAdapter(client)
+    return () => adapter
   }
   // Fail CLOSED for an unrecognized runtime (a data typo / a future runtime) —
   // never silently dispatch it; just drop it from this exchange.
