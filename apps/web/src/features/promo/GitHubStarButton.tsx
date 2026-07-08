@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Github, Star } from 'lucide-react'
+import { useInSettingsModal } from '@/features/settings/settingsModalContext'
 
 // GitHub star button — dograh-style outline pill rendered in each view's
 // header. Drives traffic to the repo for stars.
@@ -63,6 +64,7 @@ function formatCount(count: number): string {
 }
 
 export function GitHubStarButton() {
+  const inSettingsModal = useInSettingsModal()
   const [stars, setStars] = useState<number | null>(() => readCache()?.count ?? null)
   // `inflight` prevents multiple concurrent fetches when mount + focus +
   // click-refetch all race.
@@ -121,6 +123,11 @@ export function GitHubStarButton() {
     }, POST_CLICK_REFETCH_DELAY_MS)
   }, [fetchStars])
 
+  // Hidden inside the Settings modal — the panels there reuse their normal
+  // headers, but one Star pill in the app already covers the CTA. (All hooks
+  // above run unconditionally, so this early return is rules-of-hooks safe.)
+  if (inSettingsModal) return null
+
   return (
     <a
       href={REPO_URL}
@@ -134,7 +141,7 @@ export function GitHubStarButton() {
       // around 30-32 px tall with the same thin border and no shadow.
       // The earlier 36 px + shadow made the pill float visually above
       // the rest of the toolbar; now it belongs in the same row.
-      className="group inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[12px] font-medium text-foreground transition-all duration-150 hover:border-foreground/20 hover:bg-foreground/[0.04]"
+      className="group inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-[12.5px] font-medium text-foreground transition-all duration-150 hover:border-border-strong hover:bg-foreground/[0.03]"
     >
       <Github className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
       <span>Star</span>
