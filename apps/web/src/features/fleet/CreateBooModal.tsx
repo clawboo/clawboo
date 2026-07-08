@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Loader2 } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
 import { createAgent } from '@/lib/createAgent'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
+import { Button } from '@/features/shared/Button'
+import { FormattedAlert } from '@/features/shared/FormattedAlert'
 
 const DEFAULT_SOUL = `# SOUL\n\nYou are a helpful AI assistant. You approach tasks methodically, communicate clearly, and ask for clarification when needed.`
 
@@ -111,7 +112,8 @@ export function CreateBooModal({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+          style={{ background: 'var(--overlay-scrim)' }}
           onKeyDown={handleKeyDown}
           onClick={(e) => {
             if (e.target === e.currentTarget) onClose()
@@ -122,17 +124,15 @@ export function CreateBooModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.92, y: 20 }}
             transition={{ type: 'spring', damping: 28, stiffness: 360 }}
-            className="surface-overlay-tier w-full max-w-md rounded-2xl p-6"
+            className="w-full max-w-md rounded-2xl border border-border bg-surface p-6"
+            style={{ boxShadow: 'var(--shadow-overlay)' }}
           >
-            <h2
-              className="mb-5 text-[16px] font-semibold text-text"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
+            <h2 className="mb-5 text-[17px] font-bold text-foreground" style={{ letterSpacing: '-0.01em' }}>
               Create a new Boo
             </h2>
 
             {/* Name */}
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-widest text-secondary">
+            <label className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
               Name
             </label>
             <input
@@ -144,12 +144,11 @@ export function CreateBooModal({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void handleSubmit()
               }}
-              className="mb-4 w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
-              style={{ fontFamily: 'var(--font-body)' }}
+              className="mb-4 w-full rounded-xl border border-border bg-surface px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
             />
 
             {/* Role */}
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-widest text-secondary">
+            <label className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
               Role (optional)
             </label>
             <textarea
@@ -157,32 +156,29 @@ export function CreateBooModal({
               onChange={(e) => setRole(e.target.value)}
               rows={4}
               placeholder="What should this Boo do?"
-              className="mb-4 w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
-              style={{ fontFamily: 'var(--font-body)' }}
+              className="mb-4 w-full resize-none rounded-xl border border-border bg-surface px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
             />
 
             {/* Error */}
-            {error && <p className="mb-3 text-[12px] text-destructive">{error}</p>}
+            {error && (
+              <div className="mb-3">
+                <FormattedAlert tone="error">{error}</FormattedAlert>
+              </div>
+            )}
 
             {/* Actions */}
             <div className="flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={creating}
-                className="rounded-lg px-4 py-2 text-[13px] font-medium text-secondary transition-colors hover:text-text disabled:opacity-40"
-              >
+              <Button variant="ghost" onClick={onClose} disabled={creating}>
                 Cancel
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={() => void handleSubmit()}
-                disabled={!name.trim() || creating}
-                className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-[13px] font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!name.trim()}
+                loading={creating}
               >
-                {creating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 Create Boo
-              </button>
+              </Button>
             </div>
           </motion.div>
         </motion.div>
