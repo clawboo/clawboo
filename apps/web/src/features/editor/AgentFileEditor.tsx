@@ -1,6 +1,6 @@
-import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
+import { readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, Save, X } from 'lucide-react'
+import { Save, X } from 'lucide-react'
 import {
   EditorView,
   keymap,
@@ -14,6 +14,8 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { closeBrackets } from '@codemirror/autocomplete'
 import { highlightSelectionMatches } from '@codemirror/search'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
+import { Button, IconButton } from '@/features/shared/Button'
+import { Spinner } from '@/features/shared/Spinner'
 import { AGENT_FILE_META, AGENT_FILE_PLACEHOLDERS, AGENT_FILE_NAMES } from '@clawboo/protocol'
 import type { AgentFileName } from '@clawboo/protocol'
 import { useConnectionStore } from '@/stores/connection'
@@ -344,126 +346,43 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        bottom: 0,
-        left: 268,
-        zIndex: 40,
-        background: 'var(--background)',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
+      className="fixed inset-y-0 right-0 z-40 flex flex-col bg-background"
+      style={{ left: 268 }}
     >
       {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '10px 16px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-          background: 'var(--card)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2.5">
+        <div className="flex items-center gap-2.5">
           <AgentBooAvatar agentId={agentId} size={24} />
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--foreground)',
-              fontFamily: 'var(--font-body)',
-            }}
-          >
+          <span className="text-[13px] font-semibold text-foreground" style={{ letterSpacing: '-0.01em' }}>
             {agentName}
           </span>
-          <span
-            style={{
-              fontSize: 11,
-              color: 'rgba(107,114,128,0.7)',
-              fontFamily: 'var(--font-mono)',
-            }}
-          >
+          <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
             Edit Files
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="flex items-center gap-2">
           {/* Save button */}
-          <button
-            type="button"
-            disabled={!isDirty(activeTab) || saving}
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!isDirty(activeTab)}
+            loading={saving}
             onClick={() => void handleSave()}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '5px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: isDirty(activeTab)
-                ? 'var(--primary)'
-                : 'rgb(var(--foreground-rgb) / 0.06)',
-              color: isDirty(activeTab) ? '#fff' : 'rgb(var(--foreground-rgb) / 0.4)',
-              fontSize: 12,
-              fontWeight: 500,
-              cursor: isDirty(activeTab) ? 'pointer' : 'default',
-              opacity: saving ? 0.6 : 1,
-              transition: 'all 0.15s',
-              fontFamily: 'var(--font-mono)',
-            }}
           >
-            {saving ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
-            ) : (
-              <Save className="h-3.5 w-3.5" strokeWidth={2} />
-            )}
+            {!saving && <Save size={14} strokeWidth={2} />}
             Save
-          </button>
+          </Button>
 
           {/* Close button */}
-          <button
-            type="button"
-            onClick={() => void handleClose()}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 28,
-              height: 28,
-              borderRadius: 6,
-              border: 'none',
-              background: 'transparent',
-              color: 'rgb(var(--foreground-rgb) / 0.5)',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.06)'
-              e.currentTarget.style.color = 'var(--foreground)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.5)'
-            }}
-          >
-            <X className="h-4 w-4" strokeWidth={2} />
-          </button>
+          <IconButton size="sm" label="Close editor" onClick={() => void handleClose()}>
+            <X size={16} strokeWidth={2} />
+          </IconButton>
         </div>
       </div>
 
       {/* Tab bar */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 2,
-          padding: '0 12px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-          background: 'var(--card)',
-        }}
-      >
+      <div className="flex items-center gap-1 border-b border-border bg-surface px-3">
         {visibleTabs.map((tab) => {
           const isActive = tab === activeTab
           const dirty = isDirty(tab)
@@ -472,64 +391,36 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
               key={tab}
               type="button"
               onClick={() => setActiveTab(tab)}
-              style={{
-                position: 'relative',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '8px 14px',
-                border: 'none',
-                borderBottom: isActive ? '2px solid var(--primary)' : '2px solid transparent',
-                background: 'transparent',
-                color: isActive ? 'var(--foreground)' : 'rgb(var(--foreground-rgb) / 0.45)',
-                fontSize: 11,
-                fontWeight: isActive ? 600 : 400,
-                fontFamily: 'var(--font-mono)',
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.7)'
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive) e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.45)'
-              }}
+              className={[
+                'relative -mb-px inline-flex cursor-pointer items-center gap-1.5 px-3 pb-2.5 pt-2.5 font-mono text-[11px] uppercase tracking-[0.14em]',
+                'transition-colors duration-150',
+                isActive
+                  ? 'font-semibold text-foreground'
+                  : 'text-foreground/45 hover:text-foreground/75',
+              ].join(' ')}
             >
               {tab.replace('.md', '')}
               {dirty && (
                 <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: 'var(--amber)',
-                  }}
+                  className="inline-block h-1.5 w-1.5 rounded-full"
+                  style={{ background: 'var(--amber)' }}
                 />
               )}
+              <span
+                aria-hidden
+                className="absolute inset-x-0 -bottom-px h-0.5 rounded-full transition-opacity duration-150"
+                style={{ background: 'var(--primary)', opacity: isActive ? 1 : 0 }}
+              />
             </button>
           )
         })}
       </div>
 
-      {/* Editor area */}
       {/* Editor area — container always rendered so CodeMirror can mount */}
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div className="relative flex-1 overflow-hidden">
         {loading && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              color: 'rgb(var(--foreground-rgb) / 0.4)',
-              fontSize: 13,
-              zIndex: 1,
-              background: 'var(--background)',
-            }}
-          >
-            <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+          <div className="absolute inset-0 z-[1] flex items-center justify-center gap-2 bg-background text-[13px] text-foreground/40">
+            <Spinner size={16} />
             Loading files…
           </div>
         )}
@@ -537,21 +428,9 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
       </div>
 
       {/* Footer */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '6px 16px',
-          borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-          background: 'var(--card)',
-          fontSize: 11,
-          color: 'rgb(var(--foreground-rgb) / 0.4)',
-          fontFamily: 'var(--font-mono)',
-        }}
-      >
+      <div className="flex items-center justify-between border-t border-border bg-surface px-4 py-1.5 font-mono text-[11px] text-foreground/40">
         <span>{AGENT_FILE_META[activeTab].hint}</span>
-        <span>
+        <span className="font-data">
           {anyDirty ? 'Unsaved changes' : 'All saved'}
           {' · '}
           {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+S to save
