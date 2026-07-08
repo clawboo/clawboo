@@ -7,6 +7,7 @@
 
 export const RUNTIME_ERROR_CLASSES = [
   'InvalidArgs',
+  'ContextOverflow',
   'Timeout',
   'ProviderError',
   'RateLimited',
@@ -37,6 +38,13 @@ const RULES: Rule[] = [
   {
     cls: 'UnexpectedEnv',
     test: /\b(enoent|eacces|eperm|einval|espawn|command not found|no such file|permission denied|not installed|spawn\s|module not found|cannot find module)\b/i,
+  },
+  // Context overflow is an oversized-input 400 — checked BEFORE InvalidArgs so a
+  // "context length exceeded" 400 classifies here, not as a generic bad-request. Not a
+  // harness bug: it's an expected (if now-rare, post-compaction) recoverable condition.
+  {
+    cls: 'ContextOverflow',
+    test: /context[\s_-]?(?:overflow|length|window|limit)|(?:prompt|input) (?:is )?too (?:large|long)|maximum context|too many tokens/i,
   },
   {
     cls: 'InvalidArgs',
@@ -102,6 +110,7 @@ export const BASELINE_EXPECTED_CLASSES: Record<string, RuntimeErrorClass[]> = {
 
 const GENERIC_BASELINE: RuntimeErrorClass[] = [
   'InvalidArgs',
+  'ContextOverflow',
   'Timeout',
   'ProviderError',
   'RateLimited',
