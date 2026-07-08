@@ -6,7 +6,7 @@
 
 import { Cpu } from 'lucide-react'
 
-import type { RuntimeClass } from '@/lib/runtimesClient'
+import type { RuntimeClass } from '@clawboo/control-client'
 
 import { RuntimeIcon } from './RuntimeBrand'
 import type { RuntimeId } from './runtimeCatalog'
@@ -38,11 +38,11 @@ export function RuntimeDepthBadge({
   return (
     <span
       data-testid={testid}
+      className="font-mono"
       style={{
         display: 'inline-block',
         fontSize: 9.5,
         fontWeight: 600,
-        fontFamily: 'var(--font-geist-mono, monospace)',
         textTransform: 'uppercase',
         letterSpacing: '0.04em',
         padding: '1px 7px',

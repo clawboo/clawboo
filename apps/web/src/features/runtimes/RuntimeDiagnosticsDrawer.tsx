@@ -7,6 +7,7 @@
 // filtered to this runtime.
 
 import { useEffect, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import {
   Activity,
@@ -23,15 +24,17 @@ import {
   X,
 } from 'lucide-react'
 
+import { Button, IconButton } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { fetchCapabilities } from '@/lib/capabilitiesClient'
 import { formatRelative } from '@/lib/formatRelative'
 import { ENTER_SPRING } from '@/lib/motion'
-import { disconnectRuntime, type ConnectionState, type RuntimeClass } from '@/lib/runtimesClient'
+import { disconnectRuntime, type ConnectionState, type RuntimeClass } from '@clawboo/control-client'
 import { useCapabilityFilterStore } from '@/stores/capabilityFilter'
 import { useToastStore } from '@/stores/toast'
-import { useViewStore } from '@/stores/view'
+import { confirm } from '@/stores/confirm'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 
 import { RuntimeDepthBadge, RuntimeGlyph } from './runtimeDepth'
 import { useRuntimeProbeStore, type ProbeSample } from './runtimeProbeStore'
@@ -91,16 +94,14 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <div style={{ marginBottom: 18 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 9 }}>
-        <span style={{ color: muted(0.5), display: 'flex' }}>{icon}</span>
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
+        <span style={{ color: muted(0.45), display: 'flex' }}>{icon}</span>
         <span
-          className="font-mono"
+          className="font-mono uppercase"
           style={{
             fontSize: 11,
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
+            letterSpacing: '0.14em',
             color: muted(0.45),
           }}
         >
@@ -134,7 +135,7 @@ export function RuntimeDiagnosticsDrawer({
 }) {
   const history = useRuntimeProbeStore((s) => s.history[target.id]) ?? EMPTY_HISTORY
   const setPendingRuntime = useCapabilityFilterStore((s) => s.setPendingRuntime)
-  const navigateTo = useViewStore((s) => s.navigateTo)
+  const openSettings = useSettingsModalStore((s) => s.openSettings)
   const [errors, setErrors] = useState<RuntimeErrorRow[]>([])
   const [skillCount, setSkillCount] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
@@ -193,9 +194,13 @@ export function RuntimeDiagnosticsDrawer({
 
   const handleDisconnect = useCallback(async () => {
     if (
-      !window.confirm(
-        `Disconnect ${target.name}? This removes its saved API key from the encrypted vault — you'll need to re-enter it to reconnect.`,
-      )
+      !(await confirm({
+        title: `Disconnect ${target.name}?`,
+        message:
+          "This removes its saved API key from the encrypted vault — you'll need to re-enter it to reconnect.",
+        confirmLabel: 'Disconnect',
+        tone: 'danger',
+      }))
     ) {
       return
     }
@@ -211,7 +216,9 @@ export function RuntimeDiagnosticsDrawer({
 
   function handleViewCapabilities(): void {
     setPendingRuntime(target.id)
-    navigateTo('capabilities')
+    // Capabilities lives in the Settings modal now — switch the modal to it
+    // (CapabilitiesPanel consumes pendingRuntime for the pre-filter).
+    openSettings('capabilities')
     onClose()
   }
 
@@ -224,7 +231,11 @@ export function RuntimeDiagnosticsDrawer({
 
   const canDisconnect = target.connectionState === 'ready' && target.authKind === 'api-key'
 
-  return (
+  // Portalled to <body> so the fixed-position drawer resolves against the
+  // viewport (not clipped/contained when this panel is rendered inside the
+  // Settings modal, whose glass backdrop-filter + overflow-hidden would
+  // otherwise trap it). z above the settings scrim (z-70).
+  return createPortal(
     <>
       <motion.div
         initial={{ opacity: 0 }}
@@ -235,7 +246,7 @@ export function RuntimeDiagnosticsDrawer({
           position: 'fixed',
           inset: 0,
           background: 'var(--overlay-scrim, rgb(0 0 0 / 0.5))',
-          zIndex: 60,
+          zIndex: 80,
         }}
       />
       <motion.div
@@ -255,7 +266,7 @@ export function RuntimeDiagnosticsDrawer({
           width: 'min(480px, 92vw)',
           borderRadius: 0,
           borderLeft: '1px solid var(--border-overlay, rgb(var(--foreground-rgb) / 0.08))',
-          zIndex: 61,
+          zIndex: 81,
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -293,21 +304,9 @@ export function RuntimeDiagnosticsDrawer({
               <RuntimeDepthBadge runtimeClass={target.runtimeClass} testid="runtime-depth-badge" />
             </div>
           </div>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="shrink-0 rounded-md p-1 transition-colors hover:bg-foreground/[0.06]"
-            style={{
-              border: 'none',
-              background: 'transparent',
-              color: muted(0.5),
-              cursor: 'pointer',
-              display: 'flex',
-            }}
-          >
+          <IconButton variant="ghost" size="sm" label="Close" onClick={onClose}>
             <X size={16} />
-          </button>
+          </IconButton>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 32px' }}>
@@ -405,30 +404,28 @@ export function RuntimeDiagnosticsDrawer({
             {target.connectionState === 'needs-login' && target.loginCommand ? (
               <div
                 style={{
-                  marginTop: 8,
+                  marginTop: 10,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: 8,
-                  borderRadius: 8,
-                  padding: '7px 10px',
-                  background: 'var(--code-block-bg, rgb(var(--foreground-rgb) / 0.05))',
+                  borderRadius: 12,
+                  padding: '10px 12px',
+                  background: 'var(--terminal-bg)',
                 }}
               >
-                <code className="font-data" style={{ fontSize: 12, color: 'var(--foreground)' }}>
+                <code
+                  className="font-mono"
+                  style={{ fontSize: 12, color: 'rgb(201 209 217 / 0.9)' }}
+                >
                   {target.loginCommand}
                 </code>
                 <button
                   type="button"
                   aria-label="Copy login command"
                   onClick={handleCopyLogin}
-                  style={{
-                    border: 'none',
-                    background: 'transparent',
-                    color: muted(0.5),
-                    cursor: 'pointer',
-                    display: 'flex',
-                  }}
+                  className="flex shrink-0 cursor-pointer rounded-md p-1 transition-colors hover:bg-white/10"
+                  style={{ color: 'rgb(201 209 217 / 0.6)' }}
                 >
                   {copied ? (
                     <Check size={13} style={{ color: 'var(--mint)' }} />
@@ -482,67 +479,49 @@ export function RuntimeDiagnosticsDrawer({
 
           {/* Actions */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-            <ActionButton
-              testid="runtime-diagnostics-recheck"
-              busy={busy}
-              onClick={handleRecheck}
-              icon={<RotateCcw size={13} />}
+            <Button
+              data-testid="runtime-diagnostics-recheck"
+              variant="secondary"
+              size="sm"
+              loading={busy}
+              onClick={() => void handleRecheck()}
             >
-              Re-check
-            </ActionButton>
-            <ActionButton
-              testid="runtime-diagnostics-capabilities"
+              {busy ? null : <RotateCcw size={13} strokeWidth={2} />} Re-check
+            </Button>
+            <Button
+              data-testid="runtime-diagnostics-capabilities"
+              variant="secondary"
+              size="sm"
               onClick={handleViewCapabilities}
-              icon={<Boxes size={13} />}
             >
-              View capabilities
-            </ActionButton>
+              <Boxes size={13} strokeWidth={2} /> View capabilities
+            </Button>
             {target.docsUrl ? (
               <a
                 href={target.docsUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold transition-[background] hover:bg-foreground/[0.1]"
-                style={{
-                  height: 32,
-                  background: 'rgb(var(--foreground-rgb) / 0.06)',
-                  color: 'var(--foreground)',
-                  border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-                  textDecoration: 'none',
-                }}
+                className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[13px] font-medium text-foreground no-underline shadow-[var(--shadow-raised)] transition-[background-color,border-color] hover:border-border-strong hover:bg-foreground/[0.02]"
               >
-                <BookOpen size={13} /> Docs <ExternalLink size={11} />
+                <BookOpen size={13} strokeWidth={2} /> Docs <ExternalLink size={11} strokeWidth={2} />
               </a>
             ) : null}
             {canDisconnect ? (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 data-testid="runtime-diagnostics-disconnect"
                 onClick={() => void handleDisconnect()}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold transition-[background,border-color]"
-                style={{
-                  marginLeft: 'auto',
-                  height: 32,
-                  border: '1px solid rgb(var(--primary-rgb) / 0.25)',
-                  background: 'transparent',
-                  color: 'var(--primary)',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgb(var(--primary-rgb) / 0.1)'
-                  e.currentTarget.style.borderColor = 'rgb(var(--primary-rgb) / 0.4)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent'
-                  e.currentTarget.style.borderColor = 'rgb(var(--primary-rgb) / 0.25)'
-                }}
+                className="ml-auto"
               >
-                <Plug size={13} /> Disconnect
-              </button>
+                <Plug size={13} strokeWidth={2} /> Disconnect
+              </Button>
             ) : null}
           </div>
         </div>
       </motion.div>
-    </>
+    </>,
+    document.body,
   )
 }
 
@@ -550,37 +529,4 @@ export function RuntimeDiagnosticsDrawer({
 function presence(has: boolean | undefined, envVar: string | null | undefined): string {
   const name = envVar ? ` (${envVar})` : ''
   return has ? `present${name}` : `missing${name}`
-}
-
-function ActionButton({
-  children,
-  onClick,
-  icon,
-  busy,
-  testid,
-}: {
-  children: React.ReactNode
-  onClick: () => void | Promise<void>
-  icon?: React.ReactNode
-  busy?: boolean
-  testid?: string
-}) {
-  return (
-    <button
-      type="button"
-      data-testid={testid}
-      disabled={busy}
-      onClick={() => void onClick()}
-      className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold transition-[filter,transform,background] hover:bg-foreground/[0.1] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-      style={{
-        height: 32,
-        background: 'rgb(var(--foreground-rgb) / 0.06)',
-        color: 'var(--foreground)',
-        border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-      }}
-    >
-      {icon}
-      {children}
-    </button>
-  )
 }
