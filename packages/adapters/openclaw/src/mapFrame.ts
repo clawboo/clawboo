@@ -114,8 +114,23 @@ export function mapFrameToRuntimeEvents(
       const phase = typeof data['phase'] === 'string' ? data['phase'] : ''
       if (phase === 'start') events.push({ ...base(), kind: 'status', phase: 'running' })
       else if (phase === 'end') events.push({ ...base(), kind: 'status', phase: 'turn-complete' })
-      else if (phase === 'error')
-        events.push({ ...base(), kind: 'error', code: null, message: 'agent error', fatal: true })
+      else if (phase === 'error') {
+        // Surface the ACTUAL error detail from the lifecycle payload instead of a
+        // generic "agent error" — without this the obs log + chat show nothing
+        // actionable. OpenClaw puts the reason in one of a few fields; take the first.
+        const pick = (k: string): string | null =>
+          typeof data[k] === 'string' && (data[k] as string).trim() ? (data[k] as string) : null
+        const detail =
+          pick('error') ?? pick('message') ?? pick('reason') ?? pick('detail') ?? pick('text')
+        const codeVal = data['code']
+        events.push({
+          ...base(),
+          kind: 'error',
+          code: typeof codeVal === 'string' ? codeVal : null,
+          message: detail ?? 'agent error',
+          fatal: true,
+        })
+      }
       return events
     }
 

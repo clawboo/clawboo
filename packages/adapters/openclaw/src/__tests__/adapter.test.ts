@@ -229,6 +229,35 @@ describe('mapFrameToRuntimeEvents', () => {
     const evs = mapFrameToRuntimeEvents(frame, ctx, seqGen(), () => 1)
     expect(evs[0]).toMatchObject({ kind: 'text-delta', channel: 'reasoning', text: 'thinking...' })
   })
+
+  it('surfaces the real detail from a lifecycle error phase (not a generic "agent error")', () => {
+    const frame: EventFrame = {
+      type: 'event',
+      event: 'agent',
+      payload: {
+        runId: RUN,
+        sessionKey: SK,
+        stream: 'lifecycle',
+        data: { phase: 'error', error: 'openrouter billing error: out of credits' },
+      },
+    }
+    const evs = mapFrameToRuntimeEvents(frame, ctx, seqGen(), () => 1)
+    expect(evs[0]).toMatchObject({
+      kind: 'error',
+      fatal: true,
+      message: 'openrouter billing error: out of credits',
+    })
+  })
+
+  it('falls back to "agent error" when a lifecycle error phase carries no detail', () => {
+    const frame: EventFrame = {
+      type: 'event',
+      event: 'agent',
+      payload: { runId: RUN, sessionKey: SK, stream: 'lifecycle', data: { phase: 'error' } },
+    }
+    const evs = mapFrameToRuntimeEvents(frame, ctx, seqGen(), () => 1)
+    expect(evs[0]).toMatchObject({ kind: 'error', fatal: true, message: 'agent error' })
+  })
 })
 
 describe('OpenClawAdapter chat.send verification', () => {
