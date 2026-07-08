@@ -4,10 +4,11 @@
  * Top-level connection orchestrator. Determines which overlay to render:
  *
  *   First-time user (no 'clawboo.onboarded' in localStorage)
- *     → OnboardingWizard (welcome → detect → [install → configure →
- *       startGateway] → team → deploy). When the wizard finishes with a
- *       deployed team, we navigate the user into that team's group chat;
- *       otherwise the user lands on the default view.
+ *     → OnboardingWizard (native-first: welcome → configureNative → addRuntimes
+ *       → nativeReady). ConfigureNative seeds a native team; the wizard finishes
+ *       by landing the user in that team's group chat. Native completions arrive
+ *       with a null client ('native' mode → enterNativeMode); the OpenClaw detour
+ *       may hand back a live client ('gateway' mode).
  *
  *   Returning user (key present), not connected
  *     → Auto-connect attempt using saved settings.
@@ -28,23 +29,21 @@ import {
   resolveProxyGatewayUrl,
 } from '@clawboo/gateway-client'
 import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
-import { pushAgentSync, refreshFleetFromRegistry } from '@/lib/agentSourceClient'
+import { refreshFleetFromRegistry, agentRecordToFleetState } from '@/lib/agentSourceClient'
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayConnectScreen } from './GatewayConnectScreen'
 import {
   OnboardingWizard,
   type WizardStep,
   type OnboardingMode,
-  type SelectedRuntime,
 } from '@/features/onboarding/OnboardingWizard'
 import { BooTip } from '@/features/onboarding/BooTip'
+import { CapabilityTour } from '@/features/onboarding/CapabilityTour'
 import {
   isWizardActive,
   markWizardActive,
   clearWizardActive,
-  getWizardRuntime,
   decideOnboardingView,
-  type WizardRuntime,
 } from '@/lib/onboardingProgress'
 import { useGatewayEvents } from './useGatewayEvents'
 import { useConnectionStore } from '@/stores/connection'
@@ -57,8 +56,9 @@ import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { DEFAULT_COLLECTION_ID } from '@/lib/teamPalettes'
 import { TEAM_ACCENT_PRESETS } from '@/features/teams/TeamAccentPicker'
-import { consumeSSE } from '@/lib/sseClient'
+import { consumeApiSSE, pushAgentSync, listAgents } from '@clawboo/control-client'
 import { fetchAgentModelMap } from '@/lib/agentModelMap'
+import type { AgentState } from '@/stores/fleet'
 import type { SystemInfo } from '@/stores/system'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -132,14 +132,12 @@ async function hasAnyTeam(): Promise<boolean> {
   }
 }
 
-/** The wizard step a mid-onboarding refresh resumes at, given the runtime the
- *  user had picked (persisted in localStorage). */
-function resumeStepForRuntime(rt: WizardRuntime | null): WizardStep {
-  if (rt === 'openclaw') return 'detect'
-  if (rt === 'clawboo-native') return 'configureNative'
-  if (rt === 'claude-code' || rt === 'hermes' || rt === 'codex') return 'connectAgents'
-  return 'chooseRuntime'
-}
+// The OpenClaw Gateway's OWN default agent ("main"). It was historically treated
+// as Boo Zero (and thus teamless); now that Boo Zero is runtime-neutral (often a
+// native agent) the two can differ, but the Gateway default is still a SYSTEM
+// agent, not a user-chosen team member — so it stays excluded from auto-migration.
+// Set by `hydrateFleetFromClient` from the Gateway's `defaultId`.
+let gatewayDefaultAgentId: string | null = null
 
 /**
  * Auto-migrate teamless agents.
@@ -188,6 +186,9 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
         leaderAgentId: null,
         isArchived: false,
         agentCount: 0,
+        // Every team is server-orchestrated after the OpenClaw cutover (this
+        // auto-migrated "Default" team of OpenClaw agents runs the server engine too).
+        serverOrchestrated: true,
       })
       useTeamStore.getState().selectTeam(team.id)
     } catch {
@@ -211,8 +212,20 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
     }
   }
 
-  // Find agents without a team assignment (excluding Boo Zero)
-  const unassigned = agents.filter((a) => !a.teamId && a.id !== booZeroId)
+  // Find agents without a team assignment (excluding Boo Zero). ONLY orphan
+  // OpenClaw agents get auto-homed — a teamless native / hermes / coding agent is
+  // intentionally standalone (a marketplace single-agent deploy, the native Boo
+  // Zero, etc.), so it must NEVER be dumped into an arbitrary existing team. (Before
+  // the multi-source fleet merge the gateway-mode fleet was OpenClaw-only, so this
+  // filter exactly restores that behavior.) `runtime == null` = legacy/unknown,
+  // treated as OpenClaw for back-compat.
+  const unassigned = agents.filter(
+    (a) =>
+      !a.teamId &&
+      a.id !== booZeroId &&
+      a.id !== gatewayDefaultAgentId &&
+      (a.runtime == null || a.runtime === 'openclaw'),
+  )
   if (unassigned.length === 0) return
 
   // Assign each unassigned agent to the target team (upserts SQLite row)
@@ -305,6 +318,187 @@ export async function enterNativeMode(teamId: string | null): Promise<{ ok: bool
   return { ok: true }
 }
 
+/**
+ * Read the fleet from a LIVE Gateway client and hydrate the fleet store.
+ *
+ * The browser-fallback sync driver: the ONE intentional direct Gateway agent
+ * read left in the SPA. The registry-of-record is SQLite (served by
+ * /api/agents), but on connect the browser warms it from its own (proxy-
+ * approved) Gateway connection so a fresh install hydrates even before the
+ * server's own connection syncs (which can lag or hit NOT_PAIRED). Identifies +
+ * seeds Boo Zero, then `pushAgentSync`es the list to warm SQLite.
+ *
+ * Module-level so BOTH the component `hydrateFleet` wrapper (which adds the
+ * `fleetError` banner) AND `enterGatewayMode` (the dashboard OpenClawSetupFlow
+ * finalizer, which has no banner) share ONE hydration path. Returns the agent
+ * count, or -1 on failure (the caller decides how to surface it).
+ */
+async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number> {
+  try {
+    const result = await liveClient.agents.list()
+    const mainKey = result.mainKey?.trim() || 'main'
+    // Preserve existing teamId assignments — Gateway doesn't know about teams
+    const existingTeamIds = new Map(useFleetStore.getState().agents.map((a) => [a.id, a.teamId]))
+    // Load per-agent model overrides + exec configs in parallel
+    const [agentModels, execConfigs] = await Promise.all([fetchAgentModelMap(), fetchExecConfigMap()])
+    const mapped = result.agents.map((a) => ({
+      id: a.id,
+      name: a.identity?.name ?? a.name ?? a.id,
+      status: 'idle' as const,
+      sessionKey: `agent:${a.id}:${mainKey}`,
+      model: agentModels.get(a.id) ?? null,
+      createdAt: null,
+      streamingText: null,
+      runId: null,
+      lastSeenAt: null,
+      teamId: existingTeamIds.get(a.id) ?? null,
+      runtime: 'openclaw' as const,
+      execConfig: execConfigs.get(a.id) ?? null,
+    }))
+
+    // The Gateway client only knows OpenClaw agents. Merge the NON-OpenClaw agents
+    // (native, hermes, …) from the multi-source registry so a native / mixed team
+    // has its members client-side — WITHOUT this, a native team shows 0 members
+    // (composer disabled, empty graph) whenever a Gateway is connected, so Boo Zero
+    // "doesn't respond." The registry read also gives us the runtime-NEUTRAL
+    // `defaultId` (= `resolveBooZero` — native for a native-first install), so we
+    // identify Boo Zero as the native one, NOT the Gateway's own "main". Best-effort:
+    // a failed read falls back to the Gateway-only snapshot + defaultId.
+    let registryDefaultId: string | undefined
+    let extraAgents: AgentState[] = []
+    try {
+      const reg = await listAgents()
+      registryDefaultId = reg.defaultId || undefined
+      const openClawIds = new Set(mapped.map((m) => m.id))
+      extraAgents = reg.agents
+        .filter((r) => r.runtime !== 'openclaw' && !openClawIds.has(r.id))
+        .map(agentRecordToFleetState)
+    } catch {
+      // Registry read failed — proceed with the Gateway-only fleet.
+    }
+    const fullFleet: AgentState[] = [...mapped, ...extraAgents]
+
+    // Identify Boo Zero from the runtime-neutral registry defaultId (native for a
+    // native-first install), falling back to the Gateway defaultId. Done before the
+    // display-name override so we know which agent's name to overlay.
+    const booZeroId = identifyBooZero(fullFleet, registryDefaultId ?? result.defaultId)
+    useBooZeroStore.getState().setBooZeroAgentId(booZeroId)
+    // Remember the Gateway's own default agent so auto-migration leaves it teamless
+    // (a system agent, not a user team member) — see `gatewayDefaultAgentId`.
+    gatewayDefaultAgentId = result.defaultId?.trim() || null
+
+    // Clawboo-side display-name override for Boo Zero. The user's
+    // Gateway agent name might be the literal slug "main" or a custom
+    // name picked in OpenClaw onboarding. Clawboo's policy: lock the display name to
+    // "Boo Zero" by default; user can change it anytime in the System
+    // panel ("Boo Zero" section). The override lives in SQLite —
+    // Gateway-side identity is never touched.
+    //
+    // First-connect behavior: if no override exists yet, we write
+    // "Boo Zero" as the default so the chat header / identity anchor
+    // / briefs all read consistently. Subsequent connects respect
+    // whatever the user has saved.
+    if (booZeroId) {
+      let override = ''
+      try {
+        const res = await fetch(`/api/boo-zero/display-name/${encodeURIComponent(booZeroId)}`)
+        if (res.ok) {
+          const body = (await res.json()) as { name?: string | null }
+          override = (body.name ?? '').trim()
+        }
+      } catch {
+        // Best-effort.
+      }
+      // No override yet → seed with the Clawboo default "Boo Zero".
+      // Skipped silently on fetch failure (the user can still see the
+      // Gateway-side name; the next successful connect will seed).
+      if (override.length === 0) {
+        try {
+          const seed = await fetch(`/api/boo-zero/display-name/${encodeURIComponent(booZeroId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: 'Boo Zero' }),
+          })
+          if (seed.ok) override = 'Boo Zero'
+        } catch {
+          // Best-effort.
+        }
+      }
+      if (override.length > 0) {
+        for (const a of fullFleet) {
+          if (a.id === booZeroId) a.name = override
+        }
+        // Auto-sync the display name into Boo Zero's SOUL.md. Idempotent
+        // (no-op when the SOUL.md heading already matches). Best-effort —
+        // the per-turn rules block in `lib/booZeroRules.ts` is the
+        // authoritative anchor regardless of whether the sync sticks.
+        // Fire-and-forget so a slow Gateway doesn't delay fleet hydration.
+        void syncBooZeroSoulIdentity({
+          agentId: booZeroId,
+          displayName: override,
+        })
+      }
+    }
+
+    useFleetStore.getState().hydrateAgents(fullFleet)
+
+    // Browser-fallback sync: push the freshly-fetched Gateway list to the
+    // server so SQLite (the registry-of-record) stays warm even if the
+    // server's OWN Gateway connection is degraded (e.g. NOT_PAIRED on a
+    // fresh install while the browser's proxy connection is approved). The
+    // server upserts Gateway-owned columns + archives absent agents, so this
+    // also subsumes the old `cleanup-ghosts` sweep.
+    if (result.agents.length > 0) {
+      void pushAgentSync({
+        defaultId: result.defaultId ?? '',
+        mainKey,
+        scope: result.scope ?? '',
+        agents: result.agents as Array<{
+          id: string
+          name?: string
+          identity?: Record<string, unknown>
+        }>,
+      })
+    }
+
+    return result.agents.length
+  } catch {
+    return -1
+  }
+}
+
+/**
+ * Enter the dashboard in GATEWAY MODE with a freshly connected OpenClaw client.
+ *
+ * The counterpart to `enterNativeMode` for the OpenClaw path: surfaces the
+ * client to the connection store then fully hydrates (fleet from the LIVE
+ * client → teams → auto-migrate teamless agents → approval history) — mirroring
+ * GatewayBootstrap's own connect flows. Used by the dashboard OpenClawSetupFlow
+ * so a native-first user can set up OpenClaw from Runtimes and land connected
+ * WITHOUT going back through onboarding.
+ *
+ * Does NOT navigate — the user stays on whatever view they launched setup from;
+ * the RuntimesPanel OpenClaw row flips "Healthy" reactively off the store status.
+ * Best-effort hydration: a live-read failure leaves an empty-but-connected fleet
+ * that the panel's poll heals (there is no `fleetError` banner here — that is
+ * component state owned by GatewayBootstrap's own flows).
+ */
+export async function enterGatewayMode(client: GatewayClient, url: string): Promise<void> {
+  const conn = useConnectionStore.getState()
+  // Disconnect any prior client before replacing to avoid leaked WS listeners.
+  const prev = conn.client
+  if (prev && prev !== client) prev.disconnect()
+
+  conn.setStatus('connected')
+  conn.setGatewayUrl(url)
+  conn.setClient(client)
+
+  await hydrateFleetFromClient(client)
+  await hydrateTeams()
+  await autoMigrateTeamlessAgents()
+  preloadApprovalHistory()
+}
+
 // ─── GatewayBootstrap ─────────────────────────────────────────────────────────
 
 export function GatewayBootstrap() {
@@ -313,7 +507,6 @@ export function GatewayBootstrap() {
   const setClient = useConnectionStore((s) => s.setClient)
   const setStatus = useConnectionStore((s) => s.setStatus)
   const setGatewayUrl = useConnectionStore((s) => s.setGatewayUrl)
-  const hydrateAgents = useFleetStore((s) => s.hydrateAgents)
 
   // null = not yet determined (avoids SSR/client localStorage mismatch)
   const [showWizard, setShowWizard] = useState<boolean | null>(null)
@@ -325,8 +518,6 @@ export function GatewayBootstrap() {
   // Step the wizard re-enters at. 'welcome' for a fresh run; a later step when
   // resuming a mid-onboarding refresh (see the resume branch below).
   const [wizardInitialStep, setWizardInitialStep] = useState<WizardStep>('welcome')
-  // Runtime the user had picked before a refresh (drives resume direction).
-  const [wizardInitialRuntime, setWizardInitialRuntime] = useState<SelectedRuntime | null>(null)
 
   useEffect(() => {
     // ALWAYS verify system state. The previous "fast path" trusted the
@@ -376,9 +567,11 @@ export function GatewayBootstrap() {
 
       const resumeWizard = (): void => {
         markWizardActive() // idempotent — keep the marker through the resume
-        const runtime = getWizardRuntime()
-        setWizardInitialRuntime(runtime)
-        setWizardInitialStep(resumeStepForRuntime(runtime))
+        // Native-first: the only pre-seed resumable step is configureNative. Once
+        // a native team is seeded (or OpenClaw is configured), decideOnboardingView
+        // returns 'native'/'dashboard' instead of 'wizard-resume', so addRuntimes /
+        // the OpenClaw detour / nativeReady are never resume targets.
+        setWizardInitialStep('configureNative')
         setShowWizard(true)
       }
 
@@ -451,130 +644,18 @@ export function GatewayBootstrap() {
 
   // ── Fleet hydration ────────────────────────────────────────────────────────
 
-  const hydrateFleet = useCallback(
-    async (liveClient: GatewayClient): Promise<number> => {
-      setFleetError(null)
-      try {
-        // Browser-fallback sync driver: this is the ONE intentional direct
-        // Gateway agent read left in the SPA. The registry-of-record is SQLite
-        // (served by /api/agents), but on connect the browser warms it from its
-        // own (proxy-approved) Gateway connection so a fresh install hydrates
-        // even before the server's own connection syncs. See pushAgentSync below.
-        const result = await liveClient.agents.list()
-        const mainKey = result.mainKey?.trim() || 'main'
-        // Preserve existing teamId assignments — Gateway doesn't know about teams
-        const existingTeamIds = new Map(
-          useFleetStore.getState().agents.map((a) => [a.id, a.teamId]),
-        )
-        // Load per-agent model overrides + exec configs in parallel
-        const [agentModels, execConfigs] = await Promise.all([
-          fetchAgentModelMap(),
-          fetchExecConfigMap(),
-        ])
-        const mapped = result.agents.map((a) => ({
-          id: a.id,
-          name: a.identity?.name ?? a.name ?? a.id,
-          status: 'idle' as const,
-          sessionKey: `agent:${a.id}:${mainKey}`,
-          model: agentModels.get(a.id) ?? null,
-          createdAt: null,
-          streamingText: null,
-          runId: null,
-          lastSeenAt: null,
-          teamId: existingTeamIds.get(a.id) ?? null,
-          execConfig: execConfigs.get(a.id) ?? null,
-        }))
-
-        // Identify Boo Zero before applying the display-name override so
-        // we know which agent's name to overlay.
-        const booZeroId = identifyBooZero(mapped, result.defaultId)
-        useBooZeroStore.getState().setBooZeroAgentId(booZeroId)
-
-        // Clawboo-side display-name override for Boo Zero. The user's
-        // Gateway agent name might be the literal slug "main" or a custom
-        // name picked in OpenClaw onboarding. Clawboo's policy: lock the display name to
-        // "Boo Zero" by default; user can change it anytime in the System
-        // panel ("Boo Zero" section). The override lives in SQLite —
-        // Gateway-side identity is never touched.
-        //
-        // First-connect behavior: if no override exists yet, we write
-        // "Boo Zero" as the default so the chat header / identity anchor
-        // / briefs all read consistently. Subsequent connects respect
-        // whatever the user has saved.
-        if (booZeroId) {
-          let override = ''
-          try {
-            const res = await fetch(`/api/boo-zero/display-name/${encodeURIComponent(booZeroId)}`)
-            if (res.ok) {
-              const body = (await res.json()) as { name?: string | null }
-              override = (body.name ?? '').trim()
-            }
-          } catch {
-            // Best-effort.
-          }
-          // No override yet → seed with the Clawboo default "Boo Zero".
-          // Skipped silently on fetch failure (the user can still see the
-          // Gateway-side name; the next successful connect will seed).
-          if (override.length === 0) {
-            try {
-              const seed = await fetch(
-                `/api/boo-zero/display-name/${encodeURIComponent(booZeroId)}`,
-                {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ name: 'Boo Zero' }),
-                },
-              )
-              if (seed.ok) override = 'Boo Zero'
-            } catch {
-              // Best-effort.
-            }
-          }
-          if (override.length > 0) {
-            for (const a of mapped) {
-              if (a.id === booZeroId) a.name = override
-            }
-            // Auto-sync the display name into Boo Zero's SOUL.md. Idempotent
-            // (no-op when the SOUL.md heading already matches). Best-effort —
-            // the per-turn rules block in `lib/booZeroRules.ts` is the
-            // authoritative anchor regardless of whether the sync sticks.
-            // Fire-and-forget so a slow Gateway doesn't delay fleet hydration.
-            void syncBooZeroSoulIdentity({
-              agentId: booZeroId,
-              displayName: override,
-            })
-          }
-        }
-
-        hydrateAgents(mapped)
-
-        // Browser-fallback sync: push the freshly-fetched Gateway list to the
-        // server so SQLite (the registry-of-record) stays warm even if the
-        // server's OWN Gateway connection is degraded (e.g. NOT_PAIRED on a
-        // fresh install while the browser's proxy connection is approved). The
-        // server upserts Gateway-owned columns + archives absent agents, so this
-        // also subsumes the old `cleanup-ghosts` sweep.
-        if (result.agents.length > 0) {
-          void pushAgentSync({
-            defaultId: result.defaultId ?? '',
-            mainKey,
-            scope: result.scope ?? '',
-            agents: result.agents as Array<{
-              id: string
-              name?: string
-              identity?: Record<string, unknown>
-            }>,
-          })
-        }
-
-        return result.agents.length
-      } catch {
-        setFleetError('Could not load your agent fleet. The Gateway may have restarted.')
-        return -1
-      }
-    },
-    [hydrateAgents],
-  )
+  // Thin wrapper around the module-level `hydrateFleetFromClient` (shared with
+  // `enterGatewayMode`) that adds this component's `fleetError` banner on a
+  // live-read failure. The hydration logic itself lives in one place so the
+  // dashboard OpenClawSetupFlow can't diverge from the bootstrap connect flows.
+  const hydrateFleet = useCallback(async (liveClient: GatewayClient): Promise<number> => {
+    setFleetError(null)
+    const n = await hydrateFleetFromClient(liveClient)
+    if (n < 0) {
+      setFleetError('Could not load your agent fleet. The Gateway may have restarted.')
+    }
+    return n
+  }, [])
 
   // ── Returning-user connect handler (GatewayConnectScreen) ─────────────────
 
@@ -683,7 +764,7 @@ export function GatewayBootstrap() {
     setStartGatewayError(null)
 
     sseControllerRef.current?.abort()
-    sseControllerRef.current = consumeSSE(
+    sseControllerRef.current = consumeApiSSE(
       '/api/system/gateway',
       {
         method: 'POST',
@@ -828,7 +909,6 @@ export function GatewayBootstrap() {
             key="onboarding"
             onComplete={handleOnboardingComplete}
             initialStep={wizardInitialStep}
-            initialRuntime={wizardInitialRuntime}
           />
         )}
 
@@ -1018,6 +1098,10 @@ export function GatewayBootstrap() {
       <AnimatePresence>
         {showBooTip && <BooTip key="boo-tip" onDismiss={() => setShowBooTip(false)} />}
       </AnimatePresence>
+
+      {/* One-time capability tour — auto-opens once the shell is settled (no
+          onboarding tip showing) and never again. */}
+      <CapabilityTour show={isConnected && !showBooTip} />
     </>
   )
 }

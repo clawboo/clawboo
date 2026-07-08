@@ -38,6 +38,11 @@ export function GatewayConnectScreen({
   // Form state
   const [url, setUrl] = useState(initialUrl?.trim() || DEFAULT_URL)
   const [token, setToken] = useState('')
+  // The saved token never reaches the browser (GET /api/settings returns only a
+  // `hasToken` flag), so we track its presence as a flag + show a placeholder —
+  // NOT by stuffing bullet chars into the field value (that made the show/hide eye
+  // a no-op: revealing literal bullets looked identical to the masked field).
+  const [hasSavedToken, setHasSavedToken] = useState(initialHasToken)
   const [showToken, setShowToken] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -59,9 +64,9 @@ export function GatewayConnectScreen({
       .then((r) => r.json())
       .then((data: { gatewayUrl?: string; hasToken?: boolean }) => {
         if (data.gatewayUrl?.trim()) setUrl(data.gatewayUrl.trim())
-        // The raw token never travels to the browser — GET /api/settings returns only
-        // a `hasToken` flag; show the masked placeholder so the field reads as set.
-        if (data.hasToken) setToken('••••••••')
+        // Track the saved token as a flag (a placeholder tells the user it's set);
+        // the raw value never travels to the browser.
+        if (data.hasToken) setHasSavedToken(true)
       })
       .catch(() => {
         /* silently ignore — user can type manually */
@@ -72,8 +77,9 @@ export function GatewayConnectScreen({
     const trimmedUrl = url.trim()
     if (!trimmedUrl || connecting) return
 
-    // If the token field is still the placeholder dots, treat as "keep existing"
-    const trimmedToken = token === '••••••••' ? '' : token.trim()
+    // A blank field means "keep the saved token" (the proxy injects it server-side);
+    // only a value the user actually typed is sent as a new token.
+    const trimmedToken = token.trim()
 
     setConnecting(true)
     setError(null)
@@ -97,7 +103,7 @@ export function GatewayConnectScreen({
       // If the token field still shows the placeholder (user never touched it),
       // only save the URL — leave the existing saved token intact so the proxy
       // can inject it. If the user explicitly cleared or typed a new token, save that.
-      const tokenChanged = token !== '••••••••'
+      const tokenChanged = trimmedToken.length > 0
       await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -238,7 +244,7 @@ export function GatewayConnectScreen({
               >
                 Token{' '}
                 <span className="normal-case font-normal text-secondary/50">
-                  {initialHasToken ? '(saved)' : '(optional)'}
+                  {hasSavedToken ? '(saved)' : '(optional)'}
                 </span>
               </label>
               <div className="relative">
@@ -247,11 +253,7 @@ export function GatewayConnectScreen({
                   type={showToken ? 'text' : 'password'}
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
-                  onFocus={() => {
-                    // Clear placeholder dots so user can type real value
-                    if (token === '••••••••') setToken('')
-                  }}
-                  placeholder="gateway-token"
+                  placeholder={hasSavedToken ? 'Saved — leave blank to keep' : 'gateway-token'}
                   spellCheck={false}
                   autoComplete="current-password"
                   disabled={connecting}
