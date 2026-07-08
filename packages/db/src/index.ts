@@ -111,6 +111,9 @@ export * from './routines'
 // ── team_chat — the mixed-runtime peer-chat room substrate ─────
 export * from './teamChat'
 
+// ── chat_messages — the durable transcript tail (live team-chat SSE) ──
+export * from './chat'
+
 // ── Database connection + helpers ──────────────────────────────────────────
 export {
   createDb,

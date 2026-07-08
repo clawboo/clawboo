@@ -28,6 +28,9 @@ export const chatMessages = sqliteTable(
   (t) => [
     uniqueIndex('uniq_chat_messages_entry_id').on(t.entryId),
     index('idx_chat_messages_session_ts').on(t.sessionKey, t.timestampMs),
+    // The (session_key, id) tail index for the live SSE stream: each poll
+    // range-seeks `id > cursor` per team member key — O(new-rows), not O(history).
+    index('idx_chat_messages_session_id').on(t.sessionKey, t.id),
   ],
 )
 
