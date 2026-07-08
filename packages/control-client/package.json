@@ -1,0 +1,35 @@
+{
+  "name": "@clawboo/control-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Framework-agnostic REST/SSE client for the clawboo control plane (onboarding, runtimes, agents, teams) — a configurable base URL + auth/tenant header seam shared by web/desktop/mobile/npm clients",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clawboo/agent-registry": "workspace:*"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
