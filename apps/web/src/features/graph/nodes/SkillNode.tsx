@@ -155,7 +155,7 @@ export const SkillNode = memo(function SkillNode({
                 e.stopPropagation()
                 setShowPicker((v) => !v)
               }}
-              className="opacity-0 group-hover:opacity-100"
+              className="font-mono uppercase opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
               style={{
                 position: 'absolute',
                 top: -6,
@@ -163,14 +163,13 @@ export const SkillNode = memo(function SkillNode({
                 background: 'var(--mint)',
                 color: 'var(--background)',
                 border: 'none',
-                borderRadius: 4,
-                fontSize: 9,
-                fontWeight: 700,
+                borderRadius: 5,
+                fontSize: 10,
+                fontWeight: 600,
                 padding: '2px 6px',
                 cursor: 'pointer',
-                transition: 'opacity 0.15s',
                 whiteSpace: 'nowrap',
-                letterSpacing: '0.02em',
+                letterSpacing: '0.06em',
               }}
             >
               Install →

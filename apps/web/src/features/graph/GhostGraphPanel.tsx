@@ -44,7 +44,7 @@ export function GhostGraphPanel({
       {!embedded && (
         <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-3">
           <div className="flex items-center gap-2">
-            <span className="text-[12px] font-semibold text-foreground/50">
+            <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
               {scope === 'atlas'
                 ? 'Atlas — All Teams'
                 : selectedTeam
@@ -52,7 +52,7 @@ export function GhostGraphPanel({
                   : 'Ghost Graph'}
             </span>
             {booCount > 0 && (
-              <span className="rounded-full bg-primary/12 px-2 py-0.5 text-[11px] font-medium text-primary">
+              <span className="font-data rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[11px] font-semibold text-foreground/55">
                 {booCount} Boo{booCount !== 1 ? 's' : ''}
                 {skillCount > 0 && ` · ${skillCount} skills`}
               </span>

@@ -85,8 +85,8 @@ export function GraphContextMenu({
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.12, ease: 'easeOut' }}
-      className="surface-floating-tier fixed z-[100] min-w-[180px] overflow-hidden rounded-[10px] py-1"
-      style={{ left: x, top: y }}
+      className="fixed z-[100] min-w-[180px] overflow-hidden rounded-xl border border-border bg-popover py-1.5"
+      style={{ left: x, top: y, boxShadow: 'var(--shadow-floating)' }}
     >
       {items.map((item, index) => {
         const Icon = item.icon
@@ -94,15 +94,15 @@ export function GraphContextMenu({
         const showDivider = isDestructive && index > 0
         return (
           <div key={item.action}>
-            {showDivider && <div className="my-1 mx-3.5 border-t border-foreground/[0.06]" />}
+            {showDivider && <div className="my-1 mx-3.5 border-t border-border" />}
             <button
               type="button"
               onClick={() => handlers[item.action]()}
-              className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors duration-150 hover:bg-foreground/[0.05] ${
-                isDestructive ? 'text-primary' : 'text-foreground'
+              className={`flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors duration-150 hover:bg-foreground/[0.06] ${
+                isDestructive ? 'text-destructive' : 'text-foreground'
               }`}
             >
-              <Icon size={14} strokeWidth={1.75} aria-hidden />
+              <Icon size={14} strokeWidth={2} aria-hidden />
               <span>{item.label}</span>
             </button>
           </div>
