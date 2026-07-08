@@ -9,6 +9,8 @@ import { motion } from 'framer-motion'
 import { AlertCircle, CheckCircle2, HeartPulse, RefreshCw, XCircle } from 'lucide-react'
 
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { Button } from '@/features/shared/Button'
+import { PanelHeader } from '@/features/shared/PanelHeader'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { Spinner } from '@/features/shared/Spinner'
@@ -29,7 +31,7 @@ const TONE_META: Record<
 > = {
   ok: { color: 'var(--mint)', Icon: CheckCircle2, pill: 'success', pillLabel: 'OK' },
   degraded: { color: 'var(--amber)', Icon: AlertCircle, pill: 'warning', pillLabel: 'Degraded' },
-  fatal: { color: 'var(--primary)', Icon: XCircle, pill: 'error', pillLabel: 'Fatal' },
+  fatal: { color: 'var(--destructive)', Icon: XCircle, pill: 'error', pillLabel: 'Fatal' },
 }
 
 // Human-readable labels for the known boot-probe check ids. The raw camelCase
@@ -53,42 +55,29 @@ function humanizeCheckId(id: string): string {
   )
 }
 
-const KICKER = 'mb-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider'
-const KICKER_COLOR = 'rgb(var(--foreground-rgb) / 0.4)'
+const SECTION_LABEL = 'font-mono text-[11px] font-semibold uppercase tracking-[0.14em]'
+
+const cardStyle: React.CSSProperties = { boxShadow: 'var(--shadow-raised)' }
 
 function SectionCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section style={{ marginBottom: 18 }}>
-      <div className={KICKER} style={{ color: KICKER_COLOR }}>
-        {title}
-      </div>
-      <div className="surface-raised-tier" style={{ borderRadius: 12, padding: '4px 16px' }}>
+    <section className="mb-6">
+      <div className={`${SECTION_LABEL} mb-2.5 text-foreground/45`}>{title}</div>
+      <div
+        className="rounded-2xl border border-border bg-surface px-4"
+        style={cardStyle}
+      >
         {children}
       </div>
     </section>
   )
 }
 
-function ResolvedRow({ label, value, last }: { label: string; value: string; last?: boolean }) {
+function ResolvedRow({ label, value }: { label: string; value: string }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 12,
-        padding: '9px 0',
-        fontSize: 12,
-        borderBottom: last ? 'none' : '1px solid rgb(var(--foreground-rgb) / 0.05)',
-      }}
-    >
-      <span style={{ width: 150, flexShrink: 0, color: 'rgb(var(--foreground-rgb) / 0.5)' }}>
-        {label}
-      </span>
-      <span
-        className="font-data"
-        style={{ color: 'rgb(var(--foreground-rgb) / 0.85)', wordBreak: 'break-all' }}
-      >
-        {value}
-      </span>
+    <div className="flex gap-3 border-b border-border py-2.5 text-[13px] last:border-b-0">
+      <span className="w-[150px] shrink-0 text-foreground/50">{label}</span>
+      <span className="font-data break-all text-foreground/85">{value}</span>
     </div>
   )
 }
@@ -141,102 +130,48 @@ export function SystemHealthPanel() {
   return (
     <div
       data-testid="system-health-panel"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        background: 'var(--background)',
-        overflow: 'hidden',
-      }}
+      className="flex h-full flex-col overflow-hidden bg-background"
     >
-      {/* Toolbar (44px to host the GitHub Star pill — AppTopBar is hidden for nav views) */}
-      <div
-        style={{
-          height: 44,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <HeartPulse size={15} style={{ color: 'rgb(var(--foreground-rgb) / 0.55)' }} />
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              fontFamily: 'var(--font-display)',
-              letterSpacing: '-0.01em',
-              color: 'var(--foreground)',
-            }}
-          >
-            System Health
-          </span>
-          {headerTone && <StatusPill tone={headerTone} label={headerLabel} />}
-        </div>
+      <PanelHeader
+        title="System Health"
+        icon={HeartPulse}
+        size="md"
+        border
+        actions={
+          <>
+            {headerTone && <StatusPill tone={headerTone} label={headerLabel} />}
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="system-health-recheck"
+              onClick={() => void load(true)}
+              disabled={loading}
+              loading={loading}
+              title="Re-run the boot probe"
+            >
+              <RefreshCw size={14} strokeWidth={2} />
+              Re-run probe
+            </Button>
+            <GitHubStarButton />
+          </>
+        }
+      />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            data-testid="system-health-recheck"
-            onClick={() => void load(true)}
-            disabled={loading}
-            title="Re-run the boot probe"
-            className="health-recheck-btn"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              height: 30,
-              padding: '0 11px',
-              borderRadius: 7,
-              background: 'transparent',
-              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-              color: 'rgb(var(--foreground-rgb) / 0.6)',
-              fontSize: 12,
-              fontWeight: 500,
-              cursor: loading ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.6 : 1,
-              transition:
-                'background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast)',
-            }}
-            onMouseEnter={(e) => {
-              if (loading) return
-              e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.05)'
-              e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.2)'
-              e.currentTarget.style.color = 'var(--foreground)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.1)'
-              e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.6)'
-            }}
-          >
-            {loading ? <Spinner size={12} /> : <RefreshCw size={12} />}
-            Re-run probe
-          </button>
-          <GitHubStarButton />
-        </div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', maxWidth: 920 }}>
+      <div className="max-w-[920px] flex-1 overflow-y-auto px-6 py-5">
         {error && (
-          <div data-testid="system-health-error" style={{ marginBottom: 16 }}>
+          <div data-testid="system-health-error" className="mb-4">
             <FormattedAlert tone="error">Could not load health: {error}</FormattedAlert>
           </div>
         )}
 
         {report && (fatalCount > 0 || degradedCount > 0) && (
-          <div data-testid="system-health-banner" style={{ marginBottom: 20 }}>
+          <div data-testid="system-health-banner" className="mb-5">
             <FormattedAlert tone={fatalCount > 0 ? 'error' : 'warning'}>
               {fatalCount > 0 ? (
                 <>
                   <strong>The install has a fatal problem.</strong> clawboo has no upgrade/repair
                   path — reset{' '}
-                  <code className="font-data" style={{ fontSize: 11 }}>
-                    ~/.clawboo
-                  </code>{' '}
+                  <code className="font-data text-[11px]">~/.clawboo</code>{' '}
                   and re-run onboarding to start clean.
                 </>
               ) : (
@@ -250,32 +185,24 @@ export function SystemHealthPanel() {
         )}
 
         {/* Checks */}
-        <section style={{ marginBottom: 18 }}>
-          <div className={KICKER} style={{ color: KICKER_COLOR }}>
-            Checks
-          </div>
+        <section className="mb-6">
+          <div className={`${SECTION_LABEL} mb-2.5 text-foreground/45`}>Checks</div>
           {!report && loading ? (
             <div
-              className="surface-raised-tier"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                color: 'rgb(var(--foreground-rgb) / 0.5)',
-                fontSize: 12,
-                borderRadius: 12,
-                padding: '16px',
-              }}
+              className="flex items-center gap-2 rounded-2xl border border-border bg-surface p-4 text-[13px] text-foreground/50"
+              style={cardStyle}
             >
               <Spinner size={13} /> Running boot probe…
             </div>
           ) : (
-            <div className="surface-raised-tier" style={{ borderRadius: 12, padding: '4px 16px' }}>
+            <div
+              className="rounded-2xl border border-border bg-surface px-4"
+              style={cardStyle}
+            >
               {report?.checks.map((check, i) => {
                 const tone = toneFor(report, check)
                 const meta = TONE_META[tone]
                 const { color, Icon } = meta
-                const last = i === report.checks.length - 1
                 return (
                   <motion.div
                     key={check.id}
@@ -283,55 +210,24 @@ export function SystemHealthPanel() {
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
-                    style={{
-                      display: 'flex',
-                      gap: 11,
-                      padding: '11px 0',
-                      borderBottom: last ? 'none' : '1px solid rgb(var(--foreground-rgb) / 0.05)',
-                    }}
+                    className="flex gap-3 border-b border-border py-3 last:border-b-0"
                   >
-                    <Icon size={16} style={{ color, flexShrink: 0, marginTop: 1 }} />
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 600,
-                            color: 'var(--foreground)',
-                          }}
-                        >
+                    <Icon size={16} className="mt-px shrink-0" style={{ color }} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[13px] font-semibold text-foreground">
                           {humanizeCheckId(check.id)}
                         </span>
                         <StatusPill tone={meta.pill} label={meta.pillLabel} />
-                        <span
-                          className="font-data"
-                          style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.4)' }}
-                        >
+                        <span className="font-data text-[11px] text-foreground/40">
                           {check.durationMs}ms
                         </span>
                       </div>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: 'rgb(var(--foreground-rgb) / 0.6)',
-                          marginTop: 2,
-                          lineHeight: 1.45,
-                        }}
-                      >
+                      <div className="mt-0.5 text-[13px] leading-snug text-foreground/60">
                         {check.message}
                       </div>
                       {!check.ok && check.detail && (
-                        <div
-                          className="font-data"
-                          style={{
-                            fontSize: 11,
-                            color: 'rgb(var(--foreground-rgb) / 0.45)',
-                            marginTop: 4,
-                            wordBreak: 'break-all',
-                          }}
-                        >
+                        <div className="font-data mt-1 break-all text-[11px] text-foreground/45">
                           {check.detail}
                         </div>
                       )}
@@ -368,7 +264,6 @@ export function SystemHealthPanel() {
                 value={
                   report.resolved.masterKeyOk ? 'verified' : 'unreadable — re-enter runtime keys'
                 }
-                last
               />
             </SectionCard>
 
@@ -389,7 +284,6 @@ export function SystemHealthPanel() {
                     ? 'OTel exporter active'
                     : 'local event log (OTel opt-in)'
                 }
-                last
               />
             </SectionCard>
           </>
