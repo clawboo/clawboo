@@ -16,7 +16,6 @@ import { create } from 'zustand'
 export const NAV_VIEWS = [
   'graph',
   'fleet',
-  'approvals',
   'cost',
   'marketplace',
   'scheduler',
@@ -45,7 +44,7 @@ interface ViewStore {
   viewMode: ViewMode
   setViewMode: (mode: ViewMode) => void
 
-  /** Navigate to a NavView (graph, approvals, cost, marketplace, scheduler, system). */
+  /** Navigate to a NavView (graph, board, cost, marketplace, scheduler, system). */
   navigateTo: (view: NavView) => void
 
   /** Open an agent's chat / detail view. */

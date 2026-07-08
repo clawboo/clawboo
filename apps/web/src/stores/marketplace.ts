@@ -122,7 +122,8 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   searchQuery: '',
   categoryFilter: 'all',
   sortBy: 'name',
-  marketplaceTab: 'agents',
+  // Teams lead the marketplace (first tab + default landing).
+  marketplaceTab: 'teams',
   teamSearchQuery: '',
   teamCategoryFilter: 'all',
   teamSourceFilter: 'all',

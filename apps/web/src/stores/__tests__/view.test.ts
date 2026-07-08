@@ -47,12 +47,12 @@ describe('useViewStore', () => {
 
   describe('navigateTo', () => {
     it('sets viewMode to nav with the given view', () => {
-      useViewStore.getState().navigateTo('approvals')
-      expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view: 'approvals' })
+      useViewStore.getState().navigateTo('board')
+      expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view: 'board' })
     })
 
     it('works for all NavView values', () => {
-      const views: NavView[] = ['graph', 'approvals', 'cost', 'marketplace', 'scheduler', 'system']
+      const views: NavView[] = ['graph', 'board', 'cost', 'marketplace', 'scheduler', 'system']
       for (const view of views) {
         useViewStore.getState().navigateTo(view)
         expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view })

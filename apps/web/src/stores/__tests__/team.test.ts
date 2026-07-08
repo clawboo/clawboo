@@ -15,6 +15,7 @@ function makeTeam(overrides: Partial<Team> = {}): Team {
     agentCount: 0,
     leaderAgentId: null,
     isArchived: false,
+    serverOrchestrated: false,
     ...overrides,
   }
 }
