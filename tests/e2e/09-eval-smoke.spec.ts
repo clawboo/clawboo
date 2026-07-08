@@ -11,7 +11,11 @@ async function connect(
 ): Promise<void> {
   await assertSandboxed(request)
   await request.post(`${API_BASE}/api/settings`, { data: { gatewayUrl, gatewayToken: '' } })
-  await page.addInitScript(() => localStorage.setItem('clawboo.onboarded', '1'))
+  await page.addInitScript(() => {
+    localStorage.setItem('clawboo.onboarded', '1')
+    localStorage.setItem('clawboo.tour.shown', '1')
+    localStorage.setItem('clawboo.firstTask.shown', '1')
+  })
   await page.route('**/api/system/status', async (route) => {
     await route.fulfill({
       status: 200,
@@ -38,9 +42,11 @@ test.describe('Eval-run-from-UI (smoke)', () => {
     test.setTimeout(90_000)
     await connect(page, request, gateway.url)
 
-    // Observability is always available → open it directly.
-    await expect(page.locator('[data-testid="nav-obs"]')).toBeVisible({ timeout: 10_000 })
-    await page.locator('[data-testid="nav-obs"]').click()
+    // Observability moved into the Settings modal — open it from the sidebar
+    // gear, then pick Observability.
+    await page.locator('[data-testid="nav-settings"]').click()
+    await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 10_000 })
+    await page.locator('[data-testid="settings-nav-obs"]').click()
     await expect(page.locator('[data-testid="obs-panel"]')).toBeVisible({ timeout: 10_000 })
     await expect(page.locator('[data-testid="eval-scorecard"]')).toBeVisible()
 

@@ -1,19 +1,16 @@
-// Native onboarding happy path (the headline ~60-second first-run): a fresh
-// install → the native-first wizard → paste a key → seed a starter team → skip
-// the optional "add runtimes" step → land in the dashboard with the team
-// showing. Native is the DEFAULT (no up-front runtime choice). Fully offline-
-// capable — the native connect route only writes the vault and the seed only
-// writes SQLite (no Gateway, no live provider call).
-//
-// The OpenClaw / coding-agent runtime connect flows are covered by the RTL step
-// tests (ConfigureNativeStep / AddRuntimesStep / RuntimeConnectionCard) plus the
-// existing connected-dashboard e2e; their install-subprocess steps are fragile
-// to drive headlessly and are intentionally out of scope here.
+// The optional "add runtimes" step never strands. In the native-first flow a
+// working team is already seeded (ConfigureNative) BEFORE this step, so the
+// coding-agent / OpenClaw runtimes here are purely additive: whether the user
+// connects one, opens the OpenClaw detour, or just continues, they always land
+// in their working native team. This guards the OLD coding-agent-first-choice
+// "strand" (a dashboard with nothing in it) from ever returning — the strand is
+// now impossible by construction. (The RuntimeConnectionCard connect state
+// machine itself is covered by the RTL step tests.)
 
 import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
 
-test.describe('Native onboarding', () => {
-  test('fresh install → paste key → seed team → skip runtimes → land in dashboard', async ({
+test.describe('Add-runtimes onboarding step', () => {
+  test('seed native team → the add-runtimes surface is present → Continue → land in the working team', async ({
     page,
     request,
   }) => {
@@ -50,8 +47,7 @@ test.describe('Native onboarding', () => {
       localStorage.setItem('clawboo.firstTask.shown', '1')
     })
 
-    // Report OpenClaw as NOT configured so the bootstrap shows the wizard (no
-    // gateway auto-connect, no offline overlay).
+    // Report OpenClaw as NOT configured so the bootstrap shows the wizard.
     await page.route('**/api/system/status', async (route) => {
       await route.fulfill({
         status: 200,
@@ -77,7 +73,8 @@ test.describe('Native onboarding', () => {
       })
     })
 
-    // Keep the AddRuntimes step deterministic (no live CLI-health probing).
+    // Keep the AddRuntimes step deterministic (no live CLI-health probing). The
+    // coding-runtime cards render off the catalog regardless of live status.
     await page.route('**/api/runtimes', async (route) => {
       if (route.request().method() !== 'GET') return route.fallback()
       await route.fulfill({
@@ -89,30 +86,27 @@ test.describe('Native onboarding', () => {
 
     await page.goto('/')
 
-    // Welcome → ConfigureNative directly (native is the default — no runtime pick).
+    // Welcome → ConfigureNative → seed the starter team.
     await page.getByRole('button', { name: /Get Started/ }).click()
     await expect(page.getByTestId('configure-native-step')).toBeVisible({ timeout: 10_000 })
-
-    // Paste a (fake) key and create the team. The connect route writes the
-    // vault; the seed writes SQLite — both run offline.
     await page.getByTestId('native-api-key').fill('sk-ant-e2e-fake-key')
     await page.getByTestId('native-create-team').click()
 
-    // Optional "add more runtimes" step → skip it.
+    // Add-runtimes: the three coding-runtime cards + the OpenClaw detour row are
+    // all present (the opt-in surface); the native team is already seeded.
     await expect(page.getByTestId('add-runtimes-step')).toBeVisible({ timeout: 15_000 })
-    await page.getByTestId('addruntimes-skip').click()
+    await expect(page.getByTestId('runtime-card-claude-code')).toBeVisible()
+    await expect(page.getByTestId('runtime-card-codex')).toBeVisible()
+    await expect(page.getByTestId('runtime-card-hermes')).toBeVisible()
+    await expect(page.getByTestId('addruntimes-setup-openclaw')).toBeVisible()
 
-    // "Team is ready" landing → open the dashboard.
+    // Continue → ready → dashboard with the seeded native team STILL present
+    // (the add-runtimes step never strands — the team was seeded before it).
+    await page.getByTestId('addruntimes-continue').click()
     await expect(page.getByTestId('native-ready-step')).toBeVisible({ timeout: 10_000 })
     await page.getByTestId('native-open-dashboard').click()
-
-    // Wizard fully exits (its NativeReady roster also renders a "Team Lead"
-    // label, so wait for the overlay to be gone before asserting the dashboard
-    // — otherwise the assertion races the AnimatePresence exit animation).
     await expect(page.getByTestId('native-ready-step')).toHaveCount(0)
 
-    // Landed in the dashboard with the seeded team showing — scope the lookup
-    // to the sidebar agent list (the seeded agent also appears as a graph node).
     const sidebar = page.locator('[data-testid="agent-list-column"]')
     await expect(sidebar).toBeVisible({ timeout: 15_000 })
     await expect(sidebar.getByText('Team Lead')).toBeVisible({ timeout: 10_000 })

@@ -38,26 +38,57 @@ test.describe('Teams', () => {
     await agentList.locator('[data-testid="nav-marketplace"]').click()
     await expect(page.getByRole('main').getByText('Marketplace')).toBeVisible({ timeout: 5_000 })
 
-    // Click Tokens Used nav button
-    await agentList.locator('[data-testid="nav-cost"]').click()
+    // Tokens Used moved into the Settings modal (opened from the sidebar gear).
+    await agentList.locator('[data-testid="nav-settings"]').click()
+    await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 5_000 })
+    await page.locator('[data-testid="settings-nav-cost"]').click()
     await expect(page.getByText('Token usage by team and agent')).toBeVisible({ timeout: 5_000 })
+
+    // Close the modal before clicking a sidebar nav — the scrim covers it.
+    await page.locator('[data-testid="settings-close"]').click()
+    await expect(page.locator('[data-testid="settings-modal"]')).toHaveCount(0)
 
     // Click back to Atlas
     await agentList.locator('[data-testid="nav-graph"]').click()
     await expect(page.locator('.react-flow')).toBeVisible({ timeout: 10_000 })
   })
 
-  test('system nav button opens maintenance panel', async ({ page, request, gateway }) => {
+  test('runtime diagnostics drawer opens full-height above the Settings modal', async ({
+    page,
+    request,
+    gateway,
+  }) => {
+    await connectToMockGateway(page, request, gateway.url)
+    const agentList = page.locator('[data-testid="agent-list-column"]')
+
+    // Settings modal defaults to the Runtimes pane; the built-in native runtime
+    // is always present, so its diagnostics drawer is a stable target.
+    await agentList.locator('[data-testid="nav-settings"]').click()
+    await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 5_000 })
+    await page.locator('[data-testid="runtime-clawboo-native-diagnostics"]').click()
+
+    // The drawer is portaled to <body> so it escapes the modal's clipping glass
+    // container — assert it renders roughly full viewport height (the regression
+    // was it being clipped to the ~640px modal box).
+    const drawer = page.locator('[data-testid="runtime-diagnostics-drawer"]')
+    await expect(drawer).toBeVisible({ timeout: 5_000 })
+    const box = await drawer.boundingBox()
+    const vp = page.viewportSize()
+    expect(box).not.toBeNull()
+    if (box && vp) expect(box.height).toBeGreaterThan(vp.height - 8)
+  })
+
+  test('system settings opens maintenance panel', async ({ page, request, gateway }) => {
     await connectToMockGateway(page, request, gateway.url)
 
     const agentList = page.locator('[data-testid="agent-list-column"]')
 
-    // Click System nav button in secondary nav. We use the testid because
-    // `button:has-text("System")` strict-matches BOTH the nav button and the
-    // theme-toggle button (whose title attribute reads
-    // "Theme: System (light). Click for Light." when the theme preference is
-    // 'system' — the default for fresh sessions).
-    await agentList.locator('[data-testid="nav-system"]').click()
+    // System moved into the Settings modal. Open the modal from the sidebar
+    // gear (testid — `button:has-text("Settings")` would also match the modal's
+    // own "Settings" heading + the "System" theme-toggle title), then pick it.
+    await agentList.locator('[data-testid="nav-settings"]').click()
+    await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 5_000 })
+    await page.locator('[data-testid="settings-nav-system"]').click()
 
     // MaintenancePanel renders this subtitle
     await expect(page.getByText('Manage your OpenClaw installation')).toBeVisible({
