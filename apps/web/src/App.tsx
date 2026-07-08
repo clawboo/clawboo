@@ -6,8 +6,11 @@ import { AgentListColumn } from '@/features/layout/AgentListColumn'
 import { ContentArea } from '@/features/layout/ContentArea'
 import { FirstRunNudge } from '@/features/fleet/FirstRunNudge'
 import { AppTopBar } from '@/features/promo/AppTopBar'
+import { SettingsModal } from '@/features/settings/SettingsModal'
+import { ConfirmDialog } from '@/features/shared/ConfirmDialog'
 import { useViewStore } from '@/stores/view'
 import { useConnectionStore } from '@/stores/connection'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { shouldShowGlobalTopBar } from '@/lib/topBar'
 
 export function App() {
@@ -17,6 +20,9 @@ export function App() {
   // The first-run nudge only belongs on the settled dashboard (status 'connected'
   // in both gateway and native mode), never over the onboarding wizard.
   const onDashboard = useConnectionStore((s) => s.status === 'connected')
+  // While the Settings modal is open, the whole app shell is inert so
+  // background controls leave the tab order + AT tree (honouring aria-modal).
+  const settingsOpen = useSettingsModalStore((s) => s.open)
 
   // Every nav view + agent/booZero/groupChat host the GitHub Star pill inline in
   // their own header, so the global AppTopBar (a Star-pill-only strip) would be a
@@ -29,7 +35,10 @@ export function App() {
     <Providers>
       <ToastContainer />
       <GatewayBootstrap />
-      <div className="flex h-screen overflow-hidden bg-background text-foreground">
+      <div
+        inert={settingsOpen || undefined}
+        className="flex h-screen overflow-hidden bg-background text-foreground"
+      >
         {/* Col 1 — Team sidebar (60px) */}
         <TeamSidebar />
         {/* Col 2 — Agent list + nav (208px) — hidden in Boo Zero view or when collapsed */}
@@ -44,6 +53,11 @@ export function App() {
         </main>
       </div>
       {onDashboard && <FirstRunNudge />}
+      <SettingsModal />
+      {/* App-root confirmation dialog (design-system replacement for
+          window.confirm). Outside the inert app-shell + above the settings
+          modal scrim so an imperative confirm() is always interactive. */}
+      <ConfirmDialog />
     </Providers>
   )
 }
