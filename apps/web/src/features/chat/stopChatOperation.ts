@@ -1,4 +1,4 @@
-// stopChatOperation — "pull the plug" for the chat composer's Stop button.
+// stopChatOperation — "pull the plug" for the 1:1 chat composer's Stop button.
 //
 // Three layers, in this order:
 //   1. Optimistic local teardown — patches `useFleetStore` + `useChatStore`
@@ -14,24 +14,20 @@
 //      available. Covers two cases that pure `chat.abort` misses:
 //         a. `runId` is null at stop time → `chat.abort` is skipped, but
 //            the Gateway resolves the active run from the sessionKey.
-//         b. Queued / pending work on the session (delegate sends, wake
-//            messages) gets nuked alongside the active run, instead of
-//            firing one beat later and starting a fresh cascade.
+//         b. Queued / pending work on the session gets nuked alongside the
+//            active run, instead of firing one beat later.
 // Both RPCs are idempotent — `status: 'no-active-run'` for already-idle
 // sessions is a benign no-op. We `Promise.allSettled` everything so a
 // single failure can't block the rest of the teardown.
 //
-// For group chat there's a fourth concern: orchestration in-memory state
-// (wake-in-flight set, team-chat overrides) that doesn't live in stores, so it
-// needs explicit clears here. The board orchestration's in-flight delegation
-// work is cancelled via the `stopSignal` counter the caller bumps before
-// invoking this — see `useBoardOrchestration`.
+// Team-chat Stop is now server-side (`stopServerTeam` → POST /api/teams/:id/chat/stop);
+// the browser-orchestration team stop (`stopAllInTeam`) was retired with the browser
+// team engine.
 
 import type { GatewayClient } from '@clawboo/gateway-client'
-import { useFleetStore, type AgentState } from '@/stores/fleet'
+
 import { useChatStore } from '@/stores/chat'
-import { clearAllTeamChatOverridesForAgent } from '@/lib/sessionUtils'
-import { clearWakeInFlight } from '@/features/group-chat/groupChatSendOperation'
+import { useFleetStore } from '@/stores/fleet'
 
 // ── Single agent ─────────────────────────────────────────────────────────────
 
@@ -74,74 +70,5 @@ export async function stopAgentRun(params: StopAgentRunParams): Promise<void> {
   // (Stop pressed before the first streaming event) AND nukes any queued
   // work on the session.
   aborts.push(client.sessions.abort(sessionKey).catch(() => undefined))
-  await Promise.allSettled(aborts)
-}
-
-// ── Whole team ───────────────────────────────────────────────────────────────
-
-export interface StopAllInTeamParams {
-  client: GatewayClient | null
-  teamId: string
-  /**
-   * Effective participants = team members + Boo Zero (when present), deduped
-   * by id. Same shape `GroupChatPanel` already computes in `participants`.
-   */
-  participants: AgentState[]
-  /** agentId → team-scoped sessionKey, same map `GroupChatPanel` builds. */
-  teamSessionKeys: Map<string, string>
-}
-
-/**
- * Abort every running run on the team AND wipe orchestration in-flight
- * state so no follow-up delegation fires after Stop. The caller
- * (`GroupChatPanel`) is expected to ALSO bump its `stopSignal` counter
- * before calling this — that cancels `useBoardOrchestration`'s in-flight
- * delegation work, which lives inside the hook and isn't reachable from here.
- */
-export async function stopAllInTeam(params: StopAllInTeamParams): Promise<void> {
-  const { client, teamId, participants, teamSessionKeys } = params
-
-  // Target every participant that's currently working — `running` covers the
-  // common case. `sleeping` agents aren't generating, so no abort needed.
-  const runningAgents = participants.filter((a) => a.status === 'running')
-
-  // 1. Optimistic local teardown for each running agent.
-  for (const agent of runningAgents) {
-    useFleetStore.getState().patchAgent(agent.id, {
-      status: 'idle',
-      runId: null,
-      streamText: null,
-    })
-    const sk = teamSessionKeys.get(agent.id)
-    if (sk) useChatStore.getState().setStreamingText(sk, null)
-  }
-
-  // 2. Clear orchestration in-memory state — these don't live in stores so
-  //    the `chat:aborted` events from the Gateway won't clean them up.
-  clearWakeInFlight(teamId)
-  for (const agent of runningAgents) {
-    clearAllTeamChatOverridesForAgent(agent.id)
-  }
-
-  // 3. Best-effort server-side aborts in parallel. We use the team-scoped
-  //    sessionKey for each agent — group-chat runs are scoped to that
-  //    session, so aborting on the 1:1 sessionKey would miss the actual
-  //    in-flight run.
-  //
-  // Two aborts per agent: surgical `chat.abort` when `runId` is available,
-  // PLUS `sessions.abort` as a backstop. The backstop covers (a) the
-  // runId-less race where Stop fires before the first streaming event
-  // arrived, and (b) queued delegate / wake sends that would otherwise
-  // fire after the surgical abort and restart the cascade.
-  if (!client) return
-  const aborts: Promise<unknown>[] = []
-  for (const agent of runningAgents) {
-    const sk = teamSessionKeys.get(agent.id)
-    if (!sk) continue
-    if (agent.runId) {
-      aborts.push(client.chat.abort(sk, agent.runId).catch(() => undefined))
-    }
-    aborts.push(client.sessions.abort(sk).catch(() => undefined))
-  }
   await Promise.allSettled(aborts)
 }

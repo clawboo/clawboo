@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
@@ -8,6 +8,8 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useTeamStore } from '@/stores/team'
 import { sendChatMessage } from './chatSendOperation'
 import { stopAgentRun } from './stopChatOperation'
+import { sendNativeAgentMessage, stopNativeAgentChat } from './nativeAgentChatSend'
+import { useNativeAgentChatStream } from './useNativeAgentChatStream'
 import {
   groupEntriesToBlocks,
   MessageList,
@@ -16,10 +18,12 @@ import {
 } from './chatComponents'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 import { parseTeamOrAgentMention } from '@/lib/parseTeamOrAgentMention'
-import { buildTeamContextPreamble } from '@/lib/teamProtocol'
 import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
-import { getMergedTeamEntries } from '@/features/group-chat/groupChatSendOperation'
 import { TeamChips } from './TeamChips'
+
+// A native 1:1 chat has no Gateway 'running' status pushed, so "busy" is an activity
+// window: busy while the SSE streams a reply + a short grace after the last frame.
+const NATIVE_BUSY_GRACE_MS = 6000
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
 
@@ -68,9 +72,38 @@ export function ChatPanel({
       .catch(() => {})
   }, [sessionKey])
 
-  const isRunning = agent?.status === 'running'
+  // ── Native 1:1 chat (the Boo-Zero personal chat + any clawboo-native agent) ──
+  // A native agent is NOT an OpenClaw Gateway agent, so its 1:1 chat is driven
+  // server-side (POST /api/agents/:id/chat) + streamed back over SSE, NOT via
+  // `client.chat.send` (which errors "agent no longer exists in configuration").
+  const isNativeChat = agent?.runtime === 'clawboo-native'
+  // Busy signal for the native chat (no Gateway 'running' status): busy while SSE
+  // frames stream + a grace, refreshed on every frame + on send.
+  const [nativeBusy, setNativeBusy] = useState(false)
+  const nativeActivityRef = useRef(0)
+  const bumpNativeActivity = useCallback(() => {
+    nativeActivityRef.current = Date.now()
+    setNativeBusy(true)
+  }, [])
+  useEffect(() => {
+    if (!nativeBusy) return
+    const id = setInterval(() => {
+      if (Date.now() - nativeActivityRef.current > NATIVE_BUSY_GRACE_MS) setNativeBusy(false)
+    }, 1000)
+    return () => clearInterval(id)
+  }, [nativeBusy])
+  // Feed the native chat's SSE (committed turns + live token deltas) into the store.
+  // Inert for a non-native agent (enabled=false) — the Gateway path is unchanged.
+  useNativeAgentChatStream({
+    agentId: agent?.id ?? '',
+    enabled: isNativeChat && Boolean(agent),
+    onActivity: bumpNativeActivity,
+  })
+
+  const isRunning = isNativeChat ? nativeBusy : agent?.status === 'running'
+  // A native chat needs NO Gateway client; an OpenClaw chat does.
   const canSend = Boolean(
-    client && connectionStatus === 'connected' && agent && sessionKey && !isRunning,
+    (isNativeChat || client) && connectionStatus === 'connected' && agent && sessionKey && !isRunning,
   )
 
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
@@ -113,7 +146,45 @@ export function ChatPanel({
 
   const handleSend = useCallback(
     async (message: string) => {
-      if (!client || !agent || !sessionKey) return
+      if (!agent || !sessionKey) return
+      // A native chat drives the run server-side (no Gateway client); an OpenClaw
+      // chat requires a live client.
+      if (!isNativeChat && !client) return
+
+      // Native `/reset` — clear the local + persisted 1:1 history (there is no
+      // Gateway session to recreate). The Gateway path handles `/reset` inside
+      // `sendChatMessage` (sessions.create).
+      const trimmed = message.trim()
+      if (isNativeChat && (trimmed === '/reset' || trimmed === '/new')) {
+        useChatStore.getState().clearTranscript(sessionKey)
+        void fetch(`/api/chat-history?sessionKey=${encodeURIComponent(sessionKey)}`, {
+          method: 'DELETE',
+        }).catch(() => {})
+        return
+      }
+
+      // Transport: native agents run server-side + stream over SSE; OpenClaw agents
+      // ride the Gateway. `outbound` is the (context-injected) text delivered to the
+      // model; `display` is what shows in the transcript (undefined = same as outbound).
+      const deliver = async (outbound: string, display: string | undefined): Promise<void> => {
+        if (isNativeChat) {
+          bumpNativeActivity()
+          await sendNativeAgentMessage({
+            agentId: agent.id,
+            sessionKey,
+            message: outbound,
+            displayText: display ?? outbound,
+          })
+        } else if (client) {
+          await sendChatMessage({
+            client,
+            agentId: agent.id,
+            sessionKey,
+            message: outbound,
+            ...(display ? { displayText: display } : {}),
+          })
+        }
+      }
 
       // In Boo Zero's individual chat, inject the rules block + (when the
       // user `@TeamName`-mentions) the matching team brief. The rules block
@@ -131,89 +202,53 @@ export function ChatPanel({
         const mention = parseTeamOrAgentMention(message, teamCandidates)
 
         if (mention.kind === 'team' && mention.targetId) {
-          let briefBlock: string | null = null
+          // Pull the team's REAL recent activity from the SERVER on demand: its
+          // Boo-Zero brief + board state + recent team chat, composed + capped
+          // server-side (`buildTeamActivitySummary`). This works regardless of what
+          // THIS browser session has loaded — Boo Zero's individual chat is a
+          // separate session from the team's group chat, and the server reads the
+          // durable `chat_messages` + board rows directly (the old path read only
+          // client-store transcripts, empty unless the group chat was opened).
+          // Best-effort: a miss injects nothing.
+          let activityBlock: string | null = null
           try {
             const res = await fetch(
-              `/api/boo-zero/team-briefs/${encodeURIComponent(mention.targetId)}`,
+              `/api/teams/${encodeURIComponent(mention.targetId)}/activity-summary`,
             )
             if (res.ok) {
               const body = (await res.json()) as { content?: string | null }
-              if (typeof body.content === 'string' && body.content.length > 0) {
-                briefBlock = `[Team Brief: ${mention.matchedName}]\n${body.content.trim()}\n[End Team Brief]`
+              if (typeof body.content === 'string' && body.content.trim()) {
+                activityBlock = body.content.trim()
               }
             }
           } catch {
-            // Best-effort — missing brief is silently OK.
+            // Best-effort — missing activity is silently OK.
           }
 
-          // Inject recent team-chat history. The user's individual chat with
-          // Boo Zero is a separate session from the team's group chat — Boo
-          // Zero literally has no record of what the team was doing without
-          // this. We reuse the same merge + preamble helpers the group chat
-          // uses, with their built-in token caps:
-          //   - last 10 messages from the team's transcripts
-          //   - 1500 char hard cap (drops oldest lines until it fits)
-          //
-          // The merge pulls from each team agent's team-scoped sessionKey
-          // (`agent:<memberId>:team:<teamId>`) AND Boo Zero's team-scoped
-          // sessionKey (so Boo Zero's own prior team-chat participation is
-          // included). Boo Zero's individual-chat history isn't pulled in —
-          // that's already in the LLM's context window from this session.
-          //
-          // Token cost: typically 300–1500 tokens per @team turn, same order
-          // of magnitude as the group chat's own preamble. If the team has
-          // no transcripts (e.g. team deployed but never chatted) the helper
-          // returns null and we don't inject anything.
-          const allAgents = useFleetStore.getState().agents
-          const teamMembers = allAgents.filter((a) => a.teamId === mention.targetId)
-          const teamEntries = getMergedTeamEntries(mention.targetId, teamMembers, agent)
-          const historyBlock = buildTeamContextPreamble({
-            entries: teamEntries,
-            // Pass empty target so no entries are filtered out — we want
-            // every speaker's voice in the context.
-            targetAgentName: '',
-            maxMessages: 10,
-            maxChars: 1500,
-          })
-
-          // Order matters: identity (who you are) → team brief (who the team
-          // is) → recent team history (what they've been doing) → user's
-          // actual question.
-          const sections = [identityBlock, briefBlock, historyBlock, mention.cleanedMessage].filter(
+          // Order: identity (who you are) → the team's activity → the user's question.
+          const sections = [identityBlock, activityBlock, mention.cleanedMessage].filter(
             (s): s is string => Boolean(s),
           )
-          await sendChatMessage({
-            client,
-            agentId: agent.id,
-            sessionKey,
-            message: sections.join('\n\n'),
-            displayText: message,
-          })
+          await deliver(sections.join('\n\n'), message)
           return
         }
 
         // No team mention — still inject the identity anchor on every Boo
         // Zero turn.
-        await sendChatMessage({
-          client,
-          agentId: agent.id,
-          sessionKey,
-          message: `${identityBlock}\n\n${message}`,
-          displayText: message,
-        })
+        await deliver(`${identityBlock}\n\n${message}`, message)
         return
       }
 
-      await sendChatMessage({ client, agentId: agent.id, sessionKey, message })
+      await deliver(message, undefined)
     },
-    [client, agent, sessionKey, isBooZeroChat, teams],
+    [client, agent, sessionKey, isBooZeroChat, isNativeChat, teams, bumpNativeActivity],
   )
 
   // ── No agent selected ───────────────────────────────────────────────────────
   if (!agent) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-        <p className="font-mono text-[12px] text-secondary/50">
+        <p className="font-mono text-[12px] text-foreground/45">
           Select an agent from the fleet sidebar.
         </p>
       </div>
@@ -227,19 +262,27 @@ export function ChatPanel({
           (e.g. `AgentDetailView` extends the agent identity row across all
           three panels, so this panel's own header would duplicate it). */}
       {!hideHeader && (
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div className="flex items-center gap-2.5">
+        <div className="flex min-h-[52px] items-center justify-between gap-4 border-b border-border px-5 py-3">
+          <div className="flex min-w-0 items-center gap-2.5">
             <AgentBooAvatar agentId={agent.id} size={30} />
             <h2
-              className="text-[14px] font-semibold text-text"
-              style={{ fontFamily: 'var(--font-body)' }}
+              className="truncate font-display text-[15px] font-bold text-foreground"
+              style={{ letterSpacing: '-0.01em' }}
             >
               {agent.name}
             </h2>
-            {!sessionKey && <span className="font-mono text-[10px] text-amber/60">No session</span>}
+            {!sessionKey && (
+              <span className="shrink-0 rounded-full bg-amber/15 px-2 py-0.5 font-mono text-[10px] font-medium text-amber">
+                No session
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-[10px] text-secondary/40">
+          <div className="flex shrink-0 items-center gap-2">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${connectionStatus === 'connected' ? 'bg-mint' : 'bg-foreground/25'}`}
+              aria-hidden
+            />
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-foreground/45">
               {connectionStatus === 'connected' ? 'Connected' : connectionStatus}
             </span>
           </div>
@@ -271,30 +314,39 @@ export function ChatPanel({
         ref={composerRef}
         onSend={handleSend}
         disabled={!canSend}
+        // 1:1 chat handles `/reset` (start a fresh session / clear the conversation).
+        // `/rule` is team-only, so it's not advertised here.
+        commands={[{ k: '/reset', label: 'new session' }]}
         // Pass the team list as mentionAgents so the in-composer autocomplete
         // dropdown opens on `@` and filters as the user types. Empty array
         // outside Boo Zero's chat → no autocomplete (regular 1:1 behavior).
         mentionAgents={mentionTargets}
-        // Stop button — replaces Send while the agent is running. Pulls the
-        // plug on the in-flight LLM call via `chat.abort` AND optimistically
-        // clears local streaming state so the UI flips to idle within one
-        // render even if the RPC round-trips slowly. See `stopChatOperation`.
+        // Stop button — replaces Send while the agent is running. Native chats
+        // abort the server-side run (`/chat/stop`); OpenClaw chats pull the plug on
+        // the in-flight LLM call via `chat.abort`. Both optimistically clear local
+        // streaming state so the UI flips to idle within one render.
         isActive={isRunning}
         onStop={() => {
-          void stopAgentRun({
-            client,
-            agentId: agent.id,
-            sessionKey,
-            runId: agent.runId,
-          })
+          if (isNativeChat) {
+            void stopNativeAgentChat(agent.id)
+          } else {
+            void stopAgentRun({
+              client,
+              agentId: agent.id,
+              sessionKey,
+              runId: agent.runId,
+            })
+          }
         }}
         placeholder={
-          !client
+          !isNativeChat && !client
             ? 'Gateway not connected…'
             : !sessionKey
               ? 'No active session…'
               : isRunning
-                ? 'Agent is working…'
+                ? isNativeChat
+                  ? 'Thinking…'
+                  : 'Agent is working…'
                 : isBooZeroChat
                   ? 'Ask me anything… use @ to tag a team'
                   : 'Message…'
