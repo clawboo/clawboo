@@ -60,17 +60,17 @@ export function TeamAccentPicker({ value, onChange }: TeamAccentPickerProps) {
     `drop-shadow(0 1px 1px rgb(${haloRgb} / 0.6))`
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2.5">
       {TEAM_ACCENT_PRESETS.map((color) => (
         <button
           key={color}
           type="button"
           aria-label={`Accent color ${color}`}
           onClick={() => onChange(color)}
-          className="h-7 w-7 rounded-full transition-all"
+          className="h-8 w-8 cursor-pointer rounded-full transition-all hover:scale-105"
           style={{
             backgroundColor: color,
-            boxShadow: value === color ? `0 0 0 2px var(--background), 0 0 0 4px ${color}` : 'none',
+            boxShadow: value === color ? `0 0 0 2px var(--surface), 0 0 0 4px ${color}` : 'none',
           }}
         />
       ))}
@@ -80,7 +80,7 @@ export function TeamAccentPicker({ value, onChange }: TeamAccentPickerProps) {
           the all-hex invariant the presets enforce (no var()/named colors). */}
       <label
         title="Custom color"
-        className="relative inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-all"
+        className="relative inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-all hover:scale-105"
         style={{
           // Filled with the picked color when active; otherwise the rainbow
           // "pick any color" affordance.
@@ -88,8 +88,8 @@ export function TeamAccentPicker({ value, onChange }: TeamAccentPickerProps) {
             ? value
             : 'conic-gradient(from 0deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #8b5cf6, #ec4899, #ef4444)',
           boxShadow: customActive
-            ? `0 0 0 2px var(--background), 0 0 0 4px ${value}`
-            : 'inset 0 0 0 1px rgb(0 0 0 / 0.12)',
+            ? `0 0 0 2px var(--surface), 0 0 0 4px ${value}`
+            : 'inset 0 0 0 1px rgb(var(--foreground-rgb) / 0.12)',
         }}
       >
         <input

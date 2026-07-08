@@ -27,11 +27,11 @@ function MenuItem({ icon: Icon, label, onClick, destructive }: MenuItemProps) {
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors duration-150 hover:bg-foreground/[0.05] ${
-        destructive ? 'text-primary' : 'text-foreground'
+      className={`flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors duration-150 hover:bg-foreground/[0.06] ${
+        destructive ? 'text-destructive' : 'text-foreground'
       }`}
     >
-      <Icon size={14} strokeWidth={1.75} aria-hidden />
+      <Icon size={14} strokeWidth={2} aria-hidden />
       <span>{label}</span>
     </button>
   )
@@ -73,12 +73,12 @@ export function TeamContextMenu({
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.12, ease: 'easeOut' }}
-      className="surface-floating-tier fixed z-[100] min-w-[180px] overflow-hidden rounded-[10px] py-1"
-      style={{ left: x, top: y }}
+      className="fixed z-[100] min-w-[180px] overflow-hidden rounded-xl border border-border bg-popover py-1.5"
+      style={{ left: x, top: y, boxShadow: 'var(--shadow-floating)' }}
     >
       {/* Team name header — mono uppercase microlabel matches the rest of the
           app's section-header rhythm. */}
-      <div className="border-b border-foreground/[0.06] px-3.5 pb-1.5 pt-1.5 font-mono text-[10px] uppercase tracking-wider text-foreground/40">
+      <div className="border-b border-border px-3.5 pb-1.5 pt-1.5 font-mono text-[10px] uppercase tracking-wider text-foreground/45">
         {teamName}
       </div>
 
@@ -89,7 +89,7 @@ export function TeamContextMenu({
           onClick={onArchive}
         />
         <MenuItem icon={RotateCw} label="Refresh Protocol" onClick={onRefreshProtocol} />
-        <div className="my-1 mx-3.5 border-t border-foreground/[0.06]" />
+        <div className="my-1 mx-3.5 border-t border-border" />
         <MenuItem icon={Trash2} label="Delete team only" onClick={onDelete} destructive />
         <MenuItem
           icon={Trash2}
