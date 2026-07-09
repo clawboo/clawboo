@@ -20,6 +20,11 @@ export interface AgentState {
   lastSeenAt: number | null
   /** Team this agent belongs to (null = unassigned) */
   teamId: string | null
+  /** Which runtime backs this agent (`openclaw` | `clawboo-native` | `hermes` | …).
+   *  Optional/undefined for legacy constructors; populated by the registry +
+   *  Gateway hydration. Used to keep runtime-specific logic (e.g. only auto-migrating
+   *  orphan OpenClaw agents) from touching intentionally-teamless native agents. */
+  runtime?: string | null
   /** Per-agent execution permission config (null = use Gateway default) */
   execConfig: { execAsk: string } | null
 }

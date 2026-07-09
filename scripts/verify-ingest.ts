@@ -150,7 +150,7 @@ async function main(): Promise<void> {
     const content = await fetchRawFile(item.path)
     fileContents.set(item.path, content)
   })
-  await pLimit(fetchTasks, 10)
+  await pLimit(fetchTasks, 5)
   console.log(`\nFetched ${fileContents.size} files\n`)
 
   const domainAgents = new Map<AgencyDomain, ProcessedAgent[]>()
@@ -178,7 +178,7 @@ async function main(): Promise<void> {
     const content = await fetchAwesomeOpenclawRawFile(item.path)
     usecaseContents.set(item.path, content)
   })
-  await pLimit(usecaseFetchTasks, 10)
+  await pLimit(usecaseFetchTasks, 5)
   console.log(`\nFetched ${usecaseContents.size} files\n`)
 
   const awesomeAgents: AwesomeOpenclawAgent[] = []

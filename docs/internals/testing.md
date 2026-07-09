@@ -134,7 +134,7 @@ The cost is real: the server integration and e2e tests are slow (hence the widen
 - **The schema parity guard is name-level, not shape-level.** It catches added/removed tables and columns, not type or constraint drift, by design, until a real schema change warrants the deeper check.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

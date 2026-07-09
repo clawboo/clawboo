@@ -1,14 +1,14 @@
 ---
 title: 'Quickstart: the OpenClaw Gateway'
-description: Run npx clawboo, let onboarding detect, install, and configure OpenClaw, start the Gateway, approve the device, then deploy a team.
+description: Run npx clawboo, connect the native runtime, then add OpenClaw by detecting, installing, and configuring it, starting the Gateway, and approving the device.
 ---
 
-By the end of this tutorial you'll have a running OpenClaw Gateway driving a deployed team of agents, set up entirely from Clawboo's onboarding wizard: detect your environment, install OpenClaw if needed, configure a model provider, start the Gateway, approve the one-time device pairing, and deploy a starter team into group chat.
+By the end of this tutorial you'll have a running OpenClaw Gateway connected to Clawboo, set up from the onboarding wizard's **Add more runtimes** step. Onboarding is native-first, so you connect the native runtime first (that seeds a starter team), then add OpenClaw through its setup detour: detect your environment, install OpenClaw if needed, configure a model provider, start the Gateway, and approve the one-time device pairing. Once OpenClaw is connected you deploy an OpenClaw team from the dashboard.
 
 This is the OpenClaw path. Unlike the other four runtimes, [OpenClaw](/runtimes/openclaw) is a _connected substrate_; Clawboo connects to a running OpenClaw Gateway (a WebSocket server that hosts OpenClaw agents), rather than installing and spawning a CLI per task. If you want a working team with no Gateway at all, the [native runtime quickstart](/getting-started/quickstart-native) is faster: paste one provider key and you're done.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## Prerequisites
@@ -40,15 +40,15 @@ The CLI prints the Clawboo logo, does a quick informational probe of the OpenCla
 
 The first screen is the welcome splash: the Clawboo wordmark, the line "Your AI agents, visible.", and a **Get Started** button.
 
-**Expected result:** clicking **Get Started** advances to the runtime-choice step.
+**Expected result:** clicking **Get Started** advances to the native connect step. There is no "pick a runtime" screen; native is the default, and OpenClaw is added afterward.
 
-### 3. Choose OpenClaw
+### 3. Connect the native runtime, then choose "Set up OpenClaw"
 
-The next screen asks **"How do you want your agents to run?"** It shows the **Clawboo Native** card first, then a divider, then secondary cards for OpenClaw, Claude Code, Hermes, and Codex.
+Onboarding is native-first, so you connect the built-in native runtime before adding OpenClaw. On the **Connect Clawboo Native** step, pick a provider and paste a key (or select **Ollama** for a keyless local model), then click **Create my team**. Clawboo seeds a starter native team and advances to the **Add more runtimes** step. (The native connect step is covered in full in [Quickstart: native](/getting-started/quickstart-native).)
 
-Click the **OpenClaw** card.
+On **Add more runtimes**, find the **Set up OpenClaw** row and click **Set up OpenClaw**.
 
-**Expected result:** the wizard branches to the **System Check** step, the OpenClaw setup flow's entry point. (Picking the native card instead would skip the Gateway entirely; see [Quickstart: native](/getting-started/quickstart-native).)
+**Expected result:** the wizard enters the OpenClaw setup detour at the **System Check** step. Everything in steps 4 to 7 below happens inside this detour, which returns you to **Add more runtimes** when it's done.
 
 ### 4. Let Clawboo detect your environment
 
@@ -118,23 +118,23 @@ Instead of an error, the step swaps in an **Approve this device** card. Click **
 
 On success, the step automatically retries the original connect with the same URL and token, and the connection completes.
 
-**Expected result:** the mascot pulses while the Gateway starts, the **Approve this device** card appears, and after you click it the status flips to **Connected!** and the wizard advances to the runtime-connect step (which you can **Skip** straight through to the team step on the OpenClaw path).
+**Expected result:** the mascot pulses while the Gateway starts, the **Approve this device** card appears, and after you click it the status flips to **Connected!** The detour then returns you to the **Add more runtimes** step, now showing a **Connected** pill for OpenClaw.
 
 <Tip>
 You can pair from a terminal instead: run `openclaw devices approve --latest` to see the request id, then `openclaw devices approve <requestId>`. The approval card surfaces this manual fallback too.
 </Tip>
 
-### 8. Deploy a team
+### 8. Finish onboarding, then deploy an OpenClaw team
 
-The **Choose your team** step shows a grid of ready-made starter crews (drawn from Clawboo's built-in templates), each with its emoji, agent count, and a few member avatars. Click a team to deploy it (or click **Skip: start with an empty fleet** to land in the dashboard with no team).
+Back on **Add more runtimes**, click **Continue** (or **Skip for now** if you connected nothing else). The wizard advances to the **Your team is ready** screen; click **Open my dashboard**. You land in the dashboard connected to the Gateway ("gateway" mode), in the group chat of the native starter team seeded in step 3.
 
-The **Deploy** step then creates the team and its agents in order: it `POST /api/teams` to create the team, creates each agent (writing its SOUL.md, IDENTITY.md, TOOLS.md, and an enhanced AGENTS.md with the team roster and collaboration protocol), assigns each agent to the team, sets the team-internal lead when one is detected, and, when any agent has `@mention` routing, enables agent-to-agent coordination in the Gateway config. A row of ghosts lights up as each Boo is created.
+To build a team of OpenClaw agents, open the **Marketplace** (or **+ Create team** in the leftmost sidebar), pick a template, and choose **OpenClaw** as the runtime for its members. Deploy creates the team and its agents: it `POST /api/teams` to create the team, writes each agent's SOUL.md, IDENTITY.md, TOOLS.md, and an enhanced AGENTS.md with the team roster and collaboration protocol, assigns each agent to the team, sets the team-internal lead when one is detected, and, when any agent has `@mention` routing, enables agent-to-agent coordination in the Gateway config. See [Deploy your first team](/getting-started/first-team) for the full team-building flow.
 
-**Expected result:** the ghosts light up one by one to "All N Boos ready", and after a brief beat the wizard finishes. You land in the dashboard, connected to the Gateway, directly in your new team's group chat.
+**Expected result:** the new team appears in the sidebar, connected to the Gateway, and opens directly in its group chat.
 
 ## What you should see
 
-The dashboard opens with your team selected and its group chat in view. The sidebar shows the team and its Boos, the Gateway is connected, and your agents are ready to collaborate.
+The dashboard opens connected to the Gateway, with your seeded native team in view and OpenClaw available as a runtime you can build teams on. Once you deploy an OpenClaw team, its Boos are ready to collaborate.
 
 The team space looks like this once you start collaborating:
 
@@ -142,7 +142,7 @@ The team space looks like this once you start collaborating:
 
 ## What just happened
 
-The wizard walked the full OpenClaw setup: it detected your environment, installed and configured OpenClaw with your provider key, started the Gateway, and approved this device for pairing. Once the Gateway came up, Clawboo opened two connections to it: a browser-side same-origin proxy connection for the chat/execution stream, and a server-side connection that mirrors the Gateway's agent list into SQLite (the [registry of record](/appendices/glossary), so the fleet survives the Gateway being down). Deploying a team created real OpenClaw agents and wired their routing, so they can delegate to each other over the Gateway.
+The wizard's Add-runtimes detour walked the full OpenClaw setup: it detected your environment, installed and configured OpenClaw with your provider key, started the Gateway, and approved this device for pairing. Once the Gateway came up, Clawboo opened two connections to it: a browser-side same-origin proxy connection for the chat/execution stream, and a server-side connection that mirrors the Gateway's agent list into SQLite (the [registry of record](/appendices/glossary), so the fleet survives the Gateway being down). Deploying an OpenClaw team from the dashboard then creates real OpenClaw agents and wires their routing, so they can delegate to each other over the Gateway.
 
 ## Next steps
 

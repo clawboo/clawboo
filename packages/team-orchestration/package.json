@@ -1,0 +1,55 @@
+{
+  "name": "@clawboo/team-orchestration",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pure, runtime-agnostic team-chat orchestration engine (delegate/plan/workstream → durable board), shared by the browser binding and the server orchestrator",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/team-orchestration"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/team-orchestration",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "orchestration",
+    "board",
+    "delegation",
+    "team-chat"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "import": "./dist/contract.mjs",
+      "require": "./dist/contract.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clawboo/executor": "workspace:*",
+    "@clawboo/governance": "workspace:*"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

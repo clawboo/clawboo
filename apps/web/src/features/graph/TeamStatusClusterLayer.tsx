@@ -35,8 +35,8 @@ interface BucketDefinition {
 
 const BUCKETS: readonly BucketDefinition[] = [
   { key: 'running', color: 'var(--mint)', pulse: true, word: 'running' },
-  { key: 'error', color: '#ef4444', pulse: false, word: 'error' },
-  { key: 'sleeping', color: '#64748b', pulse: false, word: 'sleeping' },
+  { key: 'error', color: 'var(--destructive)', pulse: false, word: 'error' },
+  { key: 'sleeping', color: 'var(--secondary)', pulse: false, word: 'sleeping' },
   { key: 'idle', color: 'rgb(var(--foreground-rgb) / 0.45)', pulse: false, word: 'idle' },
 ] as const
 

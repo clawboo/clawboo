@@ -90,6 +90,49 @@ describe('useChatStore', () => {
       expect(useChatStore.getState().transcripts.get('s1')).toHaveLength(1)
       expect(useChatStore.getState().transcripts.get('s2')).toHaveLength(1)
     })
+
+    // Regression: an OpenClaw team turn is written by TWO writers — the server
+    // orchestrator (source 'local-send', runId null) AND the browser Gateway
+    // observer (source 'runtime-chat', with runId) — landing in DIFFERENT
+    // 1-second buckets (streamStart vs Date.now()). A LONG byte-identical turn in
+    // a team session must dedup timestamp-independently so the user sees ONE copy.
+    it('dedups a cross-writer duplicate of a long team turn (>1s apart)', () => {
+      const teamKey = 'agent:main:team:t1'
+      const longText = 'I am aware you have a whole Boo squad here and I will coordinate them for you across the sprint.'
+      // Browser copy: runtime-chat, has a runId, timestamp T.
+      useChatStore.getState().appendTranscript(teamKey, [
+        makeEntry({ entryId: 'browser-1', source: 'runtime-chat', runId: 'run-1', text: longText, timestampMs: 1_700_000_000_000 }),
+      ])
+      // Server copy: local-send, runId null, timestamp T+5s (a different bucket).
+      useChatStore.getState().appendTranscript(teamKey, [
+        makeEntry({ entryId: 'server-1', source: 'local-send', runId: null, text: longText, timestampMs: 1_700_000_005_000 }),
+      ])
+      expect(useChatStore.getState().transcripts.get(teamKey)).toHaveLength(1)
+    })
+
+    it('does NOT collapse a short repeated team ack (keeps the 1-second bucket)', () => {
+      const teamKey = 'agent:main:team:t1'
+      useChatStore.getState().appendTranscript(teamKey, [
+        makeEntry({ entryId: 'a', text: 'On it.', timestampMs: 1_700_000_000_000 }),
+      ])
+      useChatStore.getState().appendTranscript(teamKey, [
+        makeEntry({ entryId: 'b', text: 'On it.', timestampMs: 1_700_000_030_000 }),
+      ])
+      // Short (<80 char) verbatim re-utterance >1s apart is a legitimate repeat.
+      expect(useChatStore.getState().transcripts.get(teamKey)).toHaveLength(2)
+    })
+
+    it('does NOT collapse a long identical 1:1 message >1s apart (non-team session)', () => {
+      const soloKey = 'agent:x:main'
+      const longText = 'This is a long message that a user might legitimately paste twice into a one-on-one chat over time.'
+      useChatStore.getState().appendTranscript(soloKey, [
+        makeEntry({ entryId: 'x1', text: longText, timestampMs: 1_700_000_000_000 }),
+      ])
+      useChatStore.getState().appendTranscript(soloKey, [
+        makeEntry({ entryId: 'x2', text: longText, timestampMs: 1_700_000_005_000 }),
+      ])
+      expect(useChatStore.getState().transcripts.get(soloKey)).toHaveLength(2)
+    })
   })
 
   describe('setStreamingText', () => {

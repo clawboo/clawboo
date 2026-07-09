@@ -69,6 +69,51 @@ export const isAuthError = (msg: string | null): boolean => {
   )
 }
 
+// A CONNECT failure is "auth-class" when re-attempting it on a tight loop is both
+// pointless AND harmful: a bad/expired token, an unpaired device, or bad connect
+// params never succeed on retry, and a rate-limit lockout ("too many failed
+// authentication attempts, retry later") is only made worse by hammering — repeated
+// failed auth trips and re-trips the Gateway's lockout. Callers back WAY off (a long
+// floor, honouring retryAfterMs) instead of the fast reconnect backoff used for a
+// transient Gateway-down.
+const AUTH_CONNECT_ERROR_CODES = new Set([
+  'NOT_PAIRED',
+  'UNAUTHORIZED',
+  'FORBIDDEN',
+  'INVALID_TOKEN',
+  'GATEWAY_TOKEN_MISSING',
+  'CONTROL_UI_ORIGIN_NOT_ALLOWED',
+])
+
+export const isAuthConnectError = (err: unknown): boolean => {
+  if (!(err instanceof Error)) return false
+  const code = err instanceof GatewayResponseError ? err.code.trim().toUpperCase() : ''
+  if (code && AUTH_CONNECT_ERROR_CODES.has(code)) return true
+  const lower = err.message.toLowerCase()
+  return (
+    isAuthError(err.message) ||
+    lower.includes('too many failed') ||
+    lower.includes('failed authentication') ||
+    lower.includes('retry later') ||
+    lower.includes('not approved') ||
+    lower.includes('pairing required') ||
+    lower.includes('not_paired')
+  )
+}
+
+/** The Gateway's suggested cooldown for a rate-limited / "retry later" auth failure,
+ *  when it sent one (`ResFrame.error.retryAfterMs`). Null otherwise. */
+export const authRetryAfterMs = (err: unknown): number | null => {
+  if (
+    err instanceof GatewayResponseError &&
+    typeof err.retryAfterMs === 'number' &&
+    err.retryAfterMs > 0
+  ) {
+    return err.retryAfterMs
+  }
+  return null
+}
+
 // ─── URL helpers ──────────────────────────────────────────────────────────────
 
 export const resolveProxyGatewayUrl = (): string => {

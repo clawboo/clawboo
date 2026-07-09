@@ -10,30 +10,15 @@
  *     GatewayBootstrap when it detects an already-configured OpenClaw (the
  *     v0.1.6 returning-user fast path).
  *   - `clawboo.wizard.active` (this module) → "a wizard run started but hasn't
- *     finished." Without it, a mid-onboarding refresh — e.g. right after the
- *     configure / start-gateway steps, when OpenClaw becomes 'configured' —
- *     would hit the returning-user fast path and dump the user on an empty
- *     dashboard, skipping the team-pick + deploy steps. With it, the bootstrap
- *     resumes the wizard instead.
+ *     finished." Without it, a mid-onboarding refresh — e.g. mid-ConfigureNative,
+ *     before a native team is seeded — could hit the returning-user fast path and
+ *     dump the user on an empty dashboard, skipping the rest of onboarding. With
+ *     it, the bootstrap resumes the wizard instead.
  *
  * The `onboarded` flag wins over this marker for genuinely-returning users
  * (completed before): the bootstrap only resumes when active && !onboarded.
  */
 const WIZARD_ACTIVE_KEY = 'clawboo.wizard.active'
-const WIZARD_RUNTIME_KEY = 'clawboo.wizard.runtime'
-
-/** The runtime the user picked on the "How do you want your agents to run?"
- *  step — persisted so a mid-wizard refresh resumes at the right step with the
- *  same selection. */
-export type WizardRuntime = 'clawboo-native' | 'openclaw' | 'claude-code' | 'codex' | 'hermes'
-
-const VALID_RUNTIMES: readonly WizardRuntime[] = [
-  'clawboo-native',
-  'openclaw',
-  'claude-code',
-  'codex',
-  'hermes',
-]
 
 // localStorage exists but THROWS on access in storage-disabled contexts (Safari
 // private mode, some embedded webviews). The `typeof window` guard isn't enough, so
@@ -72,26 +57,14 @@ export function markWizardActive(): void {
 }
 
 /** Clear the in-progress marker — call on completion or when skipping to the
- * returning-user fast path. Also clears the persisted runtime selection. */
+ * returning-user fast path. */
 export function clearWizardActive(): void {
   safeLocalRemove(WIZARD_ACTIVE_KEY)
-  safeLocalRemove(WIZARD_RUNTIME_KEY)
 }
 
 /** True when a wizard run started but hasn't been completed/cleared. */
 export function isWizardActive(): boolean {
   return safeLocalGet(WIZARD_ACTIVE_KEY) === '1'
-}
-
-/** Persist the runtime the user picked (so a refresh resumes their selection). */
-export function setWizardRuntime(runtime: WizardRuntime): void {
-  safeLocalSet(WIZARD_RUNTIME_KEY, runtime)
-}
-
-/** The persisted runtime selection, or null if none picked yet / invalid. */
-export function getWizardRuntime(): WizardRuntime | null {
-  const v = safeLocalGet(WIZARD_RUNTIME_KEY)
-  return v && (VALID_RUNTIMES as readonly string[]).includes(v) ? (v as WizardRuntime) : null
 }
 
 /**
@@ -158,12 +131,12 @@ export function decideOnboardingView(i: OnboardingDecisionInputs): OnboardingVie
     // through the wizard. Otherwise it's a fresh/uninstalled run → the wizard.
     if (i.hasNative) return 'native'
     if (i.onboarded && i.hasConnectedRuntime) return 'native'
-    // A GENUINE mid-onboarding reload on a not-yet-configured path (native mid-
-    // ConfigureNativeStep before any agent/team is seeded, a coding-agent at the
-    // connectAgents step, or OpenClaw after chooseRuntime but before config lands):
-    // RESUME at the persisted runtime's step rather than resetting to a fresh wizard
-    // (which would wipe `onboarded` + drop the persisted runtime). Distinct from the
-    // first-load fresh case (`wizardActive` false → wizard-fresh below).
+    // A GENUINE mid-onboarding reload on a not-yet-configured path (native, mid-
+    // ConfigureNativeStep, before any agent/team is seeded): RESUME the wizard at
+    // configureNative rather than resetting to a fresh one (which would wipe
+    // `onboarded`). Once a native team is seeded, hasNative flips true and this
+    // path isn't reached. Distinct from the first-load fresh case (`wizardActive`
+    // false → wizard-fresh below).
     if (i.wizardActive && !i.onboarded) return 'wizard-resume'
     return 'wizard-fresh'
   }

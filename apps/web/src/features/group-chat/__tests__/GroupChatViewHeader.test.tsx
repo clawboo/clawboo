@@ -22,6 +22,7 @@ const team: Team = {
   agentCount: 5,
   leaderAgentId: null,
   isArchived: false,
+  serverOrchestrated: false,
 }
 
 function booNodes(n: number): GraphNode[] {

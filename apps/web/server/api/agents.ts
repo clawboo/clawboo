@@ -3,8 +3,17 @@ import { createDb, agents, costRecords, approvalHistory, settings, getSetting } 
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
+import { getTenantId } from '../lib/tenant'
 import { getRegistry } from '../lib/agentSource'
-import { nativeConfigKey, nativeFileKey } from '../lib/runtimes/native/agentConfigStore'
+import { runtimeAgentFileKey } from '../lib/agentSource/runtimeAgentFileStore'
+import {
+  loadAgentConfig,
+  nativeConfigKey,
+  nativeFileKey,
+  saveAgentConfig,
+} from '../lib/runtimes/native/agentConfigStore'
+import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
+import { ensureNativeBooZero, resolveBooZero } from '../lib/teamChat/booZero'
 
 // The source throws Error('gateway_disconnected') when a write/file/session op
 // needs a live Gateway but the server-side connection is down.
@@ -45,7 +54,9 @@ export async function agentsListGET(req: Request, res: Response): Promise<void> 
     const db = createDb(getDbPath())
     const health = await reg.source.health()
     res.json({
-      defaultId: getSetting(db, 'agent-source:openclaw:defaultId') ?? '',
+      // Runtime-neutral Boo Zero for the client to identify (override → native → OpenClaw).
+      // Native-first installs identify the native Boo Zero here, not the Gateway default.
+      defaultId: resolveBooZero(db)?.id ?? '',
       mainKey: (getSetting(db, 'agent-source:openclaw:mainKey') ?? '').trim() || 'main',
       agents: lists.flat(),
       stale: health.connection !== 'connected',
@@ -101,7 +112,18 @@ export async function agentsCreatePOST(req: Request, res: Response): Promise<voi
       execConfig: body.execConfig,
       avatarSeed: body.avatarSeed ?? null,
       files: body.files,
+      tenantId: getTenantId(req),
     })
+    // Eagerly materialize the DEFAULT-NATIVE Boo Zero the moment a native team gains a
+    // member, so the client identifies the native leader right away instead of the
+    // OpenClaw `main` fallback shown in the window before the first orchestrator run
+    // (the "why is my native team led by OpenClaw?" report). Best-effort, idempotent,
+    // and self-gated on a connected native provider.
+    if (agent.runtime === 'clawboo-native' && agent.teamId) {
+      void ensureNativeBooZero(createDb(getDbPath()), getRegistry().nativeSource).catch(
+        () => undefined,
+      )
+    }
     res.status(201).json({ agent })
   } catch (err) {
     if (isDisconnected(err)) {
@@ -161,6 +183,47 @@ export async function agentGET(req: Request, res: Response): Promise<void> {
       return
     }
     res.json({ agent })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── PATCH /api/agents/:agentId/model ────────────────────────────────────────
+// Change a clawboo-native agent's model — persists to its AgentConfig `primaryModel`
+// (the native source of truth; the next run reads it). OpenClaw agents change model
+// via the Gateway (sessions.patch / openclaw-config), so a non-native agent → 404.
+// We update the AgentConfig KV directly (not `updateAgent`, which would also clobber
+// the `agents.execConfig` column) — a model change is a config-only edit.
+export async function agentModelPATCH(req: Request, res: Response): Promise<void> {
+  const agentId = req.params['agentId'] as string | undefined
+  if (!agentId) {
+    res.status(400).json({ error: 'agentId required' })
+    return
+  }
+  const body = req.body as { model?: unknown } | undefined
+  const model = typeof body?.model === 'string' ? body.model.trim() : ''
+  if (!model) {
+    res.status(400).json({ error: 'model (non-empty string) required' })
+    return
+  }
+  try {
+    const agent = await sourceForAgent(agentId).getAgent(agentId)
+    if (!agent) {
+      res.status(404).json({ error: 'agent not found' })
+      return
+    }
+    if (agent.runtime !== 'clawboo-native') {
+      res.status(404).json({ error: 'model change via this route is native-only' })
+      return
+    }
+    const db = createDb(getDbPath())
+    const config = loadAgentConfig(db, agentId)
+    if (!config) {
+      res.status(404).json({ error: 'native agent config not found' })
+      return
+    }
+    saveAgentConfig(db, { ...config, primaryModel: model, updatedAt: Date.now() })
+    res.json({ ok: true, model })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -250,7 +313,11 @@ function perAgentSettingKeys(agentId: string): string[] {
   return [
     `boo-zero:display-name:${agentId}`,
     nativeConfigKey(agentId),
+    // The native 1:1 chat's resume pointer (conversation continuity).
+    nativeChatSessionSettingKey(agentId),
     ...AGENT_FILE_NAMES.map((name) => nativeFileKey(agentId, name)),
+    // The generic RuntimeAgentSource (claude-code / codex / hermes) file-KV rows.
+    ...AGENT_FILE_NAMES.map((name) => runtimeAgentFileKey(agentId, name)),
   ]
 }
 

@@ -1,8 +1,18 @@
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronDown, ChevronRight, FileEdit, Plus, Search, Trash2 } from 'lucide-react'
+import {
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
+  FileEdit,
+  Ghost,
+  Plus,
+  Search,
+  Trash2,
+} from 'lucide-react'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
+import { EmptyState } from '@/features/shared/EmptyState'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useViewStore } from '@/stores/view'
@@ -10,6 +20,8 @@ import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
 import { CreateBooModal } from './CreateBooModal'
 import { deleteAgentOperation } from './deleteAgentOperation'
 import { useEditorStore } from '@/stores/editor'
+import { useToastStore } from '@/stores/toast'
+import { confirm } from '@/stores/confirm'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -259,17 +271,21 @@ export function FleetSidebar() {
               {query ? (
                 <p className="text-[12px] text-secondary/50">No agents match.</p>
               ) : showEmpty ? (
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-2xl">👻</span>
-                  <p className="text-[12px] text-secondary/50">No Boos yet</p>
-                  <button
-                    type="button"
-                    onClick={() => useViewStore.getState().navigateTo('graph')}
-                    className="text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
-                  >
-                    Deploy a team →
-                  </button>
-                </div>
+                <EmptyState
+                  icon={Ghost}
+                  title="No Boos yet"
+                  paddingTop={0}
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => useViewStore.getState().navigateTo('graph')}
+                      className="inline-flex items-center gap-1 text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
+                    >
+                      Deploy a team
+                      <ArrowRight size={12} className="inline" />
+                    </button>
+                  }
+                />
               ) : (
                 <p className="text-[12px] text-secondary/50">No agents connected.</p>
               )}
@@ -284,12 +300,25 @@ export function FleetSidebar() {
                   onSelect={() => selectAgent(agent.id)}
                   onDelete={() => {
                     if (!client) return
-                    if (!window.confirm(`Delete ${agent.name}? This cannot be undone.`)) return
-                    deleteAgentOperation(agent.id, agent.sessionKey).catch((err) => {
-                      alert(
-                        `Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                    void (async () => {
+                      if (
+                        !(await confirm({
+                          title: `Delete ${agent.name}?`,
+                          message: 'This cannot be undone.',
+                          confirmLabel: 'Delete',
+                          tone: 'danger',
+                        }))
                       )
-                    })
+                        return
+                      try {
+                        await deleteAgentOperation(agent.id, agent.sessionKey)
+                      } catch (err) {
+                        useToastStore.getState().addToast({
+                          type: 'error',
+                          message: `Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                        })
+                      }
+                    })()
                   }}
                 />
               ))}

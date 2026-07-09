@@ -45,6 +45,8 @@ import {
   saveAgentConfig,
   writeNativeAgentFile,
 } from '../runtimes/native/agentConfigStore'
+import { resolveConnectedNativeDefaults } from '../runtimes/native/nativeProviderDefaults'
+import { nativeTeamSessionKeysForAgentLike } from '../teamChat/nativeTeamSession'
 
 const SOURCE_ID = 'clawboo-native'
 
@@ -86,7 +88,7 @@ export class ClawbooNativeAgentSource implements AgentSource {
     for (const listener of [...this.listeners]) listener(e)
   }
 
-  private mapRow(row: DbAgent): AgentRecord {
+  private mapRow(row: DbAgent, db: ClawbooDb): AgentRecord {
     return {
       id: row.id,
       sourceId: row.sourceId,
@@ -101,6 +103,9 @@ export class ClawbooNativeAgentSource implements AgentSource {
       teamId: row.teamId ?? null,
       personalityConfig: parseJson(row.personalityConfig),
       execConfig: parseJson(row.execConfig),
+      // Surface the AgentConfig's model so the client's model selector shows the
+      // native agent's real model (the config is the source of truth for native).
+      model: loadAgentConfig(db, row.id)?.primaryModel ?? null,
       participantKind: (row.participantKind as AgentRecord['participantKind']) ?? 'agent',
       runtime: row.runtime,
       capabilities: parseJson(row.capabilities),
@@ -118,14 +123,14 @@ export class ClawbooNativeAgentSource implements AgentSource {
     let rows = db.select().from(agents).where(eq(agents.sourceId, SOURCE_ID)).all()
     if (!opts?.includeArchived) rows = rows.filter((r) => r.archivedAt == null)
     if (opts?.teamId) rows = rows.filter((r) => r.teamId === opts.teamId)
-    return rows.map((r) => this.mapRow(r))
+    return rows.map((r) => this.mapRow(r, db))
   }
 
   async getAgent(id: string): Promise<AgentRecord | null> {
     const db = this.db()
     const row = db.select().from(agents).where(eq(agents.id, id)).get()
     // Scoped — a foreign source's row is not this source's agent.
-    return row && row.sourceId === SOURCE_ID ? this.mapRow(row) : null
+    return row && row.sourceId === SOURCE_ID ? this.mapRow(row, db) : null
   }
 
   /** Teams are clawboo-owned (not source-owned) — same shared-table read as
@@ -191,13 +196,26 @@ export class ClawbooNativeAgentSource implements AgentSource {
 
     // The AgentConfig rides CreateAgentInput.execConfig (the registry input's
     // free-form config carrier); SOUL.md doubles as the systemPrompt fallback.
-    const execConfig =
+    // `modelTier` is a NON-schema hint (the zod parse strips it): when the caller
+    // omits an explicit `primaryProvider` (e.g. CreateTeamModal, which doesn't know
+    // which key the user connected), the provider/model/envVar are auto-resolved
+    // from the first connected vault key so the agent runs on whatever the user
+    // connected — an anthropic default with only an OpenAI key would fail at run
+    // time. An explicit provider (the onboarding seed) bypasses this untouched.
+    const rawExec =
       input.execConfig && typeof input.execConfig === 'object'
         ? (input.execConfig as Record<string, unknown>)
         : {}
+    const { modelTier, ...execConfig } = rawExec as { modelTier?: unknown } & Record<string, unknown>
+    const hasExplicitProvider =
+      typeof execConfig['primaryProvider'] === 'string' && execConfig['primaryProvider'].length > 0
+    const resolvedProvider = hasExplicitProvider
+      ? {}
+      : resolveConnectedNativeDefaults(modelTier === 'leader' ? 'leader' : 'specialist')
     const files = input.files ?? {}
     const config: AgentConfig = agentConfigSchema.parse({
       ...DEFAULT_AGENT_CONFIG,
+      ...resolvedProvider,
       ...execConfig,
       id,
       name: input.name,
@@ -207,7 +225,7 @@ export class ClawbooNativeAgentSource implements AgentSource {
           : (files['SOUL.md'] ?? DEFAULT_AGENT_CONFIG.systemPrompt),
       createdAt: now,
       updatedAt: now,
-      tenantId: null,
+      tenantId: input.tenantId ?? null,
     })
 
     db.insert(agents)
@@ -224,9 +242,10 @@ export class ClawbooNativeAgentSource implements AgentSource {
         teamId: input.teamId ?? null,
         personalityConfig:
           input.personalityConfig != null ? JSON.stringify(input.personalityConfig) : null,
-        execConfig: input.execConfig != null ? JSON.stringify(input.execConfig) : null,
+        // Store the cleaned carrier (the non-schema `modelTier` hint stripped).
+        execConfig: input.execConfig != null ? JSON.stringify(execConfig) : null,
         avatarSeed: input.avatarSeed ?? null,
-        tenantId: null,
+        tenantId: input.tenantId ?? null,
         createdAt: now,
         updatedAt: now,
       })
@@ -242,7 +261,7 @@ export class ClawbooNativeAgentSource implements AgentSource {
         scopeId: id,
         limitUsdCents: Math.round(config.budgetUsd * 100),
         mode: 'cap',
-        tenantId: null,
+        tenantId: input.tenantId ?? null,
       })
     }
 
@@ -307,6 +326,11 @@ export class ClawbooNativeAgentSource implements AgentSource {
       .run()
     db.delete(settings)
       .where(like(settings.key, `${nativeFileKey(id, '')}%`))
+      .run()
+    // The agent's native leader session-resume pointers, one per team it leads
+    // (Boo Zero leads many). Orphan-harmless, but swept for hygiene.
+    db.delete(settings)
+      .where(like(settings.key, nativeTeamSessionKeysForAgentLike(id)))
       .run()
     db.delete(agents)
       .where(and(eq(agents.id, id), eq(agents.sourceId, SOURCE_ID)))

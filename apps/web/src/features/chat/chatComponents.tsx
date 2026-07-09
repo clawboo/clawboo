@@ -13,8 +13,9 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronRight, Clock, SendHorizontal, Square, Wrench } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronRight, Clock, SendHorizontal, Square, Wrench } from 'lucide-react'
 import { BooAvatar, resolveBooTint } from '@clawboo/ui'
+import { Button } from '@/features/shared/Button'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
@@ -191,7 +192,10 @@ export const MD_COMPONENTS: React.ComponentProps<typeof ReactMarkdown>['componen
     const isBlock = /language-/.test(className ?? '')
     if (isBlock) {
       return (
-        <pre className="my-2 overflow-x-auto rounded-md bg-foreground/[0.05] p-3 text-[12px] dark:bg-black/30">
+        <pre
+          className="my-2 overflow-x-auto rounded-xl border border-border p-3 text-[12px]"
+          style={{ background: 'var(--code-block-bg)' }}
+        >
           <code className={`font-mono ${className ?? ''}`} {...rest}>
             {children}
           </code>
@@ -200,7 +204,7 @@ export const MD_COMPONENTS: React.ComponentProps<typeof ReactMarkdown>['componen
     }
     return (
       <code
-        className="rounded bg-foreground/[0.08] px-1 py-0.5 font-mono text-[0.875em] text-mint"
+        className="rounded-md bg-foreground/[0.08] px-1.5 py-0.5 font-mono text-[0.875em] text-mint"
         {...rest}
       >
         {children}
@@ -231,14 +235,14 @@ export const TypingIndicator = memo(function TypingIndicator() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex items-center gap-2 rounded-md bg-surface px-3 py-2 text-secondary"
+      className="flex w-fit items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-foreground/60"
     >
-      <span className="font-mono text-[11px] tracking-wide">Thinking</span>
+      <span className="font-mono text-[11px] uppercase tracking-[0.14em]">Thinking</span>
       <span className="flex gap-1">
         {[0, 1, 2].map((i) => (
           <motion.span
             key={i}
-            className="inline-block h-1.5 w-1.5 rounded-full bg-secondary"
+            className="inline-block h-1.5 w-1.5 rounded-full bg-foreground/50"
             animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1, 0.85] }}
             transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2 }}
           />
@@ -255,25 +259,29 @@ export const ToolCallCard = memo(function ToolCallCard({ entry }: { entry: Trans
   const parsed = parseToolEntry(entry.text)
   if (!parsed) return null
 
-  const label = `${parsed.kind === 'call' ? '⬆' : '⬇'} ${parsed.name.toUpperCase()}`
+  const label = parsed.name.toUpperCase()
+  const DirectionIcon = parsed.kind === 'call' ? ArrowUp : ArrowDown
   const hasBody = Boolean(parsed.body)
 
   return (
     <div
-      className="rounded-md border border-border text-[11px]"
+      className="rounded-xl border border-border text-[11px]"
       style={{ background: 'var(--code-block-bg)' }}
     >
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left"
+        className={`flex w-full items-center gap-2 px-3 py-2 text-left ${hasBody ? 'cursor-pointer' : ''}`}
         onClick={() => hasBody && setOpen((v) => !v)}
         disabled={!hasBody}
       >
         <Wrench className="h-3 w-3 shrink-0 text-amber" strokeWidth={2} />
-        <span className="font-mono font-semibold tracking-wider text-amber/80">{label}</span>
+        <span className="flex items-center gap-1 font-mono font-semibold tracking-wider text-amber">
+          <DirectionIcon className="h-3 w-3 shrink-0" strokeWidth={2.5} />
+          {label}
+        </span>
         {hasBody && (
           <ChevronRight
-            className={`ml-auto h-3 w-3 shrink-0 text-secondary transition-transform ${open ? 'rotate-90' : ''}`}
+            className={`ml-auto h-3 w-3 shrink-0 text-foreground/40 transition-transform ${open ? 'rotate-90' : ''}`}
           />
         )}
       </button>
@@ -287,7 +295,7 @@ export const ToolCallCard = memo(function ToolCallCard({ entry }: { entry: Trans
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <pre className="overflow-x-auto border-t border-border px-3 py-2 font-mono text-[11px] text-secondary">
+            <pre className="overflow-x-auto border-t border-border px-3 py-2 font-mono text-[11px] text-foreground/60">
               {parsed.body}
             </pre>
           </motion.div>
@@ -313,10 +321,10 @@ export const ThinkingSection = memo(function ThinkingSection({
   if (!fullText && !streaming) return null
 
   return (
-    <div className="rounded-md bg-surface text-[11px] text-secondary">
+    <div className="rounded-xl border border-border bg-surface text-[11px] text-foreground/60">
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left opacity-70 hover:opacity-100"
+        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left opacity-70 transition hover:opacity-100"
         onClick={() => setOpen((v) => !v)}
       >
         <ChevronRight
@@ -334,7 +342,7 @@ export const ThinkingSection = memo(function ThinkingSection({
             {[0, 1, 2].map((i) => (
               <motion.span
                 key={i}
-                className="inline-block h-1 w-1 rounded-full bg-secondary"
+                className="inline-block h-1 w-1 rounded-full bg-foreground/50"
                 animate={{ opacity: [0.3, 1, 0.3] }}
                 transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2 }}
               />
@@ -352,7 +360,7 @@ export const ThinkingSection = memo(function ThinkingSection({
             transition={{ duration: 0.18 }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-3 pt-1 text-[12px] leading-relaxed text-text/70">
+            <div className="px-4 pb-3 pt-1 text-[12px] leading-relaxed text-foreground/70">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
                 {fullText || '…'}
               </ReactMarkdown>
@@ -373,7 +381,11 @@ export const MetaMessageCard = memo(function MetaMessageCard({
 }) {
   return (
     <div className="flex justify-center">
-      <p className="rounded-full bg-surface px-4 py-1.5 font-mono text-[11px] text-secondary/60">
+      {/* A fixed card radius, NOT rounded-full: a short meta reads as a pill, but a
+          long one (e.g. a multi-line [Task Update] reflection) wraps tall — rounded-full
+          would round the corners into a giant oval. max-w-prose keeps long metas from
+          sprawling full-width; whitespace-pre-wrap preserves any newlines. */}
+      <p className="max-w-prose whitespace-pre-wrap rounded-2xl border border-border bg-surface px-4 py-2 font-mono text-[11px] leading-relaxed text-foreground/55">
         {entry.text}
       </p>
     </div>
@@ -394,18 +406,24 @@ export const UserMessageCard = memo(function UserMessageCard({
 }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[70ch] overflow-hidden rounded-xl rounded-br-sm bg-blue/60 shadow-sm">
-        <div className="flex items-center justify-between gap-4 border-b border-border px-3 py-1.5">
-          <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-text/70">
+      <div
+        className="max-w-[70ch] overflow-hidden rounded-2xl rounded-br-md border border-border"
+        style={{
+          background: 'rgb(var(--primary-rgb) / 0.07)',
+          boxShadow: 'var(--shadow-raised)',
+        }}
+      >
+        <div className="flex items-center justify-between gap-4 border-b border-border px-3.5 py-1.5">
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-foreground/70">
             {targetAgentName ? `You → ${targetAgentName}` : 'You'}
           </span>
           {entry.timestampMs && (
-            <time className="font-mono text-[10px] text-secondary/60">
+            <time className="font-data text-[10px] text-foreground/45">
               {formatTimestamp(entry.timestampMs)}
             </time>
           )}
         </div>
-        <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text">
+        <div className="px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground">
           {knownAgentNames && entry.text.startsWith('@') ? (
             renderMentionInline(entry.text, knownAgentNames)
           ) : (
@@ -474,7 +492,8 @@ export const DelegationCard = memo(function DelegationCard({
           resolvedTheme,
         )
       : undefined
-  const tint = teamTint ?? (targetAgentId ? resolveBooTint(targetAgentId, isBooZero) : '#10b981')
+  const tint =
+    teamTint ?? (targetAgentId ? resolveBooTint(targetAgentId, isBooZero) : 'var(--mint)')
 
   return (
     <motion.div
@@ -498,14 +517,14 @@ export const DelegationCard = memo(function DelegationCard({
           >
             Delegated to
           </span>
-          <span className="truncate font-mono text-[11.5px] font-semibold text-text">
+          <span className="truncate font-mono text-[11.5px] font-semibold text-foreground">
             @{targetName}
           </span>
         </div>
       </div>
       {task && (
         <div
-          className="border-t border-dashed pt-2 text-[12px] leading-relaxed whitespace-pre-wrap text-text/75"
+          className="border-t border-dashed pt-2 text-[12px] leading-relaxed whitespace-pre-wrap text-foreground/75"
           style={{ borderColor: `${tint}20` }}
         >
           {task}
@@ -554,7 +573,7 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
 
   return (
     <div
-      className={`flex flex-col gap-2${isRelay ? ' border-l-2 border-emerald-500/40 pl-3 opacity-80' : ''}`}
+      className={`flex flex-col gap-2${isRelay ? ' border-l-2 border-mint/40 pl-3 opacity-80' : ''}`}
     >
       {/* Header — suppressed when `isFollowup` so consecutive same-author
           messages read as one continuous section. */}
@@ -563,19 +582,19 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
           <div className="flex items-center gap-2.5">
             <AgentBooAvatar agentId={agentId} size={28} />
             <span
-              className="font-mono font-semibold uppercase tracking-widest text-secondary"
+              className="font-mono font-semibold uppercase tracking-widest text-foreground/55"
               style={{ fontSize: 11.5 }}
             >
               {agentName}
             </span>
             {isRelay && (
-              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-mono text-[9px] font-medium text-emerald-400">
+              <span className="rounded-full bg-mint/15 px-2 py-0.5 font-mono text-[9px] font-medium text-mint">
                 Team Update
               </span>
             )}
           </div>
           {block.timestampMs && (
-            <time className="font-mono text-[10px] text-secondary/50">
+            <time className="font-data text-[10px] text-foreground/45">
               {formatTimestamp(block.timestampMs)}
             </time>
           )}
@@ -606,7 +625,7 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
           leader's committed turn renders as clean prose. `max-w-prose` (~65ch)
           caps line length to the optimal reading measure. */}
       {hasText && (
-        <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-text">
+        <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-foreground">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
             {stripPlanBlocks(
               stripDelegationBlocks(
@@ -622,7 +641,7 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
 
       {/* Token usage (real from Gateway) or estimated from char count */}
       {!streaming && hasText && (
-        <p className="font-mono text-[10px] tabular-nums text-secondary/40">
+        <p className="font-data text-[10px] text-foreground/40">
           {tokenUsage
             ? `${tokenUsage.inputTokens.toLocaleString()} in · ${tokenUsage.outputTokens.toLocaleString()} out${costUsd !== null ? ` · ${formatCost(costUsd)}` : ''}`
             : `~${Math.ceil(charCount / 4).toLocaleString()} tokens`}
@@ -654,14 +673,14 @@ export const StreamingCard = memo(function StreamingCard({
       <div className="flex items-center gap-2.5">
         <AgentBooAvatar agentId={agentId} size={28} />
         <span
-          className="font-mono font-semibold uppercase tracking-widest text-secondary"
+          className="font-mono font-semibold uppercase tracking-widest text-foreground/55"
           style={{ fontSize: 11.5 }}
         >
           {agentName}
         </span>
       </div>
       {hasText ? (
-        <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-text opacity-80">
+        <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-foreground opacity-80">
           {segments.map((segment, idx) =>
             segment.kind === 'delegation' ? (
               <DelegationCard
@@ -890,6 +909,9 @@ export const MessageList = memo(function MessageList({
 export interface MessageComposerHandle {
   /** Insert @AgentName at the start of the draft and focus the textarea. */
   insertMention: (agentName: string) => void
+  /** Replace the draft with `text` and focus (cursor at end). Used by the guided
+   *  first-task hint to pre-fill a suggested prompt for the user to send/edit. */
+  prefill: (text: string) => void
 }
 
 /**
@@ -924,9 +946,14 @@ export const MessageComposer = memo(
        */
       onStop?: () => void
       isActive?: boolean
+      /** Context-specific slash-command hints shown in the keycap strip, AFTER the
+       *  base Enter / Shift+Enter hints. Each caller passes only the commands it
+       *  actually handles (`/reset` for 1:1 chat, `/rule` for team chat) so the
+       *  strip never advertises a command that does nothing in this context. */
+      commands?: readonly { k: string; label: string }[]
     }
   >(function MessageComposer(
-    { onSend, disabled, placeholder, mentionAgents, onStop, isActive = false },
+    { onSend, disabled, placeholder, mentionAgents, onStop, isActive = false, commands = [] },
     ref,
   ) {
     const showStop = isActive && Boolean(onStop)
@@ -957,6 +984,15 @@ export const MessageComposer = memo(
             const pos = agentName.length + 2 // @name + space
             textareaRef.current?.setSelectionRange(pos, pos)
             textareaRef.current?.focus()
+          })
+        },
+        prefill: (text: string) => {
+          setDraft(text)
+          requestAnimationFrame(() => {
+            const el = textareaRef.current
+            if (!el) return
+            el.setSelectionRange(text.length, text.length)
+            el.focus()
           })
         },
       }),
@@ -1088,7 +1124,7 @@ export const MessageComposer = memo(
     const sendDisabled = disabled || !draft.trim()
 
     return (
-      <div className="border-t border-border px-4 py-3">
+      <div className="border-t border-border px-5 py-4">
         <div className="relative flex items-end gap-2">
           {/* Mention autocomplete dropdown (positioned above textarea) */}
           {mentionOpen && filteredMentionAgents.length > 0 && (
@@ -1108,43 +1144,57 @@ export const MessageComposer = memo(
             placeholder={placeholder ?? 'Message…'}
             disabled={disabled}
             data-testid="chat-composer-input"
-            className="flex-1 resize-none overflow-hidden rounded-lg border border-border bg-input px-3 py-2 text-[13px] text-text outline-none transition placeholder:text-secondary/40 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ fontFamily: 'var(--font-body)', minHeight: '38px' }}
+            className="flex-1 resize-none overflow-hidden rounded-xl border border-border bg-surface px-4 py-2.5 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ fontFamily: 'var(--font-body)', minHeight: '42px' }}
           />
           {showStop ? (
             // ── Stop button — "pull the plug" on the active run(s) ──────────
-            // Same 38×38 footprint as Send so the composer doesn't reflow on
+            // Same 42×42 footprint as Send so the composer doesn't reflow on
             // morph. Filled-square icon (`Square`) reads as Stop universally.
-            // Color: solid project accent red. NOT gated by `disabled` — the
+            // Color: solid destructive red. NOT gated by `disabled` — the
             // user pressed Stop precisely because the chat is in a state
             // where Send is unavailable.
-            <button
-              type="button"
+            <Button
+              variant="danger"
               onClick={onStop}
               data-testid="chat-stop-button"
               aria-label="Stop"
               title="Stop"
-              className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-primary-foreground transition hover:brightness-110"
+              className="h-[42px] w-[42px] shrink-0 rounded-xl px-0"
             >
               <Square className="h-3.5 w-3.5" strokeWidth={2} fill="currentColor" />
-            </button>
+            </Button>
           ) : (
-            <button
-              type="button"
+            <Button
+              variant="primary"
               onClick={handleSend}
               disabled={sendDisabled}
               data-testid="chat-send-button"
               aria-label="Send message"
-              className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-accent text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-muted disabled:text-secondary"
+              className="h-[42px] w-[42px] rounded-xl px-0"
             >
               <SendHorizontal className="h-4 w-4" strokeWidth={2} />
-            </button>
+            </Button>
           )}
         </div>
-        <p className="mt-1.5 text-right font-mono text-[10px] text-secondary/30">
-          Enter to send · Shift+Enter for newline · /reset for new session · /rule &lt;text&gt; to
-          save a team rule
-        </p>
+        {/* Keycap hint strip — wraps cleanly BETWEEN groups (never mid-phrase like a
+            single wrapping sentence did), with each shortcut in a small keycap. The
+            base Enter / newline hints always show; the caller appends only the
+            slash-commands it actually handles here. */}
+        <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-3.5 gap-y-1.5 text-[10px] text-foreground/35">
+          {[
+            { k: 'Enter', label: 'send' },
+            { k: '⇧ Enter', label: 'newline' },
+            ...commands,
+          ].map(({ k, label }) => (
+            <span key={k} className="inline-flex items-center gap-1.5">
+              <kbd className="rounded-[5px] border border-border bg-foreground/[0.04] px-1.5 py-[1px] font-mono text-[9.5px] font-medium leading-[1.5] text-foreground/55">
+                {k}
+              </kbd>
+              <span>{label}</span>
+            </span>
+          ))}
+        </div>
       </div>
     )
   }),
@@ -1187,7 +1237,8 @@ const MentionDropdownInline = memo(function MentionDropdownInline({
     <div
       ref={listRef}
       data-testid="mention-dropdown"
-      className="absolute bottom-full left-0 z-50 mb-1 max-h-[200px] min-w-[180px] overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-lg"
+      className="absolute bottom-full left-0 z-50 mb-1.5 max-h-[200px] min-w-[190px] overflow-y-auto rounded-xl border border-border bg-popover py-1.5"
+      style={{ boxShadow: 'var(--shadow-floating)' }}
     >
       {agents.map((agent, i) => (
         <button
@@ -1199,7 +1250,7 @@ const MentionDropdownInline = memo(function MentionDropdownInline({
             onSelect(agent.name)
           }}
           className={[
-            'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-popover-foreground transition-colors',
+            'flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-popover-foreground transition-colors',
             i === selectedIndex ? 'bg-foreground/[0.08]' : 'hover:bg-foreground/[0.04]',
           ].join(' ')}
         >
@@ -1216,7 +1267,9 @@ const MentionDropdownInline = memo(function MentionDropdownInline({
                 width: 20,
                 height: 20,
                 borderRadius: '50%',
-                background: `${agent.color ?? '#e94560'}33`,
+                background: agent.color
+                  ? `${agent.color}33`
+                  : 'color-mix(in srgb, var(--primary) 20%, transparent)',
                 fontSize: 12,
                 flexShrink: 0,
               }}

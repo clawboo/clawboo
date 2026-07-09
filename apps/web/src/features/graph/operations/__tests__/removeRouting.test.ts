@@ -26,7 +26,7 @@ vi.mock('@/stores/connection', () => ({
   },
 }))
 
-vi.mock('@/lib/agentSourceClient', () => ({
+vi.mock('@clawboo/control-client', () => ({
   readAgentFile: mockFilesRead,
   writeAgentFile: mockFilesSet,
 }))

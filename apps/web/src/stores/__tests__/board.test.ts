@@ -35,6 +35,31 @@ describe('useBoardStore.applyChange (projection merge)', () => {
     expect(task.summary).toBe('all done')
   })
 
+  it('does NOT regress a field when a strictly-older change arrives (reconnect load vs live frame)', () => {
+    const s = useBoardStore.getState()
+    // A live board SSE frame lands during a reconnect gap: task → done at T2.
+    s.applyChange('t1', {
+      id: 'task-1',
+      title: 'Fix bug',
+      status: 'done',
+      summary: 'shipped',
+      updatedAt: 200,
+    })
+    // The `open`-triggered `load()` returns an older REST snapshot (T1 < T2) — it must
+    // NOT roll the card backward to in_progress.
+    s.applyChange('t1', {
+      id: 'task-1',
+      title: 'Fix bug',
+      status: 'in_progress',
+      assigneeAgentId: 'a2',
+      updatedAt: 100,
+    })
+    const task = useBoardStore.getState().tasksByTeam.get('t1')!.get('task-1')!
+    expect(task.status).toBe('done') // NOT regressed
+    expect(task.summary).toBe('shipped') // preserved
+    expect(task.updatedAt).toBe(200) // newer time kept
+  })
+
   it('isolates teams and resets one without touching another', () => {
     const s = useBoardStore.getState()
     s.applyChange('t1', { id: 'task-1', status: 'todo', updatedAt: 1 })

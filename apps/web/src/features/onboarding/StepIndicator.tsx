@@ -1,34 +1,77 @@
 /**
  * features/onboarding/StepIndicator.tsx
  *
- * Step-progress indicator for the onboarding wizard. The OpenClaw path runs the
- * default Setup / Team / Deploy beats; the native path is a shorter
- * Connect / Ready flow (it seeds a team server-side and lands directly), so it
- * passes `steps={NATIVE_STEPS}` to avoid promising Team/Deploy beats it never
- * reaches.
+ * Step-progress indicator for the native-first onboarding wizard. The spine is
+ * a 3-beat flow — Connect (paste a provider key + seed a team) → Runtimes
+ * (optionally add OpenClaw / coding-agent runtimes now or later) → Ready. The
+ * OpenClaw setup detour (Detect / Install / Configure / Start Gateway / Connect)
+ * is a drill-in of the Runtimes beat, so those steps render `current="runtimes"`.
  */
 
 import { Check } from 'lucide-react'
 
-export type IndicatorId = 'setup' | 'team' | 'deploy' | 'connect' | 'ready'
+export type IndicatorId = 'connect' | 'runtimes' | 'ready'
 
 export type IndicatorStep = { id: IndicatorId; label: string }
 
-const DEFAULT_STEPS: IndicatorStep[] = [
-  { id: 'setup', label: 'Setup' },
-  { id: 'team', label: 'Team' },
-  { id: 'deploy', label: 'Deploy' },
-]
-
-/** The native path's 2-beat flow (paste a key → land in the dashboard). */
+/** The native-first spine: paste a key → add runtimes (opt-in) → land. */
 export const NATIVE_STEPS: IndicatorStep[] = [
   { id: 'connect', label: 'Connect' },
+  { id: 'runtimes', label: 'Runtimes' },
   { id: 'ready', label: 'Ready' },
 ]
 
+/**
+ * Minimal bottom step indicator — small dots, with the active step rendered as
+ * an elongated brand pill (the premium onboarding pattern). Used by
+ * `OnboardingScreen`; the labeled circle `StepIndicator` below is retained for
+ * the OpenClaw detour steps until they migrate.
+ */
+export function StepDots({
+  current,
+  steps = NATIVE_STEPS,
+  className = '',
+}: {
+  current: IndicatorId
+  steps?: IndicatorStep[]
+  className?: string
+}) {
+  const currentIdx = steps.findIndex((s) => s.id === current)
+
+  return (
+    <div
+      className={['flex items-center justify-center gap-2', className].join(' ')}
+      role="progressbar"
+      aria-valuenow={currentIdx + 1}
+      aria-valuemin={1}
+      aria-valuemax={steps.length}
+      aria-label={`Step ${currentIdx + 1} of ${steps.length}: ${steps[currentIdx]?.label ?? ''}`}
+    >
+      {steps.map((s, i) => {
+        const active = i === currentIdx
+        const done = i < currentIdx
+        return (
+          <span
+            key={s.id}
+            className="h-1.5 rounded-full transition-all duration-300"
+            style={{
+              width: active ? 26 : 6,
+              background: active
+                ? 'var(--primary)'
+                : done
+                  ? 'rgb(var(--primary-rgb) / 0.4)'
+                  : 'rgb(var(--foreground-rgb) / 0.14)',
+            }}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 export function StepIndicator({
   current,
-  steps = DEFAULT_STEPS,
+  steps = NATIVE_STEPS,
 }: {
   current: IndicatorId
   steps?: IndicatorStep[]

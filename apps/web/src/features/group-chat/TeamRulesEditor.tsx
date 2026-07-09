@@ -5,7 +5,9 @@
 // Used by `TeamSettingsSheet` — opened from the team header gear icon.
 
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, Save } from 'lucide-react'
+import { Save } from 'lucide-react'
+import { Button } from '@/features/shared/Button'
+import { Spinner } from '@/features/shared/Spinner'
 import { useToastStore } from '@/stores/toast'
 import { fetchTeamRules as fetchTeamRulesContent, saveTeamRules } from '@/lib/teamRules'
 
@@ -51,15 +53,16 @@ export function TeamRulesEditor({ teamId }: { teamId: string }) {
   }, [content, teamId])
 
   return (
-    <div className="flex flex-col gap-2">
-      <p className="m-0 text-[11px] text-foreground/45">
+    <div className="flex flex-col gap-3">
+      <p className="m-0 text-[12px] leading-relaxed text-foreground/45">
         Durable rules injected into every team agent&apos;s preamble + every Boo Zero turn in this
-        team. One rule per line. Also writable via <code>/rule &lt;text&gt;</code> in the team chat
-        composer.
+        team. One rule per line. Also writable via{' '}
+        <code className="font-mono text-[11px] text-foreground/70">/rule &lt;text&gt;</code> in the
+        team chat composer.
       </p>
       {loading ? (
-        <div className="flex items-center gap-2 p-2.5 text-[11px] text-foreground/50">
-          <Loader2 size={12} className="animate-spin" /> Loading rules…
+        <div className="flex items-center gap-2 p-2.5 text-[12px] text-foreground/50">
+          <Spinner size={13} /> Loading rules…
         </div>
       ) : (
         <>
@@ -69,29 +72,28 @@ export function TeamRulesEditor({ teamId }: { teamId: string }) {
             disabled={saving}
             spellCheck={false}
             placeholder="No rules yet. Type one per line — they'll be injected into every team agent's preamble."
-            className="w-full resize-y rounded-md border border-border bg-input p-2 font-mono text-[12px] leading-relaxed text-foreground"
+            className="w-full resize-y rounded-xl border border-border bg-surface px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
             style={{
               minHeight: 120,
               maxHeight: 320,
-              fontFamily: 'var(--font-geist-mono, monospace)',
             }}
           />
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
+          <div className="flex items-center gap-2.5">
+            <Button
+              variant="primary"
+              size="sm"
               onClick={handleSave}
-              disabled={!isDirty || saving}
-              className={[
-                'inline-flex h-[26px] items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-semibold',
-                isDirty
-                  ? 'cursor-pointer border-primary/30 bg-primary text-primary-foreground'
-                  : 'cursor-default border-border bg-foreground/[0.06] text-foreground/50',
-              ].join(' ')}
+              disabled={!isDirty}
+              loading={saving}
             >
-              {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              {!saving && <Save size={14} strokeWidth={2} />}
               Save rules
-            </button>
-            {isDirty && <span className="text-[10px] text-amber">Unsaved changes</span>}
+            </Button>
+            {isDirty && (
+              <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-amber">
+                Unsaved changes
+              </span>
+            )}
           </div>
         </>
       )}

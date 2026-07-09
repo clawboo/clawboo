@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { TranscriptEntry } from '@clawboo/protocol'
+import { isTeamSessionKey } from '@clawboo/team-orchestration'
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 // Keyed by sessionKey so multiple agent conversations are held simultaneously.
@@ -95,6 +96,19 @@ export const useChatStore = create<ChatStore>((set) => ({
       // but blocks the same-frame triplication that production exhibits.
       // First 160 chars of text is plenty to disambiguate distinct messages
       // while keeping the signature cheap.
+      // Team sessions have TWO independent turn writers whose copies land in
+      // different 1-second buckets: the server orchestrator (persistTeamChatEntry,
+      // source 'local-send', runId null) AND — for OpenClaw agents whose frames the
+      // browser Gateway connection also observes — useGatewayEvents (source
+      // 'runtime-chat'), which the Gateway's multi-final-frame behavior fires more
+      // than once per turn (first commit at streamStart, later ones at Date.now()).
+      // A byte-identical LONG machine turn in a team is ALWAYS a duplicate (agents
+      // don't re-emit the same 80+-char text verbatim), so dedup those timestamp-
+      // independently. Excludes USER messages — a user may legitimately paste the
+      // same long text twice; those dedup by entryId (the optimistic bubble threads
+      // its id to the server). Short texts + 1:1 sessions keep the 1-second bucket
+      // so a legitimate re-utterance (a repeated "hi" / short ack) still passes.
+      const teamSession = isTeamSessionKey(sessionKey)
       function contentSig(e: {
         kind?: string
         role?: string
@@ -103,7 +117,8 @@ export const useChatStore = create<ChatStore>((set) => ({
       }): string {
         const k = e.kind ?? ''
         const r = e.role ?? ''
-        const tsBucket = Math.floor((e.timestampMs ?? 0) / 1000)
+        const longTeamTurn = teamSession && r !== 'user' && (e.text ?? '').length > 80
+        const tsBucket = longTeamTurn ? 'T' : Math.floor((e.timestampMs ?? 0) / 1000)
         const t = (e.text ?? '').slice(0, 160)
         return `${k}|${r}|${tsBucket}|${t}`
       }

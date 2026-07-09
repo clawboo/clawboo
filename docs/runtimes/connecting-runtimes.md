@@ -5,7 +5,7 @@ description: Install, connect, disconnect, and health-check the non-OpenClaw run
 
 Use this page when you want to bring a non-OpenClaw [runtime](/appendices/glossary), `claude-code`, `codex`, `hermes`, or `clawboo-native`, online so it can execute board tasks. Each runtime is a [RuntimeAdapter](/appendices/glossary): Clawboo lists it, installs its CLI, stores its provider key, and reports its connection state. OpenClaw is connected differently (the Gateway, not a CLI install); see [OpenClaw](/runtimes/openclaw).
 
-The whole lifecycle runs from the **Runtimes** panel (`RuntimeConnectionCard`), backed by `/api/runtimes/*`. This page documents what each step does, where keys are stored, and the per-runtime differences.
+The whole lifecycle runs from the **Runtimes** panel (`RuntimeConnectionCard`), backed by `/api/runtimes/*`. Open it from **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Runtimes** under the Workspace group. This page documents what each step does, where keys are stored, and the per-runtime differences.
 
 ## Prerequisites
 

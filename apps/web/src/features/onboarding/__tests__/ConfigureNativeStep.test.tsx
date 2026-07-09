@@ -25,12 +25,21 @@ describe('ConfigureNativeStep', () => {
     expect(input).toHaveAttribute('type', 'text')
   })
 
-  it('selecting a provider marks its pill pressed', async () => {
+  it('selecting a provider marks its card checked', async () => {
     render(<ConfigureNativeStep onSeeded={vi.fn()} onBack={vi.fn()} />)
-    expect(screen.getByTestId('native-provider-anthropic')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('native-provider-anthropic')).toHaveAttribute('aria-checked', 'true')
     await userEvent.click(screen.getByTestId('native-provider-openai'))
-    expect(screen.getByTestId('native-provider-openai')).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByTestId('native-provider-anthropic')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByTestId('native-provider-openai')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('native-provider-anthropic')).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('shows a "Get a key" link that re-points per selected provider', async () => {
+    render(<ConfigureNativeStep onSeeded={vi.fn()} onBack={vi.fn()} />)
+    expect(screen.getByTestId('native-get-key').getAttribute('href')).toContain(
+      'console.anthropic.com',
+    )
+    await userEvent.click(screen.getByTestId('native-provider-openrouter'))
+    expect(screen.getByTestId('native-get-key').getAttribute('href')).toContain('openrouter.ai')
   })
 
   it('Test connection reports success when the key works', async () => {
@@ -78,7 +87,8 @@ describe('ConfigureNativeStep', () => {
     expect(connectBody).toEqual({ apiKey: SECRET, provider: 'anthropic' })
     // …but NEVER the seed request,…
     expect(JSON.stringify(seedBody)).not.toContain(SECRET)
-    expect(seedBody).toEqual({ provider: 'anthropic' })
+    // the seed carries the provider + the chosen leader model (default = provider's strongest).
+    expect(seedBody).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6' })
     // …and NEVER any response body.
     for (const r of responses) expect(r).not.toContain(SECRET)
   })
@@ -91,7 +101,7 @@ describe('ConfigureNativeStep', () => {
     ).toHaveNoViolations()
   })
 
-  it('Ollama expander hides the key field and submits keyless', async () => {
+  it('Ollama card hides the key field and submits keyless', async () => {
     const onSeeded = vi.fn()
     let connectBody: Record<string, unknown> | null = null
     server.use(
@@ -104,7 +114,7 @@ describe('ConfigureNativeStep', () => {
       ),
     )
     render(<ConfigureNativeStep onSeeded={onSeeded} onBack={vi.fn()} />)
-    await userEvent.click(screen.getByTestId('native-ollama-toggle'))
+    await userEvent.click(screen.getByTestId('native-provider-ollama'))
     expect(screen.queryByTestId('native-api-key')).not.toBeInTheDocument()
     await userEvent.click(screen.getByTestId('native-create-team'))
     await waitFor(() => expect(onSeeded).toHaveBeenCalledWith('team-ollama'))

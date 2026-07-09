@@ -78,7 +78,7 @@ The kind set is a frozen union. The producers and reducers stay typed through a 
 | Routines         | `routine_fired`, `routine_dispatched`, `routine_completed`, `routine_error`     |
 | Peer chat        | `team_chat_post`, `speaker_selected`, `turn_bound_hit`                          |
 
-Board lifecycle events are emitted server-side by the [board](/concepts/the-board) REST handlers. The OpenClaw runtime, however, is observed _in the browser_, so the server never sees its tool calls directly. The `POST /api/obs/ingest` route closes that gap: the client mirrors its observed `tool_call`, `tool_result`, and `error` events into the log so the activity surface reads uniformly across every runtime. The ingest route is whitelisted to exactly those three kinds; board lifecycle is never accepted from the browser, because the server already emits it.
+Board lifecycle events are emitted server-side by the [board](/concepts/the-board) REST handlers, and every runtime's `tool_call`, `tool_result`, `error`, and cost events are emitted server-side too: the executor runner for the native and coding-agent runtimes, and the server-side team orchestrator for OpenClaw as it drives each turn. A `POST /api/obs/ingest` route remains as a defensive mirror for any browser-observed runtime events, whitelisted to exactly those three kinds; board lifecycle is never accepted from the browser, because the server already emits it.
 
 ## Projections
 
@@ -175,10 +175,10 @@ Keeping the event-log trace store _always on_ and the OTLP export _opt-in_ is th
 - **Not a metrics time-series database.** The log is an orchestration event stream, not Prometheus. `summarizeMetrics` aggregates over a queried window on demand; there is no retention policy, downsampling, or long-horizon storage tuned for time-series queries.
 - **Not the audit log.** The governance audit log is a separate, "most-recent-first" lineage feed for forensics; the orchestration log is `seq ASC` for replay. They mirror each other's insert-only / scrub discipline but serve different reads.
 - **OTLP export is opt-in, not bundled.** A lean bundled CLI degrades to event-log-only; the OTel SDK is only required when an OTLP endpoint is configured and the SDK is present.
-- **Single implicit tenant today.** `orchestration_events.tenant_id` is a dormant column; no per-tenant filtering is active in v0.2.0. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** `orchestration_events.tenant_id` is a dormant column; no per-tenant filtering is active in v0.2.1. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

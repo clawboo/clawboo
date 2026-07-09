@@ -96,14 +96,14 @@ type GlowConfig = { color: string; pulse: boolean }
 const STATUS_GLOW: Record<string, GlowConfig | null> = {
   idle: null,
   running: { color: 'rgb(var(--mint-rgb) / 0.55)', pulse: true },
-  error: { color: 'rgba(249,115,22,0.55)', pulse: false },
-  sleeping: { color: 'rgba(96,115,140,0.30)', pulse: false },
+  error: { color: 'rgb(var(--amber-rgb) / 0.55)', pulse: false },
+  sleeping: { color: 'rgb(var(--foreground-rgb) / 0.3)', pulse: false },
 }
 
 const STATUS_DOT: Record<string, string> = {
-  idle: '#4B5563',
+  idle: 'var(--category-other)',
   running: 'var(--mint)',
-  error: '#F97316',
+  error: 'var(--amber)',
   sleeping: 'var(--amber)',
 }
 
@@ -488,7 +488,7 @@ function CardContent({
               fontSize: 14,
               fontWeight: 600,
               color: selected ? 'var(--primary)' : 'var(--foreground)',
-              fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+              fontFamily: 'var(--font-display)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -614,7 +614,7 @@ function CircleContent({
             fontSize: 12,
             fontWeight: 600,
             color: selected ? 'var(--primary)' : 'var(--foreground)',
-            fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+            fontFamily: 'var(--font-display)',
             // No max-width / truncation: the name sits BELOW the avatar in
             // circle mode and has the entire 340px envelope width to
             // expand into. Long names extend symmetrically because the

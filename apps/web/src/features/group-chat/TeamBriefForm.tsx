@@ -6,7 +6,9 @@
 // Used by `TeamSettingsSheet` — opened from the team header gear icon.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Loader2, RefreshCw, Save } from 'lucide-react'
+import { RefreshCw, Save } from 'lucide-react'
+import { Button } from '@/features/shared/Button'
+import { Spinner } from '@/features/shared/Spinner'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 import { buildTeamBrief, type TeamBriefMember } from '@/lib/booZeroBrief'
@@ -116,15 +118,15 @@ export function TeamBriefForm({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 p-4 text-[11px] text-foreground/50">
-        <Loader2 size={12} className="animate-spin" /> Loading brief…
+      <div className="flex items-center gap-2 p-4 text-[12px] text-foreground/50">
+        <Spinner size={13} /> Loading brief…
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <p className="m-0 text-[11px] text-foreground/45">
+    <div className="flex flex-col gap-3">
+      <p className="m-0 text-[12px] leading-relaxed text-foreground/45">
         Describes this team — read by Boo Zero whenever it operates in {teamName}. Editable; safe to
         regenerate from the current team roster.
       </p>
@@ -133,35 +135,35 @@ export function TeamBriefForm({
         onChange={(e) => setContent(e.target.value)}
         disabled={saving}
         spellCheck={false}
-        className="w-full resize-y rounded-md border border-border bg-input p-2.5 font-mono text-[12px] leading-relaxed text-foreground"
-        style={{ minHeight: 200, maxHeight: 420, fontFamily: 'var(--font-geist-mono, monospace)' }}
+        className="w-full resize-y rounded-xl border border-border bg-surface px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+        style={{ minHeight: 200, maxHeight: 420 }}
       />
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
+      <div className="flex items-center gap-2.5">
+        <Button
+          variant="primary"
+          size="sm"
           onClick={handleSave}
-          disabled={!isDirty || saving}
-          className={[
-            'inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-semibold',
-            isDirty
-              ? 'cursor-pointer border-primary/30 bg-primary text-primary-foreground'
-              : 'cursor-default border-border bg-foreground/[0.06] text-foreground/50',
-          ].join(' ')}
+          disabled={!isDirty}
+          loading={saving}
         >
-          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+          {!saving && <Save size={14} strokeWidth={2} />}
           Save
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={handleRegenerate}
           disabled={saving}
-          className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border bg-foreground/[0.04] px-2.5 text-[11px] font-semibold text-foreground/70 disabled:cursor-default"
           title="Regenerate from current team members (does not save until you press Save)"
         >
-          <RefreshCw size={12} />
+          <RefreshCw size={14} strokeWidth={2} />
           Regenerate
-        </button>
-        {isDirty && <span className="text-[10px] text-amber">Unsaved changes</span>}
+        </Button>
+        {isDirty && (
+          <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-amber">
+            Unsaved changes
+          </span>
+        )}
       </div>
     </div>
   )

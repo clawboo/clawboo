@@ -20,12 +20,15 @@ import {
   type WorkspaceDetail,
 } from '@/lib/boardClient'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
+import { IconButton } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import { ENTER_SPRING } from '@/lib/motion'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
+const SECTION_LABEL =
+  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
 
 const VERDICT_TONE: Record<'pass' | 'fail' | 'completed_with_debt', StatusTone> = {
   pass: 'success',
@@ -64,21 +67,10 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <div style={{ marginBottom: 18 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 9 }}>
-        <span style={{ color: muted(0.4), display: 'flex' }}>{icon}</span>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            fontFamily: 'var(--font-mono)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-            color: muted(0.45),
-          }}
-        >
-          {title}
-        </span>
+    <div className="mb-5">
+      <div className="mb-2.5 flex items-center gap-1.5">
+        <span className="flex text-foreground/40">{icon}</span>
+        <span className={SECTION_LABEL}>{title}</span>
       </div>
       {children}
     </div>
@@ -91,8 +83,9 @@ const codeBox: React.CSSProperties = {
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
   background: 'var(--code-block-bg, rgb(var(--foreground-rgb) / 0.05))',
-  borderRadius: 8,
-  padding: '8px 10px',
+  border: '1px solid var(--border)',
+  borderRadius: 12,
+  padding: '10px 12px',
   color: muted(0.75),
   maxHeight: 260,
   overflowY: 'auto',
@@ -100,8 +93,8 @@ const codeBox: React.CSSProperties = {
 
 function kv(label: string, value: string) {
   return (
-    <div style={{ display: 'flex', gap: 10, fontSize: 12, marginBottom: 4 }}>
-      <span style={{ color: muted(0.4), minWidth: 78 }}>{label}</span>
+    <div style={{ display: 'flex', gap: 12, fontSize: 12.5, marginBottom: 6 }}>
+      <span style={{ color: muted(0.45), minWidth: 82 }}>{label}</span>
       <span
         className="font-data"
         style={{
@@ -152,6 +145,12 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
     authorType?: string
     createdAt?: number
   }[]
+  // The delegated agent's deliverable is its report-up comment(s) — surface them as
+  // a prominent, readable "Output" section so clicking the task shows what the agent
+  // produced, formatting preserved. The Comments section below keeps the full log.
+  const agentOutputs = comments.filter(
+    (c) => c.authorType === 'agent' && typeof c.body === 'string' && c.body.trim().length > 0,
+  )
 
   return (
     <>
@@ -180,69 +179,41 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
           right: 0,
           bottom: 0,
           width: 'min(560px, 92vw)',
-          borderRadius: 0,
+          borderTopLeftRadius: 16,
+          borderBottomLeftRadius: 16,
           zIndex: 61,
           display: 'flex',
           flexDirection: 'column',
+          overflow: 'hidden',
         }}
       >
         <div
           style={{
-            height: 48,
+            height: 56,
             flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '0 14px',
-            borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+            gap: 12,
+            padding: '0 12px 0 20px',
+            borderBottom: '1px solid var(--border)',
           }}
         >
           <span
+            className="truncate font-display font-bold text-foreground"
             style={{
-              fontSize: 14,
-              fontWeight: 600,
-              fontFamily: 'var(--font-display)',
-              letterSpacing: '-0.01em',
-              color: 'var(--foreground)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              fontSize: 16,
+              letterSpacing: '-0.02em',
             }}
           >
             {task?.title ?? 'Task'}
           </span>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              width: 28,
-              height: 28,
-              borderRadius: 7,
-              border: 'none',
-              background: 'transparent',
-              color: muted(0.5),
-              cursor: 'pointer',
-              transition: 'background var(--motion-fast), color var(--motion-fast)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgb(var(--foreground-rgb) / 0.06)'
-              e.currentTarget.style.color = 'var(--foreground)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.color = muted(0.5)
-            }}
-          >
-            <X size={16} />
-          </button>
+          <IconButton variant="ghost" size="sm" label="Close" onClick={onClose}>
+            <X size={16} strokeWidth={2} />
+          </IconButton>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 32px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 36px' }}>
           {loading ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               {[0, 1, 2].map((s) => (
@@ -261,6 +232,22 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
             />
           ) : (
             <>
+              {agentOutputs.length > 0 && (
+                <Section icon={<FileText size={13} />} title="Output">
+                  <div className="flex flex-col gap-2">
+                    {agentOutputs.map((c, i) => (
+                      <div
+                        key={i}
+                        className="whitespace-pre-wrap break-words rounded-xl border border-border bg-surface p-3 text-[13px] leading-relaxed text-foreground/85"
+                        style={{ fontFamily: 'var(--font-body)' }}
+                      >
+                        {c.body}
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+
               <Section icon={<ListChecks size={13} />} title="Overview">
                 {kv('Status', task.status)}
                 {kv('Assignee', String(task['assigneeAgentId'] ?? '—'))}
@@ -307,9 +294,9 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
                       </ul>
                     )}
                     {(verdict.attempts?.[0]?.critic?.findings ?? []).map((fnd, i) => (
-                      <div key={i} style={{ marginTop: 6, fontSize: 11, color: muted(0.7) }}>
-                        <strong style={{ color: 'var(--primary)' }}>{fnd.severity}</strong> —{' '}
-                        {fnd.title}
+                      <div key={i} className="mt-1.5 text-[11px] text-foreground/70">
+                        <strong className="font-semibold text-foreground/85">{fnd.severity}</strong>{' '}
+                        — {fnd.title}
                       </div>
                     ))}
                   </div>
@@ -374,41 +361,25 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
                 title={`Execution ledger (${executions.length})`}
               >
                 {executions.length === 0 ? (
-                  <div style={{ fontSize: 11, color: muted(0.4) }}>No runs recorded.</div>
+                  <div className="text-[11px] text-foreground/40">No runs recorded.</div>
                 ) : (
                   executions.map((ex) => (
-                    <div
-                      key={ex.id}
-                      style={{
-                        fontSize: 11,
-                        padding: '6px 0',
-                        borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)',
-                      }}
-                    >
-                      <span style={{ color: 'var(--foreground)', fontWeight: 600 }}>
+                    <div key={ex.id} className="border-t border-border py-2 text-[11px]">
+                      <span className="font-semibold text-foreground">
                         {ex.executorType ?? 'runtime'}
                       </span>{' '}
-                      <span style={{ color: muted(0.5) }}>{ex.status}</span>
+                      <span className="text-foreground/50">{ex.status}</span>
                       {typeof ex.costUsd === 'number' && (
-                        <span style={{ color: muted(0.5) }}> · ${ex.costUsd.toFixed(4)}</span>
+                        <span className="font-data text-foreground/50"> · ${ex.costUsd.toFixed(4)}</span>
                       )}
                       {(ex.inputTokens != null || ex.outputTokens != null) && (
-                        <span style={{ color: muted(0.4) }}>
+                        <span className="font-data text-foreground/40">
                           {' '}
                           · {ex.inputTokens ?? 0}↓ {ex.outputTokens ?? 0}↑ tok
                         </span>
                       )}
                       {ex.error && (
-                        <div
-                          className="font-data"
-                          style={{
-                            marginTop: 3,
-                            fontSize: 10.5,
-                            color: 'var(--primary)',
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-word',
-                          }}
-                        >
+                        <div className="font-data mt-1 whitespace-pre-wrap break-words text-[10.5px] text-destructive">
                           {ex.error}
                         </div>
                       )}
@@ -430,12 +401,20 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
                       key={i}
                       style={{
                         fontSize: 11.5,
-                        padding: '6px 0',
-                        borderTop: '1px solid rgb(var(--foreground-rgb) / 0.05)',
+                        padding: '8px 0',
+                        borderTop: '1px solid var(--border)',
                       }}
                     >
                       <span style={{ color: muted(0.4) }}>{c.authorType ?? 'system'}: </span>
-                      <span style={{ color: muted(0.75) }}>{c.body}</span>
+                      <span
+                        style={{
+                          color: muted(0.75),
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {c.body}
+                      </span>
                     </div>
                   ))
                 )}

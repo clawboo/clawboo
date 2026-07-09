@@ -2,6 +2,7 @@ import { motion } from 'framer-motion'
 import { useMemo } from 'react'
 import { BooAvatar } from '@clawboo/ui'
 import type { AgentCatalogEntry } from '@/features/teams/types'
+import { Button } from '@/features/shared/Button'
 import { SOURCE_META, TEMPLATE_CATEGORIES, teamsContainingAgent } from './teamCatalog'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
@@ -44,73 +45,34 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18, delay: Math.min(index * 0.02, 0.4) }}
-      style={{
-        background: 'var(--surface-raised)',
-        border: `1px solid ${agent.color}25`,
-        borderRadius: 10,
-        padding: '14px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        boxShadow: 'var(--shadow-raised)',
-        transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = `${agent.color}45`
-        e.currentTarget.style.boxShadow = 'var(--shadow-floating)'
-        e.currentTarget.style.transform = 'translateY(-1px)'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = `${agent.color}25`
-        e.currentTarget.style.boxShadow = 'var(--shadow-raised)'
-        e.currentTarget.style.transform = 'translateY(0)'
-      }}
+      className="group flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
     >
       {/* Top row: avatar + name + role */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ flexShrink: 0 }}>
+      <div className="flex items-center gap-3">
+        <div className="shrink-0">
           <BooAvatar seed={agent.name} size={40} />
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="min-w-0 flex-1">
           <div
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--foreground)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
+            className="truncate text-[14px] font-semibold text-foreground"
+            style={{ letterSpacing: '-0.01em' }}
           >
             {agent.name}
           </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: 'rgb(var(--foreground-rgb) / 0.45)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {agent.role}
-          </div>
+          <div className="truncate text-[12px] text-foreground/50">{agent.role}</div>
         </div>
       </div>
 
       {/* Badge row: source + domain + category */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div className="flex flex-wrap items-center gap-1.5">
         {sourceMeta && (
           <span
+            className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
             style={{
-              fontSize: 9,
-              fontWeight: 600,
               color: sourceMeta.color,
               background: `${sourceMeta.color}18`,
-              border: `1px solid ${sourceMeta.color}35`,
-              borderRadius: 4,
-              padding: '1px 6px',
-              whiteSpace: 'nowrap',
+              borderColor: `${sourceMeta.color}35`,
               letterSpacing: '0.03em',
             }}
           >
@@ -118,30 +80,23 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
           </span>
         )}
         <span
+          className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-medium uppercase"
           style={{
-            fontSize: 9,
-            fontWeight: 500,
             color: `${agent.color}cc`,
             background: `${agent.color}14`,
-            border: `1px solid ${agent.color}30`,
-            borderRadius: 4,
-            padding: '1px 6px',
-            whiteSpace: 'nowrap',
+            borderColor: `${agent.color}30`,
             letterSpacing: '0.03em',
           }}
         >
           {formatDomain(agent.domain)}
         </span>
-        <span style={{ fontSize: 10, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
-          {getCategoryLabel(agent.category)}
-        </span>
+        <span className="text-[10px] text-foreground/35">{getCategoryLabel(agent.category)}</span>
       </div>
 
       {/* Description */}
       <div
+        className="text-[12.5px] text-foreground/55"
         style={{
-          fontSize: 12,
-          color: 'rgb(var(--foreground-rgb) / 0.5)',
           lineHeight: 1.5,
           display: '-webkit-box',
           WebkitLineClamp: 2,
@@ -153,73 +108,24 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
       </div>
 
       {/* Stats row */}
-      <div
-        style={{
-          fontSize: 10.5,
-          color: 'rgb(var(--foreground-rgb) / 0.4)',
-          display: 'flex',
-          gap: 10,
-        }}
-      >
+      <div className="font-data flex gap-2.5 text-[11px] text-foreground/40">
         <span>
           {skillCount} skill{skillCount === 1 ? '' : 's'}
         </span>
-        <span>•</span>
+        <span className="text-foreground/25">•</span>
         <span>
           in {teamCount} team{teamCount === 1 ? '' : 's'}
         </span>
       </div>
 
       {/* Button row */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 2 }}>
-        <button
-          onClick={() => onDetails(agent)}
-          style={{
-            background: 'transparent',
-            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-            color: 'rgb(var(--foreground-rgb) / 0.55)',
-            fontSize: 11,
-            fontWeight: 500,
-            padding: '4px 10px',
-            borderRadius: 6,
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            whiteSpace: 'nowrap',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.18)'
-            e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.75)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.08)'
-            e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.55)'
-          }}
-        >
+      <div className="mt-0.5 flex justify-end gap-2">
+        <Button variant="outline" size="sm" onClick={() => onDetails(agent)}>
           Details
-        </button>
-        <button
-          onClick={() => onDeploy(agent)}
-          style={{
-            background: `${agent.color}20`,
-            border: `1px solid ${agent.color}40`,
-            color: agent.color,
-            fontSize: 11,
-            fontWeight: 600,
-            padding: '4px 12px',
-            borderRadius: 6,
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            whiteSpace: 'nowrap',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = `${agent.color}35`
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = `${agent.color}20`
-          }}
-        >
+        </Button>
+        <Button variant="primary" size="sm" onClick={() => onDeploy(agent)}>
           Deploy
-        </button>
+        </Button>
       </div>
     </motion.div>
   )

@@ -180,9 +180,13 @@ export async function connectToMockGateway(
     data: { gatewayUrl, gatewayToken: '' },
   })
 
-  // Mark as onboarded to skip the onboarding wizard
+  // Mark as onboarded to skip the onboarding wizard, and mark the one-time
+  // first-run affordances (capability tour + guided-first-task hint) as seen so
+  // they don't overlay/prefill during e2e interactions.
   await page.addInitScript(() => {
     localStorage.setItem('clawboo.onboarded', '1')
+    localStorage.setItem('clawboo.tour.shown', '1')
+    localStorage.setItem('clawboo.firstTask.shown', '1')
   })
 
   // Intercept system status to prevent "Gateway Offline" overlay from blocking auto-connect.

@@ -4,7 +4,12 @@
 // (apps/web/server/lib/runtimes/descriptor.ts); the LIVE install/auth status
 // comes from GET /api/runtimes at runtime.
 
-export type RuntimeId = 'claude-code' | 'codex' | 'hermes' | 'clawboo-native'
+// The connectable-runtime id union is owned by @clawboo/control-client (the shared
+// client) so the runtimes REST wrappers and this display catalog share ONE
+// definition. Imported for local use here + re-exported so existing
+// `import type { RuntimeId } from '.../runtimeCatalog'` sites are unchanged.
+import type { RuntimeId } from '@clawboo/control-client'
+export type { RuntimeId }
 export type RuntimeAuthKind = 'api-key' | 'oauth' | 'none'
 
 export interface RuntimeCatalogEntry {
@@ -25,6 +30,9 @@ export interface RuntimeCatalogEntry {
   /** Ships inside the clawboo server — always installed. */
   builtIn?: boolean
   docsUrl: string
+  /** Console URL where the user can mint an API key (api-key runtimes only;
+   *  absent for oauth runtimes like Codex). Shown as a "Get a key ↗" link. */
+  keyUrl?: string
   /** Capability hint shown as chips until live caps arrive from the server. */
   capabilityHint: { streaming: boolean; mcp: boolean; worktrees: boolean; resume: boolean }
 }
@@ -40,6 +48,7 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
     keyPlaceholder: 'sk-ant-…',
     builtIn: true,
     docsUrl: 'https://github.com/clawboo/clawboo',
+    keyUrl: 'https://console.anthropic.com/settings/keys',
     capabilityHint: { streaming: true, mcp: true, worktrees: true, resume: true },
   },
   'claude-code': {
@@ -52,6 +61,7 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
     keyPlaceholder: 'sk-ant-…',
     installCommand: 'npm install -g @anthropic-ai/claude-code',
     docsUrl: 'https://docs.claude.com/en/docs/claude-code/overview',
+    keyUrl: 'https://console.anthropic.com/settings/keys',
     capabilityHint: { streaming: true, mcp: true, worktrees: true, resume: true },
   },
   codex: {
@@ -73,8 +83,26 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
     keyPlaceholder: 'sk-or-…',
     installCommand: 'pipx install hermes-agent',
     docsUrl: 'https://pypi.org/project/hermes-agent/',
+    keyUrl: 'https://openrouter.ai/keys',
     capabilityHint: { streaming: false, mcp: true, worktrees: true, resume: true },
   },
 }
 
 export const RUNTIME_ORDER: RuntimeId[] = ['clawboo-native', 'claude-code', 'codex', 'hermes']
+
+/**
+ * Console URLs where a user can mint an API key, keyed by the lowercase
+ * provider slug the native runtime + connect endpoints use. Drives the
+ * "Get a key ↗" affordance next to the ConfigureNativeStep provider pills.
+ * Keyless providers (e.g. ollama) have no entry.
+ */
+export const PROVIDER_KEY_URLS: Record<string, string> = {
+  anthropic: 'https://console.anthropic.com/settings/keys',
+  openai: 'https://platform.openai.com/api-keys',
+  openrouter: 'https://openrouter.ai/keys',
+}
+
+/** The "get a key" console URL for a provider slug, or undefined if keyless. */
+export function getKeyUrl(provider: string): string | undefined {
+  return PROVIDER_KEY_URLS[provider]
+}

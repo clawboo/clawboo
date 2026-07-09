@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { useMemo } from 'react'
 import type { TeamTemplate, ProfileLike } from '@/features/teams/types'
+import { Button } from '@/features/shared/Button'
 import { SOURCE_META, TEMPLATE_CATEGORIES, resolveTeamAgents } from './teamCatalog'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
@@ -33,50 +34,25 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
-      style={{
-        background: 'var(--surface-raised)',
-        border: `1px solid ${profile.color}25`,
-        borderRadius: 10,
-        padding: '14px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        boxShadow: 'var(--shadow-raised)',
-        transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = `${profile.color}45`
-        e.currentTarget.style.boxShadow = 'var(--shadow-floating)'
-        e.currentTarget.style.transform = 'translateY(-1px)'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = `${profile.color}25`
-        e.currentTarget.style.boxShadow = 'var(--shadow-raised)'
-        e.currentTarget.style.transform = 'translateY(0)'
-      }}
+      className="group flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
     >
-      {/* Top row: emoji + name + agent count */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* Top row: emoji tile + name + agent count */}
+      <div className="flex items-center gap-2.5">
         <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: `${profile.color}20`,
-            fontSize: 16,
-            flexShrink: 0,
-          }}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[17px]"
+          style={{ background: `${profile.color}20` }}
         >
           {profile.emoji}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
+        <div className="min-w-0 flex-1">
+          <div
+            className="truncate text-[14px] font-semibold text-foreground"
+            style={{ letterSpacing: '-0.01em' }}
+          >
             {profile.name}
           </div>
-          <div style={{ fontSize: 10, color: 'rgb(var(--foreground-rgb) / 0.45)' }}>
+          <div className="font-data text-[11px] text-foreground/45">
             {resolved.length} agent{resolved.length !== 1 ? 's' : ''}
           </div>
         </div>
@@ -84,17 +60,13 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
 
       {/* Source badge + category + synthetic pill */}
       {isTpl && sourceMeta && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <div className="flex flex-wrap items-center gap-1.5">
           <span
+            className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
             style={{
-              fontSize: 9,
-              fontWeight: 600,
               color: sourceMeta.color,
               background: `${sourceMeta.color}18`,
-              border: `1px solid ${sourceMeta.color}35`,
-              borderRadius: 4,
-              padding: '1px 6px',
-              whiteSpace: 'nowrap',
+              borderColor: `${sourceMeta.color}35`,
               letterSpacing: '0.03em',
             }}
           >
@@ -102,22 +74,17 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
           </span>
           {isSynthetic && (
             <span
+              className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase text-amber"
               style={{
-                fontSize: 9,
-                fontWeight: 600,
-                color: 'var(--amber)',
                 background: 'rgb(var(--amber-rgb) / 0.12)',
-                border: '1px solid rgb(var(--amber-rgb) / 0.35)',
-                borderRadius: 4,
-                padding: '1px 6px',
-                whiteSpace: 'nowrap',
+                borderColor: 'rgb(var(--amber-rgb) / 0.35)',
                 letterSpacing: '0.03em',
               }}
             >
               Synthetic
             </span>
           )}
-          <span style={{ fontSize: 10, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
+          <span className="text-[10px] text-foreground/35">
             {getCategoryLabel(profile.category)}
           </span>
         </div>
@@ -125,9 +92,8 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
 
       {/* Description */}
       <div
+        className="text-[12.5px] text-foreground/55"
         style={{
-          fontSize: 12,
-          color: 'rgb(var(--foreground-rgb) / 0.5)',
           lineHeight: 1.5,
           display: '-webkit-box',
           WebkitLineClamp: 2,
@@ -139,96 +105,38 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
       </div>
 
       {/* Agent roles */}
-      <div
-        style={{
-          fontSize: 11,
-          color: 'rgb(var(--foreground-rgb) / 0.35)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
+      <div className="truncate text-[11px] text-foreground/40">
         {resolved.map((a) => a.role || a.name).join(', ')}
       </div>
 
       {/* Bottom row: tags + buttons */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div className="mt-0.5 flex items-center gap-2">
         {/* Tag pills (first 3) */}
         {isTpl && (
-          <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          <div className="flex min-w-0 flex-1 gap-1.5 overflow-hidden">
             {profile.tags.slice(0, 3).map((tag) => (
               <span
                 key={tag}
-                style={{
-                  fontSize: 9,
-                  padding: '1px 6px',
-                  borderRadius: 10,
-                  background: 'rgb(var(--foreground-rgb) / 0.04)',
-                  border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                  color: 'rgb(var(--foreground-rgb) / 0.35)',
-                  whiteSpace: 'nowrap',
-                }}
+                className="whitespace-nowrap rounded-full border border-border bg-foreground/[0.03] px-2 py-0.5 text-[9px] text-foreground/40"
               >
                 {tag}
               </span>
             ))}
           </div>
         )}
-        {!isTpl && <div style={{ flex: 1 }} />}
+        {!isTpl && <div className="flex-1" />}
 
         {/* Details button */}
         {isTpl && (
-          <button
-            onClick={() => onDetails(profile)}
-            style={{
-              background: 'transparent',
-              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-              color: 'rgb(var(--foreground-rgb) / 0.55)',
-              fontSize: 11,
-              fontWeight: 500,
-              padding: '4px 10px',
-              borderRadius: 6,
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-              whiteSpace: 'nowrap',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.18)'
-              e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.75)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.08)'
-              e.currentTarget.style.color = 'rgb(var(--foreground-rgb) / 0.55)'
-            }}
-          >
+          <Button variant="outline" size="sm" onClick={() => onDetails(profile)}>
             Details
-          </button>
+          </Button>
         )}
 
         {/* Deploy button */}
-        <button
-          onClick={() => onDeploy(profile)}
-          style={{
-            background: `${profile.color}20`,
-            border: `1px solid ${profile.color}40`,
-            color: profile.color,
-            fontSize: 11,
-            fontWeight: 600,
-            padding: '4px 12px',
-            borderRadius: 6,
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            whiteSpace: 'nowrap',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = `${profile.color}35`
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = `${profile.color}20`
-          }}
-        >
+        <Button variant="primary" size="sm" onClick={() => onDeploy(profile)}>
           Deploy
-        </button>
+        </Button>
       </div>
     </motion.div>
   )

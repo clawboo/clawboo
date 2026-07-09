@@ -198,7 +198,7 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search emoji…"
-                className="w-full rounded-md border border-border bg-foreground/[0.03] px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-secondary/50 focus:border-foreground/20"
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
               />
             </div>
 
@@ -206,7 +206,7 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
             <div style={{ overflowY: 'auto', padding: 8, flex: 1 }}>
               {results ? (
                 results.length === 0 ? (
-                  <p className="px-1 py-6 text-center text-[11px] text-secondary/60">
+                  <p className="px-1 py-6 text-center text-[11px] text-foreground/50">
                     No emoji found — paste your own below.
                   </p>
                 ) : (
@@ -215,7 +215,7 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
               ) : (
                 EMOJI_CATEGORIES.map((cat) => (
                   <div key={cat.id} style={{ marginBottom: 8 }}>
-                    <div className="mb-1 px-0.5 text-[10px] font-medium uppercase tracking-wider text-secondary/60">
+                    <div className="mb-1 px-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
                       {cat.label}
                     </div>
                     <EmojiGrid emojis={cat.emojis} value={value} onPick={choose} />
@@ -229,7 +229,7 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
               className="flex items-center gap-2"
               style={{ padding: 8, borderTop: '1px solid var(--border)' }}
             >
-              <span className="text-[10px] font-medium uppercase tracking-wider text-secondary/60">
+              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
                 Custom
               </span>
               <input
@@ -240,7 +240,7 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
                   if (v) onChange(v)
                 }}
                 placeholder="Paste any emoji"
-                className="min-w-0 flex-1 rounded-md border border-border bg-foreground/[0.03] px-2 py-1 text-center text-[14px] outline-none placeholder:text-[11px] placeholder:text-secondary/50 focus:border-foreground/20"
+                className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 py-1.5 text-center text-[14px] outline-none transition placeholder:text-[11px] placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
               />
             </div>
           </div>,

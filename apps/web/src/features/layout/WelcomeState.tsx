@@ -3,10 +3,12 @@ import { motion } from 'framer-motion'
 import { BarChart3, Globe, Loader2, ShoppingCart, type LucideIcon } from 'lucide-react'
 import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useConnectionStore } from '@/stores/connection'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
-import { consumeSSE } from '@/lib/sseClient'
+import { consumeApiSSE } from '@clawboo/control-client'
 import { SkyAtmosphere } from '@/features/atmosphere'
+import { Button } from '@/features/shared/Button'
 import type { SystemInfo } from '@/stores/system'
 
 // ─── System Status Hint ──────────────────────────────────────────────────────
@@ -43,7 +45,7 @@ function SystemHint({ isConnected }: { isConnected: boolean }) {
     setStartingGw(true)
     setStartError(null)
     sseRef.current?.abort()
-    sseRef.current = consumeSSE(
+    sseRef.current = consumeApiSSE(
       '/api/system/gateway',
       {
         method: 'POST',
@@ -207,15 +209,15 @@ export function WelcomeState() {
 
       {/* Quick-start steps */}
       {isConnected && (
-        <div className="relative z-10 flex w-full max-w-[340px] flex-col gap-3 text-left">
+        <div className="relative z-10 flex w-full max-w-[340px] flex-col gap-3.5 text-left">
           {steps.map((step) => (
             <div key={step.num} className="flex items-start gap-3">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[12px] font-bold text-primary">
+              <div className="font-data flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[12px] font-bold text-primary ring-1 ring-primary/25">
                 {step.num}
               </div>
               <div className="flex-1 pt-0.5">
                 <span
-                  className="text-[13px]"
+                  className="text-[13.5px]"
                   style={{
                     color: 'rgba(30,37,64,0.82)',
                     textShadow: '0 1px 10px rgba(255,255,255,0.7)',
@@ -226,7 +228,7 @@ export function WelcomeState() {
                 {step.action && (
                   <button
                     onClick={step.action}
-                    className="mt-1 block border-none bg-transparent p-0 text-[11px] font-semibold text-primary"
+                    className="mt-1 block cursor-pointer border-none bg-transparent p-0 text-[12px] font-semibold text-primary transition-opacity hover:opacity-80"
                   >
                     {step.actionLabel} →
                   </button>
@@ -239,22 +241,16 @@ export function WelcomeState() {
 
       {/* Primary CTA when no teams */}
       {isConnected && !hasTeams && (
-        <motion.button
-          onClick={() => setShowCreateModal(true)}
+        <motion.div
+          className="relative z-10 mt-2"
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, duration: 0.3, ease: 'easeOut' }}
-          whileHover={{ y: -1 }}
-          whileTap={{ scale: 0.98 }}
-          className="relative z-10 mt-2 rounded-xl border-none bg-primary px-6 py-3 text-[14px] font-semibold text-primary-foreground"
-          style={{
-            boxShadow:
-              '0 8px 24px rgb(var(--primary-rgb) / 0.3), 0 0 0 1px rgb(var(--primary-rgb) / 0.15)',
-            transition: 'box-shadow var(--motion-base)',
-          }}
         >
-          Create your first team
-        </motion.button>
+          <Button variant="primary" size="lg" onClick={() => setShowCreateModal(true)}>
+            Create your first team
+          </Button>
+        </motion.div>
       )}
 
       {/* Nav shortcuts when teams exist */}
@@ -271,13 +267,17 @@ export function WelcomeState() {
             return (
               <button
                 key={item.view}
-                onClick={() => useViewStore.getState().navigateTo(item.view)}
-                className="flex items-center gap-2 rounded-lg border border-[rgba(30,37,64,0.14)] bg-[rgba(255,255,255,0.45)] px-3.5 py-1.5 text-[12px] text-[rgba(30,37,64,0.7)] transition-all duration-150 hover:border-[rgba(30,37,64,0.28)] hover:text-[rgba(30,37,64,0.92)]"
+                onClick={() =>
+                  item.view === 'cost'
+                    ? useSettingsModalStore.getState().openSettings('cost')
+                    : useViewStore.getState().navigateTo(item.view)
+                }
+                className="flex cursor-pointer items-center gap-2 rounded-xl border border-[rgba(30,37,64,0.14)] bg-[rgba(255,255,255,0.55)] px-4 py-2 text-[13px] font-medium text-[rgba(30,37,64,0.72)] shadow-sm backdrop-blur-sm transition-all duration-150 hover:-translate-y-px hover:border-[rgba(30,37,64,0.28)] hover:text-[rgba(30,37,64,0.92)]"
                 style={{
                   transitionTimingFunction: 'var(--motion-easing-standard)',
                 }}
               >
-                <Icon size={13} strokeWidth={1.75} aria-hidden />
+                <Icon size={14} strokeWidth={2} aria-hidden />
                 {item.label}
               </button>
             )

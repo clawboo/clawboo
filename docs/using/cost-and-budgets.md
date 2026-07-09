@@ -22,7 +22,7 @@ The Cost view is global on purpose; it shows every team's usage, not just the se
 
 ## The Cost dashboard (Tokens Used)
 
-Open it from the **Cost** nav button. The toolbar reads **Tokens Used**; the body is "Token usage by team and agent."
+Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Tokens Used** under the Insights group. The toolbar reads **Tokens Used**; the body is "Token usage by team and agent."
 
 ![Clawboo dashboard showing teams and live agent activity](/images/team-space.png)
 
@@ -46,7 +46,7 @@ The dashboard is token-first. The underlying records also carry a `costUsd` valu
 
 ## Setting a USD budget
 
-Open the **Governance** nav button. The toolbar shows **Governance** and a `N budgets` pill. The **Budgets** section is where you create, raise, and resume budgets.
+Open **Settings**, then **Governance** under the Insights group. The toolbar shows **Governance** and a `N budgets` pill. The **Budgets** section is where you create, raise, and resume budgets.
 
 The default posture is **track-and-warn**: out of the box nothing pauses your agents. You choose the posture per budget when you create it.
 
@@ -112,7 +112,7 @@ A cap hit is logged to the audit feed below the caps (a `cap_hit` event).
 
 ## Verify it worked
 
-- **Cost dashboard**: after a run completes, re-open **Cost**. The summary cards and the team breakdown should reflect the new tokens; the 30-day line should pick up today's bucket. The dashboard fetches `/api/cost-records/summary` on mount.
+- **Cost dashboard**: after a run completes, re-open **Settings → Tokens Used**. The summary cards and the team breakdown should reflect the new tokens; the 30-day line should pick up today's bucket. The dashboard fetches `/api/cost-records/summary` on mount.
 - **Budgets**: the new budget appears in the **Budgets** list (the panel polls `GET /api/governance/budgets` every five seconds). Its `spent / cap` line and percent bar move as runs in that scope record spend. A `cap` budget that crosses 100% flips to `paused`; a `warn` budget never pauses.
 - **Audit**: budget threshold crossings, cap hits, and resumes land in the **Audit log** at the bottom of Governance as `budget` / `cap_hit` events. Filter by agent id, event type, or a time window (1h / 24h / 7d / All).
 

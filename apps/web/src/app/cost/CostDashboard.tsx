@@ -8,12 +8,16 @@ import {
   Line,
   CartesianGrid,
 } from 'recharts'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight } from 'lucide-react'
 import { formatTokens } from '@/features/cost/costUtils'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { PanelHeader } from '@/features/shared/PanelHeader'
+import { EmptyState } from '@/features/shared/EmptyState'
+import { FormattedAlert } from '@/features/shared/FormattedAlert'
+import { Skeleton } from '@/features/shared/Skeleton'
 
 // ─── API response types ─────────────────────────────────────────────────────
 
@@ -50,12 +54,12 @@ function SummaryCard({ label, tokens }: { label: string; tokens: number }) {
   const color = tokenColor(tokens)
   return (
     <div
-      className="surface-raised-tier"
+      className="rounded-2xl border border-border bg-surface"
       style={{
         flex: 1,
-        minWidth: 140,
-        borderRadius: 12,
-        padding: '16px 20px',
+        minWidth: 150,
+        padding: '18px 22px',
+        boxShadow: 'var(--shadow-raised)',
         transition: 'transform var(--motion-fast), box-shadow var(--motion-fast)',
       }}
       onMouseEnter={(e) => {
@@ -68,27 +72,25 @@ function SummaryCard({ label, tokens }: { label: string; tokens: number }) {
       }}
     >
       <div
+        className="font-mono uppercase"
         style={{
           fontSize: 11,
           fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
+          letterSpacing: '0.14em',
           color: 'rgb(var(--foreground-rgb) / 0.45)',
-          marginBottom: 8,
-          fontFamily: 'var(--font-geist-mono, monospace)',
+          marginBottom: 10,
         }}
       >
         {label}
       </div>
       <div
+        className="font-data"
         style={{
-          fontSize: 26,
+          fontSize: 28,
           fontWeight: 700,
           color,
           lineHeight: 1,
           marginBottom: 4,
-          fontFamily: 'var(--font-display)',
-          fontVariantNumeric: 'tabular-nums',
           letterSpacing: '-0.02em',
         }}
       >
@@ -385,72 +387,32 @@ export function CostDashboard() {
         color: 'var(--foreground)',
       }}
     >
-      {/* Fixed top toolbar — matches Atlas / Marketplace / Approvals /
-          Scheduler patterns. 44 px height, padding 0 12 px, border-b. The
-          GitHub Star pill sits at right:12 top:6 within this toolbar — same
-          coordinates as every other view. The big "page heading" treatment
-          this view used to have (h1 + subtitle) is folded into the toolbar
-          as a compact title (the subtitle moves into the body as a kicker). */}
-      <div
-        style={{
-          height: 44,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            style={{ fontSize: 12, fontWeight: 600, color: 'rgb(var(--foreground-rgb) / 0.5)' }}
-          >
-            Tokens Used
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <GitHubStarButton />
-        </div>
-      </div>
+      <PanelHeader
+        title="Tokens Used"
+        subtitle="Token usage by team and agent"
+        icon={BarChart3}
+        size="md"
+        border
+        actions={<GitHubStarButton />}
+      />
 
       {/* Scrollable body */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
-        <p
-          style={{
-            fontSize: 12,
-            color: 'rgb(var(--foreground-rgb) / 0.45)',
-            margin: '0 0 20px',
-          }}
-        >
-          Token usage by team and agent
-        </p>
-
         {loading && (
-          <div
-            style={{
-              textAlign: 'center',
-              padding: '60px 0',
-              color: 'rgb(var(--foreground-rgb) / 0.4)',
-            }}
-          >
-            Loading token data...
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} height={92} width="30%" radius={16} />
+              ))}
+            </div>
+            <Skeleton height={220} radius={16} />
           </div>
         )}
 
         {error && (
-          <div
-            style={{
-              background: 'rgb(var(--primary-rgb) / 0.08)',
-              border: '1px solid rgb(var(--primary-rgb) / 0.3)',
-              borderRadius: 8,
-              padding: '12px 16px',
-              color: 'var(--primary)',
-              fontSize: 13,
-            }}
-          >
+          <FormattedAlert tone="error" style={{ marginBottom: 20 }}>
             {error}
-          </div>
+          </FormattedAlert>
         )}
 
         {!loading && !error && data && (
@@ -464,39 +426,33 @@ export function CostDashboard() {
 
             {/* Team Breakdown */}
             <div
+              className="rounded-2xl border border-border bg-surface"
               style={{
-                background: 'var(--card)',
-                borderRadius: 12,
-                border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
                 padding: '20px 20px 12px',
                 marginBottom: 20,
+                boxShadow: 'var(--shadow-raised)',
               }}
             >
               <h2
+                className="font-mono uppercase"
                 style={{
-                  fontSize: 13,
+                  fontSize: 11,
                   fontWeight: 600,
-                  color: 'rgb(var(--foreground-rgb) / 0.65)',
-                  margin: '0 0 12px',
-                  fontFamily: 'var(--font-geist-mono, monospace)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
+                  color: 'rgb(var(--foreground-rgb) / 0.45)',
+                  margin: '0 0 16px',
+                  letterSpacing: '0.14em',
                 }}
               >
                 Tokens by Team
               </h2>
 
               {teamGroups.length === 0 ? (
-                <div
-                  style={{
-                    textAlign: 'center',
-                    padding: '32px 0',
-                    color: 'rgb(var(--foreground-rgb) / 0.3)',
-                    fontSize: 13,
-                  }}
-                >
-                  No token records yet. Start chatting with your Boos to track usage.
-                </div>
+                <EmptyState
+                  icon={BarChart3}
+                  title="No token records yet"
+                  helper="Start chatting with your Boos to track usage."
+                  paddingTop={28}
+                />
               ) : (
                 teamGroups.map((group) => (
                   <TeamSection key={group.teamId ?? 'none'} group={group} />
@@ -506,22 +462,17 @@ export function CostDashboard() {
 
             {/* Token Trend — 30 day line chart */}
             <div
-              style={{
-                background: 'var(--card)',
-                borderRadius: 12,
-                border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                padding: '20px 20px 12px',
-              }}
+              className="rounded-2xl border border-border bg-surface"
+              style={{ padding: '20px 20px 12px', boxShadow: 'var(--shadow-raised)' }}
             >
               <h2
+                className="font-mono uppercase"
                 style={{
-                  fontSize: 13,
+                  fontSize: 11,
                   fontWeight: 600,
-                  color: 'rgb(var(--foreground-rgb) / 0.65)',
+                  color: 'rgb(var(--foreground-rgb) / 0.45)',
                   margin: '0 0 16px',
-                  fontFamily: 'var(--font-geist-mono, monospace)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
+                  letterSpacing: '0.14em',
                 }}
               >
                 Token Usage — Last 30 Days

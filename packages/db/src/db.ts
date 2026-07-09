@@ -190,6 +190,10 @@ export function createDb(dbPath: string): ClawbooDb {
       ON chat_messages (entry_id);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_ts
       ON chat_messages (session_key, timestamp_ms);
+    -- The (session_key, id) tail index for the live SSE stream: each poll
+    -- range-seeks id-greater-than-cursor per member key (O(new-rows), not O(history)).
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id
+      ON chat_messages (session_key, id);
 
     CREATE TABLE IF NOT EXISTS boo_zero_team_briefs (
       team_id    TEXT    PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,

@@ -37,6 +37,7 @@ const makeTeam = (over: Partial<Team>): Team => ({
   agentCount: 0,
   leaderAgentId: null,
   isArchived: false,
+  serverOrchestrated: false,
   ...over,
 })
 

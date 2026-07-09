@@ -1,135 +1,30 @@
-// Browser client for the agent registry-of-record (AgentSource decoupling).
+// Web-only glue over the framework-agnostic agent registry client.
 //
-// The SPA no longer reads agents/files/sessions from the Gateway directly — it
-// reads through these REST wrappers, which the server backs with SQLite (synced
-// from the Gateway server-side). Reads work even when the Gateway is down; writes
-// + file I/O throw on a 503 (gateway disconnected) so existing try/catch + loading
-// states behave as they did with the direct Gateway calls.
+// The pure REST wrappers (list/get/create/archive/files/sessions/sync) moved to
+// `@clawboo/control-client` — import them from there. These two helpers stay in
+// the web app because they hydrate the SPA's Zustand fleet store, which a
+// framework-agnostic package can't own.
 
-import type { AgentFileName, AgentRecord, SessionRecord } from '@clawboo/agent-registry'
+import type { AgentRecord } from '@clawboo/agent-registry'
+import { listAgents } from '@clawboo/control-client'
+
+import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
-
-export interface AgentListResult {
-  defaultId: string
-  mainKey: string
-  agents: AgentRecord[]
-  stale: boolean
-  lastSyncedAt: number | null
-}
-
-async function jsonOrThrow<T>(res: Response, what: string): Promise<T> {
-  if (!res.ok) {
-    let detail = ''
-    try {
-      const body = (await res.json()) as { error?: string }
-      detail = body.error ? `: ${body.error}` : ''
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new Error(`${what} failed (${res.status})${detail}`)
-  }
-  return (await res.json()) as T
-}
-
-const JSON_HEADERS = { 'Content-Type': 'application/json' } as const
-
-export async function listAgents(opts?: {
-  includeArchived?: boolean
-  teamId?: string
-}): Promise<AgentListResult> {
-  const params = new URLSearchParams()
-  if (opts?.includeArchived) params.set('includeArchived', 'true')
-  if (opts?.teamId) params.set('teamId', opts.teamId)
-  const qs = params.toString()
-  const res = await fetch(`/api/agents${qs ? `?${qs}` : ''}`)
-  return jsonOrThrow<AgentListResult>(res, 'List agents')
-}
-
-export async function getAgentRecord(id: string): Promise<AgentRecord | null> {
-  const res = await fetch(`/api/agents/${encodeURIComponent(id)}`)
-  if (res.status === 404) return null
-  const body = await jsonOrThrow<{ agent: AgentRecord }>(res, 'Get agent')
-  return body.agent
-}
-
-export interface CreateAgentRequest {
-  name: string
-  teamId?: string | null
-  personalityConfig?: unknown
-  execConfig?: unknown
-  avatarSeed?: string | null
-  files?: Partial<Record<string, string>>
-}
-
-export async function createAgentRecord(input: CreateAgentRequest): Promise<AgentRecord> {
-  const res = await fetch('/api/agents', {
-    method: 'POST',
-    headers: JSON_HEADERS,
-    body: JSON.stringify(input),
-  })
-  const body = await jsonOrThrow<{ agent: AgentRecord }>(res, 'Create agent')
-  return body.agent
-}
-
-export async function archiveAgentRecord(id: string): Promise<void> {
-  const res = await fetch(`/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' })
-  await jsonOrThrow<{ ok: true }>(res, 'Delete agent')
-}
-
-export async function readAgentFile(
-  agentId: string,
-  name: AgentFileName | string,
-): Promise<string> {
-  const res = await fetch(
-    `/api/agents/${encodeURIComponent(agentId)}/files/${encodeURIComponent(name)}`,
-  )
-  const body = await jsonOrThrow<{ name: string; content: string }>(res, `Read ${name}`)
-  return body.content
-}
-
-export async function writeAgentFile(
-  agentId: string,
-  name: AgentFileName | string,
-  content: string,
-): Promise<void> {
-  const res = await fetch(
-    `/api/agents/${encodeURIComponent(agentId)}/files/${encodeURIComponent(name)}`,
-    {
-      method: 'PUT',
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ content }),
-    },
-  )
-  await jsonOrThrow<{ name: string; content: string }>(res, `Write ${name}`)
-}
-
-export async function listAgentSessions(agentId: string): Promise<SessionRecord[]> {
-  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/sessions`)
-  const body = await jsonOrThrow<{ sessions: SessionRecord[] }>(res, 'List sessions')
-  return body.sessions
-}
-
-/** Browser-fallback sync: push a Gateway agent snapshot to the server so SQLite
- *  stays warm even if the server's own Gateway connection is degraded. */
-export async function pushAgentSync(payload: {
-  defaultId: string
-  mainKey: string
-  scope?: string
-  agents: Array<{ id: string; name?: string; identity?: Record<string, unknown> }>
-}): Promise<void> {
-  await fetch('/api/agents/sync', {
-    method: 'POST',
-    headers: JSON_HEADERS,
-    body: JSON.stringify(payload),
-  }).catch(() => {})
-}
 
 /** List the registry + hydrate the fleet store, merging live store state
  *  (status/model/runId/streamingText/lastSeenAt are event-driven) so a refresh
  *  never clobbers a running agent. Returns the agent count. Shared by the
- *  summary-refresh path + every "refresh after creating a Boo" handler. */
+ *  summary-refresh path + every "refresh after creating a Boo" handler.
+ *
+ *  ALSO identifies Boo Zero from the registry `defaultId` — which the server
+ *  resolves as the runtime-NEUTRAL `resolveBooZero(db)` (override → native →
+ *  OpenClaw), the same value `booZeroForTeam` uses to pick the team leader. This
+ *  is the ONE identification point for NATIVE mode (the Gateway path identifies
+ *  in `hydrateFleetFromClient`); it's idempotent + authoritative in both, so a
+ *  native-first install correctly points at the teamless native Boo Zero instead
+ *  of a leftover OpenClaw agent. */
 export async function refreshFleetFromRegistry(): Promise<number> {
-  const { agents: records } = await listAgents()
+  const { agents: records, defaultId } = await listAgents()
   const existing = new Map(useFleetStore.getState().agents.map((a) => [a.id, a]))
   useFleetStore.getState().hydrateAgents(
     records.map((r) => {
@@ -139,7 +34,10 @@ export async function refreshFleetFromRegistry(): Promise<number> {
         ? {
             ...base,
             status: prev.status,
-            model: prev.model,
+            // OpenClaw model is event-driven (preserve it); a native agent's model is
+            // authoritative from its AgentConfig (record.model = base.model), so take
+            // the fresh value so a server-side change (onboarding / another client) shows.
+            model: r.runtime === 'clawboo-native' ? base.model : prev.model,
             streamingText: prev.streamingText,
             runId: prev.runId,
             lastSeenAt: prev.lastSeenAt,
@@ -147,6 +45,7 @@ export async function refreshFleetFromRegistry(): Promise<number> {
         : base
     }),
   )
+  useBooZeroStore.getState().setBooZeroAgentId(identifyBooZero(records, defaultId || undefined))
   return records.length
 }
 
@@ -158,12 +57,14 @@ export function agentRecordToFleetState(record: AgentRecord): AgentState {
     name: record.displayName,
     status: 'idle',
     sessionKey: record.sessionKey,
-    model: null,
+    // Native agents surface their AgentConfig model; OpenClaw's is event-driven (null here).
+    model: record.model ?? null,
     createdAt: record.createdAt ?? null,
     streamingText: null,
     runId: null,
     lastSeenAt: null,
     teamId: record.teamId,
+    runtime: record.runtime ?? null,
     execConfig: (record.execConfig as { execAsk: string } | null) ?? null,
   }
 }

@@ -1,36 +1,31 @@
-import { listAgents, agentRecordToFleetState } from '@/lib/agentSourceClient'
+import { listAgents } from '@clawboo/control-client'
+import { agentRecordToFleetState } from '@/lib/agentSourceClient'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-  Activity,
-  BarChart3,
-  Brain,
-  Clock,
-  Cpu,
+  ChevronRight,
   Gauge,
   Ghost,
   Globe,
-  HeartPulse,
   KanbanSquare,
-  Lock,
   Plus,
-  Puzzle,
-  Search,
   Settings,
-  ShieldAlert,
   ShoppingCart,
   Trash2,
   type LucideIcon,
 } from 'lucide-react'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { EmptyState } from '@/features/shared/EmptyState'
+import { SearchInput } from '@/features/shared/SearchInput'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useTeamStore, type Team } from '@/stores/team'
 import { useConnectionStore } from '@/stores/connection'
 import { useViewStore, type NavView } from '@/stores/view'
-import { useApprovalsStore } from '@/stores/approvals'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { CreateBooModal } from '@/features/fleet/CreateBooModal'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
+import { useToastStore } from '@/stores/toast'
+import { confirm } from '@/stores/confirm'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { ThemeToggle } from '@/features/theme/ThemeToggle'
 import { aggregateTeamStatus } from '@/lib/teamStatus'
@@ -227,24 +222,62 @@ const PRIMARY_NAV: NavItem[] = [
   // now specifically the org-wide map. Subtitle clarifies that Atlas is
   // cross-team (vs. the per-team Ghost Graph users see inside Group Chat).
   { id: 'graph', label: 'Atlas', icon: Globe, subtitle: '(All Teams)' },
-  { id: 'fleet', label: 'Fleet', icon: Gauge, subtitle: '(Overview)' },
+  { id: 'board', label: 'Board', icon: KanbanSquare },
   { id: 'marketplace', label: 'Marketplace', icon: ShoppingCart },
 ]
 
-const SECONDARY_NAV: NavItem[] = [
-  // Board + Runtimes + Memory + Governance are always-visible: their subsystems
-  // are always on, so each panel renders its real content unconditionally (no
-  // feature gate).
-  { id: 'board', label: 'Board', icon: KanbanSquare },
-  { id: 'runtimes', label: 'Runtimes', icon: Cpu },
-  { id: 'memory', label: 'Memory', icon: Brain },
-  { id: 'governance', label: 'Governance', icon: ShieldAlert },
-  { id: 'capabilities', label: 'Capabilities', icon: Puzzle },
-  { id: 'approvals', label: 'Approvals', icon: Lock },
-  { id: 'scheduler', label: 'Scheduler', icon: Clock },
-  { id: 'cost', label: 'Tokens Used', icon: BarChart3 },
-  { id: 'system', label: 'System', icon: Settings },
-]
+// Second nav block: Fleet + the Settings gear (rendered after this list). Settings
+// opens the modal that houses the management / config / insights surfaces (Runtimes,
+// Memory, Capabilities, Scheduler, Tokens Used, Observability, Governance, System,
+// System Health) so the sidebar stays short.
+// Approvals moved into the Board (a collapsible "Needs approval" column) + inline
+// above the chat composer, so the sidebar no longer carries a separate item.
+const SECONDARY_NAV: NavItem[] = [{ id: 'fleet', label: 'Fleet', icon: Gauge, subtitle: '(Overview)' }]
+
+// One consistent nav row — neutral active surface + a brand-red active icon
+// (the premium sidebar pattern). Used for both nav sections.
+function NavButton({
+  item,
+  active,
+  badge,
+  onClick,
+}: {
+  item: NavItem
+  active: boolean
+  badge?: number
+  onClick: () => void
+}) {
+  const Icon = item.icon
+  return (
+    <button
+      type="button"
+      data-testid={`nav-${item.id}`}
+      onClick={onClick}
+      className={[
+        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors duration-150 cursor-pointer',
+        active
+          ? 'bg-foreground/[0.06] font-semibold text-foreground'
+          : 'font-medium text-foreground/60 hover:bg-foreground/[0.035] hover:text-foreground/90',
+      ].join(' ')}
+    >
+      <Icon
+        size={17}
+        strokeWidth={2}
+        aria-hidden
+        style={{ color: active ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.45)' }}
+      />
+      <span className="truncate">{item.label}</span>
+      {item.subtitle ? (
+        <span className="text-[11px] font-normal text-foreground/40">{item.subtitle}</span>
+      ) : null}
+      {badge ? (
+        <span className="ml-auto flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+          {badge}
+        </span>
+      ) : null}
+    </button>
+  )
+}
 
 // ─── Group chat row ─────────────────────────────────────────────────────────
 //
@@ -282,16 +315,6 @@ const GROUP_CHAT_AVATAR_SIZE = 28
 const GROUP_CHAT_STRIDE = 18 // 28 - 18 = 10px overlap between adjacent avatars
 const GROUP_CHAT_MAX_VISIBLE_NO_OVERFLOW = 4
 const GROUP_CHAT_MAX_VISIBLE_WITH_OVERFLOW = 3
-
-// The avatar-stack column has a FIXED width regardless of how many
-// avatars the team actually contributes — sized to hold the maximum
-// (4 items wide). Without this, smaller teams produced a narrower
-// stack which let the right-side "Group Chat / Idle" text shift left,
-// so the same label rendered at different X positions across teams.
-// A fixed-width left column keeps the label / status badge aligned
-// to the same column edge in every team size.
-const GROUP_CHAT_STACK_WIDTH =
-  GROUP_CHAT_AVATAR_SIZE + (GROUP_CHAT_MAX_VISIBLE_NO_OVERFLOW - 1) * GROUP_CHAT_STRIDE
 
 function orderTeamAgentsForPhoto(team: Team, teamAgents: AgentState[]): AgentState[] {
   if (!team.leaderAgentId) return teamAgents
@@ -335,19 +358,22 @@ function GroupChatRow({
       onClick={onClick}
       title={`${team.name} — Group Chat (${ordered.length} agent${ordered.length === 1 ? '' : 's'})`}
       className={[
-        // py-2 + the right-side label-on-top + status-below stack mirror
-        // the agent rows below exactly — same outer height (~56px) and
-        // same internal vertical rhythm.
-        'group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2',
-        'transition-colors duration-150',
-        isActive ? 'bg-foreground/[0.08] shadow-sm' : 'hover:bg-foreground/[0.04]',
+        // A distinct bordered "entry" card (unlike the borderless agent
+        // rows) so the Group Chat CTA reads as the obvious place to click
+        // into the team. Active = a gentle brand-red tint + red border.
+        'group flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left cursor-pointer',
+        'transition-all duration-150',
+        isActive
+          ? 'border-primary/45 bg-primary/[0.07]'
+          : 'border-border bg-foreground/[0.025] hover:border-border-strong hover:bg-foreground/[0.05]',
       ].join(' ')}
     >
-      {/* Team photo — overlapping Boo avatars on the left. The container
-          has a FIXED width (GROUP_CHAT_STACK_WIDTH) regardless of how
-          many avatars are visible, so the right-side label / status
-          column starts at the same X across every team size. */}
-      <div className="flex items-center" style={{ width: GROUP_CHAT_STACK_WIDTH, flexShrink: 0 }}>
+      {/* Team photo — overlapping Boo avatars on the left. The stack fits
+          its actual avatars (only one Group Chat row is ever visible at a
+          time, so no cross-team alignment is needed) — this keeps the
+          "Group Chat" label snug against the photo instead of leaving a
+          gap sized for a full 4-avatar stack. */}
+      <div className="flex shrink-0 items-center">
         {visible.map((agent, i) => (
           <div
             key={agent.id}
@@ -363,7 +389,7 @@ function GroupChatRow({
               // Earlier (leftmost) avatars sit ON TOP — the leader is at
               // index 0, so they dominate the front of the team photo.
               zIndex: visible.length - i,
-              boxShadow: '0 1px 2px rgb(0 0 0 / 0.25)',
+              boxShadow: 'var(--shadow-raised)',
               background: 'var(--background)',
             }}
           >
@@ -391,18 +417,13 @@ function GroupChatRow({
       </div>
 
       {/* Right side — "Group Chat" name on top, aggregate status badge
-          below. Vertically stacked the same way agent rows lay out
-          [name / status badge], so the Group Chat row reads as a
-          structural peer of the agents listed beneath it.
-          The label has a small NEGATIVE left margin so its first letter
-          sits slightly outside the badge's left edge — closer to where
-          the agent NAME visually anchors on the rows below. The status
-          badge is left untouched at the column's left edge so the
-          status indicator's absolute position is unchanged. */}
+          below, sitting right beside the team photo. */}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <p
-          className="truncate text-[12px] font-medium leading-tight text-text"
-          style={{ fontFamily: 'var(--font-body)', marginLeft: -8 }}
+          className={[
+            'truncate text-[12.5px] font-semibold leading-tight',
+            isActive ? 'text-primary' : 'text-foreground',
+          ].join(' ')}
         >
           Group Chat
         </p>
@@ -410,6 +431,17 @@ function GroupChatRow({
           <StatusBadge status={aggregateStatus} />
         </div>
       </div>
+
+      {/* Trailing chevron — signals this row navigates INTO the team chat
+          (a clear "click me" affordance distinct from the agent rows). */}
+      <ChevronRight
+        size={15}
+        strokeWidth={2.25}
+        className={[
+          'shrink-0 transition-transform duration-150 group-hover:translate-x-0.5',
+          isActive ? 'text-primary' : 'text-foreground/35',
+        ].join(' ')}
+      />
     </button>
   )
 }
@@ -430,12 +462,7 @@ export function AgentListColumn() {
   const client = useConnectionStore((s) => s.client)
 
   const viewMode = useViewStore((s) => s.viewMode)
-  const pendingApprovals = useApprovalsStore((s) => s.pendingApprovals)
-  const secondaryNav = [
-    ...SECONDARY_NAV,
-    { id: 'obs' as const, label: 'Observability', icon: Activity },
-    { id: 'health' as const, label: 'System Health', icon: HeartPulse },
-  ]
+  const settingsOpen = useSettingsModalStore((s) => s.open)
 
   const [query, setQuery] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -516,35 +543,28 @@ export function AgentListColumn() {
   return (
     <div
       className="flex h-full flex-col border-r border-border bg-surface"
-      style={{ width: 208, flexShrink: 0 }}
+      style={{ width: 236, flexShrink: 0 }}
       data-testid="agent-list-column"
     >
       {/* Team header */}
-      <div className="flex items-center justify-between px-3 pb-2 pt-4">
-        <h2
-          className="text-[11px] font-semibold uppercase tracking-widest text-secondary"
-          style={{ fontFamily: 'var(--font-mono)' }}
-        >
+      <div className="flex items-center justify-between px-3.5 pb-2.5 pt-4">
+        <h2 className="truncate font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
           {selectedTeam ? selectedTeam.name : 'All Agents'}
           {filtered.length > 0 && (
-            <span className="ml-1.5 tabular-nums text-secondary/60">({filtered.length})</span>
+            <span className="ml-1.5 tabular-nums text-foreground/30">{filtered.length}</span>
           )}
         </h2>
       </div>
 
       {/* Search */}
-      <div className="px-3 pb-2">
-        <label className="flex items-center gap-2 rounded-md border border-border bg-input px-2.5 py-1.5 focus-within:border-foreground/20 focus-within:ring-1 focus-within:ring-ring/30">
-          <Search className="h-3.5 w-3.5 shrink-0 text-secondary" strokeWidth={2} />
-          <input
-            type="search"
-            placeholder="Search agents…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="min-w-0 flex-1 bg-transparent text-[12px] text-text outline-none placeholder:text-secondary/50"
-            style={{ fontFamily: 'var(--font-body)' }}
-          />
-        </label>
+      <div className="px-3 pb-2.5">
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          placeholder="Search agents…"
+          size="sm"
+          aria-label="Search agents"
+        />
       </div>
 
       {/* Agent list — grows to fill the space between search and the
@@ -614,12 +634,25 @@ export function AgentListColumn() {
                   onSelect={() => handleSelectAgent(agent.id)}
                   onDelete={() => {
                     if (!client) return
-                    if (!window.confirm(`Delete ${agent.name}? This cannot be undone.`)) return
-                    deleteAgentOperation(agent.id, agent.sessionKey).catch((err) => {
-                      alert(
-                        `Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                    void (async () => {
+                      if (
+                        !(await confirm({
+                          title: `Delete ${agent.name}?`,
+                          message: 'This cannot be undone.',
+                          confirmLabel: 'Delete',
+                          tone: 'danger',
+                        }))
                       )
-                    })
+                        return
+                      try {
+                        await deleteAgentOperation(agent.id, agent.sessionKey)
+                      } catch (err) {
+                        useToastStore.getState().addToast({
+                          type: 'error',
+                          message: `Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                        })
+                      }
+                    })()
                   }}
                 />
               ))}
@@ -646,73 +679,59 @@ export function AgentListColumn() {
       {/* Divider between Create Boo and nav */}
       <div className="mx-3 my-2 border-t border-border" />
 
-      {/* Primary nav — Atlas & Marketplace */}
-      <div className="px-2 flex flex-col gap-0.5">
-        {PRIMARY_NAV.map((item) => {
-          const isActive = viewMode.type === 'nav' && viewMode.view === item.id
-          const Icon = item.icon
-          return (
-            <button
-              key={item.id}
-              type="button"
-              data-testid={`nav-${item.id}`}
-              onClick={() => useViewStore.getState().navigateTo(item.id)}
-              className={[
-                'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-semibold transition-all duration-150',
-                isActive
-                  ? 'bg-accent/12 text-accent'
-                  : 'text-text/85 hover:bg-foreground/[0.04] hover:text-text',
-              ].join(' ')}
-            >
-              <Icon size={14} strokeWidth={2} aria-hidden />
-              <span>{item.label}</span>
-              {item.subtitle && (
-                <span className="text-[10px] font-normal text-text/45">{item.subtitle}</span>
-              )}
-            </button>
-          )
-        })}
+      {/* Primary nav */}
+      <div className="flex flex-col gap-0.5 px-2">
+        {PRIMARY_NAV.map((item) => (
+          <NavButton
+            key={item.id}
+            item={item}
+            active={viewMode.type === 'nav' && viewMode.view === item.id}
+            onClick={() => useViewStore.getState().navigateTo(item.id)}
+          />
+        ))}
       </div>
 
       {/* Divider */}
       <div className="mx-3 my-1.5 border-t border-border" />
 
-      {/* Secondary nav — Approvals, Scheduler, Cost, System, Observability */}
-      <div className="px-2 flex flex-col gap-0.5">
-        {secondaryNav.map((item) => {
-          const isActive = viewMode.type === 'nav' && viewMode.view === item.id
-          const badge = item.id === 'approvals' ? pendingApprovals.size : 0
-          const Icon = item.icon
-          return (
-            <button
-              key={item.id}
-              type="button"
-              data-testid={`nav-${item.id}`}
-              onClick={() => useViewStore.getState().navigateTo(item.id)}
-              className={[
-                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150',
-                isActive
-                  ? 'bg-accent/12 text-accent'
-                  : 'text-text/70 hover:bg-foreground/5 hover:text-text/90',
-              ].join(' ')}
-            >
-              <Icon size={13} strokeWidth={1.75} aria-hidden />
-              <span>{item.label}</span>
-              {badge > 0 && (
-                <span className="ml-auto rounded-full bg-amber px-1.5 py-px text-[9px] font-bold leading-snug text-background">
-                  {badge}
-                </span>
-              )}
-            </button>
-          )
-        })}
+      {/* Second nav block: Fleet + Settings (Settings opens the modal that houses
+          the management / config / insights surfaces). */}
+      <div className="flex flex-col gap-0.5 px-2">
+        {SECONDARY_NAV.map((item) => (
+          <NavButton
+            key={item.id}
+            item={item}
+            active={viewMode.type === 'nav' && viewMode.view === item.id}
+            badge={0}
+            onClick={() => useViewStore.getState().navigateTo(item.id)}
+          />
+        ))}
+        <button
+          type="button"
+          data-testid="nav-settings"
+          onClick={() => useSettingsModalStore.getState().openSettings()}
+          title="Settings (⌘,)"
+          className={[
+            'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors duration-150 cursor-pointer',
+            settingsOpen
+              ? 'bg-foreground/[0.06] font-semibold text-foreground'
+              : 'font-medium text-foreground/60 hover:bg-foreground/[0.035] hover:text-foreground/90',
+          ].join(' ')}
+        >
+          <Settings
+            size={17}
+            strokeWidth={2}
+            aria-hidden
+            style={{ color: settingsOpen ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.45)' }}
+          />
+          <span className="truncate">Settings</span>
+        </button>
       </div>
 
-      {/* Theme toggle — bottom of nav. The GitHub Star CTA lives in the
-          fixed top-right `AppTopBar` (dograh-style outline pill) so the
-          sidebar footer is reserved for in-app preferences only. */}
+      {/* Footer — theme toggle. The GitHub Star CTA lives in the top bar, so the
+          footer is reserved for the theme preference. */}
       <div className="mx-3 my-1.5 border-t border-border" />
-      <div className="px-2 pb-3">
+      <div className="flex flex-col gap-0.5 px-2 pb-3">
         <ThemeToggle />
       </div>
 

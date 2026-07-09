@@ -1,6 +1,6 @@
 /**
  * Central site config: canonical URLs, nav, and shared copy constants.
- * Copy law: no em dashes; claims match the shipped v0.2.0 surface only.
+ * Copy law: no em dashes; claims match the shipped v0.2.1 surface only.
  */
 
 export const REPO = 'clawboo/clawboo'
@@ -24,7 +24,7 @@ export const site = {
   url: 'https://www.claw.boo',
   domain: 'www.claw.boo',
   install: 'npx clawboo',
-  version: 'v0.2.0',
+  version: 'v0.2.1',
   tagline: 'A TypeScript orchestrator for heterogeneous AI agent runtimes.',
   subhead:
     'Deploy a team of agents and watch them collaborate live. Native agents are built in: paste one key and go. Claude Code, Codex, Hermes, and OpenClaw join as peer teammates in one chat, sharing one board, one memory, and one capability dashboard.',

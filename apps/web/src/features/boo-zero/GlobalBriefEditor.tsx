@@ -11,7 +11,8 @@
 // `InlineEditor`.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, RefreshCw, Save } from 'lucide-react'
+import { RefreshCw, Save } from 'lucide-react'
+import { Button } from '@/features/shared/Button'
 import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
 import { buildGlobalBrief } from '@/lib/booZeroBrief'
@@ -119,13 +120,13 @@ export function GlobalBriefEditor() {
         onChange={(e) => setContent(e.target.value)}
         disabled={loading || saving}
         spellCheck={false}
+        className="font-mono"
         style={{
           width: '100%',
           minHeight: 240,
           maxHeight: 480,
           padding: 12,
           fontSize: 12,
-          fontFamily: 'var(--font-geist-mono, monospace)',
           lineHeight: 1.55,
           background: 'var(--input)',
           color: 'var(--foreground)',
@@ -135,51 +136,26 @@ export function GlobalBriefEditor() {
         }}
       />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button
-          type="button"
-          onClick={handleSave}
+        <Button
+          variant="primary"
+          size="sm"
           disabled={!isDirty || saving || loading}
-          style={{
-            height: 30,
-            padding: '0 12px',
-            fontSize: 11,
-            fontWeight: 600,
-            borderRadius: 8,
-            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-            background: isDirty ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.06)',
-            color: isDirty ? '#fff' : 'rgb(var(--foreground-rgb) / 0.5)',
-            cursor: !isDirty || saving || loading ? 'default' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
+          loading={saving}
+          onClick={handleSave}
         >
-          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+          <Save size={12} strokeWidth={2} />
           Save
-        </button>
-        <button
-          type="button"
-          onClick={handleRegenerate}
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
           disabled={loading || saving}
-          style={{
-            height: 30,
-            padding: '0 12px',
-            fontSize: 11,
-            fontWeight: 600,
-            borderRadius: 8,
-            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-            background: 'rgb(var(--foreground-rgb) / 0.04)',
-            color: 'rgb(var(--foreground-rgb) / 0.7)',
-            cursor: loading || saving ? 'default' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
+          onClick={handleRegenerate}
           title="Regenerate from current team list (does not save yet)"
         >
-          <RefreshCw size={12} />
+          <RefreshCw size={12} strokeWidth={2} />
           Regenerate from teams
-        </button>
+        </Button>
         {isDirty && <span style={{ fontSize: 10, color: 'var(--amber)' }}>Unsaved changes</span>}
       </div>
     </div>

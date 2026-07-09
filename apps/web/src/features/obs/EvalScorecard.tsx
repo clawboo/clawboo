@@ -12,8 +12,8 @@ import { useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Check, FlaskConical, Minus, Play } from 'lucide-react'
 
+import { Button } from '@/features/shared/Button'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
-import { Spinner } from '@/features/shared/Spinner'
 import { StatusPill } from '@/features/shared/StatusPill'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
 import { runSmokeEvals, type SuiteReport } from '@/lib/evalsClient'
@@ -26,8 +26,8 @@ function passTone(v: number): string {
   return v >= 1 ? 'var(--mint)' : v > 0 ? 'var(--amber)' : 'var(--primary)'
 }
 
-const KICKER = 'mb-1.5 font-mono text-[11px] font-semibold uppercase tracking-wider'
-const KICKER_COLOR = 'rgb(var(--foreground-rgb) / 0.4)'
+const KICKER = 'mb-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em]'
+const KICKER_COLOR = 'rgb(var(--foreground-rgb) / 0.45)'
 
 // The ±verifier × ±structured-state ablation shape. The numbers come from the CI
 // run (live-model judge) — here we render the SHAPE with em-dash placeholders so
@@ -51,9 +51,11 @@ function AblationFlag({ on }: { on: boolean }) {
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <span className="flex items-baseline gap-1.5">
-      <span className="text-[11px] uppercase tracking-wider text-secondary">{label}</span>
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+        {label}
+      </span>
       <span
-        className="font-data font-semibold text-foreground"
+        className="font-data text-[15px] font-semibold text-foreground"
         style={tone ? { color: tone } : undefined}
       >
         {value}
@@ -79,54 +81,40 @@ export function EvalScorecard() {
   return (
     <div
       data-testid="eval-scorecard"
-      className="surface-raised-tier flex flex-col gap-3"
-      style={{ borderRadius: 12, padding: '12px 14px' }}
+      className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
     >
       {/* Header + run button */}
-      <div className="flex items-center justify-between gap-2.5">
-        <span className="flex items-center gap-2">
-          <FlaskConical size={14} className="text-mint" />
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <span className="flex items-center gap-2.5">
           <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              fontFamily: 'var(--font-display)',
-              letterSpacing: '-0.01em',
-              color: 'var(--foreground)',
-            }}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
+            style={{ background: 'rgb(var(--mint-rgb) / 0.12)', color: 'var(--mint)' }}
+          >
+            <FlaskConical size={16} strokeWidth={2} />
+          </span>
+          <span
+            className="whitespace-nowrap font-display font-bold text-foreground"
+            style={{ fontSize: 15, letterSpacing: '-0.01em' }}
           >
             Eval scorecard
           </span>
         </span>
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
           data-testid="obs-run-smoke-evals"
+          className="eval-run-btn shrink-0"
           onClick={() => void run()}
           disabled={running}
-          className="eval-run-btn flex h-[30px] items-center gap-1.5 rounded-md border px-3 text-[12px] font-semibold transition-colors"
-          style={{
-            border: '1px solid rgb(var(--mint-rgb) / 0.3)',
-            background: 'rgb(var(--mint-rgb) / 0.12)',
-            color: 'var(--mint)',
-            cursor: running ? 'default' : 'pointer',
-            opacity: running ? 0.7 : 1,
-          }}
-          onMouseEnter={(e) => {
-            if (running) return
-            e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.2)'
-            e.currentTarget.style.borderColor = 'rgb(var(--mint-rgb) / 0.45)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.12)'
-            e.currentTarget.style.borderColor = 'rgb(var(--mint-rgb) / 0.3)'
-          }}
+          loading={running}
         >
-          {running ? <Spinner size={12} /> : <Play size={12} />}
+          {!running && <Play size={13} strokeWidth={2} />}
           {running ? 'Running…' : 'Run smoke evals'}
-        </button>
+        </Button>
       </div>
 
-      <div className="text-[12px] leading-relaxed text-secondary">
+      <div className="text-[13px] leading-relaxed text-foreground/55">
         Runs the deterministic smoke suite (the CI subset) on throwaway boards — no live model, no
         API keys. The results are real and reproducible.
       </div>
@@ -139,43 +127,47 @@ export function EvalScorecard() {
       {report && (
         <div
           data-testid="eval-suite-report"
-          className="surface-raised-tier flex flex-col gap-2"
-          style={{ borderRadius: 10, padding: 12 }}
+          className="flex flex-col gap-3 rounded-xl border border-border bg-foreground/[0.02] p-4"
         >
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-5">
             <Metric label="pass@1" value={pct(report.passAt1)} tone={passTone(report.passAt1)} />
             <Metric label="pass^k" value={pct(report.passPowK)} tone={passTone(report.passPowK)} />
             <Metric label="k" value={String(report.k)} />
             <Metric label="tasks" value={String(report.tasks.length)} />
           </div>
-          <div className="flex flex-col gap-0.5">
-            <div className="flex pb-0.5 text-[11px] uppercase tracking-wider text-secondary">
-              <span className="flex-[2]">task</span>
-              <span className="flex-1">suite</span>
-              <span className="flex-1">kind</span>
-              <span className="w-14 text-right">pass@1</span>
-              <span className="w-14 text-right">score</span>
+          <div className="-mx-1 overflow-x-auto px-1">
+            <div className="flex min-w-[320px] flex-col">
+              <div className="flex gap-2.5 border-b border-border pb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+                <span className="min-w-0 flex-[2]">task</span>
+                <span className="min-w-0 flex-1">suite</span>
+                <span className="min-w-0 flex-1">kind</span>
+                <span className="w-12 shrink-0 text-right">pass@1</span>
+                <span className="w-12 shrink-0 text-right">score</span>
+              </div>
+              {report.tasks.map((t, i) => (
+                <motion.div
+                  key={t.taskId}
+                  data-testid="eval-task-row"
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
+                  className="flex items-center gap-2.5 border-b border-border py-1.5 text-[12px] text-foreground/70 last:border-0 hover:bg-foreground/[0.02]"
+                >
+                  <span className="font-data min-w-0 flex-[2] truncate">{t.taskId}</span>
+                  <span className="min-w-0 flex-1 truncate text-foreground/50">{t.suite}</span>
+                  <span className="min-w-0 flex-1 truncate text-foreground/50">{t.kind}</span>
+                  <span
+                    className="font-data w-12 shrink-0 text-right font-semibold"
+                    style={{ color: passTone(t.passAt1) }}
+                  >
+                    {pct(t.passAt1)}
+                  </span>
+                  <span className="font-data w-12 shrink-0 text-right text-foreground/55">
+                    {t.meanScore.toFixed(2)}
+                  </span>
+                </motion.div>
+              ))}
             </div>
-            {report.tasks.map((t, i) => (
-              <motion.div
-                key={t.taskId}
-                data-testid="eval-task-row"
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
-                className="flex items-center py-0.5 text-[12px] text-foreground/70"
-              >
-                <span className="flex-[2] truncate font-mono">{t.taskId}</span>
-                <span className="flex-1 text-secondary">{t.suite}</span>
-                <span className="flex-1 text-secondary">{t.kind}</span>
-                <span className="font-data w-14 text-right" style={{ color: passTone(t.passAt1) }}>
-                  {pct(t.passAt1)}
-                </span>
-                <span className="font-data w-14 text-right text-foreground/55">
-                  {t.meanScore.toFixed(2)}
-                </span>
-              </motion.div>
-            ))}
           </div>
         </div>
       )}
@@ -183,8 +175,7 @@ export function EvalScorecard() {
       {/* Ablation — the real scorecard SHAPE, explained (runs in CI, not on demand) */}
       <div
         data-testid="ablation-scorecard"
-        className="surface-raised-tier flex flex-col gap-2.5"
-        style={{ borderRadius: 10, padding: 12 }}
+        className="flex flex-col gap-3 rounded-xl border border-border bg-foreground/[0.02] p-4"
       >
         <div className="flex items-center justify-between gap-2">
           <span className={KICKER} style={{ color: KICKER_COLOR, marginBottom: 0 }}>
@@ -197,46 +188,50 @@ export function EvalScorecard() {
           N trials, live-model judge) — trigger it from the Actions tab, not on demand.
         </FormattedAlert>
 
-        {/* Variant rows — the shape; numbers fill in from the CI run. */}
-        <div className="flex flex-col gap-0.5">
-          <div className="flex pb-0.5 text-[11px] uppercase tracking-wider text-secondary">
-            <span className="flex-[2]">variant</span>
-            <span className="flex-1 text-center">verify</span>
-            <span className="flex-1 text-center">structured</span>
-            <span className="w-14 text-right">pass@1</span>
-            <span className="w-14 text-right">pass^k</span>
-          </div>
-          {ABLATION_VARIANTS.map((v) => (
-            <div
-              key={v.variant}
-              data-testid="ablation-variant-row"
-              className="flex items-center py-0.5 text-[12px] text-foreground/70"
-            >
-              <span className="flex-[2] font-mono">{v.variant}</span>
-              <span className="flex flex-1 justify-center">
-                <AblationFlag on={v.verify} />
-              </span>
-              <span className="flex flex-1 justify-center">
-                <AblationFlag on={v.structured} />
-              </span>
-              <span className="font-data w-14 text-right text-foreground/40">—</span>
-              <span className="font-data w-14 text-right text-foreground/40">—</span>
+        {/* Variant rows — the shape; numbers fill in from the CI run.
+            Wrapped in overflow-x-auto with a min-width + column gaps so the
+            headers keep clear separation (never collide) in a narrow pane. */}
+        <div className="-mx-1 overflow-x-auto px-1">
+          <div className="flex min-w-[300px] flex-col">
+            <div className="flex gap-2.5 border-b border-border pb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+              <span className="min-w-0 flex-1">variant</span>
+              <span className="w-16 shrink-0 text-center">verify</span>
+              <span className="w-20 shrink-0 text-center">structured</span>
+              <span className="w-12 shrink-0 text-right">pass@1</span>
+              <span className="w-12 shrink-0 text-right">pass^k</span>
             </div>
-          ))}
+            {ABLATION_VARIANTS.map((v) => (
+              <div
+                key={v.variant}
+                data-testid="ablation-variant-row"
+                className="flex items-center gap-2.5 border-b border-border py-1.5 text-[12px] text-foreground/70 last:border-0"
+              >
+                <span className="font-data min-w-0 flex-1 truncate">{v.variant}</span>
+                <span className="flex w-16 shrink-0 justify-center">
+                  <AblationFlag on={v.verify} />
+                </span>
+                <span className="flex w-20 shrink-0 justify-center">
+                  <AblationFlag on={v.structured} />
+                </span>
+                <span className="font-data w-12 shrink-0 text-right text-foreground/40">—</span>
+                <span className="font-data w-12 shrink-0 text-right text-foreground/40">—</span>
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Marginal contributions (Δ pass@1) — verifier / structured-state. */}
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[11px] uppercase tracking-wider text-secondary">
+        <div className="flex flex-col">
+          <span className="mb-1 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
             marginal contribution (Δ pass@1)
           </span>
           {ABLATION_CONTRIBUTIONS.map((c) => (
             <div
               key={c}
               data-testid="ablation-contribution-row"
-              className="flex items-center py-0.5 text-[12px] text-foreground/70"
+              className="flex items-center border-b border-border py-1.5 text-[12px] text-foreground/70 last:border-0"
             >
-              <span className="flex-1 font-mono">{c}</span>
+              <span className="font-data flex-1">{c}</span>
               <span className="font-data w-14 text-right text-foreground/40">—</span>
             </div>
           ))}

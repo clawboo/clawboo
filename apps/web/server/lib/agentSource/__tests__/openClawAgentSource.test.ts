@@ -9,8 +9,9 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { agents, createDb, teams } from '@clawboo/db'
+import { GatewayResponseError } from '@clawboo/gateway-client'
 import { eq } from 'drizzle-orm'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDbPath } from '../../db'
 import {
@@ -78,18 +79,29 @@ class FakeGateway implements OpenClawClientLike {
   // (registerSharedMcpServers passes a partial `{ mcp: { servers } }` to this fake,
   // which stands in for the gateway-client helper — the `{ raw }` envelope is
   // exercised in the gateway-client's own client.test.ts.)
-  configState: { mcp?: { servers?: Record<string, unknown> } } = {}
+  configState: {
+    mcp?: { servers?: Record<string, unknown> }
+    tools?: { deny?: string[] }
+  } = {}
   config = {
     get: () => Promise.resolve({ path: this.configPath, config: this.configState }),
     patch: (updates: Record<string, unknown>) => {
       this.configPatches.push(updates)
-      const u = updates as { mcp?: { servers?: Record<string, unknown> } }
+      const u = updates as {
+        mcp?: { servers?: Record<string, unknown> }
+        tools?: { deny?: string[] }
+      }
       if (u.mcp) {
         this.configState.mcp = {
           ...(this.configState.mcp ?? {}),
           ...u.mcp,
           servers: { ...(this.configState.mcp?.servers ?? {}), ...(u.mcp.servers ?? {}) },
         }
+      }
+      // Mirror the real Gateway's tools.deny merge so the idempotency check can
+      // observe a prior sub-agent-tool denial (arrays are replaced, not concatenated).
+      if (u.tools) {
+        this.configState.tools = { ...(this.configState.tools ?? {}), ...u.tools }
       }
       return Promise.resolve()
     },
@@ -309,11 +321,17 @@ describe('OpenClawAgentSource', () => {
     // Streamable-HTTP entry { url, transport: 'streamable-http' }.
     const merged = fake.configPatches.at(-1) as {
       mcp?: { servers?: Record<string, { url: string; transport: string }> }
+      tools?: { deny?: string[] }
     }
     const servers = merged.mcp?.servers ?? {}
     expect(servers['clawboo-memory']?.url).toContain('/api/mcp/memory')
     expect(servers['clawboo-memory']?.transport).toBe('streamable-http')
     expect(servers['clawboo-tasks']?.url).toContain('/api/mcp/tasks')
+    // Anti-sub-agent enforcement: the sub-agent-spawning tools are denied at the
+    // runtime level so a spawn-happy model can't bypass the team via sessions_spawn.
+    expect(merged.tools?.deny).toEqual(
+      expect.arrayContaining(['sessions_spawn', 'sessions_yield']),
+    )
     // TeamChat is DELIBERATELY NOT registered for OpenClaw (anti-spoof): a
     // process-wide URL can't carry a per-run author binding, so an unbound
     // team_chat_post tool would let an agent post as any author. OpenClaw's room
@@ -363,5 +381,95 @@ describe('OpenClawAgentSource', () => {
     await flush()
     expect(fake.configPatches.length).toBe(0)
     await src.stop()
+  })
+
+  it('reconnectAndWait returns true immediately when the operator is already connected', async () => {
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    const src = makeSource(fake)
+    await src.start()
+    await flush()
+    expect(src.operatorClient()).not.toBeNull()
+    expect(await src.reconnectAndWait()).toBe(true)
+    await src.stop()
+  })
+
+  it('reconnectAndWait returns false (bounded) when the Gateway stays unreachable', async () => {
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    // Every connect attempt fails → the operator can never come up.
+    fake.connect = () => Promise.reject(new Error('no gateway'))
+    const src = makeSource(fake)
+    await src.start() // initial connect fails → operator null
+    await flush()
+    expect(src.operatorClient()).toBeNull()
+    // A short deadline so the poll times out fast in the test.
+    expect(await src.reconnectAndWait(300)).toBe(false)
+    await src.stop()
+  })
+
+  // ── Auth-class connect failures must NOT hammer the Gateway ─────────────────
+  // (the lockout fix: a bad token / unpaired device / "too many failed
+  // authentication attempts" lockout was retried forever on a tight loop).
+
+  it('an auth-class connect failure blocks reconnectAndWait from re-hammering', async () => {
+    const fake = new FakeGateway()
+    let connectCalls = 0
+    fake.connect = () => {
+      connectCalls += 1
+      return Promise.reject(
+        new GatewayResponseError({
+          code: 'INVALID_REQUEST',
+          message: 'unauthorized: too many failed authentication attempts (retry later)',
+        }),
+      )
+    }
+    const src = makeSource(fake)
+    await src.start() // initial connect fails (auth-class)
+    await flush()
+    expect(connectCalls).toBe(1)
+    expect(src.operatorClient()).toBeNull()
+    expect(src.isAuthBlocked()).toBe(true)
+
+    // A team-chat delivery calls reconnectAndWait — while auth-blocked it must report
+    // unusable WITHOUT re-attempting the connect (re-attempting is what accumulates
+    // the Gateway's failed-auth lockout).
+    expect(await src.reconnectAndWait(50)).toBe(false)
+    expect(connectCalls).toBe(1) // no re-attempt
+
+    // An explicit reconnect() (settings change / gateway restart) clears the block.
+    fake.connect = () => Promise.resolve()
+    await src.reconnect()
+    expect(src.isAuthBlocked()).toBe(false)
+    await src.stop()
+  })
+
+  it('an auth-class failure retries on the long floor, not the fast 2s backoff', async () => {
+    vi.useFakeTimers()
+    try {
+      const fake = new FakeGateway()
+      let connectCalls = 0
+      fake.connect = () => {
+        connectCalls += 1
+        return Promise.reject(
+          new GatewayResponseError({ code: 'NOT_PAIRED', message: 'pairing required' }),
+        )
+      }
+      const src = makeSource(fake)
+      await src.start()
+      expect(connectCalls).toBe(1)
+
+      // Well past the transient 2s→60s window: the auth-class retry must NOT fire yet.
+      await vi.advanceTimersByTimeAsync(90_000)
+      expect(connectCalls).toBe(1)
+
+      // Past the 120s floor: the slow retry fires once more (still no hammering).
+      await vi.advanceTimersByTimeAsync(40_000)
+      expect(connectCalls).toBe(2)
+
+      await src.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

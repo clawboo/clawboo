@@ -241,15 +241,51 @@ export function titleCase(str: string): string {
 
 // ─── GitHub API ───────────────────────────────────────────────────────────────
 
+// A GitHub token (when present) raises the api.github.com rate limit from 60 to
+// 5000 requests/hour; CI supplies the automatic `secrets.GITHUB_TOKEN`. Locally
+// it is usually unset, which is fine.
+const GITHUB_TOKEN = process.env['GITHUB_TOKEN'] ?? process.env['GH_TOKEN'] ?? ''
+
+/**
+ * Fetch a GitHub URL resiliently: auth header when a token is present, plus
+ * retry-with-backoff on 429 (rate limit) and 5xx, honoring `Retry-After`. Other
+ * statuses (e.g. 404) return immediately so the caller's `!res.ok` check throws.
+ * This is what keeps `verify:ingest` from failing CI on a transient GitHub 429
+ * while fetching the ~180 pinned upstream source files.
+ */
+export async function githubFetch(
+  url: string,
+  extraHeaders: Record<string, string> = {},
+): Promise<Response> {
+  const headers: Record<string, string> = { 'User-Agent': 'clawboo-ingest-script', ...extraHeaders }
+  if (GITHUB_TOKEN) headers['Authorization'] = `Bearer ${GITHUB_TOKEN}`
+  const MAX_ATTEMPTS = 6
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(url, { headers })
+    // Success, or a non-retryable error (e.g. 404) → hand back to the caller.
+    if (res.ok || (res.status !== 429 && res.status < 500)) return res
+    if (attempt === MAX_ATTEMPTS) return res
+    const retryAfter = res.headers.get('retry-after')
+    let waitMs: number
+    if (retryAfter) {
+      const asSeconds = Number(retryAfter)
+      waitMs = Number.isFinite(asSeconds)
+        ? asSeconds * 1000
+        : Math.max(0, Date.parse(retryAfter) - Date.now())
+    } else {
+      waitMs = Math.min(30_000, 1000 * 2 ** (attempt - 1))
+    }
+    waitMs += Math.floor(Math.random() * 500) // jitter to de-sync concurrent retries
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
+  }
+  // Unreachable: the loop returns on the final attempt.
+  throw new Error(`githubFetch: exhausted retries for ${url}`)
+}
+
 /** Fetch the full recursive git tree for the pinned SHA */
 export async function fetchAgentTree(): Promise<GitTreeItem[]> {
   const url = `https://api.github.com/repos/${AGENCY_AGENTS_REPO}/git/trees/${AGENCY_AGENTS_SHA}?recursive=1`
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'clawboo-ingest-script',
-      Accept: 'application/vnd.github.v3+json',
-    },
-  })
+  const res = await githubFetch(url, { Accept: 'application/vnd.github.v3+json' })
   if (!res.ok) {
     throw new Error(`GitHub tree API returned ${res.status}: ${await res.text()}`)
   }
@@ -271,9 +307,7 @@ export function filterAgentFiles(tree: GitTreeItem[]): GitTreeItem[] {
 /** Fetch raw content of a file at the pinned SHA */
 export async function fetchRawFile(filePath: string): Promise<string> {
   const url = `https://raw.githubusercontent.com/${AGENCY_AGENTS_REPO}/${AGENCY_AGENTS_SHA}/${filePath}`
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'clawboo-ingest-script' },
-  })
+  const res = await githubFetch(url)
   if (!res.ok) {
     throw new Error(`Failed to fetch ${filePath}: ${res.status}`)
   }
@@ -751,12 +785,7 @@ const AWESOME_CATEGORY_EMOJI: Record<string, string> = {
 /** Fetch the full recursive git tree for awesome-openclaw at the pinned SHA */
 export async function fetchAwesomeOpenclawTree(): Promise<GitTreeItem[]> {
   const url = `https://api.github.com/repos/${AWESOME_OPENCLAW_REPO}/git/trees/${AWESOME_OPENCLAW_SHA}?recursive=1`
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'clawboo-ingest-script',
-      Accept: 'application/vnd.github.v3+json',
-    },
-  })
+  const res = await githubFetch(url, { Accept: 'application/vnd.github.v3+json' })
   if (!res.ok) {
     throw new Error(`GitHub tree API returned ${res.status}: ${await res.text()}`)
   }
@@ -776,9 +805,7 @@ export function filterUsecaseFiles(tree: GitTreeItem[]): GitTreeItem[] {
 /** Fetch raw content of an awesome-openclaw file at the pinned SHA */
 export async function fetchAwesomeOpenclawRawFile(filePath: string): Promise<string> {
   const url = `https://raw.githubusercontent.com/${AWESOME_OPENCLAW_REPO}/${AWESOME_OPENCLAW_SHA}/${filePath}`
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'clawboo-ingest-script' },
-  })
+  const res = await githubFetch(url)
   if (!res.ok) {
     throw new Error(`Failed to fetch ${filePath}: ${res.status}`)
   }

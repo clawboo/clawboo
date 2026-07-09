@@ -12,7 +12,8 @@
 // `InlineEditor`. (Also re-exported for the System breadcrumb to point at.)
 
 import { useCallback, useState } from 'react'
-import { Loader2, Save } from 'lucide-react'
+import { Save } from 'lucide-react'
+import { Button } from '@/features/shared/Button'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
@@ -89,31 +90,16 @@ export function DisplayNameEditor({
             borderRadius: 6,
           }}
         />
-        <button
-          type="button"
-          onClick={handleSave}
+        <Button
+          variant="primary"
+          size="sm"
           disabled={!isDirty || saving || value.trim().length === 0}
-          style={{
-            height: 30,
-            padding: '0 12px',
-            fontSize: 11,
-            fontWeight: 600,
-            borderRadius: 8,
-            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-            background:
-              isDirty && value.trim().length > 0
-                ? 'var(--primary)'
-                : 'rgb(var(--foreground-rgb) / 0.06)',
-            color: isDirty && value.trim().length > 0 ? '#fff' : 'rgb(var(--foreground-rgb) / 0.5)',
-            cursor: !isDirty || saving || value.trim().length === 0 ? 'default' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
+          loading={saving}
+          onClick={handleSave}
         >
-          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+          <Save size={12} strokeWidth={2} />
           Save
-        </button>
+        </Button>
       </div>
       {isDirty && (
         <span style={{ fontSize: 10, color: 'var(--amber)' }}>

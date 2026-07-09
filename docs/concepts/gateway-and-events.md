@@ -136,6 +136,10 @@ The Handler carries two pieces of guard state. A debounce timer collapses bursts
 
 In the browser, `useGatewayEvents` wires this together: it constructs the handler with store-backed dispatchers, subscribes to `client.onEvent`, and calls `processEvent(frame, handler)` for every frame.
 
+<Note>
+For a **server-orchestrated team session** (an `agent:<id>:team:<teamId>` key), `useGatewayEvents` deliberately suppresses its own chat commit _and_ live streaming-text writes. The server-side orchestrator is the single writer of that team's transcript, it persists each turn and streams it back over SSE (`GET /api/teams/:id/chat/stream`). The browser still receives the same OpenClaw `chat` frames on its Gateway connection, so without this gate a team turn would be written twice, once from the Gateway frame here and once from the SSE, and render as a duplicate. See [delegation and orchestration](/concepts/delegation-and-orchestration).
+</Note>
+
 ### The access gate
 
 The proxy upgrade and every `/api/*` route sit behind an optional access gate, active only when `STUDIO_ACCESS_TOKEN` is set. With a token configured, `?access_token=<token>` sets an `HttpOnly` cookie and redirects; thereafter every `/api/*` request and the WS upgrade require that cookie. Token comparison is constant-time (both sides SHA-256-hashed first, so the compare leaks neither length nor a first-differing-byte timing oracle). The gate is the only authentication for a non-loopback bind, so the server warns loudly if it's bound to a public interface with no token set.
@@ -162,7 +166,7 @@ The gate has one exemption: a **loopback** request to `/api/mcp/*` is let throug
 - **Device pairing depends on the CLI.** The approve-device endpoint shells out to `openclaw` and parses its output; it is a convenience over the manual `openclaw devices approve` flow, not a reimplementation of OpenClaw's pairing.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

@@ -27,7 +27,7 @@ Before the steps, the one mental model you need: Clawboo splits a mixed-runtime 
 
 ```mermaid
 flowchart TB
-    subgraph SHARED["Shared plane — canonical, cross-runtime"]
+    subgraph SHARED["Shared plane: canonical, cross-runtime"]
         BOARD["Board (tasks, claim, deps)"]
         CHAT["Team chat room: team:&lt;teamId&gt;"]
         MEM["Shared memory (team facts via MCP)"]
@@ -113,7 +113,7 @@ sequenceDiagram
 ```
 
 <Info>
-The in-chat orchestrator (`useBoardOrchestration`) observes **OpenClaw-adapter sessions**; it is the dispatch path for team members that run on the OpenClaw Gateway. A native / Claude Code / Hermes specialist runs a *claimed board task* through the server-side executor runner (next path), not through the Gateway session observer. In a mixed team, the board is the meeting point: a delegation lands a task on the board regardless of who claims it, and any runtime can pick it up.
+The server-side team orchestrator (`getTeamOrchestrator`) drives every team member: it resolves each agent's real runtime and dispatches its turn through `serverDeliver`, which runs OpenClaw over the operator connection and the native, Claude Code, Codex, and Hermes runtimes through their drivers. In a mixed team the board is the meeting point: a delegation lands a task on the board regardless of who claims it, and any runtime can pick it up.
 </Info>
 
 **b. Cross-runtime, by board task (the executor path).** A board task can be executed by any wrapped/native runtime directly. Create or pick a task, then dispatch it:
@@ -177,7 +177,7 @@ Meanwhile each runtime's **private plane** keeps compounding: the Hermes agent's
 </Danger>
 
 <Note>
-Multi-tenant scoping is a future seam: every table carries a dormant `tenant_id`, but no per-tenant filtering is active in v0.2.0. A team is a single-implicit-tenant coordination boundary, not a tenant or a sandbox.
+Multi-tenant scoping is a future seam: every table carries a dormant `tenant_id`, but no per-tenant filtering is active in v0.2.1. A team is a single-implicit-tenant coordination boundary, not a tenant or a sandbox.
 </Note>
 
 ## Related

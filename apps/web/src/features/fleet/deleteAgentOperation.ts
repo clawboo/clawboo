@@ -1,7 +1,7 @@
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
-import { archiveAgentRecord } from '@/lib/agentSourceClient'
+import { archiveAgentRecord } from '@clawboo/control-client'
 
 export async function deleteAgentOperation(
   agentId: string,

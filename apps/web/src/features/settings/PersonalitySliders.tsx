@@ -1,9 +1,11 @@
-import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
+import { readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Loader2, FileText, PenLine, SlidersHorizontal } from 'lucide-react'
+import { Check, FileText, PenLine, SlidersHorizontal } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { Slider } from '@/components/ui/slider'
+import { Button } from '@/features/shared/Button'
+import { Spinner } from '@/features/shared/Spinner'
 import { mutationQueue } from '@/lib/mutationQueue'
 import { useEditorStore } from '@/stores/editor'
 import {
@@ -274,7 +276,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
 
   if (!selectedAgentId) {
     return (
-      <div className="flex items-center justify-center py-8 text-[12px] text-secondary/50">
+      <div className="flex items-center justify-center py-8 text-[12px] text-foreground/45">
         Select an agent to configure its personality.
       </div>
     )
@@ -282,8 +284,8 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 py-6 text-secondary/60">
-        <Loader2 className="h-4 w-4 animate-spin" />
+      <div className="flex items-center gap-2 py-6 text-foreground/50">
+        <Spinner size={15} />
         <span className="text-[12px]">Loading personality…</span>
       </div>
     )
@@ -304,16 +306,8 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
           return (
             <div key={dim.key} className="mb-6 space-y-2">
               <div className="flex items-center justify-between">
-                <span
-                  className="text-[13px] font-semibold text-text"
-                  style={{ fontFamily: 'var(--font-body)' }}
-                >
-                  {dim.label}
-                </span>
-                <span
-                  className="min-w-[2.5rem] text-right text-[11px] tabular-nums text-secondary"
-                  style={{ fontFamily: 'var(--font-mono)' }}
-                >
+                <span className="text-[13px] font-semibold text-foreground">{dim.label}</span>
+                <span className="font-data min-w-[2.5rem] text-right text-[12px] text-foreground/55 tabular-nums">
                   {values[dim.key]}
                 </span>
               </div>
@@ -327,12 +321,12 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
                 onValueCommit={(vals) => handleCommit(dim.key, vals[0] ?? 50)}
               />
 
-              <div className="flex justify-between">
-                <span className="text-[10px] text-secondary/50">{labels.left}</span>
-                <span className="text-[10px] text-secondary/50">{labels.right}</span>
+              <div className="flex justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/40">
+                <span>{labels.left}</span>
+                <span>{labels.right}</span>
               </div>
 
-              <p className="text-[11px] leading-relaxed text-secondary/70">
+              <p className="text-[11px] leading-relaxed text-foreground/60">
                 {getDimensionText(dim.key, values[dim.key])}
               </p>
             </div>
@@ -341,49 +335,29 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       </div>
 
       {/* Custom text override toggle */}
-      <div style={{ borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)', paddingTop: 12 }}>
-        <button
-          type="button"
+      <div className="border-t border-border pt-3">
+        <Button
+          variant={customMode ? 'primary' : 'secondary'}
+          size="sm"
+          fullWidth
           onClick={toggleMode}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 10px',
-            borderRadius: 6,
-            border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-            background: customMode ? 'rgb(var(--primary-rgb) / 0.1)' : 'transparent',
-            color: customMode ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.5)',
-            fontSize: 11,
-            fontWeight: 500,
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            width: '100%',
-          }}
+          className="justify-start"
         >
           {customMode ? (
             <>
-              <SlidersHorizontal style={{ width: 13, height: 13 }} strokeWidth={2} />
+              <SlidersHorizontal size={13} strokeWidth={2} />
               Switch to Sliders
             </>
           ) : (
             <>
-              <PenLine style={{ width: 13, height: 13 }} strokeWidth={2} />
+              <PenLine size={13} strokeWidth={2} />
               Use Custom Instructions
             </>
           )}
-        </button>
+        </Button>
 
         {customMode && (
-          <p
-            style={{
-              fontSize: 10,
-              color: 'rgb(var(--foreground-rgb) / 0.35)',
-              lineHeight: 1.4,
-              marginTop: 6,
-              marginBottom: 8,
-            }}
-          >
+          <p className="mt-2 mb-2 text-[11px] leading-snug text-foreground/40">
             Write free-form personality instructions. This overrides the slider-generated
             personality in SOUL.md.
           </p>
@@ -414,28 +388,11 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
             }}
             rows={8}
             placeholder="e.g. Be concise and direct. Use technical language when discussing code. Never use emojis. Always explain trade-offs when making recommendations."
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              borderRadius: 8,
-              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-              background: 'var(--background)',
-              color: 'var(--foreground)',
-              fontSize: 12,
-              fontFamily: 'var(--font-mono)',
-              lineHeight: 1.6,
-              resize: 'vertical',
-              outline: 'none',
-              minHeight: 120,
-            }}
+            spellCheck={false}
+            className="w-full resize-y rounded-xl border border-border bg-surface px-3 py-2.5 font-mono text-[12px] leading-relaxed text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+            style={{ minHeight: 120 }}
           />
-          <p
-            style={{
-              fontSize: 10,
-              color: 'rgb(var(--foreground-rgb) / 0.25)',
-              marginTop: 4,
-            }}
-          >
+          <p className="mt-1.5 font-mono text-[10px] text-foreground/30">
             Saves on blur or {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+S
           </p>
         </div>
@@ -446,29 +403,37 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
         <button
           type="button"
           onClick={() => setShowPreview((p) => !p)}
-          className="flex items-center gap-1.5 text-[11px] text-secondary/50 transition-colors hover:text-secondary"
+          className="flex items-center gap-1.5 text-[11px] text-foreground/50 transition-colors hover:text-foreground/80 cursor-pointer"
         >
-          <FileText className="h-3.5 w-3.5" />
+          <FileText className="h-3.5 w-3.5" strokeWidth={2} />
           {showPreview ? 'Hide' : 'Preview'} SOUL.md
         </button>
 
         <div className="flex items-center gap-2">
           {saving && (
-            <span className="flex items-center gap-1 text-[11px] text-secondary/60">
-              <Loader2 className="h-3 w-3 animate-spin" />
+            <span className="flex items-center gap-1.5 text-[11px] text-foreground/55">
+              <Spinner size={12} />
               Saving…
             </span>
           )}
-          {saved && !saving && <span className="text-[11px] text-mint">Saved ✓</span>}
+          {saved && !saving && (
+            <span className="flex items-center gap-1 text-[11px] font-medium text-mint">
+              <Check size={12} strokeWidth={2.5} />
+              Saved
+            </span>
+          )}
           {error && !saving && <span className="text-[11px] text-destructive">{error}</span>}
         </div>
       </div>
 
       {/* SOUL.md preview — shows merged content (role description + personality) */}
       {showPreview && (
-        <div className="max-h-64 overflow-y-auto rounded-lg border border-border bg-surface p-3">
+        <div
+          className="max-h-64 overflow-y-auto rounded-xl border border-border bg-surface p-3"
+          style={{ boxShadow: 'var(--shadow-raised)' }}
+        >
           <pre
-            className="whitespace-pre-wrap text-[10px] leading-relaxed text-secondary/70"
+            className="whitespace-pre-wrap text-[10px] leading-relaxed text-foreground/60"
             style={{ fontFamily: 'var(--font-mono)' }}
           >
             {customMode && customText.trim()

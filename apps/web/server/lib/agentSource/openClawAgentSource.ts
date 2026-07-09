@@ -33,6 +33,7 @@ import type {
   UpdateAgentInput,
 } from '@clawboo/agent-registry'
 import type { OpenClawGatewayClient } from '@clawboo/adapter-openclaw'
+import { authRetryAfterMs, isAuthConnectError } from '@clawboo/gateway-client'
 import { mcpHttpUrl } from '@clawboo/mcp'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 
@@ -90,7 +91,9 @@ export interface OpenClawAgentSourceDeps {
   log?: (level: 'info' | 'warn' | 'error', obj: object, msg: string) => void
 }
 
-const SETTING_DEFAULT_ID = 'agent-source:openclaw:defaultId'
+/** The persisted Gateway `defaultId` (the teamless default agent = Boo Zero). Exported
+ *  so the server team orchestrator can identify Boo Zero for OpenClaw teams. */
+export const SETTING_DEFAULT_ID = 'agent-source:openclaw:defaultId'
 const SETTING_MAIN_KEY = 'agent-source:openclaw:mainKey'
 const SETTING_SCOPE = 'agent-source:openclaw:scope'
 const SETTING_LAST_SYNCED = 'agent-source:openclaw:lastSyncedAt'
@@ -98,6 +101,20 @@ const SETTING_LAST_SYNCED = 'agent-source:openclaw:lastSyncedAt'
 const RESYNC_DEBOUNCE_MS = 750
 const BACKOFF_BASE_MS = 2_000
 const BACKOFF_CAP_MS = 60_000
+// Floor between retries after an AUTH-class connect failure (bad token / unpaired
+// device / bad connect params / a "too many failed authentication attempts" lockout).
+// The fast transient backoff (2s → 60s) is what trips + re-trips the Gateway's
+// failed-auth lockout, so we back WAY off — slow enough never to accumulate a
+// lockout, still self-healing once the credentials/pairing are fixed or the lockout
+// window clears. Honours the Gateway's own `retryAfterMs` when it sends one.
+const AUTH_RETRY_FLOOR_MS = 120_000
+
+// OpenClaw's native sub-agent-spawning tools. Clawboo's team model forbids agents
+// from spawning their own throwaway sub-agents (they must delegate to the EXISTING
+// team via `<delegate>`, which the board orchestrator drives) — the anti-sub-agent
+// invariant. These are added to the Gateway's `tools.deny` on connect so the
+// enforcement is at the runtime level, not just a prompt the model may ignore.
+const SUBAGENT_SPAWN_TOOLS = ['sessions_spawn', 'sessions_yield'] as const
 
 function parseJson(value: string | null): unknown | null {
   if (!value) return null
@@ -117,6 +134,12 @@ export class OpenClawAgentSource implements AgentSource {
   private connection: HealthResult['connection'] = 'disconnected'
   private connecting = false
   private stopped = false
+  // Set when the last connect failed for an AUTH-class reason. Suppresses the
+  // per-delivery `reconnectAndWait` re-attempt (the amplifier that hammers the
+  // Gateway) and routes the retry to the long AUTH_RETRY_FLOOR_MS backoff. Cleared
+  // on a successful connect or an explicit `reconnect()` (settings change / gateway
+  // start = "the credentials may have changed, try now").
+  private authBlocked = false
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private resyncTimer: ReturnType<typeof setTimeout> | null = null
   private retries = 0
@@ -149,6 +172,13 @@ export class OpenClawAgentSource implements AgentSource {
 
   isConnected(): boolean {
     return this.connection === 'connected'
+  }
+
+  /** True while the last connect failed for an auth-class reason (bad token /
+   *  unpaired device / lockout). Diagnostic — the source is on a long backoff and
+   *  is deliberately NOT hammering the Gateway. */
+  isAuthBlocked(): boolean {
+    return this.authBlocked
   }
 
   // ── Operator surface (the connected-substrate dispatch + cron seam) ────────
@@ -201,8 +231,12 @@ export class OpenClawAgentSource implements AgentSource {
       // `.config` (older shapes spread it to the top level too); read both
       // defensively so the idempotency check below sees the real servers.
       const snapshot = (await client.config.get()) as {
-        config?: { mcp?: { servers?: Record<string, { url?: string }> } }
+        config?: {
+          mcp?: { servers?: Record<string, { url?: string }> }
+          tools?: { deny?: unknown }
+        }
         mcp?: { servers?: Record<string, { url?: string }> }
+        tools?: { deny?: unknown }
         hash?: string
         baseHash?: string
       }
@@ -210,6 +244,19 @@ export class OpenClawAgentSource implements AgentSource {
       // OpenClaw 2026.5.x's config.patch requires the snapshot hash (optimistic
       // concurrency). config.get returns it as `hash` (defensively also `baseHash`).
       const baseHash = snapshot.hash ?? snapshot.baseHash
+
+      // Anti-sub-agent enforcement (a Tier-1 team invariant): deny the OpenClaw
+      // tools that spawn throwaway sub-agents. Without this, a spawn-happy model
+      // (e.g. a weak OpenRouter model) ignores the prompt-level "delegate, don't
+      // spawn" rule and loops on `sessions_spawn`, creating its own sub-agents that
+      // bypass the real team + Clawboo's board (observed: 51 spawn calls in one run).
+      // Clawboo owns openclaw.json (it also patches mcp.servers here); `tools.deny`
+      // is a top-level id array under `tools` (deny-wins). Re-asserted as the union
+      // with any user-set deny entries so we never drop the user's own denials.
+      const rawDeny = (snapshot.config?.tools?.deny ?? snapshot.tools?.deny) as unknown
+      const currentDeny = Array.isArray(rawDeny) ? rawDeny.filter((x): x is string => typeof x === 'string') : []
+      const desiredDeny = Array.from(new Set([...currentDeny, ...SUBAGENT_SPAWN_TOOLS]))
+      const denyOk = SUBAGENT_SPAWN_TOOLS.every((t) => currentDeny.includes(t))
       const entry = (server: 'memory' | 'tasks') => ({
         url: mcpHttpUrl(baseUrl, server),
         transport: 'streamable-http' as const,
@@ -230,23 +277,23 @@ export class OpenClawAgentSource implements AgentSource {
         'clawboo-memory': entry('memory'),
         'clawboo-tasks': entry('tasks'),
       }
-      // Idempotent: skip the patch when both are already registered with the
-      // right URLs. This fires on EVERY reconnect, and the Gateway rate-limits
-      // control-plane writes to 3 per 60s — re-patching unchanged config would
-      // burn that budget (and spam the log) for nothing.
+      // Idempotent: skip the patch when the MCP servers are registered AND the
+      // sub-agent tools are already denied. This fires on EVERY reconnect, and the
+      // Gateway rate-limits control-plane writes to 3 per 60s — re-patching
+      // unchanged config would burn that budget (and spam the log) for nothing.
       const alreadyRegistered = Object.entries(desired).every(
         ([name, e]) => current[name]?.url === e.url,
       )
-      if (alreadyRegistered) return
-      // Send ONLY `mcp.servers` (a partial). The Gateway deep-merges, so unrelated
-      // config — including the user's own MCP servers and other `mcp.*` keys — is
-      // preserved; we re-assert `current` to keep the merge explicit.
+      if (alreadyRegistered && denyOk) return
+      // The Gateway deep-merges partials, so unrelated config — the user's own MCP
+      // servers, other `mcp.*` keys, existing `tools.*` — is preserved; we re-assert
+      // `current` (servers) + the deny UNION to keep the merge explicit.
       const servers = { ...current, ...desired }
-      await client.config.patch({ mcp: { servers } }, baseHash)
+      await client.config.patch({ mcp: { servers }, tools: { deny: desiredDeny } }, baseHash)
       this.log(
         'info',
-        { baseUrl },
-        'agent-source: registered clawboo MCP servers in Gateway config',
+        { baseUrl, denied: SUBAGENT_SPAWN_TOOLS },
+        'agent-source: registered clawboo MCP servers + denied sub-agent tools in Gateway config',
       )
     } catch (err) {
       this.log('warn', { err: String(err) }, 'agent-source: MCP registration failed (non-blocking)')
@@ -270,10 +317,35 @@ export class OpenClawAgentSource implements AgentSource {
     this.setConnection('disconnected')
   }
 
-  /** Re-read settings + reconnect (called when settings change or the gateway starts). */
+  /** Re-read settings + reconnect (called when settings change or the gateway starts).
+   *  Clears any auth block: an explicit reconnect means "the credentials/pairing may
+   *  have changed — try again now" (the recovery path out of the long auth backoff). */
   async reconnect(): Promise<void> {
+    this.authBlocked = false
     await this.stop()
     await this.start()
+  }
+
+  /** Ensure the operator client is live, reconnecting + WAITING (bounded) if it is
+   *  not — so a caller (a team-chat delivery) recovers a transient down-state on the
+   *  spot instead of failing and making the user resend. Returns whether the operator
+   *  is usable by the deadline. Fast path: already-connected returns immediately. If
+   *  the Gateway itself is down the reconnect can't succeed and this returns false. */
+  async reconnectAndWait(timeoutMs = 8000): Promise<boolean> {
+    if (this.operatorClient()) return true
+    // Auth-blocked: the Gateway is rejecting our credentials/pairing. Re-attempting
+    // here — which happens per team-chat delivery — is exactly what accumulates its
+    // "too many failed authentication attempts" lockout. Report the operator
+    // unusable; recovery comes from the slow auth backoff or an explicit reconnect()
+    // (a settings change / gateway restart), never from this hot path.
+    if (this.authBlocked) return false
+    await this.reconnect().catch(() => undefined)
+    if (this.operatorClient()) return true
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline && !this.operatorClient()) {
+      await new Promise((r) => setTimeout(r, 300))
+    }
+    return this.operatorClient() != null
   }
 
   private teardownClient(): void {
@@ -314,6 +386,7 @@ export class OpenClawAgentSource implements AgentSource {
       await client.connect(gatewayUrl, this.deps.connectOptions())
       this.connecting = false
       this.retries = 0
+      this.authBlocked = false
       this.setConnection('connected')
       // Attach the shared Memory/Tasks MCP servers in the Gateway config (best
       // effort; idempotent on reconnect — see registerSharedMcpServers).
@@ -325,8 +398,23 @@ export class OpenClawAgentSource implements AgentSource {
       this.connecting = false
       this.teardownClient()
       this.setConnection('disconnected')
-      this.scheduleRetry()
-      this.log('warn', { err: String(err) }, 'agent-source: connect failed, will retry')
+      // A permanent auth failure (bad token / unpaired device / bad connect params)
+      // or a rate-limit lockout ("too many failed authentication attempts") must NOT
+      // be fast-retried — doing so is what trips and re-trips the Gateway lockout.
+      // Back off to a long floor (honouring the Gateway's retryAfterMs) and mark the
+      // source auth-blocked so the per-delivery reconnect path stops re-attempting.
+      const authClass = isAuthConnectError(err)
+      this.authBlocked = authClass
+      this.scheduleRetry(
+        authClass ? Math.max(authRetryAfterMs(err) ?? 0, AUTH_RETRY_FLOOR_MS) : undefined,
+      )
+      this.log(
+        'warn',
+        { err: String(err), authClass },
+        authClass
+          ? 'agent-source: auth-class connect failure — backing off (long) to avoid a Gateway lockout'
+          : 'agent-source: connect failed, will retry',
+      )
     }
   }
 
@@ -335,9 +423,12 @@ export class OpenClawAgentSource implements AgentSource {
   // 2s → 60s. Once a connection has opened, the GatewayClient's own reconnect
   // loop (800ms → 15s) owns post-open drops. The two are gated on disjoint
   // conditions, so they never run concurrently for the same connection.
-  private scheduleRetry(): void {
+  private scheduleRetry(minDelayMs?: number): void {
     if (this.stopped || this.retryTimer) return
-    const delay = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** this.retries)
+    const base = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** this.retries)
+    // An auth-class failure passes a long floor so the retry never lands in the fast
+    // window; a transient failure uses the plain exponential backoff.
+    const delay = minDelayMs != null ? Math.max(minDelayMs, base) : base
     this.retries += 1
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
@@ -639,6 +730,9 @@ export class OpenClawAgentSource implements AgentSource {
           input.personalityConfig != null ? JSON.stringify(input.personalityConfig) : null,
         execConfig: input.execConfig != null ? JSON.stringify(input.execConfig) : null,
         avatarSeed: input.avatarSeed ?? null,
+        // Insert-branch only — the conflict `set` is Gateway-owned columns ONLY, so a
+        // re-create never re-stamps an existing row's tenant (mirrors upsertFromList).
+        tenantId: input.tenantId ?? null,
         createdAt: now,
         updatedAt: now,
       })

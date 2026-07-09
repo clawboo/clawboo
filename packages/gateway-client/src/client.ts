@@ -460,6 +460,11 @@ export class GatewayClient {
               code: res.error.code,
               message: res.error.message ?? 'request failed',
               details: res.error.details,
+              // Preserve the Gateway's retry hints — a rate-limit lockout ("too
+              // many failed authentication attempts, retry later") carries these,
+              // and the server-side reconnect uses them to back off (not hammer).
+              retryable: res.error.retryable,
+              retryAfterMs: res.error.retryAfterMs,
             }),
           )
           return

@@ -10,7 +10,7 @@ The whole surface is the **Observability** panel (`ObsPanel`), backed by the `/a
 ## Prerequisites
 
 <Note>
-There is nothing to configure. The Observability nav view is always present. The data is empty until agents run board tasks; run a [team](/using/teams) or a [board](/using/board) task first, then come back.
+There is nothing to configure. The Observability panel is always available. The data is empty until agents run board tasks; run a [team](/using/teams) or a [board](/using/board) task first, then come back.
 </Note>
 
 - A team that has executed at least one board task (delegation, tool calls, cost). A fresh install with no runs shows empty states everywhere.
@@ -18,7 +18,7 @@ There is nothing to configure. The Observability nav view is always present. The
 
 ## Where it lives
 
-Open the **Observability** view from the secondary nav in the left sidebar (the `Activity` icon). It is one of the dashboard nav views; unlike the `Cmd`/`Ctrl`+1–6 quick-nav slots (graph, marketplace, approvals, scheduler, cost, system), Observability has no keyboard shortcut; reach it via the nav button.
+Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Observability** under the Insights group (the `Activity` icon). The `Cmd`/`Ctrl`+1–5 quick-nav slots cover the sidebar work surfaces (Atlas, Fleet, Marketplace, Board, Approvals); Observability, like the other Settings panels, is reached through the Settings modal instead.
 
 The panel is two columns:
 
@@ -112,7 +112,7 @@ The same event log feeds a live **activity terminal**, `ActivityTerminal`, a con
 | Global    | The Atlas **Activity** dock, a right-edge slide-in toggled by the `Activity` button on the [Ghost Graph](/using/ghost-graph) toolbar (Atlas scope only) | none (all teams) |
 
 <Note>
-The OpenClaw runtime is observed in the browser, so its `tool_call` / `tool_result` / `error` events never reach the server's event log on their own. The browser mirrors them through `POST /api/obs/ingest`, which is restricted to exactly those three kinds; board lifecycle events are always emitted server-side and are never accepted from the browser. This is what makes the terminal uniform across runtimes.
+Every runtime's activity reaches the event log **server-side**: the executor runner emits for the native and coding-agent runtimes, and the server-side team orchestrator emits `tool_call` / `tool_result` / `error` (and cost) for OpenClaw as it drives each turn. A `POST /api/obs/ingest` route remains as a defensive mirror for browser-observed runtime events, restricted to exactly those three kinds; board lifecycle events are always emitted server-side and are never accepted from the browser. This is what makes the terminal uniform across runtimes.
 </Note>
 
 ## Options and variations

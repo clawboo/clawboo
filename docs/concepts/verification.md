@@ -160,7 +160,7 @@ Making the gate intrinsic to the state machine, rather than a step the orchestra
 - **The deterministic gate trusts the configured command.** It reads an exit code; it does not validate that the command actually exercises the change. A weak `VERIFY_CMD` yields a weak gate.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

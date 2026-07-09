@@ -56,6 +56,7 @@ export function ModelDropdown({
   'aria-label': ariaLabel,
 }: ModelDropdownProps) {
   const [open, setOpen] = useState(false)
+  const [focused, setFocused] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const [pos, setPos] = useState<MenuPosition | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -171,6 +172,8 @@ export function ModelDropdown({
         aria-label={ariaLabel}
         onClick={() => !disabled && setOpen((v) => !v)}
         onKeyDown={onTriggerKeyDown}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -178,19 +181,22 @@ export function ModelDropdown({
           gap: 8,
           width: '100%',
           height: 40,
-          padding: '0 12px',
+          padding: '0 14px',
           fontSize: 13,
           fontWeight: 500,
           fontFamily: 'var(--font-body)',
           textAlign: 'left',
           borderRadius: 8,
-          border: `1px solid ${open ? 'rgb(var(--foreground-rgb) / 0.2)' : 'rgb(var(--foreground-rgb) / 0.1)'}`,
-          background: 'rgb(var(--foreground-rgb) / 0.04)',
+          border: `1px solid ${open || focused ? 'var(--primary)' : 'var(--border)'}`,
+          background: 'var(--surface)',
           color: selected ? 'var(--foreground)' : 'rgb(var(--foreground-rgb) / 0.45)',
           cursor: disabled ? 'not-allowed' : 'pointer',
           opacity: disabled ? 0.5 : 1,
           outline: 'none',
-          transition: 'border-color var(--motion-fast), background var(--motion-fast)',
+          boxShadow:
+            (open || focused) && !disabled ? '0 0 0 4px rgb(var(--primary-rgb) / 0.15)' : 'none',
+          transition:
+            'border-color var(--motion-fast), background var(--motion-fast), box-shadow var(--motion-fast)',
         }}
       >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -216,7 +222,7 @@ export function ModelDropdown({
             ref={menuRef}
             role="listbox"
             aria-label={ariaLabel}
-            className="surface-floating-tier"
+            className="border border-border bg-popover"
             style={{
               position: 'fixed',
               left: pos.left,
@@ -226,8 +232,9 @@ export function ModelDropdown({
               zIndex: 1000,
               maxHeight: pos.maxHeight,
               overflowY: 'auto',
-              borderRadius: 10,
+              borderRadius: 12,
               padding: '6px 0',
+              boxShadow: 'var(--shadow-floating)',
             }}
           >
             {options.map((opt, idx) => {
@@ -256,7 +263,7 @@ export function ModelDropdown({
                     background: isSelected
                       ? 'rgb(var(--mint-rgb) / 0.08)'
                       : isActive
-                        ? 'rgb(var(--foreground-rgb) / 0.05)'
+                        ? 'rgb(var(--foreground-rgb) / 0.06)'
                         : 'transparent',
                     transition: 'background var(--motion-fast)',
                   }}

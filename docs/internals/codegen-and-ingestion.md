@@ -141,7 +141,7 @@ Every generated file opens with an `// AUTO-GENERATED — do not edit manually` 
 - **Counts are not test assertions.** The catalog ships 304 agents and 82 teams, but the tests assert _lower bounds_ (≥ 270 agents, ≥ 160 agency, ≥ 40 awesome, ≥ 15 clawboo) so a future re-ingest can grow the catalog without breaking them. Treat the zero-loss `identityTemplate` floor and the verify gate as the invariants, not the exact counts.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also

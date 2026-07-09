@@ -13,7 +13,7 @@
  * lettermark tile in the brand accent — an original mark, not a reproduction.
  *
  * Each mark sits inside a rounded tile washed with a 14% tint of its own accent,
- * matching the premium "integration tile" pattern (Linear / Vercel connectors).
+ * matching the premium "integration tile" pattern.
  */
 import {
   siAnthropic,

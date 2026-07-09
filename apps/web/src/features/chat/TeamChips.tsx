@@ -15,16 +15,18 @@ export const TeamChips = memo(function TeamChips({ teams, onTag }: TeamChipsProp
 
   return (
     <div
-      className="flex items-center gap-1 overflow-x-auto px-4 py-1.5"
+      className="flex items-center gap-1.5 overflow-x-auto px-6 py-2"
       style={{ scrollbarWidth: 'none' }}
     >
-      <span className="shrink-0 text-[10px] uppercase tracking-wide text-secondary/40">Teams</span>
+      <span className="shrink-0 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
+        Teams
+      </span>
       {teams.map((team) => (
         <button
           key={team.id}
           type="button"
           onClick={() => onTag(team.name)}
-          className="ml-1 flex shrink-0 items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5 transition-colors hover:bg-foreground/10"
+          className="ml-0.5 flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border px-2.5 text-foreground/70 transition-all duration-150 hover:border-border-strong hover:text-foreground"
           title={`Tag @${team.name}`}
         >
           <span
@@ -34,7 +36,7 @@ export const TeamChips = memo(function TeamChips({ teams, onTag }: TeamChipsProp
           >
             {team.icon}
           </span>
-          <span className="max-w-[100px] truncate text-[10px] text-text/75">{team.name}</span>
+          <span className="max-w-[110px] truncate text-[12.5px] font-medium">{team.name}</span>
         </button>
       ))}
     </div>

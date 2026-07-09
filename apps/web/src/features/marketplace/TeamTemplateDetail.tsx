@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X } from 'lucide-react'
+import { ExternalLink, X } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
 import type { TeamTemplate } from '@/features/teams/types'
+import { Button, IconButton } from '@/features/shared/Button'
 import { SOURCE_META, TEMPLATE_CATEGORIES, resolveTeamAgents } from './teamCatalog'
 
 // ─── Parsing helpers ────────────────────────────────────────────────────────────
@@ -29,6 +30,8 @@ function getCategoryLabel(category: string): string {
   const entry = TEMPLATE_CATEGORIES.find((c) => c.key === category)
   return entry?.label ?? category
 }
+
+const SECTION_LABEL = 'font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45'
 
 // ─── TeamTemplateDetail ─────────────────────────────────────────────────────────
 
@@ -63,15 +66,8 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
         onClick={onClose}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'var(--overlay-scrim)',
-          zIndex: 60,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+        className="fixed inset-0 z-[60] flex items-center justify-center p-6"
+        style={{ background: 'var(--overlay-scrim)' }}
       >
         {/* Modal */}
         <motion.div
@@ -80,83 +76,44 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
           exit={{ opacity: 0, y: 16 }}
           transition={{ duration: 0.2 }}
           onClick={(e) => e.stopPropagation()}
-          style={{
-            width: '100%',
-            maxWidth: 520,
-            maxHeight: '80vh',
-            overflowY: 'auto',
-            background: 'var(--surface-overlay)',
-            backdropFilter: 'blur(20px) saturate(140%)',
-            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
-            border: '1px solid var(--border-overlay)',
-            borderRadius: 14,
-            padding: 24,
-            position: 'relative',
-            boxShadow: 'var(--shadow-overlay)',
-          }}
+          className="relative w-full max-w-[520px] overflow-y-auto rounded-2xl border border-border bg-surface p-6"
+          style={{ maxHeight: '80vh', boxShadow: 'var(--shadow-overlay)' }}
         >
           {/* Close button */}
-          <button
-            onClick={onClose}
-            style={{
-              position: 'absolute',
-              top: 16,
-              right: 16,
-              background: 'transparent',
-              border: 'none',
-              color: 'rgb(var(--foreground-rgb) / 0.45)',
-              cursor: 'pointer',
-              padding: 4,
-            }}
-          >
-            <X size={16} />
-          </button>
+          <div className="absolute right-3 top-3 z-[2]">
+            <IconButton variant="ghost" size="sm" label="Close" onClick={onClose}>
+              <X size={16} strokeWidth={2} />
+            </IconButton>
+          </div>
 
           {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div className="mb-4 flex items-center gap-3">
             <div
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 12,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: `${template.color}20`,
-                fontSize: 24,
-                flexShrink: 0,
-              }}
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-[24px]"
+              style={{ background: `${template.color}20` }}
             >
               {template.emoji}
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="min-w-0 flex-1">
               <div
-                style={{
-                  fontSize: 18,
-                  fontWeight: 700,
-                  color: 'var(--foreground)',
-                  fontFamily: 'var(--font-display)',
-                  letterSpacing: '-0.01em',
-                }}
+                className="font-display text-[18px] font-bold text-foreground"
+                style={{ letterSpacing: '-0.01em' }}
               >
                 {template.name}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <div className="mt-1 flex items-center gap-1.5">
                 <span
+                  className="rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
                   style={{
-                    fontSize: 9,
-                    fontWeight: 600,
                     color: sourceMeta.color,
                     background: `${sourceMeta.color}18`,
-                    border: `1px solid ${sourceMeta.color}35`,
-                    borderRadius: 4,
-                    padding: '1px 6px',
+                    borderColor: `${sourceMeta.color}35`,
                     letterSpacing: '0.03em',
                   }}
                 >
                   {sourceMeta.label}
                 </span>
-                <span style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
+                <span className="text-[11px] text-foreground/35">
                   {getCategoryLabel(template.category)}
                 </span>
               </div>
@@ -164,78 +121,37 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
           </div>
 
           {/* Description */}
-          <div
-            style={{
-              fontSize: 13,
-              color: 'rgb(var(--foreground-rgb) / 0.65)',
-              lineHeight: 1.6,
-              marginBottom: 16,
-            }}
-          >
+          <div className="mb-4 text-[13px] leading-relaxed text-foreground/65">
             {template.description}
           </div>
 
           {/* Source attribution */}
           {template.sourceUrl && (
-            <div style={{ marginBottom: 16 }}>
+            <div className="mb-4">
               <a
                 href={template.sourceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{
-                  fontSize: 11,
-                  color: 'rgb(var(--mint-rgb) / 0.7)',
-                  textDecoration: 'none',
-                }}
+                className="text-[11px] text-mint/80 no-underline transition-colors hover:text-mint"
               >
-                Source: {sourceMeta.label} ↗
+                Source: {sourceMeta.label}
+                <ExternalLink size={11} className="ml-0.5 inline" strokeWidth={2} />
               </a>
             </div>
           )}
 
           {/* Workflow narrative */}
           {workflowNarrative && (
-            <div style={{ marginBottom: 16 }}>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'rgb(var(--foreground-rgb) / 0.55)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  marginBottom: 8,
-                }}
-              >
-                Workflow
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: 'rgb(var(--foreground-rgb) / 0.6)',
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                  background: 'rgb(var(--foreground-rgb) / 0.02)',
-                  border: '1px solid rgb(var(--foreground-rgb) / 0.04)',
-                  borderRadius: 8,
-                  padding: '10px 12px',
-                }}
-              >
+            <div className="mb-4">
+              <div className={`mb-2 ${SECTION_LABEL}`}>Workflow</div>
+              <div className="whitespace-pre-wrap rounded-xl border border-border bg-foreground/[0.02] px-3 py-2.5 text-[12px] leading-relaxed text-foreground/60">
                 {narrativeExpanded || !hasMoreNarrative
                   ? workflowNarrative
                   : `${narrativePreview}…`}
                 {hasMoreNarrative && (
                   <button
                     onClick={() => setNarrativeExpanded((v) => !v)}
-                    style={{
-                      display: 'block',
-                      marginTop: 6,
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'rgb(var(--mint-rgb) / 0.75)',
-                      fontSize: 11,
-                      cursor: 'pointer',
-                      padding: 0,
-                    }}
+                    className="mt-1.5 block cursor-pointer border-none bg-transparent p-0 text-[11px] text-mint/75 transition-colors hover:text-mint"
                   >
                     {narrativeExpanded ? 'Show less' : 'Show more'}
                   </button>
@@ -245,20 +161,9 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
           )}
 
           {/* Agents section */}
-          <div style={{ marginBottom: 16 }}>
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: 'rgb(var(--foreground-rgb) / 0.55)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                marginBottom: 10,
-              }}
-            >
-              Agents ({resolved.length})
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="mb-4">
+            <div className={`mb-2.5 ${SECTION_LABEL}`}>Agents ({resolved.length})</div>
+            <div className="flex flex-col gap-2.5">
               {resolved.map((agent) => {
                 const skills = parseSkillsFromToolsMd(agent.toolsTemplate)
                 const mentions = agent.agentsTemplate
@@ -268,50 +173,32 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
                 return (
                   <div
                     key={agent.id}
-                    style={{
-                      background: 'rgb(var(--foreground-rgb) / 0.02)',
-                      border: '1px solid rgb(var(--foreground-rgb) / 0.04)',
-                      borderRadius: 8,
-                      padding: '10px 12px',
-                    }}
+                    className="rounded-xl border border-border bg-foreground/[0.02] px-3 py-2.5"
                   >
                     {/* Agent header */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <div className="mb-1.5 flex items-center gap-2">
                       <BooAvatar seed={agent.name} size={32} />
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
+                        <div className="text-[13px] font-semibold text-foreground">
                           {agent.name}
                         </div>
-                        <div style={{ fontSize: 11, color: 'rgb(var(--foreground-rgb) / 0.45)' }}>
-                          {agent.role}
-                        </div>
+                        <div className="text-[11px] text-foreground/45">{agent.role}</div>
                       </div>
                     </div>
 
                     {/* Skills */}
                     {skills.length > 0 && (
-                      <div style={{ marginTop: 6 }}>
-                        <div
-                          style={{
-                            fontSize: 10,
-                            color: 'rgb(var(--foreground-rgb) / 0.35)',
-                            marginBottom: 4,
-                          }}
-                        >
-                          Skills
-                        </div>
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      <div className="mt-1.5">
+                        <div className="mb-1 text-[10px] text-foreground/35">Skills</div>
+                        <div className="flex flex-wrap gap-1.5">
                           {skills.map((skill) => (
                             <span
                               key={skill}
+                              className="whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px]"
                               style={{
-                                fontSize: 9,
-                                padding: '1px 6px',
-                                borderRadius: 10,
                                 background: 'rgb(var(--mint-rgb) / 0.08)',
-                                border: '1px solid rgb(var(--mint-rgb) / 0.15)',
+                                borderColor: 'rgb(var(--mint-rgb) / 0.15)',
                                 color: 'rgb(var(--mint-rgb) / 0.65)',
-                                whiteSpace: 'nowrap',
                               }}
                             >
                               {skill}
@@ -323,8 +210,8 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
 
                     {/* Routing */}
                     {mentions.length > 0 && (
-                      <div style={{ marginTop: 6 }}>
-                        <div style={{ fontSize: 10, color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
+                      <div className="mt-1.5">
+                        <div className="text-[10px] text-foreground/35">
                           Routes to:{' '}
                           {mentions.map((m, i) => (
                             <span key={m}>
@@ -343,19 +230,11 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
 
           {/* Tags */}
           {template.tags.length > 0 && (
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 16 }}>
+            <div className="mb-4 flex flex-wrap gap-1.5">
               {template.tags.map((tag) => (
                 <span
                   key={tag}
-                  style={{
-                    fontSize: 9,
-                    padding: '1px 6px',
-                    borderRadius: 10,
-                    background: 'rgb(var(--foreground-rgb) / 0.04)',
-                    border: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                    color: 'rgb(var(--foreground-rgb) / 0.35)',
-                    whiteSpace: 'nowrap',
-                  }}
+                  className="whitespace-nowrap rounded-full border border-border bg-foreground/[0.03] px-2 py-0.5 text-[9px] text-foreground/35"
                 >
                   {tag}
                 </span>
@@ -364,59 +243,13 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
           )}
 
           {/* Footer */}
-          <div
-            style={{
-              borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-              paddingTop: 16,
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 8,
-            }}
-          >
-            <button
-              onClick={onClose}
-              style={{
-                background: 'transparent',
-                border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-                color: 'rgb(var(--foreground-rgb) / 0.55)',
-                fontSize: 12,
-                fontWeight: 500,
-                padding: '6px 16px',
-                borderRadius: 6,
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.18)'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'rgb(var(--foreground-rgb) / 0.08)'
-              }}
-            >
+          <div className="flex justify-end gap-2 border-t border-border pt-4">
+            <Button variant="outline" size="sm" onClick={onClose}>
               Close
-            </button>
-            <button
-              onClick={() => onDeploy(template)}
-              style={{
-                background: `${template.color}20`,
-                border: `1px solid ${template.color}40`,
-                color: template.color,
-                fontSize: 12,
-                fontWeight: 600,
-                padding: '6px 16px',
-                borderRadius: 6,
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = `${template.color}35`
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = `${template.color}20`
-              }}
-            >
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => onDeploy(template)}>
               Deploy
-            </button>
+            </Button>
           </div>
         </motion.div>
       </motion.div>

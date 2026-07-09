@@ -15,6 +15,7 @@ import {
   Check,
   Copy,
   Download,
+  ExternalLink,
   Eye,
   EyeOff,
   Info,
@@ -24,6 +25,7 @@ import {
   Terminal,
 } from 'lucide-react'
 
+import { Button, IconButton } from '@/features/shared/Button'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { Spinner } from '@/features/shared/Spinner'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
@@ -33,8 +35,10 @@ import {
   installRuntime,
   type ConnectionState,
   type RuntimeStatus,
-} from '@/lib/runtimesClient'
+} from '@clawboo/control-client'
 
+import { confirm } from '@/stores/confirm'
+import { CapabilityChip } from './CapabilityChip'
 import { RuntimeIcon } from './RuntimeBrand'
 import type { RuntimeCatalogEntry } from './runtimeCatalog'
 
@@ -162,9 +166,13 @@ export function RuntimeConnectionCard({
 
   async function handleDisconnect(): Promise<void> {
     if (
-      !window.confirm(
-        `Disconnect ${entry.name}? This removes its saved API key from the encrypted vault — you'll need to re-enter it to reconnect.`,
-      )
+      !(await confirm({
+        title: `Disconnect ${entry.name}?`,
+        message:
+          "This removes its saved API key from the encrypted vault — you'll need to re-enter it to reconnect.",
+        confirmLabel: 'Disconnect',
+        tone: 'danger',
+      }))
     ) {
       return
     }
@@ -190,63 +198,45 @@ export function RuntimeConnectionCard({
   return (
     <div
       data-testid={`runtime-card-${entry.id}`}
-      className="surface-raised-tier flex flex-col gap-3 rounded-xl p-4 transition-transform"
+      className="flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-5"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
     >
       {/* Header */}
       <div className="flex items-start gap-3">
-        <RuntimeIcon id={entry.id} size={36} />
+        <RuntimeIcon id={entry.id} size={40} />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[14px] font-semibold" style={{ color: 'var(--foreground)' }}>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span
+              className="whitespace-nowrap text-[14.5px] font-semibold"
+              style={{ color: 'var(--foreground)' }}
+            >
               {entry.name}
             </span>
             <StatusPill tone={pill.tone} label={pill.label} />
           </div>
-          <p className="mt-0.5 text-[11px] leading-relaxed" style={{ color: muted(0.55) }}>
+          <p className="mt-1 text-[12px] leading-relaxed" style={{ color: muted(0.52) }}>
             {entry.blurb}
           </p>
         </div>
         {variant === 'panel' && onDiagnostics && (
-          <button
-            type="button"
+          <IconButton
+            variant="ghost"
+            size="sm"
+            label={`${entry.name} diagnostics`}
             data-testid={`runtime-${entry.id}-diagnostics`}
-            aria-label={`${entry.name} diagnostics`}
             onClick={onDiagnostics}
-            className="shrink-0 rounded-md p-1 transition-colors hover:bg-foreground/[0.06]"
-            style={{
-              color: muted(0.45),
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-            }}
+            className="shrink-0"
           >
             <Info size={15} />
-          </button>
+          </IconButton>
         )}
       </div>
 
       {/* Capability chips */}
       <div className="flex flex-wrap gap-1.5">
-        {CAP_KEYS.map((k) => {
-          const on = Boolean(caps[k])
-          return (
-            <span
-              key={k}
-              className="font-mono text-[9.5px] font-semibold"
-              style={{
-                padding: '1px 6px',
-                borderRadius: 5,
-                color: on ? 'var(--mint)' : muted(0.3),
-                background: on
-                  ? 'rgb(var(--mint-rgb) / 0.12)'
-                  : 'rgb(var(--foreground-rgb) / 0.03)',
-                textDecoration: on ? 'none' : 'line-through',
-              }}
-            >
-              {k}
-            </span>
-          )
-        })}
+        {CAP_KEYS.map((k) => (
+          <CapabilityChip key={k} label={k} on={Boolean(caps[k])} />
+        ))}
       </div>
 
       {/* Install terminal log */}
@@ -282,12 +272,26 @@ export function RuntimeConnectionCard({
       {/* Key input (api-key runtimes that need a key) */}
       {display === 'needs-auth' && entry.authKind === 'api-key' && (
         <div className="flex flex-col gap-1.5">
-          <label
-            className="font-mono text-[10px] uppercase tracking-widest"
-            style={{ color: muted(0.5) }}
-          >
-            {entry.envVar}
-          </label>
+          <div className="flex items-center justify-between">
+            <label
+              className="font-mono text-[10px] uppercase tracking-widest"
+              style={{ color: muted(0.5) }}
+            >
+              {entry.envVar}
+            </label>
+            {entry.keyUrl && (
+              <a
+                href={entry.keyUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                data-testid={`runtime-${entry.id}-get-key`}
+                className="inline-flex items-center gap-1 text-[10px] font-medium underline-offset-2 hover:underline"
+                style={{ color: 'var(--primary)' }}
+              >
+                Get a key <ExternalLink size={10} />
+              </a>
+            )}
+          </div>
           <div className="relative">
             <input
               data-testid={`runtime-${entry.id}-key`}
@@ -299,25 +303,14 @@ export function RuntimeConnectionCard({
               }}
               placeholder={entry.keyPlaceholder}
               aria-label={`${entry.name} API key`}
-              className="w-full rounded-lg px-3 py-2 pr-10 text-[12px] outline-none"
-              style={{
-                background: 'rgb(var(--foreground-rgb) / 0.04)',
-                border: `1px solid ${muted(0.12)}`,
-                color: 'var(--foreground)',
-              }}
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 pr-10 font-mono text-[12.5px] text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 placeholder:text-foreground/30"
             />
             <button
               type="button"
               tabIndex={-1}
               aria-label={showKey ? 'Hide key' : 'Show key'}
               onClick={() => setShowKey((s) => !s)}
-              className="absolute right-2 top-1/2 -translate-y-1/2"
-              style={{
-                color: muted(0.45),
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-              }}
+              className="absolute right-1.5 top-1/2 flex -translate-y-1/2 cursor-pointer items-center justify-center rounded-md p-1.5 text-foreground/45 transition-colors hover:bg-foreground/[0.06] hover:text-foreground/70"
             >
               {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
@@ -338,41 +331,46 @@ export function RuntimeConnectionCard({
             <code className="font-mono text-[12px]" style={{ color: 'var(--foreground)' }}>
               {entry.loginCommand ?? status?.installCommand}
             </code>
-            <button
-              type="button"
+            <IconButton
+              variant="ghost"
+              size="sm"
               data-testid={`runtime-${entry.id}-login-copy`}
-              aria-label="Copy command"
+              label="Copy command"
               onClick={handleCopyLogin}
-              className="flex items-center gap-1 text-[10px]"
-              style={{
-                color: muted(0.5),
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-              }}
             >
-              {copied ? <Check size={13} style={{ color: 'var(--mint)' }} /> : <Copy size={13} />}
-            </button>
+              {copied ? <Check size={13} className="text-mint" /> : <Copy size={13} />}
+            </IconButton>
           </div>
         </div>
       )}
 
-      {/* Action row */}
+      {/* Install command — subdued, its own row (the primary action is the
+          Install button below), so a long `npm install -g …` never competes
+          with or crowds the CTA on the narrow onboarding card. */}
+      {display === 'not-installed' && entry.installCommand && (
+        <div
+          className="rounded-lg px-3 py-2 font-mono text-[10px]"
+          style={{
+            background: 'var(--code-block-bg, rgb(var(--foreground-rgb) / 0.05))',
+            color: muted(0.5),
+          }}
+        >
+          {entry.installCommand}
+        </div>
+      )}
+
+      {/* Action row — exactly one prominent action per state (Install /
+          Connect); Re-check / Disconnect / copy are subdued. */}
       <div className="mt-auto flex items-center gap-2">
         {display === 'not-installed' && (
-          <>
-            <ActionButton
-              testid={`runtime-${entry.id}-install`}
-              primary
-              onClick={handleInstall}
-              icon={<Download size={13} />}
-            >
-              Install
-            </ActionButton>
-            <span className="font-mono text-[10px]" style={{ color: muted(0.4) }}>
-              {entry.installCommand}
-            </span>
-          </>
+          <ActionButton
+            testid={`runtime-${entry.id}-install`}
+            primary
+            onClick={handleInstall}
+            icon={<Download size={13} />}
+          >
+            Install
+          </ActionButton>
         )}
 
         {display === 'installing' && (
@@ -422,20 +420,14 @@ export function RuntimeConnectionCard({
               Re-check
             </ActionButton>
             {variant === 'panel' && (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 data-testid={`runtime-${entry.id}-disconnect`}
                 onClick={() => void handleDisconnect()}
-                className="text-[11px]"
-                style={{
-                  color: 'var(--primary)',
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
               >
                 Disconnect
-              </button>
+              </Button>
             )}
           </>
         )}
@@ -452,19 +444,13 @@ export function RuntimeConnectionCard({
         )}
 
         {error && (display === 'not-installed' || display === 'needs-auth') && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={display === 'needs-auth' ? () => void handleConnect() : handleInstall}
-            className="text-[11px]"
-            style={{
-              color: muted(0.5),
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-            }}
           >
             Retry
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -557,25 +543,19 @@ function ActionButton({
   disabled?: boolean
   testid?: string
 }) {
+  // Routes through the shared Button primitive so Install / Connect / Re-check
+  // inherit the standard height, brand shadow, focus ring, and disabled state.
   return (
-    <button
-      type="button"
+    <Button
+      variant={primary ? 'primary' : 'secondary'}
+      size="sm"
       data-testid={testid}
-      disabled={busy || disabled}
+      loading={busy}
+      disabled={disabled}
       onClick={() => void onClick()}
-      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-[filter,transform] active:scale-[0.98] disabled:opacity-50"
-      style={
-        primary
-          ? { background: 'var(--primary)', color: 'var(--primary-foreground)' }
-          : {
-              background: 'rgb(var(--foreground-rgb) / 0.06)',
-              color: 'var(--foreground)',
-              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-            }
-      }
     >
-      {busy ? <Spinner size={13} /> : icon}
+      {!busy && icon}
       {children}
-    </button>
+    </Button>
   )
 }

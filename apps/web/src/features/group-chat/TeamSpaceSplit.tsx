@@ -23,12 +23,11 @@ import { GroupChatPanel } from './GroupChatPanel'
 
 interface TeamSpaceSplitProps {
   teamId: string
-  userIntroText: string
   /** When true, play the graph "open" reveal on mount. */
   animateOpen: boolean
 }
 
-export function TeamSpaceSplit({ teamId, userIntroText, animateOpen }: TeamSpaceSplitProps) {
+export function TeamSpaceSplit({ teamId, animateOpen }: TeamSpaceSplitProps) {
   return (
     <Group orientation="vertical" id="group-chat-v" data-testid="group-chat-view">
       <Panel id="graph" defaultSize={45} minSize={20}>
@@ -51,7 +50,7 @@ export function TeamSpaceSplit({ teamId, userIntroText, animateOpen }: TeamSpace
       </Panel>
       <ResizeHandle direction="vertical" />
       <Panel id="chat" defaultSize={55} minSize={20}>
-        <GroupChatPanel teamId={teamId} userIntroText={userIntroText} embedded />
+        <GroupChatPanel teamId={teamId} embedded />
       </Panel>
     </Group>
   )

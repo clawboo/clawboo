@@ -50,7 +50,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Auth the pinned-SHA upstream fetches (raises the GitHub rate limit to
+      # 5000/hr; the fetch helper also retries on a transient 429).
       - run: pnpm verify:ingest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - run: pnpm build
 

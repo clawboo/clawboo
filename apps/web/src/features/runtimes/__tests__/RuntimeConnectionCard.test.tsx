@@ -7,13 +7,24 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { RuntimeStatus } from '@/lib/runtimesClient'
+import type { RuntimeStatus } from '@clawboo/control-client'
 
 import { server } from '../../../__vitest__/mswServer'
+import { confirm } from '@/stores/confirm'
 import { RuntimeConnectionCard } from '../RuntimeConnectionCard'
 import { RUNTIME_CATALOG } from '../runtimeCatalog'
 
-afterEach(() => cleanup())
+// The design-system confirm() (replaces window.confirm) is mocked so these unit
+// tests drive the disconnect flow without rendering the app-root <ConfirmDialog>.
+vi.mock('@/stores/confirm', async (orig) => ({
+  ...(await orig<typeof import('@/stores/confirm')>()),
+  confirm: vi.fn(),
+}))
+
+afterEach(() => {
+  vi.mocked(confirm).mockReset()
+  cleanup()
+})
 
 describe('RuntimeConnectionCard', () => {
   it('not-installed → Install streams SSE → onChanged', async () => {
@@ -64,6 +75,10 @@ describe('RuntimeConnectionCard', () => {
         onChanged={onChanged}
       />,
     )
+    // The needs-auth state surfaces a "Get a key" link to the provider console.
+    expect(screen.getByTestId('runtime-hermes-get-key').getAttribute('href')).toContain(
+      'openrouter.ai',
+    )
     await userEvent.type(screen.getByTestId('runtime-hermes-key'), 'sk-or-test')
     await userEvent.click(screen.getByTestId('runtime-hermes-connect'))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
@@ -89,7 +104,7 @@ describe('RuntimeConnectionCard', () => {
 
   it('ready (panel): Disconnect confirms, POSTs, then onChanged', async () => {
     const onChanged = vi.fn()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.mocked(confirm).mockResolvedValue(true)
     server.use(
       http.post('/api/runtimes/hermes/disconnect', () =>
         HttpResponse.json({ ok: true, connectionState: 'needs-auth' }),
@@ -106,15 +121,14 @@ describe('RuntimeConnectionCard', () => {
     )
     expect(screen.getByText('Connected')).toBeInTheDocument()
     await userEvent.click(screen.getByTestId('runtime-hermes-disconnect'))
-    expect(confirmSpy).toHaveBeenCalled()
+    expect(confirm).toHaveBeenCalled()
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
-    confirmSpy.mockRestore()
   })
 
   it('Disconnect cancelled at the confirm → no POST, no onChanged', async () => {
     const onChanged = vi.fn()
     const posted = vi.fn()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    vi.mocked(confirm).mockResolvedValue(false)
     server.use(
       http.post('/api/runtimes/hermes/disconnect', () => {
         posted()
@@ -131,15 +145,14 @@ describe('RuntimeConnectionCard', () => {
       />,
     )
     await userEvent.click(screen.getByTestId('runtime-hermes-disconnect'))
-    expect(confirmSpy).toHaveBeenCalled()
+    await waitFor(() => expect(confirm).toHaveBeenCalled())
     expect(posted).not.toHaveBeenCalled()
     expect(onChanged).not.toHaveBeenCalled()
-    confirmSpy.mockRestore()
   })
 
   it('failed Disconnect surfaces the error and does NOT call onChanged', async () => {
     const onChanged = vi.fn()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.mocked(confirm).mockResolvedValue(true)
     server.use(
       http.post('/api/runtimes/hermes/disconnect', () =>
         HttpResponse.json({ ok: false, error: 'vault is locked' }, { status: 500 }),
@@ -157,7 +170,6 @@ describe('RuntimeConnectionCard', () => {
     await userEvent.click(screen.getByTestId('runtime-hermes-disconnect'))
     expect(await screen.findByText(/vault is locked/i)).toBeInTheDocument()
     expect(onChanged).not.toHaveBeenCalled()
-    confirmSpy.mockRestore()
   })
 
   it('onboarding variant hides Disconnect on a ready card', () => {

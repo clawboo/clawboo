@@ -22,6 +22,16 @@ pnpm dev          # Vite UI on :5173, API on :18790 (auto-fallback)
 
 Clawboo stores all of its state under `~/.clawboo/` (auto-created on first run). The only optional override most contributors touch is `CLAWBOO_HOME`, to point a dev instance at a throwaway directory. There are **no feature flags**: every subsystem ships on, so there is nothing to enable. (Governance ships track-and-warn: budgets record spend and warn at thresholds, but nothing auto-pauses a run until you set a hard cap.)
 
+## Your first contribution
+
+New here? Welcome. The friendliest way in:
+
+1. Browse issues labeled [`good first issue`](https://github.com/clawboo/clawboo/labels/good%20first%20issue). They are scoped small, name the files to touch, and do not need deep knowledge of the codebase.
+2. Comment on the one you want ("I'd like to take this") and we will assign it to you. No need to ask twice.
+3. Follow **Setup** above, make your change on a branch, and open a PR. If you get stuck, say so in the issue. A half-finished PR with a question is completely welcome.
+
+Good starting areas that rarely need core changes: **new marketplace team templates**, **docs pages**, **a provider or runtime icon**, or **a test for an uncovered component**. If you are unsure whether an idea fits, open a [Discussion](https://github.com/clawboo/clawboo/discussions) first, before writing code.
+
 ## Branching
 
 We use [GitHub Flow](https://docs.github.com/en/get-started/using-git/github-flow):

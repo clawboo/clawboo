@@ -124,7 +124,7 @@ curl -s http://localhost:18790/api/health | jq '.ok, .fatal, .degraded'
 </Danger>
 
 <Warning>
-**`master key` reads "unreadable, re-enter runtime keys".** The boot sentinel did not decrypt, which means the master key changed, was lost, or `CLAWBOO_SECRETS_MASTER_KEY` now differs from what encrypted the vault. Stored runtime provider keys cannot be decrypted; re-enter them in the Runtimes panel (see [Connecting runtimes](/runtimes/connecting-runtimes)), or reset `~/.clawboo` for a clean start. This check degrades; the server keeps running.
+**`master key` reads "unreadable, re-enter runtime keys".** The boot sentinel did not decrypt, which means the master key changed, was lost, or `CLAWBOO_SECRETS_MASTER_KEY` now differs from what encrypted the vault. Stored runtime provider keys cannot be decrypted; re-enter them from **Settings**, then the **Runtimes** panel (see [Connecting runtimes](/runtimes/connecting-runtimes)), or reset `~/.clawboo` for a clean start. This check degrades; the server keeps running.
 </Warning>
 
 <Note>

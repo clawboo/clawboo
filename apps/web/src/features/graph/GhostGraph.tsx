@@ -1,11 +1,10 @@
-import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
+import { readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import '@xyflow/react/dist/style.css'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
-  Controls,
   MiniMap,
   BackgroundVariant,
   useNodesInitialized,
@@ -24,13 +23,20 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   GitBranch,
   LayoutDashboard,
+  Lock,
+  LockOpen,
   Map,
+  Maximize2,
   Pin,
   RefreshCw,
   Sparkles,
   Terminal,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { Button, IconButton } from '@/features/shared/Button'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
@@ -118,7 +124,7 @@ function GhostGraphMiniMapNode({
   strokeWidth,
   selected,
 }: MiniMapNodeProps) {
-  const fill = color ?? '#e2e2e2'
+  const fill = color ?? 'rgb(var(--foreground-rgb) / 0.5)'
   if (color === 'transparent') return null
   // Atlas team-root junctions are invisible 1px routing points; the
   // MiniMap should also hide them so it reflects what the user sees.
@@ -157,6 +163,129 @@ function GhostGraphMiniMapNode({
       shapeRendering={shapeRendering}
       className={className + (selected ? ' selected' : '')}
     />
+  )
+}
+
+// ─── Canvas control primitives ──────────────────────────────────────────────
+//
+// One shared visual dialect for every piece of graph chrome. The top command
+// bar AND the bottom viewport bar are both built from these atoms inside a
+// single `.surface-floating-tier` glass shell — so the controls read as ONE
+// coordinated system instead of the old three-corner / three-language sprawl.
+// Buttons carry NO per-button border/background; the glass shell is the single
+// elevated plane and hover is a quiet fill-fade (no jittery per-button lift).
+//
+// Accent semantics (two tiers, matching the product convention):
+//   • primary (red)   — the single forward authoring action (Connect).
+//   • mint            — an on/overlay toggle is engaged (Halos, Activity, Lock,
+//                       Minimap-shown).
+//   • neutral         — a momentary action's transient pressed tint.
+
+type BarTint = 'primary' | 'mint' | 'neutral'
+
+function BarBtn({
+  icon: Icon,
+  label,
+  onClick,
+  active,
+  tint = 'primary',
+  disabled,
+}: {
+  icon: LucideIcon
+  label: string
+  onClick: () => void
+  active?: boolean
+  tint?: BarTint
+  disabled?: boolean
+}) {
+  const activeClass =
+    tint === 'mint'
+      ? 'bg-mint/[0.18] text-mint'
+      : tint === 'neutral'
+        ? 'bg-foreground/[0.10] text-foreground'
+        : 'bg-primary/[0.18] text-primary'
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-pressed={active ?? undefined}
+      disabled={disabled}
+      onClick={onClick}
+      className={[
+        'flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg transition-colors duration-150',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-1',
+        'disabled:cursor-default disabled:opacity-40',
+        active
+          ? activeClass
+          : 'text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90',
+      ].join(' ')}
+    >
+      <Icon size={15} strokeWidth={2} aria-hidden />
+    </button>
+  )
+}
+
+function BarDivider() {
+  return <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-[rgb(var(--foreground-rgb)/0.1)]" />
+}
+
+// The one labeled inline segment in the whole control system — the Atlas
+// layout MODE pick (a choice where one is always selected), so it earns the
+// recessed-track + raised-chip treatment (the ThemeToggle pattern) to read
+// unmistakably as a switch, distinct from the icon-only toggles beside it.
+function LayoutModeSegment({
+  value,
+  onChange,
+}: {
+  value: 'top-down' | 'radial'
+  onChange: (v: 'top-down' | 'radial') => void
+}) {
+  const opts = [
+    {
+      id: 'top-down' as const,
+      label: 'Tree',
+      icon: LayoutDashboard,
+      title: 'Flat-row tree — Boo Zero at top, teams in a row',
+    },
+    {
+      id: 'radial' as const,
+      label: 'Radial',
+      icon: Sparkles,
+      title: 'Radial — Boo Zero at centre, teams as petals',
+    },
+  ]
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Atlas layout"
+      className="flex items-center gap-0.5 rounded-md bg-[rgb(var(--foreground-rgb)/0.05)] p-0.5"
+    >
+      {opts.map((o) => {
+        const active = value === o.id
+        const Icon = o.icon
+        return (
+          <button
+            key={o.id}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            title={o.title}
+            onClick={() => onChange(o.id)}
+            className={[
+              'flex h-7 cursor-pointer items-center gap-1 rounded-[5px] px-2 text-[11.5px] font-semibold transition-all duration-150',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-1',
+              active
+                ? 'bg-surface text-foreground shadow-[var(--shadow-raised)]'
+                : 'text-foreground/50 hover:text-foreground/80',
+            ].join(' ')}
+          >
+            <Icon size={12.5} strokeWidth={2} aria-hidden />
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -217,8 +346,14 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // subscription is gated on `showActivityDock` so it only tails when open.
   const [showActivityDock, setShowActivityDock] = useState(false)
 
+  // Canvas interactivity lock (viewport bar). When locked, node dragging +
+  // selection are frozen (pan/zoom stay free) so the graph can be inspected
+  // without accidental drags — the design-system replacement for React Flow's
+  // default <Controls> interactivity toggle.
+  const [locked, setLocked] = useState(false)
+
   const nodesInitialized = useNodesInitialized()
-  const { fitView } = useReactFlow()
+  const { fitView, zoomIn, zoomOut } = useReactFlow()
 
   // Track the canvas wrapper size so we can (a) re-fit the graph when the
   // panel is resized (e.g. user drags the divider in the new vertical group
@@ -817,12 +952,18 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           touch nodes, edges, physics, or ELK. */}
       {scope === 'atlas' && <TeamStatusClusterLayer nodes={nodes} />}
 
-      {/* Floating top-right toolbar — Re-layout / Team halos (Atlas only) /
-          Connect. Wrapped in a single flex row so the buttons always sit
-          adjacent regardless of which subset is visible. The previous
-          layout pinned each button to a fixed `right:` offset, which left
-          a visible gap in team scope where Team halos was hidden. */}
+      {/* ── Top-right command bar ─────────────────────────────────────────
+          One glass shell (.surface-floating-tier) holding every action / mode
+          tool in divider-separated clusters — LAYOUT · OVERLAYS · EDIT.
+          Replaces the old five-mismatched-pill strip: icon-first + tooltips so
+          the bar hugs the corner (~300px Atlas / ~88px team) instead of
+          sprawling across the top. Conditional dividers keep the team subset
+          gapless. */}
       <div
+        role="toolbar"
+        aria-label="Graph controls"
+        aria-orientation="horizontal"
+        className="surface-floating-tier"
         style={{
           position: 'absolute',
           top: 12,
@@ -830,121 +971,54 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           zIndex: 20,
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 2,
+          padding: 4,
+          borderRadius: 12,
         }}
       >
-        {/* Re-layout — bumps the layout key and saves new positions.
-            Gated by `hasRunLayout` — there's nothing to re-layout
-            before the first ELK pass completes. */}
-        {hasRunLayout && (
-          <button
-            onClick={resetLayout}
-            title="Re-layout"
-            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-canvas-control-border bg-canvas-control px-3 py-1.5 text-[12px] font-semibold text-foreground/55 shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:text-foreground/90 hover:shadow-[var(--shadow-floating)]"
-          >
-            <RefreshCw size={14} />
-            Re-layout
-          </button>
-        )}
-
-        {/* Atlas layout segmented pill (Tree | Radial). Two
-            adjacent buttons inside a single shell so it's obvious BOTH
-            options exist and which one is active. Mirrors the FAN | GRID
-            toggle in CreateTeamModal. Persisted via the store setter. */}
+        {/* LAYOUT — re-run the ELK layout + (Atlas) the Tree|Radial mode pick.
+            Re-layout is gated by `hasRunLayout` (nothing to re-layout before
+            the first pass). */}
+        {hasRunLayout && <BarBtn icon={RefreshCw} label="Re-layout" onClick={resetLayout} />}
         {scope === 'atlas' && (
-          <div
-            role="group"
-            aria-label="Atlas layout"
-            className="flex items-center gap-0.5 rounded-lg border border-canvas-control-border bg-canvas-control p-0.5 shadow-[var(--shadow-raised)]"
-          >
-            {[
-              {
-                key: 'top-down' as const,
-                label: 'Tree',
-                icon: <LayoutDashboard size={13} />,
-                title: 'Flat-row tree layout — Boo Zero at top, teams in a row',
-              },
-              {
-                key: 'radial' as const,
-                label: 'Radial',
-                icon: <Sparkles size={13} />,
-                title: 'Radial layout — Boo Zero at centre, teams as petals',
-              },
-            ].map((opt) => {
-              const active = atlasLayout === opt.key
-              return (
-                <button
-                  key={opt.key}
-                  type="button"
-                  onClick={() => setAtlasLayout(opt.key)}
-                  aria-pressed={active}
-                  title={opt.title}
-                  className={[
-                    'flex cursor-pointer items-center gap-1 rounded-md px-2.5 py-1 text-[12px] font-semibold transition-colors duration-150',
-                    active
-                      ? 'bg-primary/[0.18] text-primary'
-                      : 'text-foreground/55 hover:text-foreground/90',
-                  ].join(' ')}
-                >
-                  {opt.icon}
-                  {opt.label}
-                </button>
-              )
-            })}
-          </div>
+          <>
+            {hasRunLayout && <BarDivider />}
+            <LayoutModeSegment value={atlasLayout} onChange={setAtlasLayout} />
+          </>
         )}
 
-        {/* Team halos toggle — Atlas-only. Hidden in team scope so the
-            toolbar doesn't carry irrelevant chrome; with flex layout,
-            removing it leaves no gap. */}
+        {/* OVERLAYS — Atlas-only on/off toggles (mint = overlay engaged). */}
         {scope === 'atlas' && (
-          <button
-            onClick={() => setShowTeamHalos(!showTeamHalos)}
-            title="Toggle colored team hulls behind agents"
-            className={[
-              'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
-              showTeamHalos
-                ? 'border-mint/40 bg-mint/[0.18] text-mint'
-                : 'border-canvas-control-border bg-canvas-control text-foreground/55 hover:text-foreground/90',
-            ].join(' ')}
-          >
-            <Pin size={14} />
-            Team halos
-          </button>
+          <>
+            <BarDivider />
+            <BarBtn
+              icon={Pin}
+              label="Team halos"
+              tint="mint"
+              active={showTeamHalos}
+              onClick={() => setShowTeamHalos(!showTeamHalos)}
+            />
+            <BarBtn
+              icon={Terminal}
+              label={showActivityDock ? 'Hide activity feed' : 'Activity feed (all teams)'}
+              tint="mint"
+              active={showActivityDock}
+              onClick={() => setShowActivityDock((v) => !v)}
+            />
+          </>
         )}
 
-        {/* Global activity dock toggle — Atlas-only. Opens the live "what is
-            every team doing" terminal. */}
-        {scope === 'atlas' && (
-          <button
-            onClick={() => setShowActivityDock((v) => !v)}
-            title="Toggle the live activity feed across all teams"
-            aria-pressed={showActivityDock}
-            className={[
-              'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
-              showActivityDock
-                ? 'border-mint/40 bg-mint/[0.18] text-mint'
-                : 'border-canvas-control-border bg-canvas-control text-foreground/55 hover:text-foreground/90',
-            ].join(' ')}
-          >
-            <Terminal size={14} />
-            Activity
-          </button>
-        )}
-
-        {/* Connect mode toggle */}
-        <button
+        {/* EDIT — draw routing edges (red = the single forward authoring
+            action). Only prefix a divider when a cluster precedes it, so the
+            team subset (`[Re-layout] · [Connect]`) never shows a leading rule. */}
+        {(hasRunLayout || scope === 'atlas') && <BarDivider />}
+        <BarBtn
+          icon={GitBranch}
+          label={connectMode ? 'Stop drawing edges' : 'Connect agents (draw routing)'}
+          tint="primary"
+          active={connectMode}
           onClick={() => setConnectMode(!connectMode)}
-          className={[
-            'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
-            connectMode
-              ? 'border-primary/40 bg-primary/20 text-primary'
-              : 'border-canvas-control-border bg-canvas-control text-foreground/55 hover:text-foreground/90',
-          ].join(' ')}
-        >
-          <GitBranch size={14} />
-          {connectMode ? 'Drawing Edges' : 'Connect'}
-        </button>
+        />
       </div>
 
       {/* Atlas global activity dock — a right-edge slide-in panel. Always
@@ -1025,25 +1099,68 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         </div>
       )}
 
-      {/* MiniMap minimize/maximize toggle. Sits at the bottom-right corner —
-          where the MiniMap itself lives — so the relationship between the
-          control and what it controls reads at a glance. When the MiniMap is
-          shown, the toggle slides left of it and switches to an X icon. */}
-      <button
-        onClick={() => setShowMiniMap(!showMiniMap)}
-        title={showMiniMap ? 'Hide minimap' : 'Show minimap'}
-        aria-label={showMiniMap ? 'Hide minimap' : 'Show minimap'}
-        className={[
-          'absolute z-20 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-canvas-control-border bg-canvas-control shadow-[var(--shadow-raised)] transition-all duration-150 hover:-translate-y-px hover:shadow-[var(--shadow-floating)]',
-          showMiniMap ? 'text-primary' : 'text-foreground/55 hover:text-foreground/90',
-        ].join(' ')}
+      {/* Connect-mode armed ring — a subtle inset accent so edge-drawing mode
+          reads across the whole canvas, not only the corner toggle. Below the
+          toolbars (z-20), above the canvas; never intercepts pointer events. */}
+      {connectMode && (
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 15,
+            pointerEvents: 'none',
+            boxShadow: 'inset 0 0 0 1.5px rgb(var(--primary-rgb) / 0.35)',
+          }}
+        />
+      )}
+
+      {/* ── Bottom-right viewport bar ──────────────────────────────────────
+          Custom zoom / fit / lock / minimap in the SAME glass dialect as the
+          top command bar — replaces the off-brand default React Flow
+          <Controls> AND the lone minimap toggle, so all machine chrome speaks
+          one language. Horizontal so it hugs the bottom-right corner without
+          eating the short team-scope row. Present in both scopes. */}
+      <div
+        role="toolbar"
+        aria-label="Viewport"
+        className="surface-floating-tier"
         style={{
+          position: 'absolute',
           bottom: 12,
-          right: showMiniMap ? minimapDims.w + 24 : 12,
+          right: 12,
+          zIndex: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          padding: 4,
+          borderRadius: 12,
         }}
       >
-        {showMiniMap ? <X size={14} /> : <Map size={14} />}
-      </button>
+        <BarBtn icon={ZoomOut} label="Zoom out" onClick={() => void zoomOut({ duration: 200 })} />
+        <BarBtn icon={ZoomIn} label="Zoom in" onClick={() => void zoomIn({ duration: 200 })} />
+        <BarBtn
+          icon={Maximize2}
+          label="Fit to view"
+          onClick={() => void fitView({ padding: 0.2, duration: 300 })}
+        />
+        <BarDivider />
+        <BarBtn
+          icon={locked ? Lock : LockOpen}
+          label={locked ? 'Unlock canvas (enable dragging)' : 'Lock canvas (freeze positions)'}
+          tint="mint"
+          active={locked}
+          onClick={() => setLocked((l) => !l)}
+        />
+        <BarDivider />
+        <BarBtn
+          icon={showMiniMap ? X : Map}
+          label={showMiniMap ? 'Hide minimap' : 'Show minimap'}
+          tint="mint"
+          active={showMiniMap}
+          onClick={() => setShowMiniMap(!showMiniMap)}
+        />
+      </div>
 
       <ReactFlow
         nodes={visibleNodes}
@@ -1070,23 +1187,27 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         minZoom={0.15}
         maxZoom={2.5}
         defaultEdgeOptions={{ animated: false }}
+        // Interactivity lock (viewport bar). Freezes node dragging + selection
+        // while leaving pan/zoom free — the design-system replacement for the
+        // default <Controls> lock, which is why <Controls> is no longer rendered.
+        nodesDraggable={!locked}
+        elementsSelectable={!locked}
       >
         <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="var(--canvas-dot)" />
-        <Controls
-          style={{
-            background: 'var(--canvas-control)',
-            border: '1px solid var(--canvas-control-border)',
-            borderRadius: 8,
-          }}
-        />
         {showMiniMap && (
           <MiniMap
+            // Float ABOVE the bottom-right viewport bar (40px tall + 12px inset
+            // + 8px gap = 60) so the two never collide at the corner.
+            position="bottom-right"
             style={{
               background: 'var(--canvas-control)',
               border: '1px solid var(--canvas-control-border)',
-              borderRadius: 8,
+              borderRadius: 10,
               width: minimapDims.w,
               height: minimapDims.h,
+              bottom: 60,
+              right: 12,
+              margin: 0,
             }}
             nodeColor={(node) => {
               if (node.type === 'boo') return 'var(--primary)'
@@ -1224,19 +1345,16 @@ function EdgeExplainPanel({
       className="absolute bottom-4 left-1/2 z-10 w-[340px] -translate-x-1/2 rounded-xl border bg-canvas-control px-4 py-3.5 shadow-2xl"
       style={{
         borderColor: `${meta.color}40`,
-        boxShadow: `0 8px 32px rgb(0 0 0 / 0.25), 0 0 0 0.5px ${meta.color}30`,
+        boxShadow: `var(--shadow-floating), 0 0 0 0.5px ${meta.color}30`,
       }}
     >
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[12px] font-semibold" style={{ color: meta.color }}>
           {meta.label}
         </span>
-        <button
-          onClick={onClose}
-          className="cursor-pointer border-none bg-transparent p-0 text-[14px] leading-none text-foreground/40 hover:text-foreground/70"
-        >
-          ✕
-        </button>
+        <IconButton label="Close" variant="ghost" size="sm" onClick={onClose}>
+          <X size={14} />
+        </IconButton>
       </div>
       <p className="m-0 mb-2 text-[12px] text-foreground/55">{meta.desc}</p>
       {sourceAgent && (
@@ -1252,12 +1370,11 @@ function EdgeExplainPanel({
         </p>
       )}
       {onDelete && (
-        <button
-          onClick={() => onDelete(edge.id)}
-          className="mt-2.5 w-full cursor-pointer rounded-md border border-primary/30 bg-primary/[0.08] py-1.5 text-[12px] font-semibold text-primary transition-colors hover:bg-primary/[0.18]"
-        >
-          Remove Connection
-        </button>
+        <div className="mt-2.5">
+          <Button variant="danger" size="sm" fullWidth onClick={() => onDelete(edge.id)}>
+            Remove Connection
+          </Button>
+        </div>
       )}
     </motion.div>
   )

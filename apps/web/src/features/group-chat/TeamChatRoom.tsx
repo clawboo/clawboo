@@ -10,6 +10,7 @@ import { motion } from 'framer-motion'
 import { MessagesSquare, X } from 'lucide-react'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
+import { IconButton } from '@/features/shared/Button'
 import { formatRelative } from '@/lib/formatRelative'
 import { fetchTeamChat, type TeamChatPost } from '@/lib/teamChatClient'
 import { useFleetStore } from '@/stores/fleet'
@@ -47,8 +48,8 @@ function PeerPost({ post, authorName }: { post: TeamChatPost; authorName: string
             justifyContent: 'center',
             fontSize: 10,
             fontWeight: 700,
-            color: 'var(--primary)',
-            background: 'rgb(var(--primary-rgb) / 0.12)',
+            color: 'var(--foreground)',
+            background: muted(0.1),
           }}
         >
           You
@@ -168,20 +169,9 @@ export function TeamChatRoom({ teamId, onClose }: { teamId: string; onClose: () 
               Every runtime posts as a named peer — any runtime can lead.
             </div>
           </div>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            style={{
-              border: 'none',
-              background: 'transparent',
-              color: muted(0.5),
-              cursor: 'pointer',
-              display: 'flex',
-            }}
-          >
+          <IconButton variant="ghost" size="sm" label="Close" onClick={onClose}>
             <X size={16} />
-          </button>
+          </IconButton>
         </div>
 
         <div

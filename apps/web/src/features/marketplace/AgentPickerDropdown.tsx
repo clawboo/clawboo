@@ -32,11 +32,11 @@ export function AgentPickerDropdown({ onSelect, onClose, style }: AgentPickerDro
   return (
     <div
       ref={ref}
-      className="surface-floating-tier absolute z-50 min-w-[160px] overflow-hidden rounded-[10px] py-1"
-      style={style}
+      className="absolute z-50 min-w-[160px] overflow-hidden rounded-xl border border-border bg-popover py-1.5"
+      style={{ ...style, boxShadow: 'var(--shadow-floating)' }}
     >
       {agents.length === 0 ? (
-        <div className="px-3 py-2 text-[11px] text-foreground/55">No agents</div>
+        <div className="px-3.5 py-2 text-[12px] text-foreground/50">No agents</div>
       ) : (
         agents.map((agent) => (
           <button
@@ -46,7 +46,7 @@ export function AgentPickerDropdown({ onSelect, onClose, style }: AgentPickerDro
               onSelect(agent.id, agent.name)
               onClose()
             }}
-            className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-[12px] text-foreground transition-colors duration-150 hover:bg-foreground/[0.05]"
+            className="block w-full cursor-pointer whitespace-nowrap px-3.5 py-2 text-left text-[13px] text-foreground transition-colors duration-150 hover:bg-foreground/[0.06]"
           >
             {agent.name}
           </button>

@@ -369,7 +369,7 @@ export function TeamHaloLayer({ nodes }: TeamHaloLayerProps) {
                 textAnchor="middle"
                 style={{
                   fill: halo.color,
-                  fontFamily: 'var(--font-cabinet-grotesk, sans-serif)',
+                  fontFamily: 'var(--font-display)',
                   letterSpacing: '0.02em',
                 }}
               >

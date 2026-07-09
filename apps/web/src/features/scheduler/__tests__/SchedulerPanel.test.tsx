@@ -5,9 +5,20 @@ import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { server } from '../../../__vitest__/mswServer'
+import { confirm } from '@/stores/confirm'
 import { SchedulerPanel } from '../SchedulerPanel'
 
-afterEach(() => cleanup())
+// The design-system confirm() (replaces window.confirm) is mocked so the delete
+// test drives the flow without rendering the app-root <ConfirmDialog>.
+vi.mock('@/stores/confirm', async (orig) => ({
+  ...(await orig<typeof import('@/stores/confirm')>()),
+  confirm: vi.fn(),
+}))
+
+afterEach(() => {
+  vi.mocked(confirm).mockReset()
+  cleanup()
+})
 
 const FUTURE = 4_000_000_000_000
 
@@ -118,8 +129,10 @@ describe('SchedulerPanel', () => {
 
     // A native agent is selected first (sorted: Main openclaw is first option actually)
     // — explicitly pick the native agent and assert "Its own life" is disabled.
-    const select = within(dialog).getByTestId('schedule-agent') as HTMLSelectElement
-    await user.selectOptions(select, 'n1')
+    // The custom Select renders a trigger button + a portaled listbox (not a
+    // native <select>), so open it then click the option.
+    await user.click(within(dialog).getByTestId('schedule-agent'))
+    await user.click(await screen.findByRole('option', { name: /Coder .* Clawboo Native/i }))
     const ownLife = within(dialog).getByRole('button', { name: /its own life/i })
     expect(ownLife).toBeDisabled()
 
@@ -138,19 +151,18 @@ describe('SchedulerPanel', () => {
         return HttpResponse.json({ ok: true })
       }),
     )
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    vi.mocked(confirm).mockResolvedValue(false)
     const user = userEvent.setup()
     render(<SchedulerPanel />)
     const row = await screen.findByTestId('schedule-row-clawboo-routine:r1')
 
     await user.click(within(row).getByTestId('schedule-clawboo-routine:r1-delete'))
-    expect(confirmSpy).toHaveBeenCalled()
+    await waitFor(() => expect(confirm).toHaveBeenCalled())
     expect(deleted).toBe(0)
 
-    confirmSpy.mockReturnValue(true)
+    vi.mocked(confirm).mockResolvedValue(true)
     await user.click(within(row).getByTestId('schedule-clawboo-routine:r1-delete'))
     await waitFor(() => expect(deleted).toBe(1))
-    confirmSpy.mockRestore()
   })
 
   it('renders a routine one-shot (once@) as a friendly label, not the raw spec', async () => {

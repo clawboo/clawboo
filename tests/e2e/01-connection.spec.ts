@@ -2,9 +2,11 @@ import { test, expect, connectToMockGateway } from './helpers/fixtures'
 
 test.describe('Gateway Connection', () => {
   test('shows connect screen on first visit', async ({ page }) => {
-    // Mark as onboarded so we skip the wizard
+    // Mark as onboarded so we skip the wizard; suppress the one-time tour.
     await page.addInitScript(() => {
       localStorage.setItem('clawboo.onboarded', '1')
+      localStorage.setItem('clawboo.tour.shown', '1')
+      localStorage.setItem('clawboo.firstTask.shown', '1')
     })
 
     // GatewayBootstrap's wizard-gate logic:

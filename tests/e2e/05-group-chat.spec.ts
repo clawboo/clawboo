@@ -59,9 +59,11 @@ async function connectWithTeam(
     data: { gatewayUrl, gatewayToken: '' },
   })
 
-  // Skip onboarding
+  // Skip onboarding + the one-time first-run affordances (tour / guided-first-task)
   await page.addInitScript(() => {
     localStorage.setItem('clawboo.onboarded', '1')
+    localStorage.setItem('clawboo.tour.shown', '1')
+    localStorage.setItem('clawboo.firstTask.shown', '1')
   })
 
   // Mock system status
@@ -149,7 +151,7 @@ test.describe('Group Chat', () => {
     })
   })
 
-  test('shows "Know Your Team" gate when onboarding incomplete', async ({
+  test('gates onboarding, then walks welcome → user-intro into the team space', async ({
     page,
     request,
     gateway,
@@ -163,19 +165,33 @@ test.describe('Group Chat', () => {
     await expect(groupChatRow).toBeVisible({ timeout: 5_000 })
     await groupChatRow.click()
 
-    // Onboarding gate is rendered in the left panel — verify the
-    // "Know Your Team" button is present, and that the GroupChatPanel
-    // composer is NOT mounted (it's behind the gate).
+    // Phase A — the welcome gate is rendered in the left panel; the GroupChatPanel
+    // composer is NOT mounted (it's behind the gate), and the Ghost Graph is not
+    // rendered until the user finishes.
     await expect(page.locator('[data-testid="know-your-team-button"]')).toBeVisible({
       timeout: 5_000,
     })
     await expect(page.locator('[data-testid="group-chat-panel"]')).not.toBeVisible({
       timeout: 1_000,
     })
-
-    // The intro gate fills the whole window during onboarding — the Ghost Graph
-    // is intentionally NOT rendered until the user finishes and the team space
-    // "opens" into the graph(top)+chat(bottom) split.
     await expect(page.locator('.react-flow')).not.toBeVisible({ timeout: 2_000 })
+
+    // NEW FLOW — the welcome advances STRAIGHT to the user's self-introduction
+    // (Phase B, the agent intro parade, was removed). Still gated (no panel yet).
+    await page.locator('[data-testid="know-your-team-button"]').click()
+    await expect(page.locator('[data-testid="user-intro-textarea"]')).toBeVisible({
+      timeout: 5_000,
+    })
+    await expect(page.locator('[data-testid="group-chat-panel"]')).not.toBeVisible({
+      timeout: 1_000,
+    })
+
+    // Submitting the self-intro opens the team space — the gate hands off to the
+    // graph(top)+chat(bottom) split (works with no live orchestration client too).
+    await page
+      .locator('[data-testid="user-intro-textarea"]')
+      .fill('Hi team, I am testing the onboarding flow.')
+    await page.locator('[data-testid="submit-user-intro"]').click()
+    await expect(page.locator('[data-testid="group-chat-panel"]')).toBeVisible({ timeout: 15_000 })
   })
 })

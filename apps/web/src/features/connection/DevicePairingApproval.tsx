@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
-import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, ShieldCheck } from 'lucide-react'
+import { Button } from '@/features/shared/Button'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,17 +72,20 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
     >
       {/* Header */}
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 ring-1 ring-accent/20">
-          <ShieldCheck className="h-4 w-4 text-accent" strokeWidth={2.25} />
+        <div
+          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+          style={{
+            background: 'rgb(var(--primary-rgb) / 0.1)',
+            boxShadow: '0 0 0 1px rgb(var(--primary-rgb) / 0.2)',
+          }}
+        >
+          <ShieldCheck className="h-4 w-4 text-primary" strokeWidth={2.25} />
         </div>
         <div className="flex flex-col gap-1">
-          <h2
-            className="text-[15px] font-semibold tracking-tight text-text"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
+          <h2 className="text-[15px] font-semibold text-foreground" style={{ letterSpacing: '-0.01em' }}>
             Approve this device
           </h2>
-          <p className="text-[12px] leading-snug text-secondary">
+          <p className="text-[12px] leading-snug text-foreground/50">
             OpenClaw 2026.5+ requires you to approve new devices before they can connect. This is a
             one-time step on this machine.
           </p>
@@ -93,7 +97,7 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
         <div
           role="alert"
           data-testid="device-pairing-error"
-          className="rounded-lg border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-snug text-destructive"
+          className="rounded-xl border border-destructive/25 bg-destructive/[0.08] px-3.5 py-2.5 text-[12px] leading-snug text-destructive"
         >
           {errorMessage}
         </div>
@@ -102,7 +106,11 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
       {phase === 'approved' && (
         <div
           role="status"
-          className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-[12px] leading-snug text-emerald-400"
+          className="flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-[12px] leading-snug text-mint"
+          style={{
+            background: 'rgb(var(--mint-rgb) / 0.08)',
+            borderColor: 'rgb(var(--mint-rgb) / 0.25)',
+          }}
         >
           <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2.5} />
           Approved. Reconnecting…
@@ -111,47 +119,42 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
 
       {/* Actions */}
       <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => void handleApprove()}
+        <Button
+          variant="primary"
+          size="lg"
+          fullWidth
+          loading={phase === 'approving'}
           disabled={phase === 'approving' || phase === 'approved'}
+          onClick={() => void handleApprove()}
           data-testid="device-pairing-approve-button"
-          className="flex h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[12px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {phase === 'approving' && (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2.5} />
-              Approving…
-            </>
-          )}
-          {phase === 'approved' && (
-            <>
-              <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2.5} />
-              Approved
-            </>
-          )}
-          {(phase === 'idle' || phase === 'error') && 'Approve this device'}
-        </button>
+          {phase === 'approved' && <CheckCircle2 className="h-4 w-4" strokeWidth={2.5} />}
+          {phase === 'approving'
+            ? 'Approving…'
+            : phase === 'approved'
+              ? 'Approved'
+              : 'Approve this device'}
+        </Button>
         {onCancel && phase !== 'approving' && phase !== 'approved' && (
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="lg"
             onClick={onCancel}
             data-testid="device-pairing-cancel-button"
-            className="h-10 rounded-lg border border-border bg-transparent px-3 font-mono text-[12px] text-secondary transition hover:bg-foreground/[0.04]"
           >
             Cancel
-          </button>
+          </Button>
         )}
       </div>
 
       {/* Footer hint — how to do it manually */}
-      <p className="font-mono text-[10px] leading-relaxed text-secondary/40">
+      <p className="font-mono text-[10px] leading-relaxed text-foreground/40">
         Or from your terminal:{' '}
-        <code className="rounded bg-foreground/[0.04] px-1 py-0.5 text-secondary/60">
+        <code className="rounded bg-foreground/[0.05] px-1 py-0.5 text-foreground/60">
           openclaw devices approve --latest
         </code>{' '}
         then{' '}
-        <code className="rounded bg-foreground/[0.04] px-1 py-0.5 text-secondary/60">
+        <code className="rounded bg-foreground/[0.05] px-1 py-0.5 text-foreground/60">
           openclaw devices approve &lt;requestId&gt;
         </code>
         .

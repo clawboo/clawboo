@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
 import { useToastStore } from '@/stores/toast'
+import { Button } from '@/features/shared/Button'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -161,152 +162,63 @@ function ProviderRow({
   }, [apiKey, provider, addToast, onSaved])
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        padding: '10px 0',
-        borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.04)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+    <div className="flex flex-col gap-3 border-b border-border py-3 last:border-b-0">
+      <div className="flex items-center gap-3">
         {/* Status dot */}
         <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: hasKey ? 'var(--mint)' : 'rgb(var(--foreground-rgb) / 0.2)',
-            flexShrink: 0,
-          }}
+          className={`h-2 w-2 shrink-0 rounded-full ${hasKey ? 'bg-mint' : 'bg-foreground/20'}`}
         />
 
         {/* Provider info */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--foreground)' }}>
-            {provider.label}
-          </span>
-          <span
-            style={{
-              marginLeft: 8,
-              fontSize: 11,
-              color: 'rgb(var(--foreground-rgb) / 0.3)',
-              fontFamily: 'var(--font-geist-mono, monospace)',
-            }}
-          >
-            {provider.envVar}
-          </span>
+        <div className="min-w-0 flex-1">
+          <span className="text-[13px] font-medium text-foreground">{provider.label}</span>
+          <span className="font-data ml-2 text-[11px] text-foreground/35">{provider.envVar}</span>
         </div>
 
         {/* Status text + Update button */}
         <span
-          style={{
-            fontSize: 11,
-            color: hasKey ? 'rgb(var(--mint-rgb) / 0.7)' : 'rgb(var(--foreground-rgb) / 0.3)',
-            marginRight: 8,
-          }}
+          className={`mr-1 text-[11px] font-medium ${hasKey ? 'text-mint' : 'text-foreground/35'}`}
         >
           {hasKey ? 'Configured' : 'Not set'}
         </span>
 
-        <button
-          type="button"
-          onClick={() => setEditing((v) => !v)}
-          style={{
-            height: 26,
-            padding: '0 10px',
-            fontSize: 11,
-            fontWeight: 500,
-            borderRadius: 6,
-            border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-            background: 'rgb(var(--foreground-rgb) / 0.04)',
-            color: 'rgb(var(--foreground-rgb) / 0.6)',
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-          }}
-        >
+        <Button variant="outline" size="sm" onClick={() => setEditing((v) => !v)}>
           {editing ? 'Cancel' : 'Update'}
-        </button>
+        </Button>
       </div>
 
       {/* Inline edit row */}
       {editing && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 18 }}>
-          <div
-            style={{
-              flex: 1,
-              display: 'flex',
-              alignItems: 'center',
-              background: 'rgb(var(--foreground-rgb) / 0.04)',
-              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-              borderRadius: 6,
-              overflow: 'hidden',
-            }}
-          >
+        <div className="flex items-center gap-2 pl-5">
+          <div className="relative flex-1">
             <input
               type={showKey ? 'text' : 'password'}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder={provider.placeholder}
               autoFocus
-              style={{
-                flex: 1,
-                padding: '6px 10px',
-                fontSize: 12,
-                color: 'var(--foreground)',
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                fontFamily: 'var(--font-geist-mono, monospace)',
-              }}
+              className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 pr-11 font-mono text-[13px] text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 placeholder:text-foreground/30"
             />
             <button
               type="button"
+              tabIndex={-1}
+              aria-label={showKey ? 'Hide API key' : 'Show API key'}
               onClick={() => setShowKey((v) => !v)}
-              style={{
-                padding: '4px 8px',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'rgb(var(--foreground-rgb) / 0.4)',
-                display: 'flex',
-                alignItems: 'center',
-              }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer rounded-md border-none bg-transparent p-1 text-foreground/40 transition-colors hover:text-foreground/70"
             >
-              {showKey ? (
-                <EyeOff style={{ width: 14, height: 14 }} />
-              ) : (
-                <Eye style={{ width: 14, height: 14 }} />
-              )}
+              {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
 
-          <button
-            type="button"
-            disabled={!apiKey.trim() || saving}
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!apiKey.trim()}
+            loading={saving}
             onClick={() => void handleSave()}
-            style={{
-              height: 30,
-              padding: '0 14px',
-              fontSize: 11,
-              fontWeight: 600,
-              borderRadius: 6,
-              border: 'none',
-              background: !apiKey.trim() || saving ? 'rgb(var(--mint-rgb) / 0.2)' : 'var(--mint)',
-              color: !apiKey.trim() || saving ? 'rgb(var(--mint-rgb) / 0.4)' : 'var(--background)',
-              cursor: !apiKey.trim() || saving ? 'default' : 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              transition: 'all 0.15s',
-            }}
           >
-            {saving && (
-              <Loader2 style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
-            )}
             Save
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -335,7 +247,7 @@ export function ApiKeyManager() {
   if (!envFlags) return null
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
+    <div className="flex flex-col">
       {PRIMARY_PROVIDERS.map((provider) => (
         <ProviderRow
           key={provider.id}
@@ -346,26 +258,12 @@ export function ApiKeyManager() {
       ))}
 
       {/* Divider */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '14px 0 6px',
-        }}
-      >
-        <div style={{ flex: 1, borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)' }} />
-        <span
-          style={{
-            fontSize: 10,
-            color: 'rgb(var(--foreground-rgb) / 0.3)',
-            fontWeight: 500,
-            letterSpacing: '0.04em',
-          }}
-        >
+      <div className="flex items-center gap-3 pb-1.5 pt-4">
+        <div className="flex-1 border-t border-border" />
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
           Additional Providers
         </span>
-        <div style={{ flex: 1, borderTop: '1px solid rgb(var(--foreground-rgb) / 0.06)' }} />
+        <div className="flex-1 border-t border-border" />
       </div>
 
       {ADDITIONAL_PROVIDERS.map((provider) => (

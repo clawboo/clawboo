@@ -21,6 +21,11 @@ import {
 import { getDbPath } from '../db'
 import { ClawbooNativeAgentSource } from './clawbooNativeAgentSource'
 import { OpenClawAgentSource, type OpenClawClientLike } from './openClawAgentSource'
+import { RuntimeAgentSource } from './runtimeAgentSource'
+
+/** The executor-driven coding runtimes that get a generic record source (peers of
+ *  OpenClaw + native). They can be team MEMBERS; a native leader delegates to them. */
+const CODING_RUNTIME_SOURCE_IDS = ['claude-code', 'codex', 'hermes'] as const
 
 interface RegistryLog {
   info: (obj: object, msg: string) => void
@@ -55,6 +60,7 @@ class ServerAgentRegistry {
   readonly registry = new AgentRegistry()
   readonly source: OpenClawAgentSource
   readonly nativeSource: ClawbooNativeAgentSource
+  readonly runtimeSources: RuntimeAgentSource[]
   private log: RegistryLog | null = null
   private identityPromise: Promise<DeviceIdentity> | null = null
   // The clawboo server base URL — set at boot once the port is resolved, so the
@@ -106,6 +112,13 @@ class ServerAgentRegistry {
     this.registry.register(this.source)
     this.nativeSource = new ClawbooNativeAgentSource({ getDbPath })
     this.registry.register(this.nativeSource)
+    // The executor-driven coding runtimes as record sources (peers). Their agents
+    // hold records here; serverDeliver runs them from the row's runtime + vault key.
+    this.runtimeSources = CODING_RUNTIME_SOURCE_IDS.map((runtimeId) => {
+      const src = new RuntimeAgentSource({ getDbPath, runtimeId })
+      this.registry.register(src)
+      return src
+    })
   }
 
   private async signConnect(
@@ -129,6 +142,12 @@ class ServerAgentRegistry {
 
   async reconnect(): Promise<void> {
     await this.source.reconnect()
+  }
+
+  /** Reconnect the OpenClaw operator connection and WAIT (bounded) for it to become
+   *  usable — for a team-chat delivery to recover a transient down-state in place. */
+  async reconnectAndWaitOperator(timeoutMs?: number): Promise<boolean> {
+    return this.source.reconnectAndWait(timeoutMs)
   }
 }
 

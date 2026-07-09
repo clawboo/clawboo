@@ -6,8 +6,7 @@ import { useFleetStore } from '@/stores/fleet'
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayResponseError } from '@clawboo/gateway-client'
 import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@/lib/execSettingsForGateway'
-import { listAgentSessions } from '@/lib/agentSourceClient'
-import { getTeamChatOverride, setTeamChatOverride } from '@/lib/sessionUtils'
+import { listAgentSessions } from '@clawboo/control-client'
 
 // ─── Parsers ─────────────────────────────────────────────────────────────────
 
@@ -80,7 +79,6 @@ export interface ApprovalFollowupDeps {
   activeRunId: string | null
   /** The agent's exec-ask before we (allow-once only) drop it; restored in `finally`. */
   originalExecAsk: string
-  teamOverrideKey: string | null
   /** True when the Gateway's own followup already started the agent — no recovery needed. */
   isAgentResponding: () => boolean
   /** allow-once: wait for the re-run to finish before restoring the exec policy. */
@@ -110,7 +108,6 @@ export async function runApprovalFollowup(deps: ApprovalFollowupDeps): Promise<v
     sessionKey,
     activeRunId,
     originalExecAsk,
-    teamOverrideKey,
   } = deps
   const delay = deps.delay ?? realDelay
   const allowOnce = decision === 'allow-once'
@@ -143,9 +140,6 @@ export async function runApprovalFollowup(deps: ApprovalFollowupDeps): Promise<v
   }
 
   try {
-    // Redirect the followup's response events to the team transcript if this
-    // approval came from group chat (same pattern as sendGroupChatMessage).
-    if (teamOverrideKey) setTeamChatOverride(agentId, teamOverrideKey)
     await client.call('chat.send', {
       sessionKey,
       message: [
@@ -240,8 +234,10 @@ export function useApprovalActions() {
         // (drives the re-run with deliver:false from clawboo's side).
         if (agentId && (decision === 'allow-once' || decision === 'allow-always')) {
           const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
-          const teamOverrideKey = getTeamChatOverride(agentId)
-          const sessionKey = teamOverrideKey ?? agent?.sessionKey ?? null
+          // Route the followup to the agent's own session. (Team-chat approvals no
+          // longer redirect via a session override — the server orchestrator owns
+          // team runs now; a team-originated re-run renders in the 1:1 session.)
+          const sessionKey = agent?.sessionKey ?? null
           if (sessionKey) {
             await runApprovalFollowup({
               client,
@@ -251,7 +247,6 @@ export function useApprovalActions() {
               sessionKey,
               activeRunId: agent?.runId ?? null,
               originalExecAsk: agent?.execConfig?.execAsk ?? 'always',
-              teamOverrideKey: teamOverrideKey ?? null,
               isAgentResponding: () =>
                 useFleetStore.getState().agents.find((a) => a.id === agentId)?.status === 'running',
               waitForRerunIdle: async () => {

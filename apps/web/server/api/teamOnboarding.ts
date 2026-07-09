@@ -9,7 +9,8 @@
 // SOUL.md persistence).
 
 import type { Request, Response } from 'express'
-import { createDb, getSetting, setSetting } from '@clawboo/db'
+import { chatMessages, createDb, getSetting, setSetting } from '@clawboo/db'
+import { like } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
 
 interface OnboardingState {
@@ -26,6 +27,21 @@ const DEFAULT_STATE: OnboardingState = {
 
 function settingsKey(teamId: string): string {
   return `team-onboarding:${teamId}`
+}
+
+/** True when the team already has any group-chat history under a `agent:*:team:<id>`
+ *  session key — i.e. it has been used. Such a team should NOT be re-gated behind the
+ *  "Know Your Team" onboarding flow. (Post-S08b there is no agent-intro parade, so a
+ *  genuinely new team has no chat until the user sends its first message, which happens
+ *  only after the gate — so this cleanly distinguishes "used" from "brand-new".) */
+function hasTeamChatActivity(db: ReturnType<typeof createDb>, teamId: string): boolean {
+  const row = db
+    .select({ id: chatMessages.id })
+    .from(chatMessages)
+    .where(like(chatMessages.sessionKey, `%:team:${teamId}`))
+    .limit(1)
+    .get()
+  return row != null
 }
 
 export function readOnboardingState(
@@ -57,6 +73,14 @@ export function teamOnboardingGET(req: Request, res: Response): void {
   try {
     const db = createDb(getDbPath())
     const state = readOnboardingState(db, teamId)
+    // A team that already has chat history has clearly been used — don't re-gate it
+    // behind the "Know Your Team" onboarding. Report it as onboarded (read-time
+    // effective override; the stored flags are untouched) so the group chat opens
+    // straight to its transcript instead of the "introduce yourself" gate.
+    if ((!state.agentsIntroduced || !state.userIntroduced) && hasTeamChatActivity(db, teamId)) {
+      res.json({ ...state, agentsIntroduced: true, userIntroduced: true })
+      return
+    }
     res.json(state)
   } catch (err) {
     res.status(500).json({ error: String(err) })

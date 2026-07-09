@@ -23,6 +23,7 @@ import { randomUUID } from 'node:crypto'
 
 import type { AgentConfig, NativeEvent } from '@clawboo/adapter-native'
 import { DEFAULT_MAX_TURNS } from '@clawboo/adapter-native'
+import { compactToolOutput } from '@clawboo/compaction'
 import type { ClawbooDb } from '@clawboo/db'
 import type { StartOpts, Usage } from '@clawboo/executor'
 import { dateStamp } from '@clawboo/executor/tiers'
@@ -33,6 +34,7 @@ import type { NativeLocalTool, NativeToolOutcome } from './fileTools'
 import type { McpBridge } from './mcpBridge'
 import { priceTurn } from './pricing'
 import {
+  isContextOverflowMessage,
   ProviderError,
   type NeutralContentPart,
   type NeutralMessage,
@@ -141,10 +143,13 @@ export class Conversation {
     emit({ type: 'init', sessionId: this.sessionId, model: client.activeModel() })
 
     // Same-runtime continuation: reload the predecessor transcript. A miss is
-    // a fresh start (the prose handoff in opts.context carries continuity).
+    // a fresh start (the prose handoff in opts.context carries continuity). The
+    // reloaded transcript is bounded to a recent window (pair-safe) so a long-lived
+    // resumed session — e.g. a native team leader that resumes every turn — can't
+    // slowly grow past the model window and overflow.
     if (ctx.resume && ctx.homeDir) {
       const prior = await loadSessionTranscript(ctx.homeDir, ctx.resume)
-      if (prior) this.messages = prior
+      if (prior) this.messages = boundResumedTranscript(prior)
     }
 
     const system = `${config.systemPrompt}\n\nToday: ${dateStamp(new Date())}`
@@ -203,10 +208,24 @@ export class Conversation {
           return this.terminal({ aborted: true, summary: finalText || turnText })
         }
         const pe = err instanceof ProviderError ? err : null
+        const rawMessage = err instanceof Error ? err.message : String(err)
+        // A context-overflow provider error (an oversized-input 400) surfaces as a
+        // CLEAN, typed terminal — a clawboo-authored message + the `context_overflow`
+        // code — NOT the raw provider text (which often points at CLI-only remediation
+        // like "Try /reset (or /new)" that doesn't apply to a team run). The typed code
+        // also lets obs classify it as its own class instead of an "Unknown" harness bug.
+        if (isContextOverflowMessage(rawMessage)) {
+          return this.terminal({
+            ok: false,
+            summary: finalText || turnText,
+            errorMessage: "The task was too large for the model's context window.",
+            errorCode: 'context_overflow',
+          })
+        }
         return this.terminal({
           ok: false,
           summary: finalText || turnText,
-          errorMessage: err instanceof Error ? err.message : String(err),
+          errorMessage: rawMessage,
           ...(pe ? { errorCode: pe.code } : {}),
         })
       }
@@ -262,7 +281,12 @@ export class Conversation {
         results.push({
           type: 'tool-result',
           id: c.id,
-          output: outcome.output,
+          // Compact the output BEFORE it enters the model transcript (re-sent every
+          // turn) so a large tool result — a whole file dump — can't inflate the prompt
+          // past the context window. Pass-through-safe + failure-preserving: small
+          // outputs and error lines are returned unchanged. The obs/UI emit above keeps
+          // the FULL output; only the model context is compacted.
+          output: compactToolOutput(c.name, outcome.output).text,
           isError: outcome.isError,
         })
       }
@@ -357,4 +381,49 @@ function asArgs(input: unknown): Record<string, unknown> {
   return input && typeof input === 'object' && !Array.isArray(input)
     ? (input as Record<string, unknown>)
     : {}
+}
+
+/** Conservative char budget for a RESUMED transcript (~68k tokens of content). A
+ *  safety valve, not a normal-path trigger: an ordinary chat never reaches it, so
+ *  continuity is untouched; it only bounds a pathologically long resumed history so
+ *  the leader's cumulative conversation can't slowly grow past the model window. */
+const RESUME_TRANSCRIPT_CHAR_BUDGET = 240_000
+
+/** Approximate the model-context size of one message (its content only — the role
+ *  wrapper is negligible). A cheap proxy for the budget; exactness isn't needed. */
+function messageChars(m: NeutralMessage): number {
+  return JSON.stringify(m.content).length
+}
+
+/**
+ * Bound a resumed transcript to a recent window, PAIR-SAFE. A turn-group starts at a
+ * user TEXT message (a conversation turn opener); an assistant message and its
+ * following tool-result user message belong to the group above them, so slicing at a
+ * group boundary never orphans a tool-result from its tool-call (which the provider
+ * would reject). Keeps the largest recent window of whole groups that fits `budget`,
+ * and always at least the most recent group. Under budget ⇒ returned unchanged.
+ */
+export function boundResumedTranscript(
+  messages: NeutralMessage[],
+  budget: number = RESUME_TRANSCRIPT_CHAR_BUDGET,
+): NeutralMessage[] {
+  const total = messages.reduce((n, m) => n + messageChars(m), 0)
+  if (total <= budget) return messages
+  // Group-start indices: user messages whose first content part is text.
+  const starts: number[] = []
+  messages.forEach((m, i) => {
+    if (m.role === 'user' && m.content[0]?.type === 'text') starts.push(i)
+  })
+  if (starts.length <= 1) return messages // no safe internal boundary to trim at
+  // Walk starts oldest→newest; slices shrink, so the first that fits is the largest
+  // recent window that fits. If none fit, keep the last group (best we can do without
+  // splitting a turn — its large tool outputs are already compacted at push time).
+  for (let s = 0; s < starts.length; s++) {
+    const start = starts[s]
+    if (start === undefined) continue
+    const slice = messages.slice(start)
+    const sliceChars = slice.reduce((n, m) => n + messageChars(m), 0)
+    if (sliceChars <= budget || s === starts.length - 1) return slice
+  }
+  return messages
 }

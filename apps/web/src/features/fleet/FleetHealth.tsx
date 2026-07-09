@@ -8,7 +8,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { Activity, AlertCircle, RefreshCw } from 'lucide-react'
 
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
+import { PanelHeader } from '@/features/shared/PanelHeader'
 import { formatRelative } from '@/lib/formatRelative'
 import {
   fetchFleetSummary,
@@ -21,7 +23,10 @@ import {
 import { RUNTIME_CATALOG, type RuntimeId } from '../runtimes/runtimeCatalog'
 import { RuntimeDepthBadge, RuntimeGlyph } from '../runtimes/runtimeDepth'
 
-const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
+const SECTION_LABEL =
+  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
+const CARD = 'rounded-2xl border border-border bg-surface'
+const CARD_SHADOW = { boxShadow: 'var(--shadow-raised)' } as const
 
 const BRANDED = new Set<string>(['clawboo-native', 'claude-code', 'codex', 'hermes'])
 
@@ -36,44 +41,34 @@ function pct(v: number | null): string {
 
 function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="surface-raised-tier rounded-xl" style={{ padding: '12px 14px', minWidth: 0 }}>
-      <div
-        className="font-mono uppercase"
-        style={{ fontSize: 9.5, letterSpacing: '0.06em', color: muted(0.45) }}
-      >
-        {label}
-      </div>
-      <div
-        className="tabular-nums"
-        style={{ fontSize: 24, fontWeight: 700, color: 'var(--foreground)', marginTop: 2 }}
-      >
+    <div className={`${CARD} min-w-0 px-4 py-3.5`} style={CARD_SHADOW}>
+      <div className={SECTION_LABEL}>{label}</div>
+      <div className="font-data mt-1.5 text-[24px] font-bold leading-none text-foreground">
         {value}
       </div>
-      {sub ? <div style={{ fontSize: 11, color: muted(0.5), marginTop: 1 }}>{sub}</div> : null}
+      {sub ? <div className="mt-1.5 text-[11px] text-foreground/50">{sub}</div> : null}
     </div>
   )
 }
 
 function HealthDot({ ok }: { ok: boolean | null }) {
-  const color = ok === null ? muted(0.3) : ok ? 'var(--mint)' : 'var(--primary)'
+  const color = ok === null ? 'rgb(var(--foreground-rgb) / 0.3)' : ok ? 'var(--mint)' : 'var(--primary)'
   return (
     <span
       aria-hidden
-      style={{ width: 8, height: 8, borderRadius: 4, background: color, flexShrink: 0 }}
+      className="h-2 w-2 shrink-0 rounded-full"
+      style={{ background: color }}
     />
   )
 }
 
 function CountChip({ n, label, color }: { n: number; label: string; color: string }) {
+  const active = n > 0
   return (
     <span
-      className="tabular-nums"
+      className="font-data rounded-full px-2 py-0.5 text-[11px] font-semibold"
       style={{
-        fontSize: 10.5,
-        fontWeight: 600,
-        padding: '1px 7px',
-        borderRadius: 6,
-        color,
+        color: active ? color : 'rgb(var(--foreground-rgb) / 0.4)',
         background: 'rgb(var(--foreground-rgb) / 0.05)',
       }}
     >
@@ -86,27 +81,27 @@ function RuntimeTile({ tile }: { tile: FleetRuntimeTile }) {
   return (
     <div
       data-testid={`fleet-tile-${tile.runtime}`}
-      className="surface-raised-tier rounded-xl"
-      style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}
+      className={`${CARD} flex flex-col gap-2.5 p-4`}
+      style={CARD_SHADOW}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+      <div className="flex items-center gap-2.5">
         <RuntimeGlyph id={tile.runtime} size={28} />
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[13px] font-semibold text-foreground">
               {runtimeName(tile.runtime)}
             </span>
             <HealthDot ok={tile.healthOk} />
           </div>
-          <div style={{ marginTop: 2 }}>
+          <div className="mt-1">
             <RuntimeDepthBadge runtimeClass={tile.runtimeClass} />
           </div>
         </div>
-        <span className="tabular-nums" style={{ fontSize: 12, color: muted(0.55), flexShrink: 0 }}>
+        <span className="font-data shrink-0 text-[12px] text-foreground/55">
           {tile.agentCount} {tile.agentCount === 1 ? 'agent' : 'agents'}
         </span>
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      <div className="flex flex-wrap gap-1.5">
         <CountChip n={tile.healthy} label="healthy" color="var(--mint)" />
         <CountChip n={tile.degraded} label="degraded" color="var(--amber)" />
         <CountChip n={tile.down} label="down" color="var(--primary)" />
@@ -134,69 +129,32 @@ export function FleetHealth() {
   }, [refresh])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div
-        style={{
-          height: 44,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Activity size={15} style={{ color: 'var(--mint)' }} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>Fleet</span>
-          {summary ? (
-            <span
-              className="tabular-nums"
-              style={{
-                fontSize: 10,
-                fontFamily: 'var(--font-geist-mono, monospace)',
-                color: 'var(--primary)',
-                background: 'rgb(var(--primary-rgb) / 0.12)',
-                borderRadius: 20,
-                padding: '2px 8px',
-              }}
-            >
-              {summary.totalAgents} agents
-            </span>
-          ) : null}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            aria-label="Refresh"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              fontSize: 11,
-              color: muted(0.5),
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <RefreshCw size={12} /> Refresh
-          </button>
-          <GitHubStarButton />
-        </div>
-      </div>
+    <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
+      <PanelHeader
+        title="Fleet"
+        subtitle="Fleet health across every runtime"
+        icon={Activity}
+        size="md"
+        border
+        actions={
+          <>
+            {summary ? (
+              <span className="font-data rounded-full bg-foreground/[0.06] px-2.5 py-0.5 text-[11px] font-semibold text-foreground/55">
+                {summary.totalAgents} agents
+              </span>
+            ) : null}
+            <Button variant="secondary" size="sm" onClick={() => void refresh()}>
+              <RefreshCw size={13} strokeWidth={2} /> Refresh
+            </Button>
+            <GitHubStarButton />
+          </>
+        }
+      />
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 880 }}>
+      <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="mx-auto flex max-w-[880px] flex-col gap-6">
           {/* Metric strip */}
-          <div
-            style={{
-              display: 'grid',
-              gap: 10,
-              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-            }}
-          >
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
             <MetricCard
               label="Agents"
               value={String(summary?.totalAgents ?? 0)}
@@ -231,33 +189,26 @@ export function FleetHealth() {
 
           {/* Per-runtime tiles */}
           <div>
-            <p style={{ fontSize: 11, color: muted(0.45), marginBottom: 8, lineHeight: 1.6 }}>
-              Each runtime, by integration depth — health, agent count, and status mix.
-            </p>
+            <div className={`${SECTION_LABEL} mb-2.5`}>Runtimes</div>
             {summary && summary.runtimes.length > 0 ? (
               <div
-                style={{
-                  display: 'grid',
-                  gap: 12,
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                }}
+                className="grid gap-3"
+                style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}
               >
                 {summary.runtimes.map((t) => (
                   <RuntimeTile key={t.runtime} tile={t} />
                 ))}
               </div>
             ) : loaded ? (
-              <div style={{ fontSize: 12, color: muted(0.4) }}>No runtimes reporting yet.</div>
+              <div className="text-[12px] text-foreground/40">No runtimes reporting yet.</div>
             ) : null}
           </div>
 
           {/* Recent issues */}
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
-              <AlertCircle size={13} style={{ color: muted(0.5) }} />
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>
-                Recent issues
-              </span>
+            <div className={`${SECTION_LABEL} mb-2.5 flex items-center gap-1.5`}>
+              <AlertCircle size={13} strokeWidth={2} className="text-foreground/45" />
+              Recent issues
             </div>
             {issues.length === 0 ? (
               loaded ? (
@@ -268,28 +219,31 @@ export function FleetHealth() {
                 />
               ) : null
             ) : (
-              <div className="surface-raised-tier rounded-xl" style={{ padding: '4px 14px' }}>
-                {issues.map((e, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      fontSize: 11.5,
-                      padding: '8px 0',
-                      borderTop: i === 0 ? 'none' : '1px solid rgb(var(--foreground-rgb) / 0.05)',
-                    }}
-                  >
-                    <span style={{ color: 'var(--primary)', fontWeight: 600 }}>
-                      {e.errorClass ?? 'Unknown'}
-                    </span>
-                    {e.runtime ? (
-                      <span style={{ color: muted(0.45) }}> · {runtimeName(e.runtime)}</span>
-                    ) : null}
-                    <span style={{ color: muted(0.4) }}> · {e.ts ? formatRelative(e.ts) : ''}</span>
-                    {e.message ? (
-                      <div style={{ color: muted(0.6), marginTop: 2 }}>{e.message}</div>
-                    ) : null}
-                  </div>
-                ))}
+              <div className={`${CARD} px-4 py-1`} style={CARD_SHADOW}>
+                {issues.map((e, i) => {
+                  const cls = e.errorClass ?? 'Unknown'
+                  const isHarness = cls === 'Unknown'
+                  return (
+                    <div
+                      key={i}
+                      className={`py-2 text-[11.5px] ${i === 0 ? '' : 'border-t border-border'}`}
+                    >
+                      <span
+                        className="font-semibold"
+                        style={{ color: isHarness ? 'var(--primary)' : 'var(--amber)' }}
+                      >
+                        {cls}
+                      </span>
+                      {e.runtime ? (
+                        <span className="text-foreground/45"> · {runtimeName(e.runtime)}</span>
+                      ) : null}
+                      <span className="text-foreground/40"> · {e.ts ? formatRelative(e.ts) : ''}</span>
+                      {e.message ? (
+                        <div className="mt-0.5 text-foreground/60">{e.message}</div>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>

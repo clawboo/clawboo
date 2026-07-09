@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Shield, ChevronDown } from 'lucide-react'
+import { Shield } from 'lucide-react'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@/lib/execSettingsForGateway'
+import { Select } from '@/features/shared/Select'
 
 // ─── Option definitions ─────────────────────────────────────────────────────
 
@@ -111,99 +112,30 @@ export function ExecSettings({ agentId }: { agentId: string }) {
   return (
     <div>
       {/* Section header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          marginBottom: 12,
-        }}
-      >
-        <Shield style={{ width: 14, height: 14, color: 'var(--amber)' }} strokeWidth={2} />
-        <span
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            color: 'var(--foreground)',
-          }}
-        >
-          Execution Permissions
-        </span>
+      <div className="mb-2 flex items-center gap-1.5">
+        <Shield size={14} strokeWidth={2} style={{ color: 'var(--amber)' }} />
+        <span className="text-[12px] font-semibold text-foreground">Execution Permissions</span>
       </div>
 
-      <p
-        style={{
-          fontSize: 10,
-          color: 'rgb(var(--foreground-rgb) / 0.35)',
-          lineHeight: 1.5,
-          marginBottom: 14,
-        }}
-      >
+      <p className="mb-3.5 text-[11px] leading-relaxed text-foreground/45">
         Controls whether this agent needs your approval before running shell commands. Changes take
         effect on the next message.
       </p>
 
-      <div style={{ marginBottom: 14 }}>
-        <label
-          style={{
-            display: 'block',
-            fontSize: 11,
-            fontWeight: 500,
-            color: 'rgb(var(--foreground-rgb) / 0.55)',
-            marginBottom: 6,
-          }}
-        >
+      <div
+        className="rounded-2xl border border-border bg-surface p-4"
+        style={{ boxShadow: 'var(--shadow-raised)' }}
+      >
+        <label className="mb-2 block font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
           Command Execution
         </label>
-        <div style={{ position: 'relative' }}>
-          <select
-            value={execAsk}
-            onChange={(e) => handleChange(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '8px 32px 8px 10px',
-              borderRadius: 6,
-              border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-              background: 'var(--background)',
-              color: 'var(--foreground)',
-              fontSize: 12,
-              fontWeight: 500,
-              fontFamily: 'inherit',
-              cursor: 'pointer',
-              appearance: 'none',
-              outline: 'none',
-            }}
-          >
-            {EXEC_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            style={{
-              position: 'absolute',
-              right: 10,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              width: 14,
-              height: 14,
-              color: 'rgb(var(--foreground-rgb) / 0.4)',
-              pointerEvents: 'none',
-            }}
-            strokeWidth={2}
-          />
-        </div>
-        <p
-          style={{
-            marginTop: 4,
-            fontSize: 10,
-            color: 'rgb(var(--foreground-rgb) / 0.3)',
-            lineHeight: 1.4,
-          }}
-        >
-          {selected.description}
-        </p>
+        <Select
+          value={execAsk}
+          onChange={handleChange}
+          options={EXEC_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
+          style={{ width: '100%' }}
+        />
+        <p className="mt-2 text-[11px] leading-relaxed text-foreground/40">{selected.description}</p>
       </div>
     </div>
   )

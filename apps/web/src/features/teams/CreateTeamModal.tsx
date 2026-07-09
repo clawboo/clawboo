@@ -1,14 +1,32 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowLeft, CheckCircle2, Search, X } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, X } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
+import { Button, IconButton } from '@/features/shared/Button'
+import { Chip } from '@/features/shared/Chip'
+import { SearchInput } from '@/features/shared/SearchInput'
+import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 import { useBooZeroStore } from '@/stores/booZero'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { createAgent } from '@/lib/createAgent'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
+import { fetchRuntimes, type RuntimeStatus } from '@clawboo/control-client'
+import {
+  agentRuntimeOptions,
+  resolveDefaultRuntime,
+  suggestedRuntimeFor,
+  type RuntimeAvailability,
+  type SelectableSourceId,
+} from './runtimeSelection'
+import { NATIVE_LEADER_PROMPT, NATIVE_SPECIALIST_PROMPT, NATIVE_TEAM_TOOLS } from './nativeTeamPrompts'
+import { RuntimeSelect } from './RuntimeSelect'
+import { NATIVE_MODEL_GROUPS, nativeModelExec } from '@/lib/nativeModelCatalog'
+import { MODEL_GROUPS } from '@/lib/modelCatalog'
+import { Select } from '@/features/shared/Select'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
@@ -17,16 +35,15 @@ import { detectGenuineLeader, matchedLeadershipKeyword } from '@/lib/genuineLead
 import { buildTeamBrief, type TeamBriefMember } from '@/lib/booZeroBrief'
 import { useGraphStore } from '@/features/graph/store'
 import type { TeamTemplate, ProfileLike, TemplateSource, TemplateCategory } from './types'
-import {
-  BROWSABLE_TEAM_CATALOG,
-  searchBrowsableCatalog,
-  TEMPLATE_CATEGORIES,
-  SOURCE_META,
-  resolveTeamAgents,
-} from '@/features/marketplace/teamCatalog'
+import { resolveTeamAgents, getAgent } from '@/features/marketplace/teamCatalog'
 import { TeamTemplateDetail } from '@/features/marketplace/TeamTemplateDetail'
-import { TemplateFanDeck } from './TemplateFanDeck'
-import { TemplateGrid } from './TemplateGrid'
+import { CollapsiblePillRow } from '@/features/marketplace/CollapsiblePillRow'
+import {
+  TeamShowcaseGrid,
+  teamCategoryOptions,
+  filterTeams,
+  TEAM_SOURCE_ENTRIES,
+} from '@/features/marketplace/TeamShowcaseGrid'
 import { TeamColorCollectionPicker } from './TeamColorCollectionPicker'
 import { TeamAccentPicker, TEAM_ACCENT_PRESETS } from './TeamAccentPicker'
 import { TeamIconPicker } from './TeamIconPicker'
@@ -34,22 +51,28 @@ import { DEFAULT_COLLECTION_ID, type CollectionId } from '@/lib/teamPalettes'
 import { paletteFor } from '@/lib/resolveTeamBooColor'
 import { useTheme } from '@/features/theme/useTheme'
 
-// ─── Pick-step source filter entries (agency-agents first, clawboo last) ─────
+// ─── Per-agent model picker ──────────────────────────────────────────────────
+// A per-agent model is supported by BOTH native (AgentConfig.primaryModel, applied
+// via execConfig at create) and OpenClaw (a per-agent override in openclaw.json's
+// agents.list[], applied via a config PATCH after create). The coding runtimes
+// (claude-code / codex / hermes) run the delegated task with their SDK defaults —
+// they're model-inert as team members — so they get no picker.
+function runtimeHasModelPicker(sourceId: SelectableSourceId): boolean {
+  return sourceId === 'clawboo-native' || sourceId === 'openclaw'
+}
 
-const PICK_SOURCE_ENTRIES: { key: TemplateSource | 'all'; label: string; color: string }[] = [
-  { key: 'all', label: 'All', color: 'var(--foreground)' },
-  {
-    key: 'agency-agents',
-    label: SOURCE_META['agency-agents'].label,
-    color: SOURCE_META['agency-agents'].color,
-  },
-  {
-    key: 'awesome-openclaw',
-    label: SOURCE_META['awesome-openclaw'].label,
-    color: SOURCE_META['awesome-openclaw'].color,
-  },
-  { key: 'clawboo', label: SOURCE_META.clawboo.label, color: SOURCE_META.clawboo.color },
-]
+/** The model dropdown options for a runtime — its OWN catalog (native uses the
+ *  provider-native ids; OpenClaw uses the routing ids), led by an empty
+ *  "Recommended" that leaves the model unset (native → tier auto-resolve; OpenClaw
+ *  → the global default). The provider suffix disambiguates same-named models
+ *  across providers (e.g. GPT-4o under both OpenAI and OpenRouter). */
+function modelOptionsFor(sourceId: SelectableSourceId): { value: string; label: string }[] {
+  const groups = sourceId === 'clawboo-native' ? NATIVE_MODEL_GROUPS : MODEL_GROUPS
+  return [
+    { value: '', label: 'Recommended' },
+    ...groups.flatMap((g) => g.models.map((m) => ({ value: m.id, label: `${m.label} · ${g.provider}` }))),
+  ]
+}
 
 // ─── Steps ───────────────────────────────────────────────────────────────────
 
@@ -65,6 +88,9 @@ interface CreateTeamModalProps {
   onCreated: () => void
   /** When provided, skip the "pick" step and go directly to "customize" with this profile. */
   initialProfile?: ProfileLike | null
+  /** When true (and no `initialProfile`), skip the pick step and open directly on a
+   *  blank "start from scratch" customize step. */
+  startBlank?: boolean
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -74,8 +100,18 @@ export function CreateTeamModal({
   onClose,
   onCreated,
   initialProfile,
+  startBlank,
 }: CreateTeamModalProps) {
   const client = useConnectionStore((s) => s.client)
+  // "OpenClaw available" requires a LIVE Gateway client, not just a 'connected' status:
+  // native mode (`enterNativeMode`) sets status='connected' with client=null, so a bare
+  // status check would falsely offer OpenClaw (and default marketplace rows to it) with no
+  // Gateway behind it. Gating on `client != null` degrades those rows to Native in native
+  // mode — so a marketplace team deploys fully native (Gateway-free) instead of hitting the
+  // deploy guard.
+  const openclawConnected =
+    useConnectionStore((s) => s.status) === 'connected' && client !== null
+  const openSettings = useSettingsModalStore((s) => s.openSettings)
   const { resolvedTheme } = useTheme()
 
   const [step, setStep] = useState<Step>('pick')
@@ -91,6 +127,19 @@ export function CreateTeamModal({
       setStep('customize')
     }
   }, [isOpen, initialProfile])
+
+  // "Start from scratch" (from the Marketplace) → open directly on the blank
+  // customize step, bypassing the pick showcase. Mirrors `handlePickEmpty`.
+  useEffect(() => {
+    if (isOpen && startBlank && !initialProfile) {
+      setSelectedProfile(null)
+      setTeamName('New Team')
+      setTeamIcon('👻')
+      setTeamColor(TEAM_ACCENT_PRESETS[0])
+      setColorCollectionId(DEFAULT_COLLECTION_ID)
+      setStep('customize')
+    }
+  }, [isOpen, startBlank, initialProfile])
   const [selectedProfile, setSelectedProfile] = useState<ProfileLike | null>(null)
 
   // Customize fields
@@ -105,29 +154,41 @@ export function CreateTeamModal({
   // Regenerated in `reset()` so each created team gets a fresh, unique id.
   const [pendingTeamId, setPendingTeamId] = useState<string>(() => crypto.randomUUID())
 
+  // ── Runtime selection (PER-AGENT) ───────────────────────────────────────────
+  // There is no single "team runtime": every agent picks its own runtime, defaulting
+  // to the catalog "chef's suggestion" (a marketplace team → OpenClaw; a blank team →
+  // Native), degraded to Native when unavailable. The universal Boo Zero leads any mix.
+  const [runtimeStatuses, setRuntimeStatuses] = useState<RuntimeStatus[]>([])
+  // Per-agent overrides (all agents, leader included). Effective runtime =
+  // override ?? resolvedDefaultFor(id). Cleared in reset() so overrides don't leak.
+  const [agentRuntimes, setAgentRuntimes] = useState<Record<string, SelectableSourceId>>({})
+  // Per-agent MODEL override for native agents (catalog model id; absent = the tier
+  // default auto-resolved from the connected key). Cleared in reset().
+  const [agentModels, setAgentModels] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!isOpen) return
+    void fetchRuntimes()
+      .then(setRuntimeStatuses)
+      .catch(() => {})
+  }, [isOpen])
+
   // Deploy state
   const [progress, setProgress] = useState<DeployProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Pick-step filter state (local, not in Zustand)
+  // Pick-step filter state (local, not in Zustand). The pick step renders the
+  // SHARED Marketplace team showcase (same cards + filters + "Start from
+  // scratch"), so the first-run flow and the Marketplace stay identical.
   const [pickSearch, setPickSearch] = useState('')
   const [pickCategory, setPickCategory] = useState<TemplateCategory | 'all'>('all')
   const [pickSource, setPickSource] = useState<TemplateSource | 'all'>('all')
   const [detailTemplate, setDetailTemplate] = useState<TeamTemplate | null>(null)
-  // View-mode toggle (hybrid). `auto` flips based on count: ≤ 12
-  // templates → fan (signature), > 12 → grid (scan). User can lock the mode
-  // by tapping the toggle; that choice persists for the modal session.
-  const [viewMode, setViewMode] = useState<'auto' | 'fan' | 'grid'>('auto')
 
-  const filteredTemplates = useMemo(() => {
-    let results = pickSearch ? searchBrowsableCatalog(pickSearch) : [...BROWSABLE_TEAM_CATALOG]
-    if (pickCategory !== 'all') results = results.filter((t) => t.category === pickCategory)
-    if (pickSource !== 'all') results = results.filter((t) => t.source === pickSource)
-    return results
-  }, [pickSearch, pickCategory, pickSource])
-
-  const resolvedViewMode: 'fan' | 'grid' =
-    viewMode === 'auto' ? (filteredTemplates.length > 12 ? 'grid' : 'fan') : viewMode
+  const filteredPickTeams = useMemo(
+    () => filterTeams(pickSearch, pickCategory, pickSource),
+    [pickSearch, pickCategory, pickSource],
+  )
+  const pickCategoryOpts = useMemo(() => teamCategoryOptions(), [])
 
   const resolvedSelected = useMemo(
     () => (selectedProfile ? resolveTeamAgents(selectedProfile) : []),
@@ -164,10 +225,55 @@ export function CreateTeamModal({
     [selectedProfile],
   )
 
-  const activeCategories = useMemo(() => {
-    const catSet = new Set(BROWSABLE_TEAM_CATALOG.map((t) => t.category))
-    return TEMPLATE_CATEGORIES.filter((c) => catSet.has(c.key))
-  }, [])
+  // The team-internal lead — ONLY a genuine (keyword-matched) leadership role, else
+  // NULL. We do NOT force an arbitrary first agent to lead: the universal Boo Zero leads
+  // every team (the server resolves Boo Zero BEFORE `leaderAgentId`), so `leaderAgentId`
+  // is an OPTIONAL second-tier lead, set only when the roster genuinely has one. When set
+  // (and native), that agent gets the "Leader" badge + the native leader prompt/tier; when
+  // null, the team is leaderless (no badge, all specialists) and Boo Zero coordinates.
+  const effectiveLeaderAgent = useMemo(
+    () => resolvedSelected.find((a) => detectGenuineLeader({ name: a.name, role: a.role })) ?? null,
+    [resolvedSelected],
+  )
+
+  // A picked/prefilled template (real OR the adhoc single-agent one) is a marketplace
+  // team → its agents suggest OpenClaw; only "Start empty" (no profile) suggests Native.
+  // This is the SOURCE RULE input for the default resolver.
+  const isMarketplaceTeam = !!selectedProfile
+  const availability = useMemo<RuntimeAvailability>(
+    () => ({ statuses: runtimeStatuses, openclawConnected }),
+    [runtimeStatuses, openclawConnected],
+  )
+  const agentRuntimeOpts = useMemo(
+    () => agentRuntimeOptions(runtimeStatuses, openclawConnected),
+    [runtimeStatuses, openclawConnected],
+  )
+
+  /** The catalog "chef's suggestion" for an agent (before availability degradation):
+   *  its own `suggestedRuntime` (unpopulated today) → the team `defaultRuntime` → the
+   *  source rule (marketplace → OpenClaw, blank → Native). */
+  const suggestedFor = useCallback(
+    (agentCatalogId: string): SelectableSourceId =>
+      suggestedRuntimeFor({
+        agentSuggested: getAgent(agentCatalogId)?.suggestedRuntime,
+        teamDefault: (selectedProfile as TeamTemplate | null)?.defaultRuntime,
+        isMarketplaceTeam,
+      }),
+    [selectedProfile, isMarketplaceTeam],
+  )
+  /** The resolved default = the suggestion degraded to Native when unavailable;
+   *  `.degradedFrom` is non-null when it was degraded (drives the inline note). */
+  const resolvedDefaultFor = useCallback(
+    (agentCatalogId: string) => resolveDefaultRuntime(suggestedFor(agentCatalogId), availability),
+    [suggestedFor, availability],
+  )
+  /** The source id a given resolved agent will deploy on: the user's per-agent
+   *  override, else the resolved catalog default. */
+  const agentSourceIdFor = useCallback(
+    (agentCatalogId: string): SelectableSourceId =>
+      agentRuntimes[agentCatalogId] ?? resolvedDefaultFor(agentCatalogId).selected,
+    [agentRuntimes, resolvedDefaultFor],
+  )
 
   const reset = useCallback(() => {
     setStep('pick')
@@ -182,6 +288,8 @@ export function CreateTeamModal({
     setPickCategory('all')
     setPickSource('all')
     setDetailTemplate(null)
+    setAgentRuntimes({})
+    setAgentModels({})
     // Fresh id for the next team so each one gets its own palette rotation.
     setPendingTeamId(crypto.randomUUID())
   }, [])
@@ -191,6 +299,21 @@ export function CreateTeamModal({
     reset()
     onClose()
   }, [step, reset, onClose])
+
+  // Close this modal and route a disabled runtime option to its connect surface. OpenClaw
+  // hands the Runtimes panel a one-shot intent so it auto-opens the OpenClaw Gateway setup
+  // flow (detect / install / configure / start) — the Gateway connect flow specifically —
+  // rather than just landing on the Runtimes list; the coding runtimes land on the list.
+  const handleRuntimeConnectClick = useCallback(
+    (sourceId: SelectableSourceId) => {
+      handleClose()
+      openSettings(
+        'runtimes',
+        sourceId === 'openclaw' ? { runtimeIntent: 'connect-openclaw' } : undefined,
+      )
+    },
+    [handleClose, openSettings],
+  )
 
   // Step A → Step B
   const handlePickProfile = useCallback((profile: ProfileLike) => {
@@ -213,7 +336,6 @@ export function CreateTeamModal({
 
   // Step B → create (empty) or deploy (template)
   const handleConfirmCustomize = useCallback(async () => {
-    if (!client) return
     const name = teamName.trim()
     if (!name) return
 
@@ -222,6 +344,18 @@ export function CreateTeamModal({
     try {
       // Resolve the catalog agents up front — used for dedup, deploy, and counts.
       const resolved = selectedProfile ? resolveTeamAgents(selectedProfile) : []
+
+      // Any agent EXPLICITLY on OpenClaw needs a live browser Gateway client (its
+      // AgentSource create 503s otherwise). The resolver already degrades an OpenClaw
+      // *suggestion* to Native when the Gateway is down, so this only trips when the
+      // user forces OpenClaw on a member while disconnected.
+      const anyOpenClaw = resolved.some((a) => agentSourceIdFor(a.id) === 'openclaw')
+      if (anyOpenClaw && !client) {
+        setError(
+          'Connect an OpenClaw Gateway to deploy the OpenClaw members, or switch them to another runtime.',
+        )
+        return
+      }
 
       // ── Dedup: auto-suffix if agent/team names collide with existing ones ──
       const existingAgentNames = useFleetStore.getState().agents.map((a) => a.name)
@@ -248,6 +382,10 @@ export function CreateTeamModal({
           color: teamColor,
           colorCollectionId,
           templateId: selectedProfile?.id ?? null,
+          // Every team is server-orchestrated after the OpenClaw cutover (native,
+          // OpenClaw, and mixed all run the persistent server engine). Set the explicit
+          // flag at create so it's deterministic from the first message.
+          serverOrchestrated: true,
         }),
       })
       if (!res.ok) throw new Error('Failed to create team')
@@ -266,6 +404,8 @@ export function CreateTeamModal({
         leaderAgentId: null,
         isArchived: false,
         agentCount: 0,
+        // Every team runs the persistent server engine after the OpenClaw cutover.
+        serverOrchestrated: true,
       })
       useTeamStore.getState().selectTeam(team.id)
 
@@ -304,7 +444,10 @@ export function CreateTeamModal({
         : null
       const universalLeaderName = booZeroAgent?.name ?? null
 
-      let genuineLeaderAgentId: string | null = null
+      let leaderAgentId: string | null = null
+      const failedAgents: string[] = []
+      let createdCount = 0
+
       for (let i = 0; i < resolved.length; i++) {
         const agent = resolved[i]
         const finalAgentName = dedupPlan.agentNameMap.get(agent.name) ?? agent.name
@@ -347,13 +490,69 @@ export function CreateTeamModal({
           universalLeaderName,
         })
 
-        const agentId = await createAgent(finalAgentName, {
+        const files = {
           soul: soulWithPersonality,
           identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
           tools: agent.toolsTemplate,
           agents: enhancedAgentsMd,
           clawboo: clawbooHelpDoc,
-        })
+        }
+
+        // Runtime routing: each agent runs on its resolved runtime (per-agent
+        // override, else the catalog default). A native LEADER (the team-internal
+        // lead that also resolved to native) gets the leader prompt + tier.
+        const sourceId = agentSourceIdFor(agent.id)
+        const isNativeLeader = sourceId === 'clawboo-native' && effectiveLeaderAgent?.id === agent.id
+
+        let agentId: string
+        try {
+          if (sourceId === 'clawboo-native') {
+            // The native harness drives behavior from execConfig.systemPrompt (it
+            // does NOT read AGENTS.md), so the delegate contract lives HERE — the
+            // leader is taught the `delegate` tool by name (no `<delegate>` XML) +
+            // gets tasks:false; provider/model are auto-resolved server-side from
+            // the connected key (via the modelTier hint).
+            // A picked model overrides the auto-resolved default (provider + model +
+            // env-var); absent → the modelTier hint auto-resolves from the connected key.
+            const modelExec = agentModels[agent.id] ? nativeModelExec(agentModels[agent.id]!) : null
+            agentId = await createAgent(finalAgentName, files, 'clawboo-native', {
+              systemPrompt: `${soulWithPersonality}\n\n${isNativeLeader ? NATIVE_LEADER_PROMPT : NATIVE_SPECIALIST_PROMPT}`,
+              tools: NATIVE_TEAM_TOOLS,
+              participantKind: 'agent',
+              modelTier: isNativeLeader ? 'leader' : 'specialist',
+              ...(modelExec ?? {}),
+            })
+          } else if (sourceId === 'openclaw') {
+            agentId = await createAgent(finalAgentName, files)
+          } else {
+            // A coding-runtime member: the record exists so the server engine can
+            // run it; its driver ignores execConfig/files and runs the delegated task.
+            agentId = await createAgent(finalAgentName, files, sourceId)
+          }
+        } catch {
+          // One source's failure (e.g. an OpenClaw 503, or a mid-deploy hiccup)
+          // must not abort the rest of the team.
+          failedAgents.push(finalAgentName)
+          continue
+        }
+
+        createdCount++
+
+        // OpenClaw per-agent model override → openclaw.json agents.list[] (durable,
+        // session-independent), the same mechanism the agent-detail model selector
+        // uses. Native models already rode execConfig at create; coding runtimes are
+        // model-inert as members, so this only applies to an OpenClaw pick. Best-effort.
+        if (sourceId === 'openclaw' && agentModels[agent.id]) {
+          try {
+            await fetch('/api/system/openclaw-config', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ agentModel: { agentId, model: agentModels[agent.id] } }),
+            })
+          } catch {
+            // a failed model override is non-fatal — the agent runs on the default
+          }
+        }
 
         // Persist default personality to SQLite so sliders load correctly
         void fetch('/api/personality', {
@@ -362,13 +561,12 @@ export function CreateTeamModal({
           body: JSON.stringify({ agentId, values: defaultPersonality }),
         }).catch(() => {})
 
-        // Capture the agentId of the detected genuine leader so we can set
-        // it as the team-internal lead after the deploy loop completes.
-        if (genuineLeaderCatalogAgent && agent.name === genuineLeaderCatalogAgent.name) {
-          genuineLeaderAgentId = agentId
-        }
+        // Capture the team-internal lead id — ONLY when the roster has a genuine
+        // leadership role (effectiveLeaderAgent non-null). No genuine leader ⇒
+        // leaderAgentId stays null and the universal Boo Zero coordinates.
+        if (effectiveLeaderAgent && agent.id === effectiveLeaderAgent.id) leaderAgentId = agentId
 
-        // Assign agent to team (best-effort)
+        // Assign the successfully-created agent to the team (best-effort).
         try {
           await fetch(`/api/teams/${team.id}/agents`, {
             method: 'POST',
@@ -380,18 +578,35 @@ export function CreateTeamModal({
         }
       }
 
-      // Set the team-internal lead — ONLY when a genuine leader was detected.
-      // Forced first-agent-as-leader is gone; Boo Zero is the universal leader.
-      // PATCH always runs (with `null` when no genuine leader) so the column
-      // stays accurate even on re-deploys.
+      // No forced fallback: leaderAgentId stays null unless a genuine leadership role
+      // was detected (and created). Boo Zero universal-leads either way — the server
+      // resolves it before leaderAgentId — so a leaderless team is fully functional.
+
+      // Nothing deployed — surface it. The (empty) team row stays so the user can
+      // retry or delete it.
+      if (createdCount === 0) {
+        setError('No agents could be created. Check that the runtime is connected, then retry.')
+        setStep('customize')
+        return
+      }
+      if (failedAgents.length > 0) {
+        useToastStore.getState().addToast({
+          type: 'error',
+          message: `${createdCount} of ${resolved.length} agents created (${failedAgents.join(', ')} failed)`,
+        })
+      }
+
+      // Set the team-internal lead (the genuine detected leader, or null when the
+      // roster has none) — it's an OPTIONAL fallback below the universal Boo Zero.
+      // PATCH always runs (incl. writing null) so the column stays accurate on re-deploys.
       if (team.id) {
         try {
           await fetch(`/api/teams/${team.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ leaderAgentId: genuineLeaderAgentId }),
+            body: JSON.stringify({ leaderAgentId }),
           })
-          useTeamStore.getState().updateTeam(team.id, { leaderAgentId: genuineLeaderAgentId })
+          useTeamStore.getState().updateTeam(team.id, { leaderAgentId })
         } catch {
           // leader assignment is non-fatal
         }
@@ -485,7 +700,7 @@ export function CreateTeamModal({
       setStep('complete')
       useToastStore.getState().addToast({
         type: 'success',
-        message: `Team "${name}" deployed with ${resolved.length} agents`,
+        message: `Team "${name}" deployed with ${createdCount} agents`,
       })
       setTimeout(() => {
         reset()
@@ -503,7 +718,10 @@ export function CreateTeamModal({
     teamColor,
     selectedProfile,
     colorCollectionId,
+    agentModels,
     pendingTeamId,
+    agentSourceIdFor,
+    effectiveLeaderAgent,
     reset,
     onClose,
     onCreated,
@@ -519,7 +737,8 @@ export function CreateTeamModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+          style={{ background: 'var(--overlay-scrim)' }}
           onClick={handleClose}
         >
           <motion.div
@@ -527,262 +746,111 @@ export function CreateTeamModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-            className={`surface-overlay-tier relative w-full ${step === 'pick' ? 'max-w-2xl' : 'max-w-lg'} rounded-2xl transition-all duration-200`}
+            className={`relative w-full ${step === 'pick' ? 'max-w-4xl' : step === 'customize' ? 'max-w-2xl' : 'max-w-lg'} rounded-2xl border border-border bg-surface transition-all duration-200`}
+            style={{ boxShadow: 'var(--shadow-overlay)' }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close button */}
             {step !== 'deploy' && (
-              <button
-                type="button"
-                onClick={handleClose}
-                className="absolute right-3 top-3 rounded-lg p-1.5 text-secondary/40 transition-colors hover:text-text"
-              >
-                <X className="h-4 w-4" strokeWidth={2} />
-              </button>
+              <div className="absolute right-3 top-3 z-10">
+                <IconButton label="Close" variant="ghost" size="sm" onClick={handleClose}>
+                  <X className="h-4 w-4" strokeWidth={2} />
+                </IconButton>
+              </div>
             )}
 
-            {/* ─── Step: Pick Template ────────────────────────────── */}
+            {/* ─── Step: Pick Template ──────────────────────────────
+                The SAME team showcase as the Marketplace Teams tab (shared
+                filter primitives + TeamShowcaseGrid), so the first-run flow
+                reads exactly like the marketplace the user already loves. */}
             {step === 'pick' && (
-              <div className="p-6">
-                <h2
-                  className="mb-1 text-lg font-bold text-text"
-                  style={{ fontFamily: 'var(--font-display)' }}
-                >
-                  Create a team
-                </h2>
-                <p className="mb-4 text-[12px] text-secondary">
-                  {filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''}{' '}
-                  available — pick one or start empty.
-                </p>
-
-                {/* Search input */}
-                <div className="relative mb-3">
-                  <Search
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary/40"
-                    style={{ width: 14, height: 14 }}
-                    strokeWidth={2}
-                  />
-                  <input
-                    type="text"
-                    value={pickSearch}
-                    onChange={(e) => setPickSearch(e.target.value)}
-                    placeholder="Search templates..."
-                    className="w-full rounded-lg border border-border bg-foreground/[0.03] py-2 pl-8 pr-3 text-[12px] text-text outline-none transition placeholder:text-secondary/35 focus:border-foreground/20"
-                    style={{ fontFamily: 'var(--font-body)' }}
-                  />
-                </div>
-
-                {/* Category pills */}
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                  <button
-                    type="button"
-                    onClick={() => setPickCategory('all')}
-                    style={{
-                      background:
-                        pickCategory === 'all'
-                          ? 'rgb(var(--foreground-rgb) / 0.12)'
-                          : 'transparent',
-                      border:
-                        pickCategory === 'all'
-                          ? '1px solid rgb(var(--foreground-rgb) / 0.3)'
-                          : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                      color:
-                        pickCategory === 'all'
-                          ? 'var(--foreground)'
-                          : 'rgb(var(--foreground-rgb) / 0.45)',
-                      borderRadius: 12,
-                      padding: '2px 8px',
-                      fontSize: 10,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      transition: 'all 0.15s',
-                      whiteSpace: 'nowrap',
-                    }}
+              <div className="flex max-h-[85vh] flex-col overflow-hidden rounded-2xl">
+                {/* Header */}
+                <div className="px-6 pb-3 pt-6">
+                  <h2
+                    className="text-[18px] font-bold text-foreground"
+                    style={{ letterSpacing: '-0.01em' }}
                   >
-                    All
-                  </button>
-                  {activeCategories.map((cat) => {
-                    const isActive = pickCategory === cat.key
-                    return (
-                      <button
-                        key={cat.key}
-                        type="button"
-                        onClick={() => setPickCategory(cat.key)}
-                        style={{
-                          background: isActive ? `${cat.color}20` : 'transparent',
-                          border: isActive
-                            ? `1px solid ${cat.color}55`
-                            : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                          color: isActive ? cat.color : 'rgb(var(--foreground-rgb) / 0.45)',
-                          borderRadius: 12,
-                          padding: '2px 8px',
-                          fontSize: 10,
-                          fontWeight: 500,
-                          cursor: 'pointer',
-                          transition: 'all 0.15s',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {cat.label}
-                      </button>
-                    )
-                  })}
+                    Create a team
+                  </h2>
+                  <p className="mt-1 text-[13px] text-foreground/55">
+                    Deploy a curated team, or start one from scratch.
+                  </p>
                 </div>
 
-                {/* Source pills */}
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
-                  {PICK_SOURCE_ENTRIES.map((src) => {
-                    const isActive = pickSource === src.key
-                    return (
-                      <button
+                {/* Filter bar (fixed) — search + category + source, same as the
+                    Marketplace Teams tab. */}
+                <div className="flex flex-col gap-2.5 border-b border-border px-6 pb-3.5">
+                  <SearchInput
+                    size="sm"
+                    placeholder="Search teams…"
+                    value={pickSearch}
+                    onChange={setPickSearch}
+                  />
+                  <CollapsiblePillRow
+                    aria-label="Filter teams by category"
+                    options={pickCategoryOpts}
+                    activeKey={pickCategory}
+                    onSelect={(k) => setPickCategory(k as TemplateCategory | 'all')}
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {TEAM_SOURCE_ENTRIES.map((src) => (
+                      <Chip
                         key={src.key}
-                        type="button"
-                        onClick={() => setPickSource(src.key)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 5,
-                          background: isActive ? `${src.color}20` : 'transparent',
-                          border: isActive
-                            ? `1px solid ${src.color}55`
-                            : '1px solid rgb(var(--foreground-rgb) / 0.06)',
-                          color: isActive ? src.color : 'rgb(var(--foreground-rgb) / 0.45)',
-                          borderRadius: 12,
-                          padding: '2px 8px',
-                          fontSize: 10,
-                          fontWeight: 500,
-                          cursor: 'pointer',
-                          transition: 'all 0.15s',
-                          whiteSpace: 'nowrap',
-                        }}
+                        size="sm"
+                        active={pickSource === src.key}
+                        accent={src.key === 'all' ? undefined : src.color}
+                        onClick={() => setPickSource(src.key as TemplateSource | 'all')}
                       >
                         {src.key !== 'all' && (
-                          <div
-                            style={{
-                              width: 5,
-                              height: 5,
-                              borderRadius: '50%',
-                              background: src.color,
-                              flexShrink: 0,
-                            }}
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ background: src.color }}
                           />
                         )}
                         {src.label}
-                      </button>
-                    )
-                  })}
-                </div>
-
-                {/* View-mode toggle row + Fan/Grid renderer.
-                    Auto-mode flips based on filter count (≤ 12 → Fan, > 12 →
-                    Grid) so the user almost never has to think about it; an
-                    explicit Fan/Grid pill on the right lets power users
-                    override the choice for the rest of the modal session. */}
-                <div className="mb-2 mt-1 flex items-center justify-between gap-2">
-                  <div
-                    style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 10,
-                      letterSpacing: '0.08em',
-                      color: 'rgb(var(--foreground-rgb) / 0.5)',
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    {resolvedViewMode === 'fan' ? 'Focus pick' : 'Browse all'}
-                  </div>
-                  <div
-                    role="group"
-                    aria-label="View mode"
-                    style={{
-                      display: 'inline-flex',
-                      gap: 2,
-                      padding: 2,
-                      borderRadius: 10,
-                      background: 'rgb(var(--foreground-rgb) / 0.06)',
-                      border: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-                    }}
-                  >
-                    {[
-                      { key: 'fan' as const, label: 'Fan' },
-                      { key: 'grid' as const, label: 'Grid' },
-                    ].map((opt) => {
-                      const isActive = resolvedViewMode === opt.key
-                      return (
-                        <button
-                          key={opt.key}
-                          type="button"
-                          onClick={() => setViewMode(opt.key)}
-                          aria-pressed={isActive}
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 600,
-                            letterSpacing: '0.04em',
-                            textTransform: 'uppercase',
-                            padding: '4px 10px',
-                            borderRadius: 8,
-                            border: 'none',
-                            cursor: 'pointer',
-                            background: isActive ? 'var(--surface-overlay)' : 'transparent',
-                            color: isActive
-                              ? 'var(--foreground)'
-                              : 'rgb(var(--foreground-rgb) / 0.5)',
-                            boxShadow: isActive
-                              ? '0 1px 2px rgb(0 0 0 / 0.2), 0 0 0 1px rgb(var(--foreground-rgb) / 0.08)'
-                              : 'none',
-                            transition: 'all var(--motion-fast)',
-                          }}
-                        >
-                          {opt.label}
-                        </button>
-                      )
-                    })}
+                      </Chip>
+                    ))}
                   </div>
                 </div>
 
-                {resolvedViewMode === 'fan' ? (
-                  <TemplateFanDeck
-                    templates={filteredTemplates}
-                    onPick={handlePickProfile}
-                    onShowDetails={setDetailTemplate}
+                {/* Grid (scrollable) — the shared Marketplace team showcase */}
+                <div className="flex-1 overflow-y-auto p-6">
+                  <TeamShowcaseGrid
+                    teams={filteredPickTeams}
+                    onSelectTeam={handlePickProfile}
+                    onDetails={setDetailTemplate}
+                    onStartFromScratch={handlePickEmpty}
+                    onClearFilters={() => {
+                      setPickSearch('')
+                      setPickCategory('all')
+                      setPickSource('all')
+                    }}
                   />
-                ) : (
-                  <TemplateGrid
-                    templates={filteredTemplates}
-                    onPick={handlePickProfile}
-                    onShowDetails={setDetailTemplate}
-                  />
-                )}
-
-                {/* Start empty */}
-                <button
-                  type="button"
-                  onClick={handlePickEmpty}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-[12px] font-medium text-secondary/60 transition-colors hover:border-foreground/20 hover:text-secondary"
-                >
-                  Start empty
-                </button>
+                </div>
               </div>
             )}
 
             {/* ─── Step: Customize ────────────────────────────────── */}
             {step === 'customize' && (
               <div className="flex max-h-[85vh] flex-col overflow-hidden rounded-2xl">
-                {/* Header (fixed) */}
+                {/* Header (fixed) — the "Back to templates" arrow only makes
+                    sense when the pick step is part of THIS flow. When the modal
+                    was opened directly on customize from the Marketplace (a
+                    template Deploy or "Start from scratch"), there's no in-modal
+                    picker to return to, so it's hidden (same as single-agent). */}
                 <div className="flex items-center gap-2 px-6 pb-4 pt-6">
-                  {!isSingleAgentMode && (
-                    <button
-                      type="button"
+                  {!isSingleAgentMode && !initialProfile && !startBlank && (
+                    <IconButton
+                      label="Back to templates"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setStep('pick')}
-                      aria-label="Back to templates"
-                      className="rounded p-1 text-secondary/40 transition-colors hover:text-text"
                     >
                       <ArrowLeft className="h-4 w-4" strokeWidth={2} />
-                    </button>
+                    </IconButton>
                   )}
-                  <h2
-                    className="text-lg font-bold text-text"
-                    style={{ fontFamily: 'var(--font-display)' }}
-                  >
+                  <h2 className="text-[18px] font-bold text-foreground" style={{ letterSpacing: '-0.01em' }}>
                     {isSingleAgentMode ? 'Deploy agent' : 'Customize team'}
                   </h2>
                 </div>
@@ -791,14 +859,14 @@ export function CreateTeamModal({
                 <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-6 pb-2">
                   {/* Name */}
                   <label className="block">
-                    <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-secondary">
+                    <span className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
                       Name
                     </span>
                     <input
                       type="text"
                       value={teamName}
                       onChange={(e) => setTeamName(e.target.value)}
-                      className="w-full rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-[13px] text-text outline-none placeholder:text-secondary/40 focus:border-foreground/20 focus:ring-1 focus:ring-ring/30"
+                      className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
                       placeholder="Team name"
                     />
                   </label>
@@ -806,10 +874,10 @@ export function CreateTeamModal({
                   {/* ── Team badge: the team's icon + color ── */}
                   <section className="flex flex-col gap-3">
                     <div>
-                      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-text/85">
+                      <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
                         Team badge
                       </h3>
-                      <p className="mt-0.5 text-[10.5px] text-secondary/60">
+                      <p className="mt-1 text-[12px] text-foreground/50">
                         Tap the badge to change its icon, then pick a color.
                       </p>
                     </div>
@@ -820,8 +888,8 @@ export function CreateTeamModal({
                         onChange={setTeamIcon}
                         accentColor={teamColor}
                       />
-                      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                        <span className="text-[10px] font-medium uppercase tracking-wider text-secondary">
+                      <div className="flex min-w-0 flex-1 flex-col gap-2">
+                        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
                           Color
                         </span>
                         <TeamAccentPicker value={teamColor} onChange={setTeamColor} />
@@ -829,14 +897,14 @@ export function CreateTeamModal({
                     </div>
                   </section>
 
-                  {/* ── Teammate colors: collection + live roster preview ── */}
+                  {/* ── Teammate colors + per-agent runtime: collection + live roster ── */}
                   <section className="flex flex-col gap-2.5">
                     <div className="flex items-baseline justify-between gap-2">
-                      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-text/85">
+                      <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
                         Teammate colors
                       </h3>
                       {resolvedSelected.length > 0 && (
-                        <span className="text-[10px] text-secondary/60">
+                        <span className="font-data text-[10px] text-foreground/50">
                           {resolvedSelected.length}{' '}
                           {resolvedSelected.length === 1 ? 'teammate' : 'teammates'}
                         </span>
@@ -848,29 +916,90 @@ export function CreateTeamModal({
                     />
 
                     {resolvedSelected.length > 0 ? (
-                      <div className="mt-1 max-h-[180px] overflow-y-auto rounded-lg border border-border bg-foreground/[0.02] p-2">
+                      <div className="mt-1 max-h-[220px] overflow-y-auto rounded-xl border border-border bg-foreground/[0.02] p-2">
                         <div className="flex flex-col gap-0.5">
-                          {resolvedSelected.map((agent, i) => (
-                            <div
-                              key={agent.id}
-                              className="flex items-center gap-2 rounded-md px-1 py-0.5"
-                            >
-                              <BooAvatar seed={agent.name} size={22} tint={previewColors[i]} />
-                              <span className="truncate text-[12px] text-text/75">
-                                {agent.name}
-                              </span>
-                            </div>
-                          ))}
+                          {resolvedSelected.map((agent, i) => {
+                            const isLeaderRow = effectiveLeaderAgent?.id === agent.id
+                            const resolvedDefault = resolvedDefaultFor(agent.id)
+                            const overridden = agent.id in agentRuntimes
+                            const value = agentRuntimes[agent.id] ?? resolvedDefault.selected
+                            const degradedFrom = overridden ? null : resolvedDefault.degradedFrom
+                            const degradedLabel = degradedFrom
+                              ? (agentRuntimeOpts.find((o) => o.sourceId === degradedFrom)?.label ??
+                                degradedFrom)
+                              : null
+                            const showModel = runtimeHasModelPicker(value)
+                            return (
+                              <div
+                                key={agent.id}
+                                className="flex flex-col gap-1 rounded-lg px-1.5 py-1.5"
+                              >
+                                {/* Name + Leader flex on the left; the runtime + model
+                                    pickers sit as a compact cluster on the right. The
+                                    wider (max-w-2xl) modal keeps them on ONE line. */}
+                                <div className="flex items-center gap-2.5">
+                                  <BooAvatar seed={agent.name} size={24} tint={previewColors[i]} />
+                                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                                    <span className="min-w-0 truncate text-[13px] text-foreground/80">
+                                      {agent.name}
+                                    </span>
+                                    {isLeaderRow && (
+                                      <span className="shrink-0 rounded-md border border-border bg-foreground/[0.03] px-1.5 py-0.5 text-[10px] text-foreground/60">
+                                        Leader
+                                      </span>
+                                    )}
+                                  </div>
+                                  <RuntimeSelect
+                                    value={value}
+                                    options={agentRuntimeOpts}
+                                    onChange={(sid) => {
+                                      setAgentRuntimes((prev) => ({ ...prev, [agent.id]: sid }))
+                                      // A model id is runtime-specific (native vs OpenClaw
+                                      // catalogs differ), so clear any override when the
+                                      // runtime changes — a stale cross-runtime id must not leak.
+                                      setAgentModels((prev) => {
+                                        if (!(agent.id in prev)) return prev
+                                        const next = { ...prev }
+                                        delete next[agent.id]
+                                        return next
+                                      })
+                                    }}
+                                    onDisabledClick={handleRuntimeConnectClick}
+                                  />
+                                  {showModel && (
+                                    <Select
+                                      size="sm"
+                                      className="shrink-0"
+                                      style={{ width: 184 }}
+                                      menuWidth={252}
+                                      data-testid="member-model-trigger"
+                                      aria-label={`Model for ${agent.name}`}
+                                      value={agentModels[agent.id] ?? ''}
+                                      onChange={(m) =>
+                                        setAgentModels((prev) => ({ ...prev, [agent.id]: m }))
+                                      }
+                                      options={modelOptionsFor(value)}
+                                    />
+                                  )}
+                                </div>
+                                {degradedLabel && (
+                                  <p className="pl-[34px] text-[10.5px] text-foreground/45">
+                                    {degradedLabel} unavailable · using Clawboo Native
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          })}
                         </div>
                       </div>
                     ) : (
-                      <p className="text-[11px] text-secondary/55">
+                      <p className="text-[12px] text-foreground/50">
                         Teammates you add to this team will use these colors.
                       </p>
                     )}
                   </section>
 
-                  {error && <p className="text-[11px] text-destructive">{error}</p>}
+                  {error && <FormattedAlert tone="error">{error}</FormattedAlert>}
                 </div>
 
                 {/* Footer (fixed) — primary action always visible */}
@@ -879,8 +1008,8 @@ export function CreateTeamModal({
                     type="button"
                     onClick={() => void handleConfirmCustomize()}
                     disabled={!teamName.trim()}
-                    className="flex h-10 w-full items-center justify-center gap-2 rounded-lg text-[13px] font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                    style={{ backgroundColor: teamColor }}
+                    className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl text-[14px] font-semibold text-primary-foreground transition active:scale-[0.98] hover:brightness-110 disabled:pointer-events-none disabled:opacity-45"
+                    style={{ backgroundColor: teamColor, boxShadow: 'var(--shadow-raised)' }}
                   >
                     {isSingleAgentMode
                       ? 'Create agent'
@@ -902,13 +1031,10 @@ export function CreateTeamModal({
                 >
                   {teamIcon}
                 </motion.div>
-                <h2
-                  className="mb-2 text-lg font-bold text-text"
-                  style={{ fontFamily: 'var(--font-display)' }}
-                >
+                <h2 className="mb-2 text-[18px] font-bold text-foreground" style={{ letterSpacing: '-0.01em' }}>
                   Deploying {teamName}
                 </h2>
-                <p className="mb-6 text-[12px] text-secondary">Creating {progress.label}…</p>
+                <p className="mb-6 text-[13px] text-foreground/55">Creating {progress.label}…</p>
 
                 {/* Progress bar */}
                 <div className="mb-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-foreground/10">
@@ -922,21 +1048,17 @@ export function CreateTeamModal({
                     transition={{ duration: 0.3, ease: 'easeOut' }}
                   />
                 </div>
-                <p className="text-[11px] text-secondary/50">
+                <p className="font-data text-[11px] text-foreground/50">
                   {progress.current}/{progress.total} agents
                 </p>
 
                 {/* Safety-net error display (catch should reset to customize, but just in case) */}
                 {error && (
                   <div className="mt-4 flex w-full max-w-xs flex-col items-center gap-2">
-                    <p className="text-center text-[11px] text-destructive">{error}</p>
-                    <button
-                      type="button"
-                      onClick={() => setStep('customize')}
-                      className="rounded-lg border border-border px-4 py-1.5 text-[12px] font-medium text-secondary transition-colors hover:text-text"
-                    >
+                    <FormattedAlert tone="error">{error}</FormattedAlert>
+                    <Button variant="outline" size="sm" onClick={() => setStep('customize')}>
                       Back
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -956,13 +1078,10 @@ export function CreateTeamModal({
                     style={{ color: 'var(--mint)' }}
                   />
                 </motion.div>
-                <h2
-                  className="mb-1 text-lg font-bold text-text"
-                  style={{ fontFamily: 'var(--font-display)' }}
-                >
+                <h2 className="mb-1 text-[18px] font-bold text-foreground" style={{ letterSpacing: '-0.01em' }}>
                   Team deployed!
                 </h2>
-                <p className="text-[12px] text-secondary">{teamName} is ready to go.</p>
+                <p className="text-[13px] text-foreground/55">{teamName} is ready to go.</p>
               </div>
             )}
           </motion.div>

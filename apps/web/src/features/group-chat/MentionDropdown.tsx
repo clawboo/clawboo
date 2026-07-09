@@ -42,9 +42,10 @@ export const MentionDropdown = memo(function MentionDropdown({
     return (
       <div
         ref={listRef}
-        className="absolute bottom-full left-0 z-50 mb-1 min-w-[160px] rounded-lg border border-border bg-popover px-3 py-2 shadow-lg"
+        className="absolute bottom-full left-0 z-50 mb-1.5 min-w-[160px] rounded-xl border border-border bg-popover px-3 py-2.5"
+        style={{ boxShadow: 'var(--shadow-floating)' }}
       >
-        <span className="text-[11px] text-secondary/50">No matching agents</span>
+        <span className="text-[11px] text-foreground/50">No matching agents</span>
       </div>
     )
   }
@@ -52,7 +53,8 @@ export const MentionDropdown = memo(function MentionDropdown({
   return (
     <div
       ref={listRef}
-      className="absolute bottom-full left-0 z-50 mb-1 max-h-[200px] min-w-[180px] overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-lg"
+      className="absolute bottom-full left-0 z-50 mb-1.5 max-h-[220px] min-w-[190px] overflow-y-auto rounded-xl border border-border bg-popover p-1"
+      style={{ boxShadow: 'var(--shadow-floating)' }}
     >
       {agents.map((agent, i) => (
         <button
@@ -64,12 +66,14 @@ export const MentionDropdown = memo(function MentionDropdown({
             onSelect(agent.name)
           }}
           className={[
-            'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-popover-foreground transition-colors',
-            i === selectedIndex ? 'bg-foreground/[0.08]' : 'hover:bg-foreground/[0.04]',
+            'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-popover-foreground transition',
+            i === selectedIndex
+              ? 'bg-primary/10 text-primary'
+              : 'hover:bg-foreground/[0.05]',
           ].join(' ')}
         >
-          <AgentBooAvatar agentId={agent.id} size={20} />
-          <span className="truncate">{agent.name}</span>
+          <AgentBooAvatar agentId={agent.id} size={22} />
+          <span className="truncate font-medium">{agent.name}</span>
         </button>
       ))}
     </div>

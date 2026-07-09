@@ -42,12 +42,12 @@ export function TeamColorCollectionPicker({ value, onChange }: TeamColorCollecti
 
   return (
     <div>
-      <p className="mb-2.5 text-[11px] leading-snug text-secondary/70">
+      <p className="mb-2.5 text-[12px] leading-snug text-foreground/55">
         Each teammate gets a distinct, auto-generated color — pick a collection, not individual
         colors.
       </p>
       <div
-        className="grid gap-1"
+        className="grid gap-1.5"
         style={{ gridTemplateColumns: `repeat(${previews.length}, minmax(0, 1fr))` }}
         role="radiogroup"
       >
@@ -65,7 +65,7 @@ export function TeamColorCollectionPicker({ value, onChange }: TeamColorCollecti
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.18, delay: Math.min(index * 0.02, 0.4) }}
-              className="relative flex min-w-0 flex-col items-center gap-1.5 rounded-lg p-1 transition-colors"
+              className="relative flex min-w-0 cursor-pointer flex-col items-center gap-1.5 rounded-xl p-1.5 transition-all hover:border-border-strong"
               style={{
                 background: selected ? `${accent}14` : 'var(--surface-raised)',
                 border: `1px solid ${selected ? `${accent}aa` : 'var(--border)'}`,
@@ -75,13 +75,13 @@ export function TeamColorCollectionPicker({ value, onChange }: TeamColorCollecti
               {/* Palette preview — the 8 colors as a vertical-stripe chip. */}
               <span
                 className="flex h-9 w-full overflow-hidden rounded-md"
-                style={{ boxShadow: 'inset 0 0 0 1px rgb(0 0 0 / 0.08)' }}
+                style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--foreground-rgb) / 0.08)' }}
               >
                 {swatches.map((hex, i) => (
                   <span key={i} className="flex-1" style={{ background: hex }} />
                 ))}
               </span>
-              <span className="line-clamp-2 w-full break-words text-center text-[9px] font-medium leading-[1.15] text-text/80">
+              <span className="line-clamp-2 w-full break-words text-center text-[9px] font-medium leading-[1.15] text-foreground/80">
                 {recipe.name}
               </span>
               {selected && (

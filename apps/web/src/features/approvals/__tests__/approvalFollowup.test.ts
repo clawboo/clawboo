@@ -36,7 +36,6 @@ const base = {
   sessionKey: 'agent:a1:main',
   activeRunId: 'run-1',
   originalExecAsk: 'always',
-  teamOverrideKey: null,
   isAgentResponding: () => false,
   waitForRerunIdle: async () => {},
   delay: async () => {}, // no real timers

@@ -28,6 +28,12 @@ export interface BoardTaskView {
 
 function mergeTask(existing: BoardTaskView | undefined, change: BoardChange): BoardTaskView {
   const incomingUpdatedAt = change.updatedAt ?? existing?.updatedAt ?? Date.now()
+  // A strictly-OLDER change must not regress a field: a reconnect `load()` snapshot can
+  // predate a live board frame received during the connect gap, and copying its stale
+  // status/assignee would roll the card BACKWARD while the timestamp clamp keeps the
+  // newer time. Keep the newer existing state wholesale (the `load` change carries no
+  // summary, so nothing additive is lost).
+  if (existing && incomingUpdatedAt < existing.updatedAt) return existing
   const updatedAt = Math.max(incomingUpdatedAt, existing?.updatedAt ?? 0)
   return {
     id: change.id,

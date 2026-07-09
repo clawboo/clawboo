@@ -18,7 +18,9 @@ import {
 } from 'lucide-react'
 
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
+import { PanelHeader } from '@/features/shared/PanelHeader'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
 
@@ -90,7 +92,7 @@ const STATUS_PILL_TONE: Record<FleetAgent['status'], StatusTone> = {
 }
 
 const KICKER =
-  'mb-1.5 flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-wider'
+  'mb-1.5 flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em]'
 const KICKER_COLOR = 'rgb(var(--foreground-rgb) / 0.4)'
 
 async function getJson<T>(url: string): Promise<T | null> {
@@ -209,61 +211,62 @@ export function ObsPanel() {
       data-testid="obs-panel"
       className="flex h-full flex-col overflow-hidden bg-background text-foreground"
     >
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
-        <div className="flex items-center gap-2">
-          <Activity size={15} className="text-mint" />
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              fontFamily: 'var(--font-display)',
-              letterSpacing: '-0.01em',
-              color: 'var(--foreground)',
-            }}
-          >
-            Observability
-          </span>
-          <span className="font-data ml-1 rounded-full bg-primary/[0.12] px-2 py-0.5 text-[11px] text-primary">
-            {graph ? `${graph.tasks.length} tasks · ${graph.agents.length} agents` : 'event log'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => void refresh()}
-            className="obs-refresh-btn flex h-[30px] cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 text-[12px] text-secondary transition-colors hover:border-foreground/20 hover:text-foreground"
-          >
-            <RefreshCw size={12} /> Refresh
-          </button>
-          <GitHubStarButton />
-        </div>
-      </div>
+      <PanelHeader
+        title="Observability"
+        subtitle="Live trace + fleet-health over the orchestration event log"
+        icon={Activity}
+        size="md"
+        border
+        actions={
+          <>
+            <span className="font-data rounded-full bg-foreground/[0.06] px-2.5 py-0.5 text-[11px] font-semibold text-foreground/55">
+              {graph
+                ? `${graph.tasks.length} tasks · ${graph.agents.length} agents`
+                : 'event log'}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void refresh()}
+              className="obs-refresh-btn"
+            >
+              <RefreshCw size={13} strokeWidth={2} /> Refresh
+            </Button>
+            <GitHubStarButton />
+          </>
+        }
+      />
+
+      {/* Body */}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left: fleet health + error taxonomy + traces list */}
-        <div className="flex w-[320px] shrink-0 flex-col gap-3 overflow-y-auto border-r border-border p-3">
-          <Section title="Fleet health" icon={<Activity size={12} />}>
+        <div className="flex w-[320px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-border p-4">
+          <Section title="Fleet health" icon={<Activity size={13} strokeWidth={2} />}>
             {health.length === 0 ? (
               <EmptyState icon={Activity} title="No active agents" paddingTop={20} />
             ) : (
-              <div className="flex flex-col">
+              <div className="-mx-1 flex flex-col">
                 {health.map((a, i) => (
                   <motion.div
                     key={a.agentId}
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
-                    className="flex items-center justify-between py-1 text-[11px]"
+                    className="flex items-center justify-between gap-2 rounded-lg px-1.5 py-1.5 text-[11px] transition-colors hover:bg-foreground/[0.03]"
                   >
                     <span className="flex min-w-0 items-center gap-2 truncate">
                       <StatusPill tone={STATUS_PILL_TONE[a.status]} aria-label={a.status} />
-                      <span className="truncate font-mono">{a.agentId.slice(0, 12)}</span>
+                      <span className="font-data truncate text-foreground/80">
+                        {a.agentId.slice(0, 12)}
+                      </span>
                       {a.openExecutions > 0 && (
-                        <span className="font-data shrink-0 rounded bg-foreground/[0.06] px-1 text-[11px] text-secondary">
+                        <span className="font-data shrink-0 rounded-md bg-foreground/[0.06] px-1.5 py-0.5 text-[10px] text-foreground/50">
                           {a.openExecutions} run{a.openExecutions > 1 ? 's' : ''}
                         </span>
                       )}
                     </span>
-                    <span className="font-data shrink-0 text-secondary">
+                    <span className="font-data shrink-0 text-foreground/50">
                       {a.status} · ${a.costUsd.toFixed(3)}
                     </span>
                   </motion.div>
@@ -276,8 +279,9 @@ export function ObsPanel() {
             title={`Error taxonomy (${errorsByClass.length} · ${harnessBugCount} bug${harnessBugCount === 1 ? '' : 's'})`}
             icon={
               <AlertTriangle
-                size={12}
-                className={harnessBugCount > 0 ? 'text-primary' : 'text-secondary'}
+                size={13}
+                strokeWidth={2}
+                className={harnessBugCount > 0 ? 'text-primary' : 'text-foreground/45'}
               />
             }
           >
@@ -291,32 +295,34 @@ export function ObsPanel() {
                   paddingTop={20}
                 />
               ) : (
-                <div className="flex flex-col">
+                <div className="-mx-1 flex flex-col">
                   {errorsByClass.map(([cls, info], i) => (
                     <motion.div
                       key={cls}
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
-                      className="flex items-center justify-between py-1 text-[11px]"
+                      className="flex items-center justify-between gap-2 rounded-lg px-1.5 py-1.5 text-[11px] transition-colors hover:bg-foreground/[0.03]"
                     >
-                      <span className="flex items-center gap-1.5">
+                      <span className="flex min-w-0 items-center gap-1.5">
                         <span
-                          className={`rounded px-1.5 py-0.5 font-mono text-[11px] ${
+                          className={`font-data rounded-md px-1.5 py-0.5 text-[11px] ${
                             info.harnessBug
                               ? 'bg-primary/[0.12] text-primary'
-                              : 'bg-foreground/[0.06] text-secondary'
+                              : 'bg-foreground/[0.06] text-foreground/60'
                           }`}
                         >
                           {cls}
                         </span>
                         {info.harnessBug && (
-                          <span className="font-mono text-[11px] uppercase tracking-wider text-primary">
+                          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">
                             harness bug
                           </span>
                         )}
                       </span>
-                      <span className="font-data text-secondary">{info.count}</span>
+                      <span className="font-data font-semibold text-foreground/60">
+                        {info.count}
+                      </span>
                     </motion.div>
                   ))}
                 </div>
@@ -324,7 +330,7 @@ export function ObsPanel() {
             </div>
           </Section>
 
-          <Section title={`Traces (${traces.length})`} icon={<GitBranch size={12} />}>
+          <Section title={`Traces (${traces.length})`} icon={<GitBranch size={13} strokeWidth={2} />}>
             <div data-testid="obs-traces-list">
               {traces.length === 0 ? (
                 <EmptyState
@@ -334,7 +340,7 @@ export function ObsPanel() {
                   paddingTop={20}
                 />
               ) : (
-                <div className="flex flex-col">
+                <div className="-mx-1 flex flex-col">
                   {traces.map((t, i) => (
                     <motion.button
                       key={t.traceId}
@@ -343,14 +349,20 @@ export function ObsPanel() {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
                       onClick={() => void openTrace(t.traceId)}
-                      className={`flex w-full cursor-pointer items-center justify-between rounded px-1.5 py-1 text-left text-[11px] transition-colors hover:bg-foreground/[0.05] ${
-                        selectedTrace === t.traceId ? 'bg-foreground/[0.06]' : ''
+                      className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-1.5 py-1.5 text-left text-[11px] transition-colors hover:bg-foreground/[0.05] ${
+                        selectedTrace === t.traceId
+                          ? 'bg-primary/[0.06] ring-1 ring-inset ring-primary/25'
+                          : ''
                       }`}
                     >
-                      <span className="truncate font-mono">{t.traceId.slice(0, 16)}</span>
-                      <span className="flex items-center gap-2">
-                        <span className="font-data text-[11px] text-secondary">{t.count} ev</span>
-                        <span className="font-data text-secondary">
+                      <span className="font-data truncate text-foreground/80">
+                        {t.traceId.slice(0, 16)}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="font-data text-[11px] text-foreground/45">
+                          {t.count} ev
+                        </span>
+                        <span className="font-data text-foreground/45">
                           {new Date(t.ts).toLocaleTimeString()}
                         </span>
                       </span>
@@ -363,27 +375,32 @@ export function ObsPanel() {
         </div>
 
         {/* Right: the eval scorecard + the navigable single trace + the graph */}
-        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto p-4">
-          <div className="mb-4">
+        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-5">
+          <div className="mb-5">
             <EvalScorecard />
           </div>
 
           {trace ? (
             <div data-testid="obs-trace-detail">
               <div className={KICKER} style={{ color: KICKER_COLOR }}>
-                <GitBranch size={12} />
+                <GitBranch size={12} strokeWidth={2} />
                 Trace
               </div>
-              <div className="surface-raised-tier" style={{ borderRadius: 12, padding: 14 }}>
-                <div className="mb-3 text-[12px] font-semibold">
-                  <span className="font-mono text-secondary">{trace.traceId.slice(0, 24)}</span>
-                  <span className="ml-2 text-[11px] font-normal text-secondary">
-                    ({trace.events.length} events)
+              <div
+                className="rounded-2xl border border-border bg-surface p-5"
+                style={{ boxShadow: 'var(--shadow-raised)' }}
+              >
+                <div className="mb-3 flex items-baseline gap-2 text-[12px] font-semibold">
+                  <span className="font-data text-foreground/70">
+                    {trace.traceId.slice(0, 24)}
+                  </span>
+                  <span className="font-data text-[11px] font-normal text-foreground/45">
+                    {trace.events.length} events
                   </span>
                 </div>
 
                 {/* Metrics bar */}
-                <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 rounded-md border border-border bg-foreground/[0.02] px-3 py-2 text-[11px]">
+                <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1.5 rounded-xl border border-border bg-foreground/[0.02] px-4 py-2.5 text-[11px]">
                   <Metric label="cost" value={`$${trace.metrics.totalCostUsd.toFixed(4)}`} />
                   <Metric
                     label="tokens"
@@ -417,34 +434,41 @@ export function ObsPanel() {
           {graph && graph.taskEdges.length > 0 && (
             <div className="mt-6">
               <div className={KICKER} style={{ color: KICKER_COLOR }}>
-                <GitBranch size={12} />
+                <GitBranch size={12} strokeWidth={2} />
                 Delegation graph
               </div>
-              <div className="surface-raised-tier" style={{ borderRadius: 12, padding: 14 }}>
-                <div className="mb-2 flex items-center gap-3 text-[11px] text-secondary">
-                  <span className="flex items-center gap-1">
-                    <ArrowRight size={12} className="text-primary" /> delegation
+              <div
+                className="rounded-2xl border border-border bg-surface p-5"
+                style={{ boxShadow: 'var(--shadow-raised)' }}
+              >
+                <div className="mb-3 flex items-center gap-4 text-[11px] text-foreground/45">
+                  <span className="flex items-center gap-1.5">
+                    <ArrowRight size={12} strokeWidth={2} className="text-primary" /> delegation
                   </span>
-                  <span className="flex items-center gap-1">
-                    <ArrowRight size={12} className="text-primary opacity-60" /> dependency
+                  <span className="flex items-center gap-1.5">
+                    <ArrowRight size={12} strokeWidth={2} className="text-primary opacity-60" />{' '}
+                    dependency
                   </span>
                 </div>
-                <div className="space-y-0.5 font-mono text-[11px] text-secondary">
+                <div className="space-y-0.5 font-mono text-[11px] text-foreground/50">
                   {graph.taskEdges.map((edge, i) => (
                     <motion.div
                       key={edge.id}
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
-                      className="flex items-center"
+                      className="flex items-center py-0.5"
                     >
-                      <span className="text-foreground">{edge.source.slice(0, 8)}</span>
+                      <span className="font-data text-foreground">{edge.source.slice(0, 8)}</span>
                       <ArrowRight
                         size={12}
-                        className={`mx-1 text-primary ${edge.kind === 'delegation' ? '' : 'opacity-60'}`}
+                        strokeWidth={2}
+                        className={`mx-1.5 text-primary ${edge.kind === 'delegation' ? '' : 'opacity-60'}`}
                       />
-                      <span className="text-foreground">{edge.target.slice(0, 8)}</span>
-                      <span className="font-data ml-1.5 text-[11px]">{edge.kind}</span>
+                      <span className="font-data text-foreground">{edge.target.slice(0, 8)}</span>
+                      <span className="font-data ml-2 text-[11px] text-foreground/40">
+                        {edge.kind}
+                      </span>
                     </motion.div>
                   ))}
                 </div>
@@ -459,9 +483,14 @@ export function ObsPanel() {
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <span className="flex items-baseline gap-1">
-      <span className="text-[11px] uppercase tracking-wider text-secondary">{label}</span>
-      <span className="font-data text-foreground" style={tone ? { color: tone } : undefined}>
+    <span className="flex items-baseline gap-1.5">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+        {label}
+      </span>
+      <span
+        className="font-data font-semibold text-foreground"
+        style={tone ? { color: tone } : undefined}
+      >
         {value}
       </span>
     </span>
@@ -482,7 +511,7 @@ function TraceRow({ ev, depth, index }: { ev: ObsEvent; depth: number; index: nu
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ ...ENTER_SPRING, delay: listDelay(index) }}
-      className="flex items-center gap-2"
+      className="flex items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-foreground/[0.02]"
     >
       <span className="font-data w-28 shrink-0 text-foreground/40">
         {new Date(ev.ts).toLocaleTimeString()}
@@ -531,7 +560,10 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <div className="surface-raised-tier" style={{ borderRadius: 12, padding: '10px 12px' }}>
+    <div
+      className="rounded-2xl border border-border bg-surface p-4"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
+    >
       <div className={KICKER} style={{ color: KICKER_COLOR }}>
         {icon}
         {title}

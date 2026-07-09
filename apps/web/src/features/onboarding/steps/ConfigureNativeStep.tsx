@@ -4,12 +4,17 @@
 // written to the encrypted vault via the runtime connect route — never directly.
 
 import { useCallback, useState } from 'react'
-import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Loader2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ExternalLink, Eye, EyeOff, Loader2, X } from 'lucide-react'
 
-import { NATIVE_STEPS, StepIndicator } from '../StepIndicator'
+import { NATIVE_STEPS } from '../StepIndicator'
+import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
+import { ProviderIcon } from '../ProviderIcon'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
-import { connectRuntime, healthcheckNativeKey } from '@/lib/runtimesClient'
-import { seedNativeTeam } from '@/lib/onboardingClient'
+import { connectRuntime, healthcheckNativeKey } from '@clawboo/control-client'
+import { getKeyUrl } from '@/features/runtimes/runtimeCatalog'
+import { seedNativeTeam } from '@clawboo/control-client'
+import { nativeLeaderModelFor, nativeModelGroupsFor } from '@/lib/nativeModelCatalog'
+import { Select } from '@/features/shared/Select'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -19,6 +24,14 @@ const PROVIDERS: { id: Exclude<Provider, 'ollama'>; name: string; placeholder: s
   { id: 'anthropic', name: 'Anthropic', placeholder: 'sk-ant-…' },
   { id: 'openai', name: 'OpenAI', placeholder: 'sk-…' },
   { id: 'openrouter', name: 'OpenRouter', placeholder: 'sk-or-…' },
+]
+
+/** The provider grid — the three key-based providers plus local Ollama. */
+const PROVIDER_CARDS: { id: Provider; name: string; desc: string }[] = [
+  { id: 'anthropic', name: 'Anthropic', desc: 'Claude models' },
+  { id: 'openai', name: 'OpenAI', desc: 'GPT models' },
+  { id: 'openrouter', name: 'OpenRouter', desc: 'Any model, one key' },
+  { id: 'ollama', name: 'Ollama', desc: 'Local · no key needed' },
 ]
 
 type TestState = { phase: 'idle' | 'testing' | 'ok' | 'fail'; message?: string }
@@ -38,12 +51,29 @@ export function ConfigureNativeStep({ onSeeded, onBack }: ConfigureNativeStepPro
   const [test, setTest] = useState<TestState>({ phase: 'idle' })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The chosen leader model (native-format id). Defaults to the provider's strongest
+  // curated pick; the seed uses it for the starter leader AND the universal Boo Zero.
+  const [model, setModel] = useState<string>(() => nativeLeaderModelFor('anthropic'))
 
   const effectiveProvider: Provider = useOllama ? 'ollama' : provider
+  const modelOptions = nativeModelGroupsFor(effectiveProvider)[0]?.models ?? []
   const placeholder = PROVIDERS.find((p) => p.id === provider)?.placeholder ?? 'sk-…'
+  const keyUrl = getKeyUrl(provider)
   const canSubmit = useOllama || apiKey.trim().length > 0
 
   const resetTest = useCallback(() => setTest({ phase: 'idle' }), [])
+
+  const selectProvider = useCallback((id: Provider) => {
+    if (id === 'ollama') {
+      setUseOllama(true)
+    } else {
+      setUseOllama(false)
+      setProvider(id)
+    }
+    setModel(nativeLeaderModelFor(id)) // switch to the new provider's recommended model
+    setTest({ phase: 'idle' })
+    setError(null)
+  }, [])
 
   const handleTest = useCallback(async () => {
     setTest({ phase: 'testing' })
@@ -65,77 +95,114 @@ export function ConfigureNativeStep({ onSeeded, onBack }: ConfigureNativeStepPro
       setError(c.error ?? 'Failed to save the key')
       return
     }
-    // 2. Seed a starter leader + specialist team.
-    const seed = await seedNativeTeam(effectiveProvider)
+    // 2. Seed a starter leader + specialist team on the chosen model.
+    const seed = await seedNativeTeam(effectiveProvider, model || undefined)
     setSubmitting(false)
     if (!seed.ok) {
       setError(seed.error ?? 'Could not create the starter team')
       return
     }
     onSeeded(seed.teamId ?? null)
-  }, [canSubmit, submitting, apiKey, effectiveProvider, onSeeded])
+  }, [canSubmit, submitting, apiKey, effectiveProvider, model, onSeeded])
 
   return (
-    <div
-      data-testid="configure-native-step"
-      className="surface-overlay-tier w-full max-w-[440px] rounded-2xl p-8"
+    <OnboardingScreen
+      testId="configure-native-step"
+      step="connect"
+      steps={NATIVE_STEPS}
+      title="Connect Clawboo Native"
+      subtitle="Clawboo Native runs your agents directly on your provider — no extra install. Paste a key and we'll spin up a starter team in seconds."
+      footer={
+        <div className="flex items-center justify-between">
+          <OnboardingGhost testId="native-back" onClick={onBack} disabled={submitting}>
+            <ArrowLeft size={15} /> Back
+          </OnboardingGhost>
+          <OnboardingPrimary
+            testId="native-create-team"
+            onClick={() => void handleSubmit()}
+            disabled={!canSubmit || submitting}
+          >
+            {submitting ? <Loader2 size={16} className="animate-spin" /> : null}
+            {submitting ? 'Setting up…' : 'Create my team'}
+            {!submitting && <ArrowRight size={16} />}
+          </OnboardingPrimary>
+        </div>
+      }
     >
-      <div className="flex flex-col items-center">
-        <StepIndicator current="connect" steps={NATIVE_STEPS} />
-        <h2
-          className="mt-6 font-display text-[22px] font-semibold"
-          style={{ color: 'var(--foreground)', letterSpacing: '-0.01em' }}
-        >
-          Connect Clawboo Native
-        </h2>
-        <p
-          className="mt-1.5 text-center text-[12px] leading-relaxed"
-          style={{ color: muted(0.55), maxWidth: 360 }}
-        >
-          Paste a provider key — we&apos;ll set up a starter team for you in seconds.
-        </p>
-      </div>
-
-      {/* Provider pills */}
-      <div className="mt-6 flex gap-2" aria-label="Provider">
-        {PROVIDERS.map((p) => {
-          const active = !useOllama && provider === p.id
+      {/* Provider cards */}
+      <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Provider">
+        {PROVIDER_CARDS.map((p) => {
+          const active = p.id === 'ollama' ? useOllama : !useOllama && provider === p.id
           return (
             <button
               key={p.id}
               type="button"
+              role="radio"
+              aria-checked={active}
               data-testid={`native-provider-${p.id}`}
-              disabled={useOllama}
-              aria-pressed={active}
-              onClick={() => {
-                setProvider(p.id)
-                resetTest()
-              }}
-              className="flex-1 rounded-lg px-3 py-2 text-[12px] font-semibold transition disabled:opacity-40"
+              onClick={() => selectProvider(p.id)}
+              className={[
+                'group flex items-center gap-3 rounded-2xl border p-4 text-left',
+                'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                active
+                  ? ''
+                  : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
+              ].join(' ')}
               style={{
-                background: active ? 'rgb(var(--primary-rgb) / 0.12)' : muted(0.04),
-                color: active ? 'var(--primary)' : muted(0.6),
-                border: `1px solid ${active ? 'rgb(var(--primary-rgb) / 0.4)' : muted(0.1)}`,
-                cursor: useOllama ? 'not-allowed' : 'pointer',
+                cursor: 'pointer',
+                ...(active
+                  ? {
+                      borderColor: 'var(--primary)',
+                      background: 'rgb(var(--primary-rgb) / 0.05)',
+                      boxShadow: '0 0 0 1px var(--primary)',
+                    }
+                  : { boxShadow: 'var(--shadow-raised)' }),
               }}
             >
-              {p.name}
+              <ProviderIcon id={p.id} size={38} />
+              <span className="min-w-0">
+                <span
+                  className="block truncate text-[14px] font-semibold"
+                  style={{ color: 'var(--foreground)' }}
+                >
+                  {p.name}
+                </span>
+                <span className="block truncate text-[12px]" style={{ color: muted(0.5) }}>
+                  {p.desc}
+                </span>
+              </span>
             </button>
           )
         })}
       </div>
 
       {/* API key (hidden when using Ollama) */}
-      {!useOllama && (
-        <div className="mt-4 flex flex-col gap-1.5">
-          <label
-            className="font-mono text-[10px] uppercase tracking-widest"
-            style={{ color: muted(0.5) }}
-          >
-            API Key
-          </label>
+      {!useOllama ? (
+        <div className="mt-5 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <label
+              htmlFor="native-api-key-input"
+              className="font-mono text-[11px] uppercase tracking-[0.14em]"
+              style={{ color: muted(0.5) }}
+            >
+              API Key
+            </label>
+            {keyUrl ? (
+              <a
+                href={keyUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                data-testid="native-get-key"
+                className="inline-flex items-center gap-1 text-[12px] font-medium underline-offset-2 hover:underline"
+                style={{ color: 'var(--primary)' }}
+              >
+                Get a key <ExternalLink size={11} />
+              </a>
+            ) : null}
+          </div>
           <div className="relative">
             <input
+              id="native-api-key-input"
               data-testid="native-api-key"
               type={showKey ? 'text' : 'password'}
               value={apiKey}
@@ -151,129 +218,80 @@ export function ConfigureNativeStep({ onSeeded, onBack }: ConfigureNativeStepPro
               autoComplete="off"
               disabled={submitting}
               aria-label="Native provider API key"
-              className="w-full rounded-lg px-3 py-2.5 pr-10 font-mono text-[13px] outline-none disabled:opacity-50"
-              style={{
-                background: 'var(--background)',
-                border: `1px solid ${muted(0.12)}`,
-                color: 'var(--foreground)',
-              }}
+              className="w-full rounded-xl border border-border bg-surface px-4 py-3.5 pr-11 font-mono text-[14px] text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:opacity-50 placeholder:text-foreground/30"
             />
             <button
               type="button"
               tabIndex={-1}
               aria-label={showKey ? 'Hide API key' : 'Show API key'}
               onClick={() => setShowKey((s) => !s)}
-              className="absolute right-2 top-1/2 -translate-y-1/2"
-              style={{
-                color: muted(0.45),
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-              }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-foreground/40 transition-colors hover:text-foreground/70"
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
             >
-              {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
+              {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
+
+          {/* Test connection */}
+          <div className="mt-1 flex items-center gap-3">
+            <button
+              type="button"
+              data-testid="native-test-connection"
+              disabled={!apiKey.trim() || test.phase === 'testing' || submitting}
+              onClick={() => void handleTest()}
+              className="inline-flex items-center gap-1.5 text-[13px] font-medium underline-offset-4 transition-colors hover:underline disabled:no-underline disabled:opacity-40"
+              style={{ color: muted(0.55), background: 'transparent', border: 'none', cursor: 'pointer' }}
+            >
+              {test.phase === 'testing' ? <Loader2 size={13} className="animate-spin" /> : null}
+              Test connection
+            </button>
+            {test.phase === 'ok' ? (
+              <span className="flex items-center gap-1 text-[13px]" style={{ color: 'var(--mint)' }}>
+                <Check size={14} /> Key works
+              </span>
+            ) : null}
+            {test.phase === 'fail' ? (
+              <span
+                className="flex items-center gap-1 text-[13px]"
+                style={{ color: 'var(--primary)' }}
+              >
+                <X size={14} /> {test.message}
+              </span>
+            ) : null}
+          </div>
         </div>
+      ) : (
+        <p className="mt-5 text-[13px] leading-relaxed" style={{ color: muted(0.55) }}>
+          No key needed — Clawboo will run your agents on a local Ollama model. Make sure Ollama is
+          running before you continue.
+        </p>
       )}
 
-      {/* Ollama expander */}
-      <button
-        type="button"
-        data-testid="native-ollama-toggle"
-        aria-pressed={useOllama}
-        onClick={() => {
-          setUseOllama((v) => !v)
-          resetTest()
-          setError(null)
-        }}
-        className="mt-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] transition"
-        style={{
-          background: useOllama ? 'rgb(var(--mint-rgb) / 0.1)' : muted(0.03),
-          border: `1px solid ${useOllama ? 'rgb(var(--mint-rgb) / 0.35)' : muted(0.08)}`,
-          color: useOllama ? 'var(--mint)' : muted(0.55),
-          cursor: 'pointer',
-        }}
-      >
-        <span
-          className="flex h-4 w-4 items-center justify-center rounded"
-          style={{ border: `1.5px solid ${useOllama ? 'var(--mint)' : muted(0.3)}` }}
-        >
-          {useOllama && <Check size={11} />}
-        </span>
-        Use a local model with Ollama — no key needed
-      </button>
-
-      {/* Test connection */}
-      <div className="mt-4 flex items-center gap-3">
-        <button
-          type="button"
-          data-testid="native-test-connection"
-          disabled={(!useOllama && !apiKey.trim()) || test.phase === 'testing' || submitting}
-          onClick={() => void handleTest()}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-medium transition disabled:opacity-40"
-          style={{
-            background: muted(0.06),
-            color: 'var(--foreground)',
-            border: `1px solid ${muted(0.1)}`,
-            cursor: 'pointer',
-          }}
-        >
-          {test.phase === 'testing' ? <Loader2 size={13} className="animate-spin" /> : null}
-          Test connection
-        </button>
-        {test.phase === 'ok' && (
-          <span className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--mint)' }}>
-            <Check size={13} /> Key works
+      {/* Model — the leader model for this provider (used for the starter team + Boo Zero). */}
+      {modelOptions.length > 0 ? (
+        <div className="mt-5 flex flex-col gap-2">
+          <span
+            className="font-mono text-[11px] uppercase tracking-[0.14em]"
+            style={{ color: muted(0.5) }}
+          >
+            Model
           </span>
-        )}
-        {test.phase === 'fail' && (
-          <span className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--primary)' }}>
-            <X size={13} /> {test.message}
-          </span>
-        )}
-      </div>
+          <Select
+            value={model}
+            onChange={setModel}
+            options={modelOptions.map((m) => ({ value: m.id, label: m.label }))}
+          />
+          <p className="text-[12px] leading-relaxed" style={{ color: muted(0.45) }}>
+            Your team lead runs on this. You can change any agent&rsquo;s model later from its page.
+          </p>
+        </div>
+      ) : null}
 
-      {error && (
-        <div className="mt-4">
+      {error ? (
+        <div className="mt-5">
           <FormattedAlert tone="error">{error}</FormattedAlert>
         </div>
-      )}
-
-      {/* Footer */}
-      <div className="mt-6 flex items-center justify-between">
-        <button
-          type="button"
-          data-testid="native-back"
-          onClick={onBack}
-          disabled={submitting}
-          className="flex items-center gap-1 text-[12px] underline-offset-4 hover:underline disabled:opacity-40"
-          style={{
-            color: muted(0.5),
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          <ArrowLeft size={13} /> Back
-        </button>
-        <button
-          type="button"
-          data-testid="native-create-team"
-          disabled={!canSubmit || submitting}
-          onClick={() => void handleSubmit()}
-          className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-semibold transition active:scale-[0.98] disabled:opacity-50"
-          style={{
-            background: 'var(--primary)',
-            color: 'var(--primary-foreground)',
-            cursor: 'pointer',
-          }}
-        >
-          {submitting ? <Loader2 size={14} className="animate-spin" /> : null}
-          {submitting ? 'Setting up…' : 'Create my team'}
-          {!submitting && <ArrowRight size={14} />}
-        </button>
-      </div>
-    </div>
+      ) : null}
+    </OnboardingScreen>
   )
 }

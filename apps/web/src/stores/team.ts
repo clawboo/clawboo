@@ -15,6 +15,13 @@ export interface Team {
   agentCount: number
   leaderAgentId: string | null
   isArchived: boolean
+  /**
+   * True when the SERVER orchestrator owns this team's chat (native, Gateway-free
+   * teams). `GroupChatPanel` renders these via the REST-send + SSE-stream thin-client
+   * path (composer works with `client === null`); the browser board-orchestration
+   * path is gated OFF for them. OpenClaw teams are false → legacy browser path.
+   */
+  serverOrchestrated: boolean
 }
 
 // ─── Store ───────────────────────────────────────────────────────────────────

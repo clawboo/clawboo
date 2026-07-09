@@ -7,12 +7,11 @@ import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useBoardStore } from '@/stores/board'
-import { resolveTeamInternalLead } from '@/lib/resolveTeamLeader'
 import { useBooZeroStore } from '@/stores/booZero'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
-import { sendGroupChatMessage } from './groupChatSendOperation'
-import { useBoardOrchestration } from './useBoardOrchestration'
-import { stopAllInTeam } from '@/features/chat/stopChatOperation'
+import { parseMention } from './parseMention'
+import { useTeamChatStream } from './useTeamChatStream'
+import { sendServerTeamMessage, stopServerTeam } from './serverTeamChatSend'
 import { appendRule, fetchTeamRules, parseRuleCommand, saveTeamRules } from '@/lib/teamRules'
 import { nextSeq } from '@/lib/sequenceKey'
 import { useToastStore } from '@/stores/toast'
@@ -30,26 +29,36 @@ import {
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
 import { BoardTaskCard } from './BoardTaskCard'
+import { stripDelegationBlocks, stripPlanBlocks } from './delegationTags'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
+import { Sparkles, X } from 'lucide-react'
+import { IconButton } from '@/features/shared/Button'
+import { FIRST_TASK_FLAG, hasSeenFlag, markSeenFlag } from '@/lib/oneTimeFlag'
 
 // ─── GroupChatPanel ──────────────────────────────────────────────────────────
 
+// The one-time "guided first task" prefill — a friendly, dependency-free prompt
+// that shows off a native team collaborating (it naturally triggers delegation).
+const FIRST_TASK_SUGGESTION =
+  'Plan a simple landing page for a new app, and split the work across the team.'
+
+// How long a server-orchestrated team stays "busy" after the last SSE frame before
+// the composer flips Stop → Send. DYNAMIC by whether a delegation cascade is in
+// flight (any in-flight board task): during a cascade the long window bridges the
+// gaps between delegated turns + the reflect-batch → synthesis latency (board
+// lifecycle frames keep it alive); with NO in-flight task — a plain leader reply —
+// a short window re-enables Send promptly so the user isn't locked out staring at a
+// finished answer. (Before, the fixed 12s window locked the composer for 12s after
+// EVERY reply.) Refreshed by every committed/delta/board frame.
+const SERVER_BUSY_GRACE_CASCADE_MS = 12_000
+const SERVER_BUSY_GRACE_IDLE_MS = 3_000
+
 export function GroupChatPanel({
   teamId,
-  userIntroText,
   embedded = false,
 }: {
   teamId: string
-  /**
-   * User self-introduction captured during onboarding. Passed in from
-   * `GroupChatView` (which owns the onboarding state) and forwarded to
-   * `sendGroupChatMessage` so it's injected into the context preamble on
-   * every message — Gateway SOUL.md persistence is unreliable, so the
-   * preamble is the actual delivery mechanism for ensuring the agent knows
-   * who they're talking to.
-   */
-  userIntroText?: string
   /**
    * When true, suppresses the local header (the unified `GroupChatViewHeader`
    * rendered above the graph + chat split owns team identity).
@@ -58,7 +67,6 @@ export function GroupChatPanel({
 }) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
   const agents = useFleetStore((s) => s.agents)
-  const client = useConnectionStore((s) => s.client)
   const connectionStatus = useConnectionStore((s) => s.status)
   const transcripts = useChatStore((s) => s.transcripts)
   const streamingTextMap = useChatStore((s) => s.streamingText)
@@ -74,36 +82,24 @@ export function GroupChatPanel({
     () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
     [agents, booZeroAgentId],
   )
-  // Team-internal lead (CTO, Team Lead, etc., detected via
-  // `detectGenuineLeader` at deploy time). Surfaced separately for routing
-  // under Boo Zero — `sendGroupChatMessage` and `useBoardOrchestration`
-  // each prefer `booZeroAgent` over this when present.
-  const teamInternalLeadId = resolveTeamInternalLead(teamId, team?.leaderAgentId ?? null, agents)
+  // ── Server-orchestrated teams (the only mode) ────────────────────────────
+  // Every team's chat is driven by the SERVER orchestrator: the browser is a THIN
+  // CLIENT — it POSTs the message + renders the SSE transcript stream. There is no
+  // browser-side team orchestration and no `client` requirement (native mode runs
+  // `client === null`; an OpenClaw team keeps a live browser client for 1:1 chat /
+  // exec approvals, but its team chat still rides the server engine).
 
-  // ── Stop signal ─────────────────────────────────────────────────────────
-  // Monotonic counter bumped when the Stop button is pressed. Feeds into
-  // `useBoardOrchestration` below so the hook can cancel in-flight delegation
-  // work. The `chat.abort` RPCs themselves are fired separately by
-  // `stopAllInTeam` — this signal only owns the orchestration-side cleanup.
-  const [stopSignal, setStopSignal] = useState(0)
-
-  // ── History-hydration gate ──────────────────────────────────────────────
-  // `useBoardOrchestration` must NOT process historical entries that arrive
-  // via `/api/chat-history` hydration as if they were new — that's the root
-  // cause of the cascade of intros / wake messages we saw in
-  // production. The hook seeds its baseline on mount; if it mounts before
-  // hydration completes, the seed reads `0` and every hydrated entry trips
-  // the subscription's "new entries" branch.
-  //
-  // We flip this flag to `true` AFTER `Promise.allSettled` over all per-
-  // participant history fetches resolves. The hook is gated on `enabled =
-  // connected && historyHydrated` so it only mounts (and thus only seeds)
-  // when the transcript is in its final settled shape.
-  //
-  // Resets on `teamId` change so reopening a different team waits for THAT
-  // team's hydration cycle. Falls open after a 5s timeout as a safety net —
-  // a hung fetch shouldn't lock the team chat orchestration forever.
-  const [historyHydrated, setHistoryHydrated] = useState(false)
+  // Activity-window busy signal — the analog of the fleet-status `anyRunning`
+  // (there is no Gateway pushing "running" for a native team). Busy while frames
+  // stream OR within a grace window after the last SSE frame, so Stop stays stable
+  // through the pauses between delegated turns. Refreshed by `bumpActivity` on every
+  // frame; cleared by the effect below once idle past the grace.
+  const [serverBusy, setServerBusy] = useState(false)
+  const lastActivityRef = useRef(0)
+  const bumpActivity = useCallback(() => {
+    lastActivityRef.current = Date.now()
+    setServerBusy(true)
+  }, [])
 
   // "Effective participants" — DB team members + Boo Zero (when present),
   // deduplicated by agent id.
@@ -150,35 +146,55 @@ export function GroupChatPanel({
   const knownAgentNames = useMemo(() => participants.map((a) => a.name), [participants])
   const composerRef = useRef<MessageComposerHandle>(null)
 
+  // ── Guided first task (one-time) ────────────────────────────────────────────
+  // The first time a user lands in a server-orchestrated (native) team chat, pre-
+  // fill the composer with a suggested prompt + show a dismissible hint so the
+  // "premium first action" is obvious. Marked-once so it never repeats.
+  const [firstTaskTip, setFirstTaskTip] = useState(false)
+  const firstTaskFiredRef = useRef(false)
+  useEffect(() => {
+    if (firstTaskFiredRef.current) return
+    if (teamAgents.length === 0) return
+    if (hasSeenFlag(FIRST_TASK_FLAG)) return
+    firstTaskFiredRef.current = true
+    markSeenFlag(FIRST_TASK_FLAG)
+    composerRef.current?.prefill(FIRST_TASK_SUGGESTION)
+    setFirstTaskTip(true)
+  }, [teamAgents.length])
+
   // Team-scoped sessionKeys for isolation from 1:1 agent chat
   const teamSessionKeys = useMemo(
     () => new Map(participants.map((a) => [a.id, buildTeamSessionKey(a.id, teamId)])),
     [participants, teamId],
   )
 
-  // ── Event-driven board orchestration ──────────────────────────────────────
-  // The structured, lifecycle-event-driven orchestration path. Observes each
-  // participant's session via the OpenClaw RuntimeAdapter and turns structured
-  // delegations into durable board tasks. Gated on the Gateway connection +
-  // history hydration so it never replays historical entries as new.
-  useBoardOrchestration({
-    teamId,
-    teamAgents,
-    booZeroAgent,
-    client,
-    teamSessionKeys,
-    enabled: connectionStatus === 'connected' && historyHydrated,
-    stopSignal,
-  })
+  // ── Server-orchestrated live transport (the only team-chat transport) ──────
+  // The analog of `useGatewayEvents`: feed the team's SSE transcript stream
+  // (committed turns + live token deltas) into the chat store. Every frame bumps
+  // the activity-window busy signal. Browser team orchestration is retired.
+  useTeamChatStream({ teamId, enabled: true, onActivity: bumpActivity })
 
   // ── Merge all team transcripts (using team-scoped sessionKeys) ────────────
   const mergedEntries = useMemo(() => {
     const all: TranscriptEntry[] = []
+    // Dedup by entryId ACROSS session keys. `appendTranscript` dedups only WITHIN
+    // one key, but the same entry can land in two members' transcripts with the same
+    // entryId — e.g. an optimistic user bubble whose client-resolved target key
+    // (@mention > leader > first) differs from the server's actual target key, so the
+    // optimistic copy and the SSE-replayed copy sit under different keys. Without this
+    // guard the message renders twice: a duplicate React key AND a visible duplicate
+    // bubble (the "user message shown as 2 duplicates" symptom).
+    const seen = new Set<string>()
     for (const agent of participants) {
       const teamSk = teamSessionKeys.get(agent.id)
       if (!teamSk) continue
       const entries = transcripts.get(teamSk)
-      if (entries) all.push(...entries)
+      if (!entries) continue
+      for (const e of entries) {
+        if (seen.has(e.entryId)) continue
+        seen.add(e.entryId)
+        all.push(e)
+      }
     }
     all.sort((a, b) => {
       const tsDiff = (a.timestampMs ?? 0) - (b.timestampMs ?? 0)
@@ -191,27 +207,49 @@ export function GroupChatPanel({
   const blocks = useMemo(() => groupEntriesToBlocks(mergedEntries), [mergedEntries])
 
   // Every committed turn renders at top level — delegations surface as durable
-  // BoardTaskCards (from the projection store), not nested inside the source's
-  // turn. (`topLevelBlocks` alias kept for the render loop's local naming.)
-  const topLevelBlocks = blocks
+  // BoardTaskCards (from the projection store), not nested inside the source's turn.
+  // Two blocks are dropped so the timeline stays clean:
+  //  • A leader turn that is PURE `<delegate>` / `<plan>` (no prose, no thinking, no
+  //    tools) strips to nothing — its work is shown as BoardTaskCards, so rendering
+  //    it produced only the empty "<leader> · ~N tokens" ghost message.
+  //  • A legacy `[Task Update]` meta (the internal reflection is no longer persisted
+  //    to chat — it goes to the tracelog — but an older transcript may still hold one).
+  const topLevelBlocks = useMemo(
+    () =>
+      blocks.filter((b) => {
+        if (b.kind === 'assistant-turn') {
+          if (b.thinking.length > 0 || b.tools.length > 0) return true
+          const text = b.assistant?.text ?? ''
+          return stripPlanBlocks(stripDelegationBlocks(text)).trim().length > 0
+        }
+        if (b.kind === 'meta') {
+          const t = b.entry.text.trimStart()
+          // Drop internal orchestration reflections — the batched "[Task Update]"
+          // envelope and the per-task "✓ <agent> completed…" markers. These are no
+          // longer persisted to chat (they go to the tracelog), but an older
+          // transcript may still hold them, and dropping them keeps the timeline
+          // clean. User-facing metas (a delivery-failure notice, a Boo Zero
+          // acknowledgement) never start with these markers, so they pass through.
+          if (t.startsWith('[Task Update]')) return false
+          if (/^✓\s.+\bcompleted\b/.test(t)) return false
+          return true
+        }
+        return true
+      }),
+    [blocks],
+  )
 
   // ── Load persisted history for all participants (team-scoped sessionKeys) ──
-  // Tracks completion via `historyHydrated`: `useBoardOrchestration` is gated
-  // on this flag so it doesn't see the hydration-time appends as "new"
-  // entries and replay stale wake/relay messages (the wake-replay cascade bug).
-  // The 5s safety timeout is a fallback — if a fetch hangs forever we still
-  // want orchestration to come online eventually.
+  // Populates the merged transcript view on team-open. (The SSE stream also
+  // full-replays committed turns on connect; this covers the render before the
+  // stream lands, and dedup-by-entryId reconciles the two.)
   //
-  // **CRITICAL — stable dep signature**: depend on a STRING derived from
-  // participant ids, not the participants array reference. `participants`
-  // is a `useMemo` over `[teamAgents, booZeroAgent]`, both of which are
-  // Zustand selector results — the array reference REALLOCATES on every
-  // fleet store update (every agent status patch during streaming). With
-  // the array as a dep, this effect re-fired on every chat tick, resetting
-  // `historyHydrated` to `false` → disabling orchestration → the
-  // `useBoardOrchestration` subscription kept unmounting and remounting.
-  // The string signature only changes when the set of participant IDs
-  // actually changes (e.g., team switch, agent deleted).
+  // **CRITICAL — stable dep signature**: depend on a STRING derived from participant
+  // ids, not the participants array reference. `participants` is a `useMemo` over
+  // `[teamAgents, booZeroAgent]`, both Zustand selector results whose array reference
+  // REALLOCATES on every fleet status patch during streaming — with the array as a
+  // dep this effect would re-fire on every chat tick. The signature only changes when
+  // the set of participant IDs actually changes (team switch, agent added/removed).
   const participantSignature = useMemo(
     () =>
       participants
@@ -229,54 +267,29 @@ export function GroupChatPanel({
   const teamSessionKeysRef = useRef(teamSessionKeys)
   teamSessionKeysRef.current = teamSessionKeys
   useEffect(() => {
-    setHistoryHydrated(false)
     let cancelled = false
-
-    // Read the latest participants/teamSessionKeys via refs (not deps). The
-    // `participants` array reference reallocates whenever the fleet-store
-    // agents array reallocates (which happens on EVERY agent status patch
-    // during streaming — a chat tick can fire 10+ patches per second), and
-    // `teamSessionKeys` is downstream of that. If we put them in the deps,
-    // this effect re-fires on every chat tick, resets `historyHydrated` to
-    // `false`, and the `useBoardOrchestration` subscription gated on it
-    // unmounts/remounts in a tight loop. The `participantSignature` string
-    // only changes when the set of participant IDs actually changes (team
-    // switch, agent added/removed), which is the right granularity for
-    // "re-hydrate history".
-    const fetches: Promise<unknown>[] = []
+    // Read the latest participants/teamSessionKeys via refs (not deps) — see the
+    // stable-dep-signature rationale above (the array refs reallocate on every fleet
+    // patch; keying the fetch on the id signature avoids re-firing per chat tick).
     for (const agent of participantsRef.current) {
       const teamSk = teamSessionKeysRef.current.get(agent.id)
       if (!teamSk) continue
       const existing = useChatStore.getState().transcripts.get(teamSk)
       if (existing && existing.length > 0) continue
 
-      fetches.push(
-        fetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
-          .then((r) => r.json())
-          .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
-            if (cancelled) return
-            if (historical && historical.length > 0) {
-              useChatStore.getState().appendTranscript(teamSk, historical)
-            }
-          })
-          .catch(() => {}),
-      )
+      void fetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
+        .then((r) => r.json())
+        .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
+          if (cancelled) return
+          if (historical && historical.length > 0) {
+            useChatStore.getState().appendTranscript(teamSk, historical)
+          }
+        })
+        .catch(() => {})
     }
-
-    // Safety timeout — if a fetch hangs we still want orchestration online.
-    const timer = setTimeout(() => {
-      if (!cancelled) setHistoryHydrated(true)
-    }, 5000)
-
-    void Promise.allSettled(fetches).then(() => {
-      if (cancelled) return
-      clearTimeout(timer)
-      setHistoryHydrated(true)
-    })
 
     return () => {
       cancelled = true
-      clearTimeout(timer)
     }
   }, [participantSignature])
 
@@ -341,6 +354,36 @@ export function GroupChatPanel({
     return streams
   }, [participants, teamSessionKeys, streamingTextMap, streamStartedAtMap])
 
+  // ── Activity-window busy clear (server teams) ─────────────────────────────
+  // Poll while busy: once no SSE frame has arrived for `SERVER_BUSY_GRACE_MS` AND
+  // nothing is actively streaming, the cascade has settled → flip Stop back to Send.
+  // Each frame refreshes `lastActivityRef` (via `bumpActivity`), so a multi-step
+  // cascade keeps the window alive across the gaps between turns.
+  useEffect(() => {
+    if (!serverBusy) return
+    const id = setInterval(() => {
+      // A cascade is in flight when the team has any non-terminal board task; then
+      // hold Stop through the (frame-quiet) reflect → synthesis gap. Otherwise it was
+      // a plain reply — clear promptly. Read live (getState) so the tick always sees
+      // the latest board projection without re-subscribing the interval.
+      const tasks = useBoardStore.getState().tasksByTeam.get(teamId)
+      const cascadeActive = tasks
+        ? [...tasks.values()].some((t) => t.status !== 'done' && t.status !== 'cancelled')
+        : false
+      const grace = cascadeActive ? SERVER_BUSY_GRACE_CASCADE_MS : SERVER_BUSY_GRACE_IDLE_MS
+      if (Date.now() - lastActivityRef.current > grace && activeStreams.length === 0) {
+        setServerBusy(false)
+      }
+    }, 1000)
+    return () => clearInterval(id)
+  }, [serverBusy, activeStreams.length, teamId])
+
+  // Reset the busy signal when switching teams.
+  useEffect(() => {
+    setServerBusy(false)
+    lastActivityRef.current = 0
+  }, [teamId])
+
   // ── Interleaved render timeline ───────────────────────────────────────────
   // Committed blocks and active streaming cards merged into ONE chronologically-
   // sorted list. Each item carries the timestamp at which the leader's
@@ -398,7 +441,9 @@ export function GroupChatPanel({
     return items
   }, [topLevelBlocks, activeStreams, boardTaskList])
 
-  const anyRunning = teamAgents.some((a) => a.status === 'running')
+  // The fleet store never reports "running" for a server-orchestrated team (no Gateway
+  // pushing status) — derive it from the SSE activity window.
+  const running = serverBusy
 
   useEffect(() => {
     if (pinnedRef.current) scheduleScroll()
@@ -419,6 +464,21 @@ export function GroupChatPanel({
   // ── Send handler ──────────────────────────────────────────────────────────
   const handleSend = useCallback(
     async (message: string) => {
+      // Dismiss the guided first-task hint once the user actually sends.
+      setFirstTaskTip(false)
+      // `/reset` / `/new` — deliberately NOT a team-chat command: a team has no
+      // single session to reset (each teammate + Boo Zero has its own, all
+      // server-orchestrated). Intercept it here so it gives clear feedback rather
+      // than being sent to the leader as a literal "/reset" message. (1:1 agent
+      // chat keeps `/reset`, where it maps to a real `sessions.create`.)
+      const cmd = message.trim().toLowerCase()
+      if (cmd === '/reset' || cmd === '/new') {
+        useToastStore.getState().addToast({
+          message: 'Reset isn’t available in team chat.',
+          type: 'error',
+        })
+        return
+      }
       // `/rule <text>` — intercept BEFORE routing to any agent. Appends the
       // text to the team's durable rules in SQLite, drops a meta entry in
       // every team session's transcript so the user gets visible
@@ -472,30 +532,35 @@ export function GroupChatPanel({
         return
       }
 
-      if (!client) return
-      await sendGroupChatMessage({
-        client,
+      // ── Thin-client REST send (the only team-chat path) ────────────────────
+      // Resolve the target client-side so the optimistic bubble lands under the
+      // SAME session key the server routes to (`sendServerTeamMessage` passes it as
+      // the EXPLICIT target, which the server honors — no divergence). Priority
+      // mirrors the server: @mention > Boo Zero > leader > first. Boo Zero is now
+      // runtime-neutral (`GET /api/agents` `defaultId`): a native-first install
+      // identifies the DEFAULT-NATIVE Boo Zero here, so native teams route to it too.
+      const { targetAgentId } = parseMention(message, mentionAgentList)
+      const targetId =
+        targetAgentId ?? booZeroAgent?.id ?? team?.leaderAgentId ?? teamAgents[0]?.id
+      if (!targetId) return
+      const targetSk = teamSessionKeys.get(targetId)
+      if (!targetSk) return
+      // Optimistic busy → the composer flips to Stop immediately.
+      lastActivityRef.current = Date.now()
+      setServerBusy(true)
+      await sendServerTeamMessage({
         teamId,
-        teamName: team?.name ?? 'Team',
-        // `leaderAgentId` here is the team-internal lead (Boo-Zero-fallback);
-        // `sendGroupChatMessage` prefers `booZeroAgent` over this as the
-        // routing target.
-        leaderAgentId: teamInternalLeadId,
-        teamAgents,
-        booZeroAgent,
+        targetAgentId: targetId,
+        targetSessionKey: targetSk,
         message,
-        displayText: message, // raw message including @mention for transcript display
-        userIntroText,
       })
     },
     [
-      client,
       teamId,
-      team?.name,
-      teamInternalLeadId,
-      teamAgents,
+      team?.leaderAgentId,
       booZeroAgent,
-      userIntroText,
+      mentionAgentList,
+      teamAgents,
       participants,
       teamSessionKeys,
     ],
@@ -506,9 +571,8 @@ export function GroupChatPanel({
     composerRef.current?.insertMention(agentName)
   }, [])
 
-  const canSend = Boolean(
-    client && connectionStatus === 'connected' && teamAgents.length > 0 && !anyRunning,
-  )
+  // No `client` requirement — the server owns the run (native mode runs client=null).
+  const canSend = teamAgents.length > 0 && !serverBusy
   const isEmpty = topLevelBlocks.length === 0 && activeStreams.length === 0
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -516,7 +580,7 @@ export function GroupChatPanel({
     <div data-testid="group-chat-panel" className="flex h-full flex-col">
       {/* Header is owned by `GroupChatViewHeader` when embedded. */}
       {!embedded && (
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+        <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-3">
           {team && (
             <span
               className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-[16px]"
@@ -526,18 +590,15 @@ export function GroupChatPanel({
             </span>
           )}
           <div className="min-w-0 flex-1">
-            <h2
-              className="truncate text-[14px] font-semibold text-text"
-              style={{ fontFamily: 'var(--font-body)' }}
-            >
+            <h2 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-foreground">
               {team?.name ?? 'Group Chat'}
             </h2>
-            <p className="text-[10px] text-secondary/50">
+            <p className="font-data text-[10px] text-foreground/45">
               {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''}
             </p>
           </div>
           <span
-            className={`h-2 w-2 shrink-0 rounded-full ${connectionStatus === 'connected' ? 'bg-mint' : 'bg-secondary/40'}`}
+            className={`h-2 w-2 shrink-0 rounded-full ${connectionStatus === 'connected' ? 'bg-mint' : 'bg-foreground/25'}`}
           />
         </div>
       )}
@@ -565,7 +626,7 @@ export function GroupChatPanel({
                 ))}
                 {participants.length > 4 && (
                   <div
-                    className="flex h-[42px] w-[42px] items-center justify-center rounded-full bg-foreground/10 font-mono text-[11px] font-semibold text-foreground/60 ring-2 ring-background"
+                    className="font-data flex h-[42px] w-[42px] items-center justify-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground/60 ring-2 ring-background"
                     style={{ marginLeft: -10 }}
                   >
                     +{participants.length - 4}
@@ -575,7 +636,7 @@ export function GroupChatPanel({
             )}
             <div className="flex flex-col gap-1.5">
               <p
-                className="text-[16px] font-semibold text-foreground/85"
+                className="text-[17px] font-bold text-foreground/90"
                 style={{
                   fontFamily: 'var(--font-display)',
                   letterSpacing: '-0.01em',
@@ -583,9 +644,9 @@ export function GroupChatPanel({
               >
                 {team?.name ? `Welcome to ${team.name}` : 'Welcome to the team'}
               </p>
-              <p className="max-w-[300px] text-[12px] leading-relaxed text-foreground/45">
+              <p className="max-w-[300px] text-[13px] leading-relaxed text-foreground/50">
                 Send a message to start, or ping a teammate with{' '}
-                <span className="font-mono text-foreground/55">@</span>.
+                <span className="font-data text-foreground/60">@</span>.
               </p>
             </div>
           </div>
@@ -675,7 +736,7 @@ export function GroupChatPanel({
                       agentId={ownerAgent?.id ?? 'unknown'}
                       agentName={ownerAgent?.name ?? 'Agent'}
                       streaming={
-                        anyRunning && blockIdx === lastBlockSeenIdx && activeStreams.length === 0
+                        running && blockIdx === lastBlockSeenIdx && activeStreams.length === 0
                       }
                       teamId={teamId}
                       isFollowup={isFollowup}
@@ -696,6 +757,29 @@ export function GroupChatPanel({
       {/* Inline approval cards for team agents */}
       <InlineApprovalTray teamId={teamId} />
 
+      {/* Guided first task — one-time prefilled-composer hint */}
+      {firstTaskTip && (
+        <div
+          className="mx-3 mb-2 flex items-start gap-2.5 rounded-xl border border-primary/20 bg-primary/[0.06] px-3.5 py-2.5"
+          data-testid="first-task-tip"
+        >
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" strokeWidth={2} />
+          <div className="flex-1 text-[12px] leading-relaxed text-foreground/80">
+            <span className="font-semibold text-foreground">Try your first task.</span> We filled in
+            a prompt below — press Enter to send it to your team, or edit it first.
+          </div>
+          <IconButton
+            variant="ghost"
+            size="sm"
+            label="Dismiss"
+            onClick={() => setFirstTaskTip(false)}
+            className="shrink-0"
+          >
+            <X className="h-3.5 w-3.5" strokeWidth={2} />
+          </IconButton>
+        </div>
+      )}
+
       {/* Composer */}
       <MessageComposer
         ref={composerRef as RefObject<MessageComposerHandle | null>}
@@ -703,14 +787,15 @@ export function GroupChatPanel({
         disabled={!canSend}
         placeholder="Message team… (@name to target)"
         mentionAgents={mentionAgentList}
-        // Stop button — replaces Send while ANY agent on the team is
-        // running OR mid-stream. Bumping `stopSignal` first ensures the
-        // orchestration hook tears down its in-flight state BEFORE the
-        // `chat.abort` events from the Gateway start landing.
-        isActive={anyRunning || activeStreams.length > 0}
+        // Team chat handles `/rule` (save a durable team rule). It does NOT handle
+        // `/reset` — a team has no single session to reset — so that hint is omitted.
+        commands={[{ k: '/rule', label: 'save rule' }]}
+        // Stop button — replaces Send while the team is working (running OR
+        // mid-stream). POSTs /chat/stop; the server owns the abort + clean release.
+        isActive={running || activeStreams.length > 0}
         onStop={() => {
-          setStopSignal((n) => n + 1)
-          void stopAllInTeam({ client, teamId, participants, teamSessionKeys })
+          setServerBusy(false)
+          void stopServerTeam({ teamId, sessionKeys: Array.from(teamSessionKeys.values()) })
         }}
       />
     </div>

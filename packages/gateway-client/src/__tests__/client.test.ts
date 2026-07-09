@@ -228,6 +228,33 @@ describe('GatewayClient', () => {
       await expect(callPromise).rejects.toThrow('agent not found')
       client.disconnect()
     })
+
+    it('preserves retryable / retryAfterMs from the error frame (lockout hint)', async () => {
+      const client = new GatewayClient()
+      const ws = await connectClient(client)
+      ws.sent.length = 0
+
+      const callPromise = client.call('test.rate-limited')
+      const frame = JSON.parse(ws.sent[0]) as Record<string, unknown>
+
+      ws.simulateMessage({
+        type: 'res',
+        id: frame['id'],
+        ok: false,
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'too many failed authentication attempts (retry later)',
+          retryable: false,
+          retryAfterMs: 45_000,
+        },
+      })
+
+      const err = await callPromise.catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(GatewayResponseError)
+      expect((err as GatewayResponseError).retryable).toBe(false)
+      expect((err as GatewayResponseError).retryAfterMs).toBe(45_000)
+      client.disconnect()
+    })
   })
 
   describe('config.patch envelope', () => {

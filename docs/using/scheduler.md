@@ -15,7 +15,7 @@ Everything on this tab runs from the `SchedulerPanel`, backed by `/api/schedules
 ## Prerequisites
 
 <Note>
-The Scheduler tab is always available. Open it from the **Scheduler** nav item. The panel polls `GET /api/schedules` on mount and re-fetches every 8 seconds, so `nextRunAt` countdowns and run status stay live without a manual refresh.
+The Scheduler panel is always available. Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Scheduler** under the Workspace group. The panel polls `GET /api/schedules` on mount and re-fetches every 8 seconds, so `nextRunAt` countdowns and run status stay live without a manual refresh.
 </Note>
 
 - At least one agent exists (the create dialog populates its agent picker from `GET /api/agents`).

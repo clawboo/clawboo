@@ -8,15 +8,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { motion } from 'framer-motion'
-import { Ban, EyeOff, Lock, Plug, Power, Puzzle, RefreshCw, Wrench } from 'lucide-react'
+import { EyeOff, Lock, Plug, Puzzle, RefreshCw, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 import { ToolApprovalQueue } from '@/features/approvals/ToolApprovalQueue'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
+import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Skeleton } from '@/features/shared/Skeleton'
-import { Spinner } from '@/features/shared/Spinner'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
 import {
@@ -28,8 +29,6 @@ import {
 } from '@/lib/capabilitiesClient'
 import { useCapabilityFilterStore } from '@/stores/capabilityFilter'
 import { useToastStore } from '@/stores/toast'
-
-const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
 const RUNTIME_ORDER = ['clawboo-native', 'openclaw', 'claude-code', 'codex', 'hermes', 'human']
 const RUNTIME_LABEL: Record<string, string> = {
@@ -47,8 +46,8 @@ const KIND_ICON: Record<CapabilityRecord['kind'], LucideIcon> = {
 }
 const KIND_ORDER: CapabilityRecord['kind'][] = ['skill', 'tool', 'connector']
 
-const KICKER =
-  'mb-2 font-mono text-[11px] font-semibold uppercase tracking-wider flex items-center gap-2'
+const SECTION_LABEL =
+  'flex items-center gap-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em]'
 
 // ── The action set is a PURE FUNCTION of the manageability tier ──────────────
 interface RowAction {
@@ -108,44 +107,20 @@ function Row({
   return (
     <div
       data-testid="capability-row"
-      className="surface-raised-tier"
+      className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3.5 py-2.5 transition-colors"
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        // 4px grid: 8px 12px → ~40px row height (meets the touch-target floor).
-        padding: '8px 12px',
-        borderRadius: 8,
+        boxShadow: 'var(--shadow-raised)',
         opacity: rec.available ? 1 : 0.55,
         filter: rec.available ? undefined : 'grayscale(1)',
       }}
     >
-      <KindIcon size={14} style={{ color: muted(0.45), flexShrink: 0 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 12.5,
-            fontWeight: 600,
-            color: 'var(--foreground)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {rec.name}
-        </div>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.05]">
+        <KindIcon size={15} strokeWidth={2} className="text-foreground/50" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-semibold text-foreground">{rec.name}</div>
         {rec.description && (
-          <div
-            style={{
-              fontSize: 11,
-              color: muted(0.5),
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {rec.description}
-          </div>
+          <div className="truncate text-[12px] text-foreground/50">{rec.description}</div>
         )}
       </div>
       <StatusPill tone={pill.tone} label={pill.label} />
@@ -153,81 +128,36 @@ function Row({
         <span
           data-testid="capability-observe-only"
           title={`Managed by ${RUNTIME_LABEL[rec.runtime] ?? rec.runtime}`}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            fontSize: 11,
-            color: muted(0.4),
-            flexShrink: 0,
-          }}
+          className="flex shrink-0 items-center gap-1.5 text-[11px] text-foreground/40"
         >
-          {rec.source === 'runtime-builtin' ? <Lock size={11} /> : <EyeOff size={11} />}
+          {rec.source === 'runtime-builtin' ? <Lock size={12} /> : <EyeOff size={12} />}
           built-in, managed by {RUNTIME_LABEL[rec.runtime] ?? rec.runtime}
         </span>
       ) : (
         actions.map((a) => {
-          const isEnable = a.action === 'enable'
-          const disabled = a.disabled || busy
-          const ActionIcon = isEnable ? Power : Ban
-          // Enable → mint accent (affirmative). Disable → NEUTRAL (a non-confirm
-          // action must not wear success-green). Pending-auth Enable stays
-          // neutral/disabled with the `codex login` hint.
-          const affirmative = isEnable && !a.disabled
+          // Enable → primary (affirmative). Disable → secondary (a non-confirm
+          // action must not wear the brand CTA). Pending-auth Enable stays a
+          // disabled secondary carrying the `codex login` hint.
+          const affirmative = a.action === 'enable' && !a.disabled
           return (
-            <button
+            <Button
               key={a.action}
-              type="button"
+              variant={affirmative ? 'primary' : 'secondary'}
+              size="sm"
               data-testid="capability-action"
               title={a.hint}
-              disabled={disabled}
+              disabled={a.disabled || busy}
+              loading={busy}
               onClick={() => onAction(rec, a.action)}
-              className="capability-action-btn"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                fontSize: 11.5,
-                fontWeight: 600,
-                height: 30,
-                padding: '0 11px',
-                borderRadius: 7,
-                border: `1px solid ${affirmative ? 'rgb(var(--mint-rgb) / 0.3)' : muted(0.12)}`,
-                background: affirmative ? 'rgb(var(--mint-rgb) / 0.1)' : muted(0.05),
-                color: affirmative ? 'var(--mint)' : muted(0.7),
-                cursor: disabled ? 'not-allowed' : 'pointer',
-                opacity: disabled ? 0.45 : 1,
-                flexShrink: 0,
-                transition:
-                  'background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast)',
-              }}
-              onMouseEnter={(e) => {
-                if (disabled) return
-                if (affirmative) {
-                  e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.18)'
-                  e.currentTarget.style.borderColor = 'rgb(var(--mint-rgb) / 0.45)'
-                } else {
-                  e.currentTarget.style.background = muted(0.1)
-                  e.currentTarget.style.borderColor = muted(0.2)
-                  e.currentTarget.style.color = 'var(--foreground)'
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (affirmative) {
-                  e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.1)'
-                  e.currentTarget.style.borderColor = 'rgb(var(--mint-rgb) / 0.3)'
-                } else {
-                  e.currentTarget.style.background = muted(0.05)
-                  e.currentTarget.style.borderColor = muted(0.12)
-                  e.currentTarget.style.color = muted(0.7)
-                }
-              }}
             >
-              {busy ? <Spinner size={11} /> : <ActionIcon size={12} />} {a.label}
+              {a.label}
               {a.hint && a.disabled ? (
-                <span style={{ color: muted(0.45), fontWeight: 400 }}> · {a.hint}</span>
+                <span className="font-normal text-foreground/45">
+                  {' '}
+                  · {a.hint}
+                </span>
               ) : null}
-            </button>
+            </Button>
           )
         })
       )}
@@ -235,6 +165,9 @@ function Row({
   )
 }
 
+// Runtime filter pill. A styled button matching the shared Chip aesthetic, but
+// carrying the `capability-filter-<runtime>` testid on the CLICKABLE element so
+// tests target it directly.
 function FilterPill({
   label,
   active,
@@ -251,23 +184,22 @@ function FilterPill({
       type="button"
       data-testid={testid}
       onClick={onClick}
-      className="rounded-full px-3 py-1 text-[11px] font-semibold transition-colors"
-      style={{
-        color: active ? 'var(--mint)' : muted(0.6),
-        background: active ? 'rgb(var(--mint-rgb) / 0.12)' : muted(0.05),
-        border: 'none',
-        cursor: 'pointer',
-      }}
-      onMouseEnter={(e) => {
-        if (active) return
-        e.currentTarget.style.background = muted(0.1)
-        e.currentTarget.style.color = muted(0.85)
-      }}
-      onMouseLeave={(e) => {
-        if (active) return
-        e.currentTarget.style.background = muted(0.05)
-        e.currentTarget.style.color = muted(0.6)
-      }}
+      aria-pressed={active}
+      className={[
+        'inline-flex h-7 cursor-pointer items-center rounded-full border px-3 text-[12.5px] font-medium transition-all duration-150',
+        active
+          ? ''
+          : 'border-border text-foreground/65 hover:border-border-strong hover:text-foreground',
+      ].join(' ')}
+      style={
+        active
+          ? {
+              borderColor: 'var(--mint)',
+              color: 'var(--mint)',
+              background: 'color-mix(in srgb, var(--mint) 8%, transparent)',
+            }
+          : undefined
+      }
     >
       {label}
     </button>
@@ -278,22 +210,16 @@ function FilterPill({
 function SkeletonRow() {
   return (
     <div
-      className="surface-raised-tier"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '8px 12px',
-        borderRadius: 8,
-      }}
+      className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3.5 py-2.5"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
     >
-      <Skeleton width={14} height={14} radius={4} />
+      <Skeleton width={32} height={32} radius={8} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
         <Skeleton width="40%" height={11} />
         <Skeleton width="62%" height={9} />
       </div>
       <Skeleton width={64} height={18} radius={999} />
-      <Skeleton width={84} height={30} radius={7} />
+      <Skeleton width={38} height={22} radius={999} />
     </div>
   )
 }
@@ -371,89 +297,32 @@ export function CapabilitiesPanel() {
   const visibleGroups = runtimeFilter ? groups.filter((g) => g.runtime === runtimeFilter) : groups
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div
-        style={{
-          height: 44,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Puzzle size={15} style={{ color: 'var(--mint)' }} />
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              fontFamily: 'var(--font-display)',
-              letterSpacing: '-0.01em',
-              color: 'var(--foreground)',
-            }}
-          >
-            Capabilities
-          </span>
-          <span
-            className="font-data"
-            style={{
-              fontSize: 10,
-              color: 'var(--primary)',
-              background: 'rgb(var(--primary-rgb) / 0.12)',
-              borderRadius: 20,
-              padding: '2px 8px',
-            }}
-          >
-            {records.length} capabilities · {groups.length} runtimes
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            aria-label="Refresh"
-            className="capability-refresh-btn"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              height: 30,
-              padding: '0 11px',
-              borderRadius: 7,
-              background: 'transparent',
-              border: `1px solid ${muted(0.1)}`,
-              color: muted(0.6),
-              fontSize: 12,
-              fontWeight: 500,
-              cursor: 'pointer',
-              transition:
-                'background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = muted(0.05)
-              e.currentTarget.style.borderColor = muted(0.2)
-              e.currentTarget.style.color = 'var(--foreground)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.borderColor = muted(0.1)
-              e.currentTarget.style.color = muted(0.6)
-            }}
-          >
-            <RefreshCw size={12} /> Refresh
-          </button>
-          <GitHubStarButton />
-        </div>
-      </div>
+    <div className="flex h-full flex-col bg-background">
+      <PanelHeader
+        title="Capabilities"
+        subtitle="Every runtime's skills, tools, and connectors — one inventory."
+        icon={Puzzle}
+        size="md"
+        border
+        actions={
+          <>
+            <span className="font-data rounded-full bg-foreground/[0.06] px-2.5 py-0.5 text-[11px] font-semibold text-foreground/55">
+              {records.length} capabilities · {groups.length} runtimes
+            </span>
+            <Button variant="secondary" size="sm" onClick={() => void refresh()}>
+              <RefreshCw size={14} strokeWidth={2} /> Refresh
+            </Button>
+            <GitHubStarButton />
+          </>
+        }
+      />
 
-      <div data-testid="capabilities-panel" style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 820 }}>
+      <div data-testid="capabilities-panel" className="flex-1 overflow-auto px-6 py-5">
+        <div className="flex max-w-[820px] flex-col gap-5">
           <ToolApprovalQueue />
 
           {groups.length > 1 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <div className="flex flex-wrap gap-1.5">
               <FilterPill
                 label="All runtimes"
                 active={runtimeFilter === null}
@@ -499,13 +368,9 @@ export function CapabilitiesPanel() {
               <FormattedAlert tone="error">
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   Couldn’t load the capability inventory.
-                  <button
-                    type="button"
-                    onClick={() => void refresh()}
-                    style={{ textDecoration: 'underline', cursor: 'pointer', color: 'inherit' }}
-                  >
+                  <Button variant="ghost" size="sm" onClick={() => void refresh()}>
                     Retry
-                  </button>
+                  </Button>
                 </span>
               </FormattedAlert>
             </div>
@@ -520,11 +385,11 @@ export function CapabilitiesPanel() {
               <div
                 key={g.runtime}
                 data-testid={`capability-group-${g.runtime}`}
-                style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+                className="flex flex-col gap-2"
               >
-                <div className={KICKER} style={{ color: muted(0.55) }}>
+                <div className={`${SECTION_LABEL} text-foreground/45`}>
                   {RUNTIME_LABEL[g.runtime] ?? g.runtime}
-                  <span className="font-data" style={{ color: muted(0.35), fontWeight: 400 }}>
+                  <span className="font-data font-normal text-foreground/35">
                     ({g.records.length})
                   </span>
                 </div>

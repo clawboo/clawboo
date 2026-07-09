@@ -28,7 +28,7 @@ describe('useMarketplaceStore', () => {
       searchQuery: '',
       categoryFilter: 'all',
       sortBy: 'name',
-      marketplaceTab: 'agents',
+      marketplaceTab: 'teams',
       teamSearchQuery: '',
       teamCategoryFilter: 'all',
       teamSourceFilter: 'all',
@@ -47,7 +47,7 @@ describe('useMarketplaceStore', () => {
     expect(state.searchQuery).toBe('')
     expect(state.categoryFilter).toBe('all')
     expect(state.sortBy).toBe('name')
-    expect(state.marketplaceTab).toBe('agents')
+    expect(state.marketplaceTab).toBe('teams')
     expect(state.teamSearchQuery).toBe('')
     expect(state.teamCategoryFilter).toBe('all')
     expect(state.teamSourceFilter).toBe('all')

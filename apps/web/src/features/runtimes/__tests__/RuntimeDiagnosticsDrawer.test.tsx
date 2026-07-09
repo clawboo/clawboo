@@ -6,12 +6,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { server } from '../../../__vitest__/mswServer'
 import { useToastStore } from '@/stores/toast'
+import { confirm } from '@/stores/confirm'
 import {
   RuntimeDiagnosticsDrawer,
   type RuntimeDiagnosticsTarget,
 } from '../RuntimeDiagnosticsDrawer'
 
-afterEach(() => cleanup())
+// The design-system confirm() (replaces window.confirm) is mocked so these unit
+// tests drive the disconnect flow without rendering the app-root <ConfirmDialog>.
+vi.mock('@/stores/confirm', async (orig) => ({
+  ...(await orig<typeof import('@/stores/confirm')>()),
+  confirm: vi.fn(),
+}))
+
+afterEach(() => {
+  vi.mocked(confirm).mockReset()
+  cleanup()
+})
 
 beforeEach(() => {
   server.use(
@@ -136,7 +147,7 @@ describe('RuntimeDiagnosticsDrawer', () => {
         return HttpResponse.json({ ok: true })
       }),
     )
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    vi.mocked(confirm).mockResolvedValue(false)
     const user = userEvent.setup()
     render(
       <RuntimeDiagnosticsDrawer
@@ -157,16 +168,15 @@ describe('RuntimeDiagnosticsDrawer', () => {
 
     // Cancelled at the confirm → nothing happens.
     await user.click(btn)
-    expect(confirmSpy).toHaveBeenCalled()
+    await waitFor(() => expect(confirm).toHaveBeenCalled())
     expect(disconnected).toBe(0)
     expect(rechecked).toBe(0)
 
     // Confirmed → POSTs + re-checks.
-    confirmSpy.mockReturnValue(true)
+    vi.mocked(confirm).mockResolvedValue(true)
     await user.click(btn)
     await waitFor(() => expect(disconnected).toBe(1))
     await waitFor(() => expect(rechecked).toBe(1))
-    confirmSpy.mockRestore()
   })
 
   it('a failed Disconnect surfaces an error toast and does NOT re-check', async () => {
@@ -176,7 +186,7 @@ describe('RuntimeDiagnosticsDrawer', () => {
         HttpResponse.json({ ok: false, error: 'vault is locked' }, { status: 500 }),
       ),
     )
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.mocked(confirm).mockResolvedValue(true)
     const user = userEvent.setup()
     render(
       <RuntimeDiagnosticsDrawer
@@ -202,7 +212,6 @@ describe('RuntimeDiagnosticsDrawer', () => {
       ).toBe(true),
     )
     expect(rechecked).toBe(0)
-    confirmSpy.mockRestore()
   })
 
   it('has no level-A/AA a11y violations', async () => {

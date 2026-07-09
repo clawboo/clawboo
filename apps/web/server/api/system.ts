@@ -3,7 +3,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { resolveStateDir, loadSettings, saveSettings } from '@clawboo/config'
+import { resolveStateDir, resolveClawbooDir, loadSettings, saveSettings } from '@clawboo/config'
 import {
   readGatewayPid,
   writeGatewayPid,
@@ -778,15 +778,43 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
     // flushed, and the SPA sees a dropped stream as "Network error".
     // `windowsHide: isWindows` — hide the cmd.exe console window so the
     // Gateway start doesn't flash a black terminal in front of the dashboard.
+    // The Gateway's stdout/stderr go to a LOG FILE, NOT the parent's pipes, so the
+    // process is TRULY detached and survives a parent (dashboard-server) restart.
+    // With piped stdio, a parent restart closes the pipes' read ends and the Gateway
+    // dies on its next write (EPIPE) — which silently defeated `detached: true` and
+    // was a top cause of "OpenClaw is healthy but team chat is dead". We tail the file
+    // below to keep streaming the live startup log to the SSE.
+    const gatewayLogPath = path.join(resolveClawbooDir(), 'gateway.log')
+    let tailOffset = 0
+    try {
+      tailOffset = fs.existsSync(gatewayLogPath) ? fs.statSync(gatewayLogPath).size : 0
+    } catch {
+      tailOffset = 0
+    }
+    let logFd: number | null = null
+    try {
+      logFd = fs.openSync(gatewayLogPath, 'a')
+    } catch {
+      logFd = null
+    }
+
     let child
     try {
       child = spawn(oc.path, ['gateway', '--port', String(port), '--allow-unconfigured'], {
         detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        // File-backed (not parent pipes) so the Gateway outlives a server restart.
+        stdio: ['ignore', logFd ?? 'ignore', logFd ?? 'ignore'],
         shell: isWindows,
         windowsHide: isWindows,
       })
     } catch (err) {
+      if (logFd !== null) {
+        try {
+          fs.closeSync(logFd)
+        } catch {
+          /* best-effort */
+        }
+      }
       sendEvent(res, {
         type: 'error',
         code: 'SPAWN_THROW',
@@ -796,25 +824,43 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
       return
     }
 
+    // The child inherited its own dup of the fd; close the parent's copy.
+    if (logFd !== null) {
+      try {
+        fs.closeSync(logFd)
+      } catch {
+        /* best-effort */
+      }
+    }
+
     child.unref()
 
     if (child.pid) {
       writeGatewayPid(child.pid, port)
     }
 
-    child.stdout?.on('data', (chunk: Buffer) => {
-      const lines = chunk.toString().split('\n').filter(Boolean)
-      for (const line of lines) {
-        sendEvent(res, { type: 'output', line })
+    // Tail the log file → SSE `output` events until the SSE stream ends (the port
+    // poll completes or times out). Best-effort; a read failure just skips a tick.
+    const tailGatewayLog = (): void => {
+      if (res.writableEnded) return
+      try {
+        const size = fs.statSync(gatewayLogPath).size
+        if (size > tailOffset) {
+          const fd = fs.openSync(gatewayLogPath, 'r')
+          const buf = Buffer.alloc(size - tailOffset)
+          fs.readSync(fd, buf, 0, buf.length, tailOffset)
+          fs.closeSync(fd)
+          tailOffset = size
+          for (const line of buf.toString().split('\n').filter(Boolean)) {
+            sendEvent(res, { type: 'output', line })
+          }
+        }
+      } catch {
+        /* best-effort */
       }
-    })
-
-    child.stderr?.on('data', (chunk: Buffer) => {
-      const lines = chunk.toString().split('\n').filter(Boolean)
-      for (const line of lines) {
-        sendEvent(res, { type: 'output', line })
-      }
-    })
+      if (!res.writableEnded) setTimeout(tailGatewayLog, 400)
+    }
+    setTimeout(tailGatewayLog, 300)
 
     child.on('error', (err) => {
       sendEvent(res, { type: 'error', code: 'SPAWN_ERROR', message: String(err) })

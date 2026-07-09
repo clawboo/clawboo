@@ -12,7 +12,7 @@ The dashboard is the human-facing surface over the unified **capability inventor
 ## Prerequisites
 
 <Note>
-The Capabilities nav button is always visible; the inventory subsystem is always on. What it shows depends on which runtimes you have connected and what skills you have installed.
+The Capabilities panel is always available; the inventory subsystem is always on. What it shows depends on which runtimes you have connected and what skills you have installed.
 </Note>
 
 - At least one runtime to read capabilities from. `clawboo-native` is built in and always contributes rows; connecting `openclaw`, `claude-code`, `codex`, or `hermes` adds their capabilities. See [Connecting runtimes](/runtimes/connecting-runtimes).
@@ -20,7 +20,7 @@ The Capabilities nav button is always visible; the inventory subsystem is always
 
 ## Where it lives
 
-Open the **Capabilities** entry in the left sidebar's nav list (the puzzle-piece icon). It sits in the secondary nav alongside Board, Runtimes, Memory, and Governance. There is no Cmd/Ctrl number shortcut for this view.
+Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Capabilities** under the Workspace group (the puzzle-piece icon). There is no Cmd/Ctrl number shortcut for this view.
 
 The header shows a live count pill (`N capabilities · M runtimes`) and a **Refresh** button. The diagnostics drawer elsewhere in the app can also deep-link here with a runtime pre-selected.
 

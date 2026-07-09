@@ -185,13 +185,14 @@ export function ActivityTerminal({
       style={{
         background: 'var(--code-block-bg, rgb(var(--foreground-rgb) / 0.05))',
         border: `1px solid ${muted(0.08)}`,
-        borderRadius: 10,
+        borderRadius: 12,
         overflow: 'hidden',
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
         height: fill ? '100%' : undefined,
         minHeight: fill ? 0 : undefined,
+        boxShadow: 'var(--shadow-raised)',
       }}
     >
       {!hideHeader && (
@@ -206,14 +207,14 @@ export function ActivityTerminal({
             borderBottom: `1px solid ${muted(0.06)}`,
           }}
         >
-          <Terminal size={12} style={{ color: muted(0.4) }} />
+          <Terminal size={12} strokeWidth={2} style={{ color: muted(0.4) }} />
           <span
             style={{
               fontFamily: 'var(--font-mono)',
               fontSize: 10.5,
               fontWeight: 600,
               textTransform: 'uppercase',
-              letterSpacing: '0.08em',
+              letterSpacing: '0.14em',
               color: muted(0.5),
             }}
           >
@@ -301,8 +302,9 @@ function LiveDot({ live, loading }: { live: boolean; loading: boolean }) {
         style={{
           fontFamily: 'var(--font-mono)',
           fontSize: 9.5,
+          fontWeight: 600,
           textTransform: 'uppercase',
-          letterSpacing: '0.08em',
+          letterSpacing: '0.14em',
           color: live ? 'var(--mint)' : muted(0.4),
         }}
       >

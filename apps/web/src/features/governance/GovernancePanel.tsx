@@ -22,8 +22,12 @@ import {
 import { ToolApprovalQueue } from '@/features/approvals/ToolApprovalQueue'
 import { useToastStore } from '@/stores/toast'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { Button } from '@/features/shared/Button'
+import { Chip } from '@/features/shared/Chip'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
+import { PanelHeader } from '@/features/shared/PanelHeader'
+import { SegmentedControl } from '@/features/shared/SegmentedControl'
 import { Select } from '@/features/shared/Select'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
@@ -38,8 +42,6 @@ import {
   type BudgetScope,
   type BudgetMode,
 } from '@/lib/governanceClient'
-
-const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
 const SCOPES: BudgetScope[] = ['agent', 'mission', 'team', 'tenant']
 const EVENT_TYPES: AuditEventType[] = [
@@ -58,6 +60,18 @@ const SINCE_WINDOWS: { label: string; ms: number | null }[] = [
   { label: '7d', ms: 604_800_000 },
 ]
 
+// Per-audit-event-type tone. Security/enforcement events carry warning/error
+// accents so the log scans; routine events stay neutral.
+const AUDIT_TONE: Record<AuditEventType, StatusTone> = {
+  install: 'idle',
+  approval: 'idle',
+  tool_call: 'idle',
+  budget: 'warning',
+  cap_hit: 'warning',
+  verification: 'success',
+  circuit_break: 'error',
+}
+
 // Budget lifecycle → shared StatusPill tone. active → success, soft-capped →
 // warning, paused → error. Keep the per-status accent var for the progress bar
 // (the pill carries its own palette).
@@ -72,115 +86,20 @@ const STATUS_PILL: Record<Budget['status'], StatusTone> = {
   paused: 'error',
 }
 
-const KICKER = 'mb-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider'
-const KICKER_COLOR = muted(0.4)
+const SECTION_LABEL = 'font-mono text-[11px] font-semibold uppercase tracking-[0.14em]'
 
 function SectionKicker({ children }: { children: ReactNode }) {
   return (
-    <div className={KICKER} style={{ color: KICKER_COLOR }}>
-      {children}
-    </div>
+    <div className={`${SECTION_LABEL} text-foreground/45`}>{children}</div>
   )
 }
 
-const inputStyle: React.CSSProperties = {
-  fontSize: 12,
-  height: 30,
-  padding: '0 10px',
-  borderRadius: 7,
-  border: '1px solid rgb(var(--foreground-rgb) / 0.12)',
-  background: muted(0.05),
-  color: 'var(--foreground)',
-  fontFamily: 'var(--font-body)',
-  outline: 'none',
-}
+// Card shell — the shared premium surface (rounded-2xl, hairline border, raised
+// shadow) used for every governance card.
+const cardStyle: React.CSSProperties = { boxShadow: 'var(--shadow-raised)' }
 
-// Mint-accented CTA button (set budget / set cap when paused / resume). ≥30px
-// tall with a hover lift.
-function CtaButton({
-  children,
-  onClick,
-  testId,
-}: {
-  children: ReactNode
-  onClick: () => void | Promise<void>
-  testId?: string
-}) {
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      onClick={() => void onClick()}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        height: 30,
-        padding: '0 12px',
-        fontSize: 12,
-        fontWeight: 600,
-        borderRadius: 7,
-        border: '1px solid rgb(var(--mint-rgb) / 0.3)',
-        background: 'rgb(var(--mint-rgb) / 0.12)',
-        color: 'var(--mint)',
-        cursor: 'pointer',
-        transition: 'background var(--motion-fast), border-color var(--motion-fast)',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.2)'
-        e.currentTarget.style.borderColor = 'rgb(var(--mint-rgb) / 0.45)'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'rgb(var(--mint-rgb) / 0.12)'
-        e.currentTarget.style.borderColor = 'rgb(var(--mint-rgb) / 0.3)'
-      }}
-    >
-      {children}
-    </button>
-  )
-}
-
-// Outline / secondary button (raise cap). ≥30px tall with a hover lift.
-function GhostButton({
-  children,
-  onClick,
-}: {
-  children: ReactNode
-  onClick: () => void | Promise<void>
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => void onClick()}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        height: 30,
-        padding: '0 12px',
-        fontSize: 12,
-        fontWeight: 600,
-        borderRadius: 7,
-        border: '1px solid rgb(var(--foreground-rgb) / 0.14)',
-        background: 'transparent',
-        color: muted(0.6),
-        cursor: 'pointer',
-        transition:
-          'background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast)',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = muted(0.05)
-        e.currentTarget.style.borderColor = muted(0.22)
-        e.currentTarget.style.color = 'var(--foreground)'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'transparent'
-        e.currentTarget.style.borderColor = muted(0.14)
-        e.currentTarget.style.color = muted(0.6)
-      }}
-    >
-      {children}
-    </button>
-  )
-}
+const inputClass =
+  'rounded-xl border border-border bg-surface px-3 py-2 text-[13px] text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 placeholder:text-foreground/30'
 
 function dollars(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`
@@ -203,53 +122,27 @@ function BudgetRow({ b, onChanged }: { b: Budget; onChanged: () => void }) {
   return (
     <div
       data-testid="budget-row"
-      className="surface-raised-tier"
-      style={{
-        borderRadius: 10,
-        padding: '11px 13px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 9,
-      }}
+      className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4"
+      style={cardStyle}
     >
-      <div
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
-      >
-        <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-          <span
-            className="font-data"
-            style={{
-              fontSize: 9,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-              padding: '1px 6px',
-              borderRadius: 4,
-              color: muted(0.6),
-              background: muted(0.06),
-            }}
-          >
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="font-data rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] text-foreground/60">
             {b.scope}
           </span>
           <span
-            className="font-data"
-            style={{
-              fontSize: 12,
-              color: 'var(--foreground)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
+            className="font-data truncate text-[13px] text-foreground"
+            title={b.scopeId}
           >
             {b.scopeId}
           </span>
           {b.tenantId && (
-            <span className="font-data" style={{ fontSize: 11, color: muted(0.4) }}>
+            <span className="font-data text-[11px] text-foreground/40">
               · tenant {b.tenantId}
             </span>
           )}
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span className="flex items-center gap-1.5">
           <span
             data-testid="budget-mode"
             title={
@@ -280,68 +173,74 @@ function BudgetRow({ b, onChanged }: { b: Budget; onChanged: () => void }) {
         </span>
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: 11,
-          color: muted(0.6),
-        }}
-      >
-        <span className="font-data">
-          {dollars(b.spentUsdCents)} / {dollars(b.limitUsdCents)}
+      <div className="flex items-baseline justify-between">
+        <span className="font-data text-[14px] font-semibold text-foreground">
+          {dollars(b.spentUsdCents)}{' '}
+          <span className="text-[12px] font-normal text-foreground/45">
+            / {dollars(b.limitUsdCents)}
+          </span>
         </span>
-        <span className="font-data" style={{ color: muted(0.4) }}>
+        <span className="font-data text-[12px] text-foreground/50">
           {pct.toFixed(0)}%
         </span>
       </div>
-      <div style={{ height: 5, borderRadius: 3, background: muted(0.08), overflow: 'hidden' }}>
+      <div
+        className="overflow-hidden rounded-full bg-foreground/[0.08]"
+        style={{ height: 6 }}
+      >
         <div style={{ width: `${pct}%`, height: '100%', background: STATUS_TONE[b.status] }} />
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+      <div className="flex items-center gap-2">
         <input
           value={capInput}
           onChange={(e) => setCapInput(e.target.value)}
           placeholder="new cap $"
           inputMode="decimal"
-          className="font-data"
-          style={{ ...inputStyle, width: 96 }}
+          className={`font-data ${inputClass}`}
+          style={{ width: 108 }}
         />
-        <GhostButton
-          onClick={async () => {
-            const v = Number(capInput)
-            if (!Number.isFinite(v) || v < 0) return
-            await setBudget({
-              scope: b.scope,
-              scopeId: b.scopeId,
-              limitUsdCents: Math.round(v * 100),
-              mode: b.mode, // preserve the row's posture when raising its limit
-            })
-            setCapInput('')
-            onChanged()
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            void (async () => {
+              const v = Number(capInput)
+              if (!Number.isFinite(v) || v < 0) return
+              await setBudget({
+                scope: b.scope,
+                scopeId: b.scopeId,
+                limitUsdCents: Math.round(v * 100),
+                mode: b.mode, // preserve the row's posture when raising its limit
+              })
+              setCapInput('')
+              onChanged()
+            })()
           }}
         >
           Set cap
-        </GhostButton>
+        </Button>
         {b.status === 'paused' && (
-          <CtaButton
-            testId="budget-resume"
-            onClick={async () => {
-              const { willRepause } = await resumeBudget(b.scope, b.scopeId)
-              if (willRepause) {
-                addToast({
-                  type: 'error',
-                  message:
-                    'Resumed, but spend is still at/over the cap — raise the cap to make progress.',
-                })
-              }
-              onChanged()
+          <Button
+            variant="primary"
+            size="sm"
+            data-testid="budget-resume"
+            onClick={() => {
+              void (async () => {
+                const { willRepause } = await resumeBudget(b.scope, b.scopeId)
+                if (willRepause) {
+                  addToast({
+                    type: 'error',
+                    message:
+                      'Resumed, but spend is still at/over the cap — raise the cap to make progress.',
+                  })
+                }
+                onChanged()
+              })()
             }}
           >
             Resume
-          </CtaButton>
+          </Button>
         )}
       </div>
     </div>
@@ -359,21 +258,12 @@ const CAP_CHIPS: { Icon: typeof Layers; label: string; value: string }[] = [
 function CapChip({ Icon, label, value }: { Icon: typeof Layers; label: string; value: string }) {
   return (
     <span
-      className="surface-raised-tier"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 7,
-        padding: '6px 11px',
-        borderRadius: 8,
-        fontSize: 11,
-      }}
+      className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-[12px]"
+      style={cardStyle}
     >
-      <Icon size={13} strokeWidth={2} style={{ color: muted(0.45), flexShrink: 0 }} />
-      <span style={{ color: muted(0.6) }}>{label}</span>
-      <span className="font-data" style={{ color: 'var(--foreground)', fontWeight: 600 }}>
-        {value}
-      </span>
+      <Icon size={14} strokeWidth={2} className="text-foreground/45" style={{ flexShrink: 0 }} />
+      <span className="text-foreground/60">{label}</span>
+      <span className="font-data font-semibold text-foreground">{value}</span>
     </span>
   )
 }
@@ -430,98 +320,39 @@ export function GovernancePanel() {
   }, [refreshAudit])
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        background: 'var(--background)',
-      }}
-    >
-      <div
-        style={{
-          height: 44,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <ShieldAlert size={15} style={{ color: 'var(--mint)' }} />
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              fontFamily: 'var(--font-display)',
-              letterSpacing: '-0.01em',
-              color: 'var(--foreground)',
-            }}
-          >
-            Governance
-          </span>
-          <span
-            className="font-data"
-            style={{
-              fontSize: 11,
-              color: 'var(--primary)',
-              background: 'rgb(var(--primary-rgb) / 0.12)',
-              borderRadius: 20,
-              padding: '2px 8px',
-            }}
-          >
-            {budgets.length} budgets
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => {
-              void refreshBudgets()
-              void refreshAudit()
-            }}
-            aria-label="Refresh"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              height: 30,
-              padding: '0 11px',
-              borderRadius: 7,
-              fontSize: 12,
-              fontWeight: 500,
-              color: muted(0.6),
-              background: 'transparent',
-              border: '1px solid rgb(var(--foreground-rgb) / 0.1)',
-              cursor: 'pointer',
-              transition:
-                'background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = muted(0.05)
-              e.currentTarget.style.borderColor = muted(0.2)
-              e.currentTarget.style.color = 'var(--foreground)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.borderColor = muted(0.1)
-              e.currentTarget.style.color = muted(0.6)
-            }}
-          >
-            <RefreshCw size={12} /> Refresh
-          </button>
-          <GitHubStarButton />
-        </div>
-      </div>
+    <div className="flex h-full flex-col bg-background">
+      <PanelHeader
+        title="Governance"
+        subtitle="Budgets, enforced caps, approvals, and the forensic audit log."
+        icon={ShieldAlert}
+        size="md"
+        border
+        actions={
+          <>
+            <span className="font-data rounded-full bg-foreground/[0.06] px-2.5 py-0.5 text-[11px] font-semibold text-foreground/55">
+              {budgets.length} budgets
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                void refreshBudgets()
+                void refreshAudit()
+              }}
+            >
+              <RefreshCw size={14} strokeWidth={2} /> Refresh
+            </Button>
+            <GitHubStarButton />
+          </>
+        }
+      />
 
-      <div data-testid="governance-panel" style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 760 }}>
+      <div data-testid="governance-panel" className="flex-1 overflow-auto px-6 py-5">
+        <div className="flex max-w-[760px] flex-col gap-8">
           {/* Budgets */}
-          <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <section className="flex flex-col gap-3">
             <SectionKicker>Budgets</SectionKicker>
-            <div style={{ fontSize: 12, color: muted(0.5), lineHeight: 1.55 }}>
+            <div className="text-[13px] leading-relaxed text-foreground/55">
               Default posture is <strong>track-and-warn</strong>: nothing pauses your agents out of
               the box. A <strong>warn</strong> budget records spend and warns at 80% / 100% but
               never stops a run; a <strong>cap</strong> budget is the opt-in hard cap — the executor
@@ -533,27 +364,23 @@ export function GovernancePanel() {
                 <FormattedAlert tone="error">
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     Couldn&apos;t load budgets.
-                    <button
-                      type="button"
-                      onClick={() => void refreshBudgets()}
-                      style={{ textDecoration: 'underline', cursor: 'pointer', color: 'inherit' }}
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => void refreshBudgets()}>
                       Retry
-                    </button>
+                    </Button>
                   </span>
                 </FormattedAlert>
               </div>
             ) : budgets.length === 0 ? (
               <div
-                className="surface-raised-tier"
-                style={{ borderRadius: 10, padding: '8px 12px' }}
+                className="rounded-2xl border border-border bg-surface"
+                style={cardStyle}
               >
                 <EmptyState
                   icon={Wallet}
                   title="No budgets yet"
                   helper="Create one below to set a spend cap or a track-and-warn threshold."
-                  paddingTop={20}
-                  style={{ paddingBottom: 16 }}
+                  paddingTop={24}
+                  style={{ paddingBottom: 20 }}
                 />
               </div>
             ) : (
@@ -571,18 +398,11 @@ export function GovernancePanel() {
 
             {/* Create budget */}
             <div
-              className="surface-raised-tier"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 7,
-                flexWrap: 'wrap',
-                borderRadius: 10,
-                padding: '11px 13px',
-              }}
+              className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-surface p-4"
+              style={cardStyle}
             >
               <Select
-                size="sm"
+                size="md"
                 aria-label="Budget scope"
                 value={newScope}
                 onChange={(v) => setNewScope(v as BudgetScope)}
@@ -592,84 +412,92 @@ export function GovernancePanel() {
                 value={newScopeId}
                 onChange={(e) => setNewScopeId(e.target.value)}
                 placeholder="scope id"
-                className="font-data"
-                style={{ ...inputStyle, width: 150 }}
+                className={`font-data ${inputClass}`}
+                style={{ width: 160 }}
               />
               <input
                 value={newLimit}
                 onChange={(e) => setNewLimit(e.target.value)}
                 placeholder={newMode === 'warn' ? 'warn at $' : 'cap $'}
                 inputMode="decimal"
-                className="font-data"
-                style={{ ...inputStyle, width: 90 }}
+                className={`font-data ${inputClass}`}
+                style={{ width: 96 }}
               />
-              <Select
-                size="sm"
-                aria-label="Budget mode"
-                data-testid="budget-mode-select"
-                value={newMode}
-                onChange={(v) => setNewMode(v as BudgetMode)}
-                options={[
-                  { value: 'warn', label: 'warn only' },
-                  { value: 'cap', label: 'hard cap' },
-                ]}
-              />
-              <CtaButton
-                testId="budget-create"
-                onClick={async () => {
-                  const v = Number(newLimit)
-                  if (!newScopeId.trim() || !Number.isFinite(v) || v < 0) return
-                  await setBudget({
-                    scope: newScope,
-                    scopeId: newScopeId.trim(),
-                    limitUsdCents: Math.round(v * 100),
-                    mode: newMode,
-                  })
-                  setNewScopeId('')
-                  setNewLimit('')
-                  void refreshBudgets()
+              <div data-testid="budget-mode-select">
+                <SegmentedControl
+                  size="sm"
+                  aria-label="Budget mode"
+                  options={[
+                    { id: 'warn', label: 'warn only' },
+                    { id: 'cap', label: 'hard cap' },
+                  ]}
+                  value={newMode}
+                  onChange={(v) => setNewMode(v as BudgetMode)}
+                />
+              </div>
+              <Button
+                variant="primary"
+                size="md"
+                data-testid="budget-create"
+                onClick={() => {
+                  void (async () => {
+                    const v = Number(newLimit)
+                    if (!newScopeId.trim() || !Number.isFinite(v) || v < 0) return
+                    await setBudget({
+                      scope: newScope,
+                      scopeId: newScopeId.trim(),
+                      limitUsdCents: Math.round(v * 100),
+                      mode: newMode,
+                    })
+                    setNewScopeId('')
+                    setNewLimit('')
+                    void refreshBudgets()
+                  })()
                 }}
               >
                 Set budget
-              </CtaButton>
+              </Button>
             </div>
           </section>
 
           {/* Caps (informational — enforced in code) */}
-          <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <section className="flex flex-col gap-3">
             <SectionKicker>Caps (enforced in code)</SectionKicker>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div className="flex flex-wrap gap-2">
               {CAP_CHIPS.map((c) => (
                 <CapChip key={c.label} Icon={c.Icon} label={c.label} value={c.value} />
               ))}
             </div>
-            <div style={{ fontSize: 12, color: muted(0.45), lineHeight: 1.55 }}>
+            <div className="text-[13px] leading-relaxed text-foreground/45">
               Depth + fan-out + per-node cost caps are enforced in the orchestrator / executor; a
               cap hit is logged to the audit below.
             </div>
           </section>
 
           {/* Approval queue (shared with the Approvals panel) */}
-          <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <section className="flex flex-col gap-3">
             <SectionKicker>Approval queue</SectionKicker>
-            <div className="surface-raised-tier" style={{ borderRadius: 10, padding: '8px 12px' }}>
+            <div
+              className="rounded-2xl border border-border bg-surface p-2"
+              style={cardStyle}
+            >
               <ToolApprovalQueue showEmpty />
             </div>
           </section>
 
           {/* Audit log */}
-          <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <section className="flex flex-col gap-3">
             <SectionKicker>Audit log</SectionKicker>
-            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="flex flex-wrap items-center gap-2">
               <input
                 value={auditAgent}
                 onChange={(e) => setAuditAgent(e.target.value)}
                 placeholder="agent id"
-                className="font-data"
-                style={{ ...inputStyle, width: 140 }}
+                className={`font-data ${inputClass}`}
+                style={{ width: 150 }}
               />
               <Select
-                size="sm"
+                size="md"
                 aria-label="Event type"
                 value={auditType}
                 onChange={(v) => setAuditType(v as AuditEventType | '')}
@@ -681,63 +509,34 @@ export function GovernancePanel() {
                   </option>
                 ))}
               </Select>
-              <div style={{ display: 'flex', gap: 4 }}>
-                {SINCE_WINDOWS.map((w) => {
-                  const active = auditSince === w.ms
-                  return (
-                    <button
-                      key={w.label}
-                      type="button"
-                      onClick={() => setAuditSince(w.ms)}
-                      className="font-data"
-                      style={{
-                        height: 30,
-                        fontSize: 11,
-                        padding: '0 11px',
-                        borderRadius: 20,
-                        border: `1px solid ${active ? 'rgb(var(--mint-rgb) / 0.4)' : muted(0.12)}`,
-                        background: active ? 'rgb(var(--mint-rgb) / 0.12)' : 'transparent',
-                        color: active ? 'var(--mint)' : muted(0.55),
-                        cursor: 'pointer',
-                        transition:
-                          'background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast)',
-                      }}
-                      onMouseEnter={(e) => {
-                        if (active) return
-                        e.currentTarget.style.background = muted(0.05)
-                        e.currentTarget.style.color = 'var(--foreground)'
-                      }}
-                      onMouseLeave={(e) => {
-                        if (active) return
-                        e.currentTarget.style.background = 'transparent'
-                        e.currentTarget.style.color = muted(0.55)
-                      }}
-                    >
-                      {w.label}
-                    </button>
-                  )
-                })}
+              <div className="flex gap-1.5">
+                {SINCE_WINDOWS.map((w) => (
+                  <Chip
+                    key={w.label}
+                    size="sm"
+                    active={auditSince === w.ms}
+                    accent="var(--mint)"
+                    onClick={() => setAuditSince(w.ms)}
+                    className="font-data"
+                  >
+                    {w.label}
+                  </Chip>
+                ))}
               </div>
             </div>
 
             <div
               data-testid="governance-audit"
-              className="surface-raised-tier"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-                borderRadius: 10,
-                padding: audit.length === 0 ? '8px 12px' : 8,
-              }}
+              className="flex flex-col gap-1 rounded-2xl border border-border bg-surface p-2"
+              style={cardStyle}
             >
               {audit.length === 0 ? (
                 <EmptyState
                   icon={ScrollText}
                   title="No audit events"
                   helper="Nothing matches this filter yet. Forensic events land here as agents run."
-                  paddingTop={20}
-                  style={{ paddingBottom: 16 }}
+                  paddingTop={24}
+                  style={{ paddingBottom: 20 }}
                 />
               ) : (
                 audit.map((a, i) => (
@@ -747,64 +546,22 @@ export function GovernancePanel() {
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
-                    style={{
-                      display: 'flex',
-                      gap: 8,
-                      alignItems: 'baseline',
-                      fontSize: 11,
-                      padding: '6px 8px',
-                      borderRadius: 7,
-                      background: muted(0.03),
-                    }}
+                    className="flex items-baseline gap-2 rounded-lg px-2 py-1.5 text-[12px] transition-colors hover:bg-foreground/[0.03]"
                   >
-                    <span
-                      className="font-data"
-                      style={{
-                        color: muted(0.4),
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
+                    <span className="font-data whitespace-nowrap text-foreground/40">
                       {new Date(a.createdAt).toLocaleTimeString()}
                     </span>
-                    <span
-                      className="font-data"
-                      style={{
-                        fontSize: 9,
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                        padding: '1px 6px',
-                        borderRadius: 4,
-                        color: muted(0.7),
-                        background: muted(0.07),
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {a.eventType}
-                    </span>
+                    <StatusPill tone={AUDIT_TONE[a.eventType]} label={a.eventType} />
                     {a.agentId && (
-                      <span
-                        className="font-data"
-                        style={{
-                          color: muted(0.5),
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
+                      <span className="font-data whitespace-nowrap text-foreground/50">
                         {a.agentId.slice(0, 10)}
                       </span>
                     )}
-                    <span
-                      style={{
-                        color: muted(0.6),
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
+                    <span className="truncate text-foreground/60">
                       {summarize(a.summary)}
                     </span>
                     {a.tenantId && (
-                      <span className="font-data" style={{ color: muted(0.35) }}>
+                      <span className="font-data whitespace-nowrap text-foreground/35">
                         · {a.tenantId}
                       </span>
                     )}

@@ -29,7 +29,7 @@ graph TD
 
 ## Version posture
 
-The CLI is `clawboo@0.2.0` in `apps/cli/package.json` and `CHANGELOG.md`, and v0.2.0 is published: the npm `latest` dist-tag is **`clawboo@0.2.0`** and the `clawboo@0.2.0` git tag exists, so `npx clawboo` installs 0.2.0.
+The CLI is `clawboo@0.2.1` in `apps/cli/package.json` and `CHANGELOG.md`, and v0.2.1 is published: the npm `latest` dist-tag is **`clawboo@0.2.1`** and the `clawboo@0.2.1` git tag exists, so `npx clawboo` installs 0.2.1.
 
 The CLI's runtime version string comes from the build, not from reading `package.json` at runtime: `apps/cli/tsup.config.ts` injects `define: { __CLI_VERSION__: JSON.stringify(pkg.version) }`, and `src/index.ts` reads `__CLI_VERSION__` into `VERSION` (falling back to `'0.0.0-dev'` when the define is absent, e.g. running the TS directly in dev). So `clawboo --version` reports whatever version was set in `package.json` at build time.
 
@@ -154,7 +154,7 @@ If a version is published manually (outside the Changesets flow) before the Chan
 - **No migration step at release.** Clawboo has no database migration ladder; the schema is created by `createDb`'s inline DDL and a schema change is a local reset (the database is per-user state). There is nothing to migrate as part of a release. See [Monorepo and build](/internals/monorepo-and-build#dbstudio-is-the-only-database-script).
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also
@@ -163,5 +163,5 @@ These docs describe Clawboo **v0.2.0**, the current release.
 - [Testing](/internals/testing): the unit / component / e2e / clean-install / evals strategy behind the CI gate
 - [Codegen and ingestion](/internals/codegen-and-ingestion): the `verify:ingest` gate that runs in CI and `publish.yml`
 - [CLI reference](/reference/cli): `npx clawboo` and the bundled MCP bins
-- [Changelog](/appendices/changelog): the release history (0.1.0 → 0.2.0)
+- [Changelog](/appendices/changelog): the release history (0.1.0 → 0.2.1)
 - [Internals overview](/internals/index): the contributor map

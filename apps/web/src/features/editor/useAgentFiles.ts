@@ -1,4 +1,4 @@
-import { readAgentFile, writeAgentFile } from '@/lib/agentSourceClient'
+import { readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AGENT_FILE_NAMES, type AgentFileName } from '@clawboo/protocol'
 import { useConnectionStore } from '@/stores/connection'

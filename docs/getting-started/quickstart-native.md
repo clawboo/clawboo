@@ -1,14 +1,14 @@
 ---
 title: 'Quickstart: the native runtime (no Gateway)'
-description: Run npx clawboo, choose the native runtime, paste a provider key, and land in a working two-agent team with no OpenClaw Gateway.
+description: Run npx clawboo, connect the built-in native runtime with a provider key, and land in a working two-agent team with no OpenClaw Gateway.
 ---
 
 By the end of this tutorial you'll have a working two-agent team (a leader and a specialist) running entirely inside Clawboo, with no OpenClaw Gateway, started from a single pasted provider API key.
 
-This is the fastest path to a running team. Clawboo's [native runtime](/appendices/glossary) (`clawboo-native`) is an in-process harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, or a local Ollama model), so there is nothing extra to install and no Gateway to set up. If you want the OpenClaw Gateway path instead, see [Quickstart: OpenClaw](/getting-started/quickstart-openclaw).
+This is the fastest path to a running team. Clawboo's [native runtime](/appendices/glossary) (`clawboo-native`) is an in-process harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, or a local Ollama model), so there is nothing extra to install and no Gateway to set up. It is also the default: onboarding drops you straight into connecting it, and other runtimes are opt-in. If you want the OpenClaw Gateway path instead, see [Quickstart: OpenClaw](/getting-started/quickstart-openclaw).
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## Prerequisites
@@ -37,40 +37,38 @@ The CLI prints the Clawboo logo, does a quick informational probe of the OpenCla
 
 The first screen is the welcome splash: the Clawboo wordmark, the line "Your AI agents, visible.", and a **Get Started** button.
 
-**Expected result:** clicking **Get Started** advances to the runtime-choice step.
+**Expected result:** clicking **Get Started** advances straight to the native connect step. There is no "pick a runtime" screen; native is the default, and you add other runtimes later.
 
-### 3. Choose the native runtime
+### 3. Connect Clawboo Native
 
-The next screen asks **"How do you want your agents to run?"** It shows the **Clawboo Native** card first and prominently (marked recommended, with the copy "Paste an API key and your team is ready in ~60 seconds"), then a divider reading "Or bring your own runtime", then secondary cards for OpenClaw, Claude Code, Hermes, and Codex.
+The next screen is titled **"Connect Clawboo Native"**. Choose your provider from the grid, **Anthropic** (Claude models, the default), **OpenAI** (GPT models), **OpenRouter** (any model, one key), or **Ollama** (local, no key needed), then paste your API key into the **API Key** field. The eye icon toggles key visibility. Picking **Ollama** hides the key field. A **model** dropdown lets you pick the team leader's default model; it starts on the provider's strongest option, and you can fine-tune any agent's model later from its [detail view](/using/agents).
 
-Click the **Clawboo Native** card.
+Optionally, click **Test** next to the field. Clawboo does a single authenticated `GET` against the provider's models endpoint (Anthropic `/v1/models`, OpenAI `/v1/models`, OpenRouter `/v1/models`, or the Ollama `/api/tags` probe) with an 8-second timeout. The key used for this test is never stored, logged, or echoed back.
 
-**Expected result:** the wizard advances to the native connect step. (Picking any other card branches to a different setup flow: OpenClaw goes to Gateway detection, the coding-agent runtimes go to a connect step.)
+**Expected result:** if you tested, you see a "Key works" confirmation in green (or an error like "Invalid API key." in red). Either way the **Create my team** button is enabled once a key is present (or Ollama is selected).
 
-### 4. Pick a provider and paste your key
-
-The connect step is titled **"Connect Clawboo Native"**. Choose your provider with the pills at the top: **Anthropic** (the default), **OpenAI**, or **OpenRouter**, then paste your API key into the **API Key** field. The eye icon toggles key visibility.
-
-If you'd rather use a local model, click **"Use a local model with Ollama, no key needed"**; the key field disappears.
-
-Optionally, click **Test connection**. Clawboo does a single authenticated `GET` against the provider's models endpoint (Anthropic `/v1/models`, OpenAI `/v1/models`, OpenRouter `/v1/models`, or the Ollama `/api/tags` probe) with an 8-second timeout. The key used for this test is never stored, logged, or echoed back.
-
-**Expected result:** if you tested, you see **"Key works"** in green (or an error like "Invalid API key." in red). Either way the **Create my team** button is enabled once a key is present (or Ollama is selected).
-
-### 5. Create the team
+### 4. Create the team
 
 Click **Create my team**.
 
 Two things happen in order:
 
 1. **Your key is stored.** Clawboo writes the key into its encrypted, at-rest vault under the env-var slot for the chosen provider, never to a plaintext file, never returned in any response. For Ollama (keyless) there is nothing to store.
-2. **A starter team is seeded.** Clawboo creates a team named "My First Team" with two `clawboo-native` agents: a **Team Lead** (configured to coordinate by delegating through the durable board) and a **Coder** specialist. Both agents share Clawboo's memory; the leader uses a capable model (e.g. `claude-sonnet-4-6` on Anthropic) and the specialist a cheaper one (e.g. `claude-haiku-4-5`). The team's "Know Your Team" introduction flow is pre-satisfied so you land straight in chat.
+2. **A starter team is seeded.** Clawboo creates a team with two `clawboo-native` agents: a **leader** (configured to coordinate by delegating through the durable board) and a **specialist**. Both agents share Clawboo's memory; the leader uses a capable model and the specialist a cheaper one. The team's "Know Your Team" introduction flow is pre-satisfied so you land straight in chat.
 
-**Expected result:** the button shows "Setting up…", then the wizard advances to the "Your team is ready" screen.
+**Expected result:** the button shows "Setting up…", then the wizard advances to the "Add more runtimes" step.
+
+### 5. Add more runtimes (optional)
+
+The **"Add more runtimes"** step is optional. Here you can connect Claude Code, Codex, Hermes, or OpenClaw as peers alongside your native team, or set up an OpenClaw Gateway through an inline "Set up OpenClaw" detour that returns you to this step when it's done. You can skip all of it now and add runtimes anytime later from **Settings**, then the **Runtimes** panel.
+
+Click **Skip for now** or, once you've connected anything you want, **Continue**.
+
+**Expected result:** either button advances to the "Your team is ready" screen. Nothing on this step can strand you; your native team is already seeded and works with or without extra runtimes.
 
 ### 6. Open your dashboard
 
-The final wizard screen, **"Your team is ready"**, shows your two seeded agents, a note that they share one memory, and a note that you can add other runtimes (Claude Code, Codex, Hermes, OpenClaw) as peers later.
+The final wizard screen, **"Your team is ready"**, shows your two seeded agents, a note that they share one memory, and a note that you can add other runtimes (Claude Code, Codex, Hermes, OpenClaw) as peers anytime.
 
 Click **Open my dashboard**.
 
@@ -78,19 +76,15 @@ Click **Open my dashboard**.
 
 ## What you should see
 
-The dashboard opens with your team selected and its group chat in view. The sidebar shows "My First Team" with its two Boos (Team Lead and Coder). You're now in a running team that needs no OpenClaw Gateway.
+The dashboard opens with your team selected and its group chat in view. The sidebar shows your team with its two Boos (the leader and the specialist). You're now in a running team that needs no OpenClaw Gateway. The composer is live: type a request and the leader responds, delegating to the specialist when a task needs hands-on work (see [Deploy your first team](/getting-started/first-team) for the full collaboration loop).
 
-<Note>
-Native group-chat messaging is still being wired up, so a native-only team's chat composer is currently read-only. To drive a live delegation right now, add an OpenClaw runtime from the Runtimes panel (see [Deploy your first team](/getting-started/first-team)). The team, the board, shared memory, and the capability inventory are all fully live.
-</Note>
-
-The seeded team space looks like this once you start collaborating:
+The seeded team space looks like this:
 
 ![Clawboo team space: a team's Ghost Graph on top and group chat below](/images/team-space.png)
 
 ## What just happened
 
-Choosing the native runtime connected your provider key to `clawboo-native`, Clawboo's in-process harness, and seeded a two-agent team into SQLite, the [registry of record](/appendices/glossary) for which agents and teams exist. There was no OpenClaw Gateway involved at any point. The leader is wired to coordinate work by delegating tasks onto [the board](/appendices/glossary) (the durable, race-free kanban that is the source of truth for team coordination) rather than doing everything itself.
+Connecting the native runtime linked your provider key to `clawboo-native`, Clawboo's in-process harness, and seeded a two-agent team into SQLite, the [registry of record](/appendices/glossary) for which agents and teams exist. There was no OpenClaw Gateway involved at any point. The leader is wired to coordinate work by delegating tasks onto [the board](/appendices/glossary) (the durable, race-free kanban that is the source of truth for team coordination) rather than doing everything itself, and the team chat runs [server-side](/concepts/delegation-and-orchestration), so a cascade keeps going even if you close the tab.
 
 ## Next steps
 

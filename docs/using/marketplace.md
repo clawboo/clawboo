@@ -20,23 +20,23 @@ The Marketplace is browsable with no Gateway and no runtime connected; it is a s
 
 Open the Marketplace from the **Marketplace** nav button (shopping-cart icon) in the left sidebar, or press **Cmd/Ctrl + 2**. The panel fills the content area with a toolbar (the three tab toggles + sort), a filter bar, and a responsive card grid.
 
-The panel opens on the **Agents** tab by default. The toolbar shows all three tab toggles with live counts: `Skills (30)`, `Agents (304)`, `Teams (82)`. Each tab keeps its own search query and filters, so switching tabs never loses your place.
+The panel opens on the **Teams** tab by default. The toolbar shows all three tab toggles with live counts: `Teams (82)`, `Agents (304)`, `Skills (30)`. Each tab keeps its own search query and filters, so switching tabs never loses your place.
 
 ## The three tabs
 
 | Tab        | Count | What it lists                                                 | Default? |
 | ---------- | ----- | ------------------------------------------------------------- | -------- |
-| **Agents** | 304   | Individual `AgentCatalogEntry` records, one specialist each   | yes      |
-| **Teams**  | 82    | Pre-wired `TeamTemplate`s (a roster of agents + routing)      | no       |
+| **Teams**  | 82    | Pre-wired `TeamTemplate`s (a roster of agents + routing)      | yes      |
+| **Agents** | 304   | Individual `AgentCatalogEntry` records, one specialist each   | no       |
 | **Skills** | 30    | `CatalogSkill` entries you can install onto an existing agent | no       |
-
-### Agents tab
-
-The default view. Each agent renders as an `AgentCard` showing its mascot avatar, name, role, a source badge, a colored domain pill, a category label, a two-line description, and a stats line (`N skills • in N teams`). Two buttons: **Details** (opens the detail modal) and **Deploy** (creates the agent in a dedicated team).
 
 ### Teams tab
 
-Each team renders as a `TeamTemplateCard` showing its emoji, name, agent count, a source badge, an optional amber **Synthetic** pill (for the 30 codegen'd "Excellence Team" partitions), a category label, the description, and the agent roles in the roster. Buttons: **Details** and **Deploy**.
+The default view. Each team renders as a `TeamTemplateCard` showing its emoji, name, agent count, a source badge, an optional amber **Synthetic** pill (for the 30 codegen'd "Excellence Team" partitions), a category label, the description, and the agent roles in the roster. Buttons: **Details** and **Deploy**. The grid leads with a **Curated teams** banner and a **Start from scratch** card (deploy a blank custom team); this tab is also where the sidebar's **+** create-team button lands.
+
+### Agents tab
+
+Each agent renders as an `AgentCard` showing its mascot avatar, name, role, a source badge, a colored domain pill, a category label, a two-line description, and a stats line (`N skills • in N teams`). Two buttons: **Details** (opens the detail modal) and **Deploy** (creates the agent in a dedicated team).
 
 ### Skills tab
 
@@ -138,7 +138,7 @@ When the modal finishes, Clawboo selects the new team and opens its **group chat
 </Warning>
 
 <Note>
-**Counts won't change after deploy.** The `Skills (30)` / `Agents (304)` / `Teams (82)` toolbar counts are the *catalog* size, not your fleet. They are fixed; deploying does not grow them.
+**Counts won't change after deploy.** The `Teams (82)` / `Agents (304)` / `Skills (30)` toolbar counts are the *catalog* size, not your fleet. They are fixed; deploying does not grow them.
 </Note>
 
 ## See also

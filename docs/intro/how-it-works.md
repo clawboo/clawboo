@@ -99,13 +99,13 @@ Every coordination action, a task created, a delegation routed, a run started, a
 
 ## Boundaries and non-goals
 
-- **Not multi-machine in v0.2.0.** The stack is one local process. The `tenant_id` columns are a dormant seam, not active per-tenant scoping.
+- **Not multi-machine in v0.2.1.** The stack is one local process. The `tenant_id` columns are a dormant seam, not active per-tenant scoping.
 - **Not a hosted product.** There is no cloud control plane, no account system, and no remote management surface beyond binding to a non-loopback interface (which requires an access token and triggers a warning).
 - **OpenClaw is special.** Four runtimes go through the uniform executor runner; OpenClaw is a connected substrate driven over a live WebSocket and refused by the runner, a deliberate asymmetry, not an inconsistency.
 - **This is the overview, not the spec.** Each layer here has a concept page with the real mechanics, and a reference page with the exact routes, shapes, and defaults. Follow the links.
 
 <Note>
-These docs describe Clawboo **v0.2.0**, the current release.
+These docs describe Clawboo **v0.2.1**, the current release.
 </Note>
 
 ## See also
