@@ -30,6 +30,8 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) 
 | `PORT`                                | Ports & binding    | (none)                           | `resolveApiPort()` (production only)    |
 | `HOST`                                | Ports & binding    | `127.0.0.1`                      | `resolveHost()`                         |
 | `HOSTNAME`                            | Ports & binding    | (ignored)                        | ignored (no longer a bind signal)       |
+| `CLAWBOO_ALLOWED_ORIGINS`             | Ports & binding    | (loopback only)                  | same-origin guard (widen)               |
+| `CLAWBOO_ALLOWED_HOSTS`               | Ports & binding    | (loopback only)                  | same-origin guard (widen)               |
 | `STUDIO_ACCESS_TOKEN`                 | Secrets & auth     | (none)                           | access gate                             |
 | `CLAWBOO_ALLOW_INSECURE`              | Secrets & auth     | (unset)                          | boot guard (wide-bind opt-out)          |
 | `CLAWBOO_SECRETS_MASTER_KEY`          | Secrets & auth     | auto-generated key file          | secrets vault                           |
@@ -150,6 +152,18 @@ A non-loopback bind (`HOST=0.0.0.0`, a LAN IP, or a hostname) WITHOUT `STUDIO_AC
 - **Purpose**: explicit opt-out of the token-less-wide-bind refusal. `CLAWBOO_ALLOW_INSECURE=1` lets the server start on a non-loopback bind with no `STUDIO_ACCESS_TOKEN` (it logs a loud unauthenticated-exposure warning instead of exiting). Only use it behind your own firewall/proxy. Has no effect on a loopback bind or when a token is set.
 - **Default**: unset (a token-less wide bind refuses to start).
 
+### `CLAWBOO_ALLOWED_ORIGINS`
+
+- **Read by**: the always-on same-origin guard (`createOriginGuard`), constructed at server boot in `apps/web/server/index.ts`.
+- **Purpose**: a comma-separated list of extra browser origins to trust on `/api/*` requests and WebSocket upgrades, e.g. `https://dash.example.com`. The guard blocks every cross-origin request by default (the loopback origins are always allowed); this variable **widens** the allowlist, it never disables enforcement. Set it when you reach the dashboard from a non-loopback browser origin (a LAN IP or a reverse-proxy hostname). See [Security](/operating/security#the-same-origin-guard-always-on).
+- **Default**: none (only the loopback origins, plus the Vite dev origin in `--dev`, are trusted).
+
+### `CLAWBOO_ALLOWED_HOSTS`
+
+- **Read by**: the always-on same-origin guard (`createOriginGuard`), constructed at server boot in `apps/web/server/index.ts`.
+- **Purpose**: a comma-separated list of extra hostnames to accept in the HTTP `Host` header (the guard's DNS-rebinding defense). Like `CLAWBOO_ALLOWED_ORIGINS`, it only widens the always-enforced loopback allowlist. Set it when a reverse proxy forwards a public hostname to the dashboard.
+- **Default**: none (only loopback hostnames plus the actual bind host are accepted).
+
 ## Secrets & auth
 
 ### `STUDIO_ACCESS_TOKEN`
@@ -159,7 +173,7 @@ A non-loopback bind (`HOST=0.0.0.0`, a LAN IP, or a hostname) WITHOUT `STUDIO_AC
 - **Default**: none (access gate disabled).
 
 <Danger>
-`STUDIO_ACCESS_TOKEN` is one of the server secrets that are explicitly denylisted from a spawned runtime subprocess's environment, alongside `GATEWAY_AUTH_TOKEN`, `CLAWBOO_SECRETS_MASTER_KEY`, and any `BETTER_AUTH_*` key. Untrusted agents never inherit these.
+`STUDIO_ACCESS_TOKEN` is one of the server secrets explicitly scrubbed from a spawned runtime subprocess's environment, alongside `GATEWAY_AUTH_TOKEN`, `CLAWBOO_SECRETS_MASTER_KEY`, and any `BETTER_AUTH_*` key. The same scrub also drops a curated set of the operator's third-party shell credentials (cloud, CI, package-registry, and database tokens such as `AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, `NPM_TOKEN`, `DATABASE_URL`) so an untrusted agent cannot dump them from its own environment. It is best-effort by name, not a sandbox. See [Secrets never reach spawned runtimes](/operating/security#secrets-never-reach-spawned-runtimes).
 </Danger>
 
 ### `CLAWBOO_SECRETS_MASTER_KEY`

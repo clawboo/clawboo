@@ -3,15 +3,16 @@ title: Security model and safe exposure
 description: How Clawboo authenticates, isolates secrets, and redacts output, and how to expose the dashboard safely.
 ---
 
-Clawboo is a local-first, single-user tool. A fresh install binds loopback only, holds no public credential, and runs every API route behind that boundary. The security model is built around that default: the network boundary is the primary control, the optional access gate is the opt-in second wall when you widen the bind, the secrets vault keeps provider keys off disk in plaintext, and a display-layer redaction pass keeps credentials out of responses and logs.
+Clawboo is a local-first, single-user tool. A fresh install binds loopback only, holds no public credential, and runs every API route behind that boundary. The security model is built around that default: the network boundary is the primary control against other hosts, an always-on same-origin guard stops a malicious web page in your own browser from reaching the loopback API, the optional access gate is the opt-in second wall when you widen the bind, the secrets vault keeps provider keys off disk in plaintext, and a display-layer redaction pass keeps credentials out of responses and logs.
 
-This page explains the model end to end: the loopback bind, the access gate, server-side device authentication, the encrypted secrets vault, and redact-on-display, and then gives honest guidance for exposing Clawboo beyond `localhost`. It is deliberately candid about what each control does and does not protect against.
+This page explains the model end to end: the loopback bind, the same-origin guard, the access gate, server-side device authentication, the encrypted secrets vault, and redact-on-display, and then gives honest guidance for exposing Clawboo beyond `localhost`. It is deliberately candid about what each control does and does not protect against.
 
 ## What it is, and what it isn't
 
 Clawboo's security posture is **single-tenant, local-first**. The defaults assume one operator on one machine. Every shipped control is designed to make that default safe and to make widening it a conscious, opt-in act:
 
 - **The bind is the first wall.** By default nothing off the local machine can reach the dashboard or any `/api/*` route. This is the control you rely on for a normal install.
+- **The same-origin guard is always on.** Loopback stops other hosts, but not a page running in your own browser, because your browser originates the connection to `127.0.0.1`. The guard validates the `Origin`, `Host`, and `Sec-Fetch-Site` headers on every `/api/*` request and WebSocket upgrade, independent of the access gate, so a malicious page you visit cannot drive the loopback API. It ships enforced with zero configuration.
 - **The access gate is the opt-in second wall.** It is a single shared bearer token, off by default. It exists for the case where you deliberately bind a non-loopback interface.
 - **The vault is defense in depth for provider keys**, not a targeted-attacker boundary. It defeats commodity infostealers and accidental backup/share of the vault file; it does not protect against a process running as you.
 - **Redaction is a display-and-log boundary**, distinct from the storage-layer scrub. It is the last line that keeps a credential out of an API body or a log line.
@@ -27,15 +28,17 @@ flowchart TB
     end
     subgraph local["Local machine (127.0.0.1)"]
         bind["Bind: loopback by default<br/>(widen only via explicit HOST)"]
+        guard["Same-origin guard<br/>(Origin + Host + Sec-Fetch-Site,<br/>always on)"]
         gate["Access gate<br/>(STUDIO_ACCESS_TOKEN, opt-in)"]
         api["/api/* routes"]
         proxy["Gateway proxy<br/>(Ed25519 device auth, server-side)"]
         vault["Secrets vault<br/>(AES-256-GCM)"]
-        runtime["Spawned runtime<br/>(env scrubbed of server secrets)"]
+        runtime["Spawned runtime<br/>(env scrubbed of server<br/>+ operator secrets)"]
     end
 
     rc -. "blocked at the OS<br/>unless HOST set" .-> bind
-    bind --> gate
+    bind --> guard
+    guard -->|"same-origin only<br/>(else 403)"| gate
     gate -->|"valid cookie / token"| api
     gate -->|"loopback /api/mcp/* only"| runtime
     api --> proxy
@@ -44,7 +47,7 @@ flowchart TB
     proxy -->|"signed connect frame"| upstream["Upstream OpenClaw Gateway"]
 ```
 
-The flow is: a request reaches the bind; if the bind is loopback, only local traffic gets that far. If the access gate is enabled, the request must carry a valid token (cookie or one-time query param), except a loopback `/api/mcp/*` request, which is the server's own spawned runtime and is exempt. Past the gate, the gateway proxy signs upstream connect frames with a server-held Ed25519 device key, and the secrets vault resolves provider keys into spawned-runtime env only, never into a response or a log.
+The flow is: a request reaches the bind; if the bind is loopback, only local traffic gets that far. The same-origin guard then checks the `Origin`, `Host`, and `Sec-Fetch-Site` headers and answers any cross-origin `/api/*` request with a `403`, so a malicious page in your browser is turned away before any work. If the access gate is enabled, the request must carry a valid token (cookie or one-time query param), except a loopback `/api/mcp/*` request, which is the server's own spawned runtime and is exempt. Past the gate, the gateway proxy signs upstream connect frames with a server-held Ed25519 device key, and the secrets vault resolves provider keys into spawned-runtime env only, never into a response or a log.
 
 ## The loopback bind (secure by default)
 
@@ -57,6 +60,24 @@ The dashboard binds `127.0.0.1` unless you explicitly set `HOST`. The host resol
 <Warning>
 If you bind a non-loopback interface (`HOST=…`) **and** have not set an access token, the server **refuses to start** — the origin guard is not authentication against a non-browser client (a LAN peer can forge the `Host`/`Origin` headers), so a token-less wide bind would leave the dashboard and every `/api/*` route reachable unauthenticated. Fix one of: set `STUDIO_ACCESS_TOKEN=<random>` to require a token; unset `HOST` to bind loopback only; or set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose (an explicit, greppable choice that logs a loud warning). The default loopback bind never trips this.
 </Warning>
+
+## The same-origin guard (always on)
+
+The loopback bind stops other hosts on your network, but it does not stop code running in your own browser: a web page you visit can still issue a `fetch` to (or open a WebSocket against) `http://127.0.0.1:<port>/api/*`, and because your browser originates the request, it reaches the loopback server. Left unguarded, a malicious page could drive the whole `/api/*` surface (start runtime work that spends provider credits, read your team chat and board), and a Cross-Site WebSocket Hijack could ride the server-injected upstream Gateway token. A loopback bind alone does not close this, and neither does CORS: the same-origin policy does not block the requests that matter here (a no-cors POST is still sent; a hijacked WebSocket still connects).
+
+Clawboo closes it with a same-origin guard that runs on **every** `/api/*` request and WebSocket upgrade, **independent of the access token**, so it protects the default token-less install. It validates three things:
+
+- **`Origin`** against an exact-match allowlist. A browser sets `Origin` on every cross-site WebSocket handshake and state-changing fetch and cannot forge or omit it, so this is the core Cross-Site WebSocket Hijacking (CSWSH) and cross-site-request defense. A foreign origin is answered with a `403`.
+- **`Host`** against a hostname allowlist. This is the DNS-rebinding defense: an attacker who rebinds their own domain to `127.0.0.1` still sends `Host: their-domain`, which is not on the allowlist, so the request is rejected.
+- **`Sec-Fetch-Site`** as defense in depth, covering the cross-site no-cors GET case where a browser omits `Origin`. Only `same-origin`, `same-site`, and `none` are accepted; a `cross-site` value is rejected.
+
+A request that carries neither `Origin` nor `Sec-Fetch-Site` is allowed, because a browser cannot omit both on a cross-site request, while non-browser clients (the CLI, a spawned runtime's loopback MCP attach, an SSE/`EventSource` stream) legitimately do. That is why the loopback `/api/mcp/*` attach and the team-chat streams keep working.
+
+**Posture.** The loopback allowlist (localhost, the `127.0.0.0/8` range, `::1`, plus the actual bind host) is always enforced with zero configuration, so the default `npx clawboo` install is protected out of the box. The environment allowlists only **widen** the set, never disable it: to reach the dashboard from a non-loopback browser origin (a LAN IP or a reverse-proxy hostname), enumerate the origins in `CLAWBOO_ALLOWED_ORIGINS` (and hostnames in `CLAWBOO_ALLOWED_HOSTS`). Because the allowlist can only be widened, a `HOST=0.0.0.0` bind cannot silently re-open the hole while `127.0.0.1` stays reachable.
+
+<Note>
+The same-origin guard is not authentication against a non-browser client on a wide bind: a LAN peer can forge `Host` and `Origin` with a plain HTTP client, which the guard cannot detect. That is why a non-loopback bind still requires `STUDIO_ACCESS_TOKEN` (and the server refuses to start without it). The guard defends against the browser attacker; the token defends against the network peer. They are complementary, not substitutes.
+</Note>
 
 ## The access gate (opt-in)
 
@@ -123,9 +144,18 @@ The vault is **defense in depth, not targeted-attacker-proof.** It defeats commo
 
 ### Secrets never reach spawned runtimes
 
-A spawned runtime (a Codex or Hermes CLI, the Claude Agent SDK child) executes an _untrusted_ agent that can read its own process environment. Clawboo's own server secrets must therefore never be inherited by it. The child-environment builder denylists Clawboo's named server secrets: `GATEWAY_AUTH_TOKEN`, `STUDIO_ACCESS_TOKEN`, `CLAWBOO_SECRETS_MASTER_KEY`, and any `BETTER_AUTH*` key, then merges the caller's explicit provider-key grant on top.
+A spawned runtime (a Codex or Hermes CLI, the Claude Agent SDK child, and the deterministic verify gate) executes an _untrusted_ agent that can read its own process environment with a single `env` dump. The child-environment builder scrubs two families of secrets before the child inherits them, then merges the caller's explicit provider-key grant on top:
 
-This denylist is exactly why the loopback `/api/mcp/*` access-gate exemption exists: the runtime's env has been stripped of `STUDIO_ACCESS_TOKEN`, so it _cannot_ present the gate cookie, and the loopback exemption is the controlled way to let only the server's own runtime through.
+- **Clawboo's own server secrets**, which must never leak: `GATEWAY_AUTH_TOKEN`, `STUDIO_ACCESS_TOKEN`, `CLAWBOO_SECRETS_MASTER_KEY`, and any `BETTER_AUTH*` key.
+- **A curated set of the operator's third-party shell credentials** that no runtime uses for auth: cloud, CI, package-registry, and database tokens such as `AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, `NPM_TOKEN`, `STRIPE_SECRET_KEY`, and `DATABASE_URL`. This keeps a prompt-injected task from dumping the credentials you happen to have exported into your shell, including env-only secrets (CI-injected session tokens) that never touch disk and so are reachable no other way.
+
+The scrub is **by exact name, not a broad heuristic**. The provider auth a runtime legitimately reads from the ambient env (`OPENAI_API_KEY` for Codex, a configured provider key for Hermes, `ANTHROPIC_AUTH_TOKEN` for Claude Code) and infra config (`PATH`, `HOME`, `PYTHONUSERBASE`, proxy variables, `AWS_REGION`) are preserved, so tightening the scrub never silently breaks a runtime. AWS access keys are the one conditional case: they are scrubbed by default but kept when you explicitly run Claude Code against Amazon Bedrock (`CLAUDE_CODE_USE_BEDROCK`), the signal that a runtime needs them.
+
+<Warning>
+This is defense in depth, **best-effort by name, not a sandbox.** The agent still runs un-sandboxed and can read on-disk credentials (`~/.aws/credentials`, `~/.config/gh/hosts.yml`, a project `.env`), so treat every task you run as code you are choosing to execute locally. The scrub closes the trivial `env`-dump vector and the env-only secrets; it does not isolate the runtime.
+</Warning>
+
+Scrubbing `STUDIO_ACCESS_TOKEN` is also exactly why the loopback `/api/mcp/*` access-gate exemption exists: the runtime's env has been stripped of the token, so it _cannot_ present the gate cookie, and the loopback exemption is the controlled way to let only the server's own runtime through.
 
 ## Redact-on-display
 
@@ -158,7 +188,7 @@ A non-loopback bind with no access token is the single most dangerous misconfigu
 
 ## Design rationale and trade-offs
 
-The model optimizes for a frictionless single-user local install while keeping a clear, opt-in path to a locked-down exposed one. Loopback-by-default means a fresh install is never accidentally on the network. A single shared token (rather than accounts) keeps the exposed-but-single-user case trivial to set up. Server-side device auth keeps key management out of the browser entirely, so any browser context connects. The vault is a pragmatic "raise the bar against the common threats without pretending to defeat a local attacker" choice, and it says so plainly. Redaction is a cheap, broad backstop layered behind a narrow structural guarantee (secrets only enter child env).
+The model optimizes for a frictionless single-user local install while keeping a clear, opt-in path to a locked-down exposed one. Loopback-by-default means a fresh install is never accidentally on the network, and the always-on same-origin guard means a malicious web page in your own browser cannot reach the loopback API either, so the zero-config install is safe against both the remote host and the drive-by browser attacker. A single shared token (rather than accounts) keeps the exposed-but-single-user case trivial to set up. Server-side device auth keeps key management out of the browser entirely, so any browser context connects. The vault is a pragmatic "raise the bar against the common threats without pretending to defeat a local attacker" choice, and it says so plainly. Redaction is a cheap, broad backstop layered behind a narrow structural guarantee (secrets only enter child env).
 
 The trade-offs are equally plain: there is no multi-user authorization, the token is all-or-nothing, and the vault cannot defend against a process running as you. Each is a conscious scope boundary, not an oversight.
 
