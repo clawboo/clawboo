@@ -187,11 +187,13 @@ const MAX_AUTO_RETRY_ATTEMPTS = 20
 const INITIAL_RETRY_DELAY_MS = 2_000
 const MAX_RETRY_DELAY_MS = 30_000
 
+// The fatal close reasons the clawboo proxy emits for configuration errors a
+// reconnect can never fix (see gateway-proxy's upstream-settings handling) —
+// retrying against these just burns attempts.
 const NON_RETRYABLE_CONNECT_ERROR_CODES = new Set([
-  'studio.gateway_url_missing',
-  'studio.gateway_token_missing',
-  'studio.gateway_url_invalid',
-  'studio.settings_load_failed',
+  'clawboo.gateway_url_missing',
+  'clawboo.gateway_url_invalid',
+  'clawboo.settings_load_failed',
 ])
 
 export const resolveGatewayAutoRetryDelayMs = (params: AutoRetryDelayParams): number | null => {

@@ -20,8 +20,27 @@ Please include: the affected version, a description, and a minimal reproduction 
 Clawboo is a **local-first** tool: by default the dashboard binds to loopback (`127.0.0.1`) so it is not
 reachable from other hosts on your network, all state lives under `~/.clawboo/`, and runtime API keys are
 stored in an AES-256-GCM encrypted vault. The threat model that the codebase defends against includes
-malicious agent/model output, untrusted capability/skill content, untrusted peer-chat posts, and a single
-compromised runtime attempting to read another's state. Reports that match this model are especially valuable.
+malicious agent/model output, untrusted capability/skill content, untrusted peer-chat posts, a single
+compromised runtime attempting to read another's state, and a browser-based drive-by attacker: a malicious
+web page you visit while Clawboo is running that tries to reach the loopback API from your own browser (a
+cross-site `fetch`/`no-cors` POST, or a Cross-Site WebSocket Hijack, against `http://127.0.0.1:<port>/api/*`).
+Reports that match this model are especially valuable.
+
+**Loopback is not the whole story.** A loopback bind stops other hosts on your network, but it does not stop
+code running in your own browser, because your browser originates the connection to `127.0.0.1`. Clawboo
+closes this with an always-on same-origin guard that validates the `Origin`, `Host` (the DNS-rebinding
+defense), and `Sec-Fetch-Site` headers on every `/api/*` request and WebSocket upgrade. The guard runs
+independently of the access token, so the default `npx clawboo` install is protected against the drive-by,
+CSWSH, and DNS-rebinding attacker with zero configuration; a foreign origin is answered with a 403. Reaching
+the dashboard from a LAN or remote browser origin requires enumerating it via `CLAWBOO_ALLOWED_ORIGINS` (and
+hostnames via `CLAWBOO_ALLOWED_HOSTS`); the loopback allowlist is always enforced and env vars only widen it.
+
+**Spawned runtimes run with a scrubbed environment.** The runtime subprocesses (Codex, Hermes, the Claude
+Agent SDK child) and the verify gate never inherit Clawboo's own server secrets, nor a curated set of the
+operator's third-party shell credentials (cloud, CI, package-registry, and database tokens such as
+`AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, `NPM_TOKEN`, `DATABASE_URL`). This is best-effort by name, not a
+sandbox: an un-sandboxed agent can still read on-disk credentials, so treat the tasks you run as code you are
+choosing to execute locally.
 
 ### Exposing the dashboard beyond loopback
 
