@@ -129,14 +129,9 @@ on its own terms and keeps its own native capabilities; Clawboo coordinates them
 - **Claude Code** (Anthropic Claude Agent SDK)
 - **Codex** (OpenAI Codex CLI)
 
-Clawboo's architecture and design were also informed by studying prior art in the
-open-source agent-orchestration space, among them Paperclip
-(https://github.com/paperclipai/paperclip) and vibe-kanban. The design of Clawboo's
-Hermes runtime integration was additionally informed by studying Nous Research's
-hermes-paperclip-adapter (https://github.com/NousResearch/hermes-paperclip-adapter,
-MIT), the reference for running Hermes Agent as a managed worker. No code or content
-from these projects is included in Clawboo: each adapter implements its own host's
-interface (Clawboo's `RuntimeAdapter` trait over `@clawboo/executor`, versus Paperclip's
-`@paperclipai/adapter-utils` API), and the only overlap is the `hermes chat` CLI flags
-both drive, which are Hermes Agent's own documented contract, not shared code. These
-projects are credited here as design inspiration.
+Clawboo's architecture and design were informed by prior art in the open-source
+agent-orchestration space, among them Paperclip (https://github.com/paperclipai/paperclip)
+and vibe-kanban (https://github.com/BloopAI/vibe-kanban). Nous Research's
+hermes-paperclip-adapter (https://github.com/NousResearch/hermes-paperclip-adapter, MIT)
+was a useful reference for running Hermes Agent as a managed worker. These projects are
+credited here as design inspiration.

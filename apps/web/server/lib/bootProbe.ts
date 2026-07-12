@@ -145,19 +145,33 @@ function checkVaultPerms(): CheckOutcome {
   if (process.platform === 'win32') {
     return { ok: true, message: 'secrets present (perms not enforced on this platform)' }
   }
+  // "Too open" = ANY group/other access bit set (mode & 0o077). We flag only
+  // over-permission, not an exact match, so a STRICTER owner-only mode (e.g. 0o400
+  // on master.key, or 0o500 on secrets/) is accepted rather than false-flagged as
+  // insecure. A mode that is too RESTRICTIVE to function surfaces via the vault's
+  // own read/decrypt path, not here.
+  const isTooOpen = (mode: number): boolean => (mode & 0o077) !== 0
   const problems: string[] = []
   if (existsSync(dir)) {
     const dirMode = statSync(dir).mode & 0o777
-    if (dirMode !== 0o700) problems.push(`secrets/ is ${dirMode.toString(8)} (expected 700)`)
+    if (isTooOpen(dirMode)) {
+      problems.push(`secrets/ is ${dirMode.toString(8)} (group/other access; expected owner-only)`)
+    }
     if (existsSync(masterKey)) {
       const keyMode = statSync(masterKey).mode & 0o777
-      if (keyMode !== 0o600) problems.push(`master.key is ${keyMode.toString(8)} (expected 600)`)
+      if (isTooOpen(keyMode)) {
+        problems.push(
+          `master.key is ${keyMode.toString(8)} (group/other access; expected owner-only)`,
+        )
+      }
     }
   }
   if (existsSync(identityFile)) {
     const idMode = statSync(identityFile).mode & 0o777
-    if (idMode !== 0o600) {
-      problems.push(`proxy-device-identity.json is ${idMode.toString(8)} (expected 600)`)
+    if (isTooOpen(idMode)) {
+      problems.push(
+        `proxy-device-identity.json is ${idMode.toString(8)} (group/other access; expected owner-only)`,
+      )
     }
   }
   if (problems.length > 0) {
@@ -167,7 +181,7 @@ function checkVaultPerms(): CheckOutcome {
       detail: problems.join('; '),
     }
   }
-  return { ok: true, message: 'secret-file permissions are correct (700/600)' }
+  return { ok: true, message: 'secret-file permissions are owner-only' }
 }
 
 function checkMasterKeySentinel(): { outcome: CheckOutcome; masterKeyOk: boolean } {

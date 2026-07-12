@@ -94,7 +94,7 @@ Clawboo coordinates other open-source AI agent [runtimes](/runtimes/index) as pe
 - **OpenClaw**: the Gateway-driven [connected substrate](/runtimes/openclaw).
 - **Hermes** (`hermes-agent`), **Claude Code** (Anthropic Claude Agent SDK), and **Codex** (OpenAI Codex CLI): the wrapped-one-shot runtimes.
 
-It also credits prior art in the agent-orchestration space (Paperclip, vibe-kanban, and Nous Research's `hermes-paperclip-adapter`) as design inspiration only. No code or content from those projects is included in Clawboo; each adapter implements Clawboo's own `RuntimeAdapter` trait, and the only overlap (the `hermes chat` CLI flags) is Hermes Agent's own documented contract.
+It also credits prior art in the agent-orchestration space (Paperclip, vibe-kanban, and Nous Research's `hermes-paperclip-adapter`) as design inspiration.
 
 ## See also
 

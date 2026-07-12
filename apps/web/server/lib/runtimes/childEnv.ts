@@ -1,6 +1,8 @@
-// Environment for a SPAWNED runtime subprocess (Codex / Hermes CLI, the Claude Agent
-// SDK child). The runtime executes an UNTRUSTED agent that can read its own process
-// env and exfiltrate it, so clawboo's OWN server secrets must never be inherited:
+// Environment for a SEMI-TRUSTED spawned subprocess — a runtime CLI (Codex / Hermes),
+// the Claude Agent SDK child, AND the deterministic verify gate (which runs a model/
+// worktree-authored VERIFY_CMD, see verification/deterministicGate.ts). Each executes
+// UNTRUSTED, model-directed content that can read its own process env and exfiltrate
+// it, so clawboo's OWN server secrets must never be inherited:
 //   - GATEWAY_AUTH_TOKEN    — the OpenClaw gateway bearer (written to ~/.openclaw/.env)
 //   - STUDIO_ACCESS_TOKEN   — the dashboard access-gate credential (the only auth for a
 //                             non-loopback bind)

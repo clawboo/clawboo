@@ -100,15 +100,7 @@ const realDelay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r
  * with exec approval disabled). No-op when the agent is already responding.
  */
 export async function runApprovalFollowup(deps: ApprovalFollowupDeps): Promise<void> {
-  const {
-    client,
-    agentId,
-    decision,
-    command,
-    sessionKey,
-    activeRunId,
-    originalExecAsk,
-  } = deps
+  const { client, agentId, decision, command, sessionKey, activeRunId, originalExecAsk } = deps
   const delay = deps.delay ?? realDelay
   const allowOnce = decision === 'allow-once'
 
@@ -267,18 +259,21 @@ export function useApprovalActions() {
           }
         }
       } catch (err) {
-        // Gateway returns "unknown approval id" when the approval has already expired
-        // (timeout is Gateway-side, ~120s). Silently remove the card instead of
-        // showing a confusing error — matches OpenClaw Studio's behavior.
-        if (
-          err instanceof GatewayResponseError &&
-          /unknown.*approval.*id|expired/i.test(err.message)
-        ) {
+        // A Gateway "unknown approval id" means the approval already timed out
+        // server-side (the Gateway expires them after ~120s). The card is stale
+        // at that point — drop it quietly rather than surfacing an error for
+        // something the user can no longer act on.
+        const isStaleApproval =
+          err instanceof GatewayResponseError && /unknown.*approval.*id|expired/i.test(err.message)
+        if (isStaleApproval) {
           removePending(id)
           return
         }
-        const message = err instanceof Error ? err.message : 'Failed to resolve exec approval.'
-        setResolving(id, false, message)
+        setResolving(
+          id,
+          false,
+          err instanceof Error ? err.message : 'Could not resolve the exec approval request.',
+        )
       }
     },
     [client, pendingApprovals, setResolving, removePending, prependHistory],

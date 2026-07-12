@@ -33,11 +33,11 @@ flowchart TD
 
 ## Step 1: Understand the default (do nothing if it fits)
 
-On a fresh install the dashboard binds `127.0.0.1`, not `0.0.0.0`. The host resolver returns loopback unless you explicitly set `HOST` or `HOSTNAME`; an explicit value wins (trimmed), anything else falls back to loopback. So the dashboard and every `/api/*` route are reachable only from the local machine until you opt out of that.
+On a fresh install the dashboard binds `127.0.0.1`, not `0.0.0.0`. The host resolver returns loopback unless you explicitly set `HOST`; an explicit value wins (trimmed), anything else falls back to loopback. So the dashboard and every `/api/*` route are reachable only from the local machine until you opt out of that. (`HOSTNAME` is deliberately **not** a bind signal — Docker/systemd/CI auto-inject it, so honoring it would silently widen the bind inside a container. Use an explicit `HOST=`.)
 
-`localhost`, `::1`, and the whole `127.0.0.0/8` range count as loopback. `0.0.0.0`, `::`, a LAN IP, or a hostname are all network-exposed; and binding one of those is the only thing that triggers the boot-time security warning.
+`localhost`, `::1`, and the whole `127.0.0.0/8` range count as loopback. `0.0.0.0`, `::`, a LAN IP, or a hostname are all network-exposed; and binding one of those without a token is what makes the server refuse to start (see below).
 
-If you only need the dashboard from the same machine, and you do not set `HOST`/`HOSTNAME`, you are done. No token, no proxy, nothing else to configure.
+If you only need the dashboard from the same machine, and you do not set `HOST`, you are done. No token, no proxy, nothing else to configure.
 
 ## Step 2: Reach it from another machine without widening the bind (recommended)
 
@@ -76,7 +76,7 @@ With either option, Clawboo never accepts a connection off-host directly; your t
 
 ## Step 3: Or widen the bind, and set an access token
 
-If you do bind a non-loopback interface, you take on the access gate yourself. Set `HOST` (or `HOSTNAME`) **and** `STUDIO_ACCESS_TOKEN` together:
+If you do bind a non-loopback interface, you take on the access gate yourself. Set `HOST` **and** `STUDIO_ACCESS_TOKEN` together (a token-less wide bind refuses to start):
 
 ```bash
 HOST=0.0.0.0 \
@@ -87,7 +87,7 @@ node dist/server.js
 ```
 
 <Warning>
-A non-loopback bind with **no** access token exposes the dashboard and every `/api/*` route to your network, unauthenticated, including the routes that resolve provider keys into spawned runtimes. Clawboo never auto-generates a token. It logs a loud `SECURITY:` warning at boot and keeps serving, so the boot warning is your signal that this happened. Set `STUDIO_ACCESS_TOKEN`, or unset `HOST`/`HOSTNAME`, to close it.
+A non-loopback bind with **no** access token would expose the dashboard and every `/api/*` route to your network, unauthenticated, including the routes that resolve provider keys into spawned runtimes. Clawboo never auto-generates a token; instead it **refuses to start** in that configuration (the origin guard is not authentication against a non-browser client, which can forge the `Host`/`Origin` headers). Set `STUDIO_ACCESS_TOKEN`, unset `HOST` to bind loopback only, or set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose.
 </Warning>
 
 The token must come from the safe charset `[A-Za-z0-9._~-]` (which `openssl rand -hex` satisfies). A token containing any other character is rejected; the gate logs a warning naming the offending character and **disables itself** rather than ship a permanent lockout, because a cookie-delimiter character would otherwise corrupt the auth cookie and silently 401 every `/api/*` route. So a "wrong charset" token doesn't half-work; it turns the gate off. Generate from the safe set and you will never hit this.
@@ -129,7 +129,7 @@ See [Environment variables](/reference/environment-variables) for every variable
 
 ## Verify it worked
 
-- **Confirm the bind.** Boot the server and read the startup log. A non-loopback bind with no token prints the `SECURITY:` warning; its absence (or a token being set) means you're either loopback or gated.
+- **Confirm the bind.** Boot the server and read the startup log. A non-loopback bind with no token **refuses to start** with a `SECURITY:` error (unless `CLAWBOO_ALLOW_INSECURE=1`, which logs a loud warning instead); a clean boot means you're either loopback or gated.
 - **Check the access gate.** With the gate on, `curl https://your-host/api/settings` without a cookie should return `401`. The same request with `?access_token=<token>` should `302`-redirect and set the `clawboo_access` cookie.
 - **Confirm Clawboo-shaped health.** `GET /api/settings` returns `{ gatewayUrl, hasToken }`; `GET /api/health` returns the boot probe (`{ ok, degraded, fatal, checks, … }`). `ok: true` means no fatal checks failed. See [Deployment → Verify it worked](/operating/deployment#verify-it-worked).
 
@@ -148,7 +148,7 @@ See [Environment variables](/reference/environment-variables) for every variable
 </Warning>
 
 <Danger>
-**Don't run a wide bind without a token "just for a minute."** Every `/api/*` route, including the ones that resolve provider keys into spawned runtimes, is reachable unauthenticated the moment the bind is non-loopback and no token is set. The boot warning is real; treat it as a stop sign.
+**Don't reach for `CLAWBOO_ALLOW_INSECURE=1` "just for a minute."** Every `/api/*` route, including the ones that resolve provider keys into spawned runtimes, is reachable unauthenticated the moment the bind is non-loopback and no token is set. That's exactly why a token-less wide bind refuses to start; the opt-out flag disables that safety, so only use it behind your own firewall/proxy.
 </Danger>
 
 ## The honest caveats
