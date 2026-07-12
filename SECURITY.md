@@ -26,10 +26,12 @@ compromised runtime attempting to read another's state. Reports that match this 
 ### Exposing the dashboard beyond loopback
 
 If you deliberately widen the bind (set `HOST=0.0.0.0` or a LAN address, e.g. to reach the dashboard from
-another machine), the API is then reachable by other hosts on that network. In that case **set an access
-token**: export `STUDIO_ACCESS_TOKEN=<a long random string>` before starting the server. With a token set,
-every `/api/*` route and the gateway WebSocket require it (open `/?access_token=<token>` once to set the
-cookie). The server logs a loud warning at boot if it detects a non-loopback bind with no token configured.
+another machine), the API is then reachable by other hosts on that network. In that case you **must set an
+access token**: export `STUDIO_ACCESS_TOKEN=<a long random string>` before starting the server. With a token
+set, every `/api/*` route and the gateway WebSocket require it (open `/?access_token=<token>` once to set the
+cookie). The server **refuses to start** on a non-loopback bind with no token — set `STUDIO_ACCESS_TOKEN`, or
+set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose. (`HOSTNAME` is ignored as a bind signal, so
+a container's auto-set hostname never silently widens the bind — use an explicit `HOST=`.)
 
 We do not currently run a paid bug-bounty program. We are grateful for responsible disclosure and will
 credit reporters who wish to be named.

@@ -4,7 +4,7 @@ import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
 
-import { createAccessGate, createGatewayProxy } from '@clawboo/gateway-proxy'
+import { createAccessGate, createGatewayProxy, createOriginGuard } from '@clawboo/gateway-proxy'
 import { loadSettings } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 import { createDb, reconcileOrphans, reconcileStaleInProgress, seedBuiltinTools } from '@clawboo/db'
@@ -19,7 +19,7 @@ import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { getRegistry } from './lib/agentSource'
 import { resolveApiPort, writeApiPortFile, removeApiPortFile } from './lib/portUtils'
-import { resolveHost, isLoopbackHost } from './lib/resolveHost'
+import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
 
 // ── Loggers ─────────────────────────────────────────────────────────────────
@@ -47,6 +47,13 @@ const resolvePathname = (url: string | undefined): string => {
   return (idx === -1 ? raw : raw.slice(0, idx)) || '/'
 }
 
+/** Parse a comma-separated env var into a trimmed, non-empty list. */
+const parseCsvEnv = (raw: string | undefined): string[] =>
+  String(raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -67,15 +74,59 @@ async function main() {
     token: process.env['STUDIO_ACCESS_TOKEN'],
   })
 
-  // Defense in depth: a non-loopback bind WITHOUT an access token exposes the
-  // dashboard — and every /api/* route — to the local network unauthenticated.
-  // We don't auto-generate a token; just warn loudly so the operator opts in.
+  // ── Same-origin guard (CSWSH / DNS-rebinding / cross-site CSRF) ────────────
+  // Always-on Origin + Host + Sec-Fetch-Site allowlist, independent of the token
+  // gate. Closes Cross-Site WebSocket Hijacking (a malicious page opening
+  // /api/gateway/ws to ride the server-injected upstream token) and cross-site
+  // /api/* access on a default loopback install with zero config. The env
+  // allowlists only WIDEN the set; they never disable enforcement.
+  const allowedOrigins = parseCsvEnv(process.env['CLAWBOO_ALLOWED_ORIGINS'])
+  const originGuard = createOriginGuard({
+    port,
+    bindHost: hostname,
+    dev,
+    allowedOrigins,
+    allowedHosts: parseCsvEnv(process.env['CLAWBOO_ALLOWED_HOSTS']),
+  })
+
+  // Fail-closed: refuse to run a network-exposed dashboard with NO access token.
+  // The origin guard is NOT auth against a non-browser LAN client (Host/Origin are
+  // forgeable off-browser), so an unauthenticated wide bind leaves every /api/*
+  // route — and the fleet — open to anyone who can reach this host. The default
+  // loopback bind never trips this (shouldRefuseInsecureBind is false for loopback),
+  // so the zero-friction CLI / dev / test flows are untouched; a deliberate wide
+  // bind must set a token, or opt into the insecure posture explicitly.
+  const allowInsecure = process.env['CLAWBOO_ALLOW_INSECURE'] === '1'
+  if (shouldRefuseInsecureBind({ hostname, gateEnabled: accessGate.enabled, allowInsecure })) {
+    log.error(
+      { hostname, port },
+      `SECURITY: refusing to start — bound to a non-loopback interface (HOST=${hostname}) ` +
+        'with NO access token, so the dashboard and every /api/* route would be reachable ' +
+        'UNAUTHENTICATED by anyone who can reach this host. Fix one of: set ' +
+        'STUDIO_ACCESS_TOKEN=<random> to require a token; unset HOST to bind loopback only; ' +
+        'or set CLAWBOO_ALLOW_INSECURE=1 to run unauthenticated on purpose.',
+    )
+    process.exit(1)
+  }
   if (!isLoopbackHost(hostname) && !accessGate.enabled) {
+    // Reached only when CLAWBOO_ALLOW_INSECURE=1 — the operator explicitly opted in.
     log.warn(
       { hostname, port },
-      'SECURITY: dashboard bound to a non-loopback interface with NO access token — ' +
-        'it is reachable by anyone on your network without authentication. Set ' +
-        'STUDIO_ACCESS_TOKEN to require a token, or unset HOST/HOSTNAME to bind loopback only.',
+      'SECURITY: non-loopback bind with NO access token and CLAWBOO_ALLOW_INSECURE=1 — the ' +
+        'dashboard and every /api/* route are reachable UNAUTHENTICATED by anyone on your ' +
+        'network. You opted in; set STUDIO_ACCESS_TOKEN to close the hole.',
+    )
+  }
+
+  // A non-loopback bind with no configured origins: LAN/remote origins are blocked
+  // by the same-origin guard (loopback stays allowed) until the operator enumerates
+  // them. Warn so a headless/LAN operator knows the one env var to set.
+  if (!isLoopbackHost(hostname) && allowedOrigins.length === 0) {
+    log.warn(
+      { hostname, port },
+      'SECURITY: non-loopback bind with no CLAWBOO_ALLOWED_ORIGINS — the same-origin ' +
+        'guard will block LAN/remote browser origins (loopback still works). Set ' +
+        'CLAWBOO_ALLOWED_ORIGINS (comma-separated, e.g. https://dash.example.com) to allow them.',
     )
   }
 
@@ -88,6 +139,8 @@ async function main() {
     },
     allowWs: (req) => {
       if (resolvePathname(req.url) !== '/api/gateway/ws') return false
+      // Same-origin guard first (CSWSH), then the optional token gate.
+      if (!originGuard.allowUpgrade(req)) return false
       if (!accessGate.allowUpgrade(req)) return false
       return true
     },
@@ -111,9 +164,23 @@ async function main() {
   // traffic. Mirrors the `http://127.0.0.1:${port}` the boot/ticker callers use.
   app.locals['apiPort'] = port
 
-  // CORS: only needed in dev (Vite on :5173 → Express on the dynamic API port)
+  // Same-origin guard — FIRST, before body parsing / CORS / the access gate, so a
+  // cross-origin (CSWSH/rebinding/CSRF) /api/* request is 403'd before any work.
+  app.use((req, res, next) => {
+    if (originGuard.checkHttp(req, res)) return
+    next()
+  })
+
+  // CORS: only needed in dev (Vite on :5173 → Express on the dynamic API port).
+  // Reflect ONLY allowlisted origins (never `origin: true`) so a foreign page can't
+  // be granted credentialed cross-origin reads.
   if (dev) {
-    app.use(cors({ origin: true, credentials: true }))
+    app.use(
+      cors({
+        origin: (origin, cb) => cb(null, originGuard.isAllowedOrigin(origin)),
+        credentials: true,
+      }),
+    )
   }
 
   // JSON body parser — must be before API routes
@@ -172,6 +239,13 @@ async function main() {
 
   server.on('upgrade', (req, socket, head) => {
     if (resolvePathname(req.url) === '/api/gateway/ws') {
+      // Same-origin guard on the WS upgrade (CSWSH). Reply 403 before handing off
+      // so a rejected handshake gets a real response, not a bare socket teardown.
+      // `socket.end(...)` flushes the response bytes before the FIN.
+      if (!originGuard.allowUpgrade(req)) {
+        socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+        return
+      }
       proxy.handleUpgrade(req, socket, head)
       return
     }

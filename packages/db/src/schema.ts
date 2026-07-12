@@ -346,7 +346,7 @@ export const taskComments = sqliteTable(
 export type DbTaskComment = typeof taskComments.$inferSelect
 export type DbTaskCommentInsert = typeof taskComments.$inferInsert
 
-// workspaces — per-task git worktree isolation (Vibe-Kanban style).
+// workspaces — per-task git worktree isolation.
 export const workspaces = sqliteTable(
   'workspaces',
   {

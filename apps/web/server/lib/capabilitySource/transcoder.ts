@@ -2,9 +2,6 @@
 // runtime-neutral CanonicalMcpServer spec to each runtime's dialect (Claude Code
 // inline mcpServers / Codex TOML [mcp_servers] / Hermes mcp.json), with a
 // COMMENT-PRESERVING merge so a hand-edited config file is never clobbered.
-// Ported from vibe-kanban's MCP-config transcoder pattern (Apache-2.0; this is a
-// clean-room TypeScript reimplementation of the canonical-spec→dialect idea, not
-// a copied file).
 //
 // Wired as the dispatch primitive for the external-write tier. No runtime exposes
 // a clawboo-managed PERSISTENT connector store this session (Hermes mcp.json is

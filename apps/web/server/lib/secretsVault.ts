@@ -13,6 +13,15 @@
 //   <clawbooDir>/secrets/master.key         32-byte key, base64, mode 0600
 //   <clawbooDir>/secrets/runtime-keys.json  { [envVar]: { iv, tag, ciphertext } }
 //
+// Key + ciphertext are COLOCATED under secrets/ by design: a local-first, single-
+// user tool has no daemon or keychain, and the only reader able to reach the key
+// (a process running as you) can already read the plaintext elsewhere (memory, the
+// child env, ~/.openclaw/.env). The encryption's benefit is against the CIPHERTEXT-
+// FILE-ALONE case (infostealer / accidental backup-sync-share of runtime-keys.json).
+// For true at-rest key/ciphertext SEPARATION, set `CLAWBOO_SECRETS_MASTER_KEY` from
+// a source OUTSIDE ~/.clawboo (e.g. `CLAWBOO_SECRETS_MASTER_KEY=$(cat ~/.config/…)`
+// or a secret manager) — that override seam already exists; no keychain needed.
+//
 // `CLAWBOO_SECRETS_MASTER_KEY` overrides the on-disk key (32-byte base64 /
 // 64-char hex / raw 32-char). Runtime-key resolution, highest priority first:
 //   process.env[envVar]  →  the vault (decrypt)  →  OpenClaw's ~/.openclaw/.env

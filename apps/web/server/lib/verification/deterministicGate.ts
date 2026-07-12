@@ -17,6 +17,7 @@ import {
 } from '@clawboo/governance'
 import { SOR_FILES } from '@clawboo/worktrees'
 
+import { buildChildEnv } from '../runtimes/childEnv'
 import { isWindows } from '../platform'
 import { killProcessTree } from '../runtimes/killTree'
 
@@ -28,7 +29,12 @@ export interface DeterministicGateInput {
   /** Explicit override; else parsed from init.sh → VERIFICATION.md. */
   verifyCommand?: string | null
   timeoutMs?: number
-  /** Injectable env (tests); defaults to process.env. */
+  /**
+   * Injectable env (tests); defaults to a SCRUBBED child env (`buildChildEnv()` —
+   * clawboo's own server secrets removed). The verify command is model/worktree-
+   * authored (parsed from init.sh), so it is a semi-trusted spawn and must get the
+   * same secret-scrub every other runtime child gets — never the raw process.env.
+   */
   env?: NodeJS.ProcessEnv
 }
 
@@ -83,6 +89,9 @@ async function appendEvidence(
  * a structured FAIL ("configure VERIFY_CMD") — `done` requires real evidence, not
  * the absence of a check. `shell: true` because the command is a free-form shell
  * string; `windowsHide` suppresses the console popup on win32 (repo convention).
+ * The env defaults to `buildChildEnv()` (clawboo's own secrets scrubbed) so a
+ * model-authored VERIFY_CMD can't exfiltrate the gateway/access/master-key secrets
+ * — the same guarantee the runtime drivers already enforce.
  */
 export async function runDeterministicGate(
   input: DeterministicGateInput,
@@ -114,7 +123,7 @@ export async function runDeterministicGate(
     let timedOut = false
     const child = spawn(command, [], {
       cwd: input.worktreePath,
-      env: input.env ?? process.env,
+      env: input.env ?? buildChildEnv(),
       shell: true,
       windowsHide: isWindows,
       // POSIX: process-group leader so a timeout kills the whole subtree (the

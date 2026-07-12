@@ -26,7 +26,7 @@ flowchart TB
         rc["Remote client"]
     end
     subgraph local["Local machine (127.0.0.1)"]
-        bind["Bind: loopback by default<br/>(widen only via HOST/HOSTNAME)"]
+        bind["Bind: loopback by default<br/>(widen only via explicit HOST)"]
         gate["Access gate<br/>(STUDIO_ACCESS_TOKEN, opt-in)"]
         api["/api/* routes"]
         proxy["Gateway proxy<br/>(Ed25519 device auth, server-side)"]
@@ -34,7 +34,7 @@ flowchart TB
         runtime["Spawned runtime<br/>(env scrubbed of server secrets)"]
     end
 
-    rc -. "blocked at the OS<br/>unless HOST/HOSTNAME set" .-> bind
+    rc -. "blocked at the OS<br/>unless HOST set" .-> bind
     bind --> gate
     gate -->|"valid cookie / token"| api
     gate -->|"loopback /api/mcp/* only"| runtime
@@ -48,13 +48,15 @@ The flow is: a request reaches the bind; if the bind is loopback, only local tra
 
 ## The loopback bind (secure by default)
 
-The dashboard binds `127.0.0.1` unless you explicitly set `HOST` or `HOSTNAME`. The host resolver returns loopback, not `0.0.0.0`, so the dashboard and every `/api/*` route are reachable only from the local machine on a fresh install. An explicit `HOST`/`HOSTNAME` value wins (trimmed); anything else falls back to loopback.
+The dashboard binds `127.0.0.1` unless you explicitly set `HOST`. The host resolver returns loopback, not `0.0.0.0`, so the dashboard and every `/api/*` route are reachable only from the local machine on a fresh install. An explicit `HOST` value wins (trimmed); anything else falls back to loopback.
 
-`localhost`, `::1`, and the entire `127.0.0.0/8` range count as loopback. `0.0.0.0`, `::`, a LAN IP, or a hostname are all network-exposed, and that is the trigger for a loud boot-time warning.
+`HOSTNAME` is intentionally **ignored** as a bind signal. Docker, systemd, and many CI runners auto-inject `HOSTNAME` into every process, so honoring it would silently bind a container to its routable IP — a network exposure you never chose. Widening the bind must be a deliberate `HOST=`.
 
-<Info>
-If you bind a non-loopback interface **and** have not set an access token, the server logs a `SECURITY:` warning at boot; the dashboard and every `/api/*` route are then reachable by anyone on your network, unauthenticated. Clawboo does not auto-generate a token; it warns and proceeds, so the choice is yours and visible. Set `STUDIO_ACCESS_TOKEN` or unset `HOST`/`HOSTNAME` to close the hole.
-</Info>
+`localhost`, `::1`, and the entire `127.0.0.0/8` range count as loopback. `0.0.0.0`, `::`, a LAN IP, or a hostname are all network-exposed.
+
+<Warning>
+If you bind a non-loopback interface (`HOST=…`) **and** have not set an access token, the server **refuses to start** — the origin guard is not authentication against a non-browser client (a LAN peer can forge the `Host`/`Origin` headers), so a token-less wide bind would leave the dashboard and every `/api/*` route reachable unauthenticated. Fix one of: set `STUDIO_ACCESS_TOKEN=<random>` to require a token; unset `HOST` to bind loopback only; or set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose (an explicit, greppable choice that logs a loud warning). The default loopback bind never trips this.
+</Warning>
 
 ## The access gate (opt-in)
 
@@ -102,6 +104,8 @@ Provider and runtime API keys you connect through the dashboard are stored in an
 | `~/.clawboo/secrets/runtime-keys.json` | `{ [envVar]: { iv, tag, ciphertext } }` | `0600`, ciphertext only         |
 
 Each value is encrypted with AES-256-GCM under the master key. The master key is auto-generated on first use, or you can supply your own via `CLAWBOO_SECRETS_MASTER_KEY` (a 32-byte key as base64, 64 hex characters, or a raw 32-character string). Decryption enforces the standard GCM 96-bit IV and 128-bit auth-tag lengths; a truncated tag, which would weaken forgery resistance, is rejected.
+
+The key and the ciphertext are colocated under `secrets/` by design — a local-first, single-user tool has no daemon or keychain, and the only reader that can reach the key (a process running as you) can already read the plaintext elsewhere. For true at-rest key/ciphertext **separation** (so a whole-directory backup of `secrets/` can't carry both), point `CLAWBOO_SECRETS_MASTER_KEY` at a source **outside** `~/.clawboo` — e.g. `CLAWBOO_SECRETS_MASTER_KEY=$(cat ~/.config/clawboo-master.key)` or a secret manager. Permissions are enforced at write (`0700` dir / `0600` files) and re-verified on every boot (a group/other-readable secret surfaces as a degraded check in System Health).
 
 **Resolution chain.** A runtime provider key is resolved by env-var name, highest priority first:
 

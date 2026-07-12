@@ -9,10 +9,11 @@
 // caret-escaped (cmd.exe metacharacters) so a prompt like `do X & calc.exe`
 // cannot break out and chain a second command.
 //
-// The escaping below is a faithful reproduction of the well-tested cross-spawn
-// algorithm (MIT — github.com/moxystudio/node-cross-spawn, lib/util/escape.js;
-// see also https://qntm.org/cmd). No code is imported; the function is small and
-// reproduced here to avoid a new dependency.
+// The escaping below implements cmd.exe's documented quoting rules — the
+// CommandLineToArgvW argument-boundary rules plus caret-escaping of cmd.exe's
+// metacharacters (https://qntm.org/cmd is the canonical write-up of both).
+// Implemented inline because the rules are small and fixed, and pulling in a
+// dependency for them isn't worth it.
 
 import { isWindows } from '../platform'
 

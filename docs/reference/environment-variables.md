@@ -29,8 +29,9 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) 
 | `CLAWBOO_API_PORT_START`              | Ports & binding    | `18790`                          | `resolveApiPort()` scan start           |
 | `PORT`                                | Ports & binding    | (none)                           | `resolveApiPort()` (production only)    |
 | `HOST`                                | Ports & binding    | `127.0.0.1`                      | `resolveHost()`                         |
-| `HOSTNAME`                            | Ports & binding    | `127.0.0.1`                      | `resolveHost()` fallback                |
+| `HOSTNAME`                            | Ports & binding    | (ignored)                        | ignored (no longer a bind signal)       |
 | `STUDIO_ACCESS_TOKEN`                 | Secrets & auth     | (none)                           | access gate                             |
+| `CLAWBOO_ALLOW_INSECURE`              | Secrets & auth     | (unset)                          | boot guard (wide-bind opt-out)          |
 | `CLAWBOO_SECRETS_MASTER_KEY`          | Secrets & auth     | auto-generated key file          | secrets vault                           |
 | `ANTHROPIC_API_KEY`                   | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
 | `OPENAI_API_KEY`                      | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
@@ -134,14 +135,20 @@ The in-process Express server resolves its DB path through `getDbPath()` → `~/
 - **Default**: `127.0.0.1` (loopback).
 
 <Warning>
-A non-loopback bind (`HOST=0.0.0.0`, a LAN IP, or a hostname) WITHOUT `STUDIO_ACCESS_TOKEN` set exposes the dashboard, and every `/api/*` route, to the local network with no authentication. Clawboo logs a loud `SECURITY:` warning at boot in this case but does not block it. See [Security](/operating/security).
+A non-loopback bind (`HOST=0.0.0.0`, a LAN IP, or a hostname) WITHOUT `STUDIO_ACCESS_TOKEN` set would expose the dashboard, and every `/api/*` route, to the local network with no authentication. Clawboo **refuses to start** in that configuration — set `STUDIO_ACCESS_TOKEN`, unset `HOST`, or set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose. See [Security](/operating/security).
 </Warning>
 
 ### `HOSTNAME`
 
-- **Read by**: `resolveHost()` in `apps/web/server/lib/resolveHost.ts`.
-- **Purpose**: fallback for `HOST`. A trimmed `HOST` wins; otherwise a trimmed `HOSTNAME` is used; otherwise loopback.
-- **Default**: `127.0.0.1` (loopback).
+- **Read by**: nothing (as of the security hardening). `resolveHost()` **ignores** `HOSTNAME`.
+- **Purpose**: previously a fallback for `HOST`. It is no longer a bind signal: Docker, systemd, and many CI runners auto-inject `HOSTNAME`, so honoring it would silently widen a container's bind to a routable IP. Widening must be an explicit `HOST=`.
+- **Default**: n/a (ignored).
+
+### `CLAWBOO_ALLOW_INSECURE`
+
+- **Read by**: the boot guard (`shouldRefuseInsecureBind()`) in `apps/web/server/index.ts`.
+- **Purpose**: explicit opt-out of the token-less-wide-bind refusal. `CLAWBOO_ALLOW_INSECURE=1` lets the server start on a non-loopback bind with no `STUDIO_ACCESS_TOKEN` (it logs a loud unauthenticated-exposure warning instead of exiting). Only use it behind your own firewall/proxy. Has no effect on a loopback bind or when a token is set.
+- **Default**: unset (a token-less wide bind refuses to start).
 
 ## Secrets & auth
 
