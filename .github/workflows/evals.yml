@@ -15,6 +15,10 @@ concurrency:
   group: evals
   cancel-in-progress: true
 
+# Least-privilege default: the eval job only reads the repo and runs tests.
+permissions:
+  contents: read
+
 jobs:
   evals:
     name: Orchestration evals + ablation scorecard

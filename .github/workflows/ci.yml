@@ -15,6 +15,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default: every CI job only reads the repo (checkout + install +
+# run checks) and never writes to the repo or PR. A job needing more must opt in
+# with its own permissions: block.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint
