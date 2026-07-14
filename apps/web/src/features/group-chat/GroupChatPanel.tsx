@@ -787,9 +787,6 @@ export function GroupChatPanel({
         disabled={!canSend}
         placeholder="Message team… (@name to target)"
         mentionAgents={mentionAgentList}
-        // Team chat handles `/rule` (save a durable team rule). It does NOT handle
-        // `/reset` — a team has no single session to reset — so that hint is omitted.
-        commands={[{ k: '/rule', label: 'save rule' }]}
         // Stop button — replaces Send while the team is working (running OR
         // mid-stream). POSTs /chat/stop; the server owns the abort + clean release.
         isActive={running || activeStreams.length > 0}

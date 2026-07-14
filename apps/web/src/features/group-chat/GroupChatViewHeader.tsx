@@ -14,6 +14,7 @@
 import { useState } from 'react'
 import { MessagesSquare, Settings } from 'lucide-react'
 import { useGraphStore } from '@/features/graph/store'
+import { isCapabilitySkillNode } from '@/features/graph/types'
 import type { Team } from '@/stores/team'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
@@ -28,7 +29,7 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
   // Two separate primitive selectors so we don't need shallow equality —
   // each returns a number and React's default reference check works.
   const booCount = useGraphStore((s) => s.nodes.filter((n) => n.type === 'boo').length)
-  const skillCount = useGraphStore((s) => s.nodes.filter((n) => n.type === 'skill').length)
+  const skillCount = useGraphStore((s) => s.nodes.filter(isCapabilitySkillNode).length)
   // The graph store is shared across Atlas + every team graph. Only trust the
   // count once it has STRUCTURALLY rebuilt for THIS team — otherwise a stale
   // count from a previous scope flashes (e.g. "23 Boos" from Atlas before the

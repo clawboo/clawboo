@@ -314,9 +314,6 @@ export function ChatPanel({
         ref={composerRef}
         onSend={handleSend}
         disabled={!canSend}
-        // 1:1 chat handles `/reset` (start a fresh session / clear the conversation).
-        // `/rule` is team-only, so it's not advertised here.
-        commands={[{ k: '/reset', label: 'new session' }]}
         // Pass the team list as mentionAgents so the in-composer autocomplete
         // dropdown opens on `@` and filters as the user types. Empty array
         // outside Boo Zero's chat → no autocomplete (regular 1:1 behavior).
