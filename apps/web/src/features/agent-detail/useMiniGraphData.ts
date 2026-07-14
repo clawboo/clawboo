@@ -64,6 +64,8 @@ export function useMiniGraphData(agentId: string): {
   // Build graph elements for this single agent
   const { nodes, edges } = useMemo(() => {
     if (!agent || agentFiles.size === 0) return { nodes: [], edges: [] }
+    // The runtime badge (on the Boo) and the model orbital both show in the
+    // MiniGraph too — the single-agent view mirrors the Atlas graph.
     const { rawNodes, rawEdges } = buildGraphElements([agent], agentFiles)
     return { nodes: rawNodes, edges: rawEdges }
   }, [agent, agentFiles])
