@@ -11,26 +11,38 @@
 // native runtime already knows/prices — plus the obvious strong sibling per provider.
 
 import type { ModelGroup } from './modelCatalog'
+import { NATIVE_MORE_PROVIDERS } from './nativeProviders'
+
+/** Group display names — shared so the dynamic-model hooks can find + replace
+ *  exactly these groups with a live list from the provider. */
+export const OPENROUTER_GROUP_NAME = 'OpenRouter'
+export const ANTHROPIC_GROUP_NAME = 'Anthropic'
+export const OPENAI_GROUP_NAME = 'OpenAI'
 
 /** Native provider id (lowercase, as stored in AgentConfig.primaryProvider) →
  *  display name + native-format models (strongest first — index 0 is the leader pick). */
 const NATIVE_MODELS: Record<string, { label: string; models: { id: string; label: string }[] }> = {
+  // These are the STATIC FALLBACK for Anthropic + OpenAI — shown before a key is
+  // stored / while the live list loads. Once a provider key is present, the live
+  // list from GET /api/providers/:id/models (useProviderModels) replaces these.
   anthropic: {
-    label: 'Anthropic',
+    label: ANTHROPIC_GROUP_NAME,
     models: [
-      { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+      { id: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
+      { id: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
       { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
     ],
   },
   openai: {
-    label: 'OpenAI',
+    label: OPENAI_GROUP_NAME,
     models: [
+      { id: 'gpt-5.4', label: 'GPT-5.4' },
       { id: 'gpt-4o', label: 'GPT-4o' },
       { id: 'gpt-4o-mini', label: 'GPT-4o mini' },
     ],
   },
   openrouter: {
-    label: 'OpenRouter',
+    label: OPENROUTER_GROUP_NAME,
     models: [
       { id: 'anthropic/claude-sonnet-4.5', label: 'Claude Sonnet 4.5' },
       { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5' },
@@ -42,6 +54,14 @@ const NATIVE_MODELS: Record<string, { label: string; models: { id: string; label
     label: 'Ollama',
     models: [{ id: 'llama3.2', label: 'Llama 3.2' }],
   },
+  // The extra OpenAI-compatible providers — one recommended model each as the
+  // static fallback; the live /models list provides the rest once a key exists.
+  ...Object.fromEntries(
+    NATIVE_MORE_PROVIDERS.map((p) => [
+      p.id as string,
+      { label: p.name, models: [{ id: p.recommendedModel, label: p.recommendedLabel }] },
+    ]),
+  ),
 }
 
 /** All native model groups (for the cascading agent-detail selector). */
@@ -84,14 +104,18 @@ const PROVIDER_ENV_VAR: Record<string, string> = {
   openai: 'OPENAI_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
   ollama: 'OLLAMA_BASE_URL',
+  ...Object.fromEntries(NATIVE_MORE_PROVIDERS.map((p) => [p.id as string, p.envVar])),
 }
 
 /** Turn a catalog model id into a full native execConfig override (provider + model +
- *  vault env-var), or null for an unknown/custom id (the caller keeps modelTier auto-resolve). */
+ *  vault env-var), or null for an unknown/custom id (the caller keeps modelTier auto-resolve).
+ *  A `vendor/model` id not in the curated map is treated as OpenRouter — OpenRouter ids
+ *  always contain a "/", unlike the bare Anthropic/OpenAI/Ollama ids — so a dynamically
+ *  fetched OpenRouter model still routes correctly. */
 export function nativeModelExec(
   id: string,
 ): { primaryProvider: string; primaryModel: string; envVar: string } | null {
-  const provider = MODEL_TO_PROVIDER[id]
+  const provider = MODEL_TO_PROVIDER[id] ?? (id.includes('/') ? 'openrouter' : undefined)
   if (!provider) return null
   return { primaryProvider: provider, primaryModel: id, envVar: PROVIDER_ENV_VAR[provider] ?? 'OLLAMA_BASE_URL' }
 }
