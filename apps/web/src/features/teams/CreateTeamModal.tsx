@@ -24,8 +24,14 @@ import {
 } from './runtimeSelection'
 import { NATIVE_LEADER_PROMPT, NATIVE_SPECIALIST_PROMPT, NATIVE_TEAM_TOOLS } from './nativeTeamPrompts'
 import { RuntimeSelect } from './RuntimeSelect'
-import { NATIVE_MODEL_GROUPS, nativeModelExec } from '@/lib/nativeModelCatalog'
-import { MODEL_GROUPS } from '@/lib/modelCatalog'
+import { nativeModelExec } from '@/lib/nativeModelCatalog'
+import { hermesModelExec } from '@/lib/hermesModelCatalog'
+import {
+  useHermesModelGroups,
+  useNativeModelGroups,
+  useOpenClawModelGroups,
+} from '@/lib/useOpenRouterModels'
+import { MODEL_GROUPS, type ModelGroup } from '@/lib/modelCatalog'
 import { Select } from '@/features/shared/Select'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
@@ -52,22 +58,34 @@ import { paletteFor } from '@/lib/resolveTeamBooColor'
 import { useTheme } from '@/features/theme/useTheme'
 
 // ─── Per-agent model picker ──────────────────────────────────────────────────
-// A per-agent model is supported by BOTH native (AgentConfig.primaryModel, applied
-// via execConfig at create) and OpenClaw (a per-agent override in openclaw.json's
-// agents.list[], applied via a config PATCH after create). The coding runtimes
-// (claude-code / codex / hermes) run the delegated task with their SDK defaults —
-// they're model-inert as team members — so they get no picker.
+// A per-agent model is supported by native (AgentConfig.primaryModel, applied via
+// execConfig at create), OpenClaw (a per-agent override in openclaw.json's
+// agents.list[], applied via a config PATCH after create), AND Hermes (a
+// `{ provider, model }` execConfig the server threads into `hermes chat -m …
+// --provider …`). Codex / Claude Code run the delegated task on their own
+// account / SDK default — model-inert as team members — so they get no picker.
 function runtimeHasModelPicker(sourceId: SelectableSourceId): boolean {
-  return sourceId === 'clawboo-native' || sourceId === 'openclaw'
+  return sourceId === 'clawboo-native' || sourceId === 'openclaw' || sourceId === 'hermes'
 }
 
 /** The model dropdown options for a runtime — its OWN catalog (native uses the
- *  provider-native ids; OpenClaw uses the routing ids), led by an empty
- *  "Recommended" that leaves the model unset (native → tier auto-resolve; OpenClaw
- *  → the global default). The provider suffix disambiguates same-named models
- *  across providers (e.g. GPT-4o under both OpenAI and OpenRouter). */
-function modelOptionsFor(sourceId: SelectableSourceId): { value: string; label: string }[] {
-  const groups = sourceId === 'clawboo-native' ? NATIVE_MODEL_GROUPS : MODEL_GROUPS
+ *  provider-native ids; OpenClaw uses the routing ids; Hermes its own
+ *  provider+model ids), led by an empty "Recommended" that leaves the model unset
+ *  (native → tier auto-resolve; OpenClaw → the global default; Hermes → the
+ *  key-derived default). The provider suffix disambiguates same-named models across
+ *  providers (e.g. GPT-4o under both OpenAI and OpenRouter). */
+function modelOptionsFor(
+  sourceId: SelectableSourceId,
+  nativeGroups: ModelGroup[],
+  openclawGroups: ModelGroup[],
+  hermesGroups: ModelGroup[],
+): { value: string; label: string }[] {
+  const groups =
+    sourceId === 'clawboo-native'
+      ? nativeGroups
+      : sourceId === 'hermes'
+        ? hermesGroups
+        : openclawGroups
   return [
     { value: '', label: 'Recommended' },
     ...groups.flatMap((g) => g.models.map((m) => ({ value: m.id, label: `${m.label} · ${g.provider}` }))),
@@ -85,12 +103,21 @@ type DeployProgress = { current: number; total: number; label: string }
 interface CreateTeamModalProps {
   isOpen: boolean
   onClose: () => void
-  onCreated: () => void
+  /** Called after the team is created; carries the new team's id (onboarding
+   *  uses it to land the user in that team). */
+  onCreated: (teamId?: string) => void
   /** When provided, skip the "pick" step and go directly to "customize" with this profile. */
   initialProfile?: ProfileLike | null
   /** When true (and no `initialProfile`), skip the pick step and open directly on a
    *  blank "start from scratch" customize step. */
   startBlank?: boolean
+  /** Onboarding: after the team is created, pre-satisfy the "Know Your Team"
+   *  gate so a first-run user lands straight in the team space (matching the
+   *  old auto-seed behavior). Off by default (normal team creation runs the gate). */
+  presatisfyOnboardingGate?: boolean
+  /** Whether the pick step offers "Start from scratch". Defaults to true;
+   *  onboarding disables it (a blank team would strand the first-run user). */
+  allowStartFromScratch?: boolean
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -101,8 +128,15 @@ export function CreateTeamModal({
   onCreated,
   initialProfile,
   startBlank,
+  presatisfyOnboardingGate = false,
+  allowStartFromScratch = true,
 }: CreateTeamModalProps) {
   const client = useConnectionStore((s) => s.client)
+  // Native groups with the OpenRouter list fetched live — feeds the per-agent model picker.
+  const nativeModelGroups = useNativeModelGroups()
+  // OpenClaw groups with the same live OpenRouter list (routing-id format).
+  const openclawModelGroups = useOpenClawModelGroups(MODEL_GROUPS)
+  const hermesModelGroups = useHermesModelGroups()
   // "OpenClaw available" requires a LIVE Gateway client, not just a 'connected' status:
   // native mode (`enterNativeMode`) sets status='connected' with client=null, so a bare
   // status check would falsely offer OpenClaw (and default marketplace rows to it) with no
@@ -409,6 +443,20 @@ export function CreateTeamModal({
       })
       useTeamStore.getState().selectTeam(team.id)
 
+      // Onboarding: pre-satisfy the "Know Your Team" gate so a first-run user
+      // lands straight in the team space (matches the old auto-seed behavior).
+      if (presatisfyOnboardingGate) {
+        try {
+          await fetch(`/api/teams/${team.id}/onboarding`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentsIntroduced: true, userIntroduced: true, userIntroText: '' }),
+          })
+        } catch {
+          // best-effort — the gate will just run once if this fails
+        }
+      }
+
       if (!selectedProfile) {
         // Empty team — done
         useToastStore
@@ -416,7 +464,7 @@ export function CreateTeamModal({
           .addToast({ type: 'success', message: `Team "${finalTeamName}" created` })
         reset()
         onClose()
-        onCreated()
+        onCreated(team.id)
         return
       }
 
@@ -526,8 +574,16 @@ export function CreateTeamModal({
             agentId = await createAgent(finalAgentName, files)
           } else {
             // A coding-runtime member: the record exists so the server engine can
-            // run it; its driver ignores execConfig/files and runs the delegated task.
-            agentId = await createAgent(finalAgentName, files, sourceId)
+            // run it. Hermes takes a per-agent model (the picker) stored as an
+            // execConfig `{ provider, model }` — serverDeliver threads it so the run
+            // is `hermes chat -m <model> --provider <provider>`; without a pick it
+            // uses the key-derived default. Codex / Claude Code run on their own
+            // account / SDK default (no picker) and ignore execConfig.
+            const codingExec =
+              sourceId === 'hermes' && agentModels[agent.id]
+                ? hermesModelExec(agentModels[agent.id]!)
+                : null
+            agentId = await createAgent(finalAgentName, files, sourceId, codingExec ?? undefined)
           }
         } catch {
           // One source's failure (e.g. an OpenClaw 503, or a mid-deploy hiccup)
@@ -705,7 +761,7 @@ export function CreateTeamModal({
       setTimeout(() => {
         reset()
         onClose()
-        onCreated()
+        onCreated(team.id)
       }, 800)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -722,6 +778,7 @@ export function CreateTeamModal({
     pendingTeamId,
     agentSourceIdFor,
     effectiveLeaderAgent,
+    presatisfyOnboardingGate,
     reset,
     onClose,
     onCreated,
@@ -821,6 +878,7 @@ export function CreateTeamModal({
                     onSelectTeam={handlePickProfile}
                     onDetails={setDetailTemplate}
                     onStartFromScratch={handlePickEmpty}
+                    showStartFromScratch={allowStartFromScratch}
                     onClearFilters={() => {
                       setPickSearch('')
                       setPickCategory('all')
@@ -972,13 +1030,15 @@ export function CreateTeamModal({
                                       className="shrink-0"
                                       style={{ width: 184 }}
                                       menuWidth={252}
+                                      searchable
+                                      searchPlaceholder="Search models…"
                                       data-testid="member-model-trigger"
                                       aria-label={`Model for ${agent.name}`}
                                       value={agentModels[agent.id] ?? ''}
                                       onChange={(m) =>
                                         setAgentModels((prev) => ({ ...prev, [agent.id]: m }))
                                       }
-                                      options={modelOptionsFor(value)}
+                                      options={modelOptionsFor(value, nativeModelGroups, openclawModelGroups, hermesModelGroups)}
                                     />
                                   )}
                                 </div>
@@ -1006,6 +1066,7 @@ export function CreateTeamModal({
                 <div className="border-t border-border px-6 py-4">
                   <button
                     type="button"
+                    data-testid="create-team-deploy"
                     onClick={() => void handleConfirmCustomize()}
                     disabled={!teamName.trim()}
                     className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl text-[14px] font-semibold text-primary-foreground transition active:scale-[0.98] hover:brightness-110 disabled:pointer-events-none disabled:opacity-45"

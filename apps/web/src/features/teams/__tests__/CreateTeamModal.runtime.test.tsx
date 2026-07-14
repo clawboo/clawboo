@@ -411,6 +411,38 @@ describe('CreateTeamModal deploy', () => {
     expect(exec.envVar).toBe('ANTHROPIC_API_KEY')
   })
 
+  it('hermes member: a picked model spreads into the createAgent execConfig as { provider, model }', async () => {
+    // Hermes must be READY so its runtime option is selectable (default is not-installed).
+    const runtimesReady = RUNTIMES.map((r) =>
+      r.id === 'hermes' ? { ...r, connectionState: 'ready', hasCredential: true } : r,
+    )
+    // fetchRuntimes reads `body.runtimes` (the real server returns { runtimes, available });
+    // a bare array leaves coding-runtime statuses empty → hermes would read as disabled.
+    server.use(
+      http.get('/api/runtimes', () => HttpResponse.json({ runtimes: runtimesReady })),
+      ...baseHandlers(),
+    )
+    renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+
+    // Switch the Coder (row 1) to Hermes → its model picker appears (Hermes now has one).
+    await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[1])
+    await userEvent.click(screen.getByRole('option', { name: /hermes/i }))
+    await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
+
+    // Pick a Hermes OpenRouter model (the provider suffix disambiguates the label).
+    await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
+    await userEvent.click(screen.getByRole('option', { name: /Claude 3\.5 Haiku · OpenRouter/i }))
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
+
+    // The Coder was created on the hermes source with the picked { provider, model }.
+    const coderCall = createAgentMock.mock.calls.find((c) => c[0] === 'Coder')!
+    expect(coderCall[2]).toBe('hermes')
+    expect(coderCall[3]).toEqual({ provider: 'openrouter', model: 'anthropic/claude-3.5-haiku' })
+  })
+
   it('a team with no genuine leadership role deploys leaderless (no badge, leaderAgentId null, all specialists)', async () => {
     let patchBody: Record<string, unknown> | undefined
     server.use(...baseHandlers(undefined, (b) => (patchBody = b as Record<string, unknown>)))
