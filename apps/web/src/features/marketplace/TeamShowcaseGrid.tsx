@@ -70,6 +70,10 @@ export interface TeamShowcaseGridProps {
   onStartFromScratch: () => void
   /** Shown as the empty-state action when no teams match the filters. */
   onClearFilters?: () => void
+  /** Whether to render the "Start from scratch" (blank team) card. Defaults to
+   *  true; onboarding hides it (a blank team deploys no agents, which would
+   *  leave the first-run user with an empty, leaderless workspace). */
+  showStartFromScratch?: boolean
 }
 
 export function TeamShowcaseGrid({
@@ -78,6 +82,7 @@ export function TeamShowcaseGrid({
   onDetails,
   onStartFromScratch,
   onClearFilters,
+  showStartFromScratch = true,
 }: TeamShowcaseGridProps) {
   if (teams.length === 0) {
     return (
@@ -107,6 +112,7 @@ export function TeamShowcaseGrid({
       />
       {/* Start from scratch — the blank-team path, sitting in the one canonical
           team showcase (shown in both the Marketplace and the first-run modal). */}
+      {showStartFromScratch && (
       <button
         type="button"
         data-testid="team-start-from-scratch"
@@ -123,6 +129,7 @@ export function TeamShowcaseGrid({
           </div>
         </div>
       </button>
+      )}
       {teams.map((profile) => (
         <TeamTemplateCard
           key={profile.id}

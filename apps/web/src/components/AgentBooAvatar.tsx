@@ -16,7 +16,7 @@ import { pickBooColor } from '@/lib/resolveTeamBooColor'
  * Returns `undefined` for Boo Zero / teamless / unknown agents, so the avatar
  * keeps its reserved red or hashed fallback tint.
  */
-function useTeamBooColor(agentId: string, isBooZero: boolean): string | undefined {
+export function useTeamBooColor(agentId: string, isBooZero: boolean): string | undefined {
   const { resolvedTheme } = useTheme()
   const booZeroId = useBooZeroStore((s) => s.booZeroAgentId)
   const teamId = useFleetStore((s) => s.agents.find((a) => a.id === agentId)?.teamId ?? null)

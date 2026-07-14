@@ -11,7 +11,8 @@
 // The API is unchanged from the old native wrapper — pass `value` + `onChange`
 // and either an `options` array OR raw `<option>` children (whose content may be
 // any ReactNode, e.g. an emoji + name). Use this anywhere a vanilla `<select>`
-// would otherwise render the OS-default listbox.
+// would otherwise render the OS-default listbox. Pass `searchable` for long lists
+// (e.g. the ~hundreds of live OpenRouter models) to add a sticky filter box.
 
 import {
   Children,
@@ -19,12 +20,15 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
 import type { CSSProperties, ReactElement, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
+
+import { SearchInput } from './SearchInput'
 
 export type SelectSize = 'sm' | 'md'
 
@@ -53,6 +57,10 @@ export interface SelectProps {
    *  value when the trigger is compact but the option labels are long, so the menu
    *  stays readable (it's clamped to the viewport so it never overflows the edge). */
   menuWidth?: number
+  /** Render a sticky search box that filters the options. For long lists. */
+  searchable?: boolean
+  /** Placeholder for the search box (when `searchable`). */
+  searchPlaceholder?: string
   /** Raw `<option>` elements (labels may be any ReactNode). */
   children?: ReactNode
   className?: string
@@ -106,6 +114,8 @@ export function Select({
   onChange,
   size = 'md',
   menuWidth,
+  searchable = false,
+  searchPlaceholder = 'Search…',
   children,
   className,
   style,
@@ -120,14 +130,36 @@ export function Select({
   const [open, setOpen] = useState(false)
   const [focused, setFocused] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
+  const [search, setSearch] = useState('')
   const [pos, setPos] = useState<MenuPosition | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
+  // The rows the popover renders — filtered by the search box when `searchable`.
+  const filtered = useMemo(() => {
+    const q = searchable ? search.trim().toLowerCase() : ''
+    if (!q) return normalized
+    return normalized.filter(
+      (o) =>
+        o.value.toLowerCase().includes(q) ||
+        (typeof o.label === 'string' && o.label.toLowerCase().includes(q)),
+    )
+  }, [normalized, search, searchable])
+
+  // Refs so the highlight effect can read the latest filtered list + value WITHOUT
+  // depending on their identity — an inline-array / `<option>`-children consumer
+  // re-parses a NEW array every render, which would otherwise reset the highlight.
+  const filteredRef = useRef(filtered)
+  filteredRef.current = filtered
+  const valueRef = useRef(value)
+  valueRef.current = value
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([])
+
   const selectedIndex = normalized.findIndex((o) => o.value === value)
   const selected = selectedIndex >= 0 ? normalized[selectedIndex] : undefined
   // Mirror the native <select>, which shows the first option when the value
-  // matches none — never a blank trigger.
+  // matches none — never a blank trigger. (Always from the FULL list, so the
+  // trigger keeps showing the selection even while the list is filtered.)
   const displayLabel = selected?.label ?? normalized[0]?.label ?? ''
 
   const computePosition = useCallback(() => {
@@ -184,10 +216,30 @@ export function Select({
     }
   }, [open, computePosition])
 
-  // Sync the keyboard highlight to the current value each time we open.
+  // Reset the search box each time the menu closes.
   useEffect(() => {
-    if (open) setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0)
-  }, [open, selectedIndex])
+    if (!open) setSearch('')
+  }, [open])
+
+  // Set the initial highlight when the menu OPENS or the search query changes —
+  // deliberately NOT on every render (depending on `filtered`'s identity would snap
+  // the highlight back to the selected row on any re-render, breaking arrow / hover
+  // for inline-array and `<option>`-children consumers).
+  useEffect(() => {
+    if (!open) return
+    if (searchable && search.trim()) {
+      setActiveIndex(0)
+      return
+    }
+    const idx = filteredRef.current.findIndex((o) => o.value === valueRef.current)
+    setActiveIndex(idx >= 0 ? idx : 0)
+  }, [open, searchable, search])
+
+  // Keep the keyboard-highlighted row visible in the scroll container (long lists).
+  useEffect(() => {
+    if (!open) return
+    optionRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest' })
+  }, [activeIndex, open])
 
   const choose = useCallback(
     (opt: NormalizedOption) => {
@@ -198,18 +250,41 @@ export function Select({
     [onChange],
   )
 
-  // Skip disabled options when arrowing.
+  // Skip disabled options when arrowing (over the currently-visible `filtered` list).
   const step = useCallback(
     (from: number, dir: 1 | -1) => {
       let i = from
-      for (let n = 0; n < normalized.length; n++) {
-        i = Math.min(Math.max(i + dir, 0), normalized.length - 1)
-        if (!normalized[i]?.disabled) return i
-        if (i === 0 || i === normalized.length - 1) break
+      for (let n = 0; n < filtered.length; n++) {
+        i = Math.min(Math.max(i + dir, 0), filtered.length - 1)
+        if (!filtered[i]?.disabled) return i
+        if (i === 0 || i === filtered.length - 1) break
       }
       return from
     },
-    [normalized],
+    [filtered],
+  )
+
+  // Shared arrow/enter/escape navigation — used by the trigger (non-searchable)
+  // and the search box (searchable), both operating on the `filtered` list.
+  const navKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setActiveIndex((i) => step(i, 1))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setActiveIndex((i) => step(i, -1))
+      } else if (e.key === 'Enter') {
+        e.preventDefault()
+        const opt = filtered[activeIndex]
+        if (opt) choose(opt)
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        setOpen(false)
+      }
+    },
+    [step, filtered, activeIndex, choose],
   )
 
   const onTriggerKeyDown = useCallback(
@@ -221,19 +296,20 @@ export function Select({
         return
       }
       if (!open) return
-      if (e.key === 'ArrowDown') {
+      // When searchable, the search box owns keyboard nav (it has focus on open).
+      if (searchable) return
+      // Space selects the highlighted option (non-searchable only — in the search
+      // box Space must type a space). preventDefault stops the native <button>
+      // activation that would otherwise just toggle the open menu closed.
+      if (e.key === ' ') {
         e.preventDefault()
-        setActiveIndex((i) => step(i, 1))
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setActiveIndex((i) => step(i, -1))
-      } else if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault()
-        const opt = normalized[activeIndex]
+        const opt = filtered[activeIndex]
         if (opt) choose(opt)
+        return
       }
+      navKeyDown(e)
     },
-    [open, disabled, normalized, activeIndex, choose, step],
+    [open, disabled, searchable, navKeyDown, filtered, activeIndex, choose],
   )
 
   return (
@@ -327,58 +403,90 @@ export function Select({
               boxShadow: 'var(--shadow-floating)',
             }}
           >
-            {normalized.map((opt, idx) => {
-              const isSelected = opt.value === value
-              const isActive = idx === activeIndex
-              return (
-                <button
-                  key={`${opt.value}-${idx}`}
-                  type="button"
-                  role="option"
-                  aria-selected={isSelected}
-                  aria-disabled={opt.disabled || undefined}
-                  onClick={() => choose(opt)}
-                  onMouseEnter={() => !opt.disabled && setActiveIndex(idx)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    width: '100%',
-                    padding: '7px 12px',
-                    fontSize: dims.fontSize,
-                    fontFamily: 'var(--font-body)',
-                    textAlign: 'left',
-                    border: 'none',
-                    cursor: opt.disabled ? 'not-allowed' : 'pointer',
-                    color: opt.disabled ? 'rgb(var(--foreground-rgb) / 0.4)' : 'var(--foreground)',
-                    background: isSelected
-                      ? 'rgb(var(--primary-rgb) / 0.07)'
-                      : isActive && !opt.disabled
-                        ? 'rgb(var(--foreground-rgb) / 0.06)'
-                        : 'transparent',
-                    transition: 'background var(--motion-fast)',
-                  }}
-                >
-                  <span
+            {searchable && (
+              <div
+                className="bg-popover"
+                style={{ position: 'sticky', top: 0, zIndex: 1, padding: '2px 8px 6px' }}
+              >
+                <SearchInput
+                  size="sm"
+                  value={search}
+                  onChange={setSearch}
+                  placeholder={searchPlaceholder}
+                  autoFocus
+                  onKeyDown={navKeyDown}
+                  aria-label={ariaLabel ? `Search ${ariaLabel}` : 'Search options'}
+                />
+              </div>
+            )}
+
+            {filtered.length === 0 ? (
+              <div
+                style={{
+                  padding: '9px 12px',
+                  fontSize: dims.fontSize,
+                  color: 'rgb(var(--foreground-rgb) / 0.45)',
+                }}
+              >
+                No matches
+              </div>
+            ) : (
+              filtered.map((opt, idx) => {
+                const isSelected = opt.value === value
+                const isActive = idx === activeIndex
+                return (
+                  <button
+                    key={`${opt.value}-${idx}`}
+                    ref={(el) => {
+                      optionRefs.current[idx] = el
+                    }}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    aria-disabled={opt.disabled || undefined}
+                    onClick={() => choose(opt)}
+                    onMouseEnter={() => !opt.disabled && setActiveIndex(idx)}
                     style={{
-                      flex: 1,
-                      minWidth: 0,
-                      fontWeight: isSelected ? 600 : 400,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      padding: '7px 12px',
+                      fontSize: dims.fontSize,
+                      fontFamily: 'var(--font-body)',
+                      textAlign: 'left',
+                      border: 'none',
+                      cursor: opt.disabled ? 'not-allowed' : 'pointer',
+                      color: opt.disabled ? 'rgb(var(--foreground-rgb) / 0.4)' : 'var(--foreground)',
+                      background: isSelected
+                        ? 'rgb(var(--primary-rgb) / 0.07)'
+                        : isActive && !opt.disabled
+                          ? 'rgb(var(--foreground-rgb) / 0.06)'
+                          : 'transparent',
+                      transition: 'background var(--motion-fast)',
                     }}
                   >
-                    {opt.label}
-                  </span>
-                  {isSelected && (
-                    <Check
-                      style={{ width: 14, height: 14, color: 'var(--primary)', flexShrink: 0 }}
-                    />
-                  )}
-                </button>
-              )
-            })}
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontWeight: isSelected ? 600 : 400,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {opt.label}
+                    </span>
+                    {isSelected && (
+                      <Check
+                        style={{ width: 14, height: 14, color: 'var(--primary)', flexShrink: 0 }}
+                      />
+                    )}
+                  </button>
+                )
+              })
+            )}
           </div>,
           document.body,
         )}

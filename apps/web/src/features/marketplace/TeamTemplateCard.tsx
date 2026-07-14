@@ -134,7 +134,12 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
         )}
 
         {/* Deploy button */}
-        <Button variant="primary" size="sm" onClick={() => onDeploy(profile)}>
+        <Button
+          variant="primary"
+          size="sm"
+          data-testid="team-card-deploy"
+          onClick={() => onDeploy(profile)}
+        >
           Deploy
         </Button>
       </div>
