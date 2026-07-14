@@ -8,10 +8,12 @@ import {
   FileText,
   Globe,
   MessageSquare,
+  Sparkles,
   Wrench,
   Zap,
   type LucideIcon,
 } from 'lucide-react'
+import { PROVIDER_BRAND, ProviderGlyph } from '@/features/onboarding/ProviderIcon'
 import { AgentPickerDropdown } from '@/features/marketplace/AgentPickerDropdown'
 import { installSkillForAgent } from '../operations/installSkill'
 import { useGraphStore } from '../store'
@@ -75,16 +77,38 @@ export const SkillNode = memo(function SkillNode({
   data,
   dragging,
 }: NodeProps<Node<SkillNodeData, 'skill'>>) {
-  const { name, category, description, isVisible, isLeadership, available } = data
+  const { name, category, description, isVisible, isLeadership, isModel, providerId, available } =
+    data
   // Capability availability → greyed (opacity + grayscale), matching the
   // dashboard + the MCPToolsSection treatment. `undefined` = available.
   const greyed = available === false
   const floatRef = useFloatingMotion(nodeId, 'skill', dragging)
+  // The model orbital tints itself by its provider brand (mono brands →
+  // foreground; unknown provider → neutral) and renders the provider glyph in
+  // place of a lucide icon (see the icon render below). Its `Icon` fallback is a
+  // generic model glyph, used only when the provider is unknown.
+  const modelBrand = isModel && providerId ? PROVIDER_BRAND[providerId] : null
+  const modelColor = modelBrand
+    ? modelBrand.color === 'currentColor'
+      ? 'var(--foreground)'
+      : modelBrand.color
+    : 'var(--category-other)'
   // Leadership orbital reads its visuals from a dedicated constant — the
   // `category` field is still set on the data (defaulted to `'other'` in
   // `useGraphData`) so any downstream consumer that hasn't been taught
   // about `isLeadership` falls back gracefully.
-  const { color, Icon } = isLeadership ? LEADERSHIP_VISUAL : (CATEGORY[category] ?? CATEGORY.other)
+  const { color, Icon } = isModel
+    ? { color: modelColor, Icon: Sparkles }
+    : isLeadership
+      ? LEADERSHIP_VISUAL
+      : (CATEGORY[category] ?? CATEGORY.other)
+  // The Leadership + Model orbitals are not installable capabilities — hide the
+  // Install button, its picker, AND the drag-to-install source handle (dragging
+  // one onto a Boo would otherwise write a bogus skill named after it).
+  const showInstall = !isLeadership && !isModel
+  // The Model (LLM icon) orbital renders 50% larger than a regular skill so the
+  // provider logo reads clearly.
+  const circle = isModel ? Math.round(CIRCLE * 1.5) : CIRCLE
   const [showPicker, setShowPicker] = useState(false)
 
   // Hover cascade — dim when another node is hovered
@@ -116,8 +140,8 @@ export const SkillNode = memo(function SkillNode({
           title={greyed ? `${description ?? name} — unavailable` : (description ?? name)}
           className="group"
           style={{
-            width: CIRCLE,
-            height: CIRCLE,
+            width: circle,
+            height: circle,
             position: 'relative',
             overflow: 'visible',
             opacity: greyed ? (isHighlighted ? 0.5 : 0.16) : isHighlighted ? 1 : 0.22,
@@ -125,31 +149,43 @@ export const SkillNode = memo(function SkillNode({
             transition: 'opacity 0.2s ease, filter 0.2s ease',
           }}
         >
-          {/* Filled circle. `color-mix(in srgb, ...)` lets us compose
-              opacity onto a CSS var (--category-*) the same way `${hex}18`
-              did with raw hex — supported in every modern engine since 2023. */}
+          {/* Filled circle. Skills/Leadership use a faint tint; the Model
+              orbital renders like a REAL provider logo tile — an OPAQUE
+              brand-tinted disc (surface-based so it isn't transparent) with a
+              solid brand-coloured ring and the brand glyph in its true colour. */}
           <div
             style={{
-              width: CIRCLE,
-              height: CIRCLE,
+              width: circle,
+              height: circle,
               borderRadius: '50%',
-              background: `color-mix(in srgb, ${color} 9%, transparent)`,
-              border: `2px solid color-mix(in srgb, ${color} 33%, transparent)`,
+              background: isModel
+                ? `color-mix(in srgb, ${color} 24%, var(--surface))`
+                : `color-mix(in srgb, ${color} 9%, transparent)`,
+              border: isModel
+                ? `1.5px solid ${color}`
+                : `2px solid color-mix(in srgb, ${color} 33%, transparent)`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: `0 0 14px color-mix(in srgb, ${color} 16%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.06)`,
+              boxShadow: isModel
+                ? `0 2px 8px color-mix(in srgb, ${color} 28%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.08)`
+                : `0 0 14px color-mix(in srgb, ${color} 16%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.06)`,
             }}
           >
-            <Icon size={16} strokeWidth={1.75} aria-hidden style={{ color, userSelect: 'none' }} />
+            {isModel && providerId ? (
+              <span style={{ color, display: 'inline-flex' }} aria-hidden>
+                <ProviderGlyph id={providerId} size={33} />
+              </span>
+            ) : (
+              <Icon size={16} strokeWidth={1.75} aria-hidden style={{ color, userSelect: 'none' }} />
+            )}
           </div>
 
-          {/* Install button — appears on hover. Hidden for the Leadership
-              orbital: it's reserved for Boo Zero and cannot be installed on
-              other agents (see `SkillNodeData.isLeadership`). Suppressing
+          {/* Install button — appears on hover. Hidden for the Leadership +
+              Model orbitals: they're not installable capabilities. Suppressing
               the button removes the action AND avoids opening a no-op
               picker dropdown. */}
-          {!isLeadership && (
+          {showInstall && (
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -177,13 +213,13 @@ export const SkillNode = memo(function SkillNode({
           )}
 
           {/* Agent picker dropdown — same suppression rule as the button. */}
-          {!isLeadership && showPicker && (
+          {showInstall && showPicker && (
             <AgentPickerDropdown
               onSelect={(agentId, agentName) => {
                 void installSkillForAgent(name, agentId, agentName)
               }}
               onClose={() => setShowPicker(false)}
-              style={{ top: CIRCLE + 4, left: '50%', transform: 'translateX(-50%)' }}
+              style={{ top: circle + 4, left: '50%', transform: 'translateX(-50%)' }}
             />
           )}
 
@@ -191,14 +227,20 @@ export const SkillNode = memo(function SkillNode({
           <div
             style={{
               position: 'absolute',
-              top: CIRCLE + 6,
+              top: circle + 6,
               left: '50%',
               transform: 'translateX(-50%)',
               fontSize: 11,
               fontWeight: 500,
-              color: color,
+              // The model label is free-standing text on the canvas — use the
+              // theme foreground (not the raw brand hex, which is low-contrast
+              // for pale accents like OpenRouter/HuggingFace on the light
+              // canvas). The brand colour stays on the disc bg/border/glyph.
+              color: isModel ? 'var(--foreground)' : color,
               whiteSpace: 'nowrap',
-              maxWidth: 84,
+              // Model labels ("Claude Sonnet 4.6") are longer than skill names —
+              // give them more room before the ellipsis.
+              maxWidth: isModel ? 124 : 84,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               textAlign: 'center',
@@ -208,25 +250,32 @@ export const SkillNode = memo(function SkillNode({
             {name}
           </div>
 
-          {/* Left handle — target for incoming edges from BooNodes */}
-          <Handle
-            type="target"
-            position={Position.Left}
-            style={{
-              ...handleStyle,
-              borderColor: `color-mix(in srgb, ${color} 33%, transparent)`,
-            }}
-          />
-          {/* Right handle — source for drag-to-install onto BooNodes */}
-          <Handle
-            type="source"
-            id="install"
-            position={Position.Right}
-            style={{
-              ...handleStyle,
-              borderColor: `color-mix(in srgb, ${color} 33%, transparent)`,
-            }}
-          />
+          {/* Left handle — target for incoming edges from BooNodes. Hidden for
+              the non-installable Leadership + Model orbitals. */}
+          {showInstall && (
+            <Handle
+              type="target"
+              position={Position.Left}
+              style={{
+                ...handleStyle,
+                borderColor: `color-mix(in srgb, ${color} 33%, transparent)`,
+              }}
+            />
+          )}
+          {/* Right handle — source for drag-to-install onto BooNodes. Hidden for
+              Leadership + Model: dragging one onto a Boo would install a bogus
+              skill named after it. */}
+          {showInstall && (
+            <Handle
+              type="source"
+              id="install"
+              position={Position.Right}
+              style={{
+                ...handleStyle,
+                borderColor: `color-mix(in srgb, ${color} 33%, transparent)`,
+              }}
+            />
+          )}
 
           {/* Center handle — invisible, for edge path routing only */}
           <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />

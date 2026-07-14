@@ -1,5 +1,6 @@
 import type { Node, Edge } from '@xyflow/react'
 import type { AgentStatus } from '@clawboo/gateway-client'
+import type { ProviderId } from '@/features/onboarding/ProviderIcon'
 
 // ─── Skill category ───────────────────────────────────────────────────────────
 
@@ -25,6 +26,15 @@ export interface BooNodeData extends Record<string, unknown> {
   name: string
   status: AgentStatus
   model: string | null
+  /**
+   * Which runtime backs this agent (`clawboo-native` | `openclaw` | `claude-code`
+   * | `codex` | `hermes`). `null` = the OpenClaw default (a legacy / Gateway agent
+   * whose runtime was never stamped). Drives the runtime brand badge overlaid on
+   * the Boo's avatar in the graph so the runtime is legible at a glance. Static
+   * per agent id (fixed at creation), so it rides the structural rebuild the same
+   * way `model` does — never added to `agentStructureKey`.
+   */
+  runtime: string | null
   isStreaming: boolean
   edgeCount?: number
   teamId: string | null
@@ -72,6 +82,17 @@ export interface SkillNodeData extends Record<string, unknown> {
    * the dashboard + the MCPToolsSection treatment. Defaults to available.
    */
   available?: boolean
+  /**
+   * When `true`, this synthesized orbital represents the agent's CURRENT LLM
+   * MODEL (not a capability). `SkillNode` renders the provider brand glyph +
+   * model label and hides the Install affordance (like `isLeadership`). `name`
+   * carries the model display label; `providerId` picks the brand icon (null →
+   * a generic model glyph). Synthesized per-Boo in `useGraphData` for every
+   * agent with a known model; NOT a capability record. Prefix `clawboo-model-`.
+   */
+  isModel?: boolean
+  /** The model's provider brand (for the ProviderIcon glyph); null = unknown → generic glyph. */
+  providerId?: ProviderId | null
 }
 
 export interface ResourceNodeData extends Record<string, unknown> {
@@ -113,6 +134,17 @@ export type SkillNode = Node<SkillNodeData, 'skill'>
 export type ResourceNode = Node<ResourceNodeData, 'resource'>
 export type TeamRootNode = Node<TeamRootNodeData, 'team-root'>
 export type GraphNode = BooNode | SkillNode | ResourceNode | TeamRootNode
+
+/**
+ * A "real" capability skill node — a `'skill'` node that is NOT one of the
+ * synthesized graph-layer orbitals (Leadership / Model). Used for the header
+ * skill COUNT so those synthetic orbitals don't inflate it.
+ */
+export function isCapabilitySkillNode(node: GraphNode): boolean {
+  if (node.type !== 'skill') return false
+  const d = node.data
+  return !d.isModel && !d.isLeadership
+}
 export type GraphEdge = Edge<Record<string, unknown>>
 
 // ─── Parser output types ──────────────────────────────────────────────────────

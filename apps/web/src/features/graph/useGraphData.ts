@@ -8,6 +8,7 @@ import { useGraphStore } from './store'
 import { parseAgentsMd } from './parsers/parseAgentsMd'
 import { computeSpanningTree } from './computeSpanningTree'
 import { resolveTeamInternalLead } from '@/lib/resolveTeamLeader'
+import { resolveModelProvider } from '@/lib/modelProvider'
 import { readAgentFile } from '@clawboo/control-client'
 import { fetchCapabilities, groupAgentCapabilities } from '@/lib/capabilitiesClient'
 import type { CapabilityRecord } from '@clawboo/capability-registry'
@@ -395,6 +396,7 @@ export function buildGraphElements(
         name: agent.name,
         status: agent.status ?? 'idle',
         model: agent.model,
+        runtime: agent.runtime ?? null,
         isStreaming: agent.status === 'running',
         teamId: agent.teamId ?? null,
         ...(team && {
@@ -417,6 +419,10 @@ export function buildGraphElements(
         name: booZeroAgent.name,
         status: booZeroAgent.status ?? 'idle',
         model: booZeroAgent.model,
+        // The synthesized Boo Zero carries its ACTUAL runtime (native-first →
+        // 'clawboo-native', pure-OpenClaw → 'openclaw'), not a hardcode — else a
+        // native Boo Zero's badge would wrongly resolve to the OpenClaw mark.
+        runtime: booZeroAgent.runtime ?? null,
         isStreaming: booZeroAgent.status === 'running',
         // Boo Zero stays `teamId: null` even in a team-selected view — the
         // `TeamHaloLayer` reads `data.teamId` for grouping and intentionally
@@ -466,6 +472,48 @@ export function buildGraphElements(
     })
     skillEdges.push({
       id: `skilledge-${agentId}-clawboo-leadership`,
+      type: 'skill',
+      source: `boo-${agentId}`,
+      sourceHandle: 'center',
+      target: nodeId,
+      targetHandle: 'center',
+      data: {},
+    })
+  }
+
+  // ── Per-Boo "model" orbital ──────────────────────────────────────────────
+  //
+  // Synthesized for every Boo whose current LLM model is known — a normal
+  // SkillNode (so it inherits inner-ring placement, peacock expand, physics,
+  // fitView, minimap for free, exactly like the Leadership orbital) that reads
+  // the `isModel` flag to render the provider brand glyph + model label and
+  // hide the Install affordance. NOT a capability record — a graph-layer
+  // attribute with the reserved `clawboo-model-` id prefix so it can never
+  // collide with a real capability. Agents whose model clawboo doesn't know
+  // (codex / claude-code run on their account/SDK default → `data.model` null)
+  // get NO model orbital.
+  for (const booNode of booNodes) {
+    const data = booNode.data as BooNodeData
+    if (!data.model) continue
+    const agentId = data.agentId
+    const { providerId, label } = resolveModelProvider(data.model, data.runtime)
+    const nodeId = `skill-${agentId}-clawboo-model`
+    skillNodes.push({
+      id: nodeId,
+      type: 'skill' as const,
+      data: {
+        skillId: 'clawboo-model',
+        name: label,
+        category: 'other',
+        description: `Current model: ${label}`,
+        agentIds: [agentId],
+        isModel: true,
+        providerId,
+      } satisfies SkillNodeData,
+      position: { x: 0, y: 0 },
+    })
+    skillEdges.push({
+      id: `skilledge-${agentId}-clawboo-model`,
       type: 'skill',
       source: `boo-${agentId}`,
       sourceHandle: 'center',
