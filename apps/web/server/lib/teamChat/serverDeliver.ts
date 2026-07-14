@@ -20,7 +20,15 @@
 
 import { mkdir } from 'node:fs/promises'
 
-import { agents, getAncestors, getSetting, recordSpend, setSetting, type ClawbooDb } from '@clawboo/db'
+import {
+  agents,
+  getAncestors,
+  getSetting,
+  recordSpend,
+  setSetting,
+  updateTaskFields,
+  type ClawbooDb,
+} from '@clawboo/db'
 import {
   resolveRuntimeIntegration,
   type RunHandle,
@@ -105,6 +113,22 @@ function buildApiKeyEnv(runtime: string): Record<string, string> {
     if (key) env[v] = key
   }
   return env
+}
+
+/** Parse a coding-runtime agent's execConfig for an optional per-agent model +
+ *  provider (the Hermes model picker stores `{ model, provider }`). Never throws;
+ *  returns null when absent so the driver keeps its key-derived default. */
+function parseCodingModelConfig(raw: string | null): { model?: string; provider?: string } | null {
+  if (!raw) return null
+  try {
+    const o = JSON.parse(raw) as Record<string, unknown>
+    const model = typeof o['model'] === 'string' && o['model'] ? o['model'] : undefined
+    const provider = typeof o['provider'] === 'string' && o['provider'] ? o['provider'] : undefined
+    if (!model && !provider) return null
+    return { ...(model ? { model } : {}), ...(provider ? { provider } : {}) }
+  } catch {
+    return null
+  }
 }
 
 /** The "mission" budget scope = the root of the delegation tree (a top-level task
@@ -211,7 +235,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     obs: {
       runtime: string | null
       message: string
-      estimateCostOnDone: boolean
+      /** Char length of the injected team context (roster / rules / user intro) — folded
+       *  into the input-token ESTIMATE so an OpenClaw / no-USD run's cost reflects its
+       *  real prompt size, not just the short task text. */
+      contextChars: number
       /** The native leader session-resume pointer key to update on the terminal, or
        *  null when this run is not an eligible native leader/user-facing team turn. */
       resumePointerKey: string | null
@@ -223,11 +250,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // semantics). The committed turn (persistTurn on `done`) stays the source of
     // truth; this is the ephemeral "type it out live" channel.
     let acc = ''
-    // A connected substrate (OpenClaw) emits no `cost` events, so a run's spend is
-    // ESTIMATED from its produced text on the terminal — but only when no real `cost`
-    // event fired (forward-safe against a future usage-bearing Gateway). Mirrors the
-    // routine dispatcher (openclawDispatch) + dispatchChatTurn.
-    let recordedAnyCost = false
+    // The run's total cost (USD), accumulated for BOTH the budget ledger AND the task
+    // (board card / drawer). Native sums its real `cost` events here; a runtime that
+    // reports no USD (OpenClaw's Gateway, Codex, Hermes) gets a char-based ESTIMATE on
+    // the terminal (only when nothing real was summed) so the card + cap aren't stuck at
+    // $0. Written to the task via updateTaskFields on the terminal below.
+    let runCostUsd = 0
     // Is this run a DELEGATED-CHILD board task, or a leader / user-facing turn? The
     // engine sets `sessionToTask` BEFORE it calls deliver, so the mapping is present
     // for the whole drain (completeForSession, which forgets it, runs on the terminal
@@ -235,7 +263,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // timeline — its progress + output live on its BoardTaskCard. Only a leader /
     // user-facing turn (no task) belongs in chat. Capturing once avoids a per-delta
     // Map.get and keeps the two gates below consistent.
-    const isTaskRun = taskForSession(sessionKey) != null
+    const runTaskId = taskForSession(sessionKey)
+    const isTaskRun = runTaskId != null
     // A LEADER turn that DELEGATES (calls the `delegate` tool) must not surface its
     // text in chat either: the delegation IS the board cards, and the leader's
     // "handed off, they're working on it" narration is premature noise. (The OpenClaw
@@ -263,11 +292,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // StreamingCard would never be cleared and would stick on screen.
           if (chatVisible()) publishDelta?.(sessionKey, ev.runId, acc)
         }
-        if (ev.kind === 'cost' && ev.costUsd != null) {
-          recordedAnyCost = true // a null-cost usage event must not zero out the estimate
-          // Budget kill-switch: a paused CAP budget aborts the run; the resulting
-          // `done:aborted` flows through this same loop (the engine fails the task).
-          if (ev.costUsd > 0 && recordSpendForRun(sessionKey, agentId, ev.costUsd))
+        if (ev.kind === 'cost' && ev.costUsd != null && ev.costUsd > 0) {
+          // Real per-turn USD (native): sum it for the task ledger, then run the budget
+          // kill-switch — a paused CAP budget aborts the run; the resulting `done:aborted`
+          // flows through this same loop (the engine fails the task).
+          runCostUsd += ev.costUsd
+          if (recordSpendForRun(sessionKey, agentId, ev.costUsd))
             await adapter.abort(run).catch(() => undefined)
         }
         if (ev.kind === 'done') {
@@ -278,16 +308,20 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // after the `[Task Update]` — commits. Same gate as the streaming channel, so a
           // suppressed turn neither streams nor commits.
           if (ev.summary && chatVisible()) persistTurn?.(sessionKey, ev.summary)
-          // Connected-substrate cost fallback: keep the budget ledger moving for a
-          // runtime that reports nothing (so a cap can still engage).
-          if (obs.estimateCostOnDone && !recordedAnyCost) {
+          // Cost fallback for a runtime that reports no USD (OpenClaw's Gateway, Codex,
+          // Hermes): a char-based ESTIMATE so the task ledger + budget cap aren't stuck
+          // at $0. Only when nothing real was summed (native already has runCostUsd > 0).
+          if (runCostUsd === 0) {
             const usd = estimateRunCostUsd({
               model: null,
-              inputChars: obs.message.length,
+              inputChars: obs.contextChars + obs.message.length,
               outputChars: ev.summary?.length ?? 0,
             })
-            // The run is already at its terminal — no run to abort even if this pauses.
-            if (usd > 0) recordSpendForRun(sessionKey, agentId, usd)
+            if (usd > 0) {
+              runCostUsd += usd
+              // The run is already at its terminal — no run to abort even if this pauses.
+              recordSpendForRun(sessionKey, agentId, usd)
+            }
           }
           // Leader continuity: persist THIS turn's harness session id so the NEXT team
           // turn resumes it. Done HERE (on the terminal, BEFORE markIdle) so the next
@@ -310,8 +344,23 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         // Per-tool runtime detail → the obs activity terminal (all runtimes).
         emitRunObs(sessionKey, agentId, obs.runtime, ev)
         const terminal = ev.kind === 'done' || (ev.kind === 'error' && ev.fatal)
-        if (terminal) nudge.markIdle(sessionKey)
-        else nudge.markBusy(sessionKey)
+        if (terminal) {
+          nudge.markIdle(sessionKey)
+          // Persist the run's cost + REAL runtime onto its task so the board card +
+          // drawer show them: the engine creates the task at cost 0 with a hardcoded
+          // `assigneeRuntime: 'openclaw'`, and nothing else writes them. Delegated-child
+          // task runs only; best-effort — a ledger write must never break the drain.
+          if (runTaskId) {
+            try {
+              updateTaskFields(db, runTaskId, {
+                costUsd: runCostUsd,
+                ...(obs.runtime ? { assigneeRuntime: obs.runtime } : {}),
+              })
+            } catch {
+              /* non-fatal */
+            }
+          }
+        } else nudge.markBusy(sessionKey)
         try {
           await onEvent(sessionKey, ev)
         } catch {
@@ -378,7 +427,13 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // there; the row carries the agent's REAL runtime). A test (makeAdapterForAgent)
           // may target an unseeded agent → row undefined → a plain ephemeral run.
           const row = db.select().from(agents).where(eq(agents.id, targetAgentId)).get() as
-            | { id: string; runtime?: string | null; sourceAgentId?: string | null; gatewayId?: string | null }
+            | {
+                id: string
+                runtime?: string | null
+                sourceAgentId?: string | null
+                gatewayId?: string | null
+                execConfig?: string | null
+              }
             | undefined
           const resolvedRuntime = row?.runtime ?? null
 
@@ -454,8 +509,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               })
                 ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId)) || null
                 : null
+              // A coding runtime (hermes/codex/claude-code) may carry a per-agent
+              // model + provider chosen at team creation, stored on the row's
+              // execConfig (`{ model, provider }` — the Hermes model picker). Thread
+              // it in so the driver runs that exact model on that provider. Native
+              // reads its OWN config (no top-level `model`), so scope to non-native.
+              const codingModel =
+                runtime !== NATIVE_RUNTIME ? parseCodingModelConfig(row?.execConfig ?? null) : null
               const ctx: RuntimeRunContext = {
-                model: null,
+                model: codingModel?.model ?? null,
+                ...(codingModel?.provider ? { providerHint: codingModel.provider } : {}),
                 resume: teamResumeId,
                 mcpBaseUrl,
                 memoryScope: { teamId, agentId: targetAgentId },
@@ -484,7 +547,6 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // cross-subsystem (routines / runTeamExchange / other teams' orchestrators)
           // AND Boo-Zero-in-N-teams (the one OpenClaw agent that spans teams).
           const connectedKey = homeKind === 'connected' && row ? connectedAgentKey(row) : null
-          const estimateCostOnDone = homeKind === 'connected'
 
           const runJob = async (): Promise<void> => {
             if (capturedHomeDir)
@@ -522,7 +584,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             await drainRun(adapter, run, targetSessionKey, targetAgentId, {
               runtime: resolvedRuntime,
               message,
-              estimateCostOnDone,
+              contextChars: teamContext ? teamContext.length : 0,
               resumePointerKey,
             })
           }
