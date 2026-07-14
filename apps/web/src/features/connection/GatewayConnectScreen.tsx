@@ -253,7 +253,7 @@ export function GatewayConnectScreen({
                   type={showToken ? 'text' : 'password'}
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
-                  placeholder={hasSavedToken ? 'Saved — leave blank to keep' : 'gateway-token'}
+                  placeholder={hasSavedToken ? 'Saved, leave blank to keep' : 'gateway-token'}
                   spellCheck={false}
                   autoComplete="current-password"
                   disabled={connecting}

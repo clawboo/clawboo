@@ -33,6 +33,12 @@ import { refreshFleetFromRegistry, agentRecordToFleetState } from '@/lib/agentSo
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayConnectScreen } from './GatewayConnectScreen'
 import {
+  GatewayReconnectBanner,
+  type GatewayDegradeReason,
+  type ReconnectPhase,
+} from './GatewayReconnectBanner'
+import { useSettingsModalStore } from '@/stores/settingsModal'
+import {
   OnboardingWizard,
   type WizardStep,
   type OnboardingMode,
@@ -92,6 +98,29 @@ async function hasNativeAgents(): Promise<boolean> {
         a.sourceId === 'clawboo-native' ||
         (a.id ?? '').startsWith('native-'),
     )
+  } catch {
+    return false
+  }
+}
+
+/** True when the user has at least one agent that runs WITHOUT the OpenClaw
+ *  Gateway (native / codex / hermes / claude-code). Such a user can keep working
+ *  while the Gateway is down, so a Gateway failure degrades to a NON-BLOCKING
+ *  reconnect banner over the dashboard rather than a full-screen block. A
+ *  pure-OpenClaw user (every agent gateway-bound) still gets the full-screen
+ *  connect / offline flow — they have nothing to do without the Gateway.
+ *  Best-effort (REST). */
+async function hasGatewayIndependentAgents(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/agents')
+    if (!res.ok) return false
+    const body = (await res.json()) as {
+      agents?: { runtime?: string; sourceId?: string }[]
+    }
+    return (body.agents ?? []).some((a) => {
+      const rt = a.runtime ?? a.sourceId
+      return rt != null && rt !== 'openclaw'
+    })
   } catch {
     return false
   }
@@ -637,6 +666,14 @@ export function GatewayBootstrap() {
   const [gatewayOffline, setGatewayOffline] = useState(false)
   const [startingGateway, setStartingGateway] = useState(false)
   const [startGatewayError, setStartGatewayError] = useState<string | null>(null)
+
+  // Non-blocking degraded-Gateway state: set when a user WITH gateway-independent
+  // agents (native/codex/hermes) hits a Gateway failure — the dashboard loads via
+  // native mode and the reconnect banner floats over it instead of a full-screen
+  // block. Null = no banner. See `GatewayReconnectBanner`.
+  const [gatewayDegraded, setGatewayDegraded] = useState<GatewayDegradeReason | null>(null)
+  const [reconnectPhase, setReconnectPhase] = useState<ReconnectPhase>('idle')
+  const [reconnectError, setReconnectError] = useState<string | null>(null)
   const sseControllerRef = useRef<AbortController | null>(null)
 
   // Wire gateway events → Zustand stores
@@ -692,6 +729,29 @@ export function GatewayBootstrap() {
       // which would also flash the 'Reconnecting…' spinner on top of the error — the
       // retry overlay owns recovery from here.
       if (useConnectionStore.getState().status === 'error') return
+
+      // Degrade a Gateway failure to a NON-BLOCKING reconnect banner when the user
+      // has agents that run WITHOUT the Gateway: load their dashboard (native mode)
+      // and float the banner over it, instead of a full-screen block. A pure-
+      // OpenClaw user returns false here and falls through to the existing
+      // full-screen offline overlay / connect screen. Returns true when handled.
+      const degradeToReconnectBanner = async (reason: GatewayDegradeReason): Promise<boolean> => {
+        if (!(await hasGatewayIndependentAgents())) return false
+        // Arm the degraded state BEFORE hydrating so it survives a transient
+        // native-hydrate failure: if `enterNativeMode` 5xxs → the nativeError
+        // overlay's Retry re-enters native mode directly, and a successful retry
+        // then shows the reconnect banner instead of stranding the user in native
+        // mode with no reconnect affordance.
+        setReconnectPhase('idle')
+        setReconnectError(null)
+        setGatewayDegraded(reason)
+        const r = await enterNativeMode(null)
+        if (!r.ok) {
+          setNativeError('Could not load your workspace. The server may be restarting.')
+        }
+        return true
+      }
+
       setAutoConnecting(true)
       try {
         // 1. Check system status first
@@ -709,6 +769,7 @@ export function GatewayBootstrap() {
               systemInfo.openclaw.installed &&
               systemInfo.openclaw.configExists
             ) {
+              if (await degradeToReconnectBanner('offline')) return
               setGatewayOffline(true)
               return
             }
@@ -747,7 +808,11 @@ export function GatewayBootstrap() {
         await autoMigrateTeamlessAgents()
         preloadApprovalHistory()
       } catch {
-        // Auto-connect failed — GatewayConnectScreen renders as fallback
+        // Auto-connect failed (bad token / unpaired / gateway error). A user with
+        // gateway-independent agents degrades to the non-blocking reconnect banner
+        // over their dashboard; a pure-OpenClaw user falls through to the
+        // GatewayConnectScreen to re-enter a token / re-pair.
+        if (await degradeToReconnectBanner('unreachable')) return
       } finally {
         setAutoConnecting(false)
       }
@@ -832,6 +897,102 @@ export function GatewayBootstrap() {
       },
     )
   }, [setStatus, setGatewayUrl, setClient, hydrateFleet])
+
+  // ── Non-blocking degraded-Gateway reconnect (the reconnect banner) ──────────
+  // The user is already on their dashboard (native mode). Bring the Gateway
+  // back: start it if it's down, connect, then UPGRADE to gateway mode via
+  // `enterGatewayMode` (client set + fleet re-hydrated, so OpenClaw agents go
+  // live). On success the banner flashes "reconnected" then dismisses.
+
+  const handleGatewayReconnect = useCallback(async () => {
+    setReconnectPhase('reconnecting')
+    setReconnectError(null)
+    try {
+      // 1. Ensure the Gateway process is running (start it if not).
+      let running = true
+      try {
+        const st = await fetch('/api/system/status')
+        if (st.ok) running = ((await st.json()) as SystemInfo).gateway.running
+      } catch {
+        /* optimistic — attempt the connect anyway */
+      }
+      if (!running) {
+        await new Promise<void>((resolve, reject) => {
+          sseControllerRef.current?.abort()
+          sseControllerRef.current = consumeApiSSE(
+            '/api/system/gateway',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'start' }),
+            },
+            {
+              onComplete(e) {
+                if (e.success) resolve()
+                else reject(new Error('Gateway started but reported failure'))
+              },
+              onError(e) {
+                reject(new Error((e.message as string) ?? 'Could not start the Gateway'))
+              },
+            },
+          )
+        })
+      }
+      // 2. Connect + upgrade native mode → gateway mode.
+      const resp = await fetch('/api/settings')
+      const data = resp.ok ? ((await resp.json()) as { gatewayUrl?: string }) : {}
+      const url = data.gatewayUrl?.trim() || 'ws://localhost:18789'
+      const prev = useConnectionStore.getState().client
+      if (prev) prev.disconnect()
+      const gwClient = new GatewayClient()
+      await gwClient.connect(resolveProxyGatewayUrl(), {
+        clientName: 'openclaw-control-ui',
+        clientVersion: '0.1.0',
+        disableDeviceAuth: true,
+      })
+      await enterGatewayMode(gwClient, url)
+      // 3. Success — flash, then dismiss.
+      setReconnectPhase('success')
+      window.setTimeout(() => {
+        setGatewayDegraded(null)
+        setReconnectPhase('idle')
+      }, 1300)
+    } catch (err) {
+      setReconnectPhase('error')
+      setReconnectError(
+        err instanceof GatewayResponseError && err.code === 'NOT_PAIRED'
+          ? 'This device needs approval. Open Settings to approve it.'
+          : 'Could not reach the Gateway. Try again, or set it up in Settings.',
+      )
+    }
+  }, [])
+
+  const openRuntimeSettings = useCallback(() => {
+    useSettingsModalStore.getState().openSettings('runtimes', { runtimeIntent: 'connect-openclaw' })
+  }, [])
+
+  const dismissGatewayBanner = useCallback(() => {
+    setGatewayDegraded(null)
+    setReconnectPhase('idle')
+    setReconnectError(null)
+  }, [])
+
+  // Clear the degraded banner the moment a LIVE Gateway client comes up by ANY
+  // path — e.g. the user re-pairs via the banner's "Settings" escape → Runtimes →
+  // `enterGatewayMode` — not only via the banner's own Reconnect. Gated to
+  // `idle`/`error` so the banner's OWN reconnect keeps its success flash (which
+  // runs during the `reconnecting`/`success` phases and self-clears after 1.3s).
+  useEffect(() => {
+    if (
+      gatewayDegraded &&
+      client &&
+      status === 'connected' &&
+      (reconnectPhase === 'idle' || reconnectPhase === 'error')
+    ) {
+      setGatewayDegraded(null)
+      setReconnectError(null)
+    }
+  }, [client, status, gatewayDegraded, reconnectPhase])
 
   // ── First-time onboarding complete handler ─────────────────────────────────
 
@@ -1091,6 +1252,23 @@ export function GatewayBootstrap() {
               </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Non-blocking degraded-Gateway reconnect banner — floats over the loaded
+          dashboard for a user with gateway-independent agents, instead of a
+          full-screen block. */}
+      <AnimatePresence>
+        {isConnected && gatewayDegraded && (
+          <GatewayReconnectBanner
+            key="gateway-reconnect"
+            reason={gatewayDegraded}
+            phase={reconnectPhase}
+            error={reconnectError}
+            onReconnect={handleGatewayReconnect}
+            onOpenSettings={openRuntimeSettings}
+            onDismiss={dismissGatewayBanner}
+          />
         )}
       </AnimatePresence>
 
