@@ -93,28 +93,39 @@ test.describe('Native onboarding', () => {
     await page.getByRole('button', { name: /Get Started/ }).click()
     await expect(page.getByTestId('configure-native-step')).toBeVisible({ timeout: 10_000 })
 
-    // Paste a (fake) key and create the team. The connect route writes the
-    // vault; the seed writes SQLite — both run offline.
+    // Paste a (fake) key and continue. The connect route writes the vault
+    // (offline); no team is created here — real team selection is the next step.
     await page.getByTestId('native-api-key').fill('sk-ant-e2e-fake-key')
-    await page.getByTestId('native-create-team').click()
+    await page.getByTestId('native-continue').click()
 
-    // Optional "add more runtimes" step → skip it.
-    await expect(page.getByTestId('add-runtimes-step')).toBeVisible({ timeout: 15_000 })
+    // Add-runtimes comes FIRST (so a connected runtime is assignable to a team) —
+    // it's optional; skip it.
+    await expect(page.getByTestId('add-runtimes-step')).toBeVisible({ timeout: 10_000 })
     await page.getByTestId('addruntimes-skip').click()
 
-    // "Team is ready" landing → open the dashboard.
-    await expect(page.getByTestId('native-ready-step')).toBeVisible({ timeout: 10_000 })
+    // Team step: the marketplace opens. Pick a small starter team and deploy it —
+    // every agent degrades to clawboo-native (no Gateway), so the deploy is a pure
+    // SQLite write and runs fully offline.
+    await expect(page.getByTestId('select-team-step')).toBeVisible({ timeout: 10_000 })
+    const search = page.getByPlaceholder(/Search teams/)
+    await expect(search).toBeVisible({ timeout: 10_000 })
+    await search.fill('Research Lab')
+    await page.getByTestId('team-card-deploy').first().click()
+    // Customize step → deploy the team (creates the native agents in SQLite).
+    await page.getByTestId('create-team-deploy').click()
+
+    // "Team is ready" landing (appears once the deploy lands) → open the dashboard.
+    await expect(page.getByTestId('native-ready-step')).toBeVisible({ timeout: 30_000 })
     await page.getByTestId('native-open-dashboard').click()
 
-    // Wizard fully exits (its NativeReady roster also renders a "Team Lead"
-    // label, so wait for the overlay to be gone before asserting the dashboard
-    // — otherwise the assertion races the AnimatePresence exit animation).
+    // Wizard fully exits before asserting the dashboard (avoid racing the
+    // AnimatePresence exit animation).
     await expect(page.getByTestId('native-ready-step')).toHaveCount(0)
 
-    // Landed in the dashboard with the seeded team showing — scope the lookup
-    // to the sidebar agent list (the seeded agent also appears as a graph node).
+    // Landed in the dashboard with the DEPLOYED team showing — the group-chat row
+    // appears once the selected team has agents (proves a real team was deployed).
     const sidebar = page.locator('[data-testid="agent-list-column"]')
     await expect(sidebar).toBeVisible({ timeout: 15_000 })
-    await expect(sidebar.getByText('Team Lead')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('group-chat-row')).toBeVisible({ timeout: 15_000 })
   })
 })
