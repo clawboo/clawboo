@@ -218,4 +218,31 @@ describe('RuntimeConnectionCard', () => {
     await userEvent.click(card)
     expect(onPick).toHaveBeenCalledTimes(1)
   })
+
+  it('onDisplayState reports the live state (the tab-dot contract): installing → terminal', async () => {
+    const onDisplayState = vi.fn()
+    server.use(
+      http.post(
+        '/api/runtimes/claude-code/install',
+        () =>
+          new HttpResponse(
+            'data: {"type":"output","line":"installing…"}\n\ndata: {"type":"complete","success":true}\n\n',
+            { headers: { 'Content-Type': 'text/event-stream' } },
+          ),
+      ),
+    )
+    render(
+      <RuntimeConnectionCard
+        entry={RUNTIME_CATALOG['claude-code']}
+        status={{ id: 'claude-code', connectionState: 'not-installed' } as RuntimeStatus}
+        variant="onboarding"
+        onDisplayState={onDisplayState}
+      />,
+    )
+    expect(onDisplayState).toHaveBeenLastCalledWith('not-installed')
+    await userEvent.click(screen.getByTestId('runtime-claude-code-install'))
+    await waitFor(() => expect(onDisplayState).toHaveBeenCalledWith('installing'))
+    // After the SSE completes, the state settles back to the server-derived one.
+    await waitFor(() => expect(onDisplayState).toHaveBeenLastCalledWith('not-installed'))
+  })
 })

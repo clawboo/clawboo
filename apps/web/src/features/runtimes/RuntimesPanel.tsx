@@ -1,15 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import { Cpu, Info, RefreshCw, ChevronDown } from 'lucide-react'
+import { Cpu, RefreshCw, ChevronDown } from 'lucide-react'
 
 import { useConnectionStore } from '@/stores/connection'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
-import { Button, IconButton } from '@/features/shared/Button'
-import { CapabilityChip } from './CapabilityChip'
+import { Button } from '@/features/shared/Button'
 import { PanelHeader } from '@/features/shared/PanelHeader'
-import { Skeleton } from '@/features/shared/Skeleton'
-import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
+import { type StatusTone } from '@/features/shared/StatusPill'
 import {
   fetchRegistryHealth,
   fetchRuntimes,
@@ -19,9 +17,9 @@ import {
   type RuntimeStatus,
 } from '@clawboo/control-client'
 
-import { RuntimeConnectionCard } from './RuntimeConnectionCard'
+import { RuntimeConnectList } from './RuntimeConnectList'
+import { OpenClawInlineSetup } from './OpenClawInlineSetup'
 import { RuntimeDiagnosticsDrawer, type RuntimeDiagnosticsTarget } from './RuntimeDiagnosticsDrawer'
-import { OpenClawSetupFlow } from './OpenClawSetupFlow'
 import { useRuntimeProbeStore } from './runtimeProbeStore'
 import { RUNTIME_CATALOG, RUNTIME_ORDER, type RuntimeId } from './runtimeCatalog'
 
@@ -40,8 +38,6 @@ function connStatePill(state?: ConnectionState): { tone: StatusTone; label: stri
   }
 }
 
-const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
-
 interface Capabilities {
   streaming?: boolean
   mcp?: boolean
@@ -51,17 +47,6 @@ interface Capabilities {
   models?: string[]
 }
 
-interface OpenClawInfo {
-  id: string
-  participantKind?: string
-  capabilities?: Capabilities
-  health?: { ok: boolean; message?: string }
-}
-
-const CAP_KEYS: (keyof Capabilities)[] = ['streaming', 'mcp', 'worktrees', 'resume', 'toolApproval']
-
-// Capability chip — a single rounded-full pill shared in look with the coding-agent
-// cards below (RuntimeConnectionCard). "Off" caps read as muted, not struck-through.
 function McpAttach({ runtimeId }: { runtimeId: string }) {
   const [open, setOpen] = useState(false)
   const [snippet, setSnippet] = useState<string | null>(null)
@@ -86,6 +71,8 @@ function McpAttach({ runtimeId }: { runtimeId: string }) {
       <button
         type="button"
         onClick={() => void toggle()}
+        aria-expanded={open}
+        aria-controls={`mcp-attach-${runtimeId}`}
         className="text-foreground/50 transition-colors hover:text-foreground hover:bg-foreground/[0.05]"
         style={{
           display: 'flex',
@@ -112,6 +99,7 @@ function McpAttach({ runtimeId }: { runtimeId: string }) {
       </button>
       {open && (
         <div
+          id={`mcp-attach-${runtimeId}`}
           className="font-mono"
           style={{
             marginTop: 6,
@@ -134,91 +122,14 @@ function McpAttach({ runtimeId }: { runtimeId: string }) {
   )
 }
 
-/** OpenClaw is always present (the Gateway runtime); its health = the live gateway
- *  connection. Rendered as a status row (no install/connect — it's the host). */
-function OpenClawRow({
-  info,
-  onDiagnostics,
-  onSetup,
-}: {
-  info: OpenClawInfo
-  onDiagnostics: () => void
-  onSetup?: () => void
-}) {
-  const caps = info.capabilities ?? {}
-  const ok = info.health?.ok ?? false
-  return (
-    <div
-      data-testid="runtime-row-openclaw"
-      className="rounded-2xl border border-border bg-surface p-5"
-      style={{ boxShadow: 'var(--shadow-raised)' }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span
-          aria-hidden
-          className="flex shrink-0 items-center justify-center rounded-xl"
-          style={{
-            width: 32,
-            height: 32,
-            color: 'var(--mint)',
-            background: 'rgb(var(--mint-rgb) / 0.14)',
-          }}
-        >
-          <Cpu size={17} strokeWidth={2} />
-        </span>
-        <span
-          className="font-semibold text-foreground"
-          style={{ fontSize: 14, letterSpacing: '-0.01em' }}
-        >
-          openclaw
-        </span>
-        <span className="font-mono" style={{ fontSize: 10.5, color: muted(0.4) }}>
-          {info.participantKind ?? 'agent'}
-        </span>
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <StatusPill
-            tone={ok ? 'success' : 'error'}
-            label={ok ? 'Healthy' : (info.health?.message ?? 'Unavailable')}
-          />
-          {!ok && onSetup && (
-            <Button
-              data-testid="runtime-openclaw-setup"
-              onClick={onSetup}
-              size="sm"
-              variant="outline"
-            >
-              Set up OpenClaw
-            </Button>
-          )}
-          <IconButton
-            variant="ghost"
-            size="sm"
-            label="OpenClaw diagnostics"
-            data-testid="runtime-openclaw-diagnostics"
-            onClick={onDiagnostics}
-          >
-            <Info size={15} strokeWidth={2} />
-          </IconButton>
-        </span>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
-        {CAP_KEYS.map((k) => (
-          <CapabilityChip key={k} label={k} on={Boolean(caps[k])} />
-        ))}
-      </div>
-      <McpAttach runtimeId={info.id} />
-    </div>
-  )
-}
-
 export function RuntimesPanel() {
   const connStatus = useConnectionStore((s) => s.status)
   const gatewayUrl = useConnectionStore((s) => s.gatewayUrl)
   // The app is "connected" in NATIVE mode too (status='connected', client=null),
   // but OpenClaw itself is only connected when a live Gateway client is present.
-  // Gate the OpenClaw row's health + the "Set up OpenClaw" CTA on the client, not
+  // Gate the OpenClaw tab's health + the "Set up OpenClaw" CTA on the client, not
   // the app status — otherwise a native-first user (the P7 target) would see the
-  // OpenClaw row as "Healthy" with no way to add OpenClaw.
+  // OpenClaw tab as "Healthy" with no way to add OpenClaw.
   const client = useConnectionStore((s) => s.client)
   // Thin-client parity: a client pointed at a remote server has no browser Gateway
   // WS, so `client` is null even when OpenClaw is set up and the server's operator
@@ -237,7 +148,7 @@ export function RuntimesPanel() {
   const [loaded, setLoaded] = useState(false)
   const [diagId, setDiagId] = useState<string | null>(null)
   // The standalone OpenClaw setup flow (detect → install → configure → start),
-  // launched from the OpenClaw row's "Set up OpenClaw" CTA when not connected.
+  // launched from the OpenClaw tab's "Set up OpenClaw" CTA when not connected.
   const [setupOpen, setSetupOpen] = useState(false)
 
   // A one-shot intent from elsewhere (a disabled OpenClaw option in CreateTeamModal)
@@ -284,23 +195,18 @@ export function RuntimesPanel() {
     return () => clearInterval(id)
   }, [refresh])
 
-  const openclaw: OpenClawInfo = {
-    id: 'openclaw',
-    participantKind: 'agent',
-    capabilities: {
-      streaming: true,
-      mcp: false,
-      worktrees: false,
-      resume: true,
-      toolApproval: true,
-      models: [],
-    },
-    health: { ok: openclawConnected, message: openclawMessage },
+  const openclawCaps: Capabilities = {
+    streaming: true,
+    mcp: false,
+    worktrees: false,
+    resume: true,
+    toolApproval: true,
+    models: [],
   }
 
   // Build the normalized diagnostics target for whichever runtime is selected.
   // The depth badge is DERIVED from capabilities.runtimeClass (OpenClaw is the
-  // synthesized connected-substrate row, not in /api/runtimes).
+  // synthesized connected-substrate tab, not in /api/runtimes).
   function buildTarget(id: string): RuntimeDiagnosticsTarget | null {
     if (id === 'openclaw') {
       const ok = openclawConnected
@@ -311,7 +217,7 @@ export function RuntimesPanel() {
         statusTone: ok ? 'success' : 'warning',
         statusLabel: ok ? 'Connected' : 'Offline',
         health: { ok, message: openclawMessage },
-        caps: openclaw.capabilities,
+        caps: openclawCaps,
         gatewayUrl,
         connectionStatus: connStatus,
         docsUrl: 'https://github.com/openclaw/openclaw',
@@ -387,51 +293,35 @@ export function RuntimesPanel() {
       />
 
       <div style={{ flex: 1, overflowY: 'auto' }} className="px-6 py-5">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 720 }}>
-          <OpenClawRow
-            info={openclaw}
-            onDiagnostics={() => setDiagId('openclaw')}
-            onSetup={() => setSetupOpen(true)}
+        <div style={{ maxWidth: 720 }}>
+          {/* One connect LIST (shared with onboarding). Each row carries a
+              diagnostics button; OpenClaw setup runs IN-PLACE in its row. */}
+          <RuntimeConnectList
+            runtimeIds={RUNTIME_ORDER}
+            statuses={statuses}
+            loaded={loaded}
+            variant="panel"
+            onChanged={refresh}
+            onDiagnostics={(id) => setDiagId(id)}
+            openclaw={{
+              connected: openclawConnected,
+              statusLabel: openclawConnected ? 'Healthy' : (openclawMessage || 'Unavailable'),
+              onSetup: () => setSetupOpen(true),
+              setupTestId: 'runtime-openclaw-setup',
+              onDiagnostics: () => setDiagId('openclaw'),
+              extra: <McpAttach runtimeId="openclaw" />,
+              setupOpen,
+              setupContent: (
+                <OpenClawInlineSetup
+                  onFinish={() => {
+                    setSetupOpen(false)
+                    void refresh()
+                  }}
+                  onCancel={() => setSetupOpen(false)}
+                />
+              ),
+            }}
           />
-
-          <div>
-            <p
-              className="font-mono uppercase"
-              style={{
-                fontSize: 11,
-                letterSpacing: '0.14em',
-                color: muted(0.45),
-                marginBottom: 12,
-              }}
-            >
-              Coding agents
-            </p>
-            <div
-              style={{
-                display: 'grid',
-                gap: 12,
-                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-              }}
-            >
-              {!loaded
-                ? RUNTIME_ORDER.map((id) => <Skeleton key={id} height={150} radius={12} />)
-                : RUNTIME_ORDER.map((id) => {
-                    const entry = RUNTIME_CATALOG[id]
-                    const status = statuses.find((s) => s.id === id)
-                    return (
-                      <div key={id} data-testid={`runtime-row-${id}`}>
-                        <RuntimeConnectionCard
-                          entry={entry}
-                          status={status}
-                          variant="panel"
-                          onChanged={() => void refresh()}
-                          onDiagnostics={() => setDiagId(id)}
-                        />
-                      </div>
-                    )
-                  })}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -441,20 +331,6 @@ export function RuntimesPanel() {
             target={diagTarget}
             onClose={() => setDiagId(null)}
             onRecheck={handleDrawerRecheck}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Standalone OpenClaw setup. On close (incl. the resolved happy path,
-          which flips the OpenClaw row Healthy reactively via connStatus), also
-          re-sync the coding-agent cards. */}
-      <AnimatePresence>
-        {setupOpen && (
-          <OpenClawSetupFlow
-            onClose={() => {
-              setSetupOpen(false)
-              void refresh()
-            }}
           />
         )}
       </AnimatePresence>

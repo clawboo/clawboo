@@ -81,7 +81,7 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
     authKind: 'api-key',
     envVar: 'OPENROUTER_API_KEY',
     keyPlaceholder: 'sk-or-…',
-    installCommand: 'pipx install hermes-agent',
+    installCommand: "pipx install 'hermes-agent[anthropic]'",
     docsUrl: 'https://pypi.org/project/hermes-agent/',
     keyUrl: 'https://openrouter.ai/keys',
     capabilityHint: { streaming: false, mcp: true, worktrees: true, resume: true },

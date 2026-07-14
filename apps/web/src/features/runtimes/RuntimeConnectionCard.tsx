@@ -1,15 +1,19 @@
-// The shared runtime connection card — used by BOTH the onboarding ConnectAgents
-// step and the Runtimes panel. One component, one state machine:
+// The shared runtime connection state-machine content — the body an expanded
+// RuntimeConnectList row reveals (onboarding Add-runtimes step + the Settings
+// Runtimes panel). One component, one state machine:
 //
 //   not-installed (Install, SSE) → installing
 //     → needs-auth (paste key) | needs-login (codex login + Re-check)
 //     → connecting → ready (Re-check + Disconnect[panel])   (+ error / unknown)
 //
-// Reuses the onboarding InstallStep SSE-terminal pattern (no abort on unmount;
-// Retry aborts the prior controller) + the ConfigureStep key-input affordance +
-// the shared StatusPill / FormattedAlert / Spinner primitives.
+// With `hideHeader` (the list host) it carries NO name/status header, no brand
+// tile (the row owns them) — just the status-specific inputs + the one action
+// the current state needs. Reuses the onboarding InstallStep SSE-terminal pattern
+// (no abort on unmount; Retry aborts the prior controller) + the ConfigureStep
+// key-input affordance. `onDisplayState` reports the live state up so the row can
+// drive its CTA / Connected indicator.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowRight,
   Check,
@@ -38,15 +42,16 @@ import {
 } from '@clawboo/control-client'
 
 import { confirm } from '@/stores/confirm'
-import { CapabilityChip } from './CapabilityChip'
 import { RuntimeIcon } from './RuntimeBrand'
 import type { RuntimeCatalogEntry } from './runtimeCatalog'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
-type DisplayState = ConnectionState | 'installing' | 'connecting'
+export type DisplayState = ConnectionState | 'installing' | 'connecting'
 
-const PILL: Record<DisplayState, { tone: StatusTone; label: string }> = {
+/** The canonical state → pill map for this component's own (non-hideHeader)
+ *  header. Exported so hosts can reuse the exact same tones + labels. */
+export const DISPLAY_PILL: Record<DisplayState, { tone: StatusTone; label: string }> = {
   'not-installed': { tone: 'idle', label: 'Not installed' },
   installing: { tone: 'working', label: 'Installing…' },
   'needs-auth': { tone: 'warning', label: 'Needs key' },
@@ -55,8 +60,6 @@ const PILL: Record<DisplayState, { tone: StatusTone; label: string }> = {
   ready: { tone: 'success', label: 'Connected' },
   unknown: { tone: 'idle', label: 'Unknown' },
 }
-
-const CAP_KEYS = ['streaming', 'mcp', 'worktrees', 'resume'] as const
 
 export interface RuntimeConnectionCardProps {
   entry: RuntimeCatalogEntry
@@ -72,12 +75,20 @@ export interface RuntimeConnectionCardProps {
    *   elevated, Recommended treatment; `wizard-secondary` is the muted row.
    */
   variant: 'onboarding' | 'panel' | 'wizard-primary' | 'wizard-secondary'
-  /** Fired after any state-changing action so the host can refetch status. */
-  onChanged?: () => void
+  /** Fired after any state-changing action so the host can refetch status. May
+   *  return a promise; the card awaits it so it can hold its in-flight state
+   *  (Connecting… / Installing…) until the refreshed status lands, instead of
+   *  briefly reverting to the stale pre-action state. */
+  onChanged?: () => void | Promise<void>
   /** Fired when a wizard-pick card is chosen (wizard-* variants only). */
   onPick?: () => void
   /** Opens the diagnostics drawer for this runtime (panel variant only). */
   onDiagnostics?: () => void
+  /** Reports the live display state up so the row can drive its CTA / indicator. */
+  onDisplayState?: (state: DisplayState) => void
+  /** Hide the internal name+status header — the LIST host (RuntimeConnectList)
+   *  renders its own row summary, so the card supplies only the connect body. */
+  hideHeader?: boolean
 }
 
 export function RuntimeConnectionCard({
@@ -87,6 +98,8 @@ export function RuntimeConnectionCard({
   onChanged,
   onPick,
   onDiagnostics,
+  onDisplayState,
+  hideHeader,
 }: RuntimeConnectionCardProps) {
   const [installing, setInstalling] = useState(false)
   const [installLog, setInstallLog] = useState<string[]>([])
@@ -98,6 +111,18 @@ export function RuntimeConnectionCard({
   const controllerRef = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
 
+  // Computed ABOVE the wizard early-return so the display-state effect (a hook)
+  // always runs in the same order regardless of variant.
+  const display: DisplayState = installing
+    ? 'installing'
+    : busy
+      ? 'connecting'
+      : (status?.connectionState ?? 'unknown')
+
+  useEffect(() => {
+    onDisplayState?.(display)
+  }, [display, onDisplayState])
+
   // Wizard-pick variants: a selection surface, not the connect machine. Picking
   // sets the chosen runtime and advances the wizard to the right next step.
   if (variant === 'wizard-primary' || variant === 'wizard-secondary') {
@@ -106,13 +131,7 @@ export function RuntimeConnectionCard({
     )
   }
 
-  const display: DisplayState = installing
-    ? 'installing'
-    : busy
-      ? 'connecting'
-      : (status?.connectionState ?? 'unknown')
-  const pill = PILL[display]
-  const caps = status?.capabilities ?? entry.capabilityHint
+  const pill = DISPLAY_PILL[display]
 
   function appendLog(line?: string): void {
     if (!line) return
@@ -136,8 +155,12 @@ export function RuntimeConnectionCard({
       },
       onComplete: (e) => {
         if (typeof e.warning === 'string') appendLog(e.warning)
-        setInstalling(false)
-        onChanged?.()
+        // Hold 'installing' until the refetch lands the post-install state, so the
+        // row doesn't flash the stale 'Install' affordance before it settles.
+        void (async () => {
+          await onChanged?.()
+          setInstalling(false)
+        })()
       },
     })
   }
@@ -147,13 +170,16 @@ export function RuntimeConnectionCard({
     setBusy(true)
     setError(null)
     const r = await connectRuntime(entry.id, keyInput.trim())
-    setBusy(false)
     if (!r.ok) {
+      setBusy(false)
       setError(r.error ?? 'Failed to save the key')
       return
     }
     setKeyInput('')
-    onChanged?.()
+    // Hold the 'connecting' state until the parent's status refetch lands, so the
+    // row settles Connecting → Connected without flashing back to the stale form.
+    await onChanged?.()
+    setBusy(false)
   }
 
   async function handleRecheck(): Promise<void> {
@@ -169,7 +195,7 @@ export function RuntimeConnectionCard({
       !(await confirm({
         title: `Disconnect ${entry.name}?`,
         message:
-          "This removes its saved API key from the encrypted vault — you'll need to re-enter it to reconnect.",
+          "This removes its saved API key from the encrypted vault. You'll need to re-enter it to reconnect.",
         confirmLabel: 'Disconnect',
         tone: 'danger',
       }))
@@ -196,48 +222,33 @@ export function RuntimeConnectionCard({
   }
 
   return (
-    <div
-      data-testid={`runtime-card-${entry.id}`}
-      className="flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-5"
-      style={{ boxShadow: 'var(--shadow-raised)' }}
-    >
-      {/* Header */}
-      <div className="flex items-start gap-3">
-        <RuntimeIcon id={entry.id} size={40} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span
-              className="whitespace-nowrap text-[14.5px] font-semibold"
-              style={{ color: 'var(--foreground)' }}
-            >
-              {entry.name}
-            </span>
-            <StatusPill tone={pill.tone} label={pill.label} />
-          </div>
-          <p className="mt-1 text-[12px] leading-relaxed" style={{ color: muted(0.52) }}>
-            {entry.blurb}
-          </p>
-        </div>
-        {variant === 'panel' && onDiagnostics && (
-          <IconButton
-            variant="ghost"
-            size="sm"
-            label={`${entry.name} diagnostics`}
-            data-testid={`runtime-${entry.id}-diagnostics`}
-            onClick={onDiagnostics}
-            className="shrink-0"
+    <div data-testid={`runtime-card-${entry.id}`} className="flex flex-col gap-3.5">
+      {/* Header — name + status. Hidden in the LIST host (hideHeader), which
+          renders its own row summary (brand tile + name + state control). */}
+      {!hideHeader && (
+        <div className="flex items-center gap-2.5">
+          <span
+            className="whitespace-nowrap text-[13.5px] font-semibold"
+            style={{ color: 'var(--foreground)' }}
           >
-            <Info size={15} />
-          </IconButton>
-        )}
-      </div>
-
-      {/* Capability chips */}
-      <div className="flex flex-wrap gap-1.5">
-        {CAP_KEYS.map((k) => (
-          <CapabilityChip key={k} label={k} on={Boolean(caps[k])} />
-        ))}
-      </div>
+            {entry.name}
+          </span>
+          <StatusPill tone={pill.tone} label={pill.label} />
+          <span className="flex-1" />
+          {variant === 'panel' && onDiagnostics && (
+            <IconButton
+              variant="ghost"
+              size="sm"
+              label={`${entry.name} diagnostics`}
+              data-testid={`runtime-${entry.id}-diagnostics`}
+              onClick={onDiagnostics}
+              className="shrink-0"
+            >
+              <Info size={15} />
+            </IconButton>
+          )}
+        </div>
+      )}
 
       {/* Install terminal log */}
       {installing || installLog.length > 0 ? (
@@ -322,7 +333,7 @@ export function RuntimeConnectionCard({
       {display === 'needs-login' && (
         <div className="flex flex-col gap-1.5">
           <FormattedAlert tone="info">
-            {entry.name} uses your terminal login — run the command below, then re-check.
+            {entry.name} uses your terminal login. Run the command below, then re-check.
           </FormattedAlert>
           <div
             className="flex items-center justify-between gap-2 rounded-lg px-3 py-2"
@@ -365,7 +376,7 @@ export function RuntimeConnectionCard({
         {display === 'not-installed' && (
           <ActionButton
             testid={`runtime-${entry.id}-install`}
-            primary
+            primary={variant === 'panel'}
             onClick={handleInstall}
             icon={<Download size={13} />}
           >
@@ -382,7 +393,7 @@ export function RuntimeConnectionCard({
         {display === 'needs-auth' && (
           <ActionButton
             testid={`runtime-${entry.id}-connect`}
-            primary
+            primary={variant === 'panel'}
             busy={busy}
             disabled={!keyInput.trim()}
             onClick={handleConnect}

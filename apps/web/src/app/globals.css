@@ -477,6 +477,17 @@ samp {
   }
 }
 
+/* One-shot "verified" pop for the connected-runtime disc (steady thereafter,
+   never pulses). Neutralized by the prefers-reduced-motion guard below. */
+@keyframes clawboo-disc-pop {
+  from {
+    transform: scale(0.55);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .clawboo-skeleton {
     animation: none;
@@ -511,12 +522,23 @@ samp {
 :focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
-  border-radius: inherit;
+  /* Do NOT set `border-radius` here. The outline already follows the
+     element's own border-radius, so `border-radius: inherit` only served
+     to flatten rounded elements to their parent's radius while focused
+     (which squared-off rounded buttons and their focus rings). */
 }
 /* React Flow + CodeMirror manage their own focus visuals; suppress
    the global ring inside those scopes so we don't double up. */
 .react-flow :focus-visible,
 .cm-editor :focus-visible,
 .cm-editor *:focus-visible {
+  outline: none;
+}
+
+/* The onboarding welcome CTA is a large, unmistakable primary button with
+   its own glow + hover/press affordances, so it opts out of the focus
+   frame. Scoped opt-out (not a utility) because the global :focus-visible
+   rule above is unlayered and would otherwise win the cascade. */
+.welcome-cta:focus-visible {
   outline: none;
 }
