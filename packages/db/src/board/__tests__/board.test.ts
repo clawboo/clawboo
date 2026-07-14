@@ -25,6 +25,7 @@ import {
   reconcileOrphans,
   reconcileStaleInProgress,
   updateStatus,
+  updateTaskFields,
 } from '../repository'
 import { canTransition, isLocked, isTerminal } from '../state-machine'
 
@@ -40,6 +41,26 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
+})
+
+describe('updateTaskFields — cost + runtime (board card ledger)', () => {
+  it('writes costUsd + the real assigneeRuntime; the engine creates a task at 0 / hardcoded openclaw', () => {
+    // The engine creates a task with cost 0 and assigneeRuntime 'openclaw' regardless of
+    // the real runtime; the orchestrator corrects both on the run terminal.
+    const t = createTask(db, { title: 'poem', teamId: 'team1', assigneeRuntime: 'openclaw' })
+    expect(getTask(db, t.id)!.costUsd).toBe(0)
+
+    updateTaskFields(db, t.id, { costUsd: 0.0042, assigneeRuntime: 'hermes' })
+    const after = getTask(db, t.id)!
+    expect(after.costUsd).toBeCloseTo(0.0042)
+    expect(after.assigneeRuntime).toBe('hermes')
+
+    // A later cost-only write updates cost without disturbing the runtime.
+    updateTaskFields(db, t.id, { costUsd: 0.01 })
+    const again = getTask(db, t.id)!
+    expect(again.costUsd).toBeCloseTo(0.01)
+    expect(again.assigneeRuntime).toBe('hermes')
+  })
 })
 
 describe('atomic claim', () => {
