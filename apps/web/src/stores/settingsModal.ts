@@ -9,6 +9,7 @@ import type { NavView } from './view'
 export type SettingsView = Extract<
   NavView,
   | 'runtimes'
+  | 'providers'
   | 'memory'
   | 'capabilities'
   | 'scheduler'
@@ -27,6 +28,7 @@ export const DEFAULT_SETTINGS_VIEW: SettingsView = 'runtimes'
 // view with no sidebar entry.
 export const SETTINGS_VIEWS: readonly SettingsView[] = [
   'runtimes',
+  'providers',
   'memory',
   'capabilities',
   'scheduler',

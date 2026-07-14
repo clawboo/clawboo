@@ -574,7 +574,10 @@ export function AgentListColumn() {
           `flex-1` instead anchors it to a clear top-half, with Create Boo
           and the global nav (Atlas, Marketplace, Approvals, etc.) all
           sitting at the bottom edge. */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
+      <div
+        className="flex-1 min-h-0 overflow-y-auto px-2 pb-2"
+        data-testid="fleet-agent-list"
+      >
         {selectedTeam && filtered.length > 0 && (
           <>
             <GroupChatRow

@@ -7,6 +7,7 @@ import { MaintenancePanel } from '@/features/maintenance'
 import { ObsPanel } from '@/features/obs'
 import { BoardPanel } from '@/features/board/BoardPanel'
 import { RuntimesPanel } from '@/features/runtimes/RuntimesPanel'
+import { ProvidersPanel } from '@/features/providers/ProvidersPanel'
 import { FleetHealth } from '@/features/fleet/FleetHealth'
 import { MemoryPanel } from '@/features/memory/MemoryPanel'
 import { CapabilitiesPanel } from '@/features/capabilities/CapabilitiesPanel'
@@ -30,6 +31,7 @@ export const NAV_PANELS: Record<NavView, () => ReactNode> = {
   obs: () => <ObsPanel />,
   board: () => <BoardPanel />,
   runtimes: () => <RuntimesPanel />,
+  providers: () => <ProvidersPanel />,
   memory: () => <MemoryPanel />,
   governance: () => <GovernancePanel />,
   capabilities: () => <CapabilitiesPanel />,
