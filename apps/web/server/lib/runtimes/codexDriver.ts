@@ -9,8 +9,13 @@
 // The exact `codex exec --json` event field names are confirmed against the
 // installed CLI in the live smoke; the parser is tolerant of shape drift and the
 // exit-synthesized terminal keeps a run correct regardless.
+//
+// The isolated home has no login of its own, so the user's `codex login` OAuth
+// (`~/.codex/auth.json`) is SEEDED into it — copy-only, never written back — so a
+// run authenticates with the account the user logged in with in their terminal.
 
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -19,6 +24,7 @@ import { buildAttachConfig, mcpHttpUrl, MCP_SERVER_NAMES, type AttachScope } fro
 import type { StartOpts } from '@clawboo/executor'
 
 import { resolveRuntimeBin } from '../platform'
+import { userCodexAuthPath } from './codexAuth'
 import { createSpawnDriver } from './subprocess'
 import type { RuntimeRunContext } from './types'
 
@@ -49,8 +55,17 @@ export function translateCodexEvent(raw: unknown, state: CodexRunState): CodexNa
   const j = asRecord(raw)
   if (!j) return []
   const type = asStr(j['type']) ?? ''
-  const msg = asRecord(j['msg']) // `codex exec` wraps events as { id, msg: { type, ... } }
-  const inner = msg ?? j
+  // `codex exec --json` (0.136) wraps a content ITEM as
+  //   { type: 'item.completed', item: { type: 'agent_message' | 'reasoning' | …, text, … } }
+  // and lifecycle as top-level { type: 'thread.started' | 'turn.completed', … }; an
+  // older/other shape wraps content as { msg: { type, … } }. Unwrap item → msg → the
+  // bare event so the inner type/text/usage are read regardless of the envelope.
+  // WITHOUT the `item` unwrap, an `agent_message` reply was never captured, so the
+  // run's summary came back EMPTY and the board fell back to "<title> completed."
+  // (the "codex just echoes the prompt" bug — the run actually succeeded).
+  const item = asRecord(j['item'])
+  const msg = asRecord(j['msg'])
+  const inner = item ?? msg ?? j
   const innerType = asStr(inner['type']) ?? type
 
   // Thread / session id (several plausible field spellings).
@@ -135,6 +150,16 @@ export function createCodexDriver(opts: StartOpts, ctx: RuntimeRunContext): Code
   return createSpawnDriver<CodexNativeEvent>({
     async resolve() {
       const codexHome = await mkdtemp(path.join(os.tmpdir(), 'clawboo-codex-home-'))
+      // Seed the user's ChatGPT-OAuth login so the run authenticates with their
+      // `codex login` account (the isolated home starts empty). Copy-if-present;
+      // never write back to ~/.codex. If absent, the run falls back to whatever
+      // ctx.apiKeyEnv provides (or fails with a clear auth error).
+      try {
+        const src = userCodexAuthPath()
+        if (existsSync(src)) await copyFile(src, path.join(codexHome, 'auth.json'))
+      } catch {
+        /* best-effort — auth seeding is not fatal to constructing the plan */
+      }
       if (ctx.mcpBaseUrl) {
         // Sanity: buildAttachConfig stays the source of truth for the URLs.
         void buildAttachConfig({

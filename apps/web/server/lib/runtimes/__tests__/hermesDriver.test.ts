@@ -209,22 +209,138 @@ describe('hermes driver (preserved runtime)', () => {
     expect(spawn.args).not.toContain('gateway') // one-shot worker, never the Hermes gateway
   })
 
-  it('provider precedence: config wins (no flag) → OPENROUTER key fallback → nothing', async () => {
+  it('provider precedence: config wins → key-derived --provider (openrouter > anthropic > openai-api) → nothing', async () => {
     const home = await provisionHermesHome(identityHome())
+    const providerArg = (args: string[]): string | undefined => {
+      const i = args.indexOf('--provider')
+      return i > -1 ? args[i + 1] : undefined
+    }
 
     // 1. No config, no key → no flag (Hermes default `auto`).
     expect((await plan(home)).args).not.toContain('--provider')
 
-    // 2. No config + OPENROUTER_API_KEY → the compatibility fallback.
-    const withKey = await plan(home, { apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or-test' } })
-    const i = withKey.args.indexOf('--provider')
-    expect(i).toBeGreaterThan(-1)
-    expect(withKey.args[i + 1]).toBe('openrouter')
+    // 2. No config + OPENROUTER_API_KEY → openrouter (the default path).
+    expect(providerArg((await plan(home, { apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' } })).args)).toBe(
+      'openrouter',
+    )
 
-    // 3. Configured model.provider wins → no flag even with the key present.
+    // 3. A REUSED native Anthropic key → the `anthropic` provider.
+    expect(providerArg((await plan(home, { apiKeyEnv: { ANTHROPIC_API_KEY: 'sk-ant' } })).args)).toBe(
+      'anthropic',
+    )
+
+    // 4. A REUSED OpenAI key → `openai-api` (NOT bare `openai`, which is not a
+    //    valid hermes provider id).
+    expect(providerArg((await plan(home, { apiKeyEnv: { OPENAI_API_KEY: 'sk-oa' } })).args)).toBe(
+      'openai-api',
+    )
+
+    // 5. OpenRouter wins when multiple keys are present (it is always available).
+    expect(
+      providerArg(
+        (await plan(home, { apiKeyEnv: { ANTHROPIC_API_KEY: 'a', OPENROUTER_API_KEY: 'o' } })).args,
+      ),
+    ).toBe('openrouter')
+
+    // 6. Configured model.provider wins → no flag even with a key present.
     await writeFile(path.join(home.home, 'config.yaml'), 'model:\n  provider: anthropic\n', 'utf8')
-    const configured = await plan(home, { apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or-test' } })
+    const configured = await plan(home, { apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' } })
     expect(configured.args).not.toContain('--provider')
+  })
+
+  it('derives a default model with a key-derived provider (so OpenRouter does not 400 "No models provided")', async () => {
+    const home = await provisionHermesHome(identityHome())
+    const modelArg = (args: string[]): string | undefined => {
+      const i = args.indexOf('-m')
+      return i > -1 ? args[i + 1] : undefined
+    }
+
+    // OpenRouter-derived: a default OpenRouter model id now rides `-m` alongside
+    // `--provider openrouter` (the reported bug was NO `-m` → "No models provided").
+    const or = await plan(home, { apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' } })
+    expect(or.args).toContain('--provider')
+    expect(modelArg(or.args)).toBe('openai/gpt-4o-mini')
+
+    // Reused native keys get their own namespace defaults.
+    expect(modelArg((await plan(home, { apiKeyEnv: { ANTHROPIC_API_KEY: 'a' } })).args)).toBe(
+      'claude-haiku-4-5',
+    )
+    expect(modelArg((await plan(home, { apiKeyEnv: { OPENAI_API_KEY: 'o' } })).args)).toBe(
+      'gpt-4o-mini',
+    )
+
+    // An explicit model still wins over the derived default.
+    expect(
+      modelArg(
+        (
+          await plan(home, {
+            model: 'anthropic/claude-sonnet-4',
+            apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' },
+          })
+        ).args,
+      ),
+    ).toBe('anthropic/claude-sonnet-4')
+
+    // No provider derived (no key, no config) → NO `-m` (Hermes default `auto`).
+    expect(modelArg((await plan(home)).args)).toBeUndefined()
+  })
+
+  it('a per-agent PICKED provider (ctx.providerHint) pins --provider + uses ctx.model, ahead of key derivation and config', async () => {
+    const home = await provisionHermesHome(identityHome())
+    const providerArg = (args: string[]): string | undefined => {
+      const i = args.indexOf('--provider')
+      return i > -1 ? args[i + 1] : undefined
+    }
+    const modelArg = (args: string[]): string | undefined => {
+      const i = args.indexOf('-m')
+      return i > -1 ? args[i + 1] : undefined
+    }
+
+    // Pick anthropic even though an OpenRouter key is present (would otherwise derive
+    // openrouter): the pick pins the provider AND passes the picked model.
+    const picked = await plan(home, {
+      model: 'claude-haiku-4-5',
+      providerHint: 'anthropic',
+      apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or', ANTHROPIC_API_KEY: 'a' },
+    })
+    expect(providerArg(picked.args)).toBe('anthropic')
+    expect(modelArg(picked.args)).toBe('claude-haiku-4-5')
+
+    // The pick also wins over a seeded config.yaml provider.
+    await writeFile(path.join(home.home, 'config.yaml'), 'model:\n  provider: openrouter\n', 'utf8')
+    const overConfig = await plan(home, {
+      model: 'gpt-4o-mini',
+      providerHint: 'openai-api',
+      apiKeyEnv: { OPENAI_API_KEY: 'o' },
+    })
+    expect(providerArg(overConfig.args)).toBe('openai-api')
+    expect(modelArg(overConfig.args)).toBe('gpt-4o-mini')
+  })
+
+  it('degrades a PICKED provider whose key is NOT connected to the key-derived default (no hard-fail)', async () => {
+    const home = await provisionHermesHome(identityHome())
+    const providerArg = (args: string[]): string | undefined => {
+      const i = args.indexOf('--provider')
+      return i > -1 ? args[i + 1] : undefined
+    }
+    const modelArg = (args: string[]): string | undefined => {
+      const i = args.indexOf('-m')
+      return i > -1 ? args[i + 1] : undefined
+    }
+
+    // The reported failure: an Anthropic-direct pick on an OpenRouter-only setup. The
+    // unusable `--provider anthropic` pin + its model are DROPPED and the run degrades
+    // to the key-derived openrouter default — never the un-authable `--provider anthropic`
+    // (which fails "No Anthropic credentials found").
+    const degraded = await plan(home, {
+      model: 'claude-haiku-4-5',
+      providerHint: 'anthropic',
+      apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' },
+    })
+    expect(providerArg(degraded.args)).toBe('openrouter')
+    expect(modelArg(degraded.args)).toBe('openai/gpt-4o-mini')
+    expect(degraded.args).not.toContain('anthropic')
+    expect(degraded.args).not.toContain('claude-haiku-4-5')
   })
 
   it('injects --resume from ctx.resume only into a PRE-EXISTING home', async () => {

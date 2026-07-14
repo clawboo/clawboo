@@ -87,6 +87,7 @@ export class RuntimeAgentSource implements AgentSource {
   }
 
   private mapRow(row: DbAgent): AgentRecord {
+    const exec = parseJson(row.execConfig) as { model?: unknown } | null
     return {
       id: row.id,
       sourceId: row.sourceId,
@@ -100,7 +101,10 @@ export class RuntimeAgentSource implements AgentSource {
       isDefault: false,
       teamId: row.teamId ?? null,
       personalityConfig: parseJson(row.personalityConfig),
-      execConfig: parseJson(row.execConfig),
+      execConfig: exec,
+      // A coding-runtime agent's model lives in execConfig (Hermes: { provider, model }
+      // — the editable pick). Surface it so the agent-detail selector shows the current.
+      model: exec && typeof exec['model'] === 'string' ? exec['model'] : null,
       participantKind: (row.participantKind as AgentRecord['participantKind']) ?? 'agent',
       runtime: row.runtime,
       capabilities: parseJson(row.capabilities),

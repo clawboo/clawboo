@@ -5,6 +5,8 @@
 // driver/SDK imports, so importing this never pulls a runtime dependency into the
 // server boot graph.
 
+import { NATIVE_PROVIDER_ENV_VARS } from '@clawboo/adapter-native'
+
 export type NonOpenClawRuntimeId = 'claude-code' | 'codex' | 'hermes' | 'clawboo-native'
 
 export const NON_OPENCLAW_RUNTIME_IDS: readonly NonOpenClawRuntimeId[] = [
@@ -84,11 +86,21 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
     packageManager: 'pip',
     // Pinned below the next major (blocks an auto-install of a future 1.0); the
     // installer passes this as a single argv element (no shell), so `<1` is safe.
-    pkg: 'hermes-agent<1',
-    installCommand: "pipx install 'hermes-agent<1'",
+    // The `[anthropic]` extra bundles the Anthropic provider SDK — OpenAI +
+    // OpenRouter ship with hermes core, but the Anthropic provider needs this
+    // extra, so a REUSED Anthropic key (the native default) routes without a
+    // separate install. Confirmed against the installed CLI (`--provider
+    // anthropic` errors "the 'anthropic' package is required" without it).
+    pkg: 'hermes-agent[anthropic]<1',
+    installCommand: "pipx install 'hermes-agent[anthropic]<1'",
     builtIn: false,
     authKind: 'api-key',
     envVar: 'OPENROUTER_API_KEY',
+    // Hermes routes across providers (config.yaml `model.provider` / `--provider`),
+    // so a native-onboarded Anthropic or OpenAI key ALSO makes it usable — any of
+    // these satisfies the credential check, mirroring the native runtime. The
+    // driver maps whichever key is present to the matching `--provider` flag.
+    altEnvVars: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'],
     docsUrl: 'https://pypi.org/project/hermes-agent/',
     headlessAuth: true,
   },
@@ -104,9 +116,11 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
     builtIn: true,
     authKind: 'api-key',
     envVar: 'ANTHROPIC_API_KEY',
-    // Routable across providers — an OpenAI or OpenRouter key alone also makes
-    // it usable, so any of them satisfies the credential check.
-    altEnvVars: ['OPENAI_API_KEY', 'OPENROUTER_API_KEY'],
+    // Routable across providers — a key for ANY supported provider (OpenAI,
+    // OpenRouter, Google, xAI, Groq, Mistral, Together, Cerebras, Moonshot) makes
+    // it usable, so any of them satisfies the credential check. Kept in lock-step
+    // with the adapter's NATIVE_PROVIDER_ENV_VARS (minus the primary envVar).
+    altEnvVars: NATIVE_PROVIDER_ENV_VARS.filter((v) => v !== 'ANTHROPIC_API_KEY'),
     docsUrl: 'https://github.com/clawboo/clawboo',
     headlessAuth: true,
   },
@@ -132,10 +146,14 @@ export function deriveConnectionState(
   d: RuntimeDescriptor,
   installed: boolean,
   hasCredential: boolean,
+  /** For oauth runtimes (codex): whether the user is already logged in (detected
+   *  from `codex login status`). When true the runtime is 'ready' — clawboo
+   *  reuses the existing terminal login instead of prompting to log in again. */
+  oauthLoggedIn = false,
 ): RuntimeConnectionState {
   if (!installed) return 'not-installed'
   if (d.authKind === 'none') return 'ready'
-  if (d.authKind === 'oauth') return 'needs-login'
+  if (d.authKind === 'oauth') return oauthLoggedIn ? 'ready' : 'needs-login'
   // api-key
   return hasCredential ? 'ready' : 'needs-auth'
 }
