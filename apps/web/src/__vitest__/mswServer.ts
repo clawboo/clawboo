@@ -41,4 +41,11 @@ export const server = setupServer(
   http.post('/api/providers/:id/models', () => HttpResponse.json({ models: [] })),
   // ConfigureNativeStep records the chosen leader model (fire-and-forget) on connect.
   http.post('/api/onboarding/native-leader-model', () => HttpResponse.json({ ok: true })),
+  // The OpenClaw "reachable server-side" signal — CreateTeamModal + the Runtimes panel
+  // read registry health so OpenClaw is offered in thin-client mode (browser client null,
+  // server operator connection live). A benign disconnected default; a test that needs
+  // it connected overrides with its own `server.use(...)`.
+  http.get('/api/agents/registry/health', () =>
+    HttpResponse.json({ ok: false, connection: 'disconnected', lastSyncedAt: null }),
+  ),
 )

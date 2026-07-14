@@ -14,7 +14,7 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { createAgent } from '@/lib/createAgent'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
-import { fetchRuntimes, type RuntimeStatus } from '@clawboo/control-client'
+import { fetchRegistryHealth, fetchRuntimes, type RuntimeStatus } from '@clawboo/control-client'
 import {
   agentRuntimeOptions,
   resolveDefaultRuntime,
@@ -22,7 +22,11 @@ import {
   type RuntimeAvailability,
   type SelectableSourceId,
 } from './runtimeSelection'
-import { NATIVE_LEADER_PROMPT, NATIVE_SPECIALIST_PROMPT, NATIVE_TEAM_TOOLS } from './nativeTeamPrompts'
+import {
+  NATIVE_LEADER_PROMPT,
+  NATIVE_SPECIALIST_PROMPT,
+  NATIVE_TEAM_TOOLS,
+} from './nativeTeamPrompts'
 import { RuntimeSelect } from './RuntimeSelect'
 import { nativeModelExec } from '@/lib/nativeModelCatalog'
 import { hermesModelExec } from '@/lib/hermesModelCatalog'
@@ -88,7 +92,9 @@ function modelOptionsFor(
         : openclawGroups
   return [
     { value: '', label: 'Recommended' },
-    ...groups.flatMap((g) => g.models.map((m) => ({ value: m.id, label: `${m.label} · ${g.provider}` }))),
+    ...groups.flatMap((g) =>
+      g.models.map((m) => ({ value: m.id, label: `${m.label} · ${g.provider}` })),
+    ),
   ]
 }
 
@@ -132,19 +138,27 @@ export function CreateTeamModal({
   allowStartFromScratch = true,
 }: CreateTeamModalProps) {
   const client = useConnectionStore((s) => s.client)
+  const connStatus = useConnectionStore((s) => s.status)
+  // OpenClaw's SERVER-side operator connection (registry health) — the thin-client
+  // signal. OpenClaw team deploy + run happen server-side (the OpenClawAgentSource
+  // create + the server orchestrator run over the operator connection), so a live
+  // browser Gateway client is NOT required; this is what actually gates OpenClaw.
+  // Fetched on open.
+  const [serverOpenclawConnected, setServerOpenclawConnected] = useState(false)
   // Native groups with the OpenRouter list fetched live — feeds the per-agent model picker.
   const nativeModelGroups = useNativeModelGroups()
   // OpenClaw groups with the same live OpenRouter list (routing-id format).
   const openclawModelGroups = useOpenClawModelGroups(MODEL_GROUPS)
   const hermesModelGroups = useHermesModelGroups()
-  // "OpenClaw available" requires a LIVE Gateway client, not just a 'connected' status:
-  // native mode (`enterNativeMode`) sets status='connected' with client=null, so a bare
-  // status check would falsely offer OpenClaw (and default marketplace rows to it) with no
-  // Gateway behind it. Gating on `client != null` degrades those rows to Native in native
-  // mode — so a marketplace team deploys fully native (Gateway-free) instead of hitting the
-  // deploy guard.
+  // "OpenClaw available" = a live browser Gateway client OR the server's operator
+  // connection (mirrors the Runtimes panel). A bare status check is wrong — native mode
+  // sets status='connected' with client=null and no Gateway — so the registry-health
+  // signal is the accurate "OpenClaw is reachable" test, and it's what lets OpenClaw be
+  // picked in thin-client / degraded-gateway mode (browser client null, server operator
+  // connection live). When NEITHER is connected, marketplace rows degrade to Native so a
+  // deploy still succeeds Gateway-free.
   const openclawConnected =
-    useConnectionStore((s) => s.status) === 'connected' && client !== null
+    (connStatus === 'connected' && client !== null) || serverOpenclawConnected
   const openSettings = useSettingsModalStore((s) => s.openSettings)
   const { resolvedTheme } = useTheme()
 
@@ -204,6 +218,12 @@ export function CreateTeamModal({
     void fetchRuntimes()
       .then(setRuntimeStatuses)
       .catch(() => {})
+    // The server's OpenClaw operator connection — so OpenClaw is offered when it's
+    // reachable server-side even if the browser Gateway client is null (thin-client /
+    // degraded-gateway mode), matching the Runtimes panel.
+    void fetchRegistryHealth()
+      .then((h) => setServerOpenclawConnected(h.connection === 'connected'))
+      .catch(() => setServerOpenclawConnected(false))
   }, [isOpen])
 
   // Deploy state
@@ -379,12 +399,13 @@ export function CreateTeamModal({
       // Resolve the catalog agents up front — used for dedup, deploy, and counts.
       const resolved = selectedProfile ? resolveTeamAgents(selectedProfile) : []
 
-      // Any agent EXPLICITLY on OpenClaw needs a live browser Gateway client (its
-      // AgentSource create 503s otherwise). The resolver already degrades an OpenClaw
-      // *suggestion* to Native when the Gateway is down, so this only trips when the
-      // user forces OpenClaw on a member while disconnected.
+      // Any agent EXPLICITLY on OpenClaw needs OpenClaw reachable — the server-side
+      // operator connection (its AgentSource create 503s otherwise), NOT a browser
+      // Gateway client. The resolver already degrades an OpenClaw *suggestion* to Native
+      // when OpenClaw is down, so this only trips when the user forces OpenClaw on a
+      // member while OpenClaw is disconnected.
       const anyOpenClaw = resolved.some((a) => agentSourceIdFor(a.id) === 'openclaw')
-      if (anyOpenClaw && !client) {
+      if (anyOpenClaw && !openclawConnected) {
         setError(
           'Connect an OpenClaw Gateway to deploy the OpenClaw members, or switch them to another runtime.',
         )
@@ -450,7 +471,11 @@ export function CreateTeamModal({
           await fetch(`/api/teams/${team.id}/onboarding`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agentsIntroduced: true, userIntroduced: true, userIntroText: '' }),
+            body: JSON.stringify({
+              agentsIntroduced: true,
+              userIntroduced: true,
+              userIntroText: '',
+            }),
           })
         } catch {
           // best-effort — the gate will just run once if this fails
@@ -550,7 +575,8 @@ export function CreateTeamModal({
         // override, else the catalog default). A native LEADER (the team-internal
         // lead that also resolved to native) gets the leader prompt + tier.
         const sourceId = agentSourceIdFor(agent.id)
-        const isNativeLeader = sourceId === 'clawboo-native' && effectiveLeaderAgent?.id === agent.id
+        const isNativeLeader =
+          sourceId === 'clawboo-native' && effectiveLeaderAgent?.id === agent.id
 
         let agentId: string
         try {
@@ -768,7 +794,7 @@ export function CreateTeamModal({
       setStep('customize')
     }
   }, [
-    client,
+    openclawConnected,
     teamName,
     teamIcon,
     teamColor,
@@ -908,7 +934,10 @@ export function CreateTeamModal({
                       <ArrowLeft className="h-4 w-4" strokeWidth={2} />
                     </IconButton>
                   )}
-                  <h2 className="text-[18px] font-bold text-foreground" style={{ letterSpacing: '-0.01em' }}>
+                  <h2
+                    className="text-[18px] font-bold text-foreground"
+                    style={{ letterSpacing: '-0.01em' }}
+                  >
                     {isSingleAgentMode ? 'Deploy agent' : 'Customize team'}
                   </h2>
                 </div>
@@ -1038,7 +1067,12 @@ export function CreateTeamModal({
                                       onChange={(m) =>
                                         setAgentModels((prev) => ({ ...prev, [agent.id]: m }))
                                       }
-                                      options={modelOptionsFor(value, nativeModelGroups, openclawModelGroups, hermesModelGroups)}
+                                      options={modelOptionsFor(
+                                        value,
+                                        nativeModelGroups,
+                                        openclawModelGroups,
+                                        hermesModelGroups,
+                                      )}
                                     />
                                   )}
                                 </div>
@@ -1092,7 +1126,10 @@ export function CreateTeamModal({
                 >
                   {teamIcon}
                 </motion.div>
-                <h2 className="mb-2 text-[18px] font-bold text-foreground" style={{ letterSpacing: '-0.01em' }}>
+                <h2
+                  className="mb-2 text-[18px] font-bold text-foreground"
+                  style={{ letterSpacing: '-0.01em' }}
+                >
                   Deploying {teamName}
                 </h2>
                 <p className="mb-6 text-[13px] text-foreground/55">Creating {progress.label}…</p>
@@ -1139,7 +1176,10 @@ export function CreateTeamModal({
                     style={{ color: 'var(--mint)' }}
                   />
                 </motion.div>
-                <h2 className="mb-1 text-[18px] font-bold text-foreground" style={{ letterSpacing: '-0.01em' }}>
+                <h2
+                  className="mb-1 text-[18px] font-bold text-foreground"
+                  style={{ letterSpacing: '-0.01em' }}
+                >
                   Team deployed!
                 </h2>
                 <p className="text-[13px] text-foreground/55">{teamName} is ready to go.</p>
