@@ -114,9 +114,10 @@ export async function writeAgentFile(
   await jsonOrThrow<{ name: string; content: string }>(res, `Write ${name}`)
 }
 
-/** Change a clawboo-native agent's model (persists to its AgentConfig primaryModel).
- *  Native-only — an OpenClaw agent changes model via the Gateway path (404 here). */
-export async function setNativeAgentModel(agentId: string, model: string): Promise<void> {
+/** Change an agent's model via the model route. Native persists to its AgentConfig
+ *  `primaryModel`; Hermes persists to its execConfig `{ provider, model }` (routed via
+ *  OpenRouter). Other runtimes (Codex / Claude Code / OpenClaw) 404 here. */
+export async function setAgentModel(agentId: string, model: string): Promise<void> {
   const res = await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/model`, {
     method: 'PATCH',
     headers: JSON_HEADERS,
