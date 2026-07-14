@@ -29,6 +29,11 @@ export interface RuntimeDescriptor {
   packageManager: 'npm' | 'pip' | null
   /** Package to install (`npm install -g <pkg>` / `pip|pipx install <pkg>`). */
   pkg: string | null
+  /** For a `pip` runtime: the minimum Python 3 MINOR version the package needs
+   *  (e.g. 11 for `>=3.11`). The installer resolves a matching interpreter,
+   *  preferring version-specific binaries over the bare `python3` (which on a
+   *  fresh macOS is the Xcode Command Line Tools Python 3.9 — too old). */
+  pythonMinMinor?: number
   /** Human-readable install command (UI + error remediation). */
   installCommand: string | null
   /** Ships inside the clawboo server — always installed, never installable. */
@@ -92,6 +97,10 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
     // separate install. Confirmed against the installed CLI (`--provider
     // anthropic` errors "the 'anthropic' package is required" without it).
     pkg: 'hermes-agent[anthropic]<1',
+    // hermes-agent requires Python >=3.11,<3.14. A fresh macOS `python3` is the
+    // Xcode CLT Python 3.9, which requires-python excludes → pip reports
+    // "(from versions: none)". The installer resolves a 3.11+ interpreter first.
+    pythonMinMinor: 11,
     installCommand: "pipx install 'hermes-agent[anthropic]<1'",
     builtIn: false,
     authKind: 'api-key',

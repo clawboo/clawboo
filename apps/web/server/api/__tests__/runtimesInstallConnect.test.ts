@@ -15,12 +15,33 @@ import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ── Mock platform: control which CLI bins are "installed". ───────────────────
-const platformState = vi.hoisted(() => ({ bins: {} as Record<string, string | null> }))
+type PyResult = {
+  compatible: { bin: string; minor: number; version: string } | null
+  best: { bin: string; minor: number; version: string } | null
+}
+const platformState = vi.hoisted(() => ({
+  bins: {} as Record<string, string | null>,
+  // Force a specific resolvePython result (e.g. a too-old Xcode Python); when
+  // null, resolvePython is derived from `bins` (a python bin => compatible 3.12).
+  pythonOverride: null as PyResult | null,
+}))
 vi.mock('../../lib/platform', () => ({
   isWindows: false,
   resolveShimName: (n: string) => n,
   resolveRuntimeBin: (n: string) => platformState.bins[n] ?? null,
   findExecutable: (n: string) => platformState.bins[n] ?? null,
+  resolvePython: (): PyResult => {
+    if (platformState.pythonOverride) return platformState.pythonOverride
+    const bin =
+      platformState.bins['python3.12'] ??
+      platformState.bins['python3.11'] ??
+      platformState.bins['python3'] ??
+      platformState.bins['python'] ??
+      null
+    if (!bin) return { compatible: null, best: null }
+    const c = { bin, minor: 12, version: '3.12' }
+    return { compatible: c, best: c }
+  },
 }))
 
 // ── Mock the Codex login probe (real impl shells out to `codex login status`). ─
@@ -180,6 +201,7 @@ describe('runtimes install/connect REST', () => {
     process.env['CLAWBOO_HOME'] = home
     process.env['OPENCLAW_STATE_DIR'] = stateDir
     platformState.bins = {}
+    platformState.pythonOverride = null
     spawnState.calls = []
     spawnState.children = []
     runnerState.lastInput = null
@@ -262,7 +284,14 @@ describe('runtimes install/connect REST', () => {
     first.emitClose(1)
     expect(spawnState.calls[1]).toEqual({
       cmd: '/usr/bin/python3',
-      args: ['-m', 'pip', 'install', '--user', '--break-system-packages', 'hermes-agent[anthropic]<1'],
+      args: [
+        '-m',
+        'pip',
+        'install',
+        '--user',
+        '--break-system-packages',
+        'hermes-agent[anthropic]<1',
+      ],
     })
     ;(spawnState.children[1] as FakeChild).emitClose(0)
     await m.ended
@@ -274,6 +303,28 @@ describe('runtimes install/connect REST', () => {
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
     await m.ended
     expect(m.events().some((e) => e['code'] === 'PYTHON_MISSING')).toBe(true)
+    expect(spawnState.calls.length).toBe(0)
+  })
+
+  it('hermes install reports PYTHON_TOO_OLD (not pip gibberish) when only the Xcode Python 3.9 exists', async () => {
+    // The exact fresh-macOS case: no pipx, and the only Python is the Xcode CLT
+    // 3.9 — below hermes-agent's requires-python >=3.11. Must be a clear error,
+    // never a doomed pip spawn that returns "(from versions: none)".
+    platformState.pythonOverride = {
+      compatible: null,
+      best: {
+        bin: '/Applications/Xcode.app/Contents/Developer/usr/bin/python3',
+        minor: 9,
+        version: '3.9',
+      },
+    }
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    await m.ended
+    const err = m.events().find((e) => e['code'] === 'PYTHON_TOO_OLD')
+    expect(err).toBeTruthy()
+    expect(String(err?.['message'])).toMatch(/3\.11/)
+    expect(String(err?.['message'])).toMatch(/Xcode/)
     expect(spawnState.calls.length).toBe(0)
   })
 

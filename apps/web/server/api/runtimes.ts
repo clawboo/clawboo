@@ -16,7 +16,13 @@ import { getDbPath } from '../lib/db'
 import { runTaskOnRuntime } from '../lib/executorRunner'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { fetchOpenRouterModels } from '../lib/openrouterModels'
-import { findExecutable, isWindows, resolveRuntimeBin, resolveShimName } from '../lib/platform'
+import {
+  findExecutable,
+  isWindows,
+  resolvePython,
+  resolveRuntimeBin,
+  resolveShimName,
+} from '../lib/platform'
 import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
 import { nativeCompatProvider } from '../lib/runtimes/native/nativeProviders'
 import { adapterFactoryFor, enabledRuntimeIds } from '../lib/runtimes'
@@ -255,12 +261,19 @@ function installViaPip(
   d: RuntimeDescriptor,
   ctl: { child: ChildProcess | null },
 ): void {
-  // Prefer pipx (sidesteps PEP-668 entirely).
+  // Resolve an interpreter new enough for the package (Hermes needs >=3.11).
+  // Prefers python3.13/3.12/3.11 over the bare `python3` so a fresh macOS whose
+  // default is the Xcode CLT Python 3.9 still works when a newer Python exists.
+  const { compatible, best } = resolvePython(d.pythonMinMinor ?? 0)
+
+  // Prefer pipx (sidesteps PEP-668 entirely); pin its interpreter to the
+  // compatible one so it never builds the venv with a too-old default Python.
   const pipx = resolveRuntimeBin('pipx') ?? findExecutable('pipx')
   if (pipx) {
     sendEvent(res, { type: 'progress', step: 'installing', message: 'Installing via pipx…' })
+    const args = ['install', ...(compatible ? ['--python', compatible.bin] : []), d.pkg ?? '']
     try {
-      ctl.child = spawn(pipx, ['install', d.pkg ?? ''], {
+      ctl.child = spawn(pipx, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: isWindows,
         windowsHide: isWindows,
@@ -277,20 +290,34 @@ function installViaPip(
     streamInstallChild(res, ctl.child, d)
     return
   }
-  // Else `python -m pip install --user`, retrying once with
-  // --break-system-packages if the env is PEP-668 externally-managed.
-  const python = findExecutable('python3') ?? findExecutable('python')
-  if (!python) {
-    sendEvent(res, {
-      type: 'error',
-      code: 'PYTHON_MISSING',
-      message:
-        'Python 3 (with pip or pipx) not found. Install Python 3 and retry. Recommended: pipx.',
-    })
+
+  // No pipx → `python -m pip install --user` with a compatible interpreter,
+  // retrying once with --break-system-packages for PEP-668 environments.
+  if (!compatible) {
+    const min = d.pythonMinMinor ?? 0
+    if (best && min) {
+      const clt = /Xcode\.app|CommandLineTools/i.test(best.bin)
+      sendEvent(res, {
+        type: 'error',
+        code: 'PYTHON_TOO_OLD',
+        message:
+          `${d.name} needs Python 3.${min} or newer, but the Python on this machine is ` +
+          `${best.version}${clt ? ' (Xcode Command Line Tools)' : ''}. Install a newer Python ` +
+          '(e.g. `brew install python@3.12`) or pipx (`brew install pipx`), then Retry.',
+      })
+    } else {
+      sendEvent(res, {
+        type: 'error',
+        code: 'PYTHON_MISSING',
+        message:
+          `Python ${min ? `3.${min}+` : '3'} (with pip or pipx) not found. Install it ` +
+          '(e.g. `brew install python@3.12` or `brew install pipx`), then Retry.',
+      })
+    }
     res.end()
     return
   }
-  runPipUser(res, d, ctl, python, false)
+  runPipUser(res, d, ctl, compatible.bin, false)
 }
 
 function runPipUser(
@@ -470,7 +497,11 @@ function providerProbe(provider: string): ProviderProbe | null {
     default: {
       // Extra OpenAI-compatible providers probe their own `/models` endpoint.
       const ep = nativeCompatProvider(provider)
-      if (ep) return { url: `${ep.baseURL}/models`, headers: (key) => ({ Authorization: `Bearer ${key}` }) }
+      if (ep)
+        return {
+          url: `${ep.baseURL}/models`,
+          headers: (key) => ({ Authorization: `Bearer ${key}` }),
+        }
       return null
     }
   }

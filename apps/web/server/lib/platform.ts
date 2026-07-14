@@ -132,3 +132,73 @@ export function resolveRuntimeBin(
 export function resolveShimName(name: string): string {
   return isWindows ? `${name}.cmd` : name
 }
+
+export interface PythonCandidate {
+  /** Absolute path to the interpreter. */
+  bin: string
+  /** The Python 3.x MINOR version (e.g. 12 for Python 3.12). */
+  minor: number
+  /** Human-readable "3.<minor>". */
+  version: string
+}
+
+/**
+ * PURE: from the discovered interpreters, pick the newest that satisfies
+ * `minMinor` (Python >= 3.<minMinor>), plus the newest found overall (so a
+ * caller can render a precise "Python X is too old" error when none qualify).
+ * Exported for tests.
+ */
+export function pickPython(
+  found: PythonCandidate[],
+  minMinor: number,
+): { compatible: PythonCandidate | null; best: PythonCandidate | null } {
+  let best: PythonCandidate | null = null
+  let compatible: PythonCandidate | null = null
+  for (const c of found) {
+    if (!best || c.minor > best.minor) best = c
+    if (c.minor >= minMinor && (!compatible || c.minor > compatible.minor)) compatible = c
+  }
+  return { compatible, best }
+}
+
+function pythonMinorOf(bin: string): number | null {
+  try {
+    // A bounded one-liner (mirrors findExecutable's 5 s cap): print the 3.x minor
+    // (or -1 for a Python 2), so a too-old interpreter is detected, not spawned at.
+    const out = execFileSync(
+      bin,
+      ['-c', 'import sys;print(sys.version_info[1] if sys.version_info[0]==3 else -1)'],
+      { encoding: 'utf8', timeout: 5_000, windowsHide: true },
+    ).trim()
+    const n = Number(out)
+    return Number.isInteger(n) && n >= 0 ? n : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve a Python 3 interpreter, preferring version-specific binaries
+ * (python3.13 / 3.12 / 3.11) over the bare `python3`. This is the fix for the
+ * fresh-macOS case where `python3` is the Xcode Command Line Tools interpreter
+ * (Python 3.9) — too old for Hermes (`hermes-agent` requires >=3.11,<3.14) —
+ * even though a newer Homebrew/pyenv Python is installed under a versioned name.
+ * Returns the newest COMPATIBLE interpreter (>= 3.<minMinor>) plus the newest
+ * found overall. Spawns `which` + a bounded `<py> -c ...` per candidate.
+ */
+export function resolvePython(minMinor: number): {
+  compatible: PythonCandidate | null
+  best: PythonCandidate | null
+} {
+  const names = ['python3.13', 'python3.12', 'python3.11', 'python3', 'python']
+  const found: PythonCandidate[] = []
+  const seen = new Set<string>()
+  for (const name of names) {
+    const bin = resolveRuntimeBin(name)
+    if (!bin || seen.has(bin)) continue
+    seen.add(bin)
+    const minor = pythonMinorOf(bin)
+    if (minor !== null) found.push({ bin, minor, version: `3.${minor}` })
+  }
+  return pickPython(found, minMinor)
+}
