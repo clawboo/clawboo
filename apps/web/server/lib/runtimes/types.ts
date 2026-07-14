@@ -10,6 +10,13 @@ export interface RuntimeRunContext {
   cwd?: string | null
   /** Model override for this run. */
   model?: string | null
+  /**
+   * Provider override for a runtime that derives its provider at run time (Hermes
+   * picks OpenRouter / Anthropic / OpenAI from the connected key by default). Set
+   * from a per-agent model choice (execConfig.provider) to PIN the provider so the
+   * chosen model runs on it. Runtimes that don't derive a provider ignore it.
+   */
+  providerHint?: string | null
   /** Native resume handle (session/thread id) when resuming the same runtime. */
   resume?: string | null
   /**

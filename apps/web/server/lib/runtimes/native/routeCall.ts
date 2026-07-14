@@ -13,6 +13,7 @@
 import { envVarForProvider, type AgentConfig } from '@clawboo/adapter-native'
 
 import { resolveRuntimeKey } from '../../secretsVault'
+import { nativeCompatProvider } from './nativeProviders'
 import { createAnthropicProvider } from './providers/anthropic'
 import { createOpenAiProvider, ollamaBaseUrl, OPENROUTER_BASE_URL } from './providers/openai'
 import {
@@ -65,10 +66,15 @@ function defaultMakeProvider(c: RouteCandidate): ProviderClient {
         apiKey: 'ollama',
         baseURL: ollamaBaseUrl(),
       })
-    default:
-      // Unknown provider ids are treated as OpenAI-compatible only when a
-      // base URL convention exists for them — there is none, so refuse loudly.
+    default: {
+      // Extra OpenAI-compatible providers (Google, xAI, Groq, Mistral, …) route
+      // through the OpenAI client with the registry's base-URL override.
+      const ep = nativeCompatProvider(c.provider)
+      if (ep) {
+        return createOpenAiProvider({ provider: c.provider, apiKey: c.key ?? '', baseURL: ep.baseURL })
+      }
       throw new ProviderError(`unknown provider: ${c.provider}`, 'bad_request')
+    }
   }
 }
 
