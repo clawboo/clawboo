@@ -14,6 +14,9 @@ import {
 } from '../lib/processManager'
 import { getModelsFromCli } from '../lib/modelCache'
 import { isWindows, resolveShimName } from '../lib/platform'
+import { ENV_KEY_MAP, envVarForOpenclawProvider, writeOpenclawProviderKeys } from '../lib/openclawEnv'
+import { providerStatus } from '../lib/providerKeys'
+import { resolveRuntimeKey } from '../lib/secretsVault'
 import { getRegistry } from '../lib/agentSource'
 import { detectOpenClaw, invalidateOpenClawCache } from '../lib/openclawDetect'
 import { MODEL_GROUPS as STATIC_MODEL_GROUPS } from '../../src/lib/modelCatalog'
@@ -21,6 +24,26 @@ import { MODEL_GROUPS as STATIC_MODEL_GROUPS } from '../../src/lib/modelCatalog'
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_PORT = 18789
+
+// Default OpenClaw ROUTING model id per provider (used by both the configure and
+// the auto-configure paths). OpenClaw addresses models by `provider/model`.
+const OPENCLAW_MODEL_MAP: Record<string, string> = {
+  anthropic: 'anthropic/claude-sonnet-4-5',
+  openai: 'openai/gpt-5.4',
+  google: 'google/gemini-2.0-flash',
+  openrouter: 'openrouter/anthropic/claude-sonnet-4-5',
+  xai: 'xai/grok-3',
+  groq: 'groq/llama-3.3-70b-versatile',
+  mistral: 'mistral/mistral-large-latest',
+  moonshot: 'moonshot/kimi-k2.5',
+  minimax: 'minimax/MiniMax-M2.5',
+  together: 'together/meta-llama/Llama-3.3-70B-Instruct-Turbo',
+  nvidia: 'nvidia/llama-3.1-nemotron-70b-instruct',
+  huggingface: 'huggingface/deepseek-ai/DeepSeek-R1',
+  cerebras: 'cerebras/zai-glm-4.7',
+  venice: 'venice/llama-3.3-70b',
+  ollama: 'ollama/llama3.2',
+}
 
 /**
  * Read GATEWAY_AUTH_TOKEN from the .env file and sync it to Clawboo settings
@@ -135,44 +158,9 @@ function detectAuthProfileKeys(stateDir: string): Set<string> {
   return providers
 }
 
-/**
- * Get list of all agent directories that have auth-profiles.json files.
- */
-function getAgentAuthProfilePaths(stateDir: string): string[] {
-  const paths: string[] = []
-  try {
-    const agentsDir = path.join(stateDir, 'agents')
-    if (!fs.existsSync(agentsDir)) return paths
-    const agentIds = fs.readdirSync(agentsDir)
-    for (const agentId of agentIds) {
-      const profilePath = path.join(agentsDir, agentId, 'agent', 'auth-profiles.json')
-      if (fs.existsSync(profilePath)) {
-        paths.push(profilePath)
-      }
-    }
-  } catch {
-    // Non-fatal
-  }
-  return paths
-}
-
-// Shared provider → env var name mapping (used in configure + PATCH handlers)
-const ENV_KEY_MAP: Record<string, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'OPENAI_API_KEY',
-  google: 'GEMINI_API_KEY',
-  openrouter: 'OPENROUTER_API_KEY',
-  xai: 'XAI_API_KEY',
-  groq: 'GROQ_API_KEY',
-  mistral: 'MISTRAL_API_KEY',
-  moonshot: 'MOONSHOT_API_KEY',
-  minimax: 'MINIMAX_API_KEY',
-  together: 'TOGETHER_API_KEY',
-  nvidia: 'NVIDIA_API_KEY',
-  huggingface: 'HF_TOKEN',
-  cerebras: 'CEREBRAS_API_KEY',
-  venice: 'VENICE_API_KEY',
-}
+// `ENV_KEY_MAP`, `getAgentAuthProfilePaths`, and the `.env` + auth-profiles writer
+// now live in ../lib/openclawEnv (single source of truth, shared with the
+// Settings → Providers hub).
 
 function parseEnvFlags(content: string | null): Record<string, boolean> {
   const FLAG_CHECKS: Record<string, string[]> = {
@@ -550,23 +538,7 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
     const gatewayToken = crypto.randomBytes(32).toString('hex')
 
     // Resolve model from provider
-    const MODEL_MAP: Record<string, string> = {
-      anthropic: 'anthropic/claude-sonnet-4-5',
-      openai: 'openai/gpt-5.4',
-      google: 'google/gemini-2.0-flash',
-      openrouter: 'openrouter/anthropic/claude-sonnet-4-5',
-      xai: 'xai/grok-3',
-      groq: 'groq/llama-3.3-70b-versatile',
-      mistral: 'mistral/mistral-large-latest',
-      moonshot: 'moonshot/kimi-k2.5',
-      minimax: 'minimax/MiniMax-M2.5',
-      together: 'together/meta-llama/Llama-3.3-70B-Instruct-Turbo',
-      nvidia: 'nvidia/llama-3.1-nemotron-70b-instruct',
-      huggingface: 'huggingface/deepseek-ai/DeepSeek-R1',
-      cerebras: 'cerebras/zai-glm-4.7',
-      venice: 'venice/llama-3.3-70b',
-      ollama: 'ollama/llama3.2',
-    }
+    const MODEL_MAP = OPENCLAW_MODEL_MAP
     const resolvedModel =
       typeof model === 'string' && model
         ? model
@@ -612,6 +584,101 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
     // The raw token is persisted server-side only — never returned in the body. The
     // same-origin proxy injects it on connect, so the browser only needs the URL.
     res.json({ ok: true, gatewayUrl })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// POST /api/system/auto-configure-openclaw — provision OpenClaw from an ALREADY-
+// connected provider key (from native onboarding's vault or the Providers hub), so
+// the OpenClaw setup flow never re-asks for a key. Non-destructive: upserts the key
+// + gateway token into .env (never overwrites) and ensures openclaw.json exists with
+// a local gateway + a default model. Returns { ok:false, needsKey:true } when no
+// provider is connected (the UI then falls back to asking for a key).
+export function autoConfigureOpenclawPOST(_req: Request, res: Response): void {
+  try {
+    const stateDir = resolveStateDir()
+    const connected = providerStatus().find((p) => p.connected)
+    if (!connected) {
+      res.json({ ok: false, needsKey: true })
+      return
+    }
+    const provider = connected.id
+    const key = resolveRuntimeKey(envVarForOpenclawProvider(provider))
+    if (!key) {
+      res.json({ ok: false, needsKey: true })
+      return
+    }
+
+    fs.mkdirSync(stateDir, { recursive: true })
+    const port = DEFAULT_PORT
+    const envPath = path.join(stateDir, '.env')
+
+    // Reuse an existing gateway token; generate + upsert one if absent.
+    let gatewayToken = ''
+    let envLines: string[] = []
+    try {
+      envLines = fs.readFileSync(envPath, 'utf8').split('\n')
+    } catch {
+      // fresh
+    }
+    for (const line of envLines) {
+      const t = line.trim()
+      if (t.startsWith('GATEWAY_AUTH_TOKEN=')) {
+        gatewayToken = t.slice('GATEWAY_AUTH_TOKEN='.length).trim()
+        break
+      }
+    }
+    if (!gatewayToken) {
+      gatewayToken = crypto.randomBytes(32).toString('hex')
+      const idx = envLines.findIndex((l) => l.trim().startsWith('GATEWAY_AUTH_TOKEN='))
+      const newLine = `GATEWAY_AUTH_TOKEN=${gatewayToken}`
+      if (idx >= 0) envLines[idx] = newLine
+      else envLines.push(newLine)
+      while (envLines.length > 0 && envLines[envLines.length - 1] === '') envLines.pop()
+      fs.writeFileSync(envPath, envLines.join('\n') + '\n', 'utf8')
+    }
+
+    // Upsert the provider key into .env + auth-profiles (non-destructive).
+    writeOpenclawProviderKeys(stateDir, [{ provider, key }])
+
+    // Ensure openclaw.json — a local gateway + a default model (read-modify-write,
+    // never clobbering fields the user may have set).
+    const configPath = path.join(stateDir, 'openclaw.json')
+    let config: Record<string, unknown> = {}
+    try {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        config = parsed as Record<string, unknown>
+      }
+    } catch {
+      // create fresh
+    }
+    if (!config['gateway'] || typeof config['gateway'] !== 'object') config['gateway'] = {}
+    const gw = config['gateway'] as Record<string, unknown>
+    gw['mode'] = 'local'
+    if (typeof gw['port'] !== 'number') gw['port'] = port
+    if (!gw['auth'] || typeof gw['auth'] !== 'object') {
+      gw['auth'] = { mode: 'token', token: '${GATEWAY_AUTH_TOKEN}' }
+    }
+    if (!config['agents'] || typeof config['agents'] !== 'object') config['agents'] = {}
+    const agents = config['agents'] as Record<string, unknown>
+    if (!agents['defaults'] || typeof agents['defaults'] !== 'object') agents['defaults'] = {}
+    const defaults = agents['defaults'] as Record<string, unknown>
+    if (!defaults['model'] || typeof defaults['model'] !== 'object') defaults['model'] = {}
+    const modelObj = defaults['model'] as Record<string, unknown>
+    if (!modelObj['primary']) {
+      modelObj['primary'] = OPENCLAW_MODEL_MAP[provider] ?? `${provider}/default`
+    }
+    if (!config['tools'] || typeof config['tools'] !== 'object') config['tools'] = {}
+    const tools = config['tools'] as Record<string, unknown>
+    if (!tools['agentToAgent']) tools['agentToAgent'] = { enabled: true }
+    if (!tools['sessions']) tools['sessions'] = { visibility: 'all' }
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+
+    const gatewayUrl = `ws://localhost:${port}`
+    saveSettings({ gatewayUrl, gatewayToken })
+    res.json({ ok: true, gatewayUrl, provider })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -1050,78 +1117,9 @@ export async function openclawConfigPATCH(req: Request, res: Response): Promise<
     fs.mkdirSync(stateDir, { recursive: true })
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
 
-    // Update .env if apiKeys provided
+    // Update .env + auth-profiles if apiKeys provided (shared writer).
     if (Array.isArray(apiKeys) && apiKeys.length > 0) {
-      const envPath = path.join(stateDir, '.env')
-      let envLines: string[] = []
-      try {
-        envLines = fs.readFileSync(envPath, 'utf8').split('\n')
-      } catch {
-        // Start fresh
-      }
-
-      for (const entry of apiKeys) {
-        if (!entry || typeof entry !== 'object') continue
-        const e = entry as Record<string, unknown>
-        const provider = e['provider']
-        const key = e['key']
-        if (typeof provider !== 'string' || typeof key !== 'string') continue
-
-        const envVarName = ENV_KEY_MAP[provider] ?? `${provider.toUpperCase()}_API_KEY`
-        const existingIdx = envLines.findIndex((l) => l.trim().startsWith(`${envVarName}=`))
-        const newLine = `${envVarName}=${key}`
-        if (existingIdx >= 0) {
-          envLines[existingIdx] = newLine
-        } else {
-          envLines.push(newLine)
-        }
-      }
-
-      // Clean trailing empty lines but ensure final newline
-      while (envLines.length > 0 && envLines[envLines.length - 1] === '') {
-        envLines.pop()
-      }
-      fs.writeFileSync(envPath, envLines.join('\n') + '\n', 'utf8')
-
-      // Also update auth-profiles.json for all existing agents
-      const profilePaths = getAgentAuthProfilePaths(stateDir)
-      for (const entry of apiKeys) {
-        if (!entry || typeof entry !== 'object') continue
-        const e = entry as Record<string, unknown>
-        const provider = e['provider']
-        const key = e['key']
-        if (typeof provider !== 'string' || typeof key !== 'string') continue
-
-        const profileName = `${provider}:default`
-        for (const profilePath of profilePaths) {
-          try {
-            let data: Record<string, unknown> = {
-              version: 1,
-              profiles: {},
-              lastGood: {},
-              usageStats: {},
-            }
-            try {
-              const raw = fs.readFileSync(profilePath, 'utf8')
-              const parsed = JSON.parse(raw) as unknown
-              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                data = parsed as Record<string, unknown>
-              }
-            } catch {
-              // Start fresh
-            }
-            if (!data['profiles'] || typeof data['profiles'] !== 'object') data['profiles'] = {}
-            const profiles = data['profiles'] as Record<string, unknown>
-            profiles[profileName] = { type: 'api_key', provider, key }
-            if (!data['lastGood'] || typeof data['lastGood'] !== 'object') data['lastGood'] = {}
-            const lastGood = data['lastGood'] as Record<string, unknown>
-            lastGood[provider] = profileName
-            fs.writeFileSync(profilePath, JSON.stringify(data, null, 2) + '\n', 'utf8')
-          } catch {
-            // Best-effort per agent
-          }
-        }
-      }
+      writeOpenclawProviderKeys(stateDir, apiKeys)
     }
 
     // Update Clawboo settings if port changed

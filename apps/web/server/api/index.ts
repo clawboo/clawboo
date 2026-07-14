@@ -13,6 +13,7 @@ import {
   systemStatusGET,
   installOpenclawPOST,
   configureOpenclawPOST,
+  autoConfigureOpenclawPOST,
   gatewayControlPOST,
   openclawConfigGET,
   openclawConfigPATCH,
@@ -91,13 +92,21 @@ import {
 } from './mcp'
 import {
   runtimesListGET,
+  runtimesOpenRouterModelsGET,
   runtimesInstallPOST,
   runtimesConnectPOST,
   runtimesDisconnectPOST,
   runtimesHealthcheckPOST,
   runtimesRunPOST,
 } from './runtimes'
-import { onboardingSeedNativeTeamPOST } from './onboardingSeed'
+import {
+  providersListGET,
+  providerConnectPOST,
+  providerDisconnectPOST,
+  providerModelsGET,
+  providerModelsPOST,
+} from './providers'
+import { onboardingNativeLeaderModelPOST, onboardingSeedNativeTeamPOST } from './onboardingSeed'
 import { onboardingStateGET } from './onboardingState'
 import { budgetsListGET, budgetsResumePOST, budgetsSetPOST } from './budgets'
 import { governanceAuditGET } from './governanceAudit'
@@ -164,6 +173,7 @@ router.delete('/api/skills', skillsDELETE)
 router.get('/api/system/status', systemStatusGET)
 router.post('/api/system/install-openclaw', installOpenclawPOST)
 router.post('/api/system/configure-openclaw', configureOpenclawPOST)
+router.post('/api/system/auto-configure-openclaw', autoConfigureOpenclawPOST)
 router.post('/api/system/gateway', gatewayControlPOST)
 router.get('/api/system/openclaw-config', openclawConfigGET)
 router.patch('/api/system/openclaw-config', openclawConfigPATCH)
@@ -292,6 +302,14 @@ router.delete('/api/mcp/teamchat', mcpTeamchatSession)
 
 // Non-OpenClaw runtimes. POST drives a board task on the chosen runtime.
 router.get('/api/runtimes', runtimesListGET)
+router.get('/api/runtimes/openrouter/models', runtimesOpenRouterModelsGET)
+
+// Provider keys (Settings → Providers hub) — writes both the encrypted vault + OpenClaw .env.
+router.get('/api/providers', providersListGET)
+router.get('/api/providers/:id/models', providerModelsGET)
+router.post('/api/providers/:id/models', providerModelsPOST)
+router.post('/api/providers/:id/connect', providerConnectPOST)
+router.post('/api/providers/:id/disconnect', providerDisconnectPOST)
 // Install the runtime CLI (SSE) / connect the provider key (encrypted vault) /
 // disconnect. Distinct two-segment suffixes — no collision with `:id/run`.
 router.post('/api/runtimes/:id/install', runtimesInstallPOST)
@@ -307,6 +325,7 @@ router.post('/api/runtimes/:id/run', runtimesRunPOST)
 // route aggregates the first-run signals (configured/hasNative/hasTeam/
 // hasConnectedRuntime) so a thin client skips the multi-call decision dance.
 router.post('/api/onboarding/seed-native-team', onboardingSeedNativeTeamPOST)
+router.post('/api/onboarding/native-leader-model', onboardingNativeLeaderModelPOST)
 router.get('/api/onboarding/state', onboardingStateGET)
 
 // Governance. Budget kill-switch caps + the forensic audit.

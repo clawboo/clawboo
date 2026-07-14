@@ -68,6 +68,32 @@ interface SeedBody {
   model?: unknown
 }
 
+// POST /api/onboarding/native-leader-model — record the provider + model the user
+// picked when connecting their native key, so the lazily-created universal Boo
+// Zero (ensureNativeBooZero) runs on it instead of the auto-resolved per-provider
+// default. The seed endpoint used to write this as a side effect; now that real
+// team selection replaces the auto-seed, the connect step records it here.
+export function onboardingNativeLeaderModelPOST(req: Request, res: Response): void {
+  const body = (req.body ?? {}) as SeedBody
+  const provider = typeof body.provider === 'string' ? body.provider.trim() : ''
+  const model = typeof body.model === 'string' ? body.model.trim() : ''
+  if (!(KNOWN_PROVIDERS as readonly string[]).includes(provider)) {
+    res.status(400).json({ error: `unknown provider '${provider}'` })
+    return
+  }
+  if (!model) {
+    res.status(400).json({ error: 'model is required' })
+    return
+  }
+  try {
+    const db = createDb(getDbPath())
+    setSetting(db, SETTING_NATIVE_LEADER_MODEL, JSON.stringify({ provider, model }))
+    res.status(200).json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
 export async function onboardingSeedNativeTeamPOST(req: Request, res: Response): Promise<void> {
   const body = (req.body ?? {}) as SeedBody
   const provider = typeof body.provider === 'string' ? body.provider.trim() : 'anthropic'
