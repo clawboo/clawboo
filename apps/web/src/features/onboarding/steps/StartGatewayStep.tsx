@@ -115,7 +115,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
         },
         onComplete(event) {
           if (event.success) {
-            appendGatewayLog('Gateway started — connecting…')
+            appendGatewayLog('Gateway started, connecting…')
             void autoConnect()
           } else {
             setPhase('error')
@@ -169,7 +169,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
       steps={NATIVE_STEPS}
       align="center"
       title="Start the Gateway"
-      subtitle="Bringing up the OpenClaw Gateway and connecting Clawboo to it. This runs on its own — no action needed unless something goes wrong."
+      subtitle="Bringing up the OpenClaw Gateway and connecting Clawboo to it. This runs on its own, no action needed unless something goes wrong."
       footer={
         <div className="flex justify-center">
           {phase === 'error' ? (

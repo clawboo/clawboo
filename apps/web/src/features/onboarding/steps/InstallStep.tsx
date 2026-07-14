@@ -124,10 +124,10 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
             <Check className="h-4 w-4" style={{ color: 'var(--mint)' }} strokeWidth={2.5} />
           )}
           {installStatus === 'success'
-            ? `Installed — v${version}.`
+            ? `Installed v${version}.`
             : installStatus === 'error'
               ? 'The install ran into a problem.'
-              : 'This may take a minute — pulling openclaw from npm.'}
+              : 'This may take a minute, pulling openclaw from npm.'}
         </span>
       }
       footer={

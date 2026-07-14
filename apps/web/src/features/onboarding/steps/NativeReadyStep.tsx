@@ -69,14 +69,9 @@ export function NativeReadyStep({ teamId, onOpenDashboard }: NativeReadyStepProp
     }
   }, [teamId])
 
-  // Fallback so the roster is never empty (the seed always mints these two).
-  const members: RosterMember[] =
-    roster.length > 0
-      ? roster
-      : [
-          { id: 'lead', name: 'Team Lead' },
-          { id: 'coder', name: 'Coder' },
-        ]
+  // The deployed team's real roster (fetched above). Cap the shown faces so a
+  // large team doesn't overflow the row; the exact count is in the subtitle.
+  const shown = roster.slice(0, 5)
 
   return (
     <OnboardingScreen
@@ -85,11 +80,15 @@ export function NativeReadyStep({ teamId, onOpenDashboard }: NativeReadyStepProp
       steps={NATIVE_STEPS}
       align="center"
       title="Your team is ready"
-      subtitle="Two native agents are set up and ready to work — say hi whenever you are."
+      subtitle={
+        roster.length > 0
+          ? `${roster.length} agent${roster.length === 1 ? '' : 's'} deployed and ready to work. Say hi whenever you are.`
+          : 'Your team is deployed and ready to work. Say hi whenever you are.'
+      }
     >
-      {/* Seeded roster — the payoff */}
-      <div className="flex items-end justify-center gap-10">
-        {members.map((m, i) => (
+      {/* Deployed roster — the payoff */}
+      <div className="flex flex-wrap items-end justify-center gap-8">
+        {shown.map((m, i) => (
           <motion.div
             key={m.id}
             initial={{ scale: 0.7, opacity: 0, y: 8 }}
@@ -108,10 +107,10 @@ export function NativeReadyStep({ teamId, onOpenDashboard }: NativeReadyStepProp
       {/* Architecture framing (true for a freshly-seeded native team). */}
       <div className="mt-9 flex flex-col gap-2.5">
         <InfoRow icon={Sparkles}>
-          Your agents share one memory — they recall facts across tasks.
+          Your agents share one memory, so they recall facts across tasks.
         </InfoRow>
         <InfoRow icon={Users}>
-          Add Claude Code, Codex, Hermes, or OpenClaw as peers anytime — they share one room, and any
+          Add Claude Code, Codex, Hermes, or OpenClaw as peers anytime. They share one room, and any
           runtime can lead.
         </InfoRow>
       </div>
