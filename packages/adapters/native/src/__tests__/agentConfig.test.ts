@@ -4,6 +4,8 @@ import {
   agentConfigSchema,
   DEFAULT_AGENT_CONFIG,
   envVarForProvider,
+  KNOWN_PROVIDERS,
+  NATIVE_PROVIDER_ENV_VARS,
   parseAgentConfig,
 } from '../agentConfig'
 
@@ -47,5 +49,24 @@ describe('agentConfig', () => {
     expect(envVarForProvider('openrouter')).toBe('OPENROUTER_API_KEY')
     expect(envVarForProvider('ollama')).toBeNull()
     expect(envVarForProvider('unknown-provider')).toBeNull()
+  })
+
+  it('maps the extra OpenAI-compatible providers to their env vars', () => {
+    expect(envVarForProvider('google')).toBe('GEMINI_API_KEY')
+    expect(envVarForProvider('xai')).toBe('XAI_API_KEY')
+    expect(envVarForProvider('groq')).toBe('GROQ_API_KEY')
+    expect(envVarForProvider('mistral')).toBe('MISTRAL_API_KEY')
+    expect(envVarForProvider('together')).toBe('TOGETHER_API_KEY')
+    expect(envVarForProvider('cerebras')).toBe('CEREBRAS_API_KEY')
+    expect(envVarForProvider('moonshot')).toBe('MOONSHOT_API_KEY')
+  })
+
+  it('NATIVE_PROVIDER_ENV_VARS covers every keyed known provider', () => {
+    const keyed = KNOWN_PROVIDERS.filter((p) => p !== 'ollama')
+    for (const p of keyed) {
+      const ev = envVarForProvider(p)
+      expect(ev).not.toBeNull()
+      expect(NATIVE_PROVIDER_ENV_VARS).toContain(ev)
+    }
   })
 })
