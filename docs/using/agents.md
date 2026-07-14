@@ -42,7 +42,7 @@ The view is a 3-panel resizable layout under one shared 44 px header (the agent'
 
 The panel split sizes persist to `localStorage` (the `Group` has an `id`), so your layout survives a reload. Drag a `ResizeHandle` to resize.
 
-The MiniGraph header carries a **model selector** for changing this agent's model. A native (`clawboo-native`) agent picks from the native model catalog and the change is saved to its `AgentConfig` via `PATCH /api/agents/:agentId/model` (no Gateway needed); an OpenClaw agent picks from the OpenClaw catalog and the change is written as a per-agent override in `openclaw.json`. A native agent has no "revert to default" row, since the model is always a concrete pick.
+The MiniGraph header fuses the agent's **runtime icon** with a **model selector** for changing this agent's model. A native (`clawboo-native`) agent picks from the native model catalog and the change is saved to its `AgentConfig` via `PATCH /api/agents/:agentId/model` (no Gateway needed); an OpenClaw agent picks from the OpenClaw catalog and the change is written as a per-agent override in `openclaw.json`; a **Hermes** agent picks from the live OpenRouter catalog (stored in `execConfig`, routed through OpenRouter). **Codex** and **Claude Code** run their account/SDK default, so they show a "runtime-managed model" note instead of a picker.
 
 ![The agent detail view: chat on the left, mini-graph and the tabbed inline editor on the right.](/images/agent-detail.png)
 

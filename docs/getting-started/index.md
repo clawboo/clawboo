@@ -31,17 +31,17 @@ The Gateway probe is purely informational; a "No Gateway detected" result does n
 
 ## How onboarding flows
 
-After the welcome splash, the wizard takes you straight to **Connect Clawboo Native**: pick a provider, paste a key (or point at a local Ollama), and Clawboo seeds a starter team. An optional **Add more runtimes** step then lets you connect OpenClaw or a coding-agent runtime as peers, and a final **Your team is ready** screen drops you into the dashboard. There is no up-front "pick a runtime" question; native is the default and everything else is additive.
+After the welcome splash, the wizard takes you straight to **Connect Clawboo Native**: pick a provider and paste a key (or point at a local Ollama). An optional **Add more runtimes** step then lets you connect OpenClaw or a coding-agent runtime as peers, a **Team** step lets you pick a starter team from the marketplace and deploy it, and a final **Your team is ready** screen drops you into the dashboard. There is no up-front "pick a runtime" question; native is the default and everything else is additive.
 
 ```mermaid
 flowchart TD
     A[npx clawboo] --> B[Welcome splash]
     B --> C[Connect Clawboo Native<br/>paste a provider key]
-    C --> D[Seed a starter team]
-    D --> E{Add more runtimes?<br/>optional}
-    E -->|Skip| G[Your team is ready<br/>native mode, no Gateway]
+    C --> E{Add more runtimes?<br/>optional}
+    E -->|Skip| H[Pick and deploy a team<br/>from the marketplace]
     E -->|Connect a runtime| F[OpenClaw · Claude Code<br/>Codex · Hermes]
-    F --> G
+    F --> H
+    H --> G[Your team is ready<br/>native mode, no Gateway]
 ```
 
 Both quickstarts share this spine; they differ only in whether you connect the OpenClaw Gateway along the way.
@@ -51,7 +51,7 @@ Both quickstarts share this spine; they differ only in whether you connect the O
 | **Best for**         | Getting a team running in ~60 seconds                                | Also running OpenClaw agents on a local Gateway                                        |
 | **What you provide** | One provider API key (or a local Ollama)                             | The same, plus OpenClaw setup in the Add-runtimes step                                 |
 | **Extra software**   | None: the native runtime ships inside Clawboo                        | The `openclaw` CLI + a running local Gateway (the wizard can install/start it for you) |
-| **End state**        | A seeded native team, no GatewayClient                               | A seeded native team plus a connected OpenClaw runtime you can add to a team           |
+| **End state**        | A deployed native team, no GatewayClient                             | A deployed native team plus a connected OpenClaw runtime you can add to a team         |
 | **Walkthrough**      | [Quickstart: the native runtime](/getting-started/quickstart-native) | [Quickstart: OpenClaw](/getting-started/quickstart-openclaw)                           |
 
 <Tip>
@@ -60,7 +60,7 @@ Nothing is permanent. Every runtime is a peer; you can add OpenClaw, Claude Code
 
 ### The native path (the fast route)
 
-Clawboo's [native runtime](/appendices/glossary) (`clawboo-native`) is an in-process harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, or a local Ollama), so there is nothing extra to install and no Gateway. You paste a provider key, optionally test it, then click **Create my team**; Clawboo stores the key in its encrypted vault and seeds a starter team (a leader plus a specialist, both native, sharing one memory). You land directly in that team's group chat.
+Clawboo's [native runtime](/appendices/glossary) (`clawboo-native`) is an in-process harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, or a local Ollama), so there is nothing extra to install and no Gateway. You paste a provider key, optionally test it, then click **Continue**; Clawboo stores the key in its encrypted vault. After an optional runtimes step, you pick a starter team from the marketplace and deploy it (every agent native, sharing one memory), and land directly in that team's group chat.
 
 This is the fastest route to a running team. Follow it step by step in the [native quickstart](/getting-started/quickstart-native).
 

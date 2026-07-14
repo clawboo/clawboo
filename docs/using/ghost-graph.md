@@ -55,6 +55,7 @@ flowchart TD
 - **Boo nodes** (red dots / cards) are your agents. The leader-rooted spanning tree from `AGENTS.md` routing rules drives the org-chart hierarchy: ELK lays out Boos and the primary dependency edges; secondary routes are revealed only on hover.
 - **Dependency edges** (red, with arrowheads) are agent-to-agent routing: "this agent routes work to the target." Each one is a line in the source agent's `AGENTS.md`.
 - **Skill nodes** (mint circles) and **resource nodes** (amber cards) are each Boo's capabilities, drawn as orbitals around their parent. They are hidden by default and revealed by [expanding a Boo](#expand-a-boos-skills-peacock).
+- **Runtime badge + model orbital.** Every Boo carries a small **runtime brand chip** on its avatar, so you can tell Native, OpenClaw, Claude Code, Codex, and Hermes apart at a glance. Expanding a Boo also pops out a **model orbital**, the provider logo plus the LLM it currently runs on (agents on an account/SDK default, like Codex, show none).
 
 ### Dual-shape Boo nodes (idle circle / active card)
 

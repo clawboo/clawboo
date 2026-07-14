@@ -187,6 +187,10 @@ Two scoping facts follow from the Gateway config being process-wide:
 **Agents render but writes 503.** The fleet list reads from SQLite, so it survives the Gateway being down; agent-file writes and live sessions need the connection. `GET /api/agents` will show `stale: true` and the registry health `connection` will be `disconnected` / `reconnecting`. Start the Gateway (`POST /api/system/gateway { "action": "start" }`) and the source reconnects.
 </Warning>
 
+<Note>
+**A down Gateway doesn't block you if you have other agents.** When the browser can't reach the Gateway on load, a **pure-OpenClaw** user gets the connect / offline screen. But if you also have Native, Codex, Claude Code, or Hermes agents, Clawboo loads your dashboard anyway and floats a **reconnect banner** at the top instead of blocking, so you keep working with those agents. The banner's **Reconnect** starts the Gateway if needed and brings your OpenClaw agents back online.
+</Note>
+
 <Danger>
 **`POST /api/runtimes/openclaw/...` returns `404`.** OpenClaw is not a `/api/runtimes` runtime; only `claude-code`, `codex`, `hermes`, and `clawboo-native` are. Drive OpenClaw through `/api/system/*` and `/api/gateway/ws`, not the runtime install/connect/run routes.
 </Danger>
