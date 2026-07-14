@@ -91,7 +91,7 @@ describe('generateBooAvatar', () => {
   })
 })
 
-describe('isBooZero tint reservation', () => {
+describe('isBooZero reservations', () => {
   it('isBooZero=true forces OpenClaw red tint (#ff4d4d)', () => {
     const svg = generateBooAvatar({ seed: 'boo-zero-test', isBooZero: true })
     // OpenClaw red should appear in the gradient stop
@@ -112,6 +112,23 @@ describe('isBooZero tint reservation', () => {
     // Explicit tint should win over isBooZero
     expect(svg).toContain('#34D399')
     expect(svg).not.toContain('stop-color="#ff4d4d"')
+  })
+
+  it('isBooZero=true always uses the mascot regular eyes (shape 0), never a hash-derived variant', () => {
+    // Every Boo Zero must wear the clean OpenClaw-style eyes (shape 0: the r=5 dark
+    // sclera at both eye positions), never dizzy-X / sleepy / dot / surprised — across
+    // many seeds, most of which would hash to a non-0 shape without the reservation.
+    for (let i = 0; i < 50; i++) {
+      const svg = generateBooAvatar({ seed: `boo-zero-eyes-${i}`, isBooZero: true })
+      expect(svg).toContain('cx="38" cy="36" r="5" fill="#050810"')
+      expect(svg).toContain('cx="62" cy="36" r="5" fill="#050810"')
+    }
+  })
+
+  it('explicit eyeShape overrides isBooZero', () => {
+    const svg = generateBooAvatar({ seed: 'boo-zero-eye-override', isBooZero: true, eyeShape: 4 })
+    // The explicit dizzy-X wins → no shape-0 r=5 sclera.
+    expect(svg).not.toContain('cx="38" cy="36" r="5" fill="#050810"')
   })
 })
 
