@@ -35,16 +35,26 @@ export function useMiniGraphData(agentId: string): {
   // Find the single agent
   const agent = useMemo(() => agents.find((a) => a.id === agentId) ?? null, [agents, agentId])
 
-  // Fetch the agent's capabilities + AGENTS.md
+  // Fetch the agent's capabilities + AGENTS.md.
+  //
+  // NOT gated on a Gateway `client` (same as `useGraphData`): both reads are REST,
+  // so they must run in NATIVE / thin-client mode where `client === null`.
   useEffect(() => {
-    if (!client || !agentId) return
+    if (!agentId) return
 
     let cancelled = false
     setIsLoading(true)
 
     const fetchFiles = async () => {
       const [capView, agentsMd] = await Promise.all([
-        fetchCapabilities({ agentId }),
+        // UNFILTERED — the same ONE stream the Atlas + dashboard read. A server
+        // `?agentId=` filter drops every `scope:'global'` record (they carry
+        // `agentId: null`, and the filter is `r.agentId !== f.agentId`), which is
+        // exactly what the inherit-if-empty fan-out needs: an agent with no
+        // per-agent caps (codex / OpenClaw / a not-yet-run hermes) would inherit
+        // NOTHING and render bare. `groupAgentCapabilities` scopes to this agent
+        // client-side, so the filter bought nothing but the bug.
+        fetchCapabilities(),
         readAgentFile(agentId, 'AGENTS.md').catch(() => null),
       ])
       if (cancelled) return
@@ -68,6 +78,9 @@ export function useMiniGraphData(agentId: string): {
     return () => {
       cancelled = true
     }
+    // `client` stays a DEP (not a gate): a null→connected transition re-runs the
+    // fetch so an OpenClaw agent's AGENTS.md that 503'd while the Gateway was
+    // down is picked up on reconnect.
   }, [client, agentId, refreshKey])
 
   // Build graph elements for this single agent
