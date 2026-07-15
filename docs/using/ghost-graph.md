@@ -5,7 +5,7 @@ description: "Read and edit your fleet's org graph: dual-shape Boo nodes, peacoc
 
 Use this page when you want to _see_ how your agents relate: who reports to whom, which skills each Boo carries, and what each one is doing right now. Clawboo renders this as a React Flow canvas in two scopes: **Atlas** (the global all-teams org graph) and the per-team **Ghost Graph** (embedded inside a team's group chat). Both are the same `GhostGraph` component driven by a `scope` prop; what differs is which agents they show and a couple of Atlas-only controls.
 
-![The Ghost Graph canvas with Boo nodes, dependency edges, and skill orbitals](/images/ghost-graph.png)
+![The Ghost Graph canvas at Atlas scope: Boo nodes, team clusters, dependency edges, and skill orbitals](/images/ghost-graph.png)
 
 Every node and edge maps to real state: a [Boo](/appendices/glossary) is a real agent record, a dependency edge is a routing rule in that agent's `AGENTS.md`, and a skill orbital is a capability from the unified inventory. Nothing on the canvas is decorative.
 

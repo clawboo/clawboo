@@ -60,21 +60,25 @@ The sidebar nav is deliberately short, five work surfaces plus the Settings gear
 
 The theme toggle sits beside the Settings gear at the bottom.
 
+The **Fleet** view is the read-only overview of the whole fleet: agent count, 24-hour task and verify pass rates, spend, and per-runtime health.
+
+![The Fleet overview: agent count, task and verify pass rates, 24-hour spend, and per-runtime health](/images/fleet-health.png)
+
 ### The Settings modal
 
 Everything for managing, configuring, and inspecting the dashboard lives in a **Settings modal**, opened from the gear at the bottom of the sidebar or with **`Cmd/Ctrl + ,`**. It groups nine surfaces:
 
-| Group     | Item                | What it shows                                    |
-| --------- | ------------------- | ------------------------------------------------ |
-| Workspace | **Runtimes**        | Connect/manage runtimes                          |
-| Workspace | **Memory**          | Shared-memory browser                            |
-| Workspace | **Capabilities**    | The capability inventory                         |
-| Workspace | **Scheduler**       | Routines (scheduled team work)                   |
-| Insights  | **Tokens Used**     | Cost dashboard                                   |
-| Insights  | **Observability**   | Traces, errors, fleet health, evals              |
-| Insights  | **Governance**      | Budgets, caps, audit, approvals                  |
-| System    | **System**          | Gateway control, model, API keys                 |
-| System    | **System Health**   | Boot probe + degradation checks                  |
+| Group     | Item              | What it shows                       |
+| --------- | ----------------- | ----------------------------------- |
+| Workspace | **Runtimes**      | Connect/manage runtimes             |
+| Workspace | **Memory**        | Shared-memory browser               |
+| Workspace | **Capabilities**  | The capability inventory            |
+| Workspace | **Scheduler**     | Routines (scheduled team work)      |
+| Insights  | **Tokens Used**   | Cost dashboard                      |
+| Insights  | **Observability** | Traces, errors, fleet health, evals |
+| Insights  | **Governance**    | Budgets, caps, audit, approvals     |
+| System    | **System**        | Gateway control, model, API keys    |
+| System    | **System Health** | Boot probe + degradation checks     |
 
 ### Content area (column 3)
 
@@ -84,13 +88,13 @@ The content area renders exactly one view at a time, chosen by the current **vie
 
 The dashboard's state is a single discriminated union, the `ViewMode`, and the content area is a `switch` over it. There are five shapes:
 
-| View mode   | What it shows                            | How you reach it                                 |
-| ----------- | ---------------------------------------- | ------------------------------------------------ |
-| `welcome`   | The welcome screen                       | `Escape` from a chat/agent view, or no selection |
-| `agent`     | An agent's three-panel detail view       | Click an agent row                               |
-| `booZero`   | Boo Zero's detail view (column 2 hidden) | Click the mascot                                 |
-| `groupChat` | A team's group chat (graph + chat split) | Click a team icon or the Group Chat row          |
-| `nav`       | One of the nav panels (5 in the sidebar, 9 in the Settings modal) | Click a nav item or a Settings item |
+| View mode   | What it shows                                                     | How you reach it                                 |
+| ----------- | ----------------------------------------------------------------- | ------------------------------------------------ |
+| `welcome`   | The welcome screen                                                | `Escape` from a chat/agent view, or no selection |
+| `agent`     | An agent's three-panel detail view                                | Click an agent row                               |
+| `booZero`   | Boo Zero's detail view (column 2 hidden)                          | Click the mascot                                 |
+| `groupChat` | A team's group chat (graph + chat split)                          | Click a team icon or the Group Chat row          |
+| `nav`       | One of the nav panels (5 in the sidebar, 9 in the Settings modal) | Click a nav item or a Settings item              |
 
 The `nav` mode carries a `view` field, one of `graph` (Atlas), `fleet`, `approvals`, `cost`, `marketplace`, `scheduler`, `system`, `obs`, `board`, `runtimes`, `memory`, `governance`, `capabilities`, `health`. The dashboard opens on `nav: graph` (Atlas) by default, so a fresh launch lands you on the org-wide map.
 
@@ -104,12 +108,12 @@ The `nav` mode carries a `view` field, one of `graph` (Atlas), `fleet`, `approva
 
 The single most useful thing to internalize: **the same Ghost Graph component renders at two scopes**, and which one you're looking at depends on how you got there.
 
-- **Atlas** is the Ghost Graph at **`atlas` scope**. It ignores the selected team and pulls _every_ agent onto one canvas, with Boo Zero presiding at the top of the hierarchy and each team laid out as a row beneath it. Reach it from the **Atlas** nav item (column 2) or the mascot's "Show all agents." This is the org-wide map, every team at once.
+- **Atlas** is the Ghost Graph at **`atlas` scope**. It ignores the selected team and pulls _every_ agent onto one canvas, with each team clustered around a presiding Boo Zero (the default radial layout; a Tree/Radial toggle switches to a top-down hierarchy with each team laid out as a row). Reach it from the **Atlas** nav item (column 2) or the mascot's "Show all agents." This is the org-wide map, every team at once.
 - **The per-team Ghost Graph** is the same component at the default **`team` scope**, embedded inside a team's group-chat view. It filters to the selected team's agents (plus Boo Zero) and renders that team's internal routing as a top-down org chart. You don't navigate to it separately; it's the top half of the group-chat split.
 
 So: **Atlas is a nav destination; the per-team Ghost Graph is part of a team's group chat.** They share rendering, hover cascades, team halos, and the peacock skill-expand interaction, but Atlas is scoped to all teams while the embedded graph is scoped to one. The Atlas nav item and its keyboard shortcut both open Atlas.
 
-![Atlas, the global Ghost Graph showing a team's Boos, their skills, and routing edges on one canvas](/images/ghost-graph.png)
+![Atlas, the global Ghost Graph: labeled team clusters arranged around Boo Zero on one canvas](/images/ghost-graph.png)
 
 ## The agent detail view
 

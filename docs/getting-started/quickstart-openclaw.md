@@ -44,11 +44,13 @@ The first screen is the welcome splash: the Clawboo wordmark, the line "Your AI 
 
 ### 3. Connect the native runtime, then choose "Set up OpenClaw"
 
-Onboarding is native-first, so you connect the built-in native runtime before adding OpenClaw. On the **Connect Clawboo Native** step, pick a provider and paste a key (or select **Ollama** for a keyless local model), then click **Continue**. Clawboo stores the key and advances to the **Add more runtimes** step (you pick and deploy a team in a later step). (The native connect step is covered in full in [Quickstart: native](/getting-started/quickstart-native).)
+Onboarding is native-first, so you connect the built-in native runtime before adding OpenClaw. On the **Connect your AI provider** step, pick a provider and paste a key (or select **Ollama** for a keyless local model), then click **Continue**. Clawboo stores the key and advances to the **Add more runtimes** step (you pick and deploy a team in a later step). (The native connect step is covered in full in [Quickstart: native](/getting-started/quickstart-native).)
 
 On **Add more runtimes**, find the **Set up OpenClaw** row and click **Set up OpenClaw**.
 
 **Expected result:** the wizard enters the OpenClaw setup detour at the **System Check** step. Everything in steps 4 to 7 below happens inside this detour, which returns you to **Add more runtimes** when it's done.
+
+![The OpenClaw setup running on the Add more runtimes step: install output streams in the terminal log while the Gateway starts](/images/openclaw-inline-setup.png)
 
 ### 4. Let Clawboo detect your environment
 

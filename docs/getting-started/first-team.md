@@ -34,6 +34,8 @@ You either already have one (from native onboarding) or you deploy one now.
 
 **Deploy a template team.** The **+** button in the leftmost sidebar takes you to the Marketplace's **Teams** tab (the catalog of 82 teams, 304 agents). Press **Deploy** on a team card, then customize its name, icon, color, and the runtime each member runs on. You can mix runtimes: a native leader with a Claude Code or OpenClaw specialist, for example. (Prefer a blank team? Use the **Start from scratch** card on that same tab.)
 
+![The team showcase, here in the create-team flow: the same curated template grid the Marketplace Teams tab renders, with Details and Deploy buttons](/images/team-gallery.png)
+
 **Expected result:** the create-team modal advances to a deploy screen showing one ghost avatar per agent in the template.
 
 ### 2. Watch the team deploy
@@ -91,7 +93,7 @@ The settled team space puts the team's Ghost Graph on top and the group chat bel
 
 The Ghost Graph itself renders the team as an org chart, the leader at the top, teammates below, and the `@mention` routing from each agent's `AGENTS.md` drawn as edges:
 
-![Clawboo Ghost Graph: agents as Boo nodes connected by delegation edges](/images/ghost-graph.png)
+![Clawboo Ghost Graph: agents as Boo nodes connected by delegation edges, the leader at the top](/images/team-graph.png)
 
 ## What just happened
 

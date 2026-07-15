@@ -85,7 +85,7 @@ Different runtimes don't speak a common orchestration protocol, except through M
 
 Every coordination action, a task created, a delegation routed, a run started, a cost recorded, is appended to one `orchestration_events` table. The server-side runner emits directly; the browser-observed OpenClaw stream is mirrored back via `POST /api/obs/ingest`. Every observability surface is then a **pure projection of that log**: the [Ghost Graph](/using/ghost-graph) you watch a team collaborate on is `projectGraph(events)` (served at `GET /api/obs/graph`); fleet-health triage, the per-mission trace view, and the cost overlay are other reducers over the same stream. Replaying the log reproduces the state; the graph is never hand-drawn, it is derived. See [observability](/concepts/observability).
 
-![The Ghost Graph rendering a team's live delegation topology](/images/ghost-graph.png)
+![The Ghost Graph rendering live delegation topology: three team clusters around Boo Zero](/images/ghost-graph.png)
 
 ## Design rationale and trade-offs
 

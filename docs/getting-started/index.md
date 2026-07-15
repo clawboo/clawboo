@@ -31,12 +31,12 @@ The Gateway probe is purely informational; a "No Gateway detected" result does n
 
 ## How onboarding flows
 
-After the welcome splash, the wizard takes you straight to **Connect Clawboo Native**: pick a provider and paste a key (or point at a local Ollama). An optional **Add more runtimes** step then lets you connect OpenClaw or a coding-agent runtime as peers, a **Team** step lets you pick a starter team from the marketplace and deploy it, and a final **Your team is ready** screen drops you into the dashboard. There is no up-front "pick a runtime" question; native is the default and everything else is additive.
+After the welcome splash, the wizard takes you straight to **Connect your AI provider**: pick a provider and paste a key (or point at a local Ollama) to power the built-in native runtime. An optional **Add more runtimes** step then lets you connect OpenClaw or a coding-agent runtime as peers, a **Team** step lets you pick a starter team from the marketplace and deploy it, and a final **Your team is ready** screen drops you into the dashboard. There is no up-front "pick a runtime" question; native is the default and everything else is additive.
 
 ```mermaid
 flowchart TD
     A[npx clawboo] --> B[Welcome splash]
-    B --> C[Connect Clawboo Native<br/>paste a provider key]
+    B --> C[Connect your AI provider<br/>paste a key for the native runtime]
     C --> E{Add more runtimes?<br/>optional}
     E -->|Skip| H[Pick and deploy a team<br/>from the marketplace]
     E -->|Connect a runtime| F[OpenClaw · Claude Code<br/>Codex · Hermes]

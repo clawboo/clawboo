@@ -41,9 +41,11 @@ The first screen is the welcome splash: the Clawboo wordmark, the line "Your AI 
 
 ### 3. Connect Clawboo Native
 
-The next screen is titled **"Connect Clawboo Native"**. Choose your provider from the grid, **Anthropic** (Claude models, the default), **OpenAI** (GPT models), **OpenRouter** (any model, one key), or **Ollama** (local, no key needed), then paste your API key into the **API Key** field. The eye icon toggles key visibility. Picking **Ollama** hides the key field. A **model** dropdown lets you pick the team leader's default model; it starts on the provider's strongest option, and you can fine-tune any agent's model later from its [detail view](/using/agents).
+The next screen is titled **"Connect your AI provider"**; the key you paste here powers the built-in Clawboo Native runtime. Choose your provider from the grid, **Anthropic** (Claude models, the default), **OpenAI** (GPT models), **OpenRouter** (any model, one key), or **Ollama** (local, no key needed), then paste your API key into the **API Key** field. The eye icon toggles key visibility. Picking **Ollama** hides the key field. A **model** dropdown lets you pick the team leader's default model; it starts on the provider's strongest option, and you can fine-tune any agent's model later from its [detail view](/using/agents).
 
-Optionally, click **Test** next to the field. Clawboo does a single authenticated `GET` against the provider's models endpoint (Anthropic `/v1/models`, OpenAI `/v1/models`, OpenRouter `/v1/models`, or the Ollama `/api/tags` probe) with an 8-second timeout. The key used for this test is never stored, logged, or echoed back.
+![The provider connect step: provider cards, the API key field, and the leader model picker](/images/onboarding-connect-provider.png)
+
+Optionally, click **Test connection** below the field. Clawboo does a single authenticated `GET` against the provider's models endpoint (Anthropic `/v1/models`, OpenAI `/v1/models`, OpenRouter `/v1/models`, or the Ollama `/api/tags` probe) with an 8-second timeout. The key used for this test is never stored, logged, or echoed back.
 
 **Expected result:** if you tested, you see a "Key works" confirmation in green (or an error like "Invalid API key." in red). Either way the **Continue** button is enabled once a key is present (or Ollama is selected). Clicking it stores the key in Clawboo's encrypted, at-rest vault (under the env-var slot for the chosen provider, never a plaintext file, never returned in any response; Ollama is keyless, so nothing is stored) and advances to the optional runtimes step. No team is created yet.
 

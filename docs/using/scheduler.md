@@ -36,8 +36,6 @@ Each row shows the schedule's label (falling back to its `agentId`), a status pi
 
 The row's action buttons are a **pure function of the schedule's manageability**. A `managed` Routine and an `external-write` Gateway cron are both writable, so they show **Pause/Resume** (managed) or **Enable/Disable** (external-write), **Run now**, and **Delete**. An `observe-only` schedule shows a `read-only` marker and no actions; the UI never offers a write the owning system forbids.
 
-![The Scheduler tab grouped by domain, with Team work and Runtime's own life sections](/images/team-space.png)
-
 <Note>
 When the OpenClaw Gateway is disconnected, the read still returns 200; degradation is data, not an error. The panel shows an amber banner ("OpenClaw Gateway cron is unavailable … showing the last-known list") and keeps rendering the last-known rows for that source.
 </Note>
