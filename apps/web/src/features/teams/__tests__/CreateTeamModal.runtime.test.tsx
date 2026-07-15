@@ -182,9 +182,7 @@ describe('CreateTeamModal per-agent runtime selector', () => {
   it('gives every agent (incl. the leader) a runtime dropdown, and badges the leader', async () => {
     server.use(...baseHandlers())
     renderModal()
-    await waitFor(() =>
-      expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
     // One "Leader" badge (the detected internal lead), not a locked native row.
     expect(screen.getAllByText('Leader')).toHaveLength(1)
   })
@@ -194,15 +192,11 @@ describe('CreateTeamModal per-agent runtime selector', () => {
     renderModal()
     // A marketplace team suggests OpenClaw for every agent; Gateway offline →
     // both degrade to Clawboo Native with an inline note.
-    await waitFor(() =>
-      expect(screen.getAllByText(/using Clawboo Native/i)).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByText(/using Clawboo Native/i)).toHaveLength(2))
     // Explicitly choosing a runtime on the Coder row removes its degraded note.
     await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[1])
     await userEvent.click(screen.getByRole('option', { name: /clawboo native/i }))
-    await waitFor(() =>
-      expect(screen.getAllByText(/using Clawboo Native/i)).toHaveLength(1),
-    )
+    await waitFor(() => expect(screen.getAllByText(/using Clawboo Native/i)).toHaveLength(1))
   })
 
   it('native mode (status=connected, client=null) still degrades OpenClaw to Native — no live Gateway', async () => {
@@ -212,18 +206,14 @@ describe('CreateTeamModal per-agent runtime selector', () => {
     useConnectionStore.setState({ status: 'connected', client: null })
     server.use(...baseHandlers())
     renderModal()
-    await waitFor(() =>
-      expect(screen.getAllByText(/using Clawboo Native/i)).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByText(/using Clawboo Native/i)).toHaveLength(2))
   })
 
   it('a disabled coding option opens the Settings Runtimes pane (no runtime intent) and closes the modal', async () => {
     server.use(...baseHandlers())
     const onClose = vi.fn()
     renderModal({ onClose })
-    await waitFor(() =>
-      expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
     await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[0])
     // Codex is needs-login → disabled → click opens the Settings modal's Runtimes
     // pane (Runtimes moved into Settings) and closes this modal, WITHOUT the
@@ -239,9 +229,7 @@ describe('CreateTeamModal per-agent runtime selector', () => {
     server.use(...baseHandlers())
     const onClose = vi.fn()
     renderModal({ onClose })
-    await waitFor(() =>
-      expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
     // Gateway offline → OpenClaw is disabled; clicking it hands the Runtimes panel a
     // one-shot `connect-openclaw` intent (which auto-opens the OpenClaw setup flow),
     // distinct from the coding runtimes' plain Runtimes route.
@@ -252,6 +240,24 @@ describe('CreateTeamModal per-agent runtime selector', () => {
     expect(useSettingsModalStore.getState().runtimeIntent).toBe('connect-openclaw')
     expect(onClose).toHaveBeenCalled()
   })
+
+  it('OpenClaw connected SERVER-side (registry health) with a null browser client is available — no degrade to Native', async () => {
+    // The reported bug: OpenClaw connected via the server operator connection (the
+    // Runtimes panel shows it Connected) while the browser Gateway client is null
+    // (degraded / thin-client mode). OpenClaw must be offered, not faded — so a
+    // marketplace team's members stay on OpenClaw instead of degrading to Native.
+    useConnectionStore.setState({ status: 'connected', client: null })
+    server.use(
+      ...baseHandlers(),
+      http.get('/api/agents/registry/health', () =>
+        HttpResponse.json({ ok: true, connection: 'connected', lastSyncedAt: 1 }),
+      ),
+    )
+    renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+    // Once the server-connection probe lands, OpenClaw is available → no degrade note.
+    await waitFor(() => expect(screen.queryByText(/using Clawboo Native/i)).not.toBeInTheDocument())
+  })
 })
 
 describe('CreateTeamModal deploy', () => {
@@ -259,9 +265,7 @@ describe('CreateTeamModal deploy', () => {
     let teamBody: Record<string, unknown> | undefined
     server.use(...baseHandlers((b) => (teamBody = b as Record<string, unknown>)))
     renderModal()
-    await waitFor(() =>
-      expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
 
     await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
     await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
@@ -292,9 +296,7 @@ describe('CreateTeamModal deploy', () => {
     useConnectionStore.setState({ status: 'connected', client: {} as unknown as GatewayClient })
     server.use(...baseHandlers())
     renderModal()
-    await waitFor(() =>
-      expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
 
     // Override the Coder (2nd row) to Clawboo Native — the leader stays on the
     // OpenClaw default → a mixed team.
@@ -318,9 +320,7 @@ describe('CreateTeamModal deploy', () => {
     createAgentMock.mockReset()
     createAgentMock.mockResolvedValueOnce('id-lead').mockRejectedValueOnce(new Error('boom'))
     renderModal()
-    await waitFor(() =>
-      expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
 
     await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
     await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
@@ -338,12 +338,12 @@ describe('CreateTeamModal deploy', () => {
     useConnectionStore.setState({ status: 'connected', client: {} as unknown as GatewayClient })
     const configPatches: Record<string, unknown>[] = []
     server.use(
-      ...baseHandlers(undefined, undefined, (b) => configPatches.push(b as Record<string, unknown>)),
+      ...baseHandlers(undefined, undefined, (b) =>
+        configPatches.push(b as Record<string, unknown>),
+      ),
     )
     renderModal()
-    await waitFor(() =>
-      expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
     // Gateway online + marketplace team → both rows default OpenClaw → each shows a model picker.
     expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2)
 
@@ -372,9 +372,7 @@ describe('CreateTeamModal deploy', () => {
     useConnectionStore.setState({ status: 'connected', client: {} as unknown as GatewayClient })
     server.use(...baseHandlers())
     renderModal()
-    await waitFor(() =>
-      expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
     // Both default OpenClaw → pick a model on the Coder (row 1).
     await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
     await userEvent.click(screen.getByRole('option', { name: /Claude Haiku 4\.5 · Anthropic/i }))
@@ -390,9 +388,7 @@ describe('CreateTeamModal deploy', () => {
     // Gateway offline (default) → the marketplace team degrades both rows to Native.
     server.use(...baseHandlers())
     renderModal()
-    await waitFor(() =>
-      expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
     // Pick a native model on the Coder (row 1). Native ids are bare (`claude-haiku-4-5`).
     await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
     await userEvent.click(screen.getByRole('option', { name: /Claude Haiku 4\.5 · Anthropic/i }))
@@ -411,13 +407,43 @@ describe('CreateTeamModal deploy', () => {
     expect(exec.envVar).toBe('ANTHROPIC_API_KEY')
   })
 
+  it('hermes member: a picked model spreads into the createAgent execConfig as { provider, model }', async () => {
+    // Hermes must be READY so its runtime option is selectable (default is not-installed).
+    const runtimesReady = RUNTIMES.map((r) =>
+      r.id === 'hermes' ? { ...r, connectionState: 'ready', hasCredential: true } : r,
+    )
+    // fetchRuntimes reads `body.runtimes` (the real server returns { runtimes, available });
+    // a bare array leaves coding-runtime statuses empty → hermes would read as disabled.
+    server.use(
+      http.get('/api/runtimes', () => HttpResponse.json({ runtimes: runtimesReady })),
+      ...baseHandlers(),
+    )
+    renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+
+    // Switch the Coder (row 1) to Hermes → its model picker appears (Hermes now has one).
+    await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[1])
+    await userEvent.click(screen.getByRole('option', { name: /hermes/i }))
+    await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
+
+    // Pick a Hermes OpenRouter model (the provider suffix disambiguates the label).
+    await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
+    await userEvent.click(screen.getByRole('option', { name: /Claude 3\.5 Haiku · OpenRouter/i }))
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
+
+    // The Coder was created on the hermes source with the picked { provider, model }.
+    const coderCall = createAgentMock.mock.calls.find((c) => c[0] === 'Coder')!
+    expect(coderCall[2]).toBe('hermes')
+    expect(coderCall[3]).toEqual({ provider: 'openrouter', model: 'anthropic/claude-3.5-haiku' })
+  })
+
   it('a team with no genuine leadership role deploys leaderless (no badge, leaderAgentId null, all specialists)', async () => {
     let patchBody: Record<string, unknown> | undefined
     server.use(...baseHandlers(undefined, (b) => (patchBody = b as Record<string, unknown>)))
     renderModal({ profile: PROFILE_NO_LEADER })
-    await waitFor(() =>
-      expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
     // No in-house lead is detected → NO "Leader" badge (Boo Zero coordinates the team).
     expect(screen.queryByText('Leader')).toBeNull()
 

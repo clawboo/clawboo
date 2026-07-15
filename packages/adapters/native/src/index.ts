@@ -5,6 +5,7 @@ export {
   agentConfigSchema,
   parseAgentConfig,
   envVarForProvider,
+  NATIVE_PROVIDER_ENV_VARS,
   DEFAULT_AGENT_CONFIG,
   DEFAULT_MAX_TURNS,
   KNOWN_PROVIDERS,

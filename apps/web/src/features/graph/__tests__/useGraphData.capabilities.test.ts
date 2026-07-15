@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentState } from '@/stores/fleet'
 import type { Team } from '@/stores/team'
 
-import { buildGraphElements } from '../useGraphData'
+import { buildGraphElements, connectorMeta } from '../useGraphData'
 import type { ResourceNodeData, SkillNodeData } from '../types'
 
 const makeAgent = (over: Partial<AgentState>): AgentState => ({
@@ -123,5 +123,165 @@ describe('buildGraphElements — capability availability greying', () => {
       (n) => n.type === 'skill' && (n.data as SkillNodeData).name === 'Echo',
     )
     expect((skill!.data as SkillNodeData).available).toBe(true)
+  })
+
+  it('gives EVERY agent a model orbital (so every Boo expands), runtime-default when no model', () => {
+    // The fresh-mac symptom: codex/claude-code/openclaw agents (no clawboo-known
+    // model + no caps) had zero orbital children, so clicking them did nothing.
+    const withModel = makeAgent({
+      id: 'a1',
+      teamId: 't1',
+      model: 'claude-haiku-4.5',
+      runtime: 'clawboo-native',
+    })
+    const noModel = makeAgent({ id: 'a2', teamId: 't1', model: null, runtime: 'codex' })
+    const { rawNodes } = buildGraphElements([withModel, noModel], new Map(), [
+      makeTeam({ id: 't1' }),
+    ])
+    const modelNode = (id: string) =>
+      rawNodes.find((n) => n.id === `skill-${id}-clawboo-model`)?.data as SkillNodeData | undefined
+
+    // Both agents now get a model orbital — nothing is left with zero children.
+    expect(modelNode('a1')).toBeTruthy()
+    expect(modelNode('a2')).toBeTruthy()
+    // Known model → resolved via the provider (no runtime fallback).
+    expect(modelNode('a1')!.modelRuntime).toBeNull()
+    // No known model → the runtime glyph + a "default" label so it still expands.
+    expect(modelNode('a2')!.providerId).toBeNull()
+    expect(modelNode('a2')!.modelRuntime).toBe('codex')
+    expect(modelNode('a2')!.name).toBe('Account default')
+  })
+
+  it('resolves an OpenClaw agent\'s model orbital from the Gateway default (not "Gateway model")', () => {
+    // OpenClaw keeps its model Gateway-side, so `data.model` is null in
+    // thin-client mode. The `openclawDefaultModel` arg — the same value the
+    // agent-detail selector shows as "Default (…)" — makes the orbital resolve
+    // the real model + Anthropic glyph instead of the neutral "Gateway model" chip.
+    const openclaw = makeAgent({ id: 'a1', teamId: 't1', model: null, runtime: 'openclaw' })
+    const orbitalOf = (nodes: ReturnType<typeof buildGraphElements>['rawNodes']) =>
+      nodes.find((n) => n.id === 'skill-a1-clawboo-model')?.data as SkillNodeData | undefined
+
+    const { rawNodes } = buildGraphElements(
+      [openclaw],
+      new Map(),
+      [makeTeam({ id: 't1' })],
+      null,
+      null,
+      null,
+      'team',
+      null,
+      false,
+      'anthropic/claude-sonnet-4-6', // the Gateway default
+    )
+    const resolved = orbitalOf(rawNodes)
+    expect(resolved).toBeTruthy()
+    // Resolved via the provider — NOT the runtime-default fallback.
+    expect(resolved!.modelRuntime).toBeNull()
+    expect(resolved!.providerId).toBe('anthropic')
+    expect(resolved!.name).not.toBe('Gateway model')
+
+    // Without a default (unknown), it still falls back to the neutral chip.
+    const { rawNodes: noDefault } = buildGraphElements([openclaw], new Map(), [
+      makeTeam({ id: 't1' }),
+    ])
+    const fallback = orbitalOf(noDefault)
+    expect(fallback!.providerId).toBeNull()
+    expect(fallback!.modelRuntime).toBe('openclaw')
+    expect(fallback!.name).toBe('Gateway model')
+  })
+})
+
+describe('connectorMeta — clean connector display names + glyph keys', () => {
+  it('normalizes the clawboo spine servers across every raw-name shape', () => {
+    expect(connectorMeta('clawboo-memory')).toEqual({
+      displayName: 'Memory',
+      serviceKind: 'memory',
+    })
+    expect(connectorMeta('memory MCP')).toEqual({ displayName: 'Memory', serviceKind: 'memory' })
+    expect(connectorMeta('mcp:clawboo-tasks')).toEqual({
+      displayName: 'Tasks',
+      serviceKind: 'tasks',
+    })
+    expect(connectorMeta('clawboo-teamchat')).toEqual({
+      displayName: 'Team Chat',
+      serviceKind: 'teamchat',
+    })
+  })
+
+  it('keeps a third-party server name verbatim with the generic glyph', () => {
+    expect(connectorMeta('Vendor MCP')).toEqual({
+      displayName: 'Vendor MCP',
+      serviceKind: 'generic',
+    })
+  })
+})
+
+describe('buildGraphElements — orbital tile type-coding + install gating', () => {
+  it('threads installable ONLY for curated skills; built-ins get the rollup flag + slate edge', () => {
+    const agent = makeAgent({ id: 'a1', teamId: 't1' })
+    const files = new Map([
+      [
+        'a1',
+        {
+          capabilities: [
+            makeCap({
+              sourceKey: 'sk1',
+              source: 'curated-skill',
+              name: 'Web Search',
+              kind: 'skill',
+            }),
+            makeCap({ sourceKey: 'builtins', source: 'runtime-builtin', name: 'Built-in tools' }),
+            makeCap({ sourceKey: 'echo', source: 'brokered-mcp', name: 'echo' }),
+          ],
+          agentsMd: null,
+        },
+      ],
+    ])
+    const { rawNodes, rawEdges } = buildGraphElements([agent], files, [makeTeam({ id: 't1' })])
+    const dataOf = (name: string) =>
+      rawNodes.find((n) => n.type === 'skill' && (n.data as SkillNodeData).name === name)!
+        .data as SkillNodeData
+
+    expect(dataOf('Web Search').installable).toBe(true)
+    expect(dataOf('Built-in tools').installable).toBe(false)
+    expect(dataOf('Built-in tools').isBuiltinRollup).toBe(true)
+    expect(dataOf('echo').installable).toBe(false)
+
+    // The built-ins rollup edge carries the slate accent; regular skill edges none (mint fallback).
+    const builtinEdge = rawEdges.find((e) => e.id === 'skilledge-a1-builtins')
+    expect(builtinEdge?.data).toEqual({ accent: 'var(--secondary)' })
+    expect(rawEdges.find((e) => e.id === 'skilledge-a1-echo')?.data).toEqual({})
+  })
+
+  it("greys a policy-disabled capability (enabled:false) and cleans a connector's name", () => {
+    const agent = makeAgent({ id: 'a1', teamId: 't1' })
+    const files = new Map([
+      [
+        'a1',
+        {
+          capabilities: [
+            makeCap({ sourceKey: 'sessions_spawn', name: 'sessions_spawn', status: 'disabled' }),
+            makeCap({
+              sourceKey: 'mcp:clawboo-memory',
+              kind: 'connector',
+              name: 'clawboo-memory',
+              status: 'ready',
+            }),
+          ],
+          agentsMd: null,
+        },
+      ],
+    ])
+    const { rawNodes } = buildGraphElements([agent], files, [makeTeam({ id: 't1' })])
+    const denied = rawNodes.find(
+      (n) => n.type === 'skill' && (n.data as SkillNodeData).name === 'sessions_spawn',
+    )!.data as SkillNodeData
+    expect(denied.enabled).toBe(false)
+
+    const connector = rawNodes.find((n) => n.type === 'resource')!.data as ResourceNodeData
+    expect(connector.name).toBe('Memory')
+    expect(connector.fullName).toBe('clawboo-memory')
+    expect(connector.serviceKind).toBe('memory')
+    expect(connector.enabled).toBe(true)
   })
 })

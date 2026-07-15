@@ -20,6 +20,7 @@ function booNode(id: string, x: number, y: number, teamId: string | null): Graph
       name: id,
       status: 'idle',
       model: null,
+      runtime: null,
       isStreaming: false,
       teamId,
       ...(teamId && {

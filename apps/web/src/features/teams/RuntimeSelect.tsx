@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { RuntimeIcon } from '@/features/runtimes/RuntimeBrand'
+import { OpenClawIcon, RuntimeIcon } from '@/features/runtimes/RuntimeBrand'
 import type { RuntimeId } from '@/features/runtimes/runtimeCatalog'
 import type { RuntimeOption, SelectableSourceId } from './runtimeSelection'
 
@@ -13,41 +13,10 @@ interface RuntimeSelectProps {
   onDisabledClick: (sourceId: SelectableSourceId) => void
 }
 
-/** OpenClaw brand tile — mirrors RuntimeIcon's monogram branch. OpenClaw is not a
- *  RuntimeId (so it can't go through RuntimeIcon); an OpenClaw-red "O" gives it a
- *  visible mark on par with the native "N". */
-function OpenClawMark({ size }: { size: number }) {
-  return (
-    <span
-      aria-hidden
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: size,
-        height: size,
-        borderRadius: Math.round(size * 0.3),
-        color: '#E94560',
-        background: 'color-mix(in srgb, currentColor 14%, transparent)',
-        flexShrink: 0,
-      }}
-    >
-      <span
-        style={{
-          fontFamily: 'var(--font-display)',
-          fontWeight: 700,
-          fontSize: Math.round(size * 0.5),
-          lineHeight: 1,
-        }}
-      >
-        O
-      </span>
-    </span>
-  )
-}
-
 function optionIcon(sourceId: SelectableSourceId): React.ReactNode {
-  if (sourceId === 'openclaw') return <OpenClawMark size={14} />
+  // OpenClaw is not a RuntimeId (can't route through RuntimeIcon) — it gets the
+  // real OpenClaw mark via the sibling OpenClawIcon export.
+  if (sourceId === 'openclaw') return <OpenClawIcon size={14} />
   return <RuntimeIcon id={sourceId as RuntimeId} size={14} />
 }
 

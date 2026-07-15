@@ -7,6 +7,7 @@ import {
   Clock,
   Cpu,
   HeartPulse,
+  KeyRound,
   Puzzle,
   Search,
   Settings as SettingsIcon,
@@ -39,6 +40,7 @@ const GROUPS: SettingsGroup[] = [
   {
     label: 'Workspace',
     items: [
+      { id: 'providers', label: 'Providers', icon: KeyRound, keywords: 'api key anthropic openai google openrouter vault provider llm' },
       { id: 'runtimes', label: 'Runtimes', icon: Cpu, keywords: 'connect install claude codex hermes native openclaw' },
       { id: 'memory', label: 'Memory', icon: Brain, keywords: 'facts recall knowledge' },
       { id: 'capabilities', label: 'Capabilities', icon: Puzzle, keywords: 'tools skills connectors' },

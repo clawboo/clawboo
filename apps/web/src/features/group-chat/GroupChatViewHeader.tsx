@@ -12,13 +12,13 @@
 // canvas without GroupChatView having to plumb it through.
 
 import { useState } from 'react'
-import { MessagesSquare, Settings } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import { useGraphStore } from '@/features/graph/store'
+import { isCapabilitySkillNode } from '@/features/graph/types'
 import type { Team } from '@/stores/team'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
 import { TeamSettingsSheet } from './TeamSettingsSheet'
-import { TeamChatRoom } from './TeamChatRoom'
 
 interface GroupChatViewHeaderProps {
   team: Team | null
@@ -28,7 +28,7 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
   // Two separate primitive selectors so we don't need shallow equality —
   // each returns a number and React's default reference check works.
   const booCount = useGraphStore((s) => s.nodes.filter((n) => n.type === 'boo').length)
-  const skillCount = useGraphStore((s) => s.nodes.filter((n) => n.type === 'skill').length)
+  const skillCount = useGraphStore((s) => s.nodes.filter(isCapabilitySkillNode).length)
   // The graph store is shared across Atlas + every team graph. Only trust the
   // count once it has STRUCTURALLY rebuilt for THIS team — otherwise a stale
   // count from a previous scope flashes (e.g. "23 Boos" from Atlas before the
@@ -39,9 +39,6 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
   // editors that used to live in the System panel. Local-state because
   // it doesn't outlive the team-chat view.
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // The peer-chat room — every teammate as a named author, any runtime can
-  // lead. A right-slide drawer so it never disturbs the aspect-sensitive graph split.
-  const [roomOpen, setRoomOpen] = useState(false)
 
   // Don't flash "0 Boos · 0 skills" before the graph hydrates, NOR a stale count
   // from the previous scope — render an ellipsis placeholder until the graph has
@@ -89,19 +86,6 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => setRoomOpen(true)}
-            aria-label={`${team.name} — team room`}
-            title="Team room — peers, any runtime can lead"
-            data-testid="team-room-button"
-          >
-            <MessagesSquare size={14} strokeWidth={2} />
-            Team room
-          </Button>
-        )}
-        {team && (
-          <Button
-            variant="secondary"
-            size="sm"
             onClick={() => setSettingsOpen(true)}
             aria-label={`${team.name} — brief & rules`}
             title="Team brief & rules"
@@ -120,7 +104,6 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
       {settingsOpen && team && (
         <TeamSettingsSheet team={team} onClose={() => setSettingsOpen(false)} />
       )}
-      {roomOpen && team && <TeamChatRoom teamId={team.id} onClose={() => setRoomOpen(false)} />}
     </>
   )
 }

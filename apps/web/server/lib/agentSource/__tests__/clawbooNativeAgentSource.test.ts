@@ -98,7 +98,7 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
       })
       const cfg = loadAgentConfig(db, created.id)
       expect(cfg?.primaryProvider).toBe('openai')
-      expect(cfg?.primaryModel).toBe('gpt-4o')
+      expect(cfg?.primaryModel).toBe('gpt-5.4') // MODEL_DEFAULTS.openai.leader
       expect(cfg?.envVar).toBe('OPENAI_API_KEY')
       expect(cfg?.tools.tasks).toBe(false)
       // `modelTier` is a non-schema hint — stripped from BOTH the stored config

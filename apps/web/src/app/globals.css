@@ -21,6 +21,7 @@
   --color-blue: var(--blue);
   --color-mint: var(--mint);
   --color-amber: var(--amber);
+  --color-violet: var(--violet);
 
   /* Category palette — shared color system for skill / cron / source
      classification. Comm/file alias to mint/amber so the visual language stays
@@ -155,6 +156,10 @@
   --mint-rgb: 5 150 105;
   --amber: #d97706;
   --amber-rgb: 217 119 6;
+  /* Violet — the MCP-connector accent (graph orbital tiles + their edges).
+     Deepened one step in light mode for AA on white, like mint/amber. */
+  --violet: #7c3aed;
+  --violet-rgb: 124 58 237;
   --blue: #1e3a8a;
 
   /* Category palette. Light values deepened one step for AA
@@ -262,6 +267,9 @@
   --mint-rgb: 52 211 153;
   --amber: #fbbf24;
   --amber-rgb: 251 191 36;
+  /* Violet — MCP-connector accent (see the light-mode note). */
+  --violet: #a78bfa;
+  --violet-rgb: 167 139 250;
   --blue: #0f3460;
 
   /* Category palette. Dark values match the previously-hardcoded
@@ -477,6 +485,17 @@ samp {
   }
 }
 
+/* One-shot "verified" pop for the connected-runtime disc (steady thereafter,
+   never pulses). Neutralized by the prefers-reduced-motion guard below. */
+@keyframes clawboo-disc-pop {
+  from {
+    transform: scale(0.55);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .clawboo-skeleton {
     animation: none;
@@ -511,12 +530,23 @@ samp {
 :focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
-  border-radius: inherit;
+  /* Do NOT set `border-radius` here. The outline already follows the
+     element's own border-radius, so `border-radius: inherit` only served
+     to flatten rounded elements to their parent's radius while focused
+     (which squared-off rounded buttons and their focus rings). */
 }
 /* React Flow + CodeMirror manage their own focus visuals; suppress
    the global ring inside those scopes so we don't double up. */
 .react-flow :focus-visible,
 .cm-editor :focus-visible,
 .cm-editor *:focus-visible {
+  outline: none;
+}
+
+/* The onboarding welcome CTA is a large, unmistakable primary button with
+   its own glow + hover/press affordances, so it opts out of the focus
+   frame. Scoped opt-out (not a utility) because the global :focus-visible
+   rule above is unlayered and would otherwise win the cascade. */
+.welcome-cta:focus-visible {
   outline: none;
 }

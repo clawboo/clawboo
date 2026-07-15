@@ -11,6 +11,7 @@ import {
   resetControlClient,
   seedNativeTeam,
   setApiBase,
+  setNativeLeaderModel,
   setRequestHeaderProvider,
 } from '../index'
 
@@ -124,6 +125,21 @@ describe('onboarding client', () => {
     })
     const res = await seedNativeTeam('anthropic')
     expect(res).toEqual({ ok: false, error: 'down' })
+  })
+
+  it('setNativeLeaderModel posts provider+model and returns ok; never throws', async () => {
+    let body: unknown = null
+    stubFetch(async (_url, init) => {
+      body = init?.body ? JSON.parse(String(init.body)) : null
+      return jsonResponse({ ok: true })
+    })
+    expect(await setNativeLeaderModel('anthropic', 'claude-sonnet-5')).toBe(true)
+    expect(body).toEqual({ provider: 'anthropic', model: 'claude-sonnet-5' })
+
+    stubFetch(async () => {
+      throw new Error('down')
+    })
+    expect(await setNativeLeaderModel('openai', 'gpt-5.4')).toBe(false)
   })
 
   it('fetchOnboardingState maps the four booleans', async () => {

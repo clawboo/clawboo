@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_AGENT_CONFIG, type AgentConfig } from '@clawboo/adapter-native'
+import { DEFAULT_AGENT_CONFIG, envVarForProvider, type AgentConfig } from '@clawboo/adapter-native'
 
+import { NATIVE_COMPAT_PROVIDERS, nativeCompatProvider } from '../nativeProviders'
 import { ProviderError, type ProviderClient, type ProviderStreamEvent } from '../providers/types'
 import { buildCandidates, createRoutedClient, type RouteCandidate } from '../routeCall'
 
@@ -68,6 +69,38 @@ describe('buildCandidates', () => {
     const cfg = { ...CONFIG, fallbacks: [{ provider: 'ollama', model: 'llama3.2' }] }
     const candidates = buildCandidates(cfg, undefined, resolveKey)
     expect(candidates[1]).toEqual({ provider: 'ollama', model: 'llama3.2', key: null })
+  })
+
+  it('resolves an extra OpenAI-compatible provider key from the vault chain', () => {
+    const cfg: AgentConfig = {
+      ...CONFIG,
+      primaryProvider: 'groq',
+      primaryModel: 'llama-3.3-70b-versatile',
+      envVar: 'GROQ_API_KEY',
+      fallbacks: [],
+    }
+    const candidates = buildCandidates(cfg, undefined, (v) => (v === 'GROQ_API_KEY' ? 'gsk-x' : null))
+    expect(candidates).toEqual([{ provider: 'groq', model: 'llama-3.3-70b-versatile', key: 'gsk-x' }])
+  })
+})
+
+describe('extra OpenAI-compatible providers', () => {
+  it('maps each extra provider to an https base URL + a vault env var', () => {
+    expect(NATIVE_COMPAT_PROVIDERS.length).toBeGreaterThan(0)
+    for (const p of NATIVE_COMPAT_PROVIDERS) {
+      expect(p.baseURL).toMatch(/^https:\/\//)
+      expect(p.envVar).toMatch(/_API_KEY$/)
+    }
+    expect(nativeCompatProvider('google')?.envVar).toBe('GEMINI_API_KEY')
+    // Built-ins are routed directly, NOT through the compat registry.
+    expect(nativeCompatProvider('anthropic')).toBeNull()
+    expect(nativeCompatProvider('nope')).toBeNull()
+  })
+
+  it('every compat provider env var matches the adapter envVarForProvider (no drift)', () => {
+    for (const p of NATIVE_COMPAT_PROVIDERS) {
+      expect(p.envVar).toBe(envVarForProvider(p.id))
+    }
   })
 })
 

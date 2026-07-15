@@ -203,9 +203,9 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
   -d '{"apiKey":"sk-or-...","provider":"openrouter"}'
 ```
 
-### 3. Seed a starter team (first-run path)
+### 3. Seed a default starter team (`seed-native-team`)
 
-`POST /api/onboarding/seed-native-team` with `{ provider?, model? }` mints a default native team, a leader (`tasks` tool on, capable model) and a specialist (cheap model), so a first-run user who just connected a key lands in a working team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). Per-provider model defaults: `anthropic` → `claude-sonnet-4-6` / `claude-haiku-4-5`; `openai` → `gpt-4o` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`.
+`POST /api/onboarding/seed-native-team` with `{ provider?, model? }` mints a default native team in one call, a leader (`tasks` tool on, capable model) and a specialist (cheap model). First-run onboarding no longer calls this; it deploys a team you pick from the marketplace instead. The endpoint remains as a quick way to stand up a default two-agent native team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). Per-provider model defaults: `anthropic` → `claude-sonnet-4-6` / `claude-haiku-4-5`; `openai` → `gpt-4o` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`.
 
 ```bash
 curl -X POST http://localhost:18790/api/onboarding/seed-native-team \

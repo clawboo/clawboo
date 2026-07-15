@@ -13,8 +13,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, getSetting, agents, teams } from '@clawboo/db'
 
-import { onboardingSeedNativeTeamPOST } from '../onboardingSeed'
+import { onboardingNativeLeaderModelPOST, onboardingSeedNativeTeamPOST } from '../onboardingSeed'
 import { getDbPath } from '../../lib/db'
+import { SETTING_NATIVE_LEADER_MODEL } from '../../lib/teamChat/booZero'
 
 interface Mock {
   res: Response
@@ -106,5 +107,46 @@ describe('onboarding seed-native-team REST', () => {
     const m = mockRes()
     await onboardingSeedNativeTeamPOST(req({ provider: 'not-a-provider' }), m.res)
     expect(m.statusCode()).toBe(400)
+  })
+})
+
+describe('onboarding native-leader-model REST', () => {
+  let home: string
+  const prev: Record<string, string | undefined> = {}
+  const SAVED = ['CLAWBOO_HOME', 'OPENCLAW_STATE_DIR'] as const
+
+  beforeEach(() => {
+    for (const k of SAVED) prev[k] = process.env[k]
+    home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-lm-'))
+    process.env['CLAWBOO_HOME'] = home
+    process.env['OPENCLAW_STATE_DIR'] = mkdtempSync(path.join(os.tmpdir(), 'clawboo-lm-state-'))
+  })
+  afterEach(() => {
+    for (const k of SAVED) {
+      if (prev[k] === undefined) delete process.env[k]
+      else process.env[k] = prev[k]
+    }
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('records the chosen provider + model to the leader-model setting', () => {
+    const m = mockRes()
+    onboardingNativeLeaderModelPOST(req({ provider: 'anthropic', model: 'claude-sonnet-5' }), m.res)
+    expect(m.statusCode()).toBe(200)
+    const db = createDb(getDbPath())
+    expect(JSON.parse(getSetting(db, SETTING_NATIVE_LEADER_MODEL) ?? '{}')).toEqual({
+      provider: 'anthropic',
+      model: 'claude-sonnet-5',
+    })
+  })
+
+  it('rejects an unknown provider (400) and a missing model (400)', () => {
+    const bad = mockRes()
+    onboardingNativeLeaderModelPOST(req({ provider: 'nope', model: 'x' }), bad.res)
+    expect(bad.statusCode()).toBe(400)
+
+    const noModel = mockRes()
+    onboardingNativeLeaderModelPOST(req({ provider: 'anthropic' }), noModel.res)
+    expect(noModel.statusCode()).toBe(400)
   })
 })

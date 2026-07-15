@@ -558,8 +558,8 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(refl[0]!.task).toMatch(/no active session/i)
     })
 
-    it('reflects a deliverable-only completion (empty summary) instead of dropping it', async () => {
-      const { delivered, orchestrator } = makeHarness()
+    it('reflects an EMPTY completion honestly (no output produced), not a false "completed"', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
       await orchestrator.onEvent(
         sk('leader'),
         doneEvent('r1', '<delegate to="@Bug Boo">write the file</delegate>'),
@@ -569,7 +569,11 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const refl = reflections(delivered)
       expect(refl).toHaveLength(1)
       expect(refl[0]!.sessionKey).toBe(sk('leader'))
-      expect(refl[0]!.task).toMatch(/produced a deliverable|completed/i)
+      // The leader is told the TRUTH (no output), NOT a false "completed" / "deliverable".
+      expect(refl[0]!.task).toMatch(/no output/i)
+      expect(refl[0]!.task).not.toMatch(/produced a deliverable/i)
+      // And the board comment (the card's output) reads honestly, not the task title.
+      expect(board.comments.some((c) => /no output produced/i.test(c.body))).toBe(true)
     })
 
     it('reports a sub-task result to its IMMEDIATE parent (reduce-point), not only the leader', async () => {

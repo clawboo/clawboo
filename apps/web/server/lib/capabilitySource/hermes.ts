@@ -19,6 +19,7 @@ import {
   type CapabilitySource,
   type CapabilityWriteAction,
 } from '@clawboo/capability-registry'
+import { agents, createDb, type ClawbooDb } from '@clawboo/db'
 
 import { listNativeSkills } from '../runtimes/hermesSkills'
 import { buildRecord, builtinRollup, degradedStatus, okStatus } from './helpers'
@@ -77,11 +78,29 @@ async function readMcpConnectors(home: string): Promise<McpConnector[]> {
 export class HermesCapabilitySource implements CapabilitySource {
   readonly id = 'hermes' as const
 
-  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
+  constructor(private readonly deps: { getDbPath?: () => string; env?: NodeJS.ProcessEnv } = {}) {}
+
+  /** Live hermes agent ids (hermes-sourced, not archived) — the set a home dir
+   *  must belong to. `null` when no db is wired (unit tests) or the db is
+   *  unreadable → skip the filter (surface all homes, the legacy behaviour). */
+  private liveHermesAgentIds(): Set<string> | null {
+    if (!this.deps.getDbPath) return null
+    try {
+      const db: ClawbooDb = createDb(this.deps.getDbPath())
+      const ids = new Set<string>()
+      for (const a of db.select().from(agents).all()) {
+        if (a.archivedAt != null) continue
+        if (a.sourceId === 'hermes' || a.runtime === 'hermes') ids.add(a.id)
+      }
+      return ids
+    } catch {
+      return null
+    }
+  }
 
   async read(): Promise<CapabilityReadResult> {
     const records: CapabilityRecord[] = []
-    const root = hermesHomesRoot(this.env)
+    const root = hermesHomesRoot(this.deps.env ?? process.env)
 
     let homes: string[]
     try {
@@ -92,8 +111,15 @@ export class HermesCapabilitySource implements CapabilitySource {
       return { records: [builtinRollup('hermes', 'hermes', 'Hermes')], status: okStatus('hermes') }
     }
 
+    // Scope to LIVE hermes agents so a DELETED agent's leftover home dir under
+    // ~/.clawboo/runtimes/hermes/<id>/ doesn't surface as a ghost capability
+    // record for a non-existent agent (the reported orphan). Null = no db wired
+    // → keep all homes (unchanged behaviour).
+    const liveIds = this.liveHermesAgentIds()
+    const scopedHomes = liveIds ? homes.filter((id) => liveIds.has(id)) : homes
+
     try {
-      for (const agentId of homes) {
+      for (const agentId of scopedHomes) {
         const home = path.join(root, agentId)
 
         const skillNames = await listNativeSkills(home)

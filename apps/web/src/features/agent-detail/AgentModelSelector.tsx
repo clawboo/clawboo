@@ -19,6 +19,9 @@ interface AgentModelSelectorProps {
   /** Hide the "Default (X)" / revert-to-global-default row. Native agents always carry
    *  a concrete `primaryModel`, so there is no global-default to revert to. */
   hideDefault?: boolean
+  /** Borderless trigger — for embedding inside a bordered group (the fused
+   *  runtime-icon + model control) so the two read as ONE element. */
+  bare?: boolean
 }
 
 const LOCAL_PROVIDERS = new Set(['ollama', 'sglang', 'opencode', 'opencode-go'])
@@ -30,6 +33,7 @@ export function AgentModelSelector({
   groups: groupsProp,
   configuredProviders: configuredProvidersProp,
   hideDefault = false,
+  bare = false,
 }: AgentModelSelectorProps) {
   const catalog = useModelCatalog()
   const MODEL_GROUPS = groupsProp ?? catalog.groups
@@ -150,14 +154,21 @@ export function AgentModelSelector({
   const activeGroupConfigured = activeGroup ? isProviderConfigured(activeGroup.provider) : true
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
+    <div
+      ref={containerRef}
+      style={{ position: 'relative', display: 'inline-flex', height: bare ? '100%' : undefined }}
+    >
       {/* Trigger pill */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex max-w-[200px] cursor-pointer items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-lg border border-border bg-surface transition hover:border-border-strong focus-visible:outline-2 focus-visible:outline-offset-2"
+        className={
+          bare
+            ? 'inline-flex max-w-[200px] cursor-pointer items-center gap-1.5 overflow-hidden whitespace-nowrap transition focus-visible:outline-2 focus-visible:outline-offset-2'
+            : 'inline-flex max-w-[200px] cursor-pointer items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-lg border border-border bg-surface transition hover:border-border-strong focus-visible:outline-2 focus-visible:outline-offset-2'
+        }
         style={{
-          height: 28,
+          height: bare ? '100%' : 28,
           padding: '0 9px',
           fontSize: 11,
           fontWeight: 500,

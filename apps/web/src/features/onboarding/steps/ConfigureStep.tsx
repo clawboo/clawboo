@@ -42,28 +42,28 @@ const PRIMARY_PROVIDERS: ProviderOption[] = [
   {
     id: 'anthropic',
     name: 'Anthropic',
-    description: 'Claude models — fast, capable, and reliable',
+    description: 'Claude models: fast, capable, and reliable',
     placeholder: 'sk-ant-...',
     needsKey: true,
   },
   {
     id: 'openai',
     name: 'OpenAI',
-    description: 'GPT models — versatile and widely used',
+    description: 'GPT models: versatile and widely used',
     placeholder: 'sk-...',
     needsKey: true,
   },
   {
     id: 'google',
     name: 'Google',
-    description: 'Gemini models — great multimodal capabilities',
+    description: 'Gemini models: great multimodal capabilities',
     placeholder: 'AIza...',
     needsKey: true,
   },
   {
     id: 'ollama',
     name: 'Ollama',
-    description: 'Run models locally — free, private, no API key',
+    description: 'Run models locally: free, private, no API key',
     placeholder: '',
     needsKey: false,
   },
@@ -486,7 +486,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
             className="mt-5 overflow-hidden text-[13px] leading-relaxed"
             style={{ color: muted(0.55) }}
           >
-            No key needed — make sure Ollama is running locally on port 11434.
+            No key needed. Make sure Ollama is running locally on port 11434.
           </motion.p>
         )}
       </AnimatePresence>

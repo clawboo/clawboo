@@ -140,3 +140,22 @@ export async function disconnectRuntime(id: RuntimeId): Promise<{ ok: boolean; e
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
+
+export interface OpenRouterModelOption {
+  id: string
+  label: string
+}
+
+/** GET /api/runtimes/openrouter/models → the live OpenRouter model list (flat,
+ *  sorted by label). Falls back to [] on any non-ok so the caller can use its
+ *  hardcoded fallback while this loads or if OpenRouter is unreachable. */
+export async function fetchOpenRouterModels(): Promise<OpenRouterModelOption[]> {
+  try {
+    const res = await apiFetch('/api/runtimes/openrouter/models')
+    if (!res.ok) return []
+    const body = (await res.json()) as { models?: OpenRouterModelOption[] }
+    return body.models ?? []
+  } catch {
+    return []
+  }
+}

@@ -1,10 +1,13 @@
-// Runtimes panel — the connection MANAGER. The synthesized OpenClaw row is always
-// present; the four non-OpenClaw runtimes (incl. the built-in native) always
-// render as cards (status-driven from GET /api/runtimes, falling back to the
-// catalog when the fetch is not ok). RTL pattern (msw onUnhandledRequest:
-// 'error'). The 8 s poll never fires in a sub-second test; cleanup() clears it.
+// Runtimes panel — the connection MANAGER. It renders the shared connect LIST
+// (variant "panel"): the synthesized OpenClaw row plus the four non-OpenClaw
+// runtimes (incl. the built-in native), status-driven from GET /api/runtimes
+// (falling back to a Connect CTA when the fetch is not ok). Each row carries a
+// diagnostics button (Re-check + Disconnect live in the drawer); connected rows
+// show the premium indicator, unconnected rows an explicit CTA. RTL pattern (msw
+// onUnhandledRequest: 'error'). The 8 s poll never fires in a sub-second test.
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -34,7 +37,7 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('RuntimesPanel', () => {
-  it('renders OpenClaw + all four runtime cards (status from GET /api/runtimes)', async () => {
+  it('renders OpenClaw + all four runtime rows (status from GET /api/runtimes)', async () => {
     useConnectionStore.setState({ status: 'connected', client: stubClient })
     server.use(
       http.get('/api/runtimes', () =>
@@ -73,27 +76,31 @@ describe('RuntimesPanel', () => {
     )
     render(<RuntimesPanel />)
 
-    expect(await screen.findByTestId('runtime-row-openclaw')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-row-clawboo-native')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-row-claude-code')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-row-codex')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-row-hermes')).toBeInTheDocument()
-    // Connected claude-code card shows the ready pill; the built-in native card
-    // shows the paste-a-key state (never Install — it ships in the server).
-    expect(await screen.findByText('Connected')).toBeInTheDocument()
-    expect(screen.getByText('Needs key')).toBeInTheDocument()
+    expect(await screen.findByTestId('runtime-list-row-openclaw')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-list-row-clawboo-native')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-list-row-claude-code')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-list-row-codex')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-list-row-hermes')).toBeInTheDocument()
+    // Connected claude-code settles to the premium indicator (the visible label +
+    // its live region both carry the text); the built-in native (needs a key)
+    // shows an explicit Connect CTA, never Install (it ships in the server).
+    expect((await screen.findAllByText('Connected')).length).toBeGreaterThan(0)
+    expect(await screen.findByTestId('runtime-list-row-clawboo-native-toggle')).toHaveAccessibleName(
+      /connect clawboo native/i,
+    )
     expect(screen.queryByTestId('runtime-clawboo-native-install')).not.toBeInTheDocument()
   })
 
-  it('renders cards from the catalog even when /api/runtimes is not ok', async () => {
+  it('renders rows from the catalog even when /api/runtimes is not ok', async () => {
     server.use(http.get('/api/runtimes', () => new HttpResponse(null, { status: 500 })))
     render(<RuntimesPanel />)
 
-    expect(await screen.findByTestId('runtime-row-openclaw')).toBeInTheDocument()
-    // Cards still render (status undefined → unknown), never a blank panel.
-    expect(screen.getByTestId('runtime-row-clawboo-native')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-row-claude-code')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-row-hermes')).toBeInTheDocument()
+    expect(await screen.findByTestId('runtime-list-row-openclaw')).toBeInTheDocument()
+    // Rows still render (status unknown → a Connect CTA once the fetch settles),
+    // never a blank panel.
+    expect(await screen.findByTestId('runtime-list-row-clawboo-native-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-list-row-claude-code')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-list-row-hermes')).toBeInTheDocument()
   })
 
   it('shows the "Set up OpenClaw" CTA on the OpenClaw row when NOT connected', async () => {
@@ -101,7 +108,8 @@ describe('RuntimesPanel', () => {
     server.use(http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })))
     render(<RuntimesPanel />)
 
-    expect(await screen.findByTestId('runtime-row-openclaw')).toBeInTheDocument()
+    const toggle = await screen.findByTestId('runtime-list-row-openclaw-toggle')
+    expect(toggle).toHaveAccessibleName(/set up openclaw/i)
     expect(screen.getByTestId('runtime-openclaw-setup')).toBeInTheDocument()
   })
 
@@ -112,7 +120,9 @@ describe('RuntimesPanel', () => {
     server.use(http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })))
     render(<RuntimesPanel />)
 
-    expect(await screen.findByTestId('runtime-row-openclaw')).toBeInTheDocument()
+    expect(await screen.findByTestId('runtime-list-row-openclaw-toggle')).toHaveAccessibleName(
+      /set up openclaw/i,
+    )
     expect(screen.getByTestId('runtime-openclaw-setup')).toBeInTheDocument()
   })
 
@@ -121,8 +131,10 @@ describe('RuntimesPanel', () => {
     server.use(http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })))
     render(<RuntimesPanel />)
 
-    expect(await screen.findByTestId('runtime-row-openclaw')).toBeInTheDocument()
+    expect(await screen.findByTestId('runtime-list-row-openclaw')).toBeInTheDocument()
+    // Connected → the premium indicator + a Manage toggle, no setup button.
     expect(screen.queryByTestId('runtime-openclaw-setup')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Connected').length).toBeGreaterThan(0)
   })
 
   it('reads OpenClaw as connected from the server registry health with NO browser client (thin-client parity)', async () => {
@@ -138,9 +150,29 @@ describe('RuntimesPanel', () => {
     )
     render(<RuntimesPanel />)
 
-    expect(await screen.findByTestId('runtime-row-openclaw')).toBeInTheDocument()
+    expect(await screen.findByTestId('runtime-list-row-openclaw')).toBeInTheDocument()
     await waitFor(() =>
       expect(screen.queryByTestId('runtime-openclaw-setup')).not.toBeInTheDocument(),
     )
+  })
+
+  it('every row exposes a diagnostics button (no tab switch needed)', async () => {
+    server.use(http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })))
+    render(<RuntimesPanel />)
+    // Native's diagnostics are reachable directly on its row.
+    expect(await screen.findByTestId('runtime-clawboo-native-diagnostics')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-openclaw-diagnostics')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-claude-code-diagnostics')).toBeInTheDocument()
+  })
+
+  it('the OpenClaw row carries setup + diagnostics + the MCP attach config', async () => {
+    useConnectionStore.setState({ status: 'disconnected', client: null })
+    server.use(http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })))
+    render(<RuntimesPanel />)
+    // Diagnostics is on the row itself; expanding the row reveals setup + MCP.
+    expect(await screen.findByTestId('runtime-openclaw-diagnostics')).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('runtime-list-row-openclaw-toggle'))
+    expect(screen.getByTestId('runtime-openclaw-setup')).toBeInTheDocument()
+    expect(screen.getByText('MCP attach config')).toBeInTheDocument()
   })
 })

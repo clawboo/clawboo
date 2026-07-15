@@ -22,7 +22,10 @@ interface Particle {
 
 const SPRING_STRENGTH = 0.035
 const REPULSION_CONSTANT = 2000
-const MIN_COLLISION_DISTANCE = 60
+// Sibling clearance between orbital tiles. Sized for the unified 46px tile
+// family (+ the 57px Model tile + label breathing room): two adjacent discs
+// need ~52px center distance before they touch, so 74 keeps a visible gap.
+const MIN_COLLISION_DISTANCE = 74
 const MIN_COLLISION_DISTANCE_SQ = MIN_COLLISION_DISTANCE * MIN_COLLISION_DISTANCE
 const DAMPING = 0.88
 const SETTLE_THRESHOLD = 0.02

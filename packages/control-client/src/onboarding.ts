@@ -32,6 +32,22 @@ export async function seedNativeTeam(provider: string, model?: string): Promise<
   }
 }
 
+/** POST /api/onboarding/native-leader-model — record the provider + model the
+ *  user picked when connecting a native key, so the universal Boo Zero runs on
+ *  it. Best-effort (a failure just falls back to the per-provider default). */
+export async function setNativeLeaderModel(provider: string, model: string): Promise<boolean> {
+  try {
+    const res = await apiFetch('/api/onboarding/native-leader-model', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, model }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 /** The aggregated first-run signals — the inputs a client feeds into its
  *  wizard-vs-dashboard decision, computed server-side so thin clients skip the
  *  multi-call dance (system status + teams + agents + runtimes). */

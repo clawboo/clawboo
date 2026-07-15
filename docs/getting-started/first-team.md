@@ -30,7 +30,7 @@ Team chat and delegation run **server-side** and work for every runtime, includi
 
 You either already have one (from native onboarding) or you deploy one now.
 
-**You already have a team.** During native onboarding, Clawboo seeded a starter team with two `clawboo-native` agents (a leader and a specialist) and pre-satisfied the introduction flow, so you landed straight in the team's group chat. Skip to [step 3](#3-run-the-know-your-team-gate); your team already exists and is introduced.
+**You already have a team.** During native onboarding you picked a starter team from the marketplace and deployed it (every agent `clawboo-native`), with its introduction flow pre-satisfied, so you landed straight in the team's group chat. Skip to [step 3](#3-run-the-know-your-team-gate); your team already exists and is introduced.
 
 **Deploy a template team.** The **+** button in the leftmost sidebar takes you to the Marketplace's **Teams** tab (the catalog of 82 teams, 304 agents). Press **Deploy** on a team card, then customize its name, icon, color, and the runtime each member runs on. You can mix runtimes: a native leader with a Claude Code or OpenClaw specialist, for example. (Prefer a blank team? Use the **Start from scratch** card on that same tab.)
 

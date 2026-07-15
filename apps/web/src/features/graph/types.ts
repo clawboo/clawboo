@@ -1,5 +1,6 @@
 import type { Node, Edge } from '@xyflow/react'
 import type { AgentStatus } from '@clawboo/gateway-client'
+import type { ProviderId } from '@/features/onboarding/ProviderIcon'
 
 // ─── Skill category ───────────────────────────────────────────────────────────
 
@@ -25,6 +26,15 @@ export interface BooNodeData extends Record<string, unknown> {
   name: string
   status: AgentStatus
   model: string | null
+  /**
+   * Which runtime backs this agent (`clawboo-native` | `openclaw` | `claude-code`
+   * | `codex` | `hermes`). `null` = the OpenClaw default (a legacy / Gateway agent
+   * whose runtime was never stamped). Drives the runtime brand badge overlaid on
+   * the Boo's avatar in the graph so the runtime is legible at a glance. Static
+   * per agent id (fixed at creation), so it rides the structural rebuild the same
+   * way `model` does — never added to `agentStructureKey`.
+   */
+  runtime: string | null
   isStreaming: boolean
   edgeCount?: number
   teamId: string | null
@@ -40,12 +50,37 @@ export interface BooNodeData extends Record<string, unknown> {
   isUniversalLeader?: boolean
 }
 
+/** Which clawboo MCP server a connector node represents — picks its glyph.
+ *  `generic` = any non-clawboo / unknown MCP server. */
+export type ConnectorServiceKind = 'memory' | 'tasks' | 'tools' | 'teamchat' | 'generic'
+
 export interface SkillNodeData extends Record<string, unknown> {
   skillId: string
   name: string
   category: SkillCategory
   description: string | null
   agentIds: string[]
+  /**
+   * True ONLY for a marketplace curated skill (`source: 'curated-skill'`) — the
+   * one capability the graph's Install→ / drag-to-install path can genuinely
+   * install onto another agent. Observed capabilities (runtime built-ins,
+   * gateway tools, brokered tools, inherited shared caps) are NOT installable;
+   * the affordance on them would write a bogus curated-skill annotation.
+   * Absent/false → the Install button + install handles are hidden.
+   */
+  installable?: boolean
+  /**
+   * True for the per-runtime "Built-in tools" rollup record — rendered as a
+   * neutral slate tile with a Blocks glyph (it summarizes the runtime's own
+   * tool set rather than naming one specific capability).
+   */
+  isBuiltinRollup?: boolean
+  /**
+   * False when the capability's server-evaluated `status` is `'disabled'`
+   * (a policy-denied tool / a toggled-off MCP). Greyed like `available:false`
+   * so a denied tool never reads as "the agent has this" at a glance.
+   */
+  enabled?: boolean
   /**
    * Set by `GhostGraph`'s visibleNodes memo from `expandedBooNodeIds`.
    * Drives the peacock-feather expand / collapse animation inside the
@@ -72,12 +107,39 @@ export interface SkillNodeData extends Record<string, unknown> {
    * the dashboard + the MCPToolsSection treatment. Defaults to available.
    */
   available?: boolean
+  /**
+   * When `true`, this synthesized orbital represents the agent's CURRENT LLM
+   * MODEL (not a capability). `SkillNode` renders a provider/runtime glyph +
+   * model label and hides the Install affordance (like `isLeadership`). `name`
+   * carries the model display label; `providerId` picks the brand icon.
+   * Synthesized per-Boo in `useGraphData` for EVERY agent (so every Boo has at
+   * least one orbital to reveal on click); NOT a capability record. Prefix
+   * `clawboo-model-`.
+   */
+  isModel?: boolean
+  /** The model's provider brand (for the ProviderIcon glyph); null = no clawboo-known model. */
+  providerId?: ProviderId | null
+  /**
+   * Set (in place of `providerId`) when clawboo doesn't know the agent's model —
+   * codex / claude-code run on their account/SDK default, and OpenClaw's model
+   * isn't populated. The chip then shows the RUNTIME glyph + a "default" label so
+   * the node still expands. Null for a real, resolved model.
+   */
+  modelRuntime?: string | null
 }
 
 export interface ResourceNodeData extends Record<string, unknown> {
   resourceId: string
+  /** Clean DISPLAY name ("Memory", "Tasks", "Team Chat") — the raw server name
+   *  ("clawboo-memory") stays in `fullName` for the tooltip. */
   name: string
   agentIds: string[]
+  /** The raw connector/server name, shown in the tooltip. */
+  fullName?: string
+  /** Which clawboo MCP server this is — picks the tile glyph. */
+  serviceKind?: ConnectorServiceKind
+  /** False when the connector's status is 'disabled' (see SkillNodeData.enabled). */
+  enabled?: boolean
   /**
    * Same semantics as `SkillNodeData.isVisible`. See note above.
    */
@@ -113,6 +175,17 @@ export type SkillNode = Node<SkillNodeData, 'skill'>
 export type ResourceNode = Node<ResourceNodeData, 'resource'>
 export type TeamRootNode = Node<TeamRootNodeData, 'team-root'>
 export type GraphNode = BooNode | SkillNode | ResourceNode | TeamRootNode
+
+/**
+ * A "real" capability skill node — a `'skill'` node that is NOT one of the
+ * synthesized graph-layer orbitals (Leadership / Model). Used for the header
+ * skill COUNT so those synthetic orbitals don't inflate it.
+ */
+export function isCapabilitySkillNode(node: GraphNode): boolean {
+  if (node.type !== 'skill') return false
+  const d = node.data
+  return !d.isModel && !d.isLeadership
+}
 export type GraphEdge = Edge<Record<string, unknown>>
 
 // ─── Parser output types ──────────────────────────────────────────────────────

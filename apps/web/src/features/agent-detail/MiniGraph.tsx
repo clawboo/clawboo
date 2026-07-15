@@ -28,10 +28,11 @@ import { installSkillForAgent } from '@/features/graph/operations/installSkill'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
-import { AgentModelSelector } from './AgentModelSelector'
+import { AgentModelControl } from './AgentModelControl'
 import { useMiniGraphData } from './useMiniGraphData'
-import { NATIVE_MODEL_GROUPS } from '@/lib/nativeModelCatalog'
-import { setNativeAgentModel } from '@clawboo/control-client'
+import { useHermesModelGroups, useNativeModelGroups } from '@/lib/useOpenRouterModels'
+import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
+import { setAgentModel } from '@clawboo/control-client'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData } from '@/features/graph/types'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -588,18 +589,12 @@ export function MiniGraph({ agentId }: { agentId: string }) {
   const agent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
   const client = useConnectionStore((s) => s.client)
   const addToast = useToastStore((s) => s.addToast)
+  // Native model groups with the OpenRouter list fetched live (shared, cached query).
+  const nativeGroups = useNativeModelGroups()
+  const hermesGroups = useHermesModelGroups()
 
-  // ── Default model (fetched once) ──────────────────────────────────────────
-  const [defaultModel, setDefaultModel] = useState<string | null>(null)
-
-  useEffect(() => {
-    fetch('/api/system/openclaw-config')
-      .then((r) => r.json())
-      .then((data: { config?: { agents?: { defaults?: { model?: { primary?: string } } } } }) => {
-        setDefaultModel(data?.config?.agents?.defaults?.model?.primary ?? null)
-      })
-      .catch(() => {})
-  }, [])
+  // ── Default model (fetched once, shared with the graph's model orbital) ────
+  const defaultModel = useOpenclawDefaultModel()
 
   const handleModelChange = useCallback(
     async (model: string | null) => {
@@ -609,10 +604,13 @@ export function MiniGraph({ agentId }: { agentId: string }) {
       // Native agents: persist to the AgentConfig via the native route (no Gateway
       // session — the next run reads primaryModel). Native has no "revert to default",
       // so `model` is always a concrete id here (the selector hides the Default row).
-      if (agent.runtime === 'clawboo-native') {
+      // Native + Hermes persist a per-agent model via the model route (native → its
+      // AgentConfig primaryModel; Hermes → its execConfig `{ provider, model }`, routed
+      // via OpenRouter). Both have no "revert to default", so `model` is a concrete id.
+      if (agent.runtime === 'clawboo-native' || agent.runtime === 'hermes') {
         if (model) {
           try {
-            await setNativeAgentModel(agent.id, model)
+            await setAgentModel(agent.id, model)
           } catch {
             addToast({ message: 'Failed to save model', type: 'error' })
           }
@@ -658,17 +656,24 @@ export function MiniGraph({ agentId }: { agentId: string }) {
             zIndex: 10,
           }}
         >
-          <AgentModelSelector
+          <AgentModelControl
+            runtime={agent.runtime}
             currentModel={agent.model ?? null}
             defaultModel={defaultModel}
             onModelChange={handleModelChange}
             {...(agent.runtime === 'clawboo-native'
               ? {
-                  groups: NATIVE_MODEL_GROUPS,
+                  groups: nativeGroups,
                   configuredProviders: NATIVE_EMPTY_PROVIDERS,
                   hideDefault: true,
                 }
-              : {})}
+              : agent.runtime === 'hermes'
+                ? {
+                    groups: hermesGroups,
+                    configuredProviders: NATIVE_EMPTY_PROVIDERS,
+                    hideDefault: true,
+                  }
+                : {})}
           />
         </div>
       )}

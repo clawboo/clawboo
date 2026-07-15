@@ -1,9 +1,13 @@
 // OnboardingWizard — wizard-level behaviour the per-step tests can't cover:
 //   1. the native-first spine (welcome → configureNative → addRuntimes →
-//      nativeReady) runs end-to-end and completes client-free — no strand.
+//      selectTeam → nativeReady) runs end-to-end and completes client-free — no
+//      strand. Runtimes come BEFORE team so a connected runtime is assignable to a
+//      team agent. The real deploy engine (CreateTeamModal) is mocked here (it has
+//      its own tests); this asserts the WIRING: a deploy advances the wizard with
+//      the deployed team id.
 //   2. Skip on addRuntimes still completes (both Continue + Skip land nativeReady).
 //   3. the OpenClaw detour hands a live client back through as 'gateway' mode
-//      (never discarded) — and returns to addRuntimes, not a team/deploy flow.
+//      (never discarded) — and returns to addRuntimes.
 //   4. the modal announces itself as a dialog, traps + restores focus, and
 //      Escape steps back one step (no-op on welcome) — the a11y contract.
 
@@ -27,13 +31,29 @@ vi.mock('@clawboo/gateway-client', async (importOriginal) => {
   return { ...actual, GatewayClient: FakeGatewayClient }
 })
 
-// The native-seed path: connect the key (vault write) + seed the starter team.
-function useNativeSeedHandlers() {
+// The real team-deploy engine is exercised by CreateTeamModal's own tests; here
+// it's a minimal fake that, while open, exposes a "deploy" button reporting a
+// team id — so the wizard test drives the spine without the deploy machinery.
+vi.mock('@/features/teams/CreateTeamModal', () => ({
+  CreateTeamModal: ({
+    isOpen,
+    onCreated,
+  }: {
+    isOpen: boolean
+    onCreated: (teamId?: string) => void
+  }) =>
+    isOpen ? (
+      <button data-testid="fake-deploy" type="button" onClick={() => onCreated('team-1')}>
+        deploy
+      </button>
+    ) : null,
+}))
+
+// The native connect path: write the vault key + record the leader model.
+function useNativeConnectHandlers() {
   server.use(
     http.post('/api/runtimes/clawboo-native/connect', () => HttpResponse.json({ ok: true })),
-    http.post('/api/onboarding/seed-native-team', () =>
-      HttpResponse.json({ teamId: 'team-1', leaderAgentId: 'lead', specialistAgentId: 'coder' }),
-    ),
+    http.post('/api/onboarding/native-leader-model', () => HttpResponse.json({ ok: true })),
     http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })),
     http.get('/api/agents', () =>
       HttpResponse.json({ agents: [{ id: 'lead', displayName: 'Team Lead', teamId: 'team-1' }] }),
@@ -44,35 +64,32 @@ function useNativeSeedHandlers() {
 afterEach(() => cleanup())
 
 describe('OnboardingWizard — native-first spine', () => {
-  beforeEach(() => useNativeSeedHandlers())
+  beforeEach(() => useNativeConnectHandlers())
 
-  async function seedNativeTeam() {
-    // configureNative: paste a key, create the team → advances to addRuntimes.
+  // configureNative: paste a key, continue → addRuntimes (runtimes come first now).
+  async function connectToAddRuntimes() {
     await userEvent.type(await screen.findByTestId('native-api-key'), 'sk-ant-test')
-    await userEvent.click(screen.getByTestId('native-create-team'))
+    await userEvent.click(screen.getByTestId('native-continue'))
     await screen.findByTestId('add-runtimes-step')
   }
 
-  it('configureNative → addRuntimes → Skip → nativeReady → completes native (no strand)', async () => {
-    const onComplete = vi.fn()
-    render(<OnboardingWizard onComplete={onComplete} initialStep="configureNative" />)
-
-    await seedNativeTeam()
-    await userEvent.click(screen.getByTestId('addruntimes-skip'))
+  // selectTeam: the (mocked) team marketplace auto-opens; deploy a real team.
+  async function deployTeamThenLand() {
+    await userEvent.click(await screen.findByTestId('fake-deploy'))
     await userEvent.click(await screen.findByTestId('native-open-dashboard'))
+  }
 
-    // Client-free native landing, in the seeded team — never stranded.
-    expect(onComplete).toHaveBeenCalledWith(null, null, 'team-1', 'native')
-  })
-
-  it('Continue on addRuntimes also completes (symmetric with Skip)', async () => {
+  it('configureNative → addRuntimes → Continue → selectTeam (deploy) → nativeReady → completes native (no strand)', async () => {
     const onComplete = vi.fn()
     render(<OnboardingWizard onComplete={onComplete} initialStep="configureNative" />)
 
-    await seedNativeTeam()
+    // Add-runtimes is optional; Continue is the single forward action (works
+    // whether or not anything was connected).
+    await connectToAddRuntimes()
     await userEvent.click(screen.getByTestId('addruntimes-continue'))
-    await userEvent.click(await screen.findByTestId('native-open-dashboard'))
+    await deployTeamThenLand()
 
+    // Client-free native landing, in the DEPLOYED team — never stranded.
     expect(onComplete).toHaveBeenCalledWith(null, null, 'team-1', 'native')
   })
 })
@@ -89,15 +106,16 @@ describe('OnboardingWizard — the OpenClaw detour hands a live client through',
     )
   })
 
-  it('connect → returns to addRuntimes → Continue → nativeReady completes as gateway', async () => {
+  it('connect → returns to addRuntimes → Continue → selectTeam → nativeReady completes as gateway', async () => {
     const onComplete = vi.fn()
     render(<OnboardingWizard onComplete={onComplete} initialStep="connect" />)
 
     // Establish a GatewayClient via the OpenClaw ConnectStep (detour).
     await userEvent.click(await screen.findByRole('button', { name: /^Connect/ }))
-    // The detour returns to addRuntimes (NOT a team/deploy flow) with a live client.
+    // The detour returns to addRuntimes with a live client, then team selection.
     await screen.findByTestId('add-runtimes-step')
     await userEvent.click(screen.getByTestId('addruntimes-continue'))
+    await userEvent.click(await screen.findByTestId('fake-deploy'))
     await userEvent.click(await screen.findByTestId('native-open-dashboard'))
 
     // The live client is preserved (gateway mode), not discarded.
@@ -108,7 +126,7 @@ describe('OnboardingWizard — the OpenClaw detour hands a live client through',
 })
 
 describe('OnboardingWizard — a11y (dialog + focus trap + Escape-as-back)', () => {
-  beforeEach(() => useNativeSeedHandlers())
+  beforeEach(() => useNativeConnectHandlers())
 
   it('announces a modal dialog', () => {
     render(<OnboardingWizard onComplete={vi.fn()} initialStep="configureNative" />)

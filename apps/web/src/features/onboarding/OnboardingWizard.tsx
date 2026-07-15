@@ -38,6 +38,7 @@ import {
   AddRuntimesStep,
   ConfigureNativeStep,
   NativeReadyStep,
+  SelectTeamStep,
 } from './steps'
 import { NATIVE_STEPS } from './StepIndicator'
 import { OnboardingPrimary, OnboardingScreen } from './OnboardingScreen'
@@ -51,6 +52,7 @@ export type WizardStep =
   | 'welcome'
   | 'configureNative'
   | 'addRuntimes'
+  | 'selectTeam'
   | 'nativeReady'
   // The OpenClaw setup detour — reachable only from addRuntimes (returns there).
   | 'detect'
@@ -61,17 +63,18 @@ export type WizardStep =
 
 const STEP_INDEX: Record<WizardStep, number> = {
   welcome: 0,
-  // The native-first spine: paste a key → seed a team → add runtimes → land.
+  // The native-first spine: paste a key → add runtimes → pick + deploy a team → land.
   configureNative: 1,
   addRuntimes: 2,
-  nativeReady: 3,
+  selectTeam: 3,
+  nativeReady: 4,
   // The OpenClaw setup detour (a drill-in of addRuntimes; higher indices so
   // entering it animates forward and returning animates backward).
-  detect: 4,
-  install: 5,
-  configure: 6,
-  startGateway: 7,
-  connect: 8,
+  detect: 5,
+  install: 6,
+  configure: 7,
+  startGateway: 8,
+  connect: 9,
 }
 
 /**
@@ -83,6 +86,7 @@ const STEP_INDEX: Record<WizardStep, number> = {
 const BACK_STEP: Partial<Record<WizardStep, WizardStep>> = {
   configureNative: 'welcome',
   addRuntimes: 'configureNative',
+  selectTeam: 'addRuntimes',
   // The OpenClaw detour: retreating out of detect abandons it back to addRuntimes.
   detect: 'addRuntimes',
   install: 'detect',
@@ -193,7 +197,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
           onClick={onContinue}
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.97 }}
-          className="flex items-center gap-2.5 h-[52px] px-9 rounded-xl bg-accent font-semibold text-[15px] text-primary-foreground shadow-[0_0_36px_rgb(var(--primary-rgb) / 0.45)] transition hover:brightness-110 active:scale-[0.98]"
+          className="welcome-cta flex items-center gap-2.5 h-[52px] px-9 rounded-xl bg-accent font-semibold text-[15px] text-primary-foreground shadow-[0_0_36px_rgb(var(--primary-rgb) / 0.45)] transition hover:brightness-110 active:scale-[0.98]"
         >
           Get Started
           <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
@@ -455,8 +459,9 @@ export function OnboardingWizard({
   const [prevStep, setPrevStep] = useState<WizardStep>(initialStep)
   const [client, setClient] = useState<GatewayClient | null>(null)
   const [gatewayUrl, setGatewayUrl] = useState('')
-  // The team minted by ConfigureNativeStep's seed call — shown on nativeReady.
-  const [seededTeamId, setSeededTeamId] = useState<string | null>(null)
+  // The team the user deployed in the selectTeam step — shown on nativeReady and
+  // used to land them in that team's chat.
+  const [deployedTeamId, setDeployedTeamId] = useState<string | null>(null)
 
   // Gateway URL from ConfigureStep — used by StartGatewayStep completion handler
   const [systemConnectUrl, setSystemConnectUrl] = useState('')
@@ -481,17 +486,9 @@ export function OnboardingWizard({
     }
   }, [client])
 
-  // ── Enter the OpenClaw setup detour (from addRuntimes). Start clean so a prior
-  // half-finished attempt's client doesn't linger; the detour returns to
-  // addRuntimes on success (handleAllGood / handleGatewayStarted / handleConnected).
-  const handleSetupOpenClaw = useCallback(() => {
-    resetGatewayClient()
-    goTo('detect')
-  }, [resetGatewayClient, goTo])
-
-  // ── addRuntimes finished (Continue OR Skip) — advance to the ready landing.
+  // ── addRuntimes finished (Continue) — advance to team selection.
   const handleAddRuntimesDone = useCallback(() => {
-    goTo('nativeReady')
+    goTo('selectTeam')
   }, [goTo])
 
   // ── Native ready: the seeded team is shown; the user opens the dashboard.
@@ -626,11 +623,28 @@ export function OnboardingWizard({
             className="w-full flex justify-center"
           >
             <ConfigureNativeStep
-              onSeeded={(teamId) => {
-                setSeededTeamId(teamId)
-                goTo('addRuntimes')
-              }}
+              onConnected={() => goTo('addRuntimes')}
               onBack={() => goTo('welcome')}
+            />
+          </motion.div>
+        )}
+
+        {step === 'selectTeam' && (
+          <motion.div
+            key="selectTeam"
+            variants={directedVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={stepTransition}
+            className="w-full flex justify-center"
+          >
+            <SelectTeamStep
+              onDeployed={(teamId) => {
+                setDeployedTeamId(teamId)
+                goTo('nativeReady')
+              }}
+              onBack={() => goTo('addRuntimes')}
             />
           </motion.div>
         )}
@@ -646,8 +660,8 @@ export function OnboardingWizard({
             className="w-full flex justify-center"
           >
             <NativeReadyStep
-              teamId={seededTeamId}
-              onOpenDashboard={() => handleNativeReady(seededTeamId)}
+              teamId={deployedTeamId}
+              onOpenDashboard={() => handleNativeReady(deployedTeamId)}
             />
           </motion.div>
         )}
@@ -729,8 +743,10 @@ export function OnboardingWizard({
           >
             <AddRuntimesStep
               onContinue={handleAddRuntimesDone}
-              onSkip={handleAddRuntimesDone}
-              onSetupOpenClaw={handleSetupOpenClaw}
+              onOpenClawConnected={(newClient, url) => {
+                setClient(newClient)
+                setGatewayUrl(url)
+              }}
               openClawConnected={!!client}
             />
           </motion.div>

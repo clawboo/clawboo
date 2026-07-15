@@ -3,7 +3,7 @@ title: 'Quickstart: the OpenClaw Gateway'
 description: Run npx clawboo, connect the native runtime, then add OpenClaw by detecting, installing, and configuring it, starting the Gateway, and approving the device.
 ---
 
-By the end of this tutorial you'll have a running OpenClaw Gateway connected to Clawboo, set up from the onboarding wizard's **Add more runtimes** step. Onboarding is native-first, so you connect the native runtime first (that seeds a starter team), then add OpenClaw through its setup detour: detect your environment, install OpenClaw if needed, configure a model provider, start the Gateway, and approve the one-time device pairing. Once OpenClaw is connected you deploy an OpenClaw team from the dashboard.
+By the end of this tutorial you'll have a running OpenClaw Gateway connected to Clawboo, set up from the onboarding wizard's **Add more runtimes** step. Onboarding is native-first, so you connect the native runtime first, then add OpenClaw through its setup detour: detect your environment, install OpenClaw if needed, configure a model provider, start the Gateway, and approve the one-time device pairing. Once OpenClaw is connected you deploy an OpenClaw team from the dashboard.
 
 This is the OpenClaw path. Unlike the other four runtimes, [OpenClaw](/runtimes/openclaw) is a _connected substrate_; Clawboo connects to a running OpenClaw Gateway (a WebSocket server that hosts OpenClaw agents), rather than installing and spawning a CLI per task. If you want a working team with no Gateway at all, the [native runtime quickstart](/getting-started/quickstart-native) is faster: paste one provider key and you're done.
 
@@ -44,7 +44,7 @@ The first screen is the welcome splash: the Clawboo wordmark, the line "Your AI 
 
 ### 3. Connect the native runtime, then choose "Set up OpenClaw"
 
-Onboarding is native-first, so you connect the built-in native runtime before adding OpenClaw. On the **Connect Clawboo Native** step, pick a provider and paste a key (or select **Ollama** for a keyless local model), then click **Create my team**. Clawboo seeds a starter native team and advances to the **Add more runtimes** step. (The native connect step is covered in full in [Quickstart: native](/getting-started/quickstart-native).)
+Onboarding is native-first, so you connect the built-in native runtime before adding OpenClaw. On the **Connect Clawboo Native** step, pick a provider and paste a key (or select **Ollama** for a keyless local model), then click **Continue**. Clawboo stores the key and advances to the **Add more runtimes** step (you pick and deploy a team in a later step). (The native connect step is covered in full in [Quickstart: native](/getting-started/quickstart-native).)
 
 On **Add more runtimes**, find the **Set up OpenClaw** row and click **Set up OpenClaw**.
 

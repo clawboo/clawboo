@@ -279,16 +279,25 @@ export interface TaskFields {
   priority?: number
   title?: string
   description?: string | null
+  /** The run's cost (USD). The engine creates a task at cost 0; the orchestrator writes
+   *  the real/estimated run cost here so the board card + drawer show it. */
+  costUsd?: number
+  /** The agent's REAL runtime. The engine hardcodes `assigneeRuntime: 'openclaw'` at
+   *  create; the orchestrator corrects it to the actual runtime for the card badge. */
+  assigneeRuntime?: string | null
 }
 
 export function updateTaskFields(db: ClawbooDb, taskId: string, fields: TaskFields): DbTask | null {
-  const patch: Partial<Pick<DbTask, 'priority' | 'title' | 'description'>> & { updatedAt: number } =
-    {
-      updatedAt: Date.now(),
-    }
+  const patch: Partial<
+    Pick<DbTask, 'priority' | 'title' | 'description' | 'costUsd' | 'assigneeRuntime'>
+  > & { updatedAt: number } = {
+    updatedAt: Date.now(),
+  }
   if (fields.priority !== undefined) patch.priority = fields.priority
   if (fields.title !== undefined) patch.title = fields.title
   if (fields.description !== undefined) patch.description = fields.description
+  if (fields.costUsd !== undefined) patch.costUsd = fields.costUsd
+  if (fields.assigneeRuntime !== undefined) patch.assigneeRuntime = fields.assigneeRuntime
   withWriteRetry(() => db.update(tasks).set(patch).where(eq(tasks.id, taskId)).run())
   return getTask(db, taskId)
 }

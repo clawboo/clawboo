@@ -86,29 +86,39 @@ test.describe('Add-runtimes onboarding step', () => {
 
     await page.goto('/')
 
-    // Welcome → ConfigureNative → seed the starter team.
+    // Welcome → ConfigureNative → continue (connect the key; no team yet).
     await page.getByRole('button', { name: /Get Started/ }).click()
     await expect(page.getByTestId('configure-native-step')).toBeVisible({ timeout: 10_000 })
     await page.getByTestId('native-api-key').fill('sk-ant-e2e-fake-key')
-    await page.getByTestId('native-create-team').click()
+    await page.getByTestId('native-continue').click()
 
-    // Add-runtimes: the three coding-runtime cards + the OpenClaw detour row are
-    // all present (the opt-in surface); the native team is already seeded.
+    // Add-runtimes comes FIRST: the tabbed connect surface — OpenClaw FIRST + the
+    // default active pane (so its Gateway setup CTA shows without a click), then
+    // one tab per coding runtime, all mounted (hidden) so installs survive switches.
     await expect(page.getByTestId('add-runtimes-step')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByTestId('runtime-card-claude-code')).toBeVisible()
-    await expect(page.getByTestId('runtime-card-codex')).toBeVisible()
-    await expect(page.getByTestId('runtime-card-hermes')).toBeVisible()
+    await expect(page.getByTestId('runtime-tab-openclaw')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByTestId('runtime-tab-claude-code')).toBeVisible()
+    await expect(page.getByTestId('runtime-tab-codex')).toBeVisible()
+    await expect(page.getByTestId('runtime-tab-hermes')).toBeVisible()
     await expect(page.getByTestId('addruntimes-setup-openclaw')).toBeVisible()
 
-    // Continue → ready → dashboard with the seeded native team STILL present
-    // (the add-runtimes step never strands — the team was seeded before it).
+    // Continue → team selection → deploy a real team (fully native).
     await page.getByTestId('addruntimes-continue').click()
-    await expect(page.getByTestId('native-ready-step')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('select-team-step')).toBeVisible({ timeout: 10_000 })
+    const search = page.getByPlaceholder(/Search teams/)
+    await expect(search).toBeVisible({ timeout: 10_000 })
+    await search.fill('Research Lab')
+    await page.getByTestId('team-card-deploy').first().click()
+    await page.getByTestId('create-team-deploy').click()
+
+    // Ready landing (appears once the deploy lands) → dashboard with the deployed
+    // team present (nothing strands).
+    await expect(page.getByTestId('native-ready-step')).toBeVisible({ timeout: 30_000 })
     await page.getByTestId('native-open-dashboard').click()
     await expect(page.getByTestId('native-ready-step')).toHaveCount(0)
 
     const sidebar = page.locator('[data-testid="agent-list-column"]')
     await expect(sidebar).toBeVisible({ timeout: 15_000 })
-    await expect(sidebar.getByText('Team Lead')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('group-chat-row')).toBeVisible({ timeout: 15_000 })
   })
 })

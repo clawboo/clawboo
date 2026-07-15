@@ -41,7 +41,7 @@ function deriveChecklist(info: SystemInfo): CheckItem[] {
     {
       label: 'Node.js',
       status: info.node.sufficient ? 'pass' : 'fail',
-      detail: info.node.sufficient ? info.node.version : `${info.node.version} — v22+ required`,
+      detail: info.node.sufficient ? info.node.version : `${info.node.version} (v22+ required)`,
     },
     {
       label: 'OpenClaw',
@@ -154,7 +154,7 @@ export function DetectStep({
       step="runtimes"
       steps={NATIVE_STEPS}
       title="System check"
-      subtitle="Checking your environment for OpenClaw. This is the advanced path — most people can skip it and stay on Clawboo Native."
+      subtitle="Checking your environment for OpenClaw. This is the advanced path. Most people can skip it and stay on Clawboo Native."
       footer={
         <div className="flex flex-col items-center gap-4">
           <AnimatePresence initial={false}>

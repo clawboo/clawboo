@@ -1,13 +1,13 @@
 ---
 title: Changelog
-description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.2.1.
+description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.3.0.
 ---
 Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a monorepo of 25 `@clawboo/*` workspace packages, but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
 
 Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which gates on the bundled-CLI clean-install smoke test and then runs `pnpm changeset publish`. The full mechanics are in [Release process](/internals/release-process).
 
 <Note>
-The current npm `latest` is **`clawboo@0.2.1`**, the version these docs describe, so `npx clawboo` installs v0.2.1.
+The current npm `latest` is **`clawboo@0.3.0`**, the version these docs describe, so `npx clawboo` installs v0.3.0.
 </Note>
 
 <Warning>
@@ -18,7 +18,7 @@ Every `0.1.x` release (0.1.0 through 0.1.9) is **deprecated** on npm. The 0.1.x 
 
 | Version | Tag | npm | Theme |
 |---|---|---|---|
-| 0.2.1 | `clawboo@0.2.1` | published | Native team chat live, server-side persistent orchestration, mixed-runtime teams, UI refresh |
+| 0.3.0 | `clawboo@0.3.0` | published | Native-first: run Gateway-free on one provider key, mixed-runtime teams, live native team chat |
 | 0.2.0 | `clawboo@0.2.0` | published | The liberated cut, full multi-runtime orchestrator |
 | 0.1.9 | `clawboo@0.1.9` | deprecated | Welcome redesign, lighter install, team colors |
 | 0.1.8 | `clawboo@0.1.8` | deprecated | Light/dark theme + design-system pass |
@@ -31,24 +31,42 @@ Every `0.1.x` release (0.1.0 through 0.1.9) is **deprecated** on npm. The 0.1.x 
 | 0.1.1 | `clawboo@0.1.1` | deprecated | First real release (v0.1.0 marketplace milestone) |
 | 0.1.0 | `clawboo@0.1.0` | deprecated | Initial package scaffold |
 
-The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap, and 0.2.1 finishes the native-first team experience it opened.
+The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap that made Clawboo runtime-agnostic, and 0.3.0 is the product that leap made possible: native-first, so the first run needs one provider key and nothing else.
 
 ---
 
-## 0.2.1
+## 0.3.0, native-first
 
-A patch on the liberated cut that finishes the native-first team experience it opened: a native team now chats and delegates end to end with no OpenClaw Gateway, team orchestration moved server-side so work survives closing the browser, teams can mix runtimes, and the dashboard got a visual and navigation refresh.
+0.2.0 made Clawboo runtime-agnostic. 0.3.0 is what that unlocked: **the first run needs one provider key and nothing else**. No OpenClaw install, no Gateway, no external CLI. Everything else, OpenClaw, Claude Code, Codex, and Hermes, is now something you add to a working setup rather than a prerequisite for having one.
 
-- **Native team chat, live**: a native-only team (no Gateway) now sends from the group-chat composer and streams responses back. The earlier read-only limitation is gone; the composer works whenever the team has agents. See [Using group chat](/using/group-chat).
-- **Server-side, persistent orchestration**: every team's delegation engine runs on the server, per team, over one shared core, and the browser is a thin client over REST + SSE (`POST` / `GET` / `POST` on `/api/teams/:id/chat`, `/stream`, `/stop`). A cascade continues with no client connected and survives a tab close or a server restart. See [Delegation and orchestration](/concepts/delegation-and-orchestration).
-- **Native multi-agent delegation**: a native leader hands work to teammates through a structured `delegate` signal the engine observes, so the claim, run, and report-up loop fires for native teams exactly as it does for OpenClaw. See [The board](/concepts/the-board).
-- **Mixed-runtime teams**: build one team from agents on different runtimes (a Native leader, a Claude Code specialist, an OpenClaw teammate). You pick each member's runtime when you create the team, and they coordinate in one room over the shared board and peer chat. See the [multi-runtime team guide](/guides/multi-runtime-team).
-- **Native-first onboarding**: the wizard no longer asks you to pick a runtime up front. Native is the default: paste a provider key, get a seeded leader + specialist team, and optionally connect OpenClaw, Claude Code, Codex, or Hermes in the same flow or later from the Runtimes panel in Settings. See [Quickstart (native)](/getting-started/quickstart-native).
-- **Peer-chat room**: a read-only view of a team's durable room, where every runtime posts as a named peer, opens from the team header. See [Peer chat](/concepts/peer-chat).
-- **Rules and self-intro reach the agents**: a `/rule` line and your onboarding self-introduction are injected into every team turn's context, so a correction and who-you-are persist across the conversation rather than rolling out of the recent-message window. Risky delegations are gated on the leader's approval queue before they run, and board task cards update live as a cascade lands. See [Using group chat](/using/group-chat).
-- **UI refresh**: the app moved to the Inter typeface with a refreshed component set, and the management surfaces (Runtimes, Memory, Capabilities, Scheduler, Tokens Used, Observability, Governance, System, System Health) moved into a **Settings modal**, opened from the gear at the bottom of the sidebar or with `Cmd/Ctrl+,`, leaving a calmer sidebar of Atlas, Fleet, Marketplace, Board, and Approvals. See the [dashboard tour](/getting-started/dashboard-tour).
+**Onboarding and providers**
 
-The 304-agent, 82-team marketplace catalog, the MCP quartet, verification, governance, and observability all carry forward from 0.2.0 unchanged. There is no schema migration between 0.2.0 and 0.2.1; the [no-migration-ladder](/operating/data-and-state) reset caveat is the same.
+- **Native-first wizard**: the first real step connects a provider key, then optionally adds runtimes, then deploys a real team from the 82-team marketplace. Connect, Runtimes, Team, Ready. The generic auto-seeded pair is gone: you pick the team you actually want, and it deploys fully native. See [Quickstart (native)](/getting-started/quickstart-native).
+- **Ten native providers**: Anthropic, OpenAI, OpenRouter, and Ollama, plus Google, xAI, Groq, Mistral, Together, Cerebras, and Moonshot routed through an OpenAI-compatible base URL. Pasting a key fetches that provider's live model list, so the model picker offers what your key can actually reach.
+- **Providers hub** in Settings, with API keys moved out of Maintenance into one surface, backed by an encrypted vault under `~/.clawboo/secrets/`. A key you connect once is reused: an Anthropic key satisfies Claude Code, an OpenRouter key satisfies Hermes, and OpenClaw setup no longer asks for a second key.
+- **First-run capability tour**: a one-time, skippable spotlight over the real sidebar controls that ends by opening your team's group chat. See the [dashboard tour](/getting-started/dashboard-tour).
+
+**Teams, models, and chat**
+
+- **Per-agent runtime and model pickers** in create-team: every member, leader included, gets its own runtime (Native, OpenClaw, Claude Code, Codex, Hermes) and, where the runtime honors one, its own model. An unavailable choice degrades to Native rather than blocking the deploy, so a marketplace team still ships with the Gateway down. See the [multi-runtime team guide](/guides/multi-runtime-team).
+- **Native team chat, live**: a native-only team sends from the group-chat composer and streams back. The earlier read-only limitation is gone. Native 1:1 chat resumes its prior session each turn, so Boo Zero remembers the conversation. See [Using group chat](/using/group-chat).
+- **Server-side, persistent orchestration**: every team's delegation engine runs on the server, per team, over one shared core, with the browser a thin client over REST and SSE. A cascade continues with no client connected and survives a tab close or a server restart. See [Delegation and orchestration](/concepts/delegation-and-orchestration).
+- **Native multi-agent delegation**: a native leader hands work to teammates through a structured `delegate` signal the engine observes, so the claim, run, and report-up loop fires for native teams exactly as it does for OpenClaw. Failed and abandoned delegations now surface on the board instead of leaving the delegator waiting. See [The board](/concepts/the-board).
+- **Editable model per agent**: the agent view fuses each agent's runtime badge with its model control, so you can see which runtime an agent runs on and change its model where that is meaningful. Codex and Claude Code show a runtime-managed note rather than a dropdown that would not take effect.
+
+**The graph**
+
+- **Runtime badges and model orbitals**: every Boo carries its runtime's brand mark, and expanding one reveals the model it runs on. See [Ghost Graph](/using/ghost-graph).
+- **MCP connector nodes**: an agent's attached MCP servers appear as their own tiles with per-service glyphs, alongside its skills and built-ins, each type colour-coded so the fan reads at a glance. An agent with no per-agent capabilities of its own now surfaces its runtime's shared ones, so Codex, OpenClaw, and Hermes agents are no longer bare. See [Capabilities dashboard](/using/capabilities-dashboard).
+- The Gateway's built-in `main` agent is hidden from the graph and sidebar unless it is genuinely your default agent, so a native-first install is not cluttered by Gateway plumbing.
+
+**Resilience**
+
+- **A degraded Gateway no longer blocks you**: if you have any non-OpenClaw agent, the dashboard loads and a non-blocking banner offers recovery, instead of a full-screen wall. The banner offers the action that actually applies: restarting the Gateway when it rejected the token, approving the device when it is unpaired, retrying when it is genuinely unreachable.
+- **Hermes installs on a modern Python**: the installer resolves a 3.11+ interpreter instead of failing against the system 3.9. **Codex login is detected**, so an existing `codex login` is recognised rather than prompting again.
+- **Security**: a non-loopback bind now refuses to start without an access token, and CI workflows run with least-privilege permissions.
+
+The 304-agent, 82-team marketplace catalog, the MCP quartet, verification, governance, and observability all carry forward from 0.2.0. There is no schema migration between 0.2.0 and 0.3.0; the [no-migration-ladder](/operating/data-and-state) reset caveat is the same.
 
 ---
 

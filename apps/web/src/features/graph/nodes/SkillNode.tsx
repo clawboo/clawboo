@@ -4,14 +4,18 @@ import { Handle, Position } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import {
   BarChart3,
+  Blocks,
   Compass,
   FileText,
   Globe,
   MessageSquare,
+  Sparkles,
   Wrench,
   Zap,
   type LucideIcon,
 } from 'lucide-react'
+import { PROVIDER_BRAND, ProviderGlyph } from '@/features/onboarding/ProviderIcon'
+import { MarkGlyph, resolveRuntimeMark } from '@/features/runtimes/RuntimeBrand'
 import { AgentPickerDropdown } from '@/features/marketplace/AgentPickerDropdown'
 import { installSkillForAgent } from '../operations/installSkill'
 import { useGraphStore } from '../store'
@@ -19,29 +23,37 @@ import { useFloatingMotion } from '../useFloatingMotion'
 import { usePeacockTransition } from '../usePeacockTransition'
 import type { SkillNodeData, SkillCategory } from '../types'
 
-// ─── Category → colour + icon ─────────────────────────────────────────────────
+// ─── Orbital tile system ──────────────────────────────────────────────────────
 //
-// Emoji glyphs replaced with Lucide icons; raw hex replaced with
-// the shared `--category-*` token palette (see globals.css). Both light and
-// dark modes inherit through the var() chain.
+// Every orbital renders as ONE tile family (the language the Model orbital
+// established): an OPAQUE accent-tinted disc (`color-mix(accent, var(--surface))`
+// — never a transparent wash), a solid accent ring, a soft accent shadow, the
+// glyph in full accent colour, and a theme-foreground label below. The tile
+// ACCENT is TYPE-coded so the fan reads at a glance:
+//
+//   provider brand → the LLM model      violet → MCP connectors (ResourceNode)
+//   mint           → skills / tools     slate  → the runtime built-ins rollup
+//   amber          → Leadership (Boo Zero)
+//
+// The category picks only the GLYPH for skill tiles (variety within the mint
+// family); the old per-category tile colours read as noise next to the
+// type-coded connectors/model.
 
-const CATEGORY: Record<SkillCategory, { color: string; Icon: LucideIcon }> = {
-  data: { color: 'var(--category-data)', Icon: BarChart3 },
-  comm: { color: 'var(--category-comm)', Icon: MessageSquare },
-  code: { color: 'var(--category-code)', Icon: Zap },
-  file: { color: 'var(--category-file)', Icon: FileText },
-  web: { color: 'var(--category-web)', Icon: Globe },
-  other: { color: 'var(--category-other)', Icon: Wrench },
+const CATEGORY_ICON: Record<SkillCategory, LucideIcon> = {
+  data: BarChart3,
+  comm: MessageSquare,
+  code: Zap,
+  file: FileText,
+  web: Globe,
+  other: Wrench,
 }
 
-// Visual overrides for Boo Zero's "Leadership" orbital — see
-// `SkillNodeData.isLeadership` for context. Compass icon picks up the
-// "guides the team" metaphor without the crown's heraldic vibe; amber
-// signals elevated status while staying clearly distinct from any of the
-// regular category colors.
+// Compass picks up the "guides the team" metaphor; amber signals elevated
+// status while staying clearly distinct from the type accents above.
 const LEADERSHIP_VISUAL = { color: 'var(--amber)', Icon: Compass } as const
 
-const CIRCLE = 38 // circle diameter in px (reduced from 52 — skills feel subordinate to Boo nodes)
+const CIRCLE = 46 // regular orbital tile diameter (px)
+const MODEL_CIRCLE = 57 // the Model tile stays the biggest — the fan's anchor
 
 // ─── Handle style ─────────────────────────────────────────────────────────────
 
@@ -75,16 +87,55 @@ export const SkillNode = memo(function SkillNode({
   data,
   dragging,
 }: NodeProps<Node<SkillNodeData, 'skill'>>) {
-  const { name, category, description, isVisible, isLeadership, available } = data
-  // Capability availability → greyed (opacity + grayscale), matching the
-  // dashboard + the MCPToolsSection treatment. `undefined` = available.
-  const greyed = available === false
+  const {
+    name,
+    category,
+    description,
+    isVisible,
+    isLeadership,
+    isModel,
+    isBuiltinRollup,
+    installable,
+    enabled,
+    providerId,
+    modelRuntime,
+    available,
+  } = data
+  // Unavailable OR policy-disabled → greyed (opacity + grayscale), matching the
+  // dashboard treatment. A denied tool must never read as "the agent has this".
+  const greyed = available === false || enabled === false
   const floatRef = useFloatingMotion(nodeId, 'skill', dragging)
-  // Leadership orbital reads its visuals from a dedicated constant — the
-  // `category` field is still set on the data (defaulted to `'other'` in
-  // `useGraphData`) so any downstream consumer that hasn't been taught
-  // about `isLeadership` falls back gracefully.
-  const { color, Icon } = isLeadership ? LEADERSHIP_VISUAL : (CATEGORY[category] ?? CATEGORY.other)
+  // The model orbital tints itself by its provider brand (mono brands →
+  // foreground; unknown provider → neutral) and renders the provider glyph in
+  // place of a lucide icon (see the icon render below). Its `Icon` fallback is a
+  // generic model glyph, used only when the provider is unknown.
+  const modelBrand = isModel && providerId ? PROVIDER_BRAND[providerId] : null
+  // No clawboo-known model → show the RUNTIME brand glyph instead (codex /
+  // claude-code / openclaw), so the model orbital still renders + expands.
+  const modelRuntimeMark =
+    isModel && !providerId && modelRuntime ? resolveRuntimeMark(modelRuntime) : null
+  const brandColor = modelBrand?.color ?? modelRuntimeMark?.color ?? null
+  const modelColor = brandColor
+    ? brandColor === 'currentColor'
+      ? 'var(--foreground)'
+      : brandColor
+    : 'var(--category-other)'
+  // TYPE-coded tile accent + glyph (see the tile-system note above). The
+  // `category` still picks the glyph for skill tiles so there's variety
+  // within the mint family.
+  const { color, Icon } = isModel
+    ? { color: modelColor, Icon: Sparkles }
+    : isLeadership
+      ? LEADERSHIP_VISUAL
+      : isBuiltinRollup
+        ? { color: 'var(--secondary)', Icon: Blocks }
+        : { color: 'var(--mint)', Icon: CATEGORY_ICON[category] ?? Wrench }
+  // Install is offered ONLY for a genuinely installable capability (a
+  // marketplace curated skill) — observed / inherited / synthesized orbitals
+  // hide the button, its picker, AND the drag-to-install handles (dragging one
+  // onto a Boo would write a bogus curated-skill annotation named after it).
+  const showInstall = installable === true && !isLeadership && !isModel
+  const circle = isModel ? MODEL_CIRCLE : CIRCLE
   const [showPicker, setShowPicker] = useState(false)
 
   // Hover cascade — dim when another node is hovered
@@ -113,11 +164,15 @@ export const SkillNode = memo(function SkillNode({
     >
       <div ref={floatRef}>
         <div
-          title={greyed ? `${description ?? name} — unavailable` : (description ?? name)}
+          title={
+            greyed
+              ? `${description ?? name} — ${enabled === false ? 'disabled' : 'unavailable'}`
+              : (description ?? name)
+          }
           className="group"
           style={{
-            width: CIRCLE,
-            height: CIRCLE,
+            width: circle,
+            height: circle,
             position: 'relative',
             overflow: 'visible',
             opacity: greyed ? (isHighlighted ? 0.5 : 0.16) : isHighlighted ? 1 : 0.22,
@@ -125,31 +180,43 @@ export const SkillNode = memo(function SkillNode({
             transition: 'opacity 0.2s ease, filter 0.2s ease',
           }}
         >
-          {/* Filled circle. `color-mix(in srgb, ...)` lets us compose
-              opacity onto a CSS var (--category-*) the same way `${hex}18`
-              did with raw hex — supported in every modern engine since 2023. */}
+          {/* The tile disc — ONE family for every orbital: an OPAQUE
+              accent-tinted surface (never a transparent wash), a solid accent
+              ring, and a soft accent shadow. The Model tile tints slightly
+              deeper + carries a full-strength ring so it stays the anchor. */}
           <div
             style={{
-              width: CIRCLE,
-              height: CIRCLE,
+              width: circle,
+              height: circle,
               borderRadius: '50%',
-              background: `color-mix(in srgb, ${color} 9%, transparent)`,
-              border: `2px solid color-mix(in srgb, ${color} 33%, transparent)`,
+              background: `color-mix(in srgb, ${color} ${isModel ? 24 : 15}%, var(--surface))`,
+              border: isModel
+                ? `1.5px solid ${color}`
+                : `1.5px solid color-mix(in srgb, ${color} 65%, transparent)`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: `0 0 14px color-mix(in srgb, ${color} 16%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.06)`,
+              boxShadow: `0 2px 8px color-mix(in srgb, ${color} ${isModel ? 28 : 20}%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.07)`,
             }}
           >
-            <Icon size={16} strokeWidth={1.75} aria-hidden style={{ color, userSelect: 'none' }} />
+            {isModel && providerId ? (
+              <span style={{ color, display: 'inline-flex' }} aria-hidden>
+                <ProviderGlyph id={providerId} size={33} />
+              </span>
+            ) : modelRuntimeMark ? (
+              <span style={{ color, display: 'inline-flex' }} aria-hidden>
+                <MarkGlyph glyph={modelRuntimeMark.glyph} size={30} />
+              </span>
+            ) : (
+              <Icon size={20} strokeWidth={2} aria-hidden style={{ color, userSelect: 'none' }} />
+            )}
           </div>
 
-          {/* Install button — appears on hover. Hidden for the Leadership
-              orbital: it's reserved for Boo Zero and cannot be installed on
-              other agents (see `SkillNodeData.isLeadership`). Suppressing
+          {/* Install button — appears on hover. Hidden for the Leadership +
+              Model orbitals: they're not installable capabilities. Suppressing
               the button removes the action AND avoids opening a no-op
               picker dropdown. */}
-          {!isLeadership && (
+          {showInstall && (
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -177,28 +244,33 @@ export const SkillNode = memo(function SkillNode({
           )}
 
           {/* Agent picker dropdown — same suppression rule as the button. */}
-          {!isLeadership && showPicker && (
+          {showInstall && showPicker && (
             <AgentPickerDropdown
               onSelect={(agentId, agentName) => {
                 void installSkillForAgent(name, agentId, agentName)
               }}
               onClose={() => setShowPicker(false)}
-              style={{ top: CIRCLE + 4, left: '50%', transform: 'translateX(-50%)' }}
+              style={{ top: circle + 4, left: '50%', transform: 'translateX(-50%)' }}
             />
           )}
 
-          {/* Name below circle */}
+          {/* Name below circle — ALWAYS theme foreground. Accent-coloured
+              labels (the old treatment) were low-contrast noise on the canvas;
+              the accent lives on the disc/ring/glyph, the label carries the
+              information. */}
           <div
             style={{
               position: 'absolute',
-              top: CIRCLE + 6,
+              top: circle + 6,
               left: '50%',
               transform: 'translateX(-50%)',
               fontSize: 11,
               fontWeight: 500,
-              color: color,
+              color: 'var(--foreground)',
               whiteSpace: 'nowrap',
-              maxWidth: 84,
+              // Model labels ("Claude Sonnet 4.6") are longer than skill names —
+              // give them more room before the ellipsis.
+              maxWidth: isModel ? 124 : 104,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               textAlign: 'center',
@@ -208,25 +280,32 @@ export const SkillNode = memo(function SkillNode({
             {name}
           </div>
 
-          {/* Left handle — target for incoming edges from BooNodes */}
-          <Handle
-            type="target"
-            position={Position.Left}
-            style={{
-              ...handleStyle,
-              borderColor: `color-mix(in srgb, ${color} 33%, transparent)`,
-            }}
-          />
-          {/* Right handle — source for drag-to-install onto BooNodes */}
-          <Handle
-            type="source"
-            id="install"
-            position={Position.Right}
-            style={{
-              ...handleStyle,
-              borderColor: `color-mix(in srgb, ${color} 33%, transparent)`,
-            }}
-          />
+          {/* Left handle — target for incoming edges from BooNodes. Hidden for
+              the non-installable Leadership + Model orbitals. */}
+          {showInstall && (
+            <Handle
+              type="target"
+              position={Position.Left}
+              style={{
+                ...handleStyle,
+                borderColor: `color-mix(in srgb, ${color} 33%, transparent)`,
+              }}
+            />
+          )}
+          {/* Right handle — source for drag-to-install onto BooNodes. Hidden for
+              Leadership + Model: dragging one onto a Boo would install a bogus
+              skill named after it. */}
+          {showInstall && (
+            <Handle
+              type="source"
+              id="install"
+              position={Position.Right}
+              style={{
+                ...handleStyle,
+                borderColor: `color-mix(in srgb, ${color} 33%, transparent)`,
+              }}
+            />
+          )}
 
           {/* Center handle — invisible, for edge path routing only */}
           <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />

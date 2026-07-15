@@ -14,7 +14,21 @@ import { z } from 'zod'
 
 /** Known first-party providers. Open set — a custom OpenAI-compatible provider
  *  id is allowed (it rides the openai client with a base-URL override). */
-export const KNOWN_PROVIDERS = ['anthropic', 'openai', 'openrouter', 'ollama'] as const
+export const KNOWN_PROVIDERS = [
+  'anthropic',
+  'openai',
+  'openrouter',
+  'ollama',
+  // OpenAI-compatible "extra" providers the native harness routes to via a
+  // base-URL override (see the server nativeProviders registry).
+  'google',
+  'xai',
+  'groq',
+  'mistral',
+  'together',
+  'cerebras',
+  'moonshot',
+] as const
 export type KnownProvider = (typeof KNOWN_PROVIDERS)[number]
 
 const fallbackSchema = z.object({
@@ -101,7 +115,8 @@ export function parseAgentConfig(json: string | null): AgentConfig | null {
   }
 }
 
-/** Conventional vault env-var per known provider (ollama is keyless). */
+/** Conventional vault env-var per known provider (ollama is keyless). The extra
+ *  OpenAI-compatible providers mirror the server nativeProviders registry. */
 export function envVarForProvider(provider: string): string | null {
   switch (provider) {
     case 'anthropic':
@@ -110,9 +125,38 @@ export function envVarForProvider(provider: string): string | null {
       return 'OPENAI_API_KEY'
     case 'openrouter':
       return 'OPENROUTER_API_KEY'
+    case 'google':
+      return 'GEMINI_API_KEY'
+    case 'xai':
+      return 'XAI_API_KEY'
+    case 'groq':
+      return 'GROQ_API_KEY'
+    case 'mistral':
+      return 'MISTRAL_API_KEY'
+    case 'together':
+      return 'TOGETHER_API_KEY'
+    case 'cerebras':
+      return 'CEREBRAS_API_KEY'
+    case 'moonshot':
+      return 'MOONSHOT_API_KEY'
     case 'ollama':
       return null
     default:
       return null
   }
 }
+
+/** All non-keyless provider env vars — the full set a multi-provider native agent
+ *  might have a key stored under (drives the runtime's credential check). */
+export const NATIVE_PROVIDER_ENV_VARS = [
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'OPENROUTER_API_KEY',
+  'GEMINI_API_KEY',
+  'XAI_API_KEY',
+  'GROQ_API_KEY',
+  'MISTRAL_API_KEY',
+  'TOGETHER_API_KEY',
+  'CEREBRAS_API_KEY',
+  'MOONSHOT_API_KEY',
+] as const

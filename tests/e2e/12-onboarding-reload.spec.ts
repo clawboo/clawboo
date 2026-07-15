@@ -1,8 +1,8 @@
 // Reload stays on the dashboard (the reload-trap regression). After completing
 // native onboarding and reaching the dashboard, a page reload must KEEP the user
 // there — not re-trap them in a fresh wizard. The durable signal that survives
-// the reload is the seeded native team (GET /api/agents → a clawboo-native agent
-// exists → decideOnboardingView returns 'native'), persisted in SQLite.
+// the reload is the DEPLOYED native team (GET /api/agents → a clawboo-native
+// agent exists → decideOnboardingView returns 'native'), persisted in SQLite.
 
 import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
 
@@ -87,15 +87,22 @@ test.describe('Native onboarding — reload stays on the dashboard', () => {
 
     await page.goto('/')
 
-    // Complete native onboarding: Welcome → ConfigureNative (seed) → skip runtimes
-    // → open the dashboard.
+    // Complete native onboarding: Welcome → ConfigureNative (connect) → pick +
+    // deploy a real team → skip runtimes → open the dashboard.
     await page.getByRole('button', { name: /Get Started/ }).click()
     await expect(page.getByTestId('configure-native-step')).toBeVisible({ timeout: 10_000 })
     await page.getByTestId('native-api-key').fill('sk-ant-e2e-fake-key')
-    await page.getByTestId('native-create-team').click()
-    await expect(page.getByTestId('add-runtimes-step')).toBeVisible({ timeout: 15_000 })
+    await page.getByTestId('native-continue').click()
+    // Add-runtimes comes first (optional) → skip; then pick + deploy a real team.
+    await expect(page.getByTestId('add-runtimes-step')).toBeVisible({ timeout: 10_000 })
     await page.getByTestId('addruntimes-skip').click()
-    await expect(page.getByTestId('native-ready-step')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('select-team-step')).toBeVisible({ timeout: 10_000 })
+    const search = page.getByPlaceholder(/Search teams/)
+    await expect(search).toBeVisible({ timeout: 10_000 })
+    await search.fill('Research Lab')
+    await page.getByTestId('team-card-deploy').first().click()
+    await page.getByTestId('create-team-deploy').click()
+    await expect(page.getByTestId('native-ready-step')).toBeVisible({ timeout: 30_000 })
     await page.getByTestId('native-open-dashboard').click()
 
     // Landed in the dashboard shell, wizard gone.

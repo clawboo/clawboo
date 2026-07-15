@@ -4,11 +4,12 @@
 // to ~/.clawboo/settings.json (firstRunDismissedAt) via the shared settings POST
 // — no second settings writer.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Rocket, X } from 'lucide-react'
 
 import { useViewStore } from '@/stores/view'
+import { useTourStore } from '@/stores/tour'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -38,6 +39,13 @@ async function persistDismiss(): Promise<void> {
 export function FirstRunNudge() {
   const [show, setShow] = useState(false)
   const navigateTo = useViewStore((s) => s.navigateTo)
+  // While the interactive capability tour runs it OWNS the first-run guidance
+  // (its finish step is the "Open the Board" hand-off), so this standing nudge
+  // stays out of the way — otherwise both stack on the dashboard at once.
+  const tourActive = useTourStore((s) => s.active)
+  // Once suppressed by the tour, stay hidden for the whole session so the nudge
+  // can't pop in the instant the tour finishes (redundant with its finish CTA).
+  const suppressedRef = useRef(false)
 
   // Decide visibility once on mount: not previously dismissed AND no completed work.
   useEffect(() => {
@@ -49,7 +57,8 @@ export function FirstRunNudge() {
         }
         if (settings.firstRunDismissedAt != null) return
         const completed = await countCompletedTasks()
-        if (alive && completed === 0) setShow(true)
+        if (alive && completed === 0 && !useTourStore.getState().active && !suppressedRef.current)
+          setShow(true)
       } catch {
         /* don't show on error */
       }
@@ -58,6 +67,15 @@ export function FirstRunNudge() {
       alive = false
     }
   }, [])
+
+  // If the tour goes live (races the mount fetch), yield the dashboard to it and
+  // stay suppressed for the session.
+  useEffect(() => {
+    if (tourActive) {
+      suppressedRef.current = true
+      setShow(false)
+    }
+  }, [tourActive])
 
   // Auto-dismiss on the first completed task (poll only while shown).
   useEffect(() => {
@@ -123,7 +141,7 @@ export function FirstRunNudge() {
               Your team is ready
             </div>
             <div style={{ fontSize: 11.5, color: muted(0.6), lineHeight: 1.5, marginTop: 2 }}>
-              Add a task on the Board and assign it to a runtime — then watch your team pick it up
+              Add a task on the Board and assign it to a runtime, then watch your team pick it up
               and collaborate.
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>

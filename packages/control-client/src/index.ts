@@ -5,5 +5,6 @@
 export * from './config'
 export * from './sse'
 export * from './runtimes'
+export * from './providers'
 export * from './agents'
 export * from './onboarding'

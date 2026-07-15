@@ -10,6 +10,7 @@ import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 import { useObsOverlayStore } from '@/stores/obsOverlay'
 import { BooLiveActivity } from './BooLiveActivity'
+import { RuntimeBadge } from './RuntimeBadge'
 import { createFlipState, useFlipMorph, type FlipState } from './useFlipMorph'
 import { useChatStore } from '@/stores/chat'
 import { getActivityVerb } from '@/lib/agentActivityVerb'
@@ -167,6 +168,9 @@ export const BooNode = memo(function BooNode({
   const { agentId, name, status } = data
   const floatRef = useFloatingMotion(agentId, 'boo', dragging)
   const showCard = status === 'running'
+  // Runtime brand badge — shown on every Boo (Atlas + team graph + agent-detail
+  // MiniGraph) so the agent's runtime is legible at a glance.
+  const runtime = data.runtime
 
   // FLIP state for the avatar / name / status sub-elements. Owned here at
   // the BooNode level so the captured rects persist across the
@@ -359,6 +363,7 @@ export const BooNode = memo(function BooNode({
             activityVerb={activityVerb}
             cardStatusColor={cardStatusColor}
             lastSeenLabel={lastSeenLabel}
+            runtime={runtime}
             avatarFlip={avatarFlip}
             nameFlip={nameFlip}
             statusFlip={statusFlip}
@@ -374,6 +379,7 @@ export const BooNode = memo(function BooNode({
             booH={booH}
             cardStatusColor={cardStatusColor}
             lastSeenLabel={lastSeenLabel}
+            runtime={runtime}
             avatarFlip={avatarFlip}
             nameFlip={nameFlip}
             statusFlip={statusFlip}
@@ -445,6 +451,7 @@ interface ContentProps {
   activityVerb: string
   cardStatusColor: string
   lastSeenLabel: string | null
+  runtime: string | null
   avatarFlip: MutableRefObject<FlipState>
   nameFlip: MutableRefObject<FlipState>
   statusFlip: MutableRefObject<FlipState>
@@ -458,6 +465,7 @@ function CardContent({
   activityVerb,
   cardStatusColor,
   lastSeenLabel,
+  runtime,
   avatarFlip,
   nameFlip,
   statusFlip,
@@ -481,6 +489,7 @@ function CardContent({
       >
         <div ref={avatarRef} style={{ flexShrink: 0, width: 44, height: 44, position: 'relative' }}>
           <AgentBooAvatar agentId={agentId} size={44} />
+          <RuntimeBadge runtime={runtime} size={15} />
         </div>
         <div ref={nameRef} style={{ flex: 1, minWidth: 0 }}>
           <div
@@ -578,6 +587,7 @@ function CircleContent({
   booH,
   cardStatusColor,
   lastSeenLabel,
+  runtime,
   avatarFlip,
   nameFlip,
   statusFlip,
@@ -588,11 +598,15 @@ function CircleContent({
   const avatarRef = useFlipMorph<HTMLDivElement>(avatarFlip)
   const nameRef = useFlipMorph<HTMLDivElement>(nameFlip)
   const statusRef = useFlipMorph<HTMLDivElement>(statusFlip)
+  // Scale the badge with the degree-aware avatar, clamped so it stays a
+  // legible-but-not-dominant corner chip across the 96–140px circle range.
+  const badgeSize = Math.min(Math.max(18, Math.round(booW * 0.22)), 26)
 
   return (
     <>
       <div ref={avatarRef} style={{ width: booW, height: booH, position: 'relative' }}>
         <AgentBooAvatar agentId={agentId} size={booW} />
+        <RuntimeBadge runtime={runtime} size={badgeSize} />
       </div>
 
       {/* Name — outer wrapper handles centering via flex (no transform that

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { MODEL_GROUPS, type ModelGroup } from './modelCatalog'
+import { useOpenClawModelGroups } from './useOpenRouterModels'
 
 export interface ModelCatalogResult {
   groups: ModelGroup[]
@@ -47,5 +48,8 @@ export function useModelCatalog(): ModelCatalogResult {
     })
   }, [])
 
-  return { groups, configuredProviders: configured }
+  // Fold the live OpenRouter catalog into the OpenRouter group (routing-id format),
+  // so the OpenClaw model pickers reflect what OpenRouter currently serves too.
+  const mergedGroups = useOpenClawModelGroups(groups)
+  return { groups: mergedGroups, configuredProviders: configured }
 }

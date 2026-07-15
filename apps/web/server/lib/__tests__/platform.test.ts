@@ -4,7 +4,14 @@ import path from 'node:path'
 
 import { describe, it, expect } from 'vitest'
 
-import { findExecutable, isWindows, resolveRuntimeBin, resolveShimName } from '../platform'
+import {
+  findExecutable,
+  isWindows,
+  pickPython,
+  resolveRuntimeBin,
+  resolveShimName,
+  type PythonCandidate,
+} from '../platform'
 
 describe('platform helper', () => {
   describe('isWindows', () => {
@@ -74,6 +81,41 @@ describe('platform helper', () => {
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }
+    })
+  })
+
+  // The pure selection behind the Hermes pip install. The bug it guards: on a
+  // fresh macOS the default `python3` is the Xcode CLT Python 3.9, below
+  // hermes-agent's requires-python >=3.11, so pip reports "(from versions: none)".
+  describe('pickPython', () => {
+    const py = (minor: number, bin = `/usr/bin/python3.${minor}`): PythonCandidate => ({
+      bin,
+      minor,
+      version: `3.${minor}`,
+    })
+    const XCODE = py(9, '/Applications/Xcode.app/Contents/Developer/usr/bin/python3')
+
+    it('picks the newest interpreter at or above the floor', () => {
+      expect(pickPython([py(9), py(12), py(11)], 11).compatible?.minor).toBe(12)
+    })
+
+    it('rejects a too-old Xcode python but reports it as `best` for the error', () => {
+      const { compatible, best } = pickPython([XCODE], 11)
+      expect(compatible).toBeNull()
+      expect(best?.minor).toBe(9)
+    })
+
+    it('uses a version-specific 3.11 when the default python3 is the old Xcode one', () => {
+      const { compatible } = pickPython([XCODE, py(11, '/opt/homebrew/bin/python3.11')], 11)
+      expect(compatible?.bin).toContain('python3.11')
+    })
+
+    it('returns null/null when nothing was found', () => {
+      expect(pickPython([], 11)).toEqual({ compatible: null, best: null })
+    })
+
+    it('with no floor accepts any interpreter, newest wins', () => {
+      expect(pickPython([py(9), py(12)], 0).compatible?.minor).toBe(12)
     })
   })
 })

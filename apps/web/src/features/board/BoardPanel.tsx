@@ -58,6 +58,14 @@ const VERDICT_META: Record<
   completed_with_debt: { tone: 'warning', label: 'debt' },
 }
 
+/** Cost label that never rounds a real sub-cent charge to a misleading $0.000: a
+ *  sub-cent cost shows 4 decimals ($0.0004), ≥1¢ shows cents ($0.42), exactly 0 → $0.000. */
+function formatCostUsd(c: number): string {
+  if (c === 0) return '$0.000'
+  if (c < 0.01) return `$${c.toFixed(4)}`
+  return `$${c.toFixed(2)}`
+}
+
 function TaskCard({ task, onClick }: { task: BoardTask; onClick: () => void }) {
   const runtime = String(task['assigneeRuntime'] ?? 'openclaw')
   const cost = typeof task['costUsd'] === 'number' ? (task['costUsd'] as number) : null
@@ -82,7 +90,7 @@ function TaskCard({ task, onClick }: { task: BoardTask; onClick: () => void }) {
           <StatusPill tone={VERDICT_META[verdict].tone} label={VERDICT_META[verdict].label} />
         )}
         {cost != null && (
-          <span className="font-data text-[11px] text-foreground/50">${cost.toFixed(3)}</span>
+          <span className="font-data text-[11px] text-foreground/50">{formatCostUsd(cost)}</span>
         )}
         {task['parentTaskId'] ? (
           <span className="inline-flex items-center gap-1 text-[11px] text-foreground/40">

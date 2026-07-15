@@ -5,8 +5,10 @@
 // across runs; without one (no runner, conservative default) it falls back to
 // a throwaway home. The user's Hermes config is honored (no
 // `--ignore-user-config`; the home is seeded once from ~/.hermes/config.yaml)
-// and the provider comes from that config, with `--provider openrouter` only
-// as the no-config fallback when an OpenRouter key is connected.
+// and the provider comes from that config; with no config we derive `--provider`
+// from whichever connected key is present (OpenRouter -> `openrouter`, a reused
+// native Anthropic key -> `anthropic`, OpenAI -> `openai-api`), so a single
+// onboarding key drives Hermes without a second prompt.
 //
 // Hermes is a single-task WORKER on clawboo's one board of record: clawboo does
 // NOT sync Hermes's internal kanban — Hermes reaches the team's coordination
@@ -123,6 +125,27 @@ export function parseHermesLine(line: string, state: HermesRunState): HermesNati
   return [{ type: 'message', text }]
 }
 
+/** Fallback model per DERIVED provider (used only when no explicit model and no
+ *  config.yaml model is set): a provider such as OpenRouter returns 400
+ *  "No models provided" when the request carries no model, and a coding-runtime
+ *  team member is model-inert (ctx.model is null). The ids are cheap,
+ *  always-available choices in each provider's own namespace. */
+const DERIVED_PROVIDER_MODEL: Record<string, string> = {
+  openrouter: 'openai/gpt-4o-mini',
+  anthropic: 'claude-haiku-4-5',
+  'openai-api': 'gpt-4o-mini',
+}
+
+/** Per-provider vault env-var — used to check a PICKED provider is actually connected
+ *  before pinning it. A pick whose key isn't present degrades to the key-derived
+ *  default instead of hard-failing ("No <provider> credentials found"). A provider not
+ *  in the map (e.g. a keyless/ollama-style one) is treated as usable. */
+const PICK_PROVIDER_ENV: Record<string, string> = {
+  openrouter: 'OPENROUTER_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  'openai-api': 'OPENAI_API_KEY',
+}
+
 /** Pure spawn-plan builder — argv/env/home assertions need no spawn mocks. */
 export async function buildHermesSpawnPlan(
   opts: StartOpts,
@@ -130,17 +153,56 @@ export async function buildHermesSpawnPlan(
   home: ProvisionedHermesHome,
 ): Promise<ResolvedSpawn> {
   const prompt = opts.context ? `${opts.context}\n\n${opts.message}` : opts.message
-  const model = ctx.model ?? opts.model
+  const explicitModel = ctx.model ?? opts.model
+  // A per-agent PICKED provider (the create-team model picker, stored in execConfig →
+  // ctx.providerHint) PINS Hermes to that provider so the picked model runs on it —
+  // ahead of the home config + the key-derived default below. BUT a pick whose provider
+  // key isn't connected is UNUSABLE: dropping the pin AND its provider-specific model,
+  // then falling back to the key-derived provider + default, degrades a mismatched pick
+  // gracefully instead of hard-failing "No <provider> credentials found" (e.g. an
+  // Anthropic-direct pick on an OpenRouter-only setup).
+  const requestedProvider = ctx.providerHint ?? null
+  const pickUsable =
+    requestedProvider != null &&
+    (PICK_PROVIDER_ENV[requestedProvider] == null ||
+      !!ctx.apiKeyEnv?.[PICK_PROVIDER_ENV[requestedProvider]!])
+  const pickedProvider = pickUsable ? requestedProvider : null
+  // A dropped (unusable) pick also drops its provider-specific model.
+  const effectiveModel = requestedProvider != null && !pickUsable ? undefined : explicitModel
   // Provider precedence: the home config's `model.provider` wins (pass NO flag
-  // — Hermes resolves it itself, including user-defined provider names) → an
-  // OPENROUTER_API_KEY in the run env adds `--provider openrouter` as the
-  // no-config compatibility fallback (a pasted OpenRouter key just works) →
-  // otherwise nothing (Hermes default `auto`).
+  // — Hermes resolves it itself, including user-defined provider names) → else
+  // derive the flag from whichever connected key is present. OpenRouter stays
+  // FIRST (the default, always available with hermes core), then the direct
+  // providers a reused native key maps to. The flag values are the exact hermes
+  // provider ids (verified against the CLI's PROVIDER_REGISTRY): `openrouter`,
+  // `anthropic` (reads ANTHROPIC_API_KEY, needs the `[anthropic]` extra which
+  // the install bundles), and `openai-api` (reads OPENAI_API_KEY — `openai`
+  // alone is NOT a valid provider id). Otherwise nothing (Hermes default `auto`).
   const configuredProvider = await detectProvider(home.home)
-  const openrouterFallback = !configuredProvider && Boolean(ctx.apiKeyEnv?.['OPENROUTER_API_KEY'])
+  const providerFlag = pickedProvider
+    ? pickedProvider
+    : configuredProvider
+      ? null
+      : ctx.apiKeyEnv?.['OPENROUTER_API_KEY']
+        ? 'openrouter'
+        : ctx.apiKeyEnv?.['ANTHROPIC_API_KEY']
+          ? 'anthropic'
+          : ctx.apiKeyEnv?.['OPENAI_API_KEY']
+            ? 'openai-api'
+            : null
   // Resume only into a PRE-EXISTING home — a freshly created one cannot hold
   // the prior session.
   const resume = !home.created && ctx.resume ? ctx.resume : null
+  // A DERIVED provider needs an explicit model: OpenRouter (and some others) 400
+  // "No models provided" without one, and a coding-runtime team member is
+  // model-inert (ctx.model is null). Fall back to a cheap per-provider default so
+  // the run succeeds; an explicit ctx/opts model, or a model in the home's
+  // config.yaml (the configuredProvider path, which passes NO -m), still wins.
+  const model =
+    effectiveModel ??
+    (providerFlag && (pickedProvider || !configuredProvider)
+      ? DERIVED_PROVIDER_MODEL[providerFlag]
+      : undefined)
   const args = [
     'chat',
     '-q',
@@ -153,7 +215,7 @@ export async function buildHermesSpawnPlan(
     '--accept-hooks',
     ...(model ? ['-m', model] : []),
     ...(resume ? ['--resume', resume] : []),
-    ...(openrouterFallback ? ['--provider', 'openrouter'] : []),
+    ...(providerFlag ? ['--provider', providerFlag] : []),
   ]
   // Resolve the absolute path — Hermes lives in the Python user-site bin
   // (e.g. ~/Library/Python/<ver>/bin), off the server's PATH, so a bare

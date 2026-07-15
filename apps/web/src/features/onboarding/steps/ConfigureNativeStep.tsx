@@ -1,19 +1,41 @@
 // Native runtime setup: pick a provider, paste a key (or use a local Ollama
-// model), optionally test it, then seed a starter leader + specialist team.
-// Mirrors ConfigureStep's key-input affordance (Eye/EyeOff reveal). The key is
-// written to the encrypted vault via the runtime connect route — never directly.
+// model), optionally test it, then continue to pick a real team. Mirrors
+// ConfigureStep's key-input affordance (Eye/EyeOff reveal). The key is written to
+// the encrypted vault via the runtime connect route — never directly. This step
+// no longer creates a team: real team selection + deployment is the NEXT step
+// (the user picks a template from the marketplace and deploys it).
 
-import { useCallback, useState } from 'react'
-import { ArrowLeft, ArrowRight, Check, ExternalLink, Eye, EyeOff, Loader2, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Loader2,
+  X,
+} from 'lucide-react'
 
 import { NATIVE_STEPS } from '../StepIndicator'
 import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
 import { ProviderIcon } from '../ProviderIcon'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
-import { connectRuntime, healthcheckNativeKey } from '@clawboo/control-client'
+import {
+  connectRuntime,
+  fetchProviderModelsWithKey,
+  healthcheckNativeKey,
+  setNativeLeaderModel,
+} from '@clawboo/control-client'
 import { getKeyUrl } from '@/features/runtimes/runtimeCatalog'
-import { seedNativeTeam } from '@clawboo/control-client'
-import { nativeLeaderModelFor, nativeModelGroupsFor } from '@/lib/nativeModelCatalog'
+import {
+  findNativeModelLabel,
+  nativeLeaderModelFor,
+  nativeModelGroupsFor,
+} from '@/lib/nativeModelCatalog'
+import { NATIVE_MORE_PROVIDERS, nativeMoreProvider } from '@/lib/nativeProviders'
+import { useOpenRouterModels } from '@/lib/useOpenRouterModels'
 import { Select } from '@/features/shared/Select'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
@@ -37,15 +59,18 @@ const PROVIDER_CARDS: { id: Provider; name: string; desc: string }[] = [
 type TestState = { phase: 'idle' | 'testing' | 'ok' | 'fail'; message?: string }
 
 export interface ConfigureNativeStepProps {
-  /** Fired with the seeded team id once the key is connected + team is minted. */
-  onSeeded: (teamId: string | null) => void
-  /** Back to the runtime-choice step. */
+  /** Fired with the connected provider + chosen model once the key is stored in
+   *  the vault. The wizard then advances to real team selection. */
+  onConnected: (provider: string, model: string) => void
+  /** Back to the welcome step. */
   onBack: () => void
 }
 
-export function ConfigureNativeStep({ onSeeded, onBack }: ConfigureNativeStepProps) {
-  const [provider, setProvider] = useState<Exclude<Provider, 'ollama'>>('anthropic')
+export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStepProps) {
+  // A non-ollama provider id — one of the primary cards OR an extra ("more") provider.
+  const [provider, setProvider] = useState<string>('anthropic')
   const [useOllama, setUseOllama] = useState(false)
+  const [showMore, setShowMore] = useState(false)
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [test, setTest] = useState<TestState>({ phase: 'idle' })
@@ -55,15 +80,72 @@ export function ConfigureNativeStep({ onSeeded, onBack }: ConfigureNativeStepPro
   // curated pick; the seed uses it for the starter leader AND the universal Boo Zero.
   const [model, setModel] = useState<string>(() => nativeLeaderModelFor('anthropic'))
 
-  const effectiveProvider: Provider = useOllama ? 'ollama' : provider
-  const modelOptions = nativeModelGroupsFor(effectiveProvider)[0]?.models ?? []
-  const placeholder = PROVIDERS.find((p) => p.id === provider)?.placeholder ?? 'sk-…'
-  const keyUrl = getKeyUrl(provider)
+  const effectiveProvider: string = useOllama ? 'ollama' : provider
+  // OpenRouter's model list is fetched live from its public catalog; every OTHER
+  // keyed provider (Anthropic, OpenAI, Google, xAI, Groq, …) is fetched live using
+  // the JUST-TYPED key (never stored — the same one-shot-fetch precedent as "Test
+  // connection"), so the picker shows the real, current model list. Ollama is local.
+  const openrouter = useOpenRouterModels()
+  const [liveModels, setLiveModels] = useState<{ id: string; label: string }[]>([])
+
+  useEffect(() => {
+    // Ollama is local (no list to fetch); OpenRouter has its own keyless public
+    // list. Every other provider enumerates its models with the typed key.
+    if (useOllama || provider === 'openrouter') {
+      setLiveModels([])
+      return
+    }
+    const key = apiKey.trim()
+    if (key.length < 20) {
+      setLiveModels([]) // wait for a plausibly-complete key before sending it
+      return
+    }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      void fetchProviderModelsWithKey(provider, key).then((models) => {
+        if (!cancelled) setLiveModels(models)
+      })
+    }, 700)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [provider, apiKey, useOllama])
+
+  // Once a live list loads, ensure a REAL model is selected — the static
+  // recommended default for an extra provider may not be a current model id.
+  // Self-stabilizing: once `model` is a live id the condition is false, so
+  // including `model` in the deps can't loop; a user pick is always in the list.
+  useEffect(() => {
+    if (liveModels.length > 0 && !liveModels.some((m) => m.id === model)) {
+      setModel(liveModels[0]!.id)
+    }
+  }, [liveModels, model])
+
+  const modelOptions =
+    effectiveProvider === 'openrouter'
+      ? openrouter.models
+      : liveModels.length > 0
+        ? liveModels
+        : (nativeModelGroupsFor(effectiveProvider)[0]?.models ?? [])
+  const modelSelectOptions = useMemo(() => {
+    const base = modelOptions.map((m) => ({ value: m.id, label: m.label }))
+    // Guarantee the current selection is present so the trigger shows it (the
+    // default id can briefly precede the live list, or be a custom id).
+    if (model && !base.some((o) => o.value === model)) {
+      base.unshift({ value: model, label: findNativeModelLabel(model) ?? model })
+    }
+    return base
+  }, [modelOptions, model])
+  const moreProvider = nativeMoreProvider(provider)
+  const placeholder =
+    moreProvider?.placeholder ?? PROVIDERS.find((p) => p.id === provider)?.placeholder ?? 'sk-…'
+  const keyUrl = moreProvider?.keyUrl ?? getKeyUrl(provider)
   const canSubmit = useOllama || apiKey.trim().length > 0
 
   const resetTest = useCallback(() => setTest({ phase: 'idle' }), [])
 
-  const selectProvider = useCallback((id: Provider) => {
+  const selectProvider = useCallback((id: string) => {
     if (id === 'ollama') {
       setUseOllama(true)
     } else {
@@ -95,35 +177,34 @@ export function ConfigureNativeStep({ onSeeded, onBack }: ConfigureNativeStepPro
       setError(c.error ?? 'Failed to save the key')
       return
     }
-    // 2. Seed a starter leader + specialist team on the chosen model.
-    const seed = await seedNativeTeam(effectiveProvider, model || undefined)
+    // 2. Record the chosen leader model so the universal Boo Zero runs on it
+    //    (best-effort — a failure just falls back to the per-provider default).
+    if (model) void setNativeLeaderModel(effectiveProvider, model)
     setSubmitting(false)
-    if (!seed.ok) {
-      setError(seed.error ?? 'Could not create the starter team')
-      return
-    }
-    onSeeded(seed.teamId ?? null)
-  }, [canSubmit, submitting, apiKey, effectiveProvider, model, onSeeded])
+    // 3. Advance to real team selection (the next step deploys a real team).
+    onConnected(effectiveProvider, model)
+  }, [canSubmit, submitting, apiKey, effectiveProvider, model, onConnected])
 
   return (
     <OnboardingScreen
       testId="configure-native-step"
       step="connect"
       steps={NATIVE_STEPS}
-      title="Connect Clawboo Native"
-      subtitle="Clawboo Native runs your agents directly on your provider — no extra install. Paste a key and we'll spin up a starter team in seconds."
+      eyebrow="Connect a provider"
+      title="Connect your AI provider"
+      subtitle="Bring a provider key. It powers Clawboo Native and every runtime on that provider (Claude Code, Hermes, and more). Next, you'll pick and deploy your first team."
       footer={
         <div className="flex items-center justify-between">
           <OnboardingGhost testId="native-back" onClick={onBack} disabled={submitting}>
             <ArrowLeft size={15} /> Back
           </OnboardingGhost>
           <OnboardingPrimary
-            testId="native-create-team"
+            testId="native-continue"
             onClick={() => void handleSubmit()}
             disabled={!canSubmit || submitting}
           >
             {submitting ? <Loader2 size={16} className="animate-spin" /> : null}
-            {submitting ? 'Setting up…' : 'Create my team'}
+            {submitting ? 'Connecting…' : 'Continue'}
             {!submitting && <ArrowRight size={16} />}
           </OnboardingPrimary>
         </div>
@@ -174,6 +255,77 @@ export function ConfigureNativeStep({ onSeeded, onBack }: ConfigureNativeStepPro
             </button>
           )
         })}
+      </div>
+
+      {/* More providers — the extra OpenAI-compatible providers native supports,
+          each with its own direct key. Collapsed by default to keep the primary
+          choices front-and-center. */}
+      <div className="mt-3">
+        <button
+          type="button"
+          data-testid="native-more-providers-toggle"
+          aria-expanded={showMore}
+          onClick={() => setShowMore((v) => !v)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-[13px] font-medium transition-colors hover:border-foreground/25"
+          style={{ color: muted(0.6), cursor: 'pointer' }}
+        >
+          More providers
+          <ChevronDown
+            size={15}
+            style={{ transform: showMore ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }}
+          />
+        </button>
+        {showMore ? (
+          <div
+            className="mt-3 grid grid-cols-2 gap-2.5"
+            role="radiogroup"
+            aria-label="More providers"
+          >
+            {NATIVE_MORE_PROVIDERS.map((p) => {
+              const active = !useOllama && provider === p.id
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  data-testid={`native-provider-${p.id}`}
+                  onClick={() => selectProvider(p.id)}
+                  className={[
+                    'group flex items-center gap-2.5 rounded-xl border p-3 text-left',
+                    'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                    active
+                      ? ''
+                      : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
+                  ].join(' ')}
+                  style={{
+                    cursor: 'pointer',
+                    ...(active
+                      ? {
+                          borderColor: 'var(--primary)',
+                          background: 'rgb(var(--primary-rgb) / 0.05)',
+                          boxShadow: '0 0 0 1px var(--primary)',
+                        }
+                      : { boxShadow: 'var(--shadow-raised)' }),
+                  }}
+                >
+                  <ProviderIcon id={p.id} size={30} />
+                  <span className="min-w-0">
+                    <span
+                      className="block truncate text-[13px] font-semibold"
+                      style={{ color: 'var(--foreground)' }}
+                    >
+                      {p.name}
+                    </span>
+                    <span className="block truncate text-[11.5px]" style={{ color: muted(0.5) }}>
+                      {p.desc}
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
       </div>
 
       {/* API key (hidden when using Ollama) */}
@@ -262,7 +414,7 @@ export function ConfigureNativeStep({ onSeeded, onBack }: ConfigureNativeStepPro
         </div>
       ) : (
         <p className="mt-5 text-[13px] leading-relaxed" style={{ color: muted(0.55) }}>
-          No key needed — Clawboo will run your agents on a local Ollama model. Make sure Ollama is
+          No key needed. Clawboo will run your agents on a local Ollama model. Make sure Ollama is
           running before you continue.
         </p>
       )}
@@ -279,10 +431,14 @@ export function ConfigureNativeStep({ onSeeded, onBack }: ConfigureNativeStepPro
           <Select
             value={model}
             onChange={setModel}
-            options={modelOptions.map((m) => ({ value: m.id, label: m.label }))}
+            options={modelSelectOptions}
+            searchable={modelSelectOptions.length > 10}
+            searchPlaceholder="Search models…"
           />
           <p className="text-[12px] leading-relaxed" style={{ color: muted(0.45) }}>
-            Your team lead runs on this. You can change any agent&rsquo;s model later from its page.
+            Sets the model for your coordinating lead. The specialists you add default to a faster,
+            cheaper model. You can change any agent&rsquo;s model later, and connect more providers
+            anytime in Settings &rarr; Providers.
           </p>
         </div>
       ) : null}

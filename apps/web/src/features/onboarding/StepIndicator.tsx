@@ -2,22 +2,26 @@
  * features/onboarding/StepIndicator.tsx
  *
  * Step-progress indicator for the native-first onboarding wizard. The spine is
- * a 3-beat flow — Connect (paste a provider key + seed a team) → Runtimes
- * (optionally add OpenClaw / coding-agent runtimes now or later) → Ready. The
- * OpenClaw setup detour (Detect / Install / Configure / Start Gateway / Connect)
- * is a drill-in of the Runtimes beat, so those steps render `current="runtimes"`.
+ * a 4-beat flow — Connect (paste a provider key) → Runtimes (optionally add
+ * OpenClaw / coding-agent runtimes so they're available to assign to the team)
+ * → Team (pick + deploy a real team from the marketplace) → Ready. The OpenClaw
+ * setup detour (Detect / Install / Configure / Start Gateway / Connect) is a
+ * drill-in of the Runtimes beat, so those steps render `current="runtimes"`.
  */
 
 import { Check } from 'lucide-react'
 
-export type IndicatorId = 'connect' | 'runtimes' | 'ready'
+export type IndicatorId = 'connect' | 'runtimes' | 'team' | 'ready'
 
 export type IndicatorStep = { id: IndicatorId; label: string }
 
-/** The native-first spine: paste a key → add runtimes (opt-in) → land. */
+/** The native-first spine: paste a key → add runtimes (opt-in) → pick + deploy a
+ *  team → land. Runtimes come BEFORE team so a connected runtime can be assigned
+ *  to a team agent. */
 export const NATIVE_STEPS: IndicatorStep[] = [
   { id: 'connect', label: 'Connect' },
   { id: 'runtimes', label: 'Runtimes' },
+  { id: 'team', label: 'Team' },
   { id: 'ready', label: 'Ready' },
 ]
 

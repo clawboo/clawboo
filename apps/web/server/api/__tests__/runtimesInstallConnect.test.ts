@@ -15,12 +15,42 @@ import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ── Mock platform: control which CLI bins are "installed". ───────────────────
-const platformState = vi.hoisted(() => ({ bins: {} as Record<string, string | null> }))
+type PyResult = {
+  compatible: { bin: string; minor: number; version: string } | null
+  best: { bin: string; minor: number; version: string } | null
+}
+const platformState = vi.hoisted(() => ({
+  bins: {} as Record<string, string | null>,
+  // Force a specific resolvePython result (e.g. a too-old Xcode Python); when
+  // null, resolvePython is derived from `bins` (a python bin => compatible 3.12).
+  pythonOverride: null as PyResult | null,
+}))
 vi.mock('../../lib/platform', () => ({
   isWindows: false,
   resolveShimName: (n: string) => n,
   resolveRuntimeBin: (n: string) => platformState.bins[n] ?? null,
   findExecutable: (n: string) => platformState.bins[n] ?? null,
+  resolvePython: (): PyResult => {
+    if (platformState.pythonOverride) return platformState.pythonOverride
+    const bin =
+      platformState.bins['python3.12'] ??
+      platformState.bins['python3.11'] ??
+      platformState.bins['python3'] ??
+      platformState.bins['python'] ??
+      null
+    if (!bin) return { compatible: null, best: null }
+    const c = { bin, minor: 12, version: '3.12' }
+    return { compatible: c, best: c }
+  },
+}))
+
+// ── Mock the Codex login probe (real impl shells out to `codex login status`). ─
+const codexAuthState = vi.hoisted(() => ({ loggedIn: false }))
+vi.mock('../../lib/runtimes/codexAuth', () => ({
+  isCodexLoggedIn: () => Promise.resolve(codexAuthState.loggedIn),
+  userCodexHome: () => '/nonexistent',
+  userCodexAuthPath: () => '/nonexistent/auth.json',
+  invalidateCodexAuthCache: () => {},
 }))
 
 // ── Mock the process spawner: record argv + hand back a controllable child. ──
@@ -155,6 +185,7 @@ describe('runtimes install/connect REST', () => {
     'ANTHROPIC_API_KEY',
     'OPENROUTER_API_KEY',
     'OPENAI_API_KEY',
+    'GROQ_API_KEY',
   ] as const
 
   beforeEach(() => {
@@ -162,6 +193,7 @@ describe('runtimes install/connect REST', () => {
     delete process.env['ANTHROPIC_API_KEY']
     delete process.env['OPENROUTER_API_KEY']
     delete process.env['OPENAI_API_KEY']
+    delete process.env['GROQ_API_KEY']
     home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-rt-rest-'))
     // Isolate the OpenClaw state dir too, so the resolveRuntimeKey `.env`
     // fallback can't read the dev box's real ~/.openclaw/.env provider keys.
@@ -169,9 +201,11 @@ describe('runtimes install/connect REST', () => {
     process.env['CLAWBOO_HOME'] = home
     process.env['OPENCLAW_STATE_DIR'] = stateDir
     platformState.bins = {}
+    platformState.pythonOverride = null
     spawnState.calls = []
     spawnState.children = []
     runnerState.lastInput = null
+    codexAuthState.loggedIn = false
   })
   afterEach(() => {
     for (const k of SAVED) {
@@ -229,7 +263,7 @@ describe('runtimes install/connect REST', () => {
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
     expect(spawnState.calls[0]).toEqual({
       cmd: '/usr/bin/pipx',
-      args: ['install', 'hermes-agent<1'],
+      args: ['install', 'hermes-agent[anthropic]<1'],
     })
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
@@ -243,14 +277,21 @@ describe('runtimes install/connect REST', () => {
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
     expect(spawnState.calls[0]).toEqual({
       cmd: '/usr/bin/python3',
-      args: ['-m', 'pip', 'install', '--user', 'hermes-agent<1'],
+      args: ['-m', 'pip', 'install', '--user', 'hermes-agent[anthropic]<1'],
     })
     const first = spawnState.children[0] as FakeChild
     first.emitStderr('error: externally-managed-environment')
     first.emitClose(1)
     expect(spawnState.calls[1]).toEqual({
       cmd: '/usr/bin/python3',
-      args: ['-m', 'pip', 'install', '--user', '--break-system-packages', 'hermes-agent<1'],
+      args: [
+        '-m',
+        'pip',
+        'install',
+        '--user',
+        '--break-system-packages',
+        'hermes-agent[anthropic]<1',
+      ],
     })
     ;(spawnState.children[1] as FakeChild).emitClose(0)
     await m.ended
@@ -262,6 +303,28 @@ describe('runtimes install/connect REST', () => {
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
     await m.ended
     expect(m.events().some((e) => e['code'] === 'PYTHON_MISSING')).toBe(true)
+    expect(spawnState.calls.length).toBe(0)
+  })
+
+  it('hermes install reports PYTHON_TOO_OLD (not pip gibberish) when only the Xcode Python 3.9 exists', async () => {
+    // The exact fresh-macOS case: no pipx, and the only Python is the Xcode CLT
+    // 3.9 — below hermes-agent's requires-python >=3.11. Must be a clear error,
+    // never a doomed pip spawn that returns "(from versions: none)".
+    platformState.pythonOverride = {
+      compatible: null,
+      best: {
+        bin: '/Applications/Xcode.app/Contents/Developer/usr/bin/python3',
+        minor: 9,
+        version: '3.9',
+      },
+    }
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    await m.ended
+    const err = m.events().find((e) => e['code'] === 'PYTHON_TOO_OLD')
+    expect(err).toBeTruthy()
+    expect(String(err?.['message'])).toMatch(/3\.11/)
+    expect(String(err?.['message'])).toMatch(/Xcode/)
     expect(spawnState.calls.length).toBe(0)
   })
 
@@ -285,14 +348,33 @@ describe('runtimes install/connect REST', () => {
     expect(m.statusCode()).toBe(400)
   })
 
-  it('codex connect is a key-less no-op returning needs-login + the login command', () => {
+  it('codex connect is a key-less no-op returning needs-login + the login command', async () => {
     platformState.bins['codex'] = '/usr/bin/codex'
     const m = mockRes()
-    runtimesConnectPOST(req({ params: { id: 'codex' }, body: {} }), m.res)
+    await runtimesConnectPOST(req({ params: { id: 'codex' }, body: {} }), m.res)
     expect(m.statusCode()).toBe(200)
     const body = m.body() as { connectionState: string; loginCommand: string }
     expect(body.connectionState).toBe('needs-login')
     expect(body.loginCommand).toBe('codex login')
+  })
+
+  it('codex REUSES an existing terminal login → ready (GET + connect)', async () => {
+    platformState.bins['codex'] = '/usr/bin/codex'
+    codexAuthState.loggedIn = true // `codex login` already run in the terminal
+
+    // GET reflects the detected login.
+    const list = mockRes()
+    await runtimesListGET(req(), list.res)
+    const codex = (list.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+      (r) => r['id'] === 'codex',
+    )!
+    expect(codex['loggedIn']).toBe(true)
+    expect(codex['connectionState']).toBe('ready')
+
+    // Connect reports 'ready' too (no re-login prompt).
+    const c = mockRes()
+    await runtimesConnectPOST(req({ params: { id: 'codex' }, body: {} }), c.res)
+    expect((c.body() as { connectionState: string }).connectionState).toBe('ready')
   })
 
   it('disconnect clears the credential', () => {
@@ -324,6 +406,31 @@ describe('runtimes install/connect REST', () => {
     expect(hermes['envVar']).toBe('OPENROUTER_API_KEY')
     expect(hermes['hasCredential']).toBe(false)
     expect(hermes['connectionState']).toBe('needs-auth')
+  })
+
+  it('Hermes REUSES a connected Anthropic key (no second prompt)', async () => {
+    // A native / Claude Code connect stores the Anthropic key in the shared vault.
+    runtimesConnectPOST(
+      req({ params: { id: 'claude-code' }, body: { apiKey: 'sk-ant-shared' } }),
+      mockRes().res,
+    )
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    const m = mockRes()
+    await runtimesListGET(req(), m.res)
+    const hermes = (m.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+      (r) => r['id'] === 'hermes',
+    )!
+    // Hermes routes across providers, so the already-connected Anthropic key
+    // satisfies its credential check → 'ready', not a re-prompt.
+    expect(hermes['hasCredential']).toBe(true)
+    expect(hermes['connectionState']).toBe('ready')
+
+    // …and the run path injects that reused key into the spawned Hermes env.
+    const m2 = mockRes()
+    await runtimesRunPOST(req({ params: { id: 'hermes' }, body: { taskId: 't-reuse' } }), m2.res)
+    expect(
+      (runnerState.lastInput?.['apiKeyEnv'] as Record<string, string>)?.['ANTHROPIC_API_KEY'],
+    ).toBe('sk-ant-shared')
   })
 
   it('connectionState matrix: not-installed / needs-login(codex) reflected', async () => {
@@ -426,6 +533,27 @@ describe('runtimes install/connect REST', () => {
 
   it('an OPENAI key alone also satisfies the native credential check (altEnvVars)', async () => {
     process.env['OPENAI_API_KEY'] = 'sk-openai-alt'
+    const m = mockRes()
+    await runtimesListGET(req(), m.res)
+    const native = (m.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+      (r) => r['id'] === 'clawboo-native',
+    )!
+    expect(native['hasCredential']).toBe(true)
+    expect(native['connectionState']).toBe('ready')
+  })
+
+  it('native connect with an extra provider (Groq) stores its OWN vault slot + is recognized', () => {
+    runtimesConnectPOST(
+      req({ params: { id: 'clawboo-native' }, body: { apiKey: 'gsk-groq', provider: 'groq' } }),
+      mockRes().res,
+    )
+    // The key lands in the Groq slot — never the default Anthropic slot.
+    expect(hasRuntimeSecret('GROQ_API_KEY')).toBe(true)
+    expect(hasRuntimeSecret('ANTHROPIC_API_KEY')).toBe(false)
+  })
+
+  it('a Groq key alone satisfies the native credential check (expanded altEnvVars)', async () => {
+    process.env['GROQ_API_KEY'] = 'gsk-alt'
     const m = mockRes()
     await runtimesListGET(req(), m.res)
     const native = (m.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(

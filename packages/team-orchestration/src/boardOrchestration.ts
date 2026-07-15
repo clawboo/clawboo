@@ -894,10 +894,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       taskToExec.delete(taskId)
       await deps.board.completeExecution(execId, { status: 'succeeded', summary: trimmed })
     }
-    // Report-up: record the SUMMARY (not the transcript) as a comment.
+    // Report-up: record the SUMMARY (not the transcript) as a comment. A genuinely
+    // EMPTY result is surfaced HONESTLY as "(no output produced)" rather than echoing
+    // its own task title as if it had done the work (the "DONE card that just repeats
+    // the prompt" bug). This orchestration path is chat-only — the delegated run has no
+    // worktree, so an empty summary means the agent returned no text, not a file
+    // deliverable. (If a future worktree-backed orchestration lands, branch here on the
+    // task's `worktreeRef` to point at the deliverable instead.)
     await deps.board.addComment(
       taskId,
-      trimmed || `${title ?? 'Task'} completed.`,
+      trimmed || '(no output produced)',
       'agent',
       agentId ?? undefined,
     )
@@ -909,15 +915,14 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       // when the recipient legitimately stays silent (UI-only; no agent round-trip).
       deps.narrate?.(sessionKey, `✓ ${by} completed${title ? `: ${title}` : ''}.`)
       // Reflect the result to whoever DELEGATED this task (the reduce-point: a
-      // sub-task reports to its parent, a top-level task to the leader). A
-      // deliverable-only completion (empty summary) still reflects, with a placeholder.
+      // sub-task reports to its parent, a top-level task to the leader). An EMPTY result
+      // still reflects, but HONESTLY — the leader is told the agent returned no output so
+      // it can re-delegate / note the gap instead of synthesizing a false success.
       enqueueReflection({
         toAgentId: reflectTargetFor(taskId),
         by,
         title,
-        summary:
-          trimmed ||
-          `${by} completed “${title ?? 'the task'}” (produced a deliverable — see the board).`,
+        summary: trimmed || `${by} finished “${title ?? 'the task'}” but returned no output.`,
       })
     }
     taskReflectTo.delete(taskId)

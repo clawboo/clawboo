@@ -8,6 +8,11 @@ import { useGraphStore } from './store'
 import { parseAgentsMd } from './parsers/parseAgentsMd'
 import { computeSpanningTree } from './computeSpanningTree'
 import { resolveTeamInternalLead } from '@/lib/resolveTeamLeader'
+import { resolveModelProvider } from '@/lib/modelProvider'
+import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
+import { isHiddenGatewayDefault } from '@/lib/hiddenSystemAgent'
+import { PROVIDER_BRAND } from '@/features/onboarding/ProviderIcon'
+import { resolveRuntimeMark } from '@/features/runtimes/RuntimeBrand'
 import { readAgentFile } from '@clawboo/control-client'
 import { fetchCapabilities, groupAgentCapabilities } from '@/lib/capabilitiesClient'
 import type { CapabilityRecord } from '@clawboo/capability-registry'
@@ -19,6 +24,7 @@ import type {
   SkillNodeData,
   ResourceNodeData,
   SkillCategory,
+  ConnectorServiceKind,
   TeamRootNodeData,
   GhostGraphScope,
 } from './types'
@@ -31,12 +37,56 @@ function capSlug(sourceKey: string): string {
     .replace(/(^-|-$)/g, '')
 }
 
-/** Map a capability to a SkillNode color bucket (the category drives node tint). */
+/** Map a capability to a SkillNode category (picks the tile GLYPH — the tile
+ *  ACCENT is type-coded in SkillNode: mint for skills/tools, slate for the
+ *  built-ins rollup, violet for connectors, brand for the model). */
 function capCategory(cap: CapabilityRecord): SkillCategory {
   if (cap.source === 'brokered-mcp' || cap.source === 'runtime-builtin') return 'code'
   if (cap.source === 'mcp-connector') return 'comm'
-  if (cap.source === 'openclaw-extension') return 'web'
+  // Gateway tools (sessions_* etc.) are runtime tools, not web capabilities —
+  // 'other' renders the Wrench glyph (the old 'web' mapping showed a Globe,
+  // which read as nonsense for a session tool).
+  if (cap.source === 'openclaw-extension') return 'other'
   return 'other'
+}
+
+// ── Connector display metadata ───────────────────────────────────────────────
+// Raw connector names ("clawboo-memory", "memory MCP", "mcp:clawboo-tasks")
+// render truncated + shouty on a small tile ("CLAWB…"). Normalize the clawboo
+// spine servers to their clean service name + a glyph key; anything else keeps
+// its own name with a generic glyph. The raw name stays in the tooltip.
+const CONNECTOR_LABEL: Record<Exclude<ConnectorServiceKind, 'generic'>, string> = {
+  memory: 'Memory',
+  tasks: 'Tasks',
+  tools: 'Tools',
+  teamchat: 'Team Chat',
+}
+export function connectorMeta(rawName: string): {
+  displayName: string
+  serviceKind: ConnectorServiceKind
+} {
+  const base = rawName
+    .toLowerCase()
+    .replace(/^mcp:/, '')
+    .replace(/^clawboo-/, '')
+    .replace(/\s*mcp$/, '')
+    .trim()
+  const kind = (['memory', 'tasks', 'tools', 'teamchat'] as const).find((k) => k === base)
+  return kind
+    ? { displayName: CONNECTOR_LABEL[kind], serviceKind: kind }
+    : { displayName: rawName.replace(/^mcp:/, ''), serviceKind: 'generic' }
+}
+
+// Label for the model orbital when clawboo doesn't know the agent's model
+// (codex/claude-code run on the account/SDK default; OpenClaw's model isn't
+// populated). The runtime GLYPH is rendered alongside by SkillNode.
+const RUNTIME_DEFAULT_MODEL_LABEL: Record<string, string> = {
+  codex: 'Account default',
+  'claude-code': 'SDK default',
+  openclaw: 'Gateway model',
+}
+function runtimeDefaultModelLabel(runtime?: string | null): string {
+  return (runtime && RUNTIME_DEFAULT_MODEL_LABEL[runtime]) || 'Default model'
 }
 
 // ─── useGraphData ─────────────────────────────────────────────────────────────
@@ -72,14 +122,30 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
   const teams = useTeamStore((s) => s.teams)
   const { setAgentFiles, setLoadingFiles, setFilesError, agentFiles, refreshKey } = useGraphStore()
+  // OpenClaw agents keep their model Gateway-side, so their model orbital falls
+  // back to this default (see the `openclawDefaultModel` param on buildGraphElements).
+  const openclawDefaultModel = useOpenclawDefaultModel()
+  // The identified Boo Zero + the OpenClaw Gateway's own default agent — used to
+  // hide the Gateway "main" system agent (see `isHiddenGatewayDefault`) while
+  // keeping a pure-OpenClaw Boo Zero (which IS the Gateway default) visible.
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  const gatewayMainAgentId = useBooZeroStore((s) => s.gatewayMainAgentId)
 
   // In atlas scope we ignore `selectedTeamId` and pull every agent into the
   // canvas. In team scope we filter to the selected team (null = no team
   // currently selected; show all as before).
   const filteredAgents = useMemo(() => {
-    if (scope === 'atlas') return agents
-    return selectedTeamId ? agents.filter((a) => a.teamId === selectedTeamId) : agents
-  }, [agents, selectedTeamId, scope])
+    const base =
+      scope === 'atlas'
+        ? agents
+        : selectedTeamId
+          ? agents.filter((a) => a.teamId === selectedTeamId)
+          : agents
+    // Hide the OpenClaw Gateway default ("main") when it isn't the identified Boo
+    // Zero — a teamless system agent, not a team member. Team-selected views
+    // already exclude it (it's teamless); this covers atlas + the no-team peek.
+    return base.filter((a) => !isHiddenGatewayDefault(a, gatewayMainAgentId, booZeroAgentId))
+  }, [agents, selectedTeamId, scope, gatewayMainAgentId, booZeroAgentId])
 
   // Resolve Boo Zero (universal team leader). When relevant (team is
   // selected in team-scope, or always in atlas-scope), we include Boo Zero
@@ -88,7 +154,6 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
   // appear on click (peacock-feather expand). Boo Zero is teamless in the
   // DB (`teamId === null`) so the per-team filter excludes it; this is
   // where we re-include it for graph purposes.
-  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const booZeroAgent = useMemo(
     () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
     [agents, booZeroAgentId],
@@ -154,9 +219,24 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
     [agentStructureKey], // intentionally using string key, not full agents array
   )
 
+  // Stable agentId → runtime map for `groupAgentCapabilities` (the inherit-if-empty
+  // fan-out — an agent with no per-agent caps inherits its runtime's shared caps).
+  // Keyed on the same structural string as `agentIds`; runtime is static per id.
+  const agentRuntimes = useMemo(
+    () => new Map(graphAgents.map((a) => [a.id, a.runtime ?? null] as const)),
+    [agentStructureKey], // runtime is static per id; structural key covers set changes
+  )
+
   // ── 1. File fetching ─────────────────────────────────────────────────────────
+  // NOT gated on a Gateway `client`: both reads are REST (`fetchCapabilities` →
+  // /api/capabilities, `readAgentFile` → /api/agents/:id/files/:name), so they
+  // work in NATIVE / thin-client mode where `client === null`. Gating on the
+  // client left a native-mode graph with ZERO capabilities (no connector tiles,
+  // no AGENTS.md dependency edges) — a Gateway-shaped assumption that no longer
+  // holds. An OpenClaw agent's file read 503s while the Gateway is down; that's
+  // already absorbed by the per-agent `.catch(() => null)` below.
   useEffect(() => {
-    if (!client || agentIds.length === 0) return
+    if (agentIds.length === 0) return
 
     let cancelled = false
     setLoadingFiles(true)
@@ -186,7 +266,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
           return
         }
 
-        const byAgent = groupAgentCapabilities(capView.records)
+        const byAgent = groupAgentCapabilities(capView.records, agentRuntimes)
         for (const { agentId, content } of agentsResults) {
           setAgentFiles(agentId, { capabilities: byAgent.get(agentId) ?? [], agentsMd: content })
         }
@@ -202,6 +282,9 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
     return () => {
       cancelled = true
     }
+    // `client` stays a DEP (not a gate): a null→connected transition re-runs the
+    // fetch so an OpenClaw agent's AGENTS.md that 503'd while the Gateway was
+    // down is picked up on reconnect.
   }, [client, agentStructureKey, refreshKey]) // intentional: string key covers structural changes; refreshKey for skill install
 
   // ── 2. Structural rebuild ────────────────────────────────────────────────────
@@ -247,6 +330,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
         scope,
         teamInternalLeadByTeamId,
         isAtlasRadial,
+        openclawDefaultModel,
       ),
     [
       agentStructureKey,
@@ -258,6 +342,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
       scope,
       teamInternalLeadByTeamId,
       isAtlasRadial,
+      openclawDefaultModel,
     ], // intentional: string keys + scalars + maps
   )
 
@@ -359,6 +444,17 @@ export function buildGraphElements(
    * and the existing path renderers run unchanged.
    */
   isAtlasRadial: boolean = false,
+  /**
+   * The OpenClaw Gateway's default model (`openclaw.json` →
+   * `agents.defaults.model.primary`). OpenClaw agents keep their model
+   * Gateway-side (not in the registry), so `agent.model` is null for them in
+   * thin-client mode — the model orbital falls back to this default so it shows
+   * the REAL model (the same value the agent-detail selector shows as
+   * "Default (…)") instead of a "Gateway model" placeholder. Native / coding
+   * runtimes are unaffected (no Gateway default applies to them). `null` when
+   * unknown → the orbital shows the neutral runtime-default label.
+   */
+  openclawDefaultModel: string | null = null,
 ): { rawNodes: GraphNode[]; rawEdges: GraphEdge[] } {
   const depEdges: GraphEdge[] = []
   const skillNodes: GraphNode[] = []
@@ -395,6 +491,7 @@ export function buildGraphElements(
         name: agent.name,
         status: agent.status ?? 'idle',
         model: agent.model,
+        runtime: agent.runtime ?? null,
         isStreaming: agent.status === 'running',
         teamId: agent.teamId ?? null,
         ...(team && {
@@ -417,6 +514,10 @@ export function buildGraphElements(
         name: booZeroAgent.name,
         status: booZeroAgent.status ?? 'idle',
         model: booZeroAgent.model,
+        // The synthesized Boo Zero carries its ACTUAL runtime (native-first →
+        // 'clawboo-native', pure-OpenClaw → 'openclaw'), not a hardcode — else a
+        // native Boo Zero's badge would wrongly resolve to the OpenClaw mark.
+        runtime: booZeroAgent.runtime ?? null,
         isStreaming: booZeroAgent.status === 'running',
         // Boo Zero stays `teamId: null` even in a team-selected view — the
         // `TeamHaloLayer` reads `data.teamId` for grouping and intentionally
@@ -471,7 +572,80 @@ export function buildGraphElements(
       sourceHandle: 'center',
       target: nodeId,
       targetHandle: 'center',
-      data: {},
+      data: { accent: 'var(--amber)' }, // matches the Leadership tile's amber
+    })
+  }
+
+  // ── Per-Boo "model" orbital ──────────────────────────────────────────────
+  //
+  // Synthesized for every Boo whose current LLM model is known — a normal
+  // SkillNode (so it inherits inner-ring placement, peacock expand, physics,
+  // fitView, minimap for free, exactly like the Leadership orbital) that reads
+  // the `isModel` flag to render the provider brand glyph + model label and
+  // hide the Install affordance. NOT a capability record — a graph-layer
+  // attribute with the reserved `clawboo-model-` id prefix so it can never
+  // collide with a real capability. Agents whose model clawboo doesn't know
+  // (codex / claude-code run on their account/SDK default → `data.model` null)
+  // get NO model orbital.
+  for (const booNode of booNodes) {
+    const data = booNode.data as BooNodeData
+    const agentId = data.agentId
+    const nodeId = `skill-${agentId}-clawboo-model`
+    // Every Boo gets a model orbital so a click always reveals something. Known
+    // model → the provider brand + model label; otherwise (codex/claude-code
+    // account-or-SDK default) → the RUNTIME glyph + a "default" label.
+    //
+    // OpenClaw agents don't carry their model in the registry (it lives
+    // Gateway-side), so `data.model` is null for them in thin-client mode. Fall
+    // back to the Gateway's effective default model — the same value the
+    // agent-detail selector shows as "Default (…)" — so the orbital reads the
+    // REAL model instead of a "Gateway model" placeholder. `null` runtime is a
+    // legacy / un-stamped OpenClaw agent, so it takes the fallback too.
+    const isOpenClaw = data.runtime === 'openclaw' || data.runtime == null
+    const effectiveModel = data.model ?? (isOpenClaw ? openclawDefaultModel : null)
+    let name: string
+    let providerId: ReturnType<typeof resolveModelProvider>['providerId'] = null
+    let modelRuntime: string | null = null
+    if (effectiveModel) {
+      const resolved = resolveModelProvider(effectiveModel, data.runtime)
+      name = resolved.label
+      providerId = resolved.providerId
+    } else {
+      name = runtimeDefaultModelLabel(data.runtime)
+      modelRuntime = data.runtime ?? 'openclaw'
+    }
+    skillNodes.push({
+      id: nodeId,
+      type: 'skill' as const,
+      data: {
+        skillId: 'clawboo-model',
+        name,
+        category: 'other',
+        description: modelRuntime ? 'Model managed by the runtime' : `Current model: ${name}`,
+        agentIds: [agentId],
+        isModel: true,
+        providerId,
+        modelRuntime,
+      } satisfies SkillNodeData,
+      position: { x: 0, y: 0 },
+    })
+    // The model edge inherits the tile's brand accent so the edge + tile read
+    // as one unit (mono 'currentColor' brands + unknown → theme foreground).
+    const brandColor = providerId
+      ? PROVIDER_BRAND[providerId]?.color
+      : modelRuntime
+        ? resolveRuntimeMark(modelRuntime).color
+        : null
+    const modelEdgeAccent =
+      brandColor && brandColor !== 'currentColor' ? brandColor : 'var(--foreground)'
+    skillEdges.push({
+      id: `skilledge-${agentId}-clawboo-model`,
+      type: 'skill',
+      source: `boo-${agentId}`,
+      sourceHandle: 'center',
+      target: nodeId,
+      targetHandle: 'center',
+      data: { accent: modelEdgeAccent },
     })
   }
 
@@ -486,18 +660,25 @@ export function buildGraphElements(
       const seen = new Set<string>()
       for (const cap of caps) {
         const slug = capSlug(cap.sourceKey)
+        // Policy-disabled capabilities (denied gateway tools, toggled-off MCP)
+        // render greyed so they never read as "the agent has this".
+        const enabled = cap.status !== 'disabled'
         if (cap.kind === 'connector') {
           const nodeId = `resource-${agent.id}-${slug}`
           if (seen.has(nodeId)) continue
           seen.add(nodeId)
+          const meta = connectorMeta(cap.name)
           resourceNodes.push({
             id: nodeId,
             type: 'resource' as const,
             data: {
               resourceId: slug,
-              name: cap.name,
+              name: meta.displayName,
+              fullName: cap.name,
+              serviceKind: meta.serviceKind,
               agentIds: [agent.id],
               available: cap.available,
+              enabled,
             } satisfies ResourceNodeData,
             position: { x: 0, y: 0 },
           })
@@ -514,6 +695,7 @@ export function buildGraphElements(
           const nodeId = `skill-${agent.id}-${slug}`
           if (seen.has(nodeId)) continue
           seen.add(nodeId)
+          const isBuiltinRollup = cap.source === 'runtime-builtin'
           skillNodes.push({
             id: nodeId,
             type: 'skill' as const,
@@ -524,6 +706,11 @@ export function buildGraphElements(
               description: cap.description || null,
               agentIds: [agent.id],
               available: cap.available,
+              enabled,
+              // Only a marketplace curated skill is genuinely installable onto
+              // another agent — observed/inherited caps hide the affordance.
+              installable: cap.source === 'curated-skill',
+              isBuiltinRollup,
             } satisfies SkillNodeData,
             position: { x: 0, y: 0 },
           })
@@ -534,7 +721,9 @@ export function buildGraphElements(
             sourceHandle: 'center',
             target: nodeId,
             targetHandle: 'center',
-            data: {},
+            // Edges inherit their tile's type accent (SkillEdge falls back to
+            // mint — the skill/tool accent — when no accent is threaded).
+            data: isBuiltinRollup ? { accent: 'var(--secondary)' } : {},
           })
         }
       }

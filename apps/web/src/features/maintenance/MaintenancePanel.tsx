@@ -2,10 +2,10 @@ import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
 import { RefreshCw, Settings } from 'lucide-react'
 import { GatewayControls } from './GatewayControls'
 import { ModelSelector } from './ModelSelector'
-import { ApiKeyManager } from './ApiKeyManager'
 import { BooZeroBriefsPanel } from './BooZeroBriefsPanel'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { consumeApiSSE } from '@clawboo/control-client'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { PanelHeader } from '@/features/shared/PanelHeader'
@@ -423,9 +423,21 @@ export function MaintenancePanel() {
             </div>
           </SectionCard>
 
-          {/* Section 3: API Keys */}
-          <SectionCard label="API Keys">
-            <ApiKeyManager />
+          {/* Section 3: Provider keys — moved to the Providers hub. */}
+          <SectionCard label="Provider Keys">
+            <p className="-mt-1 mb-3 text-[12px] leading-relaxed text-foreground/50">
+              Provider API keys now live in{' '}
+              <span className="font-medium text-foreground/70">Providers</span> — connect any
+              provider once and it&apos;s reused across every runtime (Clawboo Native, Claude Code,
+              Hermes, OpenClaw).
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => useSettingsModalStore.getState().openSettings('providers')}
+            >
+              Open Providers
+            </Button>
           </SectionCard>
 
           {/* Section 4: Boo Zero — universal team leader context. The actual

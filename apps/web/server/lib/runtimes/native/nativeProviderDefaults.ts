@@ -13,13 +13,28 @@ import { resolveRuntimeKey } from '../../secretsVault'
 export type ModelTier = 'leader' | 'specialist'
 
 /** Per-provider model picks: a capable model for a leader, a cheap one for a
- *  specialist. Every entry is in the native pricing table (honest USD) except
- *  Ollama (local, estimated). A custom provider is resolved before we get here. */
+ *  specialist. These are the current defaults for the paths that DON'T pick a model
+ *  (CreateTeamModal without an override, the lazy Boo Zero); the onboarding seed
+ *  passes the user's chosen model. A model without a native-pricing entry costs as
+ *  estimated (graceful). A custom provider is resolved before we get here. */
 export const MODEL_DEFAULTS: Record<string, { leader: string; specialist: string }> = {
-  anthropic: { leader: 'claude-sonnet-4-6', specialist: 'claude-haiku-4-5' },
-  openai: { leader: 'gpt-4o', specialist: 'gpt-4o-mini' },
+  anthropic: { leader: 'claude-sonnet-5', specialist: 'claude-haiku-4-5' },
+  openai: { leader: 'gpt-5.4', specialist: 'gpt-4o-mini' },
   openrouter: { leader: 'anthropic/claude-haiku-4.5', specialist: 'openai/gpt-4o-mini' },
   ollama: { leader: 'llama3.2', specialist: 'llama3.2' },
+  // The extra OpenAI-compatible providers. Best-guess defaults for the paths that
+  // don't pick a model (CreateTeamModal without an override, the lazy Boo Zero) —
+  // a native agent that DOES pick a model (onboarding) overrides these.
+  google: { leader: 'gemini-2.0-flash', specialist: 'gemini-2.0-flash' },
+  xai: { leader: 'grok-2-latest', specialist: 'grok-2-latest' },
+  groq: { leader: 'llama-3.3-70b-versatile', specialist: 'llama-3.1-8b-instant' },
+  mistral: { leader: 'mistral-large-latest', specialist: 'mistral-small-latest' },
+  together: {
+    leader: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+    specialist: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+  },
+  cerebras: { leader: 'llama-3.3-70b', specialist: 'llama-3.3-70b' },
+  moonshot: { leader: 'moonshot-v1-32k', specialist: 'moonshot-v1-8k' },
 }
 
 export interface NativeProviderDefaults {

@@ -82,7 +82,15 @@ export class OpenClawCapabilitySource implements CapabilitySource {
 
     let config: GatewayConfigShape
     try {
-      config = await this.deps.client.operatorCall<GatewayConfigShape>('config.get')
+      // `config.get` returns a SNAPSHOT WRAPPER — the live config sits under
+      // `.config` (older shapes spread it to the top level too). Mirror
+      // `registerSharedMcpServers`'s unwrap; reading top-level directly silently
+      // misses `mcp.servers` / `tools` / `plugins` (they'd all be undefined),
+      // leaving OpenClaw agents with only the "Built-in tools" rollup.
+      const snapshot = await this.deps.client.operatorCall<
+        { config?: GatewayConfigShape } & GatewayConfigShape
+      >('config.get')
+      config = (snapshot.config ?? snapshot) as GatewayConfigShape
     } catch (err) {
       return {
         records: [],

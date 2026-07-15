@@ -15,7 +15,16 @@ import { breakerConfigSchema } from '@clawboo/governance'
 import { getDbPath } from '../lib/db'
 import { runTaskOnRuntime } from '../lib/executorRunner'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
-import { findExecutable, isWindows, resolveRuntimeBin, resolveShimName } from '../lib/platform'
+import { fetchOpenRouterModels } from '../lib/openrouterModels'
+import {
+  findExecutable,
+  isWindows,
+  resolvePython,
+  resolveRuntimeBin,
+  resolveShimName,
+} from '../lib/platform'
+import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
+import { nativeCompatProvider } from '../lib/runtimes/native/nativeProviders'
 import { adapterFactoryFor, enabledRuntimeIds } from '../lib/runtimes'
 import {
   deriveConnectionState,
@@ -63,8 +72,10 @@ function publicDescriptor(d: RuntimeDescriptor): Record<string, unknown> {
   }
 }
 
-/** Per-runtime install + auth status, WITHOUT exposing any secret value. */
-function runtimeStatus(id: NonOpenClawRuntimeId): Record<string, unknown> {
+/** Per-runtime install + auth status, WITHOUT exposing any secret value. Pure +
+ *  synchronous — the oauth login state (codex) is probed async by the caller and
+ *  passed in, so this never blocks the event loop. */
+function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<string, unknown> {
   const d = getDescriptor(id)
   // Built-in runtimes ship inside the server: always installed, no binary.
   const binPath = d.builtIn ? null : d.healthBin ? resolveRuntimeBin(d.healthBin) : null
@@ -78,6 +89,10 @@ function runtimeStatus(id: NonOpenClawRuntimeId): Record<string, unknown> {
   // `resolveRuntimeKey` ALSO honors. The onboarding native-skip decision reads THIS so
   // a bare exported `ANTHROPIC_API_KEY` doesn't masquerade as "completed onboarding".
   const hasVaultCredential = envVars.some((v) => Boolean(getRuntimeSecret(v)))
+  // Codex authenticates via ChatGPT OAuth (`codex login`) — no vault key. The
+  // caller detects an existing terminal login (async) and passes it in so clawboo
+  // reuses it (shows 'ready') instead of re-prompting. Only meaningful for oauth.
+  const loggedIn = d.authKind === 'oauth' && installed && oauthLoggedIn
   return {
     name: d.name,
     installed,
@@ -87,9 +102,10 @@ function runtimeStatus(id: NonOpenClawRuntimeId): Record<string, unknown> {
     envVar: d.envVar,
     hasCredential,
     hasVaultCredential,
+    loggedIn,
     installCommand: d.installCommand,
     docsUrl: d.docsUrl,
-    connectionState: deriveConnectionState(d, installed, hasCredential),
+    connectionState: deriveConnectionState(d, installed, hasCredential, loggedIn),
   }
 }
 
@@ -103,12 +119,14 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
     const runtimes = await Promise.all(
       enabledRuntimeIds().map(async (id) => {
         const adapter = adapterFactoryFor(id)({})
+        // Probe the codex login state async (off the event-loop hot path).
+        const oauthLoggedIn = id === 'codex' ? await isCodexLoggedIn() : false
         return {
           id,
           participantKind: adapter.participantKind,
           capabilities: adapter.capabilities(),
           health: await adapter.health(),
-          ...runtimeStatus(id),
+          ...runtimeStatus(id, oauthLoggedIn),
         }
       }),
     )
@@ -243,12 +261,19 @@ function installViaPip(
   d: RuntimeDescriptor,
   ctl: { child: ChildProcess | null },
 ): void {
-  // Prefer pipx (sidesteps PEP-668 entirely).
+  // Resolve an interpreter new enough for the package (Hermes needs >=3.11).
+  // Prefers python3.13/3.12/3.11 over the bare `python3` so a fresh macOS whose
+  // default is the Xcode CLT Python 3.9 still works when a newer Python exists.
+  const { compatible, best } = resolvePython(d.pythonMinMinor ?? 0)
+
+  // Prefer pipx (sidesteps PEP-668 entirely); pin its interpreter to the
+  // compatible one so it never builds the venv with a too-old default Python.
   const pipx = resolveRuntimeBin('pipx') ?? findExecutable('pipx')
   if (pipx) {
     sendEvent(res, { type: 'progress', step: 'installing', message: 'Installing via pipx…' })
+    const args = ['install', ...(compatible ? ['--python', compatible.bin] : []), d.pkg ?? '']
     try {
-      ctl.child = spawn(pipx, ['install', d.pkg ?? ''], {
+      ctl.child = spawn(pipx, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: isWindows,
         windowsHide: isWindows,
@@ -265,20 +290,34 @@ function installViaPip(
     streamInstallChild(res, ctl.child, d)
     return
   }
-  // Else `python -m pip install --user`, retrying once with
-  // --break-system-packages if the env is PEP-668 externally-managed.
-  const python = findExecutable('python3') ?? findExecutable('python')
-  if (!python) {
-    sendEvent(res, {
-      type: 'error',
-      code: 'PYTHON_MISSING',
-      message:
-        'Python 3 (with pip or pipx) not found. Install Python 3 and retry. Recommended: pipx.',
-    })
+
+  // No pipx → `python -m pip install --user` with a compatible interpreter,
+  // retrying once with --break-system-packages for PEP-668 environments.
+  if (!compatible) {
+    const min = d.pythonMinMinor ?? 0
+    if (best && min) {
+      const clt = /Xcode\.app|CommandLineTools/i.test(best.bin)
+      sendEvent(res, {
+        type: 'error',
+        code: 'PYTHON_TOO_OLD',
+        message:
+          `${d.name} needs Python 3.${min} or newer, but the Python on this machine is ` +
+          `${best.version}${clt ? ' (Xcode Command Line Tools)' : ''}. Install a newer Python ` +
+          '(e.g. `brew install python@3.12`) or pipx (`brew install pipx`), then Retry.',
+      })
+    } else {
+      sendEvent(res, {
+        type: 'error',
+        code: 'PYTHON_MISSING',
+        message:
+          `Python ${min ? `3.${min}+` : '3'} (with pip or pipx) not found. Install it ` +
+          '(e.g. `brew install python@3.12` or `brew install pipx`), then Retry.',
+      })
+    }
     res.end()
     return
   }
-  runPipUser(res, d, ctl, python, false)
+  runPipUser(res, d, ctl, compatible.bin, false)
 }
 
 function runPipUser(
@@ -355,16 +394,19 @@ function runPipUser(
 // api-key runtimes: { apiKey } → encrypted vault + flag on. oauth runtimes
 // (codex): a key-less no-op that returns needs-login + the terminal command.
 // NEVER echoes the key in the response.
-export function runtimesConnectPOST(req: Request, res: Response): void {
+export async function runtimesConnectPOST(req: Request, res: Response): Promise<void> {
   const id = requireRuntimeId(req, res)
   if (!id) return
   const d = getDescriptor(id)
 
   if (d.authKind === 'oauth') {
-    // Codex can't be connected with a pasted key — install then `codex login`.
+    // Codex can't be connected with a pasted key — the user runs `codex login` in
+    // their terminal. Report the CURRENT state: 'ready' when we detect an existing
+    // login (reuse it), else 'needs-login' with the command to run.
+    const loggedIn = id === 'codex' ? await isCodexLoggedIn() : false
     res.json({
       ok: true,
-      connectionState: 'needs-login',
+      connectionState: runtimeStatus(id, loggedIn)['connectionState'],
       loginCommand: `${d.healthBin ?? d.id} login`,
     })
     return
@@ -452,8 +494,16 @@ function providerProbe(provider: string): ProviderProbe | null {
       }
     case 'ollama':
       return { url: ollamaTagsUrl(), headers: () => ({}) }
-    default:
+    default: {
+      // Extra OpenAI-compatible providers probe their own `/models` endpoint.
+      const ep = nativeCompatProvider(provider)
+      if (ep)
+        return {
+          url: `${ep.baseURL}/models`,
+          headers: (key) => ({ Authorization: `Bearer ${key}` }),
+        }
       return null
+    }
   }
 }
 
@@ -600,4 +650,13 @@ export async function runtimesRunPOST(req: Request, res: Response): Promise<void
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
   }
+}
+
+// ─── GET /api/runtimes/openrouter/models ─────────────────────────────────────
+// The live OpenRouter model catalog (public list endpoint, no key needed).
+// Cached in-process; never throws — an empty list tells the client to fall back
+// to its small hardcoded set. Powers the native OpenRouter model pickers.
+export async function runtimesOpenRouterModelsGET(_req: Request, res: Response): Promise<void> {
+  const models = (await fetchOpenRouterModels()) ?? []
+  res.json({ models })
 }

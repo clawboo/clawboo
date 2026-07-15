@@ -87,16 +87,45 @@ export function disableCapability(id: string): Promise<CapabilityActionResult> {
   return postAction('disable', { id })
 }
 
-/** Agent-scoped capabilities grouped by agentId — the Ghost Graph node source. */
+/**
+ * Per-agent capabilities for the Ghost Graph nodes, keyed by agentId.
+ *
+ * "Inherit-if-empty": an agent shows its OWN agent-scoped capabilities; an agent
+ * that has NONE inherits its runtime's shared (`global`) capabilities. This is
+ * what surfaces codex / OpenClaw / a not-yet-run hermes agent's attached MCP +
+ * built-ins (their adapters emit runtime-uniform caps once, as `global`), while
+ * native agents — which already emit their own per-agent caps — stay uncluttered
+ * (they never inherit the shared broker built-ins).
+ *
+ * `agentRuntimes` maps each agent id → its runtime, so an empty agent knows which
+ * runtime's global caps to inherit. Agents absent from the map are ignored.
+ */
 export function groupAgentCapabilities(
   records: CapabilityRecord[],
+  agentRuntimes: Map<string, string | null>,
 ): Map<string, CapabilityRecord[]> {
-  const map = new Map<string, CapabilityRecord[]>()
+  const agentScoped = new Map<string, CapabilityRecord[]>()
+  const globalByRuntime = new Map<string, CapabilityRecord[]>()
   for (const r of records) {
-    if (r.scope !== 'agent' || !r.agentId) continue
-    const arr = map.get(r.agentId) ?? []
-    arr.push(r)
-    map.set(r.agentId, arr)
+    if (r.scope === 'agent' && r.agentId) {
+      const arr = agentScoped.get(r.agentId) ?? []
+      arr.push(r)
+      agentScoped.set(r.agentId, arr)
+    } else if (r.scope === 'global' && r.runtime) {
+      const arr = globalByRuntime.get(r.runtime) ?? []
+      arr.push(r)
+      globalByRuntime.set(r.runtime, arr)
+    }
   }
-  return map
+  const out = new Map<string, CapabilityRecord[]>()
+  for (const [agentId, runtime] of agentRuntimes) {
+    const own = agentScoped.get(agentId)
+    if (own && own.length > 0) {
+      out.set(agentId, own)
+    } else {
+      const inherited = runtime ? globalByRuntime.get(runtime) : undefined
+      if (inherited && inherited.length > 0) out.set(agentId, inherited)
+    }
+  }
+  return out
 }

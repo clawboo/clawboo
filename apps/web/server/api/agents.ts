@@ -189,11 +189,12 @@ export async function agentGET(req: Request, res: Response): Promise<void> {
 }
 
 // ─── PATCH /api/agents/:agentId/model ────────────────────────────────────────
-// Change a clawboo-native agent's model — persists to its AgentConfig `primaryModel`
-// (the native source of truth; the next run reads it). OpenClaw agents change model
-// via the Gateway (sessions.patch / openclaw-config), so a non-native agent → 404.
-// We update the AgentConfig KV directly (not `updateAgent`, which would also clobber
-// the `agents.execConfig` column) — a model change is a config-only edit.
+// Change an agent's model. Native persists to its AgentConfig `primaryModel` (via the
+// AgentConfig KV directly, NOT `updateAgent`, which would clobber `agents.execConfig`).
+// Hermes persists to its execConfig `{ provider, model }` — it routes every model
+// through OpenRouter, so a model change is an execConfig edit the run reads into
+// ctx.model + providerHint. Codex / Claude Code (account / SDK default) + OpenClaw
+// (via the Gateway) are not editable here → 404.
 export async function agentModelPATCH(req: Request, res: Response): Promise<void> {
   const agentId = req.params['agentId'] as string | undefined
   if (!agentId) {
@@ -207,23 +208,31 @@ export async function agentModelPATCH(req: Request, res: Response): Promise<void
     return
   }
   try {
-    const agent = await sourceForAgent(agentId).getAgent(agentId)
+    const source = sourceForAgent(agentId)
+    const agent = await source.getAgent(agentId)
     if (!agent) {
       res.status(404).json({ error: 'agent not found' })
       return
     }
-    if (agent.runtime !== 'clawboo-native') {
-      res.status(404).json({ error: 'model change via this route is native-only' })
+    if (agent.runtime === 'clawboo-native') {
+      const db = createDb(getDbPath())
+      const config = loadAgentConfig(db, agentId)
+      if (!config) {
+        res.status(404).json({ error: 'native agent config not found' })
+        return
+      }
+      saveAgentConfig(db, { ...config, primaryModel: model, updatedAt: Date.now() })
+      res.json({ ok: true, model })
       return
     }
-    const db = createDb(getDbPath())
-    const config = loadAgentConfig(db, agentId)
-    if (!config) {
-      res.status(404).json({ error: 'native agent config not found' })
+    if (agent.runtime === 'hermes') {
+      // Hermes routes every model via OpenRouter, so store { provider, model } in the
+      // execConfig the run reads (serverDeliver → ctx.model + providerHint).
+      await source.updateAgent(agentId, { execConfig: { provider: 'openrouter', model } })
+      res.json({ ok: true, model })
       return
     }
-    saveAgentConfig(db, { ...config, primaryModel: model, updatedAt: Date.now() })
-    res.json({ ok: true, model })
+    res.status(404).json({ error: 'model change via this route is native/hermes-only' })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

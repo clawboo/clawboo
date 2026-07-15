@@ -196,8 +196,13 @@ export function generateBooAvatar(params: BooAvatarParams): string {
   const pupilOffsetY = (rng() - 0.5) * 0.8
   const bodyOpacity = (0.96 + rng() * 0.04).toFixed(2)
 
-  // Resolve eye shape
-  const eyeShape: EyeShape = params.eyeShape ?? ((Math.abs(h >> 8) % 5) as EyeShape)
+  // Resolve eye shape. Boo Zero is the iconic Clawboo mascot — it ALWAYS wears the
+  // clean OpenClaw-style regular eyes (shape 0: dark sclera + cyan pupils), never a
+  // hash-derived variant (dizzy X, sleepy arc, …). Same reservation model as the tint +
+  // accessory locks: an explicit `eyeShape` still overrides. Non-Boo-Zero agents stay
+  // hash-varied across all 5 shapes for individuality.
+  const eyeShape: EyeShape =
+    params.eyeShape ?? (params.isBooZero ? 0 : ((Math.abs(h >> 8) % 5) as EyeShape))
 
   // Resolve accessory. Boo Zero is the iconic Clawboo mascot — the clean
   // ghost-lobster with no accessory. Everyone running Clawboo sees the

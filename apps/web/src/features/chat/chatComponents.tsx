@@ -186,8 +186,81 @@ export function groupEntriesToBlocks(entries: TranscriptEntry[]): RenderBlock[] 
 }
 
 // ─── Markdown renderer ────────────────────────────────────────────────────────
+//
+// Tailwind preflight zeroes out headings / list bullets / table borders, so
+// every element an agent is likely to emit needs an explicit component here or
+// it renders as flat prose. Sizes are em-based so the same map works at any
+// container font size (13px chat turns, 12.5px board task cards).
 
 export const MD_COMPONENTS: React.ComponentProps<typeof ReactMarkdown>['components'] = {
+  h1({ children }) {
+    return (
+      <h1 className="mb-1 mt-3 text-[1.25em] font-bold leading-snug tracking-[-0.01em] text-foreground first:mt-0">
+        {children}
+      </h1>
+    )
+  },
+  h2({ children }) {
+    return (
+      <h2 className="mb-1 mt-3 text-[1.15em] font-bold leading-snug tracking-[-0.01em] text-foreground first:mt-0">
+        {children}
+      </h2>
+    )
+  },
+  h3({ children }) {
+    return (
+      <h3 className="mb-1 mt-2.5 text-[1.05em] font-semibold leading-snug text-foreground first:mt-0">
+        {children}
+      </h3>
+    )
+  },
+  h4({ children }) {
+    return (
+      <h4 className="mb-0.5 mt-2 text-[1em] font-semibold leading-snug text-foreground first:mt-0">
+        {children}
+      </h4>
+    )
+  },
+  ul({ children }) {
+    return <ul className="my-1.5 list-disc space-y-1 pl-5 marker:text-foreground/35">{children}</ul>
+  },
+  ol({ children }) {
+    return (
+      <ol className="my-1.5 list-decimal space-y-1 pl-5 marker:text-foreground/45">{children}</ol>
+    )
+  },
+  li({ children }) {
+    return <li className="leading-relaxed">{children}</li>
+  },
+  blockquote({ children }) {
+    return (
+      <blockquote className="my-2 border-l-2 border-foreground/20 pl-3 text-foreground/70">
+        {children}
+      </blockquote>
+    )
+  },
+  hr() {
+    return <hr className="my-3 border-border" />
+  },
+  table({ children }) {
+    return (
+      <div className="my-2 overflow-x-auto">
+        <table className="w-full border-collapse text-[0.95em]">{children}</table>
+      </div>
+    )
+  },
+  th({ children }) {
+    return (
+      <th className="border-b border-border px-2 py-1 text-left font-semibold text-foreground">
+        {children}
+      </th>
+    )
+  },
+  td({ children }) {
+    // Full --border (already only 8% alpha); a /50 modifier would compound to
+    // ~4% and the body-row separators read as an unruled/broken table.
+    return <td className="border-b border-border px-2 py-1 align-top">{children}</td>
+  },
   code({ className, children, ...rest }) {
     const isBlock = /language-/.test(className ?? '')
     if (isBlock) {
@@ -465,9 +538,14 @@ export const DelegationCard = memo(function DelegationCard({
   const isBooZero = targetAgentId !== null && targetAgentId === booZeroAgentId
   const avatarSeed = targetAgentId ?? targetName
 
-  // Target tint — the same hex the avatar paints with. Prefer the target's
+  // Target tint — the same color the avatar paints with. Prefer the target's
   // generated team-palette color (so the card matches the recolored avatar),
-  // falling back to the hashed boo-avatar tint, then emerald.
+  // falling back to the hashed boo-avatar tint, then the emerald CSS var when
+  // the target isn't in the fleet store (a mistyped @mention / not-yet-synced
+  // agent). Because that last fallback is a `var(--mint)`, alpha MUST be applied
+  // with color-mix (accepts a var operand) — never hex-suffix concatenation,
+  // which would produce invalid CSS (`var(--mint)33`) and drop the declaration.
+  // Same idiom as BoardTaskCard + TeamHaloLayer.
   const { resolvedTheme } = useTheme()
   const collectionId = useTeamStore((s) =>
     teamId
@@ -499,9 +577,9 @@ export const DelegationCard = memo(function DelegationCard({
     <motion.div
       className="flex flex-col gap-2 rounded-xl px-4 py-3"
       style={{
-        border: `1px solid ${tint}33`,
-        background: `linear-gradient(180deg, ${tint}10 0%, ${tint}06 55%, ${tint}03 100%)`,
-        boxShadow: `inset 0 1px 0 ${tint}20`,
+        border: `1px solid color-mix(in srgb, ${tint} 20%, transparent)`,
+        background: `linear-gradient(180deg, color-mix(in srgb, ${tint} 6%, transparent) 0%, color-mix(in srgb, ${tint} 2.4%, transparent) 55%, color-mix(in srgb, ${tint} 1.2%, transparent) 100%)`,
+        boxShadow: `inset 0 1px 0 color-mix(in srgb, ${tint} 12.5%, transparent)`,
       }}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
@@ -525,7 +603,7 @@ export const DelegationCard = memo(function DelegationCard({
       {task && (
         <div
           className="border-t border-dashed pt-2 text-[12px] leading-relaxed whitespace-pre-wrap text-foreground/75"
-          style={{ borderColor: `${tint}20` }}
+          style={{ borderColor: `color-mix(in srgb, ${tint} 12.5%, transparent)` }}
         >
           {task}
         </div>
@@ -946,14 +1024,9 @@ export const MessageComposer = memo(
        */
       onStop?: () => void
       isActive?: boolean
-      /** Context-specific slash-command hints shown in the keycap strip, AFTER the
-       *  base Enter / Shift+Enter hints. Each caller passes only the commands it
-       *  actually handles (`/reset` for 1:1 chat, `/rule` for team chat) so the
-       *  strip never advertises a command that does nothing in this context. */
-      commands?: readonly { k: string; label: string }[]
     }
   >(function MessageComposer(
-    { onSend, disabled, placeholder, mentionAgents, onStop, isActive = false, commands = [] },
+    { onSend, disabled, placeholder, mentionAgents, onStop, isActive = false },
     ref,
   ) {
     const showStop = isActive && Boolean(onStop)
@@ -1176,24 +1249,6 @@ export const MessageComposer = memo(
               <SendHorizontal className="h-4 w-4" strokeWidth={2} />
             </Button>
           )}
-        </div>
-        {/* Keycap hint strip — wraps cleanly BETWEEN groups (never mid-phrase like a
-            single wrapping sentence did), with each shortcut in a small keycap. The
-            base Enter / newline hints always show; the caller appends only the
-            slash-commands it actually handles here. */}
-        <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-3.5 gap-y-1.5 text-[10px] text-foreground/35">
-          {[
-            { k: 'Enter', label: 'send' },
-            { k: '⇧ Enter', label: 'newline' },
-            ...commands,
-          ].map(({ k, label }) => (
-            <span key={k} className="inline-flex items-center gap-1.5">
-              <kbd className="rounded-[5px] border border-border bg-foreground/[0.04] px-1.5 py-[1px] font-mono text-[9.5px] font-medium leading-[1.5] text-foreground/55">
-                {k}
-              </kbd>
-              <span>{label}</span>
-            </span>
-          ))}
         </div>
       </div>
     )

@@ -23,6 +23,7 @@ export const NAV_VIEWS = [
   'obs',
   'board',
   'runtimes',
+  'providers',
   'memory',
   'governance',
   'capabilities',
