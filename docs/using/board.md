@@ -7,6 +7,8 @@ Use this page when you want to see what your team is actually doing; the durable
 
 The Board panel lives in the `BoardPanel` React module and reads `GET /api/board`; the detail drawer (`TaskDetailDrawer`) reads `GET /api/board/:taskId`, `GET /api/board/:taskId/executions`, and `GET /api/board/:taskId/workspace/detail`. For the underlying model, the state machine, the atomic claim, and dependency chains, see [The board](/concepts/the-board). For the full request/response shapes, see the [Board API reference](/reference/rest-api/board).
 
+![The board: status columns with task cards carrying runtime and cost badges](/images/board-kanban.png)
+
 ## Prerequisites
 
 <Note>
@@ -60,6 +62,8 @@ Click any card to open its detail drawer.
 ## The task-detail drawer
 
 Clicking a card slides in a right-hand drawer (`TaskDetailDrawer`) for that task. It loads three reads in parallel: the task itself, its execution ledger, and its workspace detail, and presents them as sections. Press `Escape` or click the scrim to close.
+
+![The task-detail drawer: output, verification, execution ledger, live activity, and comments](/images/task-detail-drawer.png)
 
 ```mermaid
 flowchart LR

@@ -36,7 +36,7 @@
 <br/>
 
 <p align="center">
-  <img src="docs/screenshots/team-space.png" alt="A Clawboo team: the leader and three specialists in one team graph above a live chat, where one prompt is delegated, answered, and synthesized" width="94%" />
+  <img src="docs/screenshots/team-space.png" alt="A Clawboo team space: Boo Zero and three specialists in a live team graph, with delegated tasks completing as cards in the group chat below" width="94%" />
 </p>
 
 <p align="center">
@@ -78,22 +78,22 @@ The dashboard opens at the port written to `~/.clawboo/api-port.txt` (default `h
 <table>
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/runtimes-panel.png" alt="The Runtimes panel: Clawboo Native and Hermes connected, Claude Code and Codex ready to connect, OpenClaw healthy" />
-      <p align="center"><sub><strong>Runtimes</strong>: connect Native, OpenClaw, Claude Code, Codex, Hermes.</sub></p>
+      <img src="docs/screenshots/ghost-graph.png" alt="Atlas: an org graph of every team, with labeled team clusters arranged around Boo Zero" />
+      <p align="center"><sub><strong>Atlas</strong>: every team, one live org graph.</sub></p>
     </td>
     <td width="50%">
-      <img src="docs/screenshots/capabilities-panel.png" alt="The Capabilities dashboard: 20 capabilities across 5 runtimes, grouped by runtime with per-capability actions" />
-      <p align="center"><sub><strong>Capabilities</strong>: one inventory of every skill, tool, and connector.</sub></p>
+      <img src="docs/screenshots/board-kanban.png" alt="The board: a durable kanban where every delegation is a real task carrying runtime and cost badges" />
+      <p align="center"><sub><strong>Board</strong>: durable kanban, every delegation is a real task.</sub></p>
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/shared-memory.png" alt="The Memory panel: one shared memory store with each runtime's private self-model listed read-only" />
-      <p align="center"><sub><strong>Memory</strong>: one shared store, private self-models stay private.</sub></p>
+      <img src="docs/screenshots/runtimes-panel.png" alt="The Runtimes panel: Clawboo Native and Hermes connected, Claude Code one click away, Codex awaiting sign-in, OpenClaw connected" />
+      <p align="center"><sub><strong>Runtimes</strong>: connect Native, OpenClaw, Claude Code, Codex, Hermes.</sub></p>
     </td>
     <td width="50%">
-      <img src="docs/screenshots/clawboo-demo.gif" alt="Clawboo demo: the leader delegates work to specialists who respond live" />
-      <p align="center"><sub><strong>Group chat</strong>: delegate, track, and synthesize in one place.</sub></p>
+      <img src="docs/screenshots/fleet-health.png" alt="The Fleet overview: agent count, task and verify pass rates, 24-hour spend, and per-runtime health" />
+      <p align="center"><sub><strong>Fleet</strong>: health, pass rates, and spend across every runtime.</sub></p>
     </td>
   </tr>
 </table>

@@ -26,7 +26,7 @@ In the team sidebar, click the dashed **+** button (`title="Create a team"`). It
 
 The modal is a four-step flow (**pick → customize → deploy → complete**), but the **pick** step only appears on the first-run welcome screen, before you have any teams; every other entry, the marketplace **Deploy** buttons and **Start from scratch**, jumps straight to **customize**. When the pick step does show, it renders the same team showcase described next.
 
-![The team space: Ghost Graph above, group chat below](/images/team-space.png)
+![The team showcase: curated team templates with Details and Deploy buttons](/images/team-gallery.png)
 
 ### 2. Browse the team showcase
 
@@ -41,12 +41,12 @@ Press **Deploy** on a team card to advance to **customize** pre-filled with that
 
 The **customize** step has three sections:
 
-| Field                   | What it sets                                                                             | Stored as                    |
-| ----------------------- | ---------------------------------------------------------------------------------------- | ---------------------------- |
-| **Name**                | The team's display name                                                                  | `teams.name`                 |
-| **Team badge**          | The icon (tap the badge to open the icon picker) and accent color (icon + halo tint)     | `teams.icon`, `teams.color`  |
-| **Teammate colors**     | A _color collection_ that colors every teammate's Boo avatar, with a live roster preview | `teams.colorCollectionId`    |
-| **Runtime (per agent)** | The runtime each roster agent runs on, chosen from a per-row dropdown                     | `agents.runtime` (at create) |
+| Field                   | What it sets                                                                                   | Stored as                                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Name**                | The team's display name                                                                        | `teams.name`                                                                                               |
+| **Team badge**          | The icon (tap the badge to open the icon picker) and accent color (icon + halo tint)           | `teams.icon`, `teams.color`                                                                                |
+| **Teammate colors**     | A _color collection_ that colors every teammate's Boo avatar, with a live roster preview       | `teams.colorCollectionId`                                                                                  |
+| **Runtime (per agent)** | The runtime each roster agent runs on, chosen from a per-row dropdown                          | `agents.runtime` (at create)                                                                               |
 | **Model (per agent)**   | The model an agent runs on, from a dropdown next to its runtime (Native, OpenClaw, and Hermes) | native `AgentConfig.primaryModel`; OpenClaw `agents.list[]` override; Hermes `execConfig` (via OpenRouter) |
 
 The accent color and the teammate color collection are independent: the accent tints the team badge and its [Ghost Graph](/using/ghost-graph) halo, while the collection decides how the member Boos are colored. The roster preview seeds its palette with a client-minted team id so the colors you see here match the deployed team exactly (per-team hue rotation).

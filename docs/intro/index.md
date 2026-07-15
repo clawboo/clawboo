@@ -7,7 +7,7 @@ Clawboo is an open-source, local-first dashboard and orchestrator for teams of A
 
 What makes Clawboo more than a chat wrapper is that it runs _heterogeneous_ runtimes as one team. Native agents are built in; paste a provider key and Clawboo runs them in-process, while Claude Code, Codex, Hermes, and the OpenClaw Gateway connect as peer teammates in the same room. They share one board, one memory, and one capability inventory, and their autonomous work is independently verified before it counts as done.
 
-![The Clawboo team space: a leader and three specialists in a team graph above a live group chat](/images/team-space.png)
+![The Clawboo team space: Boo Zero and three specialists in a live team graph, with delegated task cards completing in the group chat below](/images/team-space.png)
 
 ## What you get
 
@@ -21,7 +21,7 @@ Clawboo's surface is wide on purpose; it's a mission-control dashboard, not a si
 - **Shared memory and a capability inventory.** Every runtime reads and writes the same tiered [memory](/concepts/memory) store and shows up in one [capabilities](/concepts/capabilities) dashboard, while its private self-model stays its own.
 - **A 304-agent, 82-team marketplace.** Browse and deploy from a [catalog](/using/marketplace) of curated agents and teams, then customize and route them.
 
-![The Ghost Graph: a team's leader and specialists as a live org chart with dependency edges](/images/ghost-graph.png)
+![Atlas: every team as a live org graph around Boo Zero, with labeled team clusters](/images/ghost-graph.png)
 
 ## Version
 

@@ -84,7 +84,7 @@ When several agents are working at once, a tail of log lines is not enough. You 
 
 Clawboo treats every observability surface, the live team graph, the per-mission trace, the fleet-health triage, the cost overlay, as a **projection of a single append-only event log**. One table, `orchestration_events`, captures the orchestration stream; pure deterministic reducers fold it into whatever a view needs. `projectGraph` rebuilds the delegation/status graph; `projectFleetHealth` triages each agent as `working`, `idle`, `stalled`, or `zombie` from the gaps between its events. Replaying the same log always reproduces the same state, which means the [Ghost Graph](/using/ghost-graph) you're looking at is the event log, not a hand-drawn diagram that can drift from reality. An error taxonomy flags any unrecognized failure as a likely _harness_ bug rather than a model failure, and an OpenTelemetry bridge ships the same trace data to Jaeger when you configure an endpoint. See [observability](/concepts/observability).
 
-![Ghost Graph: the live team graph projected from the event log](/images/ghost-graph.png)
+![Ghost Graph: the live org graph of every team, projected from the event log](/images/ghost-graph.png)
 
 ## The shape of the trade
 

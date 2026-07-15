@@ -103,6 +103,8 @@ Below the live report is the **Ablation** card. It renders the `±verifier × ±
 
 ### 6. Watch the live activity terminal
 
+![The Atlas Activity dock live-tailing delegate, claim, run, and result events across all teams](/images/activity-feed.png)
+
 The same event log feeds a live **activity terminal**, `ActivityTerminal`, a console that backfills the recent window (`GET /api/obs/events`) then live-tails the SSE stream (`GET /api/obs/stream`). It renders tool calls, tool results, errors, cost, and lifecycle events for every runtime uniformly, with a `Live` / `Reconnecting` pulse, tabular timestamps, and expandable tool I/O. It is mounted at three scopes:
 
 | Scope     | Where                                                                                                                                                   | Filter           |

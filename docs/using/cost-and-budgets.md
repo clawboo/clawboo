@@ -24,8 +24,6 @@ The Cost view is global on purpose; it shows every team's usage, not just the se
 
 Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Tokens Used** under the Insights group. The toolbar reads **Tokens Used**; the body is "Token usage by team and agent."
 
-![Clawboo dashboard showing teams and live agent activity](/images/team-space.png)
-
 ### Summary cards
 
 Three cards across the top, **Today**, **This Week**, **This Month**, each showing a single token count (`tokensToday`, `tokensWeek`, `tokensMonth` from the summary endpoint). The number is color-coded by magnitude: mint under 10k tokens, amber under 100k, accent-red at 100k and above. These are token counts, not dollars.

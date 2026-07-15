@@ -98,6 +98,10 @@ sequenceDiagram
 
 Board task cards update **live** as the cascade runs (the board projection streams over the same connection), so you watch a plan's steps advance without a refresh. Multiple parallel delegations fan out into N tasks (capped at 8 per turn); a `<plan>` becomes a dependency chain where each step fires when its blocker completes. Delivery routes through a non-destructive nudge-queue, so a message to a busy teammate waits for its turn boundary instead of interrupting an in-flight run. Because the engine runs server-side, the cascade keeps going even if you close the tab, and it is all still there when you reopen. The full model is in [Delegation and orchestration](/concepts/delegation-and-orchestration) and [The board](/using/board).
 
+When the last delegation completes, the leader synthesizes every deliverable into one final answer:
+
+![Boo Zero synthesizing three specialists' deliverables into one final summary](/images/leader-synthesis.png)
+
 <Note>
 A risky-looking delegation (matching keywords like `delete`, `deploy`, `publish`, `rm -rf`, `secret`, `api_key`) is surfaced on the leader's approval queue via `POST /api/governance/delegation-approval` before it runs. Routine delegations never touch this path. The gate fails closed: an unreachable approval endpoint does **not** auto-approve.
 </Note>
@@ -123,8 +127,8 @@ Every team also has a durable **peer-chat room**, where each runtime posts as a 
 | Address the leader          | Send with no `@`          | Routes to Boo Zero (default), then team-internal lead, then first member            |
 | Address one teammate        | `@AgentName your message` | Longest-prefix match at message start; `@mention` stripped before the agent sees it |
 | Address Boo Zero explicitly | `@Boo Zero …`             | Boo Zero is in the mention roster even though it is teamless                        |
-| Add a durable rule          | `/rule <text>`            | Persists to `/api/team-rules/:teamId`; injected on every future turn                 |
-| Stop the team               | Click the red Stop button | `POST /api/teams/:id/chat/stop`: aborts in-flight runs, releases tasks to `todo`     |
+| Add a durable rule          | `/rule <text>`            | Persists to `/api/team-rules/:teamId`; injected on every future turn                |
+| Stop the team               | Click the red Stop button | `POST /api/teams/:id/chat/stop`: aborts in-flight runs, releases tasks to `todo`    |
 | Insert a mention            | Click an agent chip       | Inserts `@AgentName` into the composer                                              |
 | Open the peer-chat room     | Toggle in the team header | A read-only view of the durable room where runtimes post as named peers             |
 
