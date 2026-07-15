@@ -1218,7 +1218,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
               // Boo via `data.isVisible` (set by the visibleNodes memo).
               const isVisible = (node.data as { isVisible?: boolean }).isVisible ?? true
               if (node.type === 'skill') return isVisible ? 'var(--mint)' : 'transparent'
-              if (node.type === 'resource') return isVisible ? 'var(--amber)' : 'transparent'
+              // Violet = the MCP-connector type accent (matches ResourceNode).
+              if (node.type === 'resource') return isVisible ? 'var(--violet)' : 'transparent'
               return 'var(--amber)'
             }}
             nodeComponent={GhostGraphMiniMapNode}
@@ -1301,9 +1302,9 @@ const EDGE_META = {
     file: 'AGENTS.md',
   },
   resource: {
-    label: 'Resource Connection',
-    color: 'var(--amber)',
-    desc: 'This agent uses this external service.',
+    label: 'MCP Connector',
+    color: 'var(--violet)',
+    desc: 'This agent has this MCP server attached.',
     file: 'Capabilities',
   },
 } as const

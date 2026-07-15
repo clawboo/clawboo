@@ -37,6 +37,7 @@ import {
   type GatewayDegradeReason,
   type ReconnectPhase,
 } from './GatewayReconnectBanner'
+import { classifyReconnectError, type ReconnectErrorKind } from './reconnectError'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import {
   OnboardingWizard,
@@ -680,6 +681,10 @@ export function GatewayBootstrap() {
   const [gatewayDegraded, setGatewayDegraded] = useState<GatewayDegradeReason | null>(null)
   const [reconnectPhase, setReconnectPhase] = useState<ReconnectPhase>('idle')
   const [reconnectError, setReconnectError] = useState<string | null>(null)
+  // Which KIND of failure the last reconnect hit. `'auth'` (the Gateway rejected
+  // our token) swaps the banner's primary action to "Restart Gateway", since a
+  // retry re-sends the same token and can never clear it.
+  const [reconnectErrorKind, setReconnectErrorKind] = useState<ReconnectErrorKind | null>(null)
   const sseControllerRef = useRef<AbortController | null>(null)
 
   // Wire gateway events → Zustand stores
@@ -910,9 +915,69 @@ export function GatewayBootstrap() {
   // `enterGatewayMode` (client set + fleet re-hydrated, so OpenClaw agents go
   // live). On success the banner flashes "reconnected" then dismisses.
 
+  /** Drive the Gateway process via the control SSE (`start` | `restart`). */
+  const driveGatewayProcess = useCallback(async (action: 'start' | 'restart') => {
+    await new Promise<void>((resolve, reject) => {
+      sseControllerRef.current?.abort()
+      sseControllerRef.current = consumeApiSSE(
+        '/api/system/gateway',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action }),
+        },
+        {
+          onComplete(e) {
+            if (e.success) resolve()
+            else reject(new Error(`Gateway ${action} reported failure`))
+          },
+          onError(e) {
+            reject(new Error((e.message as string) ?? `Could not ${action} the Gateway`))
+          },
+        },
+      )
+    })
+  }, [])
+
+  /** Connect a fresh client + upgrade native mode → gateway mode. */
+  const connectAndEnterGatewayMode = useCallback(async () => {
+    const resp = await fetch('/api/settings')
+    const data = resp.ok ? ((await resp.json()) as { gatewayUrl?: string }) : {}
+    const url = data.gatewayUrl?.trim() || 'ws://localhost:18789'
+    const prev = useConnectionStore.getState().client
+    if (prev) prev.disconnect()
+    const gwClient = new GatewayClient()
+    await gwClient.connect(resolveProxyGatewayUrl(), {
+      clientName: 'openclaw-control-ui',
+      clientVersion: '0.1.0',
+      disableDeviceAuth: true,
+    })
+    await enterGatewayMode(gwClient, url)
+  }, [])
+
+  /** Success flash → self-dismiss. Shared by reconnect + restart. */
+  const finishGatewayRecovery = useCallback(() => {
+    setReconnectErrorKind(null)
+    setReconnectPhase('success')
+    window.setTimeout(() => {
+      setGatewayDegraded(null)
+      setReconnectPhase('idle')
+    }, 1300)
+  }, [])
+
+  const failGatewayRecovery = useCallback((err: unknown) => {
+    setReconnectPhase('error')
+    // An auth rejection (stale token / unapproved device) is NOT a reachability
+    // failure — the kind drives which action the banner offers next.
+    const info = classifyReconnectError(err)
+    setReconnectError(info.message)
+    setReconnectErrorKind(info.kind)
+  }, [])
+
   const handleGatewayReconnect = useCallback(async () => {
     setReconnectPhase('reconnecting')
     setReconnectError(null)
+    setReconnectErrorKind(null) // a fresh attempt — re-derived from its own outcome
     try {
       // 1. Ensure the Gateway process is running (start it if not).
       let running = true
@@ -922,56 +987,36 @@ export function GatewayBootstrap() {
       } catch {
         /* optimistic — attempt the connect anyway */
       }
-      if (!running) {
-        await new Promise<void>((resolve, reject) => {
-          sseControllerRef.current?.abort()
-          sseControllerRef.current = consumeApiSSE(
-            '/api/system/gateway',
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'start' }),
-            },
-            {
-              onComplete(e) {
-                if (e.success) resolve()
-                else reject(new Error('Gateway started but reported failure'))
-              },
-              onError(e) {
-                reject(new Error((e.message as string) ?? 'Could not start the Gateway'))
-              },
-            },
-          )
-        })
-      }
+      if (!running) await driveGatewayProcess('start')
       // 2. Connect + upgrade native mode → gateway mode.
-      const resp = await fetch('/api/settings')
-      const data = resp.ok ? ((await resp.json()) as { gatewayUrl?: string }) : {}
-      const url = data.gatewayUrl?.trim() || 'ws://localhost:18789'
-      const prev = useConnectionStore.getState().client
-      if (prev) prev.disconnect()
-      const gwClient = new GatewayClient()
-      await gwClient.connect(resolveProxyGatewayUrl(), {
-        clientName: 'openclaw-control-ui',
-        clientVersion: '0.1.0',
-        disableDeviceAuth: true,
-      })
-      await enterGatewayMode(gwClient, url)
-      // 3. Success — flash, then dismiss.
-      setReconnectPhase('success')
-      window.setTimeout(() => {
-        setGatewayDegraded(null)
-        setReconnectPhase('idle')
-      }, 1300)
+      await connectAndEnterGatewayMode()
+      finishGatewayRecovery()
     } catch (err) {
-      setReconnectPhase('error')
-      setReconnectError(
-        err instanceof GatewayResponseError && err.code === 'NOT_PAIRED'
-          ? 'This device needs approval. Open Settings to approve it.'
-          : 'Could not reach the Gateway. Try again, or set it up in Settings.',
-      )
+      failGatewayRecovery(err)
     }
-  }, [])
+  }, [driveGatewayProcess, connectAndEnterGatewayMode, finishGatewayRecovery, failGatewayRecovery])
+
+  /**
+   * The recovery for an `auth` (token-rejected) failure: RESTART the Gateway so
+   * it reloads its token from `~/.openclaw/.env`, then connect. A plain retry
+   * can't fix this — the Gateway reads its token once, at boot, so a token
+   * regenerated afterwards leaves it holding a stale one forever.
+   *
+   * NOTE: `reconnectErrorKind` is deliberately NOT cleared here — it keeps the
+   * banner's primary action labelled "Restarting" (the action the user pressed)
+   * while this is in flight.
+   */
+  const handleGatewayRestart = useCallback(async () => {
+    setReconnectPhase('reconnecting')
+    setReconnectError(null)
+    try {
+      await driveGatewayProcess('restart')
+      await connectAndEnterGatewayMode()
+      finishGatewayRecovery()
+    } catch (err) {
+      failGatewayRecovery(err)
+    }
+  }, [driveGatewayProcess, connectAndEnterGatewayMode, finishGatewayRecovery, failGatewayRecovery])
 
   const openRuntimeSettings = useCallback(() => {
     useSettingsModalStore.getState().openSettings('runtimes', { runtimeIntent: 'connect-openclaw' })
@@ -981,6 +1026,7 @@ export function GatewayBootstrap() {
     setGatewayDegraded(null)
     setReconnectPhase('idle')
     setReconnectError(null)
+    setReconnectErrorKind(null)
   }, [])
 
   // Clear the degraded banner the moment a LIVE Gateway client comes up by ANY
@@ -997,6 +1043,7 @@ export function GatewayBootstrap() {
     ) {
       setGatewayDegraded(null)
       setReconnectError(null)
+      setReconnectErrorKind(null)
     }
   }, [client, status, gatewayDegraded, reconnectPhase])
 
@@ -1271,7 +1318,9 @@ export function GatewayBootstrap() {
             reason={gatewayDegraded}
             phase={reconnectPhase}
             error={reconnectError}
+            canRestartGateway={reconnectErrorKind === 'auth'}
             onReconnect={handleGatewayReconnect}
+            onRestartGateway={handleGatewayRestart}
             onOpenSettings={openRuntimeSettings}
             onDismiss={dismissGatewayBanner}
           />

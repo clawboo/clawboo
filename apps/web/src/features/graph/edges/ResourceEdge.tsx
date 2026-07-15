@@ -3,12 +3,12 @@ import { BaseEdge, getBezierPath } from '@xyflow/react'
 import type { EdgeProps } from '@xyflow/react'
 import { useGraphStore } from '../store'
 
-// ─── ResourceEdge — solid static amber bezier: Boo → Resource ────────────────
+// ─── ResourceEdge — solid static VIOLET bezier: Boo → MCP connector ──────────
 //
-// Like the skill edge, resource ownership is not a directional process — a
-// Boo "uses" a resource, the relationship is symmetric. Replaced the slow
-// marching-ants animation with a calm static stroke for the same reasons
-// (see SkillEdge.tsx for rationale).
+// Violet is the connector TYPE accent (matches the ResourceNode tile), so the
+// edge + tile read as one unit at a glance. Like the skill edge, connector
+// attachment is not a directional process — the relationship is symmetric, so
+// a calm static stroke (no marching-ants animation).
 
 export const ResourceEdge = memo(function ResourceEdge({
   id,
@@ -39,8 +39,8 @@ export const ResourceEdge = memo(function ResourceEdge({
       id={id}
       path={edgePath}
       style={{
-        stroke: selected ? 'var(--amber)' : 'rgb(var(--amber-rgb) / 0.35)',
-        strokeWidth: selected ? 2 : 1,
+        stroke: selected ? 'var(--violet)' : 'rgb(var(--violet-rgb) / 0.55)',
+        strokeWidth: selected ? 2.5 : 1.75,
         // No strokeDasharray, no animation — solid static line.
         transition: 'stroke 0.15s, stroke-width 0.15s, opacity 0.2s ease',
         opacity: isHighlighted ? 1 : 0.12,

@@ -158,7 +158,7 @@ describe('HermesCapabilitySource', () => {
 
   it('scans SKILL.md frontmatter + mcp.json — all observe-only (clawboo never writes a Hermes skills dir)', async () => {
     const env = seedHermesHome('h1')
-    const { records, status } = await new HermesCapabilitySource(env).read()
+    const { records, status } = await new HermesCapabilitySource({ env }).read()
     expect(status.ok).toBe(true)
     const skill = records.find((r) => r.source === 'filesystem-skill-md')
     expect(skill).toMatchObject({
@@ -174,6 +174,24 @@ describe('HermesCapabilitySource', () => {
         .every((r) => r.manageability === 'observe-only'),
     ).toBe(true)
     expect(records.some((r) => r.source === 'runtime-builtin')).toBe(true)
+  })
+
+  it('scopes home dirs to LIVE hermes agents — a deleted agent leftover home is not surfaced', async () => {
+    // Two home dirs under one CLAWBOO_HOME: h-live (a live hermes agent) +
+    // h-dead (orphaned — no db row, e.g. a deleted agent's leftover home).
+    const env = seedHermesHome('h-live')
+    const deadHome = path.join(dir, 'hermes-home', 'runtimes', 'hermes', 'h-dead')
+    mkdirSync(path.join(deadHome, 'skills', 'ghost'), { recursive: true })
+    writeFileSync(
+      path.join(deadHome, 'skills', 'ghost', 'SKILL.md'),
+      '---\nname: Ghost\ndescription: orphan\n---\n# body',
+    )
+    seedAgent('h-live', 'hermes', 'hermes') // only h-live exists in the registry
+
+    const { records } = await new HermesCapabilitySource({ getDbPath: () => dbPath, env }).read()
+    const agentIds = new Set(records.filter((r) => r.agentId).map((r) => r.agentId))
+    expect(agentIds.has('h-live')).toBe(true)
+    expect(agentIds.has('h-dead')).toBe(false)
   })
 
   it('write() throws unsupported (every Hermes capability is observe-only)', async () => {
@@ -265,6 +283,21 @@ describe('OpenClawCapabilitySource', () => {
     expect(shell?.writable).not.toBe(false)
     expect(records.find((r) => r.sourceKey === 'mcp:vendor')?.writable).toBe(false)
     expect(records.find((r) => r.sourceKey === 'plugin:beta')?.writable).toBe(false)
+  })
+
+  it('unwraps the config.get SNAPSHOT wrapper — mcp.servers/tools nested under `.config` still surface', async () => {
+    // Real `config.get` returns a snapshot wrapper: the live config sits under
+    // `.config`. Reading top-level directly missed everything, leaving OpenClaw
+    // agents with only the "Built-in tools" rollup (the reported bug).
+    const { client } = fakeClient(true, { hash: 'outer-hash', config })
+    const { records } = await new OpenClawCapabilitySource({
+      client,
+      getDbPath: () => dbPath,
+    }).read()
+    expect(records.find((r) => r.sourceKey === 'mcp:clawboo-memory')).toBeDefined()
+    expect(records.find((r) => r.sourceKey === 'mcp:vendor')).toBeDefined()
+    expect(records.find((r) => r.sourceKey === 'shell')).toBeDefined()
+    expect(records.find((r) => r.sourceKey === 'danger')?.status).toBe('disabled')
   })
 
   it('read() degrades (no records) when the Gateway is disconnected', async () => {

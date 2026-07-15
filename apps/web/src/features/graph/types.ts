@@ -50,12 +50,37 @@ export interface BooNodeData extends Record<string, unknown> {
   isUniversalLeader?: boolean
 }
 
+/** Which clawboo MCP server a connector node represents — picks its glyph.
+ *  `generic` = any non-clawboo / unknown MCP server. */
+export type ConnectorServiceKind = 'memory' | 'tasks' | 'tools' | 'teamchat' | 'generic'
+
 export interface SkillNodeData extends Record<string, unknown> {
   skillId: string
   name: string
   category: SkillCategory
   description: string | null
   agentIds: string[]
+  /**
+   * True ONLY for a marketplace curated skill (`source: 'curated-skill'`) — the
+   * one capability the graph's Install→ / drag-to-install path can genuinely
+   * install onto another agent. Observed capabilities (runtime built-ins,
+   * gateway tools, brokered tools, inherited shared caps) are NOT installable;
+   * the affordance on them would write a bogus curated-skill annotation.
+   * Absent/false → the Install button + install handles are hidden.
+   */
+  installable?: boolean
+  /**
+   * True for the per-runtime "Built-in tools" rollup record — rendered as a
+   * neutral slate tile with a Blocks glyph (it summarizes the runtime's own
+   * tool set rather than naming one specific capability).
+   */
+  isBuiltinRollup?: boolean
+  /**
+   * False when the capability's server-evaluated `status` is `'disabled'`
+   * (a policy-denied tool / a toggled-off MCP). Greyed like `available:false`
+   * so a denied tool never reads as "the agent has this" at a glance.
+   */
+  enabled?: boolean
   /**
    * Set by `GhostGraph`'s visibleNodes memo from `expandedBooNodeIds`.
    * Drives the peacock-feather expand / collapse animation inside the
@@ -105,8 +130,16 @@ export interface SkillNodeData extends Record<string, unknown> {
 
 export interface ResourceNodeData extends Record<string, unknown> {
   resourceId: string
+  /** Clean DISPLAY name ("Memory", "Tasks", "Team Chat") — the raw server name
+   *  ("clawboo-memory") stays in `fullName` for the tooltip. */
   name: string
   agentIds: string[]
+  /** The raw connector/server name, shown in the tooltip. */
+  fullName?: string
+  /** Which clawboo MCP server this is — picks the tile glyph. */
+  serviceKind?: ConnectorServiceKind
+  /** False when the connector's status is 'disabled' (see SkillNodeData.enabled). */
+  enabled?: boolean
   /**
    * Same semantics as `SkillNodeData.isVisible`. See note above.
    */

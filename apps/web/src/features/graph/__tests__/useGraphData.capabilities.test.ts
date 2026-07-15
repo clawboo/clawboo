@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentState } from '@/stores/fleet'
 import type { Team } from '@/stores/team'
 
-import { buildGraphElements } from '../useGraphData'
+import { buildGraphElements, connectorMeta } from '../useGraphData'
 import type { ResourceNodeData, SkillNodeData } from '../types'
 
 const makeAgent = (over: Partial<AgentState>): AgentState => ({
@@ -188,5 +188,100 @@ describe('buildGraphElements — capability availability greying', () => {
     expect(fallback!.providerId).toBeNull()
     expect(fallback!.modelRuntime).toBe('openclaw')
     expect(fallback!.name).toBe('Gateway model')
+  })
+})
+
+describe('connectorMeta — clean connector display names + glyph keys', () => {
+  it('normalizes the clawboo spine servers across every raw-name shape', () => {
+    expect(connectorMeta('clawboo-memory')).toEqual({
+      displayName: 'Memory',
+      serviceKind: 'memory',
+    })
+    expect(connectorMeta('memory MCP')).toEqual({ displayName: 'Memory', serviceKind: 'memory' })
+    expect(connectorMeta('mcp:clawboo-tasks')).toEqual({
+      displayName: 'Tasks',
+      serviceKind: 'tasks',
+    })
+    expect(connectorMeta('clawboo-teamchat')).toEqual({
+      displayName: 'Team Chat',
+      serviceKind: 'teamchat',
+    })
+  })
+
+  it('keeps a third-party server name verbatim with the generic glyph', () => {
+    expect(connectorMeta('Vendor MCP')).toEqual({
+      displayName: 'Vendor MCP',
+      serviceKind: 'generic',
+    })
+  })
+})
+
+describe('buildGraphElements — orbital tile type-coding + install gating', () => {
+  it('threads installable ONLY for curated skills; built-ins get the rollup flag + slate edge', () => {
+    const agent = makeAgent({ id: 'a1', teamId: 't1' })
+    const files = new Map([
+      [
+        'a1',
+        {
+          capabilities: [
+            makeCap({
+              sourceKey: 'sk1',
+              source: 'curated-skill',
+              name: 'Web Search',
+              kind: 'skill',
+            }),
+            makeCap({ sourceKey: 'builtins', source: 'runtime-builtin', name: 'Built-in tools' }),
+            makeCap({ sourceKey: 'echo', source: 'brokered-mcp', name: 'echo' }),
+          ],
+          agentsMd: null,
+        },
+      ],
+    ])
+    const { rawNodes, rawEdges } = buildGraphElements([agent], files, [makeTeam({ id: 't1' })])
+    const dataOf = (name: string) =>
+      rawNodes.find((n) => n.type === 'skill' && (n.data as SkillNodeData).name === name)!
+        .data as SkillNodeData
+
+    expect(dataOf('Web Search').installable).toBe(true)
+    expect(dataOf('Built-in tools').installable).toBe(false)
+    expect(dataOf('Built-in tools').isBuiltinRollup).toBe(true)
+    expect(dataOf('echo').installable).toBe(false)
+
+    // The built-ins rollup edge carries the slate accent; regular skill edges none (mint fallback).
+    const builtinEdge = rawEdges.find((e) => e.id === 'skilledge-a1-builtins')
+    expect(builtinEdge?.data).toEqual({ accent: 'var(--secondary)' })
+    expect(rawEdges.find((e) => e.id === 'skilledge-a1-echo')?.data).toEqual({})
+  })
+
+  it("greys a policy-disabled capability (enabled:false) and cleans a connector's name", () => {
+    const agent = makeAgent({ id: 'a1', teamId: 't1' })
+    const files = new Map([
+      [
+        'a1',
+        {
+          capabilities: [
+            makeCap({ sourceKey: 'sessions_spawn', name: 'sessions_spawn', status: 'disabled' }),
+            makeCap({
+              sourceKey: 'mcp:clawboo-memory',
+              kind: 'connector',
+              name: 'clawboo-memory',
+              status: 'ready',
+            }),
+          ],
+          agentsMd: null,
+        },
+      ],
+    ])
+    const { rawNodes } = buildGraphElements([agent], files, [makeTeam({ id: 't1' })])
+    const denied = rawNodes.find(
+      (n) => n.type === 'skill' && (n.data as SkillNodeData).name === 'sessions_spawn',
+    )!.data as SkillNodeData
+    expect(denied.enabled).toBe(false)
+
+    const connector = rawNodes.find((n) => n.type === 'resource')!.data as ResourceNodeData
+    expect(connector.name).toBe('Memory')
+    expect(connector.fullName).toBe('clawboo-memory')
+    expect(connector.serviceKind).toBe('memory')
+    expect(connector.enabled).toBe(true)
   })
 })

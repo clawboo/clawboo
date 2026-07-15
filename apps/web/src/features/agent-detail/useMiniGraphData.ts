@@ -49,7 +49,12 @@ export function useMiniGraphData(agentId: string): {
       ])
       if (cancelled) return
 
-      const capabilities = groupAgentCapabilities(capView.records).get(agentId) ?? []
+      // The agent's runtime feeds the inherit-if-empty fan-out (an agent with no
+      // per-agent caps inherits its runtime's shared caps). Read fresh from the
+      // store so it can't go stale in this effect's closure.
+      const rt = useFleetStore.getState().agents.find((a) => a.id === agentId)?.runtime ?? null
+      const capabilities =
+        groupAgentCapabilities(capView.records, new Map([[agentId, rt]])).get(agentId) ?? []
       const map = new Map<
         string,
         { capabilities: CapabilityRecord[] | null; agentsMd: string | null }

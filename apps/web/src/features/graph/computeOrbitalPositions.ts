@@ -27,10 +27,12 @@ const JITTER_RANGE = 12
 const BOO_HALF_W = 140
 const BOO_HALF_H = 140
 
-// Node dimensions for centering orbital children
-const SKILL_SIZE = 38 // CIRCLE const in SkillNode.tsx
-const RESOURCE_W = 64
-const RESOURCE_H = 70
+// Node dimensions for centering orbital children — the unified orbital tile
+// family (SkillNode CIRCLE + ResourceNode CIRCLE are both 46px discs; the
+// Model tile is 57px but centering on 46 keeps it within a pixel-noise margin).
+const SKILL_SIZE = 46 // CIRCLE const in SkillNode.tsx
+const RESOURCE_W = 46 // CIRCLE const in ResourceNode.tsx
+const RESOURCE_H = 46
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

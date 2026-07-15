@@ -20,6 +20,7 @@ export const SkillEdge = memo(function SkillEdge({
   sourcePosition,
   targetPosition,
   selected,
+  data,
 }: EdgeProps) {
   const [edgePath] = getBezierPath({
     sourceX,
@@ -35,13 +36,19 @@ export const SkillEdge = memo(function SkillEdge({
     (s) => s.hoveredNodeId === null || (s.highlightedEdgeIds?.has(id) ?? false),
   )
 
+  // The edge inherits its TILE's type accent (threaded via `data.accent` by
+  // `buildGraphElements` — amber for Leadership, provider brand for the Model,
+  // slate for the built-ins rollup) so an edge + its tile read as one unit.
+  // No accent → mint, the skill/tool type accent.
+  const accent = (data as { accent?: string } | undefined)?.accent ?? 'var(--mint)'
+
   return (
     <BaseEdge
       id={id}
       path={edgePath}
       style={{
-        stroke: selected ? 'var(--mint)' : 'rgb(var(--mint-rgb) / 0.4)',
-        strokeWidth: selected ? 2 : 1.5,
+        stroke: selected ? accent : `color-mix(in srgb, ${accent} 55%, transparent)`,
+        strokeWidth: selected ? 2.5 : 1.75,
         // No strokeDasharray, no animation — solid static line.
         transition: 'stroke 0.15s, stroke-width 0.15s, opacity 0.2s ease',
         opacity: isHighlighted ? 1 : 0.12,

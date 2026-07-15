@@ -23,7 +23,16 @@ interface Props {
   phase: ReconnectPhase
   /** Human error detail, shown as the subtitle in the `error` phase. */
   error: string | null
+  /**
+   * True when the failure was the Gateway REJECTING our token (`auth`). Retrying
+   * re-sends the same token and can never succeed — the Gateway only reloads its
+   * token at boot — so the primary action becomes "Restart Gateway" instead of a
+   * futile Retry. Kept as ONE primary action (not a third button) so the compact
+   * banner never crowds.
+   */
+  canRestartGateway?: boolean
   onReconnect: () => void
+  onRestartGateway?: () => void
   onOpenSettings: () => void
   onDismiss: () => void
 }
@@ -32,7 +41,9 @@ export function GatewayReconnectBanner({
   reason,
   phase,
   error,
+  canRestartGateway = false,
   onReconnect,
+  onRestartGateway,
   onOpenSettings,
   onDismiss,
 }: Props) {
@@ -40,6 +51,9 @@ export function GatewayReconnectBanner({
   const isBusy = phase === 'reconnecting'
   const isSuccess = phase === 'success'
   const isError = phase === 'error'
+  // Driven purely by the host's classification (kept set while ITS restart is in
+  // flight, so the busy label reads "Restarting" — the action the user pressed).
+  const showRestart = canRestartGateway && Boolean(onRestartGateway)
 
   // Amber (warning) at rest, mint on success — both theme-aware tokens.
   const accent = isSuccess ? 'var(--mint)' : 'var(--amber)'
@@ -101,7 +115,12 @@ export function GatewayReconnectBanner({
         {!isBusy && !isSuccess && !reduce && (
           <motion.span
             aria-hidden
-            style={{ position: 'absolute', inset: 0, borderRadius: 10, border: `1.5px solid ${accent}` }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: 10,
+              border: `1.5px solid ${accent}`,
+            }}
             animate={{ opacity: [0.5, 0, 0.5], scale: [1, 1.18, 1] }}
             transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
           />
@@ -160,11 +179,15 @@ export function GatewayReconnectBanner({
                 Settings
               </button>
             )}
+            {/* ONE primary action, whose meaning follows the failure: a token
+                rejection can only be cleared by restarting the Gateway (it
+                reloads its token at boot), so Retry is replaced rather than
+                sitting there as a button that cannot work. */}
             <button
               type="button"
-              onClick={onReconnect}
+              onClick={showRestart ? onRestartGateway : onReconnect}
               disabled={isBusy}
-              data-testid="gateway-reconnect-action"
+              data-testid={showRestart ? 'gateway-restart-action' : 'gateway-reconnect-action'}
               className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold shadow-sm transition hover:brightness-[1.06] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60"
               // Fixed near-black text: amber is a warm mid/bright tone in BOTH
               // themes, so a dark label clears WCAG AA on it (~4.8:1 light,
@@ -175,7 +198,12 @@ export function GatewayReconnectBanner({
               {isBusy ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2.5} />
-                  Reconnecting
+                  {showRestart ? 'Restarting' : 'Reconnecting'}
+                </>
+              ) : showRestart ? (
+                <>
+                  <PlugZap className="h-3.5 w-3.5" strokeWidth={2.5} />
+                  Restart Gateway
                 </>
               ) : isError ? (
                 <>

@@ -19,7 +19,7 @@ export function getCapabilityMultiplexer(): CapabilityMultiplexer {
   if (singleton) return singleton
   const mux = new CapabilityMultiplexer()
   mux.register(new NativeCapabilitySource({ getDbPath }))
-  mux.register(new HermesCapabilitySource())
+  mux.register(new HermesCapabilitySource({ getDbPath }))
   mux.register(new ClaudeCodeCapabilitySource())
   mux.register(new CodexCapabilitySource())
   mux.register(new OpenClawCapabilitySource({ client: getRegistry().source, getDbPath }))

@@ -4,6 +4,7 @@ import { Handle, Position } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import {
   BarChart3,
+  Blocks,
   Compass,
   FileText,
   Globe,
@@ -22,29 +23,37 @@ import { useFloatingMotion } from '../useFloatingMotion'
 import { usePeacockTransition } from '../usePeacockTransition'
 import type { SkillNodeData, SkillCategory } from '../types'
 
-// ─── Category → colour + icon ─────────────────────────────────────────────────
+// ─── Orbital tile system ──────────────────────────────────────────────────────
 //
-// Emoji glyphs replaced with Lucide icons; raw hex replaced with
-// the shared `--category-*` token palette (see globals.css). Both light and
-// dark modes inherit through the var() chain.
+// Every orbital renders as ONE tile family (the language the Model orbital
+// established): an OPAQUE accent-tinted disc (`color-mix(accent, var(--surface))`
+// — never a transparent wash), a solid accent ring, a soft accent shadow, the
+// glyph in full accent colour, and a theme-foreground label below. The tile
+// ACCENT is TYPE-coded so the fan reads at a glance:
+//
+//   provider brand → the LLM model      violet → MCP connectors (ResourceNode)
+//   mint           → skills / tools     slate  → the runtime built-ins rollup
+//   amber          → Leadership (Boo Zero)
+//
+// The category picks only the GLYPH for skill tiles (variety within the mint
+// family); the old per-category tile colours read as noise next to the
+// type-coded connectors/model.
 
-const CATEGORY: Record<SkillCategory, { color: string; Icon: LucideIcon }> = {
-  data: { color: 'var(--category-data)', Icon: BarChart3 },
-  comm: { color: 'var(--category-comm)', Icon: MessageSquare },
-  code: { color: 'var(--category-code)', Icon: Zap },
-  file: { color: 'var(--category-file)', Icon: FileText },
-  web: { color: 'var(--category-web)', Icon: Globe },
-  other: { color: 'var(--category-other)', Icon: Wrench },
+const CATEGORY_ICON: Record<SkillCategory, LucideIcon> = {
+  data: BarChart3,
+  comm: MessageSquare,
+  code: Zap,
+  file: FileText,
+  web: Globe,
+  other: Wrench,
 }
 
-// Visual overrides for Boo Zero's "Leadership" orbital — see
-// `SkillNodeData.isLeadership` for context. Compass icon picks up the
-// "guides the team" metaphor without the crown's heraldic vibe; amber
-// signals elevated status while staying clearly distinct from any of the
-// regular category colors.
+// Compass picks up the "guides the team" metaphor; amber signals elevated
+// status while staying clearly distinct from the type accents above.
 const LEADERSHIP_VISUAL = { color: 'var(--amber)', Icon: Compass } as const
 
-const CIRCLE = 38 // circle diameter in px (reduced from 52 — skills feel subordinate to Boo nodes)
+const CIRCLE = 46 // regular orbital tile diameter (px)
+const MODEL_CIRCLE = 57 // the Model tile stays the biggest — the fan's anchor
 
 // ─── Handle style ─────────────────────────────────────────────────────────────
 
@@ -85,13 +94,16 @@ export const SkillNode = memo(function SkillNode({
     isVisible,
     isLeadership,
     isModel,
+    isBuiltinRollup,
+    installable,
+    enabled,
     providerId,
     modelRuntime,
     available,
   } = data
-  // Capability availability → greyed (opacity + grayscale), matching the
-  // dashboard + the MCPToolsSection treatment. `undefined` = available.
-  const greyed = available === false
+  // Unavailable OR policy-disabled → greyed (opacity + grayscale), matching the
+  // dashboard treatment. A denied tool must never read as "the agent has this".
+  const greyed = available === false || enabled === false
   const floatRef = useFloatingMotion(nodeId, 'skill', dragging)
   // The model orbital tints itself by its provider brand (mono brands →
   // foreground; unknown provider → neutral) and renders the provider glyph in
@@ -108,22 +120,22 @@ export const SkillNode = memo(function SkillNode({
       ? 'var(--foreground)'
       : brandColor
     : 'var(--category-other)'
-  // Leadership orbital reads its visuals from a dedicated constant — the
-  // `category` field is still set on the data (defaulted to `'other'` in
-  // `useGraphData`) so any downstream consumer that hasn't been taught
-  // about `isLeadership` falls back gracefully.
+  // TYPE-coded tile accent + glyph (see the tile-system note above). The
+  // `category` still picks the glyph for skill tiles so there's variety
+  // within the mint family.
   const { color, Icon } = isModel
     ? { color: modelColor, Icon: Sparkles }
     : isLeadership
       ? LEADERSHIP_VISUAL
-      : (CATEGORY[category] ?? CATEGORY.other)
-  // The Leadership + Model orbitals are not installable capabilities — hide the
-  // Install button, its picker, AND the drag-to-install source handle (dragging
-  // one onto a Boo would otherwise write a bogus skill named after it).
-  const showInstall = !isLeadership && !isModel
-  // The Model (LLM icon) orbital renders 50% larger than a regular skill so the
-  // provider logo reads clearly.
-  const circle = isModel ? Math.round(CIRCLE * 1.5) : CIRCLE
+      : isBuiltinRollup
+        ? { color: 'var(--secondary)', Icon: Blocks }
+        : { color: 'var(--mint)', Icon: CATEGORY_ICON[category] ?? Wrench }
+  // Install is offered ONLY for a genuinely installable capability (a
+  // marketplace curated skill) — observed / inherited / synthesized orbitals
+  // hide the button, its picker, AND the drag-to-install handles (dragging one
+  // onto a Boo would write a bogus curated-skill annotation named after it).
+  const showInstall = installable === true && !isLeadership && !isModel
+  const circle = isModel ? MODEL_CIRCLE : CIRCLE
   const [showPicker, setShowPicker] = useState(false)
 
   // Hover cascade — dim when another node is hovered
@@ -152,7 +164,11 @@ export const SkillNode = memo(function SkillNode({
     >
       <div ref={floatRef}>
         <div
-          title={greyed ? `${description ?? name} — unavailable` : (description ?? name)}
+          title={
+            greyed
+              ? `${description ?? name} — ${enabled === false ? 'disabled' : 'unavailable'}`
+              : (description ?? name)
+          }
           className="group"
           style={{
             width: circle,
@@ -164,27 +180,23 @@ export const SkillNode = memo(function SkillNode({
             transition: 'opacity 0.2s ease, filter 0.2s ease',
           }}
         >
-          {/* Filled circle. Skills/Leadership use a faint tint; the Model
-              orbital renders like a REAL provider logo tile — an OPAQUE
-              brand-tinted disc (surface-based so it isn't transparent) with a
-              solid brand-coloured ring and the brand glyph in its true colour. */}
+          {/* The tile disc — ONE family for every orbital: an OPAQUE
+              accent-tinted surface (never a transparent wash), a solid accent
+              ring, and a soft accent shadow. The Model tile tints slightly
+              deeper + carries a full-strength ring so it stays the anchor. */}
           <div
             style={{
               width: circle,
               height: circle,
               borderRadius: '50%',
-              background: isModel
-                ? `color-mix(in srgb, ${color} 24%, var(--surface))`
-                : `color-mix(in srgb, ${color} 9%, transparent)`,
+              background: `color-mix(in srgb, ${color} ${isModel ? 24 : 15}%, var(--surface))`,
               border: isModel
                 ? `1.5px solid ${color}`
-                : `2px solid color-mix(in srgb, ${color} 33%, transparent)`,
+                : `1.5px solid color-mix(in srgb, ${color} 65%, transparent)`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: isModel
-                ? `0 2px 8px color-mix(in srgb, ${color} 28%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.08)`
-                : `0 0 14px color-mix(in srgb, ${color} 16%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.06)`,
+              boxShadow: `0 2px 8px color-mix(in srgb, ${color} ${isModel ? 28 : 20}%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.07)`,
             }}
           >
             {isModel && providerId ? (
@@ -196,12 +208,7 @@ export const SkillNode = memo(function SkillNode({
                 <MarkGlyph glyph={modelRuntimeMark.glyph} size={30} />
               </span>
             ) : (
-              <Icon
-                size={16}
-                strokeWidth={1.75}
-                aria-hidden
-                style={{ color, userSelect: 'none' }}
-              />
+              <Icon size={20} strokeWidth={2} aria-hidden style={{ color, userSelect: 'none' }} />
             )}
           </div>
 
@@ -247,7 +254,10 @@ export const SkillNode = memo(function SkillNode({
             />
           )}
 
-          {/* Name below circle */}
+          {/* Name below circle — ALWAYS theme foreground. Accent-coloured
+              labels (the old treatment) were low-contrast noise on the canvas;
+              the accent lives on the disc/ring/glyph, the label carries the
+              information. */}
           <div
             style={{
               position: 'absolute',
@@ -256,15 +266,11 @@ export const SkillNode = memo(function SkillNode({
               transform: 'translateX(-50%)',
               fontSize: 11,
               fontWeight: 500,
-              // The model label is free-standing text on the canvas — use the
-              // theme foreground (not the raw brand hex, which is low-contrast
-              // for pale accents like OpenRouter/HuggingFace on the light
-              // canvas). The brand colour stays on the disc bg/border/glyph.
-              color: isModel ? 'var(--foreground)' : color,
+              color: 'var(--foreground)',
               whiteSpace: 'nowrap',
               // Model labels ("Claude Sonnet 4.6") are longer than skill names —
               // give them more room before the ellipsis.
-              maxWidth: isModel ? 124 : 84,
+              maxWidth: isModel ? 124 : 104,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               textAlign: 'center',

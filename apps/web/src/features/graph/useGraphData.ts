@@ -11,6 +11,8 @@ import { resolveTeamInternalLead } from '@/lib/resolveTeamLeader'
 import { resolveModelProvider } from '@/lib/modelProvider'
 import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
 import { isHiddenGatewayDefault } from '@/lib/hiddenSystemAgent'
+import { PROVIDER_BRAND } from '@/features/onboarding/ProviderIcon'
+import { resolveRuntimeMark } from '@/features/runtimes/RuntimeBrand'
 import { readAgentFile } from '@clawboo/control-client'
 import { fetchCapabilities, groupAgentCapabilities } from '@/lib/capabilitiesClient'
 import type { CapabilityRecord } from '@clawboo/capability-registry'
@@ -22,6 +24,7 @@ import type {
   SkillNodeData,
   ResourceNodeData,
   SkillCategory,
+  ConnectorServiceKind,
   TeamRootNodeData,
   GhostGraphScope,
 } from './types'
@@ -34,12 +37,44 @@ function capSlug(sourceKey: string): string {
     .replace(/(^-|-$)/g, '')
 }
 
-/** Map a capability to a SkillNode color bucket (the category drives node tint). */
+/** Map a capability to a SkillNode category (picks the tile GLYPH — the tile
+ *  ACCENT is type-coded in SkillNode: mint for skills/tools, slate for the
+ *  built-ins rollup, violet for connectors, brand for the model). */
 function capCategory(cap: CapabilityRecord): SkillCategory {
   if (cap.source === 'brokered-mcp' || cap.source === 'runtime-builtin') return 'code'
   if (cap.source === 'mcp-connector') return 'comm'
-  if (cap.source === 'openclaw-extension') return 'web'
+  // Gateway tools (sessions_* etc.) are runtime tools, not web capabilities —
+  // 'other' renders the Wrench glyph (the old 'web' mapping showed a Globe,
+  // which read as nonsense for a session tool).
+  if (cap.source === 'openclaw-extension') return 'other'
   return 'other'
+}
+
+// ── Connector display metadata ───────────────────────────────────────────────
+// Raw connector names ("clawboo-memory", "memory MCP", "mcp:clawboo-tasks")
+// render truncated + shouty on a small tile ("CLAWB…"). Normalize the clawboo
+// spine servers to their clean service name + a glyph key; anything else keeps
+// its own name with a generic glyph. The raw name stays in the tooltip.
+const CONNECTOR_LABEL: Record<Exclude<ConnectorServiceKind, 'generic'>, string> = {
+  memory: 'Memory',
+  tasks: 'Tasks',
+  tools: 'Tools',
+  teamchat: 'Team Chat',
+}
+export function connectorMeta(rawName: string): {
+  displayName: string
+  serviceKind: ConnectorServiceKind
+} {
+  const base = rawName
+    .toLowerCase()
+    .replace(/^mcp:/, '')
+    .replace(/^clawboo-/, '')
+    .replace(/\s*mcp$/, '')
+    .trim()
+  const kind = (['memory', 'tasks', 'tools', 'teamchat'] as const).find((k) => k === base)
+  return kind
+    ? { displayName: CONNECTOR_LABEL[kind], serviceKind: kind }
+    : { displayName: rawName.replace(/^mcp:/, ''), serviceKind: 'generic' }
 }
 
 // Label for the model orbital when clawboo doesn't know the agent's model
@@ -184,9 +219,24 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
     [agentStructureKey], // intentionally using string key, not full agents array
   )
 
+  // Stable agentId → runtime map for `groupAgentCapabilities` (the inherit-if-empty
+  // fan-out — an agent with no per-agent caps inherits its runtime's shared caps).
+  // Keyed on the same structural string as `agentIds`; runtime is static per id.
+  const agentRuntimes = useMemo(
+    () => new Map(graphAgents.map((a) => [a.id, a.runtime ?? null] as const)),
+    [agentStructureKey], // runtime is static per id; structural key covers set changes
+  )
+
   // ── 1. File fetching ─────────────────────────────────────────────────────────
+  // NOT gated on a Gateway `client`: both reads are REST (`fetchCapabilities` →
+  // /api/capabilities, `readAgentFile` → /api/agents/:id/files/:name), so they
+  // work in NATIVE / thin-client mode where `client === null`. Gating on the
+  // client left a native-mode graph with ZERO capabilities (no connector tiles,
+  // no AGENTS.md dependency edges) — a Gateway-shaped assumption that no longer
+  // holds. An OpenClaw agent's file read 503s while the Gateway is down; that's
+  // already absorbed by the per-agent `.catch(() => null)` below.
   useEffect(() => {
-    if (!client || agentIds.length === 0) return
+    if (agentIds.length === 0) return
 
     let cancelled = false
     setLoadingFiles(true)
@@ -216,7 +266,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
           return
         }
 
-        const byAgent = groupAgentCapabilities(capView.records)
+        const byAgent = groupAgentCapabilities(capView.records, agentRuntimes)
         for (const { agentId, content } of agentsResults) {
           setAgentFiles(agentId, { capabilities: byAgent.get(agentId) ?? [], agentsMd: content })
         }
@@ -232,6 +282,9 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
     return () => {
       cancelled = true
     }
+    // `client` stays a DEP (not a gate): a null→connected transition re-runs the
+    // fetch so an OpenClaw agent's AGENTS.md that 503'd while the Gateway was
+    // down is picked up on reconnect.
   }, [client, agentStructureKey, refreshKey]) // intentional: string key covers structural changes; refreshKey for skill install
 
   // ── 2. Structural rebuild ────────────────────────────────────────────────────
@@ -519,7 +572,7 @@ export function buildGraphElements(
       sourceHandle: 'center',
       target: nodeId,
       targetHandle: 'center',
-      data: {},
+      data: { accent: 'var(--amber)' }, // matches the Leadership tile's amber
     })
   }
 
@@ -576,6 +629,15 @@ export function buildGraphElements(
       } satisfies SkillNodeData,
       position: { x: 0, y: 0 },
     })
+    // The model edge inherits the tile's brand accent so the edge + tile read
+    // as one unit (mono 'currentColor' brands + unknown → theme foreground).
+    const brandColor = providerId
+      ? PROVIDER_BRAND[providerId]?.color
+      : modelRuntime
+        ? resolveRuntimeMark(modelRuntime).color
+        : null
+    const modelEdgeAccent =
+      brandColor && brandColor !== 'currentColor' ? brandColor : 'var(--foreground)'
     skillEdges.push({
       id: `skilledge-${agentId}-clawboo-model`,
       type: 'skill',
@@ -583,7 +645,7 @@ export function buildGraphElements(
       sourceHandle: 'center',
       target: nodeId,
       targetHandle: 'center',
-      data: {},
+      data: { accent: modelEdgeAccent },
     })
   }
 
@@ -598,18 +660,25 @@ export function buildGraphElements(
       const seen = new Set<string>()
       for (const cap of caps) {
         const slug = capSlug(cap.sourceKey)
+        // Policy-disabled capabilities (denied gateway tools, toggled-off MCP)
+        // render greyed so they never read as "the agent has this".
+        const enabled = cap.status !== 'disabled'
         if (cap.kind === 'connector') {
           const nodeId = `resource-${agent.id}-${slug}`
           if (seen.has(nodeId)) continue
           seen.add(nodeId)
+          const meta = connectorMeta(cap.name)
           resourceNodes.push({
             id: nodeId,
             type: 'resource' as const,
             data: {
               resourceId: slug,
-              name: cap.name,
+              name: meta.displayName,
+              fullName: cap.name,
+              serviceKind: meta.serviceKind,
               agentIds: [agent.id],
               available: cap.available,
+              enabled,
             } satisfies ResourceNodeData,
             position: { x: 0, y: 0 },
           })
@@ -626,6 +695,7 @@ export function buildGraphElements(
           const nodeId = `skill-${agent.id}-${slug}`
           if (seen.has(nodeId)) continue
           seen.add(nodeId)
+          const isBuiltinRollup = cap.source === 'runtime-builtin'
           skillNodes.push({
             id: nodeId,
             type: 'skill' as const,
@@ -636,6 +706,11 @@ export function buildGraphElements(
               description: cap.description || null,
               agentIds: [agent.id],
               available: cap.available,
+              enabled,
+              // Only a marketplace curated skill is genuinely installable onto
+              // another agent — observed/inherited caps hide the affordance.
+              installable: cap.source === 'curated-skill',
+              isBuiltinRollup,
             } satisfies SkillNodeData,
             position: { x: 0, y: 0 },
           })
@@ -646,7 +721,9 @@ export function buildGraphElements(
             sourceHandle: 'center',
             target: nodeId,
             targetHandle: 'center',
-            data: {},
+            // Edges inherit their tile's type accent (SkillEdge falls back to
+            // mint — the skill/tool accent — when no accent is threaded).
+            data: isBuiltinRollup ? { accent: 'var(--secondary)' } : {},
           })
         }
       }
