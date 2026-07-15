@@ -3,17 +3,17 @@ title: Reference
 description: "Index of Clawboo's factual reference: REST API, CLI, configuration, env vars, database schema, MCP tools, marketplace catalog, events, and packages."
 ---
 
-Factual, code-grounded reference for every public surface of Clawboo: the **124-route** REST API, the `npx clawboo` CLI, configuration and environment variables, the **27-table** SQLite schema, the **4** MCP servers and their tools, the marketplace catalog of **304 agents** and **82 teams**, the orchestration event and error vocabulary, and one page per workspace package (**25** in total). These pages describe what the code does, verified against source; they do not teach a workflow. For learning-oriented walkthroughs see [Getting Started](/getting-started/index); for the _why_ see [Concepts](/concepts/index).
+Factual, code-grounded reference for every public surface of Clawboo: the **141-route** REST API, the `npx clawboo` CLI, configuration and environment variables, the **27-table** SQLite schema, the **4** MCP servers and their tools, the marketplace catalog of **304 agents** and **82 teams**, the orchestration event and error vocabulary, and one page per workspace package (**27** in total). These pages describe what the code does, verified against source; they do not teach a workflow. For learning-oriented walkthroughs see [Getting Started](/getting-started/index); for the _why_ see [Concepts](/concepts/index).
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## At a glance
 
 | Area          | Page                                                      | Scope                                                      |
 | ------------- | --------------------------------------------------------- | ---------------------------------------------------------- |
-| REST API      | [REST overview](/reference/rest-api/index)                | Base URL, auth/loopback, error envelope, 124-route summary |
+| REST API      | [REST overview](/reference/rest-api/index)                | Base URL, auth/loopback, error envelope, 141-route summary |
 | CLI           | [CLI reference](/reference/cli)                           | `npx clawboo` + the bundled MCP bins                       |
 | Configuration | [Configuration](/reference/configuration)                 | `settings.json`, file/dir locations                        |
 | Environment   | [Environment variables](/reference/environment-variables) | `CLAWBOO_*` / `OPENCLAW_*` / provider keys                 |

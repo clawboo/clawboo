@@ -247,7 +247,7 @@ These tune the always-on background services that run at server boot. Each is pa
 ### `CLAWBOO_BOARD_STALE_TTL_MS`
 
 - **Read by**: the board stale-task sweep in `apps/web/server/index.ts`.
-- **Purpose**: the TTL after which an `in_progress` board task whose `updatedAt` predates the window (and whose execution is still running) is timed out and released to `todo`. A generous "nobody is watching" backstop; the in-browser 8-minute idle watchdog is the primary mechanism, so keep this well beyond any real delegate turn (`tasks.updatedAt` is not a liveness signal for the in-browser path).
+- **Purpose**: the TTL after which an `in_progress` board task whose `updatedAt` predates the window (and whose execution is still running) is timed out and released to `todo`. A generous restart/crash backstop; the server orchestrator's 8-minute idle watchdog is the primary mechanism, so keep this well beyond any real delegate turn (`tasks.updatedAt` is not a liveness signal).
 - **Default**: `3600000` (60 minutes).
 
 ### `CLAWBOO_BOARD_STALE_SWEEP_MS`

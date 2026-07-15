@@ -1,12 +1,12 @@
 ---
 title: REST API overview
-description: Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 124 routes.
+description: Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 141 routes.
 ---
 
 The Clawboo dashboard server (`apps/web/server/index.ts`) is an Express app wrapped in a raw `http.Server` so it can also handle the WebSocket upgrade for the Gateway proxy. Every JSON route lives under `/api/`, is registered in one router (`apps/web/server/api/index.ts`), and returns the standard `{ error: string }` envelope on failure. This page covers the cross-cutting facts: base URL, the proxy, auth, body limits, the error shape, and the streaming endpoints, then links to the per-resource reference pages.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## Base URL
@@ -25,7 +25,7 @@ After a successful bind the chosen port is written to `<clawboo-home>/api-port.t
 
 ## Host binding
 
-The server binds **loopback (`127.0.0.1`) by default**; a fresh install is never reachable by other hosts. Set `HOST` or `HOSTNAME` to widen the bind (e.g. a headless/remote box). Binding a non-loopback interface **without** an access token logs a loud security warning at boot; pair a wide bind with `STUDIO_ACCESS_TOKEN`.
+The server binds **loopback (`127.0.0.1`) by default**; a fresh install is never reachable by other hosts. Set `HOST` to widen the bind (e.g. a headless/remote box); `HOSTNAME` is deliberately ignored. Binding a non-loopback interface **without** an access token makes the server **refuse to start** (a `SECURITY:` error, exit 1), so pair a wide bind with `STUDIO_ACCESS_TOKEN`, or opt in explicitly with `CLAWBOO_ALLOW_INSECURE=1`.
 
 ## How the SPA reaches `/api`
 
@@ -116,26 +116,26 @@ Three routes are **Server-Sent Events**, not request/response. They set `Content
 
 ## Route index
 
-124 routes across 13 resource groups: **54 GET · 47 POST · 11 DELETE · 7 PATCH · 5 PUT**. Each group has a dedicated reference page.
+141 routes across 13 resource groups: **61 GET · 56 POST · 11 DELETE · 8 PATCH · 5 PUT**. Each group has a dedicated reference page.
 
 | Resource page                                      | Routes | What it covers                                                                                |
 | -------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------- |
 | [Settings & health](/reference/rest-api/settings)  | 4      | `/api/settings`, `/api/health`, `/api/health/recheck`                                         |
-| [Agents](/reference/rest-api/agents)               | 10     | `/api/agents*`: the registry of record, files, sessions, sync, cleanup-ghosts                 |
-| [Teams](/reference/rest-api/teams)                 | 12     | `/api/teams*`, `/api/team-rules/:teamId`, `/api/team-chat*`                                   |
+| [Agents](/reference/rest-api/agents)               | 14     | `/api/agents*`: the registry of record, files, sessions, sync, model, 1:1 chat                |
+| [Teams](/reference/rest-api/teams)                 | 16     | `/api/teams*` (incl. chat + activity), `/api/team-rules/:teamId`, `/api/team-chat*`           |
 | [Board](/reference/rest-api/board)                 | 16     | `/api/board*`: tasks, claim, comments, executions, deps, worktree workspace                   |
-| [Runtimes](/reference/rest-api/runtimes)           | 7      | `/api/runtimes*`, `/api/onboarding/seed-native-team`                                          |
+| [Runtimes](/reference/rest-api/runtimes)           | 15     | `/api/runtimes*`, `/api/providers*`, `/api/onboarding/*`                                      |
 | [Memory](/reference/rest-api/memory)               | 4      | `/api/memory*`: search, save, browse, provider                                                |
 | [Tools & MCP](/reference/rest-api/tools-and-mcp)   | 17     | `/api/tools*`, `/api/mcp/*` (the four MCP transports + attach config)                         |
 | [Governance](/reference/rest-api/governance)       | 7      | `/api/governance/*`, `/api/approvals`                                                         |
 | [Capabilities](/reference/rest-api/capabilities)   | 2      | `/api/capabilities`, `/api/capabilities/:action`                                              |
 | [Observability](/reference/rest-api/observability) | 8      | `/api/obs/*` (incl. SSE), `/api/eval/smoke`                                                   |
 | [Schedules](/reference/rest-api/schedules)         | 5      | `/api/schedules*`: the unified Routines + Gateway-cron surface                                |
-| [System](/reference/rest-api/system)               | 8      | `/api/system/*`: status, install, configure, gateway, models, device pairing                  |
+| [System](/reference/rest-api/system)               | 9      | `/api/system/*`: status, install, configure, auto-configure, gateway, models, device pairing  |
 | [Misc](/reference/rest-api/misc)                   | 24     | cost-records, chat-history, graph-layout, personality, skills, exec-settings, fleet, boo-zero |
 
 <Note>
-The route counts above sum to 124 and partition the full surface; every registered route belongs to exactly one resource page. The "Misc" page is the catch-all for the smaller UI-backing resources that do not warrant their own page.
+The route counts above sum to 141 and partition the full surface; every registered route belongs to exactly one resource page. The "Misc" page is the catch-all for the smaller UI-backing resources that do not warrant their own page.
 </Note>
 
 ## See also
@@ -145,4 +145,4 @@ The route counts above sum to 124 and partition the full surface; every register
 - [Runtimes API](/reference/rest-api/runtimes), the gold-standard per-route reference for this group
 - [Gateway & events](/concepts/gateway-and-events), the `/api/gateway/ws` proxy + the Bridge→Policy→Handler pipeline
 - [Security](/operating/security), access gate, device auth, redaction, exposing safely
-- [Environment variables](/reference/environment-variables), `STUDIO_ACCESS_TOKEN`, `CLAWBOO_API_PORT*`, `HOST`/`HOSTNAME`
+- [Environment variables](/reference/environment-variables), `STUDIO_ACCESS_TOKEN`, `CLAWBOO_API_PORT*`, `HOST`

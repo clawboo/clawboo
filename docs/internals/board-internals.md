@@ -9,7 +9,7 @@ Everything here lives in `packages/db/src/board/`: four modules: `repository.ts`
 
 ## What it is, and what it isn't
 
-The board data-access layer is **the only place in the codebase that touches the board tables**. `apps/web` never reaches a board table with raw Drizzle; it calls a repository function. That is deliberate: it keeps query construction out of the app, and it is the single seam a future SQLite→Postgres or multi-tenant swap would target. Every read that could be tenant-scoped takes an optional `scope` argument carrying a `tenantId`; the column exists on every board table but no filtering is active in v0.2.1.
+The board data-access layer is **the only place in the codebase that touches the board tables**. `apps/web` never reaches a board table with raw Drizzle; it calls a repository function. That is deliberate: it keeps query construction out of the app, and it is the single seam a future SQLite→Postgres or multi-tenant swap would target. Every read that could be tenant-scoped takes an optional `scope` argument carrying a `tenantId`; the column exists on every board table but no filtering is active in v0.3.0.
 
 It is **not** an ORM-over-everything layer. It is a hand-written set of typed functions over five tables (`tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes`), each function doing exactly one board operation. The pure transition rules live apart from the data access so they are unit-testable without a database; the contention helpers live apart so the rest of the repository reads as plain Drizzle.
 
@@ -192,10 +192,12 @@ Two recovery passes keep the board from accumulating stuck work, one for crashes
 
 **`reconcileOrphans` runs once at startup.** Any `execution_processes` row still marked `running` belonged to a process that died with the previous server. The pass marks each such execution `failed`, sets `recovery_tombstone=1` so a second pass is a no-op (no infinite auto-resume), and releases its task back to `todo` if the task is currently `in_progress` or `in_review`. The release clears the assignee, the assignee runtime, and the verification verdict, the same unassign-on-release discipline as `updateStatus(→todo)`. The server's boot sequence calls it best-effort, logging and continuing on failure.
 
-**`reconcileStaleInProgress` runs at boot and on an interval.** It is the backstop for an `in_progress` task whose driving client view simply went away; the in-browser idle watchdog only runs while a team chat is mounted. A task that is `in_progress`, not dropped, whose `updatedAt` predates a TTL cutoff, **and** whose execution is still `running` is timed out (the exec → `timed_out`) and released to `todo`. The server wires it as one immediate sweep plus a `setInterval(...).unref()` loop.
+**`reconcileStaleInProgress` runs at boot and on an interval.** It is the backstop for an `in_progress` task left behind by a server restart or a crash, after the orchestrator that owned it is gone. A task that is `in_progress`, not dropped, whose `updatedAt` predates a TTL cutoff, **and** whose execution is still `running` is timed out (the exec → `timed_out`) and released to `todo`. The server wires it as one immediate sweep plus a `setInterval(...).unref()` loop.
 
 <Danger>
-`tasks.updatedAt` is **not** a liveness signal for the in-browser OpenClaw path; there is no server-side execution heartbeat that bumps the task row mid-run; `updatedAt` is written only on status/claim mutations. So the stale TTL is deliberately *generous* (`60` minutes by default, tunable via `CLAWBOO_BOARD_STALE_TTL_MS`; the sweep interval is `CLAWBOO_BOARD_STALE_SWEEP_MS`, default `5` minutes). A live client's own 8-minute watchdog fails a genuinely hung delegate long before this fires; a re-mounted client re-attaches an orphaned `in_progress` task and re-runs its watchdog. The sweep exists only to catch a client that is gone and never returns; set the TTL well beyond any realistic single delegate turn or a long-but-active run gets falsely swept.
+`tasks.updatedAt` is **not** a liveness signal: no execution heartbeat bumps the task row mid-run; `updatedAt` is written only on status/claim mutations. So the stale TTL is deliberately *generous* (`60` minutes by default, tunable via `CLAWBOO_BOARD_STALE_TTL_MS`; the sweep interval is `CLAWBOO_BOARD_STALE_SWEEP_MS`, default `5` minutes).
+
+The **primary** mechanism is the orchestrator's own idle watchdog: the per-team server orchestrator sweeps every 30 seconds and fails any delegate silent past `DELEGATION_IDLE_TIMEOUT_MS` (8 minutes), so a genuinely hung delegate is caught long before the stale TTL fires. Because that watchdog is server-side, it keeps running whether or not a browser is open. The stale sweep exists only to catch tasks orphaned by a **server** restart or crash; set the TTL well beyond any realistic single delegate turn or a long-but-active run gets falsely swept.
 </Danger>
 
 ## The no-migration-ladder model
@@ -220,10 +222,10 @@ The cost is a second persistence layer beside each runtime's own session state, 
 
 - **Not the agent or session registry.** The board references agents, runtimes, and sessions by id (soft refs, no foreign key) and owns no agent identity, agent files, or live session state. Those belong to the [registry of record](/appendices/glossary) and the [runtime](/appendices/glossary). Only the internal `parent_task_id` self-reference is FK-enforced.
 - **Not a general-purpose tracker.** The statuses, transitions, and recovery passes are tuned for runtime-driven agent execution, not for a human-facing issue tracker.
-- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.2.1. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.3.0. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

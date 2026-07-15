@@ -150,10 +150,10 @@ Two recovery passes keep the board from accumulating stuck work: one for crashes
 
 **Orphan reconciliation runs once at startup.** Any execution row still marked `running` belonged to a process that died with the previous server. The pass marks each such execution `failed`, sets a `recovery_tombstone` so a second pass is a no-op (no infinite auto-resume), and releases its task back to `todo` so a fresh claim can pick it up. It runs in a single `BEGIN IMMEDIATE` transaction and never blocks boot.
 
-**Stale-task reconciliation runs on an interval.** It is a backstop for an `in_progress` task whose driving client view simply went away (the in-browser idle watchdog only runs while a team chat is mounted). A task that is `in_progress`, whose `updated_at` is older than a TTL, and whose execution is still `running` is timed out and released to `todo`. The TTL is deliberately generous, much longer than the client's own watchdog, because `tasks.updated_at` is bumped only on status/claim writes, not on every agent event, so a long-but-active run must never be falsely swept. A boot pass plus a periodic interval cover both startup and steady state.
+**Stale-task reconciliation runs on an interval.** It is a backstop for an `in_progress` task orphaned by a server restart or crash, after the orchestrator that owned it is gone. A task that is `in_progress`, whose `updated_at` is older than a TTL, and whose execution is still `running` is timed out and released to `todo`. The TTL is deliberately generous, much longer than the orchestrator's own watchdog, because `tasks.updated_at` is bumped only on status/claim writes, not on every agent event, so a long-but-active run must never be falsely swept. A boot pass plus a periodic interval cover both startup and steady state.
 
 <Danger>
-`tasks.updated_at` is **not** a liveness signal for the in-browser OpenClaw path; there is no server-side execution heartbeat that bumps the task row mid-run. The stale sweep is purely a "nobody is watching" backstop with a long TTL (60 minutes by default, tunable via `CLAWBOO_BOARD_STALE_TTL_MS`). A live client's own watchdog fails a genuinely hung delegate long before this fires; a re-mounted client re-attaches an orphaned `in_progress` task and re-runs its watchdog.
+`tasks.updated_at` is **not** a liveness signal; no execution heartbeat bumps the task row mid-run. The stale sweep is purely a restart/crash backstop with a long TTL (60 minutes by default, tunable via `CLAWBOO_BOARD_STALE_TTL_MS`). The per-team server orchestrator's own 8-minute idle watchdog (swept every 30 seconds) fails a genuinely hung delegate long before this fires, and it runs server-side, so closing the browser does not stop it.
 </Danger>
 
 ## Design rationale and trade-offs
@@ -166,10 +166,10 @@ SQLite is a deliberate choice: it ships in-process, needs no server, and, with t
 
 - **Not a general-purpose project tracker.** The board exists to coordinate agent execution, not to replace a human-facing issue tracker. Its statuses, transitions, and recovery passes are tuned for runtime-driven work.
 - **Not the agent or session registry.** The board references agents and sessions by id and owns no agent identity, agent files, or live session state. Those belong to the registry of record and the runtime.
-- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.2.1. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.3.0. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

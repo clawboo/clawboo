@@ -47,16 +47,19 @@ This column is **team-scoped**: it shows the agents of the selected team (or all
 - **Create Boo**: adds a new agent to the selected team (shown only when connected to a runtime that can create agents).
 - **The global nav**: anchored to the bottom of the column. It holds the work surfaces you switch between most, plus a **Settings** gear and the theme toggle.
 
-The sidebar nav is deliberately short, five work surfaces plus the Settings gear:
+The sidebar nav is deliberately short, four work surfaces plus the Settings gear:
 
-| Block     | Item                    | View it opens                                    |
-| --------- | ----------------------- | ------------------------------------------------ |
-| Primary   | **Atlas** _(All Teams)_ | The global Ghost Graph                           |
-| Primary   | **Fleet** _(Overview)_  | Fleet-health summary                             |
-| Primary   | **Marketplace**         | Browse 304 agents and 82 teams                   |
-| Secondary | **Board**               | The durable kanban board                         |
-| Secondary | **Approvals**           | Pending tool/exec approvals (with a count badge) |
-| Footer    | **Settings** (gear)     | Opens the Settings modal (see below)             |
+| Block     | Item                    | View it opens                        |
+| --------- | ----------------------- | ------------------------------------ |
+| Primary   | **Atlas** _(All Teams)_ | The global Ghost Graph               |
+| Primary   | **Board**               | The durable kanban board             |
+| Primary   | **Marketplace**         | Browse 304 agents and 82 teams       |
+| Secondary | **Fleet** _(Overview)_  | Fleet-health summary                 |
+| Footer    | **Settings** (gear)     | Opens the Settings modal (see below) |
+
+<Note>
+There is no standalone **Approvals** nav item. Approvals surface where they are raised: a collapsible **Needs approval** column on the [board](/using/board) and an inline tray above the [group-chat](/using/group-chat) composer. See [Approvals](/using/approvals).
+</Note>
 
 The theme toggle sits beside the Settings gear at the bottom.
 
@@ -66,11 +69,12 @@ The **Fleet** view is the read-only overview of the whole fleet: agent count, 24
 
 ### The Settings modal
 
-Everything for managing, configuring, and inspecting the dashboard lives in a **Settings modal**, opened from the gear at the bottom of the sidebar or with **`Cmd/Ctrl + ,`**. It groups nine surfaces:
+Everything for managing, configuring, and inspecting the dashboard lives in a **Settings modal**, opened from the gear at the bottom of the sidebar or with **`Cmd/Ctrl + ,`**. It groups ten surfaces:
 
 | Group     | Item              | What it shows                       |
 | --------- | ----------------- | ----------------------------------- |
 | Workspace | **Runtimes**      | Connect/manage runtimes             |
+| Workspace | **Providers**     | Connect/manage LLM provider keys    |
 | Workspace | **Memory**        | Shared-memory browser               |
 | Workspace | **Capabilities**  | The capability inventory            |
 | Workspace | **Scheduler**     | Routines (scheduled team work)      |
@@ -88,21 +92,21 @@ The content area renders exactly one view at a time, chosen by the current **vie
 
 The dashboard's state is a single discriminated union, the `ViewMode`, and the content area is a `switch` over it. There are five shapes:
 
-| View mode   | What it shows                                                     | How you reach it                                 |
-| ----------- | ----------------------------------------------------------------- | ------------------------------------------------ |
-| `welcome`   | The welcome screen                                                | `Escape` from a chat/agent view, or no selection |
-| `agent`     | An agent's three-panel detail view                                | Click an agent row                               |
-| `booZero`   | Boo Zero's detail view (column 2 hidden)                          | Click the mascot                                 |
-| `groupChat` | A team's group chat (graph + chat split)                          | Click a team icon or the Group Chat row          |
-| `nav`       | One of the nav panels (5 in the sidebar, 9 in the Settings modal) | Click a nav item or a Settings item              |
+| View mode   | What it shows                                                      | How you reach it                                 |
+| ----------- | ------------------------------------------------------------------ | ------------------------------------------------ |
+| `welcome`   | The welcome screen                                                 | `Escape` from a chat/agent view, or no selection |
+| `agent`     | An agent's three-panel detail view                                 | Click an agent row                               |
+| `booZero`   | Boo Zero's detail view (column 2 hidden)                           | Click the mascot                                 |
+| `groupChat` | A team's group chat (graph + chat split)                           | Click a team icon or the Group Chat row          |
+| `nav`       | One of the nav panels (4 in the sidebar, 10 in the Settings modal) | Click a nav item or a Settings item              |
 
-The `nav` mode carries a `view` field, one of `graph` (Atlas), `fleet`, `approvals`, `cost`, `marketplace`, `scheduler`, `system`, `obs`, `board`, `runtimes`, `memory`, `governance`, `capabilities`, `health`. The dashboard opens on `nav: graph` (Atlas) by default, so a fresh launch lands you on the org-wide map.
+The `nav` mode carries a `view` field, one of the 14 `NAV_VIEWS`: `graph` (Atlas), `fleet`, `cost`, `marketplace`, `scheduler`, `system`, `obs`, `board`, `runtimes`, `providers`, `memory`, `governance`, `capabilities`, `health`. The dashboard opens on `nav: graph` (Atlas) by default, so a fresh launch lands you on the org-wide map.
 
 ### Keyboard navigation
 
 - `Escape`: leave an agent / Boo Zero / group-chat view back to the welcome screen (ignored while a file-editor overlay is open or you're typing).
-- `Cmd/Ctrl + 1…5`: jump to a sidebar work surface, in this order: **1** Atlas, **2** Fleet, **3** Marketplace, **4** Board, **5** Approvals.
-- `Cmd/Ctrl + ,`: open the Settings modal (Runtimes, Memory, Capabilities, Scheduler, Tokens Used, Observability, Governance, System, System Health).
+- `Cmd/Ctrl + 1…4`: jump to a sidebar work surface, in this order: **1** Atlas, **2** Fleet, **3** Marketplace, **4** Board. (The shortcut order is the `NavView` order, which is not the visual order of the nav blocks.)
+- `Cmd/Ctrl + ,`: open the Settings modal (Runtimes, Providers, Memory, Capabilities, Scheduler, Tokens Used, Observability, Governance, System, System Health).
 
 ## Atlas vs the per-team Ghost Graph
 

@@ -15,18 +15,20 @@ Below those, the panel lists the broker's tools with their availability, so you 
 ## Prerequisites
 
 <Note>
-The Approvals panel is always available; it is one of the nav views. Whether anything appears depends on whether an agent is configured to ask before acting.
+There is **no standalone Approvals nav view**. Approvals surface where they were raised, so you resolve them in context rather than on a separate screen. Whether anything appears at all depends on whether an agent is configured to ask before acting.
 </Note>
 
-- Open the **Approvals** view: click **Approvals** in the sidebar nav (the lock icon), or press **Cmd/Ctrl + 3**. The nav button shows a badge with the pending exec-approval count.
+- Approvals appear in two places, both always available:
+  - The **Needs approval** column on the [board](/using/board), the first column. It collapses to a thin rail when empty and auto-expands the moment a request arrives.
+  - An **inline tray above the composer** in [group chat](/using/group-chat) and 1:1 [agent chat](/using/agents), scoped to that team or agent (capped at three cards, with a "view on the board" link for the rest).
 - For **exec approvals** to appear, the agent's command-execution policy must be set to ask. Open an agent, go to the **Personality** tab → **Execution Permissions**, and set **Command Execution** to **Always Ask** or **Ask for Unknown**. Then ask the agent to run a command. It pauses and the request appears here.
 - For **tool / delegation approvals**, no extra setup is needed; the broker writes a pending row when a risky or availability-gated tool call needs sign-off, and the governance delegation gate writes one for a risky delegation.
 
 ## Steps
 
-### 1. Open the panel and read the pending items
+### 1. Find the pending items and read them
 
-The panel is team-scoped. When a team is selected, exec approvals are filtered to that team's agents (requests with no `agentId` always show); selecting **no team** shows all. Exec approvals are sorted oldest-first.
+Both surfaces are scoped. On the board, when a team is selected, exec approvals are filtered to that team's agents (requests with no `agentId` always show); selecting **no team** shows all. The chat tray is scoped to the team or agent you have open. Exec approvals are sorted oldest-first.
 
 Each **exec approval** card shows:
 

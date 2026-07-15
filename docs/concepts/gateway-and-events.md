@@ -142,7 +142,7 @@ For a **server-orchestrated team session** (an `agent:<id>:team:<teamId>` key), 
 
 ### The access gate
 
-The proxy upgrade and every `/api/*` route sit behind an optional access gate, active only when `STUDIO_ACCESS_TOKEN` is set. With a token configured, `?access_token=<token>` sets an `HttpOnly` cookie and redirects; thereafter every `/api/*` request and the WS upgrade require that cookie. Token comparison is constant-time (both sides SHA-256-hashed first, so the compare leaks neither length nor a first-differing-byte timing oracle). The gate is the only authentication for a non-loopback bind, so the server warns loudly if it's bound to a public interface with no token set.
+The proxy upgrade and every `/api/*` route sit behind an optional access gate, active only when `STUDIO_ACCESS_TOKEN` is set. With a token configured, `?access_token=<token>` sets an `HttpOnly` cookie and redirects; thereafter every `/api/*` request and the WS upgrade require that cookie. Token comparison is constant-time (both sides SHA-256-hashed first, so the compare leaks neither length nor a first-differing-byte timing oracle). The gate is the only authentication for a non-loopback bind, so the server refuses to start if it is bound to a public interface with no token set (unless `CLAWBOO_ALLOW_INSECURE=1` explicitly opts in).
 
 <Info>
 The gate has one exemption: a **loopback** request to `/api/mcp/*` is let through without a cookie. That is the spawned-runtime control plane, a runtime attaches its MCP client to `http://127.0.0.1:<port>/api/mcp/*` with its env scrubbed of the token. A remote client cannot forge a loopback source on a real TCP handshake, so this is safe; every non-loopback `/api/mcp/*` request still needs the cookie. See [Security](/operating/security).
@@ -166,7 +166,7 @@ The gate has one exemption: a **loopback** request to `/api/mcp/*` is let throug
 - **Device pairing depends on the CLI.** The approve-device endpoint shells out to `openclaw` and parses its output; it is a convenience over the manual `openclaw devices approve` flow, not a reimplementation of OpenClaw's pairing.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

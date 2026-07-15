@@ -140,7 +140,7 @@ GC runs once at server startup (best-effort, never blocking boot). The server-si
 - **GC heuristics, not a scheduler.** Reaping is age-and-count based, not a precise reference-counted lifecycle. The 72-hour age and 25-count defaults are field norms; active tasks are always skipped and commit-before-drop guarantees no data loss, so the heuristic can be conservative without being unsafe.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

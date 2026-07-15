@@ -6,7 +6,7 @@ description: Canonical definitions of Clawboo's core terms, each linked to the p
 Definitions of the vocabulary used throughout the Clawboo docs. Each entry is a one- or two-sentence definition with a link to the page that goes deeper. Terms are grouped by area; within a group they are roughly ordered from most-foundational to most-specific.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## Agents and runtimes

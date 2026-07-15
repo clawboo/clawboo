@@ -1,9 +1,9 @@
 ---
 title: Runtimes API
-description: 'REST reference for the runtimes resource group: list, install, connect, healthcheck, run, and seed a native team.'
+description: 'REST reference for the runtimes resource group: list, install, connect, healthcheck, run, seed a native team, and manage LLM provider keys.'
 ---
 
-REST surface for the four non-OpenClaw [runtimes](/appendices/glossary) (`claude-code`, `codex`, `hermes`, `clawboo-native`): list their capabilities and connection state, install a runtime CLI, connect or disconnect a provider key, verify a key before use, and drive a board task on a chosen runtime. This group also covers `POST /api/onboarding/seed-native-team`, which mints a default native leader + specialist team for the first-run flow.
+REST surface for the four non-OpenClaw [runtimes](/appendices/glossary) (`claude-code`, `codex`, `hermes`, `clawboo-native`): list their capabilities and connection state, install a runtime CLI, connect or disconnect a provider key, verify a key before use, and drive a board task on a chosen runtime. This group also covers the `/api/onboarding/*` first-run routes and the `/api/providers*` group that backs the Settings → **Providers** panel.
 
 <Note>
 OpenClaw is the fifth runtime but it is NOT in this group; it is a connected substrate driven over the Gateway, not a CLI you install or a key you paste. These routes 404 the `openclaw` id (it is not a member of `NonOpenClawRuntimeId`). See [System API](/reference/rest-api/system) for OpenClaw lifecycle and [Agents API](/reference/rest-api/agents) for the agent registry.
@@ -13,15 +13,23 @@ The `:id` path segment is validated against the runtime set on every route excep
 
 ## Routes
 
-| Method | Path                               | Summary                                                       | Stream? |
-| ------ | ---------------------------------- | ------------------------------------------------------------- | ------- |
-| GET    | `/api/runtimes`                    | List runtimes with capabilities, health, and connection state | No      |
-| POST   | `/api/runtimes/:id/install`        | Install the runtime CLI                                       | SSE     |
-| POST   | `/api/runtimes/:id/connect`        | Store a provider key in the encrypted vault                   | No      |
-| POST   | `/api/runtimes/:id/disconnect`     | Clear the stored credential                                   | No      |
-| POST   | `/api/runtimes/:id/healthcheck`    | Verify a pasted native provider key (no persistence)          | No      |
-| POST   | `/api/runtimes/:id/run`            | Drive a board task on the runtime end to end                  | No      |
-| POST   | `/api/onboarding/seed-native-team` | Mint a default native leader + specialist team                | No      |
+| Method | Path                                  | Summary                                                       | Stream? |
+| ------ | ------------------------------------- | ------------------------------------------------------------- | ------- |
+| GET    | `/api/runtimes`                       | List runtimes with capabilities, health, and connection state | No      |
+| POST   | `/api/runtimes/:id/install`           | Install the runtime CLI                                       | SSE     |
+| POST   | `/api/runtimes/:id/connect`           | Store a provider key in the encrypted vault                   | No      |
+| POST   | `/api/runtimes/:id/disconnect`        | Clear the stored credential                                   | No      |
+| POST   | `/api/runtimes/:id/healthcheck`       | Verify a pasted native provider key (no persistence)          | No      |
+| POST   | `/api/runtimes/:id/run`               | Drive a board task on the runtime end to end                  | No      |
+| GET    | `/api/runtimes/openrouter/models`     | The live OpenRouter catalog (Hermes model picker)             | No      |
+| POST   | `/api/onboarding/seed-native-team`    | Mint a default native leader + specialist team                | No      |
+| POST   | `/api/onboarding/native-leader-model` | Record the chosen leader provider + model                     | No      |
+| GET    | `/api/onboarding/state`               | Aggregated first-run signals in one call                      | No      |
+| GET    | `/api/providers`                      | List every provider with its connection state                 | No      |
+| POST   | `/api/providers/:id/connect`          | Store a provider key                                          | No      |
+| POST   | `/api/providers/:id/disconnect`       | Clear a stored provider key                                   | No      |
+| GET    | `/api/providers/:id/models`           | Live model list using the **stored** key                      | No      |
+| POST   | `/api/providers/:id/models`           | Live model list using a **pasted** (unsaved) key              | No      |
 
 <Info>
 `POST /api/runtimes/:id/install` is **Server-Sent Events**, not request/response. It is documented below with an event-stream catalog (event `type` → payload), not a JSON response body. A built-in runtime (`clawboo-native`) short-circuits with a plain JSON **400** before the stream opens.
@@ -137,7 +145,8 @@ The terminal `error` `code` values:
 | `code`           | Meaning                                                           |
 | ---------------- | ----------------------------------------------------------------- |
 | `NPM_MISSING`    | `npm` not found (npm runtimes)                                    |
-| `PYTHON_MISSING` | Python 3 with pip/pipx not found (Hermes)                         |
+| `PYTHON_MISSING` | No Python with pip/pipx found (Hermes)                            |
+| `PYTHON_TOO_OLD` | A Python was found but is older than 3.11 (Hermes)                |
 | `EACCES`         | Permission denied (stderr matched `EACCES` / "permission denied") |
 | `SPAWN_THROW`    | The spawn call threw synchronously                                |
 | `SPAWN_ERROR`    | The child emitted an `error` event                                |
@@ -448,6 +457,36 @@ curl -X POST http://localhost:18790/api/onboarding/seed-native-team \
   -H 'Content-Type: application/json' \
   -d '{"provider":"anthropic"}'
 ```
+
+---
+
+## Providers
+
+`/api/providers*` backs the Settings → **Providers** panel: the LLM provider keys that power `clawboo-native` (and any runtime routed through the same provider). A **provider** is not a runtime; `anthropic` is a provider, `clawboo-native` is a runtime that consumes one.
+
+### `GET /api/providers`
+
+Returns `{ providers: ProviderStatus[] }`: every known provider with its connection state. Never errors.
+
+### `POST /api/providers/:id/connect`
+
+Body `{ apiKey }`. Stores the key in the encrypted vault. Returns `{ ok: true, providers }` (the refreshed list). **400** `{ error: "unknown provider '<id>'" }` for an unknown id, or `{ error: 'apiKey is required' }` when the key is missing or blank.
+
+### `POST /api/providers/:id/disconnect`
+
+Clears the stored key. Returns `{ ok: true, providers }`. **400** for an unknown id.
+
+### `GET /api/providers/:id/models`
+
+The provider's **live** model list, enumerated with the **stored** key. Returns `{ models: [] }` for a keyless or non-enumerating provider rather than an error, so the client can fall back to its static catalog.
+
+### `POST /api/providers/:id/models`
+
+Body `{ apiKey }`. The live model list using a **pasted, unsaved** key: this is what the onboarding step calls before any key is stored. The key is used for exactly one fetch and is **never logged, persisted, or echoed back**. Returns `{ models: [] }` when the provider does not enumerate or the key is blank.
+
+<Note>
+Only providers that support live enumeration return a non-empty `models` array; the rest return `{ models: [] }` by design. See [Connecting runtimes](/runtimes/connecting-runtimes) for the vault and the connection-state machine.
+</Note>
 
 ---
 

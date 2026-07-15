@@ -26,7 +26,7 @@ Clawboo's surface is wide on purpose; it's a mission-control dashboard, not a si
 ## Version
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## Where to go next

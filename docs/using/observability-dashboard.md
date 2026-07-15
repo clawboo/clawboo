@@ -18,7 +18,7 @@ There is nothing to configure. The Observability panel is always available. The 
 
 ## Where it lives
 
-Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Observability** under the Insights group (the `Activity` icon). The `Cmd`/`Ctrl`+1–5 quick-nav slots cover the sidebar work surfaces (Atlas, Fleet, Marketplace, Board, Approvals); Observability, like the other Settings panels, is reached through the Settings modal instead.
+Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Observability** under the Insights group (the `Activity` icon). The `Cmd`/`Ctrl`+1–4 quick-nav slots cover the sidebar work surfaces (Atlas, Fleet, Marketplace, Board); Observability, like the other Settings panels, is reached through the Settings modal instead.
 
 The panel is two columns:
 

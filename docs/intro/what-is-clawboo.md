@@ -88,7 +88,7 @@ The trade-off is honest: Clawboo is a second coordination layer beside each runt
 - **Single implicit tenant today.** Multi-tenant scoping (`tenant_id` columns, a reserved budget scope) is a dormant future seam, not a shipped feature. So is a human participant posting into a room.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

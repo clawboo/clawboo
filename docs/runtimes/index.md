@@ -20,7 +20,7 @@ This page introduces the five runtimes, the three **runtime classes** that deter
 The four non-OpenClaw runtimes (`clawboo-native`, `claude-code`, `codex`, `hermes`) are declared in a single descriptor and reachable through `/api/runtimes`. OpenClaw is the fifth, handled separately because it is a connected substrate (see [runtime classes](#runtime-classes)), not a CLI/SDK Clawboo spawns and not a member of the `/api/runtimes` id set. Its lifecycle (Gateway install, device pairing, channels) lives on its own page.
 
 <Note>
-Each adapter declares `participantKind: 'agent'`. `'human'` is a reserved seam in the trait so a person could later be a first-class task assignee or delegation target behind the same interface; nothing branches on it in v0.2.1.
+Each adapter declares `participantKind: 'agent'`. `'human'` is a reserved seam in the trait so a person could later be a first-class task assignee or delegation target behind the same interface; nothing branches on it in v0.3.0.
 </Note>
 
 ## Runtime classes
@@ -110,7 +110,7 @@ Health for the CLI runtimes is "the binary resolves", checked via `resolveRuntim
 - **No conversion between runtimes.** A runtime's agents are not migrated, exported, or "collapsed into native." The runtimes are co-equal peers.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

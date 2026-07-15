@@ -75,7 +75,7 @@ SQLite is more than the board. The same database file is the agent [registry of 
 A claimed task has to actually _run_ somewhere. Clawboo drives every runtime through a single [RuntimeAdapter](/appendices/glossary) interface that emits a normalized [RuntimeEvent](/appendices/glossary) stream, so the orchestrator never branches on a runtime id. There are two execution paths:
 
 - **The server-side executor runner** drives the four non-OpenClaw runtimes (`clawboo-native`, `claude-code`, `codex`, `hermes`). For each one it claims the task, opens an execution row, acquires an isolated git [worktree](/concepts/worktrees-and-handoff), assembles a cache-stable prompt, drains the adapter's event stream to a terminal `done`, then writes a report-up summary, drives the task status (through the builder-≠-judge [verification](/concepts/verification) gate), and clocks out an `AGENT_HANDOFF.json` so a different runtime can resume cold. The runner talks _only_ through the adapter trait and an injected driver; it never assumes a runtime is a spawned process, so a future human-in-the-loop participant slots in behind the same seam. See the [executor runner internals](/internals/executor-runner).
-- **The live OpenClaw Gateway connection** handles OpenClaw runs. OpenClaw is a _connected substrate_, not a CLI Clawboo spawns: its agents run in Gateway-owned workspaces, and runs ride the browser→proxy connection. The server-side executor runner explicitly refuses an OpenClaw task. Its event stream flows through the OpenClaw-specific **Bridge→Policy→Handler** pipeline that keeps the live fleet view in sync. See [Gateway and events](/concepts/gateway-and-events) and the [runtimes overview](/runtimes/index).
+- **The live OpenClaw Gateway connection** handles OpenClaw runs. OpenClaw is a _connected substrate_, not a CLI Clawboo spawns: its agents run in Gateway-owned workspaces, so the one-shot executor runner explicitly refuses an OpenClaw task. Team runs are still driven **server-side**, over the server-held paired operator connection, not from your browser; the browser's own proxied connection carries the 1:1 chat, exec approvals, and the live fleet view through the OpenClaw-specific **Bridge→Policy→Handler** pipeline. See [Gateway and events](/concepts/gateway-and-events) and the [runtimes overview](/runtimes/index).
 
 ### 5. MCP servers are the shared spine
 
@@ -99,13 +99,13 @@ Every coordination action, a task created, a delegation routed, a run started, a
 
 ## Boundaries and non-goals
 
-- **Not multi-machine in v0.2.1.** The stack is one local process. The `tenant_id` columns are a dormant seam, not active per-tenant scoping.
+- **Not multi-machine in v0.3.0.** The stack is one local process. The `tenant_id` columns are a dormant seam, not active per-tenant scoping.
 - **Not a hosted product.** There is no cloud control plane, no account system, and no remote management surface beyond binding to a non-loopback interface (which requires an access token and triggers a warning).
 - **OpenClaw is special.** Four runtimes go through the uniform executor runner; OpenClaw is a connected substrate driven over a live WebSocket and refused by the runner, a deliberate asymmetry, not an inconsistency.
 - **This is the overview, not the spec.** Each layer here has a concept page with the real mechanics, and a reference page with the exact routes, shapes, and defaults. Follow the links.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

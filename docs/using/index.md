@@ -37,7 +37,7 @@ These are the bottom nav buttons in `AgentListColumn`. Each switches the main co
 
 ## Where things live (nav slots)
 
-The fourteen nav panels map one-to-one to `NavView` ids. The table is the same wiring `ContentArea` uses, so it doubles as a reference for the `navigateTo(view)` action and the `Cmd/Ctrl+1–6` shortcuts (Atlas, Marketplace, Approvals, Scheduler, Tokens Used, System).
+The fourteen nav panels map one-to-one to `NavView` ids. The table is the same wiring `ContentArea` uses, so it doubles as a reference for the `navigateTo(view)` action. Only the four sidebar work surfaces have a number shortcut: `Cmd/Ctrl+1–4` is Atlas, Fleet, Marketplace, Board. The other ten live in the Settings modal (`Cmd/Ctrl+,`).
 
 | Nav id (`NavView`) | Sidebar label     | Page                                                      |
 | ------------------ | ----------------- | --------------------------------------------------------- |
@@ -49,7 +49,7 @@ The fourteen nav panels map one-to-one to `NavView` ids. The table is the same w
 | `memory`           | Memory            | [Memory browser](/using/memory-browser)                   |
 | `governance`       | Governance        | [Governance dashboard](/using/governance-dashboard)       |
 | `capabilities`     | Capabilities      | [Capabilities dashboard](/using/capabilities-dashboard)   |
-| `approvals`        | Approvals         | [Approvals](/using/approvals)                             |
+| `providers`        | Providers         | [Connecting runtimes](/runtimes/connecting-runtimes)      |
 | `scheduler`        | Scheduler         | [Scheduler](/using/scheduler)                             |
 | `cost`             | Tokens Used       | [Cost & budgets](/using/cost-and-budgets)                 |
 | `system`           | System            | [System & maintenance](/using/system-maintenance)         |
@@ -58,6 +58,8 @@ The fourteen nav panels map one-to-one to `NavView` ids. The table is the same w
 
 <Note>
 The `fleet` panel (a read-only overview) does not have its own how-to; it is covered in the [dashboard tour](/getting-started/dashboard-tour).
+
+**Approvals is not a nav slot.** It has a how-to page ([Approvals](/using/approvals)) but no `NavView` id: approvals render on the [board](/using/board)'s **Needs approval** column and in an inline tray above the [group-chat](/using/group-chat) composer.
 </Note>
 
 ![The team space: Ghost Graph above the group chat for a selected team](/images/team-space.png)

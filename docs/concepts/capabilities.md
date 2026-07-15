@@ -153,12 +153,12 @@ The cost is a second persistence layer beside each runtime's own store, kept hon
 ## Boundaries and non-goals
 
 - **Clawboo never writes a runtime's private store it has declared off-limits.** Hermes `SKILL.md` skills are `observe-only` precisely because the invariant is that Clawboo never writes a Hermes skills directory; the Hermes `mcp.json` is regenerated every run, so it's surfaced read-only too. Observing the private plane is the line; clobbering it is not.
-- **Not every tier has a live runtime surface yet.** The `external-write` write path (the MCP-config transcoder that dialects a canonical spec per runtime) is built and unit-tested, but no runtime exposes a clawboo-managed _persistent_ connector store in v0.2.1; Codex's home is ephemeral and auth-blocked, Hermes's `mcp.json` is regenerated. So the genuine live writes today are `managed` (native) and `runtime-of-record` (OpenClaw `tools.allow`/`tools.deny`); the other tiers are represented and gated but await a persistent store to plug into.
+- **Not every tier has a live runtime surface yet.** The `external-write` write path (the MCP-config transcoder that dialects a canonical spec per runtime) is built and unit-tested, but no runtime exposes a clawboo-managed _persistent_ connector store in v0.3.0; Codex's home is ephemeral and auth-blocked, Hermes's `mcp.json` is regenerated. So the genuine live writes today are `managed` (native) and `runtime-of-record` (OpenClaw `tools.allow`/`tools.deny`); the other tiers are represented and gated but await a persistent store to plug into.
 - **OpenClaw connector and plugin toggles are not writable yet.** The `openclaw` source emits MCP connectors and plugins as `runtime-of-record`, but their `config.patch` toggle is a documented follow-up, so each is marked `writable: false`; only the Gateway `tools.allow`/`tools.deny` surface is a confirmed runtime-of-record write today.
-- **Single implicit tenant.** Every record and the `capabilities` table carry a `tenantId`, but it is a dormant seam; no per-tenant filtering is active in v0.2.1.
+- **Single implicit tenant.** Every record and the `capabilities` table carry a `tenantId`, but it is a dormant seam; no per-tenant filtering is active in v0.3.0.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also
