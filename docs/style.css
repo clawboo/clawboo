@@ -95,8 +95,31 @@ pre code,
 }
 
 /* ============================================================
-   8. SIDEBAR FOOTER CTA - render the primary "Star on GitHub"
-   action as a real filled button, not a plain nav link.
+   7b. SCREENSHOTS - frame content images like product shots:
+   soft radius, hairline border, ambient shadow. Keeps the
+   light-UI screenshots from glaring on the dark theme.
+   ============================================================ */
+#content img {
+  border-radius: 12px;
+  border: 1px solid var(--clawboo-hairline);
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.06),
+    0 12px 32px -16px rgb(15 23 42 / 0.18);
+}
+.dark #content img {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 16px 40px -16px rgb(0 0 0 / 0.6);
+}
+
+/* ============================================================
+   8. GITHUB CTA - the "Star on GitHub" action as a real filled
+   button, not a plain nav link. In the maple theme the whole
+   GitHub block (repo + star count, then the button) renders as
+   the sidebar's pinned footer <ul>; on desktop we relocate that
+   block into the top bar's empty right side, where a primary
+   repo action belongs. Below 1280px it stays in the sidebar
+   footer (narrower desktops risk overlapping the tab links).
    ============================================================ */
 #sidebar li[id='https://github.com/clawboo/clawboo'] > a {
   justify-content: center;
@@ -121,4 +144,46 @@ pre code,
 #sidebar li[id='https://github.com/clawboo/clawboo'] > a svg {
   color: #fff;
   opacity: 0.9;
+}
+
+@media (min-width: 1280px) {
+  /* Chromium treats position:fixed elements as stacking contexts,
+     so the relocated <ul>'s own z-index is trapped inside #sidebar.
+     Raise the sidebar itself above the top bar chrome (blur strip
+     z-20, header z-30); overlays and modals (z-45+) still win.
+     Below 1280px the block stays in the sidebar footer so it can
+     never overlap the tab links. */
+  #sidebar {
+    z-index: 31;
+  }
+  /* Lift the footer block out of the sidebar and pin it in the
+     48px (h-12) tabs row of the sticky top bar, right-aligned. */
+  #sidebar > ul {
+    position: fixed;
+    top: 0;
+    right: 1.5rem;
+    left: auto;
+    bottom: auto;
+    width: auto;
+    height: 3rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: none;
+    z-index: 40;
+  }
+  #sidebar > ul > li {
+    padding: 0;
+    white-space: nowrap;
+  }
+  /* Compact button proportions for the top bar. */
+  #sidebar li[id='https://github.com/clawboo/clawboo'] > a {
+    margin-top: 0;
+    padding: 6px 13px;
+    font-size: 0.8125rem;
+    border-radius: 8px;
+  }
 }
