@@ -208,7 +208,7 @@ This split, pure library, browser-only wiring, is what keeps the package's invar
 - **Token-count gap is upstream.** Gateway `chat` payloads carry no usage data, so the cost path estimates tokens elsewhere; that is a Gateway limitation, not this pipeline's. See [Known issues](/appendices/known-issues).
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

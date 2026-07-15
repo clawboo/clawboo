@@ -37,7 +37,7 @@ The `nativeHome`/`nativeSkills`/`nativeMemory` claims are what route Hermes to a
 ## Prerequisites
 
 <Note>
-Hermes installs through Python. `pipx` is preferred; a `pip --user` fallback applies if `pipx` is absent. You need Python 3 with `pip`/`pipx` available.
+Hermes installs through Python. `pipx` is preferred; a `pip --user` fallback applies if `pipx` is absent. You need **Python 3.11 or newer** (`hermes-agent` requires `>=3.11,<3.14`) with `pip`/`pipx` available. A present-but-too-old interpreter is its own failure (`PYTHON_TOO_OLD`), not `PYTHON_MISSING`; the installer prefers a `python3.13`/`3.12`/`3.11` binary over a bare `python3` so a fresh macOS default does not trip it.
 </Note>
 
 - An [OpenRouter](https://openrouter.ai/) API key; Hermes's `authKind` is `api-key` and its vault slot is `OPENROUTER_API_KEY`. (If your seeded Hermes config already names a provider, that provider wins and the key for _it_ is what matters; see [Provider precedence](#provider-precedence).)
@@ -49,12 +49,12 @@ Hermes installs through Python. `pipx` is preferred; a `pip --user` fallback app
 
 From the **Runtimes** panel, the Hermes card opens `POST /api/runtimes/hermes/install` (a Server-Sent Events stream) from the `not-installed` state. Because Hermes's `packageManager` is `pip`, the installer:
 
-1. Prefers `pipx install 'hermes-agent<1'`.
-2. Falls back to `python -m pip install --user 'hermes-agent<1'` when `pipx` is absent.
+1. Prefers `pipx install 'hermes-agent[anthropic]<1'`.
+2. Falls back to `python -m pip install --user 'hermes-agent[anthropic]<1'` when `pipx` is absent.
 3. Retries once with `--break-system-packages` if it detects a PEP-668 externally-managed environment.
-4. Emits an `error` event with code `PYTHON_MISSING` if neither `pipx` nor `python` is found.
+4. Emits an `error` event with code `PYTHON_MISSING` if neither `pipx` nor `python` is found, or `PYTHON_TOO_OLD` when the interpreter it finds is older than 3.11.
 
-The package is pinned to `hermes-agent<1` to block an auto-install of a future incompatible 1.0 major.
+The package is pinned to `hermes-agent[anthropic]<1` to block an auto-install of a future incompatible 1.0 major. The **`[anthropic]` extra is load-bearing, not decoration**: `openai` and `openrouter` ship with the Hermes core, but `--provider anthropic` fails with "the 'anthropic' package is required" without it.
 
 <Warning>
 **Hermes installs but reads as `not-installed`.** Hermes lands in the Python user-site bin (`~/Library/Python/<X.Y>/bin` on macOS, `~/.local/bin` on Linux, `%APPDATA%\Python\Python<XY>\Scripts` on Windows), which is usually **off** the dashboard server's PATH. Clawboo resolves it via `resolveRuntimeBin` (PATH **plus** those user-install dirs), so this is normally handled. If a fresh install's `complete` event still carries a `warning` (the binary did not resolve yet), restart the server.

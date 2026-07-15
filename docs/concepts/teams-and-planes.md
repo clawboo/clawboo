@@ -118,13 +118,13 @@ The shared plane is canonical for a related reason: with N runtimes contributing
 
 ## Boundaries and non-goals
 
-- **A team is not a tenant.** Every table carries a dormant `tenant_id`, but no per-tenant scoping is active in v0.2.1. Multi-tenant teams are a future seam, not a shipped feature.
+- **A team is not a tenant.** Every table carries a dormant `tenant_id`, but no per-tenant scoping is active in v0.3.0. Multi-tenant teams are a future seam, not a shipped feature.
 - **An agent belongs to at most one team.** Membership is a single nullable `teamId` foreign key; there is no many-to-many agent↔team join. A documented future seam (an `agent_team_memberships` table) would change this; it is not built.
 - **Clawboo does not bridge private planes.** It never syncs a runtime's native kanban, never serves a runtime's messaging channel, and never co-runs a runtime's own scheduler for teammate dispatch (`coRunScheduler` is hard-typed `false`). Cross-runtime collaboration happens _only_ on the shared plane.
 - **The split is coordination, not isolation.** It does not enforce a security or privilege boundary. Concurrency isolation for file-mutating work is the job of per-task [worktrees](/concepts/worktrees-and-handoff), not of the plane split.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

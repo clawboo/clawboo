@@ -2,7 +2,7 @@
 
 > Clawboo is an open-source, local-first multi-agent mission-control dashboard and orchestrator, installed via `npx clawboo`. Deploy a team of agents across five runtimes (clawboo-native, OpenClaw, Claude Code, Codex, Hermes), watch them collaborate live in group chat and on a durable kanban board, and govern them with builder-not-judge verification, USD budgets, circuit breakers, and an always-on observability event log.
 
-This file indexes the Clawboo documentation for language models. Paths are relative to the documentation root. Documents Clawboo v0.2.1, the current published release (npm `latest` = `clawboo@0.2.1`).
+This file indexes the Clawboo documentation for language models. Paths are relative to the documentation root. Documents Clawboo v0.3.0, the current published release (npm `latest` = `clawboo@0.3.0`).
 
 ## Introduction
 
@@ -91,7 +91,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 
 ## Reference — REST API
 
-- [REST API overview](reference/rest-api/index.md): Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 124 routes.
+- [REST API overview](reference/rest-api/index.md): Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 141 routes.
 - [Agents API](reference/rest-api/agents.md): REST reference for the agent registry-of-record — list, create, sync, per-agent reads, files, sessions, delete, and ghost cleanup.
 - [Board API](reference/rest-api/board.md): REST reference for the durable board — tasks, atomic claim, status gate, comments, executions, deps, and per-task worktrees.
 - [Capabilities API](reference/rest-api/capabilities.md): REST reference for the unified capability inventory — list every runtime's skills, tools, and connectors, and act on the manageable ones.
@@ -108,7 +108,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 
 ## Reference — Packages
 
-- [Package overview](reference/packages/index.md): The 25 @clawboo/* workspace packages — version, purity, purpose, dependency graph, and build order.
+- [Package overview](reference/packages/index.md): The 27 @clawboo/* workspace packages — version, purity, purpose, dependency graph, and build order.
 - [@clawboo/adapter-claude-code](reference/packages/adapter-claude-code.md): Claude Code RuntimeAdapter that maps the Claude Agent SDK lifecycle into the normalized executor event stream.
 - [@clawboo/adapter-codex](reference/packages/adapter-codex.md): Codex RuntimeAdapter that maps the codex exec event stream into the normalized executor event stream.
 - [@clawboo/adapter-hermes](reference/packages/adapter-hermes.md): Hermes RuntimeAdapter that drives the Hermes CLI as a board worker, mapped into the normalized executor event stream.
@@ -162,7 +162,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 
 ## Appendices
 
-- [Changelog](appendices/changelog.md): Release history of the clawboo CLI from the 0.1.0 name-claim placeholder through v0.2.1.
+- [Changelog](appendices/changelog.md): Release history of the clawboo CLI from the 0.1.0 name-claim placeholder through v0.3.0.
 - [Contributing to Clawboo](appendices/contributing.md): Clone, run the dev stack, pass the local gate, add a changeset, and respect the architecture invariants.
 - [Frequently asked questions](appendices/faq.md): Common questions about Clawboo — runtimes, data location, local-first behavior, cost, safe network exposure, and resetting.
 - [Glossary](appendices/glossary.md): Canonical definitions of Clawboo's core terms, each linked to the page that explains it.

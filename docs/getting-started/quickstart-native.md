@@ -8,7 +8,7 @@ By the end of this tutorial you'll have a working team, picked from Clawboo's bu
 This is the fastest path to a running team. Clawboo's [native runtime](/appendices/glossary) (`clawboo-native`) is an in-process harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, or a local Ollama model), so there is nothing extra to install and no Gateway to set up. It is also the default: onboarding drops you straight into connecting it, and other runtimes are opt-in. If you want the OpenClaw Gateway path instead, see [Quickstart: OpenClaw](/getting-started/quickstart-openclaw).
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## Prerequisites

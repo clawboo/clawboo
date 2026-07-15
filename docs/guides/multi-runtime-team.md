@@ -177,7 +177,7 @@ Meanwhile each runtime's **private plane** keeps compounding: the Hermes agent's
 </Danger>
 
 <Note>
-Multi-tenant scoping is a future seam: every table carries a dormant `tenant_id`, but no per-tenant filtering is active in v0.2.1. A team is a single-implicit-tenant coordination boundary, not a tenant or a sandbox.
+Multi-tenant scoping is a future seam: every table carries a dormant `tenant_id`, but no per-tenant filtering is active in v0.3.0. A team is a single-implicit-tenant coordination boundary, not a tenant or a sandbox.
 </Note>
 
 ## Related

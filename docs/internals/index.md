@@ -68,7 +68,7 @@ These pages explain the *internals*. For the factual surface, every package's pu
 - **Shipping a release** → [Release process](/internals/release-process).
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

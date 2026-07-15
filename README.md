@@ -165,7 +165,7 @@ Clawboo stores everything under `~/.clawboo/` (auto-created). Nothing here is re
 | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `CLAWBOO_HOME`                | Clawboo's state directory (default `~/.clawboo`): SQLite DB, settings, secrets vault, worktrees        |
 | `CLAWBOO_API_PORT`            | Pin the dashboard API port (default `18790`, auto-fallback through `18809`)                            |
-| `CLAWBOO_DB_PATH`             | Override the SQLite database path                                                                      |
+| `CLAWBOO_DB_PATH`             | SQLite path for the out-of-process MCP stdio bins only (the server follows `CLAWBOO_HOME`)             |
 | `CLAWBOO_SECRETS_MASTER_KEY`  | Override the credential-vault master key (auto-generated at `~/.clawboo/secrets/master.key` otherwise) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Export traces to Jaeger / Zipkin (otherwise the local event log is the trace store)                    |
 | `LOG_LEVEL`                   | pino log level (default `info`)                                                                        |

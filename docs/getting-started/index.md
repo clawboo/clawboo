@@ -6,7 +6,7 @@ description: 'The two install paths: native-first (paste a key, no Gateway) or t
 Clawboo runs the same way for everyone: one command, `npx clawboo`, which launches a local dashboard and walks you through a first-run wizard. Onboarding is **native-first**: you paste one provider key and land in a working team, with no runtime to pick up front. The OpenClaw Gateway and the coding-agent runtimes are **opt-in**, connected during the optional Add-runtimes step or later from Settings. This page explains the fast native path and the OpenClaw path so you can choose which quickstart to follow.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## Prerequisites

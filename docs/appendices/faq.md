@@ -6,7 +6,7 @@ description: 'Common questions about Clawboo: runtimes, data location, local-fir
 Short, grounded answers to the questions that come up most. Each answer links to the page that covers the topic in full.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## Do I need OpenClaw to use Clawboo?
@@ -43,7 +43,7 @@ Clawboo only ever _reads_ OpenClaw's `~/.openclaw/` directory for interop; it ne
 
 ## How do I expose Clawboo on a network safely?
 
-By default the server binds to loopback `127.0.0.1`, so a fresh install is not reachable from other hosts. Widening the bind is an explicit opt-in: set the `HOST` (or `HOSTNAME`) environment variable. When you do, **always** also set `STUDIO_ACCESS_TOKEN`.
+By default the server binds to loopback `127.0.0.1`, so a fresh install is not reachable from other hosts. Widening the bind is an explicit opt-in: set the `HOST` environment variable (`HOSTNAME` is deliberately ignored, since Docker and CI inject it automatically). When you do, you **must** also set `STUDIO_ACCESS_TOKEN`; a wide bind with no token makes the server refuse to start.
 
 The token activates the access gate: every `/api/*` route then requires a valid cookie, set once by opening `/?access_token=<token>`. The gate compares tokens in constant time, folds path case before its prefix check (so `/API/...` cannot evade it), and restricts the token charset to `[A-Za-z0-9._~-]`. If you bind to a non-loopback interface _without_ a token, the server logs a loud SECURITY warning at boot rather than silently exposing the dashboard.
 

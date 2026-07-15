@@ -8,7 +8,7 @@ By the end of this tutorial you'll have a team of agents in Clawboo, you'll have
 A _team_ is a named group of Boos (agents) that collaborate in one shared chat room. Clawboo gives you two ways to deploy one: pick a ready-made template from the marketplace catalog (82 teams, 304 agents), or, on the native-first path, let onboarding seed a starter team for you. This tutorial covers both, then walks the same group-chat-and-board collaboration loop that follows either.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## Prerequisites

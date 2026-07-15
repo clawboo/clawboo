@@ -17,8 +17,8 @@ This section is for the person who runs the Clawboo server, on a laptop, a share
 
 ## Operator concerns at a glance
 
-- **Where it runs**: one bundled server process. It picks a free API port at boot (default `18790`, scanning up to `18809`) and binds loopback unless you set `HOST`/`HOSTNAME`. Start with [Deployment](/operating/deployment).
-- **How to expose it safely**: a non-loopback bind without `STUDIO_ACCESS_TOKEN` is reachable unauthenticated by anyone on your network; the server warns loudly in that case. The access gate is the only auth for a non-loopback bind. See [Security](/operating/security).
+- **Where it runs**: one bundled server process. It picks a free API port at boot (default `18790`, scanning up to `18809`) and binds loopback unless you set `HOST` (`HOSTNAME` is ignored). Start with [Deployment](/operating/deployment).
+- **How to expose it safely**: a non-loopback bind without `STUDIO_ACCESS_TOKEN` would be reachable unauthenticated by anyone on your network, so the server refuses to start in that case. The access gate is the only auth for a non-loopback bind. See [Security](/operating/security).
 - **What attaches to it**: runtimes (and external agents) reach the shared plane by attaching Clawboo's MCP servers. The loopback exemption lets a server-spawned runtime attach `/api/mcp/*` without a token; everything else still needs the gate cookie. See [MCP servers](/operating/mcp-servers).
 - **Where data lives**: everything Clawboo owns sits under `~/.clawboo` (`CLAWBOO_HOME` overrides it): the SQLite DB, `settings.json`, the secrets vault, worktrees, and the proxy device identity. OpenClaw's `~/.openclaw` is only ever read for interop. See [Data & state](/operating/data-and-state).
 - **What the defaults are**: production-leaning out of the box: budgets track-and-warn instead of hard-capping, circuit breakers are conservative, and the boot probe surfaces a degraded environment without blocking. See [Production defaults](/operating/production-defaults).

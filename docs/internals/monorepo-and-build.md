@@ -25,14 +25,14 @@ packages:
   - 'docs'
 ```
 
-The second glob is load-bearing. The five runtime adapters live one level deeper, `packages/adapters/{native,openclaw,claude-code,codex,hermes}`, so without `packages/adapters/*` pnpm would not discover them and `workspace:*` resolution would fail. The result is **25 packages** (20 top-level under `packages/*` plus 5 nested adapters), two apps, and the `docs/` Mintlify site (hand-edited Markdown, deployed as-is).
+The second glob is load-bearing. The five runtime adapters live one level deeper, `packages/adapters/{native,openclaw,claude-code,codex,hermes}`, so without `packages/adapters/*` pnpm would not discover them and `workspace:*` resolution would fail. The result is **27 packages** (22 top-level under `packages/*` plus 5 nested adapters), two apps, and the `docs/` Mintlify site (hand-edited Markdown, deployed as-is).
 
 `@clawboo/tsconfig` is the shared TypeScript-config root, `base.json`, `react.json`, `node.json`. It is a devDependency everywhere and has no runtime edge, so it doesn't appear in the dependency graph that drives the build order.
 
 ```mermaid
 graph TD
   root["pnpm-workspace.yaml"]
-  root --> p["packages/*<br/>(20 top-level libs)"]
+  root --> p["packages/*<br/>(22 top-level libs)"]
   root --> a["packages/adapters/*<br/>(5 runtime adapters)"]
   root --> apps["apps/*<br/>(web + cli)"]
   p -. "@clawboo/* scope" .- a

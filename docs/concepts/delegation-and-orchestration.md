@@ -129,7 +129,7 @@ The depth cap, the report-up-to-a-single-reduce-point discipline, the fan-out ca
 - **The orchestrator coordinates; it does not execute.** It creates, claims, delivers, and reflects. The actual work happens inside the delegate's runtime, and the result is reported up as a condensed summary, never the raw transcript.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

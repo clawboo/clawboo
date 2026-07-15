@@ -6,7 +6,7 @@ description: Run Clawboo via npx, in dev mode, or as a bundled server, covering 
 Use this page when you want to run the Clawboo dashboard server: locally with `npx clawboo`, from the monorepo in dev mode, or on a remote/headless box behind a reverse proxy. Clawboo is a single Express server that serves both the SPA and every `/api/*` route, plus a WebSocket proxy at `/api/gateway/ws`.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## Prerequisites
@@ -17,13 +17,13 @@ These docs describe Clawboo **v0.2.1**, the current release.
 
 ## At a glance
 
-| Mode                 | Command                                                       | What runs                                                 | Where it binds                                   |
-| -------------------- | ------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------ |
-| Bundled (production) | `npx clawboo`                                                 | Forks `dist/server.js` (the SPA + API), opens the browser | Loopback `127.0.0.1`, auto-port from `18790`     |
-| Dev                  | `pnpm dev`                                                    | Express API (watch) + Vite SPA on `:5173`, proxied        | API on the chosen port; Vite serves `:5173`      |
-| Standalone server    | `node dist/server.js` (or `pnpm --filter @clawboo/web start`) | The server only, no browser, no CLI                       | Loopback by default; `HOST`/`HOSTNAME` widens it |
+| Mode                 | Command                                                       | What runs                                                 | Where it binds                               |
+| -------------------- | ------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------- |
+| Bundled (production) | `npx clawboo`                                                 | Forks `dist/server.js` (the SPA + API), opens the browser | Loopback `127.0.0.1`, auto-port from `18790` |
+| Dev                  | `pnpm dev`                                                    | Express API (watch) + Vite SPA on `:5173`, proxied        | API on the chosen port; Vite serves `:5173`  |
+| Standalone server    | `node dist/server.js` (or `pnpm --filter @clawboo/web start`) | The server only, no browser, no CLI                       | Loopback by default; `HOST` widens it        |
 
-The default bind is **loopback only** (`127.0.0.1`). A fresh install is never reachable from another host until you explicitly set `HOST`/`HOSTNAME`.
+The default bind is **loopback only** (`127.0.0.1`). A fresh install is never reachable from another host until you explicitly set `HOST` (and `HOST` alone; `HOSTNAME` is ignored, see below).
 
 ## Bundled mode: `npx clawboo`
 
@@ -99,14 +99,14 @@ Pin the port with `CLAWBOO_API_PORT=18790` when you want a stable URL (a reverse
 
 Clawboo owns one state directory, default `~/.clawboo`, overridable with `CLAWBOO_HOME` (`~`-expansion applies). Everything Clawboo writes lives under it:
 
-| Path                                    | Contents                                                                                                            |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `~/.clawboo/clawboo.db`                 | The SQLite database (registry, board, memory, tools, governance, obs, …). Override the file with `CLAWBOO_DB_PATH`. |
-| `~/.clawboo/settings.json`              | Gateway URL/token and the access token.                                                                             |
-| `~/.clawboo/api-port.txt`               | The runtime port file (above).                                                                                      |
-| `~/.clawboo/secrets/`                   | The encrypted runtime-credential vault (`master.key` + `runtime-keys.json`). See [Security](/operating/security).   |
-| `~/.clawboo/worktrees/`                 | Per-task git worktrees.                                                                                             |
-| `~/.clawboo/proxy-device-identity.json` | The Ed25519 device key the proxy signs Gateway connects with.                                                       |
+| Path                                    | Contents                                                                                                          |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `~/.clawboo/clawboo.db`                 | The SQLite database (registry, board, memory, tools, governance, obs, …). Relocate it with `CLAWBOO_HOME`.        |
+| `~/.clawboo/settings.json`              | Gateway URL/token and the access token.                                                                           |
+| `~/.clawboo/api-port.txt`               | The runtime port file (above).                                                                                    |
+| `~/.clawboo/secrets/`                   | The encrypted runtime-credential vault (`master.key` + `runtime-keys.json`). See [Security](/operating/security). |
+| `~/.clawboo/worktrees/`                 | Per-task git worktrees.                                                                                           |
+| `~/.clawboo/proxy-device-identity.json` | The Ed25519 device key the proxy signs Gateway connects with.                                                     |
 
 <Info>
 There is **no migration ladder**. The schema is the inline `CREATE TABLE IF NOT EXISTS` DDL in `createDb`; a schema change is a hard reset of the local DB. To wipe state, stop the server and delete `~/.clawboo` (or just `~/.clawboo/clawboo.db`), then re-run onboarding.
@@ -135,7 +135,7 @@ In production mode the server serves the SPA from `CLAWBOO_UI_DIR` (default: the
 
 ## Behind a reverse proxy / on a remote box
 
-By default the server binds `127.0.0.1`, so it is unreachable off-host. To expose it (a remote box, a container, behind nginx/Caddy), set `HOST` or `HOSTNAME`:
+By default the server binds `127.0.0.1`, so it is unreachable off-host. To expose it (a remote box, a container, behind nginx/Caddy), set `HOST`:
 
 ```bash
 HOST=0.0.0.0 \
@@ -145,10 +145,16 @@ CLAWBOO_UI_DIR=./dist/ui \
 node dist/server.js
 ```
 
-`resolveHost()` returns the trimmed `HOST` (or `HOSTNAME`) when set, otherwise loopback. A bind to `0.0.0.0`/`::` reports a browser URL of `http://localhost:<port>` in the log, but the listener accepts connections on all interfaces.
+`resolveHost()` returns the trimmed **`HOST`** when set, otherwise loopback. A bind to `0.0.0.0`/`::` reports a browser URL of `http://localhost:<port>` in the log, but the listener accepts connections on all interfaces.
+
+<Note>
+**`HOSTNAME` is deliberately ignored.** Only `HOST` widens the bind. Docker, systemd, and many CI runners auto-inject `HOSTNAME` into every process env, so honouring it would silently expose a container that never asked to be exposed. Setting `HOSTNAME=0.0.0.0` leaves the server on loopback.
+</Note>
 
 <Warning>
-A non-loopback bind **without** an access token exposes the dashboard and every `/api/*` route to your network unauthenticated. The server does not auto-generate a token; it logs a loud `SECURITY:` warning and keeps serving. Always pair a wide bind with `STUDIO_ACCESS_TOKEN`.
+A non-loopback bind **without** an access token means the server **refuses to start**: it logs a `SECURITY:` error and exits with code 1. This is deliberate; the origin guard is not authentication against a non-browser client (a LAN peer forges `Host`/`Origin` freely), so on a wide bind the access token is the only real auth.
+
+Fix it by one of: set `STUDIO_ACCESS_TOKEN=<random>` to require a token; unset `HOST` to bind loopback only; or set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose. Only that last escape hatch reaches the warn-and-keep-serving path.
 </Warning>
 
 When `STUDIO_ACCESS_TOKEN` is set, the access gate protects every `/api/*` route. A few load-bearing details for proxy setups:

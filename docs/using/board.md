@@ -20,10 +20,10 @@ The Board panel is always available. Its subsystem is always on, so the panel re
 
 ## Open the board
 
-Click **Board** (the kanban-square icon) in the secondary nav of the left sidebar. The panel mounts in the main content area.
+Click **Board** (the kanban-square icon) in the primary nav of the left sidebar, or press **`Cmd/Ctrl + 4`**. The panel mounts in the main content area.
 
 <Note>
-The board has no `Cmd/Ctrl`+number shortcut; those are reserved for the six primary views (Atlas, Marketplace, Approvals, Scheduler, Tokens Used, System). Reach the board from the sidebar nav.
+The number shortcuts cover the four sidebar work surfaces only: `Cmd/Ctrl+1` Atlas, `+2` Fleet, `+3` Marketplace, `+4` Board. Everything else (Scheduler, Tokens Used, System, and the rest) lives in the Settings modal (`Cmd/Ctrl+,`).
 </Note>
 
 ## The columns
@@ -157,7 +157,7 @@ curl 'http://localhost:18790/api/board/<task-id>'
 ## Troubleshooting
 
 <Warning>
-**A task is stuck in "In progress" forever.** `tasks.updated_at` is not a per-event liveness heartbeat for the in-browser path, so the panel can't tell a long run from a dead one by itself. A live team-chat client runs its own idle watchdog; a "nobody is watching" stale sweep is the server-side backstop (60-minute default TTL). See [the board's reconciliation](/concepts/the-board#orphan-and-stale-reconciliation).
+**A task is stuck in "In progress" forever.** `tasks.updated_at` is not a per-event liveness heartbeat, so the panel can't tell a long run from a dead one by itself. The server orchestrator's own 8-minute idle watchdog fails a silent delegate (and keeps running with the browser closed); a stale sweep is the restart/crash backstop (60-minute default TTL). See [the board's reconciliation](/concepts/the-board#orphan-and-stale-reconciliation).
 </Warning>
 
 <Warning>

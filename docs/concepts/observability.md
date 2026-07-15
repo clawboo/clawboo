@@ -175,10 +175,10 @@ Keeping the event-log trace store _always on_ and the OTLP export _opt-in_ is th
 - **Not a metrics time-series database.** The log is an orchestration event stream, not Prometheus. `summarizeMetrics` aggregates over a queried window on demand; there is no retention policy, downsampling, or long-horizon storage tuned for time-series queries.
 - **Not the audit log.** The governance audit log is a separate, "most-recent-first" lineage feed for forensics; the orchestration log is `seq ASC` for replay. They mirror each other's insert-only / scrub discipline but serve different reads.
 - **OTLP export is opt-in, not bundled.** A lean bundled CLI degrades to event-log-only; the OTel SDK is only required when an OTLP endpoint is configured and the SDK is present.
-- **Single implicit tenant today.** `orchestration_events.tenant_id` is a dormant column; no per-tenant filtering is active in v0.2.1. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** `orchestration_events.tenant_id` is a dormant column; no per-tenant filtering is active in v0.3.0. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

@@ -38,7 +38,7 @@ Every runtime resolves to one **connection state** that drives the card UI. The 
 | `clawboo-native` (Clawboo Native) | yes      | none                                         | api-key | `ANTHROPIC_API_KEY` (+ `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) | In-process harness; multi-provider; any of the three keys (or `OLLAMA_BASE_URL`) counts as connected |
 | `claude-code` (Claude Code)       | no       | `npm install -g @anthropic-ai/claude-code@2` | api-key | `ANTHROPIC_API_KEY`                                            | Health binary `claude`                                                                               |
 | `codex` (Codex)                   | no       | `npm install -g @openai/codex@0`             | oauth   | none                                                           | Connects via `codex login`, not a pasted key; health binary `codex`                                  |
-| `hermes` (Hermes)                 | no       | `pipx install 'hermes-agent<1'`              | api-key | `OPENROUTER_API_KEY`                                           | Python CLI; installs to the user-site bin (resolved off PATH); health binary `hermes`                |
+| `hermes` (Hermes)                 | no       | `pipx install 'hermes-agent[anthropic]<1'`   | api-key | `OPENROUTER_API_KEY`                                           | Python 3.11+ CLI; installs to the user-site bin (resolved off PATH); health binary `hermes`          |
 
 ## Steps
 

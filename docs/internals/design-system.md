@@ -188,7 +188,7 @@ Two principles run through all of them. **They are token-driven**, every color i
 - **`globals.css` is the single source of truth.** Every token value comes from `globals.css`; this page documents what ships.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

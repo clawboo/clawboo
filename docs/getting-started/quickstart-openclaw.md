@@ -8,7 +8,7 @@ By the end of this tutorial you'll have a running OpenClaw Gateway connected to 
 This is the OpenClaw path. Unlike the other four runtimes, [OpenClaw](/runtimes/openclaw) is a _connected substrate_; Clawboo connects to a running OpenClaw Gateway (a WebSocket server that hosts OpenClaw agents), rather than installing and spawning a CLI per task. If you want a working team with no Gateway at all, the [native runtime quickstart](/getting-started/quickstart-native) is faster: paste one provider key and you're done.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## Prerequisites

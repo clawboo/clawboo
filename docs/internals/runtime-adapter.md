@@ -44,7 +44,7 @@ interface RuntimeAdapter {
 `participantKind` is `'agent' | 'human'`. Today every adapter sets `'agent'`; nothing in the shipped code branches on this. It is a reserved seam so a person can later be a first-class task assignee, delegation target, or approver behind the _same_ interface, without baking "executor == automated agent" into the trait.
 
 <Info>
-`participantKind: 'human'` is a future seam, not a shipped feature in v0.2.1. There is no human-participant adapter. The field exists so the trait, the board's assignee model, and the event stream don't have to be rewritten when one is added.
+`participantKind: 'human'` is a future seam, not a shipped feature in v0.3.0. There is no human-participant adapter. The field exists so the trait, the board's assignee model, and the event stream don't have to be rewritten when one is added.
 </Info>
 
 ### `capabilities()`: the declarative profile
@@ -246,11 +246,11 @@ The trade-off is indirection. Driving a runtime is two layers, the adapter and t
 - **The trait does not dispatch.** Claiming, worktrees, verification, budgets, and handoff are the runner's job. An adapter starts a run and yields events; it knows nothing about the board.
 - **The trait does not decide who exists.** That is the registry of record (AgentSource). An adapter never creates or archives a Boo.
 - **The contract suite is not in the app bundle.** It imports vitest and is reachable only through the `./contract` subpath, with vitest kept external.
-- **`participantKind: 'human'` is a dormant seam.** No human-participant adapter exists in v0.2.1.
+- **`participantKind: 'human'` is a dormant seam.** No human-participant adapter exists in v0.3.0.
 - **`./tiers` cache breakpoints are advisory.** They are suggestions for an Anthropic-style consumer; OpenAI auto-caches prefixes and the OpenClaw Gateway owns its own caching, so both ignore the breakpoints.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

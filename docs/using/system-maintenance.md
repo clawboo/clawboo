@@ -18,7 +18,7 @@ The System panel is built for the OpenClaw path. If you are running native-only 
 
 ## Where it lives
 
-Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **System** under the System group. The panel is a single scrollable column of sections separated by thin dividers: Gateway, Default Model, API Keys, Boo Zero, Agent Coordination, Command Approval, and System.
+Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **System** under the System group. The panel is a single scrollable column of sections separated by thin dividers: Gateway, Default Model, Provider Keys, Boo Zero, Agent Coordination, Command Approval, and System Info.
 
 ## Steps
 
@@ -56,9 +56,9 @@ Need a model the catalog does not list? Use **Custom model…** at the bottom of
 
 If a Gateway `client` is connected, the panel also attempts a best-effort hot reload (`config.get` for the snapshot hash, then `config.patch` at `agents.defaults.model.primary`). If the hot reload fails, the config file was still updated and the Gateway picks it up on the next turn.
 
-### Manage API keys
+### Manage provider keys
 
-The **API Keys** section (`ApiKeyManager`) lists provider rows: seven primary providers, then an **Additional Providers** group of seven more. Each row shows a status dot (mint = configured, grey = not set), the provider label, its env-var name, and a **Configured** / **Not set** label.
+The **Provider Keys** section (`ApiKeyManager`) lists provider rows: seven primary providers, then an **Additional Providers** group of seven more. Each row shows a status dot (mint = configured, grey = not set), the provider label, its env-var name, and a **Configured** / **Not set** label.
 
 1. Click **Update** on a row to reveal an inline masked input (with an eye toggle to reveal/hide).
 2. Paste the key and click **Save**.

@@ -216,10 +216,10 @@ The native source pays a different price for the same benefit: by being its own 
 - **Not the runtime.** A source owns _who exists_; it never executes a turn. Execution is `RuntimeAdapter` in `@clawboo/executor`. The two layers stay separate by design.
 - **Not the board.** The board references agents by id and owns only task state. No agent identity, files, or session state live there.
 - **One-to-one team membership.** An agent row has a single `teamId`. A many-to-many membership model is a documented deferred seam, not a shipped feature.
-- **`participantKind` and `tenantId` are dormant.** No human-participant path and no active per-tenant scoping exist in v0.2.1. Both are reserved fields.
+- **`participantKind` and `tenantId` are dormant.** No human-participant path and no active per-tenant scoping exist in v0.3.0. Both are reserved fields.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also

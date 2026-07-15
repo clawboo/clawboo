@@ -175,7 +175,7 @@ Two scoping facts follow from the Gateway config being process-wide:
 - `GET /api/agents/registry/health` (always `200`) reports the source `connection`; it should read `connected` with a recent `lastSyncedAt`.
 - `GET /api/agents` should return your OpenClaw agents with `stale: false`.
 - `GET /api/system/status` should show `gateway.running: true`.
-- Send a message in group chat; the run streams over the same-origin proxy connection.
+- Send a message in group chat; the send is an HTTP `POST /api/teams/:id/chat` and the reply streams back over SSE (`/api/teams/:id/chat/stream`), because team orchestration runs server-side. The same-origin WS proxy carries the 1:1 chat and exec approvals, not the team run.
 
 ## Troubleshooting
 

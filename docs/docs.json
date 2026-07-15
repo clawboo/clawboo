@@ -206,6 +206,7 @@
               "reference/packages/capability-registry",
               "reference/packages/compaction",
               "reference/packages/config",
+              "reference/packages/control-client",
               "reference/packages/db",
               "reference/packages/evals",
               "reference/packages/events",
@@ -218,6 +219,7 @@
               "reference/packages/obs",
               "reference/packages/protocol",
               "reference/packages/scheduler",
+              "reference/packages/team-orchestration",
               "reference/packages/tsconfig",
               "reference/packages/ui",
               "reference/packages/worktrees"

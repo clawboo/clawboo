@@ -18,7 +18,7 @@ The Marketplace is browsable with no Gateway and no runtime connected; it is a s
 
 ## Where it lives
 
-Open the Marketplace from the **Marketplace** nav button (shopping-cart icon) in the left sidebar, or press **Cmd/Ctrl + 2**. The panel fills the content area with a toolbar (the three tab toggles + sort), a filter bar, and a responsive card grid.
+Open the Marketplace from the **Marketplace** nav button (shopping-cart icon) in the left sidebar, or press **Cmd/Ctrl + 3**. The panel fills the content area with a toolbar (the three tab toggles + sort), a filter bar, and a responsive card grid.
 
 The panel opens on the **Teams** tab by default. The toolbar shows all three tab toggles with live counts: `Teams (82)`, `Agents (304)`, `Skills (30)`. Each tab keeps its own search query and filters, so switching tabs never loses your place.
 

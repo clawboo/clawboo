@@ -6,7 +6,7 @@ description: The single npx clawboo launcher (only --version/--help) plus the fo
 Clawboo ships one user-facing command and four MCP stdio binaries. The `clawboo` command is a thin launcher: it finds or starts the bundled dashboard server and opens a browser. There are **no subcommands**; onboarding, Gateway detection, runtime connection, and team deployment all happen in the web UI. The MCP bins are not launched by humans; an external agent runtime spawns them to attach Clawboo's board, memory, tools, and team-chat surfaces over stdio.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## At a glance

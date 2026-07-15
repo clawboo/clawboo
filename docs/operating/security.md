@@ -176,7 +176,7 @@ Redaction is a safety net, not the primary control; the value patterns are an in
 
 The honest summary: Clawboo is single-tenant and local-first today. If you keep the loopback default you need none of the following; if you widen the bind, do all of it.
 
-1. **Prefer not to widen the bind.** For local use, leave `HOST`/`HOSTNAME` unset. The dashboard is loopback-only and no token is needed.
+1. **Prefer not to widen the bind.** For local use, leave `HOST` unset. The dashboard is loopback-only and no token is needed.
 2. **If you must reach it remotely, tunnel rather than bind wide.** An SSH tunnel or a reverse proxy that terminates TLS and forwards to `127.0.0.1:<port>` keeps the bind loopback and adds a real transport-security and authentication layer in front. This is the recommended path.
 3. **If you do bind a non-loopback interface, set `STUDIO_ACCESS_TOKEN`.** Use a long random token from the safe charset (`[A-Za-z0-9._~-]`). The boot warning exists to catch the case where you forget; do not run a non-loopback bind without it.
 4. **Terminate TLS in front of the dashboard** so the access cookie is sent with `Secure`. The gate only marks the cookie `Secure` when the request arrives over TLS (it detects this via `x-forwarded-proto: https`), so a terminating proxy that sets that header is what upgrades the cookie.
@@ -194,13 +194,13 @@ The trade-offs are equally plain: there is no multi-user authorization, the toke
 
 ## Boundaries and non-goals
 
-- **Single-tenant today.** There is no per-tenant isolation. The dormant `tenant_id` columns across the schema are a future seam; no per-tenant filtering or scoping is active in v0.2.1.
+- **Single-tenant today.** There is no per-tenant isolation. The dormant `tenant_id` columns across the schema are a future seam; no per-tenant filtering or scoping is active in v0.3.0.
 - **OpenClaw shared memory is registered globally.** Because OpenClaw agents are cross-team, Clawboo registers the shared [Memory](/concepts/memory) MCP server for the OpenClaw runtime at _global_ scope rather than per-run/per-team scope (the other four runtimes get per-run team scope). In a multi-tenant world that global registration would need narrowing; it is a documented multi-tenant deferral, not a leak in the single-tenant model Clawboo ships.
 - **Not a key-management service.** The vault stores one value per env-var, server-wide. Named profiles, per-team keys, and rotation tooling are future seams.
 - **Not multi-user.** The access gate is one shared secret with no accounts, roles, or scopes.
 
 <Note>
-These docs describe Clawboo **v0.2.1**, the current release.
+These docs describe Clawboo **v0.3.0**, the current release.
 </Note>
 
 ## See also
@@ -209,6 +209,6 @@ These docs describe Clawboo **v0.2.1**, the current release.
 - [Gateway and events](/concepts/gateway-and-events): the proxy handshake and event pipeline
 - [Connecting runtimes](/runtimes/connecting-runtimes): the connect/disconnect flow that writes the vault
 - [Memory](/concepts/memory): the shared-tier registration and its OpenClaw global-scope note
-- [Environment variables](/reference/environment-variables): `STUDIO_ACCESS_TOKEN`, `HOST`/`HOSTNAME`, `CLAWBOO_SECRETS_MASTER_KEY`
+- [Environment variables](/reference/environment-variables): `STUDIO_ACCESS_TOKEN`, `HOST`, `CLAWBOO_SECRETS_MASTER_KEY`
 - [Configuration](/reference/configuration): settings file and directory locations
 - [Glossary](/appendices/glossary): canonical term definitions
