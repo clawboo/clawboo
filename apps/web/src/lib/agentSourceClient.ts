@@ -24,7 +24,7 @@ import { useFleetStore, type AgentState } from '@/stores/fleet'
  *  native-first install correctly points at the teamless native Boo Zero instead
  *  of a leftover OpenClaw agent. */
 export async function refreshFleetFromRegistry(): Promise<number> {
-  const { agents: records, defaultId } = await listAgents()
+  const { agents: records, defaultId, mainKey } = await listAgents()
   const existing = new Map(useFleetStore.getState().agents.map((a) => [a.id, a]))
   useFleetStore.getState().hydrateAgents(
     records.map((r) => {
@@ -46,6 +46,9 @@ export async function refreshFleetFromRegistry(): Promise<number> {
     }),
   )
   useBooZeroStore.getState().setBooZeroAgentId(identifyBooZero(records, defaultId || undefined))
+  // The OpenClaw Gateway's own default agent id (distinct from the runtime-neutral
+  // defaultId) — lets the display layer hide it when it isn't the identified Boo Zero.
+  useBooZeroStore.getState().setGatewayMainAgentId(mainKey?.trim() || null)
   return records.length
 }
 

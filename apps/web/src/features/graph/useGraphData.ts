@@ -9,6 +9,8 @@ import { parseAgentsMd } from './parsers/parseAgentsMd'
 import { computeSpanningTree } from './computeSpanningTree'
 import { resolveTeamInternalLead } from '@/lib/resolveTeamLeader'
 import { resolveModelProvider } from '@/lib/modelProvider'
+import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
+import { isHiddenGatewayDefault } from '@/lib/hiddenSystemAgent'
 import { readAgentFile } from '@clawboo/control-client'
 import { fetchCapabilities, groupAgentCapabilities } from '@/lib/capabilitiesClient'
 import type { CapabilityRecord } from '@clawboo/capability-registry'
@@ -38,6 +40,18 @@ function capCategory(cap: CapabilityRecord): SkillCategory {
   if (cap.source === 'mcp-connector') return 'comm'
   if (cap.source === 'openclaw-extension') return 'web'
   return 'other'
+}
+
+// Label for the model orbital when clawboo doesn't know the agent's model
+// (codex/claude-code run on the account/SDK default; OpenClaw's model isn't
+// populated). The runtime GLYPH is rendered alongside by SkillNode.
+const RUNTIME_DEFAULT_MODEL_LABEL: Record<string, string> = {
+  codex: 'Account default',
+  'claude-code': 'SDK default',
+  openclaw: 'Gateway model',
+}
+function runtimeDefaultModelLabel(runtime?: string | null): string {
+  return (runtime && RUNTIME_DEFAULT_MODEL_LABEL[runtime]) || 'Default model'
 }
 
 // ─── useGraphData ─────────────────────────────────────────────────────────────
@@ -73,14 +87,30 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
   const teams = useTeamStore((s) => s.teams)
   const { setAgentFiles, setLoadingFiles, setFilesError, agentFiles, refreshKey } = useGraphStore()
+  // OpenClaw agents keep their model Gateway-side, so their model orbital falls
+  // back to this default (see the `openclawDefaultModel` param on buildGraphElements).
+  const openclawDefaultModel = useOpenclawDefaultModel()
+  // The identified Boo Zero + the OpenClaw Gateway's own default agent — used to
+  // hide the Gateway "main" system agent (see `isHiddenGatewayDefault`) while
+  // keeping a pure-OpenClaw Boo Zero (which IS the Gateway default) visible.
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  const gatewayMainAgentId = useBooZeroStore((s) => s.gatewayMainAgentId)
 
   // In atlas scope we ignore `selectedTeamId` and pull every agent into the
   // canvas. In team scope we filter to the selected team (null = no team
   // currently selected; show all as before).
   const filteredAgents = useMemo(() => {
-    if (scope === 'atlas') return agents
-    return selectedTeamId ? agents.filter((a) => a.teamId === selectedTeamId) : agents
-  }, [agents, selectedTeamId, scope])
+    const base =
+      scope === 'atlas'
+        ? agents
+        : selectedTeamId
+          ? agents.filter((a) => a.teamId === selectedTeamId)
+          : agents
+    // Hide the OpenClaw Gateway default ("main") when it isn't the identified Boo
+    // Zero — a teamless system agent, not a team member. Team-selected views
+    // already exclude it (it's teamless); this covers atlas + the no-team peek.
+    return base.filter((a) => !isHiddenGatewayDefault(a, gatewayMainAgentId, booZeroAgentId))
+  }, [agents, selectedTeamId, scope, gatewayMainAgentId, booZeroAgentId])
 
   // Resolve Boo Zero (universal team leader). When relevant (team is
   // selected in team-scope, or always in atlas-scope), we include Boo Zero
@@ -89,7 +119,6 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
   // appear on click (peacock-feather expand). Boo Zero is teamless in the
   // DB (`teamId === null`) so the per-team filter excludes it; this is
   // where we re-include it for graph purposes.
-  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const booZeroAgent = useMemo(
     () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
     [agents, booZeroAgentId],
@@ -248,6 +277,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
         scope,
         teamInternalLeadByTeamId,
         isAtlasRadial,
+        openclawDefaultModel,
       ),
     [
       agentStructureKey,
@@ -259,6 +289,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
       scope,
       teamInternalLeadByTeamId,
       isAtlasRadial,
+      openclawDefaultModel,
     ], // intentional: string keys + scalars + maps
   )
 
@@ -360,6 +391,17 @@ export function buildGraphElements(
    * and the existing path renderers run unchanged.
    */
   isAtlasRadial: boolean = false,
+  /**
+   * The OpenClaw Gateway's default model (`openclaw.json` →
+   * `agents.defaults.model.primary`). OpenClaw agents keep their model
+   * Gateway-side (not in the registry), so `agent.model` is null for them in
+   * thin-client mode — the model orbital falls back to this default so it shows
+   * the REAL model (the same value the agent-detail selector shows as
+   * "Default (…)") instead of a "Gateway model" placeholder. Native / coding
+   * runtimes are unaffected (no Gateway default applies to them). `null` when
+   * unknown → the orbital shows the neutral runtime-default label.
+   */
+  openclawDefaultModel: string | null = null,
 ): { rawNodes: GraphNode[]; rawEdges: GraphEdge[] } {
   const depEdges: GraphEdge[] = []
   const skillNodes: GraphNode[] = []
@@ -494,21 +536,43 @@ export function buildGraphElements(
   // get NO model orbital.
   for (const booNode of booNodes) {
     const data = booNode.data as BooNodeData
-    if (!data.model) continue
     const agentId = data.agentId
-    const { providerId, label } = resolveModelProvider(data.model, data.runtime)
     const nodeId = `skill-${agentId}-clawboo-model`
+    // Every Boo gets a model orbital so a click always reveals something. Known
+    // model → the provider brand + model label; otherwise (codex/claude-code
+    // account-or-SDK default) → the RUNTIME glyph + a "default" label.
+    //
+    // OpenClaw agents don't carry their model in the registry (it lives
+    // Gateway-side), so `data.model` is null for them in thin-client mode. Fall
+    // back to the Gateway's effective default model — the same value the
+    // agent-detail selector shows as "Default (…)" — so the orbital reads the
+    // REAL model instead of a "Gateway model" placeholder. `null` runtime is a
+    // legacy / un-stamped OpenClaw agent, so it takes the fallback too.
+    const isOpenClaw = data.runtime === 'openclaw' || data.runtime == null
+    const effectiveModel = data.model ?? (isOpenClaw ? openclawDefaultModel : null)
+    let name: string
+    let providerId: ReturnType<typeof resolveModelProvider>['providerId'] = null
+    let modelRuntime: string | null = null
+    if (effectiveModel) {
+      const resolved = resolveModelProvider(effectiveModel, data.runtime)
+      name = resolved.label
+      providerId = resolved.providerId
+    } else {
+      name = runtimeDefaultModelLabel(data.runtime)
+      modelRuntime = data.runtime ?? 'openclaw'
+    }
     skillNodes.push({
       id: nodeId,
       type: 'skill' as const,
       data: {
         skillId: 'clawboo-model',
-        name: label,
+        name,
         category: 'other',
-        description: `Current model: ${label}`,
+        description: modelRuntime ? 'Model managed by the runtime' : `Current model: ${name}`,
         agentIds: [agentId],
         isModel: true,
         providerId,
+        modelRuntime,
       } satisfies SkillNodeData,
       position: { x: 0, y: 0 },
     })

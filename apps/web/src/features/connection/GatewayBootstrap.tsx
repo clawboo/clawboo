@@ -369,7 +369,10 @@ async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number
     // Preserve existing teamId assignments — Gateway doesn't know about teams
     const existingTeamIds = new Map(useFleetStore.getState().agents.map((a) => [a.id, a.teamId]))
     // Load per-agent model overrides + exec configs in parallel
-    const [agentModels, execConfigs] = await Promise.all([fetchAgentModelMap(), fetchExecConfigMap()])
+    const [agentModels, execConfigs] = await Promise.all([
+      fetchAgentModelMap(),
+      fetchExecConfigMap(),
+    ])
     const mapped = result.agents.map((a) => ({
       id: a.id,
       name: a.identity?.name ?? a.name ?? a.id,
@@ -415,6 +418,9 @@ async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number
     // Remember the Gateway's own default agent so auto-migration leaves it teamless
     // (a system agent, not a user team member) — see `gatewayDefaultAgentId`.
     gatewayDefaultAgentId = result.defaultId?.trim() || null
+    // Also persist it for the display layer, which hides this Gateway system agent
+    // when it isn't the identified Boo Zero (see `isHiddenGatewayDefault`).
+    useBooZeroStore.getState().setGatewayMainAgentId(mainKey)
 
     // Clawboo-side display-name override for Boo Zero. The user's
     // Gateway agent name might be the literal slug "main" or a custom

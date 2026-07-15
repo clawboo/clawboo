@@ -31,6 +31,7 @@ import { useToastStore } from '@/stores/toast'
 import { AgentModelControl } from './AgentModelControl'
 import { useMiniGraphData } from './useMiniGraphData'
 import { useHermesModelGroups, useNativeModelGroups } from '@/lib/useOpenRouterModels'
+import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
 import { setAgentModel } from '@clawboo/control-client'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData } from '@/features/graph/types'
 
@@ -592,17 +593,8 @@ export function MiniGraph({ agentId }: { agentId: string }) {
   const nativeGroups = useNativeModelGroups()
   const hermesGroups = useHermesModelGroups()
 
-  // ── Default model (fetched once) ──────────────────────────────────────────
-  const [defaultModel, setDefaultModel] = useState<string | null>(null)
-
-  useEffect(() => {
-    fetch('/api/system/openclaw-config')
-      .then((r) => r.json())
-      .then((data: { config?: { agents?: { defaults?: { model?: { primary?: string } } } } }) => {
-        setDefaultModel(data?.config?.agents?.defaults?.model?.primary ?? null)
-      })
-      .catch(() => {})
-  }, [])
+  // ── Default model (fetched once, shared with the graph's model orbital) ────
+  const defaultModel = useOpenclawDefaultModel()
 
   const handleModelChange = useCallback(
     async (model: string | null) => {

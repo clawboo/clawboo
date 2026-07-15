@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { PROVIDER_BRAND, ProviderGlyph } from '@/features/onboarding/ProviderIcon'
+import { MarkGlyph, resolveRuntimeMark } from '@/features/runtimes/RuntimeBrand'
 import { AgentPickerDropdown } from '@/features/marketplace/AgentPickerDropdown'
 import { installSkillForAgent } from '../operations/installSkill'
 import { useGraphStore } from '../store'
@@ -77,8 +78,17 @@ export const SkillNode = memo(function SkillNode({
   data,
   dragging,
 }: NodeProps<Node<SkillNodeData, 'skill'>>) {
-  const { name, category, description, isVisible, isLeadership, isModel, providerId, available } =
-    data
+  const {
+    name,
+    category,
+    description,
+    isVisible,
+    isLeadership,
+    isModel,
+    providerId,
+    modelRuntime,
+    available,
+  } = data
   // Capability availability → greyed (opacity + grayscale), matching the
   // dashboard + the MCPToolsSection treatment. `undefined` = available.
   const greyed = available === false
@@ -88,10 +98,15 @@ export const SkillNode = memo(function SkillNode({
   // place of a lucide icon (see the icon render below). Its `Icon` fallback is a
   // generic model glyph, used only when the provider is unknown.
   const modelBrand = isModel && providerId ? PROVIDER_BRAND[providerId] : null
-  const modelColor = modelBrand
-    ? modelBrand.color === 'currentColor'
+  // No clawboo-known model → show the RUNTIME brand glyph instead (codex /
+  // claude-code / openclaw), so the model orbital still renders + expands.
+  const modelRuntimeMark =
+    isModel && !providerId && modelRuntime ? resolveRuntimeMark(modelRuntime) : null
+  const brandColor = modelBrand?.color ?? modelRuntimeMark?.color ?? null
+  const modelColor = brandColor
+    ? brandColor === 'currentColor'
       ? 'var(--foreground)'
-      : modelBrand.color
+      : brandColor
     : 'var(--category-other)'
   // Leadership orbital reads its visuals from a dedicated constant — the
   // `category` field is still set on the data (defaulted to `'other'` in
@@ -176,8 +191,17 @@ export const SkillNode = memo(function SkillNode({
               <span style={{ color, display: 'inline-flex' }} aria-hidden>
                 <ProviderGlyph id={providerId} size={33} />
               </span>
+            ) : modelRuntimeMark ? (
+              <span style={{ color, display: 'inline-flex' }} aria-hidden>
+                <MarkGlyph glyph={modelRuntimeMark.glyph} size={30} />
+              </span>
             ) : (
-              <Icon size={16} strokeWidth={1.75} aria-hidden style={{ color, userSelect: 'none' }} />
+              <Icon
+                size={16}
+                strokeWidth={1.75}
+                aria-hidden
+                style={{ color, userSelect: 'none' }}
+              />
             )}
           </div>
 

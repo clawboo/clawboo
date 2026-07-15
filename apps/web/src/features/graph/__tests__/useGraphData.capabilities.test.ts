@@ -124,4 +124,69 @@ describe('buildGraphElements — capability availability greying', () => {
     )
     expect((skill!.data as SkillNodeData).available).toBe(true)
   })
+
+  it('gives EVERY agent a model orbital (so every Boo expands), runtime-default when no model', () => {
+    // The fresh-mac symptom: codex/claude-code/openclaw agents (no clawboo-known
+    // model + no caps) had zero orbital children, so clicking them did nothing.
+    const withModel = makeAgent({
+      id: 'a1',
+      teamId: 't1',
+      model: 'claude-haiku-4.5',
+      runtime: 'clawboo-native',
+    })
+    const noModel = makeAgent({ id: 'a2', teamId: 't1', model: null, runtime: 'codex' })
+    const { rawNodes } = buildGraphElements([withModel, noModel], new Map(), [
+      makeTeam({ id: 't1' }),
+    ])
+    const modelNode = (id: string) =>
+      rawNodes.find((n) => n.id === `skill-${id}-clawboo-model`)?.data as SkillNodeData | undefined
+
+    // Both agents now get a model orbital — nothing is left with zero children.
+    expect(modelNode('a1')).toBeTruthy()
+    expect(modelNode('a2')).toBeTruthy()
+    // Known model → resolved via the provider (no runtime fallback).
+    expect(modelNode('a1')!.modelRuntime).toBeNull()
+    // No known model → the runtime glyph + a "default" label so it still expands.
+    expect(modelNode('a2')!.providerId).toBeNull()
+    expect(modelNode('a2')!.modelRuntime).toBe('codex')
+    expect(modelNode('a2')!.name).toBe('Account default')
+  })
+
+  it('resolves an OpenClaw agent\'s model orbital from the Gateway default (not "Gateway model")', () => {
+    // OpenClaw keeps its model Gateway-side, so `data.model` is null in
+    // thin-client mode. The `openclawDefaultModel` arg — the same value the
+    // agent-detail selector shows as "Default (…)" — makes the orbital resolve
+    // the real model + Anthropic glyph instead of the neutral "Gateway model" chip.
+    const openclaw = makeAgent({ id: 'a1', teamId: 't1', model: null, runtime: 'openclaw' })
+    const orbitalOf = (nodes: ReturnType<typeof buildGraphElements>['rawNodes']) =>
+      nodes.find((n) => n.id === 'skill-a1-clawboo-model')?.data as SkillNodeData | undefined
+
+    const { rawNodes } = buildGraphElements(
+      [openclaw],
+      new Map(),
+      [makeTeam({ id: 't1' })],
+      null,
+      null,
+      null,
+      'team',
+      null,
+      false,
+      'anthropic/claude-sonnet-4-6', // the Gateway default
+    )
+    const resolved = orbitalOf(rawNodes)
+    expect(resolved).toBeTruthy()
+    // Resolved via the provider — NOT the runtime-default fallback.
+    expect(resolved!.modelRuntime).toBeNull()
+    expect(resolved!.providerId).toBe('anthropic')
+    expect(resolved!.name).not.toBe('Gateway model')
+
+    // Without a default (unknown), it still falls back to the neutral chip.
+    const { rawNodes: noDefault } = buildGraphElements([openclaw], new Map(), [
+      makeTeam({ id: 't1' }),
+    ])
+    const fallback = orbitalOf(noDefault)
+    expect(fallback!.providerId).toBeNull()
+    expect(fallback!.modelRuntime).toBe('openclaw')
+    expect(fallback!.name).toBe('Gateway model')
+  })
 })

@@ -27,6 +27,7 @@ import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { useToastStore } from '@/stores/toast'
 import { confirm } from '@/stores/confirm'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
+import { isHiddenGatewayDefault } from '@/lib/hiddenSystemAgent'
 import { ThemeToggle } from '@/features/theme/ThemeToggle'
 import { aggregateTeamStatus } from '@/lib/teamStatus'
 import { getActivityVerb } from '@/lib/agentActivityVerb'
@@ -232,7 +233,9 @@ const PRIMARY_NAV: NavItem[] = [
 // System Health) so the sidebar stays short.
 // Approvals moved into the Board (a collapsible "Needs approval" column) + inline
 // above the chat composer, so the sidebar no longer carries a separate item.
-const SECONDARY_NAV: NavItem[] = [{ id: 'fleet', label: 'Fleet', icon: Gauge, subtitle: '(Overview)' }]
+const SECONDARY_NAV: NavItem[] = [
+  { id: 'fleet', label: 'Fleet', icon: Gauge, subtitle: '(Overview)' },
+]
 
 // One consistent nav row — neutral active surface + a brand-red active icon
 // (the premium sidebar pattern). Used for both nav sections.
@@ -457,6 +460,10 @@ export function AgentListColumn() {
   const selectedTeam = useTeamStore((s) =>
     s.selectedTeamId ? (s.teams.find((t) => t.id === s.selectedTeamId) ?? null) : null,
   )
+  // The identified Boo Zero + the OpenClaw Gateway's own default agent — used to
+  // hide the Gateway "main" system agent from the sidebar (see isHiddenGatewayDefault).
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
+  const gatewayMainAgentId = useBooZeroStore((s) => s.gatewayMainAgentId)
 
   const connectionStatus = useConnectionStore((s) => s.status)
   const client = useConnectionStore((s) => s.client)
@@ -488,7 +495,9 @@ export function AgentListColumn() {
 
   // Filter agents by team + search query
   const filtered = useMemo(() => {
-    let list = agents
+    // Hide the OpenClaw Gateway default ("main") when it isn't the identified Boo
+    // Zero — a teamless system agent, not a user team member.
+    let list = agents.filter((a) => !isHiddenGatewayDefault(a, gatewayMainAgentId, booZeroAgentId))
     if (selectedTeamId !== null) {
       list = list.filter((a) => a.teamId === selectedTeamId)
     }
@@ -497,7 +506,7 @@ export function AgentListColumn() {
       list = list.filter((a) => a.name.toLowerCase().includes(q))
     }
     return list
-  }, [agents, selectedTeamId, query])
+  }, [agents, selectedTeamId, query, gatewayMainAgentId, booZeroAgentId])
 
   const handleSelectAgent = useCallback(
     (agentId: string) => {
@@ -574,10 +583,7 @@ export function AgentListColumn() {
           `flex-1` instead anchors it to a clear top-half, with Create Boo
           and the global nav (Atlas, Marketplace, Approvals, etc.) all
           sitting at the bottom edge. */}
-      <div
-        className="flex-1 min-h-0 overflow-y-auto px-2 pb-2"
-        data-testid="fleet-agent-list"
-      >
+      <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2" data-testid="fleet-agent-list">
         {selectedTeam && filtered.length > 0 && (
           <>
             <GroupChatRow

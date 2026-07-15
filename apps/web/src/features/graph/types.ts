@@ -84,15 +84,23 @@ export interface SkillNodeData extends Record<string, unknown> {
   available?: boolean
   /**
    * When `true`, this synthesized orbital represents the agent's CURRENT LLM
-   * MODEL (not a capability). `SkillNode` renders the provider brand glyph +
+   * MODEL (not a capability). `SkillNode` renders a provider/runtime glyph +
    * model label and hides the Install affordance (like `isLeadership`). `name`
-   * carries the model display label; `providerId` picks the brand icon (null →
-   * a generic model glyph). Synthesized per-Boo in `useGraphData` for every
-   * agent with a known model; NOT a capability record. Prefix `clawboo-model-`.
+   * carries the model display label; `providerId` picks the brand icon.
+   * Synthesized per-Boo in `useGraphData` for EVERY agent (so every Boo has at
+   * least one orbital to reveal on click); NOT a capability record. Prefix
+   * `clawboo-model-`.
    */
   isModel?: boolean
-  /** The model's provider brand (for the ProviderIcon glyph); null = unknown → generic glyph. */
+  /** The model's provider brand (for the ProviderIcon glyph); null = no clawboo-known model. */
   providerId?: ProviderId | null
+  /**
+   * Set (in place of `providerId`) when clawboo doesn't know the agent's model —
+   * codex / claude-code run on their account/SDK default, and OpenClaw's model
+   * isn't populated. The chip then shows the RUNTIME glyph + a "default" label so
+   * the node still expands. Null for a real, resolved model.
+   */
+  modelRuntime?: string | null
 }
 
 export interface ResourceNodeData extends Record<string, unknown> {

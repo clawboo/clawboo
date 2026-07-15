@@ -6,6 +6,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useGraphStore } from '@/features/graph/store'
 import { buildGraphElements } from '@/features/graph/useGraphData'
+import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
 import type { GraphNode, GraphEdge } from '@/features/graph/types'
 
 // ─── useMiniGraphData ────────────────────────────────────────────────────────
@@ -22,6 +23,9 @@ export function useMiniGraphData(agentId: string): {
   const client = useConnectionStore((s) => s.client)
   const agents = useFleetStore((s) => s.agents)
   const refreshKey = useGraphStore((s) => s.refreshKey)
+  // OpenClaw agents keep their model Gateway-side — fall back to the Gateway
+  // default so the orbital agrees with the agent-detail selector's "Default (…)".
+  const openclawDefaultModel = useOpenclawDefaultModel()
 
   const [agentFiles, setAgentFiles] = useState<
     Map<string, { capabilities: CapabilityRecord[] | null; agentsMd: string | null }>
@@ -65,10 +69,24 @@ export function useMiniGraphData(agentId: string): {
   const { nodes, edges } = useMemo(() => {
     if (!agent || agentFiles.size === 0) return { nodes: [], edges: [] }
     // The runtime badge (on the Boo) and the model orbital both show in the
-    // MiniGraph too — the single-agent view mirrors the Atlas graph.
-    const { rawNodes, rawEdges } = buildGraphElements([agent], agentFiles)
+    // MiniGraph too — the single-agent view mirrors the Atlas graph. The trailing
+    // args are buildGraphElements' team/scope defaults; only the last
+    // (openclawDefaultModel) is non-default here so the OpenClaw model orbital
+    // resolves instead of showing "Gateway model".
+    const { rawNodes, rawEdges } = buildGraphElements(
+      [agent],
+      agentFiles,
+      [],
+      null,
+      null,
+      null,
+      'team',
+      null,
+      false,
+      openclawDefaultModel,
+    )
     return { nodes: rawNodes, edges: rawEdges }
-  }, [agent, agentFiles])
+  }, [agent, agentFiles, openclawDefaultModel])
 
   return { nodes, edges, isLoading }
 }
