@@ -6,16 +6,29 @@
 // exit (the reliable lifecycle backbone) if the stream didn't already produce
 // one. Codex reports no USD — the mapper marks cost estimated.
 //
-// The exact `codex exec --json` event field names are confirmed against the
-// installed CLI in the live smoke; the parser is tolerant of shape drift and the
-// exit-synthesized terminal keeps a run correct regardless.
+// The exact `codex exec --json` event field names — AND the `codex exec resume
+// [SESSION_ID] [PROMPT]` subcommand with the same `--json` / bypass flags — are
+// confirmed against the installed CLI (0.136); the parser is tolerant of shape
+// drift and the exit-synthesized terminal keeps a run correct regardless.
 //
-// The isolated home has no login of its own, so the user's `codex login` OAuth
-// (`~/.codex/auth.json`) is SEEDED into it — copy-only, never written back — so a
-// run authenticates with the account the user logged in with in their terminal.
+// HOMES. Two kinds, decided by `ctx.homeDir` (computed by the caller from the
+// adapter's integration plan — drivers never re-derive it):
+//   - MANAGED (persistent, per-identity — `~/.clawboo/runtimes/codex/<agentId>/`):
+//     what gives a Codex LEADER conversational continuity — the CLI's session
+//     files under $CODEX_HOME/sessions/ survive between turns so `ctx.resume`
+//     (a thread id) can `codex exec resume` them.
+//   - THROWAWAY (mkdtemp): the legacy per-run fallback when no homeDir is given.
+//
+// AUTH SEEDING (the Paperclip codex-local pattern). The user's `codex login`
+// OAuth (`~/.codex/auth.json`) is SEEDED into the run home — never written back.
+// For a MANAGED home the seed is an mtime FRESHNESS DECISION, not a blind copy:
+// the CLI rotates the refresh token INSIDE the managed home's auth.json, so
+// re-copying an older user file over it would replay a consumed refresh token
+// ("refresh_token_reused"). And a managed run FAILS FAST with an explicit error
+// when no usable credential is provisioned — never an unauthenticated request.
 
-import { copyFile, mkdtemp, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { copyFile, mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -40,6 +53,76 @@ function codexConfigToml(baseUrl: string, scope?: AttachScope): string {
     const url = mcpHttpUrl(baseUrl, server, scope)
     return `[mcp_servers.clawboo-${server}]\nurl = "${url}"\n`
   }).join('\n')
+}
+
+/**
+ * Does this auth.json hold a USABLE credential? Parse-validated (never a blind
+ * file-exists check — the Paperclip `hasUsableAuthPayload` pattern): usable means
+ * an OAuth `tokens` object carrying a non-empty access or refresh token, or a
+ * non-empty `OPENAI_API_KEY` field. Unreadable/unparseable ⇒ unusable.
+ * Exported for the driver tests.
+ */
+export function hasUsableCodexAuth(authPath: string): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(authPath, 'utf8')) as {
+      tokens?: { access_token?: unknown; refresh_token?: unknown } | null
+      OPENAI_API_KEY?: unknown
+    }
+    const t = parsed.tokens
+    if (t && typeof t === 'object') {
+      if (typeof t.access_token === 'string' && t.access_token.length > 0) return true
+      if (typeof t.refresh_token === 'string' && t.refresh_token.length > 0) return true
+    }
+    return typeof parsed.OPENAI_API_KEY === 'string' && parsed.OPENAI_API_KEY.length > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Seed the user's `codex login` OAuth into the run home. Copy-only — NEVER
+ * writes back to `~/.codex`. For a persistent (managed) home this is a
+ * FRESHNESS DECISION: the codex CLI rotates the refresh token inside the
+ * managed home's own auth.json, so the user's copy only replaces it when the
+ * user's file is NEWER (a re-login) or the managed one is missing/unusable —
+ * a blind re-copy would replay an already-consumed refresh token
+ * ("refresh_token_reused"). Best-effort: seeding failures never throw.
+ * Exported for the driver tests.
+ */
+export async function seedCodexAuth(codexHome: string): Promise<void> {
+  try {
+    const src = userCodexAuthPath()
+    if (!existsSync(src)) return
+    const dst = path.join(codexHome, 'auth.json')
+    if (existsSync(dst) && hasUsableCodexAuth(dst)) {
+      const [srcStat, dstStat] = await Promise.all([stat(src), stat(dst)])
+      if (srcStat.mtimeMs <= dstStat.mtimeMs) return // managed token is as fresh or fresher
+    }
+    await copyFile(src, dst)
+  } catch {
+    /* best-effort — auth seeding is not fatal to constructing the plan */
+  }
+}
+
+/**
+ * The `codex exec` argv, pure for tests. A `resume` (a prior thread id) turns the
+ * run into `codex exec resume <id> …` — same flags, confirmed against the 0.136
+ * CLI (`codex exec resume --help` lists --json + both bypass flags).
+ */
+export function buildCodexExecArgs(opts: {
+  prompt: string
+  model?: string | null
+  resume?: string | null
+}): string[] {
+  return [
+    'exec',
+    ...(opts.resume ? ['resume', opts.resume] : []),
+    '--json',
+    '--dangerously-bypass-approvals-and-sandbox',
+    '--skip-git-repo-check',
+    ...(opts.model ? ['--model', opts.model] : []),
+    opts.prompt,
+  ]
 }
 
 /** Mutable accumulators a Codex run threads through line parsing → close. */
@@ -149,16 +232,30 @@ export function createCodexDriver(opts: StartOpts, ctx: RuntimeRunContext): Code
 
   return createSpawnDriver<CodexNativeEvent>({
     async resolve() {
-      const codexHome = await mkdtemp(path.join(os.tmpdir(), 'clawboo-codex-home-'))
+      // MANAGED (persistent, per-identity) home when the caller resolved one from
+      // the adapter's integration plan; the legacy throwaway mkdtemp otherwise.
+      const managed = Boolean(ctx.homeDir)
+      const codexHome =
+        ctx.homeDir ?? (await mkdtemp(path.join(os.tmpdir(), 'clawboo-codex-home-')))
+      if (managed) await mkdir(codexHome, { recursive: true, mode: 0o700 })
       // Seed the user's ChatGPT-OAuth login so the run authenticates with their
-      // `codex login` account (the isolated home starts empty). Copy-if-present;
-      // never write back to ~/.codex. If absent, the run falls back to whatever
-      // ctx.apiKeyEnv provides (or fails with a clear auth error).
-      try {
-        const src = userCodexAuthPath()
-        if (existsSync(src)) await copyFile(src, path.join(codexHome, 'auth.json'))
-      } catch {
-        /* best-effort — auth seeding is not fatal to constructing the plan */
+      // `codex login` account. Freshness-aware for a managed home (see seedCodexAuth);
+      // never writes back to ~/.codex.
+      await seedCodexAuth(codexHome)
+      // FAIL-FAST guard (managed homes only — the Paperclip codex-local pattern):
+      // no usable provisioned credential + no API key env ⇒ an explicit error the
+      // engine can reflect, never an unauthenticated request with a cryptic 401.
+      // The throwaway path keeps its historic lenient behavior (codex surfaces its
+      // own auth error), so nothing else changes shape.
+      if (
+        managed &&
+        !hasUsableCodexAuth(path.join(codexHome, 'auth.json')) &&
+        Object.keys(ctx.apiKeyEnv ?? {}).length === 0
+      ) {
+        throw new Error(
+          `no Codex credentials provisioned for managed home ${codexHome} — ` +
+            'run `codex login` in your terminal, then retry',
+        )
       }
       if (ctx.mcpBaseUrl) {
         // Sanity: buildAttachConfig stays the source of truth for the URLs.
@@ -178,14 +275,13 @@ export function createCodexDriver(opts: StartOpts, ctx: RuntimeRunContext): Code
       const model = ctx.model ?? opts.model
       // Headless: emit JSONL events; the worktree is our isolation, so bypass
       // Codex's own sandbox/approval prompts; the worktree is already a git repo.
-      const args = [
-        'exec',
-        '--json',
-        '--dangerously-bypass-approvals-and-sandbox',
-        '--skip-git-repo-check',
-        ...(model ? ['--model', model] : []),
+      // A prior thread id (ctx.resume) continues that session via `exec resume` —
+      // only meaningful for a managed home, whose sessions/ dir persists.
+      const args = buildCodexExecArgs({
         prompt,
-      ]
+        model,
+        resume: managed ? (ctx.resume ?? null) : null,
+      })
       return {
         // Resolve to an absolute path (PATH first, then the user-install dirs) so
         // a shell-free spawn finds it on Windows and the resolved extension drives

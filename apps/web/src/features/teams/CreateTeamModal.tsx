@@ -14,7 +14,13 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { createAgent } from '@/lib/createAgent'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
-import { fetchRegistryHealth, fetchRuntimes, type RuntimeStatus } from '@clawboo/control-client'
+import {
+  fetchBooZeroOverride,
+  fetchRegistryHealth,
+  fetchRuntimes,
+  setBooZeroOverride,
+  type RuntimeStatus,
+} from '@clawboo/control-client'
 import {
   agentRuntimeOptions,
   resolveDefaultRuntime,
@@ -128,13 +134,16 @@ interface CreateTeamModalProps {
   /** Whether the pick step offers "Start from scratch". Defaults to true;
    *  onboarding disables it (a blank team would strand the first-run user). */
   allowStartFromScratch?: boolean
-  /** Onboarding: default EVERY agent to Clawboo Native regardless of the catalog's
-   *  source rule (which suggests OpenClaw for a marketplace team). The wizard is the
-   *  native-first spine and the provider key just entered is its only guaranteed
-   *  runtime; without this, a first-run user with a reachable Gateway silently
-   *  deploys their first team onto OpenClaw. The per-agent picker still offers every
-   *  connected runtime, so this is a default, not a lock. */
-  preferNativeRuntime?: boolean
+  /** Onboarding: default EVERY agent to THIS runtime regardless of the catalog's
+   *  source rule (which suggests OpenClaw for a marketplace team). The wizard passes
+   *  its primary connect choice — `'clawboo-native'` (a provider key) or `'codex'`
+   *  (Sign in with ChatGPT) — the only runtime guaranteed connected at that point;
+   *  without this, a first-run user with a reachable Gateway silently deploys their
+   *  first team onto OpenClaw. The per-agent picker still offers every connected
+   *  runtime, so this is a default, not a lock. A codex-preferred deploy also
+   *  designates an explicit team lead (see the deploy loop) because a codex-only
+   *  install has no universal Boo Zero to coordinate a leaderless team. */
+  preferRuntime?: 'clawboo-native' | 'codex'
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -147,7 +156,7 @@ export function CreateTeamModal({
   startBlank,
   presatisfyOnboardingGate = false,
   allowStartFromScratch = true,
-  preferNativeRuntime = false,
+  preferRuntime,
 }: CreateTeamModalProps) {
   const client = useConnectionStore((s) => s.client)
   const connStatus = useConnectionStore((s) => s.status)
@@ -316,7 +325,7 @@ export function CreateTeamModal({
   )
 
   /** The catalog "chef's suggestion" for an agent (before availability degradation):
-   *  onboarding's `preferNativeRuntime` → its own `suggestedRuntime` (unpopulated
+   *  onboarding's `preferRuntime` → its own `suggestedRuntime` (unpopulated
    *  today) → the team `defaultRuntime` → the source rule (marketplace → OpenClaw,
    *  blank → Native). */
   const suggestedFor = useCallback(
@@ -325,9 +334,9 @@ export function CreateTeamModal({
         agentSuggested: getAgent(agentCatalogId)?.suggestedRuntime,
         teamDefault: (selectedProfile as TeamTemplate | null)?.defaultRuntime,
         isMarketplaceTeam,
-        preferNative: preferNativeRuntime,
+        prefer: preferRuntime,
       }),
-    [selectedProfile, isMarketplaceTeam, preferNativeRuntime],
+    [selectedProfile, isMarketplaceTeam, preferRuntime],
   )
   /** The resolved default = the suggestion degraded to Native when unavailable;
    *  `.degradedFrom` is non-null when it was degraded (drives the inline note). */
@@ -536,6 +545,9 @@ export function CreateTeamModal({
       const universalLeaderName = booZeroAgent?.name ?? null
 
       let leaderAgentId: string | null = null
+      // The first successfully-created agent — the explicit lead a codex-preferred
+      // (ChatGPT-subscription) deploy designates when no genuine leader role exists.
+      let firstCreatedAgentId: string | null = null
       const failedAgents: string[] = []
       let createdCount = 0
 
@@ -665,6 +677,7 @@ export function CreateTeamModal({
         // leadership role (effectiveLeaderAgent non-null). No genuine leader ⇒
         // leaderAgentId stays null and the universal Boo Zero coordinates.
         if (effectiveLeaderAgent && agent.id === effectiveLeaderAgent.id) leaderAgentId = agentId
+        if (!firstCreatedAgentId) firstCreatedAgentId = agentId
 
         // Assign the successfully-created agent to the team (best-effort).
         try {
@@ -681,6 +694,13 @@ export function CreateTeamModal({
       // No forced fallback: leaderAgentId stays null unless a genuine leadership role
       // was detected (and created). Boo Zero universal-leads either way — the server
       // resolves it before leaderAgentId — so a leaderless team is fully functional.
+      //
+      // EXCEPT a codex-preferred (ChatGPT-subscription) deploy: that install has NO
+      // universal Boo Zero to fall back on (the native one needs a provider key, the
+      // OpenClaw one needs a Gateway), so `resolveLeaderId` would land on the
+      // implicit first-member fallback. Designate the lead EXPLICITLY instead —
+      // visible in the UI, deterministic on the server.
+      if (preferRuntime === 'codex' && !leaderAgentId) leaderAgentId = firstCreatedAgentId
 
       // Nothing deployed — surface it. The (empty) team row stays so the user can
       // retry or delete it.
@@ -709,6 +729,23 @@ export function CreateTeamModal({
           useTeamStore.getState().updateTeam(team.id, { leaderAgentId })
         } catch {
           // leader assignment is non-fatal
+        }
+      }
+
+      // Codex-preferred deploy: promote the designated lead to the UNIVERSAL Boo
+      // Zero via the override. This is what makes `defaultId` resolve → the
+      // "Led by" badge renders, the client identifies Boo Zero deterministically,
+      // and the server leads every team with the Codex agent. A DELIBERATE
+      // existing Boo Zero (a prior override, or a native one from a connected
+      // native key) is never stomped — but the weak OpenClaw `main` fallback IS
+      // outranked (an OpenClaw `main` leading a codex team is the exact
+      // "unresponsive first team" failure class the first-team fix closed).
+      if (preferRuntime === 'codex' && leaderAgentId) {
+        try {
+          const { tier } = await fetchBooZeroOverride()
+          if (tier !== 'override' && tier !== 'native') await setBooZeroOverride(leaderAgentId)
+        } catch {
+          // best-effort — `resolveLeaderId` still falls back to team.leaderAgentId
         }
       }
 

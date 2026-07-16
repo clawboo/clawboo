@@ -11,6 +11,7 @@ import {
   ArrowRight,
   Check,
   ChevronDown,
+  Copy,
   ExternalLink,
   Eye,
   EyeOff,
@@ -25,10 +26,11 @@ import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import {
   connectRuntime,
   fetchProviderModelsWithKey,
+  fetchRuntimes,
   healthcheckNativeKey,
   setNativeLeaderModel,
 } from '@clawboo/control-client'
-import { getKeyUrl } from '@/features/runtimes/runtimeCatalog'
+import { getKeyUrl, RUNTIME_CATALOG } from '@/features/runtimes/runtimeCatalog'
 import {
   findNativeModelLabel,
   nativeLeaderModelFor,
@@ -74,6 +76,39 @@ const CONNECT_SUBTITLE =
 
 type TestState = { phase: 'idle' | 'testing' | 'ok' | 'fail'; message?: string }
 
+/** A copy-able terminal command line (the RuntimeConnectionCard login-command idiom). */
+function CommandRow({
+  command,
+  copied,
+  onCopy,
+}: {
+  command: string
+  copied?: boolean
+  onCopy?: () => void
+}) {
+  return (
+    <div
+      className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+      style={{ background: 'var(--code-block-bg)' }}
+    >
+      <code className="font-mono text-[12.5px]" style={{ color: 'var(--foreground)' }}>
+        {command}
+      </code>
+      {onCopy ? (
+        <button
+          type="button"
+          aria-label="Copy command"
+          onClick={onCopy}
+          className="rounded-md p-1 text-foreground/40 transition-colors hover:text-foreground/70"
+          style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
+        >
+          {copied ? <Check size={14} /> : <Copy size={14} />}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 export interface ConfigureNativeStepProps {
   /** Fired with the connected provider + chosen model once the key is stored in
    *  the vault. The wizard then advances to real team selection. */
@@ -92,6 +127,34 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
   const [test, setTest] = useState<TestState>({ phase: 'idle' })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The OpenAI card offers TWO auth methods: Sign in with ChatGPT (Recommended —
+  // uses the subscription via the Codex runtime, no API key) and an API key. The
+  // ChatGPT method is the default: it's the economical path, and OpenAI is the one
+  // provider where "I pay for ChatGPT" ≠ "I have an API key". Codex login is
+  // TERMINAL-only (`codex login`) — clawboo never automates the OAuth exchange; the
+  // panel shows the command and probes `connectionState` until it reads `ready`.
+  const [authMethod, setAuthMethod] = useState<'chatgpt' | 'api-key'>('chatgpt')
+  const [codexPhase, setCodexPhase] = useState<
+    'checking' | 'not-installed' | 'needs-login' | 'ready'
+  >('checking')
+  const [loginCopied, setLoginCopied] = useState(false)
+  const chatgptActive = !useOllama && provider === 'openai' && authMethod === 'chatgpt'
+
+  const refreshCodex = useCallback(async () => {
+    setCodexPhase('checking')
+    const statuses = await fetchRuntimes() // defensive: [] on any failure
+    const codex = statuses.find((s) => s.id === 'codex')
+    if (!codex || codex.installed === false) {
+      setCodexPhase('not-installed')
+      return
+    }
+    setCodexPhase(codex.connectionState === 'ready' ? 'ready' : 'needs-login')
+  }, [])
+
+  // Probe the Codex login whenever the ChatGPT method becomes active.
+  useEffect(() => {
+    if (chatgptActive) void refreshCodex()
+  }, [chatgptActive, refreshCodex])
   // The chosen leader model (native-format id). Defaults to the provider's strongest
   // curated pick; the seed uses it for the starter leader AND the universal Boo Zero.
   const [model, setModel] = useState<string>(() => nativeLeaderModelFor('anthropic'))
@@ -157,7 +220,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
   const placeholder =
     moreProvider?.placeholder ?? PROVIDERS.find((p) => p.id === provider)?.placeholder ?? 'sk-…'
   const keyUrl = moreProvider?.keyUrl ?? getKeyUrl(provider)
-  const canSubmit = useOllama || apiKey.trim().length > 0
+  const canSubmit = useOllama || (chatgptActive ? codexPhase === 'ready' : apiKey.trim().length > 0)
 
   const resetTest = useCallback(() => setTest({ phase: 'idle' }), [])
 
@@ -184,6 +247,14 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || submitting) return
+    // The ChatGPT method: Codex is ALREADY connected (the user's own `codex login`,
+    // verified via the status probe) — there is no key to store and no native leader
+    // model to record (Codex runs the ChatGPT account default). Just advance with
+    // 'codex' as the primary so the team deploy defaults every agent to it.
+    if (chatgptActive) {
+      onConnected('codex', '')
+      return
+    }
     setSubmitting(true)
     setError(null)
     // 1. Store the key in the encrypted vault (the multi-provider native slot).
@@ -199,7 +270,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
     setSubmitting(false)
     // 3. Advance to real team selection (the next step deploys a real team).
     onConnected(effectiveProvider, model)
-  }, [canSubmit, submitting, apiKey, effectiveProvider, model, onConnected])
+  }, [canSubmit, submitting, chatgptActive, apiKey, effectiveProvider, model, onConnected])
 
   return (
     <OnboardingScreen
@@ -347,8 +418,149 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
         ) : null}
       </div>
 
-      {/* API key (hidden when using Ollama) */}
-      {!useOllama ? (
+      {/* OpenAI auth method — API key vs Sign in with ChatGPT (Recommended: the
+          economical path; a ChatGPT subscription is NOT an API key). The ChatGPT
+          method connects the CODEX runtime via the user's own terminal `codex
+          login` — clawboo never automates the OAuth exchange. */}
+      {!useOllama && provider === 'openai' ? (
+        <div
+          className="mt-5 grid grid-cols-2 gap-3"
+          role="radiogroup"
+          aria-label="OpenAI auth method"
+        >
+          {[
+            {
+              id: 'chatgpt' as const,
+              title: 'Sign in with ChatGPT',
+              sub: 'Uses your ChatGPT subscription · no API key needed',
+              recommended: true,
+            },
+            {
+              id: 'api-key' as const,
+              title: 'API key',
+              sub: 'OpenAI Platform billing',
+              recommended: false,
+            },
+          ].map((m) => {
+            const active = authMethod === m.id
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                data-testid={`native-auth-${m.id}`}
+                onClick={() => setAuthMethod(m.id)}
+                className={[
+                  'flex flex-col items-start gap-1 rounded-2xl border p-4 text-left',
+                  'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                  active
+                    ? ''
+                    : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
+                ].join(' ')}
+                style={{
+                  cursor: 'pointer',
+                  ...(active
+                    ? {
+                        borderColor: 'var(--primary)',
+                        background: 'rgb(var(--primary-rgb) / 0.05)',
+                        boxShadow: '0 0 0 1px var(--primary)',
+                      }
+                    : {}),
+                }}
+              >
+                <span className="flex items-center gap-2">
+                  <span
+                    className="text-[13px] font-semibold"
+                    style={{ color: 'var(--foreground)' }}
+                  >
+                    {m.title}
+                  </span>
+                  {m.recommended ? (
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                      style={{ background: 'rgb(var(--mint-rgb) / 0.14)', color: 'var(--mint)' }}
+                    >
+                      Recommended
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-[11.5px] leading-snug" style={{ color: muted(0.5) }}>
+                  {m.sub}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+
+      {/* Sign in with ChatGPT — the Codex login panel. Terminal-login + Re-check
+          (the exact oauth pattern RuntimeConnectionCard ships in Settings). */}
+      {chatgptActive ? (
+        <div className="mt-5 flex flex-col gap-2.5" data-testid="native-chatgpt-panel">
+          {codexPhase === 'checking' ? (
+            <p className="flex items-center gap-2 text-[13px]" style={{ color: muted(0.55) }}>
+              <Loader2 size={13} className="animate-spin" /> Checking your Codex sign-in…
+            </p>
+          ) : codexPhase === 'ready' ? (
+            <p
+              className="flex items-center gap-1.5 text-[13.5px] font-medium"
+              style={{ color: 'var(--mint)' }}
+              data-testid="native-chatgpt-ready"
+            >
+              <Check size={15} /> Signed in with ChatGPT — your team will run on your subscription.
+            </p>
+          ) : (
+            <>
+              {codexPhase === 'not-installed' ? (
+                <FormattedAlert tone="info">
+                  Install the Codex CLI first, then sign in with your ChatGPT account. Both run in
+                  your terminal.
+                </FormattedAlert>
+              ) : (
+                <FormattedAlert tone="info">
+                  Codex uses your own terminal sign-in. Run the command below, then re-check.
+                </FormattedAlert>
+              )}
+              {codexPhase === 'not-installed' ? (
+                <CommandRow
+                  command={RUNTIME_CATALOG.codex.installCommand ?? 'npm install -g @openai/codex'}
+                />
+              ) : null}
+              <CommandRow
+                command={RUNTIME_CATALOG.codex.loginCommand ?? 'codex login'}
+                copied={loginCopied}
+                onCopy={() => {
+                  void navigator.clipboard?.writeText(
+                    RUNTIME_CATALOG.codex.loginCommand ?? 'codex login',
+                  )
+                  setLoginCopied(true)
+                  setTimeout(() => setLoginCopied(false), 1500)
+                }}
+              />
+              <div>
+                <button
+                  type="button"
+                  data-testid="native-chatgpt-recheck"
+                  onClick={() => void refreshCodex()}
+                  className="inline-flex items-center gap-1.5 text-[13px] font-medium underline-offset-4 transition-colors hover:underline"
+                  style={{
+                    color: muted(0.55),
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Re-check
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {/* API key (hidden when using Ollama or the ChatGPT sign-in method) */}
+      {!useOllama && !chatgptActive ? (
         <div className="mt-5 flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <label
@@ -439,15 +651,17 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
             ) : null}
           </div>
         </div>
-      ) : (
+      ) : useOllama ? (
         <p className="mt-5 text-[13px] leading-relaxed" style={{ color: muted(0.55) }}>
           No key needed. Clawboo will run your agents on a local Ollama model. Make sure Ollama is
           running before you continue.
         </p>
-      )}
+      ) : null}
 
-      {/* Model — the leader model for this provider (used for the starter team + Boo Zero). */}
-      {modelOptions.length > 0 ? (
+      {/* Model — the leader model for this provider (used for the starter team + Boo
+          Zero). Hidden for the ChatGPT method: Codex runs the account default, and
+          showing a picker whose choice can't take effect would mislead. */}
+      {modelOptions.length > 0 && !chatgptActive ? (
         <div className="mt-5 flex flex-col gap-2">
           <span
             className="font-mono text-[11px] uppercase tracking-[0.14em]"

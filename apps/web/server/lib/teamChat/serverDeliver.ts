@@ -176,7 +176,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
    *  lifecycle is already emitted by `serverBoardClient`; this covers the per-run
    *  runtime detail. Best-effort (`emitEvent` never throws). Benefits every runtime,
    *  incl. native (which previously emitted nothing from this drain). */
-  function emitRunObs(sessionKey: string, agentId: string, runtime: string | null, ev: RuntimeEvent): void {
+  function emitRunObs(
+    sessionKey: string,
+    agentId: string,
+    runtime: string | null,
+    ev: RuntimeEvent,
+  ): void {
     if (ev.kind !== 'tool-call' && ev.kind !== 'tool-result' && ev.kind !== 'error') return
     const taskId = taskForSession(sessionKey)
     const envelope = {
@@ -239,9 +244,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
        *  into the input-token ESTIMATE so an OpenClaw / no-USD run's cost reflects its
        *  real prompt size, not just the short task text. */
       contextChars: number
-      /** The native leader session-resume pointer key to update on the terminal, or
-       *  null when this run is not an eligible native leader/user-facing team turn. */
+      /** The leader session-resume pointer key to update on the terminal, or
+       *  null when this run is not an eligible leader/user-facing team turn. */
       resumePointerKey: string | null
+      /** True when THIS run was started with a resume handle (ctx.resume) — drives
+       *  the stale-pointer self-heal: a FAILED resumed run clears the pointer so the
+       *  next turn starts fresh instead of looping through identical failures
+       *  (codex `exec resume <unknown-id>` is a hard exit-1). */
+      resumeAttempted?: boolean
     },
   ): Promise<void> {
     let sawTerminal = false
@@ -330,14 +340,27 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // would race: a rapidly-sent message 2 would read the stale pointer and resume
           // message 0's transcript, dropping this turn. The harness already awaited
           // saveSessionTranscript before emitting `done`, so the session file exists.
-          // Non-null resumePointerKey ⇒ an eligible native leader / user-facing team turn.
+          // Non-null resumePointerKey ⇒ an eligible leader / user-facing team turn.
           if (obs.resumePointerKey && adapter.sessionCodec) {
-            try {
-              const blob = await adapter.sessionCodec.serialize(run)
-              const sid = (JSON.parse(blob) as { sessionId?: string | null }).sessionId
-              if (sid) setSetting(db, obs.resumePointerKey, sid)
-            } catch {
-              // A missing/unparseable id just means the next turn starts fresh.
+            if (ev.reason !== 'success' && obs.resumeAttempted) {
+              // Stale-pointer self-heal (structural, mirrors executorRunner's
+              // clear-on-failed-resume): a FAILED turn that TRIED to resume most
+              // likely holds a dead handle — codex `exec resume <unknown-id>` is a
+              // hard exit-1 — so writing it back would loop every subsequent turn
+              // through the same failure. Clear it; the next turn starts fresh.
+              try {
+                setSetting(db, obs.resumePointerKey, '')
+              } catch {
+                /* best-effort */
+              }
+            } else {
+              try {
+                const blob = await adapter.sessionCodec.serialize(run)
+                const sid = (JSON.parse(blob) as { sessionId?: string | null }).sessionId
+                if (sid) setSetting(db, obs.resumePointerKey, sid)
+              } catch {
+                // A missing/unparseable id just means the next turn starts fresh.
+              }
             }
           }
         }
@@ -440,6 +463,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           let adapter: RuntimeAdapter
           let homeKind = 'ephemeral'
           let homeDir: string | null = null
+          // The resume handle THIS run was started with (ctx.resume) — drives the
+          // drain's stale-pointer self-heal on a failed resumed run.
+          let resumeHandle: string | null = null
           if (makeAdapterForAgent) {
             // Test path: the adapter is injected; the home mutex is bypassed. The
             // connected mutex still engages when a seeded row + a connected-caps adapter
@@ -455,6 +481,22 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             } catch {
               // best-effort — treat as ephemeral
             }
+            // Mirror production's home resolution + pointer READ so the leader-
+            // continuity plumbing (pointer write, stale-pointer self-heal) is
+            // exercisable through the seam — the injected adapter itself never
+            // touches the path or consumes a ctx.
+            homeDir =
+              homeKind === 'persistent'
+                ? runtimeIdentityHomePath(resolvedRuntime ?? adapter.id, targetAgentId)
+                : null
+            resumeHandle = teamResumeEligible({
+              runtime: resolvedRuntime,
+              homeDir,
+              isTeamSession: isTeamSessionKey(targetSessionKey),
+              isTaskRun,
+            })
+              ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId)) || null
+              : null
           } else {
             const runtime = resolvedRuntime
             // native + the coding runtimes (claude-code / codex / hermes) via
@@ -516,12 +558,18 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               // reads its OWN config (no top-level `model`), so scope to non-native.
               const codingModel =
                 runtime !== NATIVE_RUNTIME ? parseCodingModelConfig(row?.execConfig ?? null) : null
+              resumeHandle = teamResumeId
               const ctx: RuntimeRunContext = {
                 model: codingModel?.model ?? null,
                 ...(codingModel?.provider ? { providerHint: codingModel.provider } : {}),
                 resume: teamResumeId,
                 mcpBaseUrl,
-                memoryScope: { teamId, agentId: targetAgentId },
+                // `delegate: true` = THIS run is orchestrator-driven, so the engine IS
+                // observing its tool-calls — it rides the TeamChat attach URL and
+                // exposes the `team_delegate` signal tool (how a coding-runtime LEADER
+                // delegates; the engine's DELEGATE_TOOL_NAME_RE branch turns the call
+                // into a board task). executorRunner runs never set it.
+                memoryScope: { teamId, agentId: targetAgentId, delegate: true },
                 ...(homeDir ? { homeDir } : {}),
                 ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
               }
@@ -586,6 +634,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               message,
               contextChars: teamContext ? teamContext.length : 0,
               resumePointerKey,
+              resumeAttempted: resumeHandle != null,
             })
           }
 

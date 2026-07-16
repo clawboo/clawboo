@@ -97,9 +97,7 @@ describe('ConfigureNativeStep', () => {
 
     // Advances with the connected provider + the chosen leader model (default =
     // the provider's strongest).
-    await waitFor(() =>
-      expect(onConnected).toHaveBeenCalledWith('anthropic', 'claude-sonnet-5'),
-    )
+    await waitFor(() => expect(onConnected).toHaveBeenCalledWith('anthropic', 'claude-sonnet-5'))
 
     // The key rides the connect request (its single legitimate destination)…
     expect(connectBody).toEqual({ apiKey: SECRET, provider: 'anthropic' })
@@ -135,5 +133,115 @@ describe('ConfigureNativeStep', () => {
     await userEvent.click(screen.getByTestId('native-continue'))
     await waitFor(() => expect(onConnected).toHaveBeenCalledWith('ollama', 'llama3.2'))
     expect(connectBody).toEqual({ apiKey: '', provider: 'ollama' })
+  })
+
+  // Sign in with ChatGPT — the Codex subscription path on the OpenAI card. Codex
+  // login is TERMINAL-only: the panel probes GET /api/runtimes for the codex
+  // connectionState and never automates the OAuth exchange. Continue must gate on
+  // a verified `ready` probe, and the codex path must NEVER touch the native
+  // connect/model routes (there is no key to store).
+  describe('Sign in with ChatGPT (OpenAI card)', () => {
+    const codexRuntimes = (over: Record<string, unknown>) =>
+      http.get('/api/runtimes', () =>
+        HttpResponse.json({ runtimes: [{ id: 'codex', installed: true, ...over }] }),
+      )
+
+    it('is the DEFAULT method on the OpenAI card, carries the Recommended chip, and hides the key + model fields; no method cards on other providers', async () => {
+      server.use(codexRuntimes({ connectionState: 'needs-login' }))
+      render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+      // Anthropic (default provider) shows no auth-method selector.
+      expect(screen.queryByTestId('native-auth-chatgpt')).not.toBeInTheDocument()
+      await userEvent.click(screen.getByTestId('native-provider-openai'))
+      // ChatGPT is pre-selected + Recommended (the economical/subscription framing).
+      expect(screen.getByTestId('native-auth-chatgpt')).toHaveAttribute('aria-checked', 'true')
+      expect(screen.getByTestId('native-auth-api-key')).toHaveAttribute('aria-checked', 'false')
+      expect(screen.getByText('Recommended')).toBeInTheDocument()
+      expect(screen.getByText(/no API key needed/i)).toBeInTheDocument()
+      // The key field + model picker are the api-key method's UI — hidden here.
+      expect(screen.queryByTestId('native-api-key')).not.toBeInTheDocument()
+      expect(screen.queryByText('Model')).not.toBeInTheDocument()
+      // Not signed in yet → Continue stays disabled.
+      await screen.findByTestId('native-chatgpt-panel')
+      expect(screen.getByText('codex login')).toBeInTheDocument()
+      expect(screen.getByTestId('native-continue')).toBeDisabled()
+    })
+
+    it('not-installed shows the install command alongside the login command', async () => {
+      server.use(http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [] })))
+      render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+      await userEvent.click(screen.getByTestId('native-provider-openai'))
+      expect(await screen.findByText('npm install -g @openai/codex')).toBeInTheDocument()
+      expect(screen.getByText('codex login')).toBeInTheDocument()
+      expect(screen.getByTestId('native-continue')).toBeDisabled()
+    })
+
+    it('Re-check re-probes: needs-login → ready enables Continue', async () => {
+      let calls = 0
+      server.use(
+        http.get('/api/runtimes', () => {
+          calls += 1
+          return HttpResponse.json({
+            runtimes: [
+              {
+                id: 'codex',
+                installed: true,
+                connectionState: calls > 1 ? 'ready' : 'needs-login',
+              },
+            ],
+          })
+        }),
+      )
+      render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+      await userEvent.click(screen.getByTestId('native-provider-openai'))
+      await userEvent.click(await screen.findByTestId('native-chatgpt-recheck'))
+      await screen.findByTestId('native-chatgpt-ready')
+      expect(screen.getByTestId('native-continue')).toBeEnabled()
+    })
+
+    it('Continue on a ready sign-in fires onConnected("codex", "") WITHOUT calling the native connect or model routes', async () => {
+      const onConnected = vi.fn()
+      let connectCalled = false
+      let modelCalled = false
+      server.use(
+        codexRuntimes({ connectionState: 'ready' }),
+        http.post('/api/runtimes/clawboo-native/connect', () => {
+          connectCalled = true
+          return HttpResponse.json({ ok: true })
+        }),
+        http.post('/api/onboarding/native-leader-model', () => {
+          modelCalled = true
+          return HttpResponse.json({ ok: true })
+        }),
+      )
+      render(<ConfigureNativeStep onConnected={onConnected} onBack={vi.fn()} />)
+      await userEvent.click(screen.getByTestId('native-provider-openai'))
+      await screen.findByTestId('native-chatgpt-ready')
+      await userEvent.click(screen.getByTestId('native-continue'))
+      await waitFor(() => expect(onConnected).toHaveBeenCalledWith('codex', ''))
+      expect(connectCalled).toBe(false)
+      expect(modelCalled).toBe(false)
+    })
+
+    it('switching to the API key method restores the key flow (connects with provider "openai")', async () => {
+      const onConnected = vi.fn()
+      let connectBody: Record<string, unknown> | null = null
+      server.use(
+        codexRuntimes({ connectionState: 'needs-login' }),
+        http.post('/api/runtimes/clawboo-native/connect', async ({ request }) => {
+          connectBody = (await request.json()) as Record<string, unknown>
+          return HttpResponse.json({ ok: true, connectionState: 'ready' })
+        }),
+        http.post('/api/onboarding/native-leader-model', () => HttpResponse.json({ ok: true })),
+      )
+      render(<ConfigureNativeStep onConnected={onConnected} onBack={vi.fn()} />)
+      await userEvent.click(screen.getByTestId('native-provider-openai'))
+      await userEvent.click(screen.getByTestId('native-auth-api-key'))
+      expect(screen.queryByTestId('native-chatgpt-panel')).not.toBeInTheDocument()
+      await userEvent.type(screen.getByTestId('native-api-key'), 'sk-openai-test-key-000000')
+      await userEvent.click(screen.getByTestId('native-continue'))
+      await waitFor(() => expect(onConnected).toHaveBeenCalled())
+      expect(onConnected.mock.calls[0]![0]).toBe('openai')
+      expect(connectBody).toEqual({ apiKey: 'sk-openai-test-key-000000', provider: 'openai' })
+    })
   })
 })

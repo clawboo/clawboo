@@ -90,7 +90,12 @@ export function parseTeamChatBinding(req?: IncomingMessage): TeamChatBoundIdenti
   const teamId = params.get('roomTeamId')
   const agentId = params.get('postAuthorAgentId')
   if (!teamId || !agentId) return undefined
-  return { agentId, teamId, roomId: resolveRoomForTeam(teamId) }
+  // `delegate=1` is written EXCLUSIVELY by serverDeliver (an orchestrator-driven
+  // run) — it exposes the `team_delegate` signal tool on this session. A merely
+  // team-scoped session (e.g. an executorRunner board-task run) must not get it:
+  // nothing observes delegation there (see TeamChatBoundIdentity.delegate).
+  const delegate = params.get('delegate') === '1'
+  return { agentId, teamId, roomId: resolveRoomForTeam(teamId), ...(delegate ? { delegate } : {}) }
 }
 
 let handlers: Record<McpServerName, McpHttpHandlers> | null = null

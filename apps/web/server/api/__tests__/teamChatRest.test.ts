@@ -29,6 +29,27 @@ describe('parseTeamChatBinding (anti-spoof URL binding)', () => {
     })
   })
 
+  it('parses delegate=1 (an orchestrator-driven run) into the binding; absent ⇒ off', () => {
+    // Written EXCLUSIVELY by serverDeliver — exposes the `team_delegate` signal
+    // tool. A merely team-scoped session (an executorRunner board-task run) omits
+    // it, so the tool stays hidden where nothing observes delegation.
+    expect(
+      parseTeamChatBinding(
+        req('/api/mcp/teamchat?roomTeamId=tm1&postAuthorAgentId=boo-1&delegate=1'),
+      ),
+    ).toEqual({
+      agentId: 'boo-1',
+      teamId: 'tm1',
+      roomId: resolveRoomForTeam('tm1'),
+      delegate: true,
+    })
+    const without = parseTeamChatBinding(
+      req('/api/mcp/teamchat?roomTeamId=tm1&postAuthorAgentId=boo-1'),
+    )
+    expect(without).toBeDefined()
+    expect(without!.delegate).toBeUndefined()
+  })
+
   it('returns undefined when either binding param is missing (unbound)', () => {
     expect(parseTeamChatBinding(req('/api/mcp/teamchat?roomTeamId=tm1'))).toBeUndefined()
     expect(parseTeamChatBinding(req('/api/mcp/teamchat?postAuthorAgentId=boo-1'))).toBeUndefined()

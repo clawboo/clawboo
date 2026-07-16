@@ -33,8 +33,19 @@ export interface RuntimeRunContext {
    * assigned agent). Carried onto the shared Memory MCP attach so saves are
    * auto-tagged team-shared and reads stay team-limited — the model never
    * supplies (and cannot widen) it. `tenantId` is a dormant seam.
+   *
+   * `delegate: true` marks an ORCHESTRATOR-driven run (set exclusively by
+   * `serverDeliver`) — it rides the TeamChat attach URL as `delegate=1` and
+   * exposes the `team_delegate` signal tool to the run. A team-scoped run alone
+   * (e.g. an executorRunner board-task run) must NOT set it: nothing observes
+   * delegation there, so the tool would be a silent no-op.
    */
-  memoryScope?: { teamId?: string | null; agentId?: string | null; tenantId?: string | null } | null
+  memoryScope?: {
+    teamId?: string | null
+    agentId?: string | null
+    tenantId?: string | null
+    delegate?: boolean
+  } | null
   /** Extra env for a spawned subprocess (provider API keys, isolated HOME, …). */
   apiKeyEnv?: Record<string, string>
 }

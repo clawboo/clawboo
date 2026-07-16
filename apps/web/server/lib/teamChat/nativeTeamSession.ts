@@ -33,12 +33,22 @@ export function nativeTeamSessionKeysForAgentLike(agentId: string): string {
   return `native-team-session:${agentId}:%`
 }
 
-/** Whether a team run should resume (and persist) a native leader session pointer.
- *  TRUE only for the native LEADER / user-facing team session with a persistent home:
- *  a delegated CHILD task (`isTaskRun`) keeps its own executor-handoff continuity, an
- *  ephemeral runtime has no transcript to reload, and only the native runtime uses this
- *  pointer scheme. The read (ctx.resume) and the write (setSetting on terminal) share
- *  this one gate so they can never diverge. */
+/** The runtimes that use the team-leader session-pointer scheme. Native reloads its
+ *  persisted transcript from the per-identity home; CODEX resumes its native thread
+ *  (`codex exec resume <id>` against the managed home's sessions/ dir — the ChatGPT-
+ *  subscription leader's continuity). Both need a PERSISTENT home for the session
+ *  material to survive between turns. */
+const POINTER_RUNTIMES = new Set(['clawboo-native', 'codex'])
+
+/** Whether a team run should resume (and persist) a leader session pointer.
+ *  TRUE only for a pointer-scheme runtime's LEADER / user-facing team session with a
+ *  persistent home: a delegated CHILD task (`isTaskRun`) keeps its own
+ *  executor-handoff continuity, and an ephemeral runtime has no session material to
+ *  reload. The read (ctx.resume) and the write (setSetting on terminal) share this
+ *  one gate so they can never diverge. (The settings key keeps its historical
+ *  `native-team-session:` prefix — the sweeps on team delete / agent archive key off
+ *  it, and it is per-(agent, team) so a codex agent's pointer can never collide with
+ *  a native one.) */
 export function teamResumeEligible(args: {
   runtime: string | null
   homeDir: string | null
@@ -46,6 +56,10 @@ export function teamResumeEligible(args: {
   isTaskRun: boolean
 }): boolean {
   return (
-    args.runtime === 'clawboo-native' && !!args.homeDir && args.isTeamSession && !args.isTaskRun
+    !!args.runtime &&
+    POINTER_RUNTIMES.has(args.runtime) &&
+    !!args.homeDir &&
+    args.isTeamSession &&
+    !args.isTaskRun
   )
 }

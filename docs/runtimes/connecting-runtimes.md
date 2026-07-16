@@ -77,13 +77,13 @@ For `clawboo-native` the optional `provider` field routes the key to the right v
 
 ### 4. Connect (codex, oauth)
 
-`codex` cannot be connected with a pasted key on current versions. `POST /api/runtimes/codex/connect` is a no-op that returns:
+`codex` cannot be connected with a pasted key on current versions. `POST /api/runtimes/codex/connect` is a no-op on storage that probes the login (`codex login status`) and returns the CURRENT state — `ready` when you are already signed in, else:
 
 ```json
 { "ok": true, "connectionState": "needs-login", "loginCommand": "codex login" }
 ```
 
-The card shows the `codex login` command (with a copy button), you run it in your terminal, then click **Re-check**. Once `codex login` has authenticated locally, the adapter run path uses Codex's own `CODEX_HOME`; Clawboo does not store a Codex credential in its vault.
+The card shows the `codex login` command (with a copy button), you run it in your terminal, then click **Re-check**. A signed-in Codex is detected by the status probe (the token file is never read), and each spawned run gets a managed `CODEX_HOME` seeded with a copy of your `~/.codex/auth.json`; Clawboo does not store a Codex credential in its vault. The onboarding wizard's OpenAI card offers the same flow as **Sign in with ChatGPT** (see [Codex](/runtimes/codex)).
 
 ### 5. Health-check a native provider key (optional)
 
@@ -133,7 +133,7 @@ Because `resolveRuntimeKey` falls back to `process.env` and OpenClaw's `.env`, a
 </Warning>
 
 <Warning>
-**Codex shows "Needs login" after a successful `codex login`.** The card does not auto-detect the login; click **Re-check** to re-fetch status. Codex never reaches `ready` from a vault key; its auth lives in `CODEX_HOME`.
+**Codex shows "Needs login" after a successful `codex login`.** Click **Re-check** to re-probe (`codex login status` is parsed; a signed-in Codex reads `ready`). Codex never reaches `ready` from a vault key; its auth lives in `CODEX_HOME`.
 </Warning>
 
 <Danger>

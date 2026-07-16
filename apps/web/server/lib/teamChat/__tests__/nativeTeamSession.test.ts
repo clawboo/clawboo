@@ -57,8 +57,16 @@ describe('teamResumeEligible', () => {
     expect(teamResumeEligible({ ...base, isTeamSession: false })).toBe(false)
   })
 
-  it('false for a non-native runtime (only the native runtime uses this pointer scheme)', () => {
+  it('true for a CODEX leader turn — the ChatGPT-subscription leader resumes via `codex exec resume`', () => {
+    expect(teamResumeEligible({ ...base, runtime: 'codex' })).toBe(true)
+    // Same child/home/session gates apply to codex as to native.
+    expect(teamResumeEligible({ ...base, runtime: 'codex', isTaskRun: true })).toBe(false)
+    expect(teamResumeEligible({ ...base, runtime: 'codex', homeDir: null })).toBe(false)
+  })
+
+  it('false for a runtime outside the pointer scheme (hermes / claude-code / unknown)', () => {
     expect(teamResumeEligible({ ...base, runtime: 'hermes' })).toBe(false)
+    expect(teamResumeEligible({ ...base, runtime: 'claude-code' })).toBe(false)
     expect(teamResumeEligible({ ...base, runtime: null })).toBe(false)
   })
 })

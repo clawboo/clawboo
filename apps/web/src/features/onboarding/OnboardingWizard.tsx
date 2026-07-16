@@ -432,7 +432,10 @@ function ConnectStep({
         </AnimatePresence>
 
         {/* Default hint */}
-        <p className="text-center text-[12px]" style={{ color: 'rgb(var(--foreground-rgb) / 0.35)' }}>
+        <p
+          className="text-center text-[12px]"
+          style={{ color: 'rgb(var(--foreground-rgb) / 0.35)' }}
+        >
           Default:{' '}
           <button
             type="button"
@@ -451,10 +454,7 @@ function ConnectStep({
 
 // ─── OnboardingWizard ─────────────────────────────────────────────────────────
 
-export function OnboardingWizard({
-  onComplete,
-  initialStep = 'welcome',
-}: OnboardingWizardProps) {
+export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: OnboardingWizardProps) {
   const [step, setStep] = useState<WizardStep>(initialStep)
   const [prevStep, setPrevStep] = useState<WizardStep>(initialStep)
   const [client, setClient] = useState<GatewayClient | null>(null)
@@ -462,6 +462,9 @@ export function OnboardingWizard({
   // The team the user deployed in the selectTeam step — shown on nativeReady and
   // used to land them in that team's chat.
   const [deployedTeamId, setDeployedTeamId] = useState<string | null>(null)
+  // The PRIMARY runtime the connect step landed on: native (a provider key) or
+  // codex (Sign in with ChatGPT). Steers the team deploy's per-agent default.
+  const [primaryRuntime, setPrimaryRuntime] = useState<'clawboo-native' | 'codex'>('clawboo-native')
 
   // Gateway URL from ConfigureStep — used by StartGatewayStep completion handler
   const [systemConnectUrl, setSystemConnectUrl] = useState('')
@@ -623,7 +626,12 @@ export function OnboardingWizard({
             className="w-full flex justify-center"
           >
             <ConfigureNativeStep
-              onConnected={() => goTo('addRuntimes')}
+              onConnected={(provider) => {
+                // 'codex' = the Sign in with ChatGPT path — the team deploy then
+                // defaults every agent to codex; any provider key = native primary.
+                setPrimaryRuntime(provider === 'codex' ? 'codex' : 'clawboo-native')
+                goTo('addRuntimes')
+              }}
               onBack={() => goTo('welcome')}
             />
           </motion.div>
@@ -645,6 +653,7 @@ export function OnboardingWizard({
                 goTo('nativeReady')
               }}
               onBack={() => goTo('addRuntimes')}
+              primaryRuntime={primaryRuntime}
             />
           </motion.div>
         )}
@@ -765,7 +774,6 @@ export function OnboardingWizard({
             <ConnectStep onConnected={handleConnected} />
           </motion.div>
         )}
-
       </AnimatePresence>
     </motion.div>
   )

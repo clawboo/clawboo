@@ -23,6 +23,7 @@ import { eq, or } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
 import { detectOpenClaw } from '../lib/openclawDetect'
 import { enabledRuntimeIds } from '../lib/runtimes'
+import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
 import { getDescriptor } from '../lib/runtimes/descriptor'
 import { getRuntimeSecret } from '../lib/secretsVault'
 
@@ -46,12 +47,18 @@ export async function onboardingStateGET(_req: Request, res: Response): Promise<
 
     // Any connectable (non-OpenClaw) runtime with a stored key — mirrors the
     // `/api/runtimes` `hasVaultCredential` signal over the same descriptor env-vars.
-    const hasConnectedRuntime = enabledRuntimeIds().some((id) => {
+    // Codex is the oauth exception: it has NO env-var/vault slot at all (`envVar:
+    // null`), so its deliberate on-disk credential is the `codex login` the user ran
+    // (probed exactly like `runtimesListGET` does). Without it, a ChatGPT-
+    // subscription-only user reads hasConnectedRuntime=false and the reload
+    // decision re-traps them in a fresh wizard.
+    const hasVaultKey = enabledRuntimeIds().some((id) => {
       const d = getDescriptor(id)
       return [d.envVar, ...(d.altEnvVars ?? [])]
         .filter((v): v is string => Boolean(v))
         .some((v) => Boolean(getRuntimeSecret(v)))
     })
+    const hasConnectedRuntime = hasVaultKey || (await isCodexLoggedIn())
 
     res.json({ configured, hasNative, hasTeam, hasConnectedRuntime })
   } catch (err) {

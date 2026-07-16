@@ -7,7 +7,7 @@ import { createDb, readRoom, resolveRoomForTeam, type ClawbooDb } from '@clawboo
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createTeamChatServer, type TeamChatBoundIdentity } from '../teamchat/server'
-import { callText, connectInMemory } from '../testing'
+import { callText, connectInMemory, listToolNames } from '../testing'
 
 let db: ClawbooDb
 beforeEach(() => {
@@ -119,5 +119,75 @@ describe('TeamChat MCP (quartet)', () => {
     )
     await callText(a, 'team_chat_post', { text: 'observed' })
     expect(seen).toEqual(['observed'])
+  })
+
+  // ── team_delegate — the coding-runtime delegation SIGNAL tool ──────────────
+  // Exposed ONLY on an orchestrator-driven session (`bound.delegate`, the
+  // `delegate=1` attach param serverDeliver writes). A merely team-BOUND session
+  // (an executorRunner board-task run) must not see it — nothing observes
+  // delegation there, so the model would "delegate" into a silent no-op (the
+  // exact failure the native driver's isTeamSessionKey gating avoids).
+  describe('team_delegate', () => {
+    it('is EXPOSED only on an orchestrator-driven session (bound + delegate)', async () => {
+      const orchestrated = await connectInMemory(
+        createTeamChatServer(db, { boundIdentity: { ...ident('leader', 'tm1'), delegate: true } }),
+      )
+      expect(await listToolNames(orchestrated)).toContain('team_delegate')
+
+      // Bound-but-not-orchestrated (e.g. an executorRunner board-task run): hidden.
+      const scopedOnly = await connectInMemory(
+        createTeamChatServer(db, { boundIdentity: ident('leader', 'tm1') }),
+      )
+      expect(await listToolNames(scopedOnly)).not.toContain('team_delegate')
+
+      // Unbound (raw stdio bin / external attach): hidden.
+      const unbound = await connectInMemory(createTeamChatServer(db, {}))
+      expect(await listToolNames(unbound)).not.toContain('team_delegate')
+    })
+
+    it('is signal-only: ACKs without touching the room (the engine owns the board)', async () => {
+      const leader = await connectInMemory(
+        createTeamChatServer(db, { boundIdentity: { ...ident('leader', 'tm1'), delegate: true } }),
+      )
+      const res = await callText(leader, 'team_delegate', {
+        assignee: 'Coder',
+        task: 'write the parser',
+      })
+      expect(res.isError).toBe(false)
+      expect(res.text).toContain('Delegated to Coder')
+      // Pure signal: no room post, no board write from this server.
+      expect(readRoom(db, { roomId: resolveRoomForTeam('tm1') })).toHaveLength(0)
+    })
+
+    it('rejects a call missing the assignee or the task', async () => {
+      const leader = await connectInMemory(
+        createTeamChatServer(db, { boundIdentity: { ...ident('leader', 'tm1'), delegate: true } }),
+      )
+      expect((await callText(leader, 'team_delegate', { assignee: ' ', task: 'x' })).isError).toBe(
+        true,
+      )
+      expect(
+        (await callText(leader, 'team_delegate', { assignee: 'Coder', task: '' })).isError,
+      ).toBe(true)
+    })
+
+    it('the name matches the engine observer under MCP namespacing', () => {
+      // The engine's DELEGATE_TOOL_NAME_RE (boardOrchestration.ts) — replicated
+      // here verbatim because packages/mcp doesn't depend on team-orchestration.
+      // If the engine regex ever changes, the apps/web integration test (which
+      // imports BOTH sides) is the cross-package guard; this is the fast local one.
+      const DELEGATE_TOOL_NAME_RE = /(?:^|[._])delegate(?:[._]|$)/i
+      for (const name of [
+        'team_delegate',
+        'clawboo-teamchat.team_delegate',
+        'mcp__clawboo-teamchat__team_delegate',
+      ]) {
+        expect(DELEGATE_TOOL_NAME_RE.test(name)).toBe(true)
+      }
+      // And the chat tools must stay DISJOINT from the observer.
+      for (const name of ['team_chat_post', 'team_chat_subscribe']) {
+        expect(DELEGATE_TOOL_NAME_RE.test(name)).toBe(false)
+      }
+    })
   })
 })

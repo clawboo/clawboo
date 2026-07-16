@@ -131,6 +131,12 @@ export function decideOnboardingView(i: OnboardingDecisionInputs): OnboardingVie
     // through the wizard. Otherwise it's a fresh/uninstalled run → the wizard.
     if (i.hasNative) return 'native'
     if (i.onboarded && i.hasConnectedRuntime) return 'native'
+    // Belt for any auth kind the runtime probes miss: a user who COMPLETED
+    // onboarding AND has a deployed team is a returning user, full stop —
+    // onboarding always deploys a team, so this can never catch a fresh box.
+    // (The concrete case: a ChatGPT-subscription (codex-login) install, whose
+    // credential is neither a vault key nor an env var.)
+    if (i.onboarded && i.hasTeam) return 'native'
     // A GENUINE mid-onboarding reload on a not-yet-configured path (native, mid-
     // ConfigureNativeStep, before any agent/team is seeded): RESUME the wizard at
     // configureNative rather than resetting to a fresh one (which would wipe

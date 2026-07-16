@@ -58,6 +58,7 @@ import {
   displayNameGET,
   displayNamePUT,
 } from './booZero'
+import { booZeroOverrideGET, booZeroOverridePOST } from './booZeroOverride'
 import {
   boardListGET,
   boardGetGET,
@@ -252,6 +253,10 @@ router.get('/api/boo-zero/global-brief', globalBriefGET)
 router.put('/api/boo-zero/global-brief', globalBriefPUT)
 router.get('/api/boo-zero/display-name/:agentId', displayNameGET)
 router.put('/api/boo-zero/display-name/:agentId', displayNamePUT)
+// The runtime-neutral leader OVERRIDE ("Make this agent Boo Zero") — the writer
+// for the `boo-zero:agent-id` setting `resolveBooZero` reads FIRST. Any runtime.
+router.get('/api/boo-zero/override', booZeroOverrideGET)
+router.post('/api/boo-zero/override', booZeroOverridePOST)
 
 // Durable board.
 router.get('/api/board', boardListGET)

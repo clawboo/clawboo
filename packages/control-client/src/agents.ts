@@ -126,6 +126,45 @@ export async function setAgentModel(agentId: string, model: string): Promise<voi
   await jsonOrThrow<{ ok: boolean; model: string }>(res, 'Set model')
 }
 
+/** The Boo Zero OVERRIDE (`/api/boo-zero/override`) — the runtime-neutral "make
+ *  this agent the universal leader" designation `resolveBooZero` reads FIRST.
+ *  `effective` is where the resolution chain currently lands and `tier` names
+ *  the rung that produced it: `override`/`native` are DELIBERATE leaders a
+ *  writer must not stomp; `openclaw` is the weak Gateway-`main` fallback a
+ *  deliberate designation may outrank. Defensive: on any error reports tier
+ *  `'native'` (the fail-safe that blocks a promote rather than misfiring one). */
+export interface BooZeroOverride {
+  overrideAgentId: string | null
+  effective: { id: string } | null
+  tier: 'override' | 'native' | 'openclaw' | null
+}
+
+export async function fetchBooZeroOverride(): Promise<BooZeroOverride> {
+  try {
+    const res = await apiFetch('/api/boo-zero/override')
+    if (!res.ok) return { overrideAgentId: null, effective: null, tier: 'native' }
+    const body = (await res.json()) as Partial<BooZeroOverride>
+    return {
+      overrideAgentId: body.overrideAgentId ?? null,
+      effective: body.effective ?? null,
+      tier: body.tier ?? null,
+    }
+  } catch {
+    return { overrideAgentId: null, effective: null, tier: 'native' }
+  }
+}
+
+/** Set (string) or clear (null) the Boo Zero override. Throws on a rejected write
+ *  (unknown/archived agent → 404) so callers can surface it. */
+export async function setBooZeroOverride(agentId: string | null): Promise<void> {
+  const res = await apiFetch('/api/boo-zero/override', {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ agentId }),
+  })
+  await jsonOrThrow<{ ok: boolean }>(res, 'Set Boo Zero override')
+}
+
 export async function listAgentSessions(agentId: string): Promise<SessionRecord[]> {
   const res = await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/sessions`)
   const body = await jsonOrThrow<{ sessions: SessionRecord[] }>(res, 'List sessions')

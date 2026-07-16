@@ -5,6 +5,7 @@ import {
   type RunHandle,
   type RuntimeAdapter,
   type RuntimeEvent,
+  type SessionCodec,
   type StartOpts,
   type TaskHandle,
 } from '@clawboo/executor'
@@ -23,6 +24,9 @@ export class CodexAdapter implements RuntimeAdapter {
   readonly participantKind = 'agent' as const
 
   private readonly drivers = new Map<string, CodexDriver>()
+  /** Native Codex thread id captured per run (from thread/result frames) — the
+   *  resumable handle the `sessionCodec` serializes for `codex exec resume <id>`. */
+  private readonly sessionIds = new Map<string, string>()
 
   constructor(
     private readonly driverFactory: CodexDriverFactory,
@@ -37,20 +41,43 @@ export class CodexAdapter implements RuntimeAdapter {
       resume: true,
       toolApproval: true,
       models: ['gpt-5-codex', 'gpt-5', 'o4-mini'],
-      // Native-preservation seam: declared as today's reality — a throwaway
-      // per-run CODEX_HOME (the driver mkdtemps one each run), no cross-run
-      // self-improvement substrate to preserve. KNOWN LIMITATION: Codex keeps
-      // its ChatGPT OAuth in $CODEX_HOME/auth.json, so a user's `codex login`
-      // (~/.codex) is invisible to spawned runs; flipping to a persistent
-      // per-identity home would CHANGE auth behavior and needs its own
-      // login-against-that-home connect flow first.
+      // Native-preservation seam: a wrapped one-shot with a PERSISTENT per-identity
+      // CODEX_HOME — the change that gives a Codex LEADER conversational continuity
+      // (`codex exec resume <thread-id>` needs the session files under
+      // $CODEX_HOME/sessions/ to survive between turns; a throwaway home lost them).
+      // The old "auth behavior would change" limitation is ADDRESSED by the driver:
+      // the user's `codex login` (~/.codex/auth.json) is SEEDED into the managed home
+      // at execute time with an mtime freshness decision (never clobbering a token
+      // the CLI rotated inside the managed home), and a managed run FAILS FAST when
+      // no usable credential is provisioned — the Paperclip codex-local pattern.
       runtimeClass: 'wrapped-oneshot',
-      nativeHome: { scope: 'per-run', persist: false },
+      nativeHome: { scope: 'per-identity', persist: true },
       nativeSkills: 'none',
       nativeMemory: 'none',
       nativeChannels: 'none',
       nativeScheduler: false,
     }
+  }
+
+  /**
+   * Serialize/restore the run's native thread handle (the claude-code/hermes
+   * mirror). The codec captures the thread id for lineage + same-runtime
+   * resume — rotation deliberately does NOT replay the heavy transcript.
+   */
+  readonly sessionCodec: SessionCodec = {
+    serialize: async (run: RunHandle): Promise<string> =>
+      JSON.stringify({
+        sessionKey: run.sessionKey,
+        sessionId: this.sessionIds.get(run.sessionKey) ?? run.runId ?? null,
+      }),
+    restore: async (blob: string): Promise<RunHandle> => {
+      const parsed = JSON.parse(blob) as { sessionKey?: string; sessionId?: string | null }
+      return {
+        adapterId: this.id,
+        sessionKey: parsed.sessionKey ?? '',
+        runId: parsed.sessionId ?? null,
+      }
+    },
   }
 
   async health(): Promise<HealthResult> {
@@ -87,6 +114,9 @@ export class CodexAdapter implements RuntimeAdapter {
 
     const unsubscribe = driver.onEvent((native: CodexNativeEvent) => {
       const nid = codexNativeId(native)
+      // Track the LATEST native thread id per session — the `sessionCodec`
+      // serializes it so the next same-runtime turn can `codex exec resume` it.
+      if (nid) this.sessionIds.set(run.sessionKey, nid)
       if (nid && !run.runId) run.runId = nid
       if (!run.runId) run.runId = run.sessionKey
       const ctx: MapContext = { runId: run.runId, sessionId: run.sessionKey }
