@@ -1,6 +1,6 @@
 ---
 title: Install Clawboo
-description: Run npx clawboo to launch the dashboard. Prerequisites, what the launcher does, port discovery, and where Clawboo keeps its state.
+description: Install Clawboo with npm i -g clawboo or npx clawboo, launch the dashboard, and see the launch sequence, port discovery, and where Clawboo keeps its state.
 ---
 
 By the end of this tutorial you'll have the Clawboo dashboard running locally and open in your browser, ready for the onboarding wizard. Installation is a single command; there is nothing to configure first.
@@ -14,7 +14,7 @@ These docs describe Clawboo **v0.3.0**, the current release.
 <Note>
 - **Node.js 22 or newer.** Clawboo's `engines` field requires `node >=22.0.0`. `npx` ships with Node, so if you have a recent Node you already have everything you need.
 - **A terminal and a web browser.** The launcher opens your default browser automatically.
-- **No global install, no OpenClaw, no provider key required to launch.** You pick a runtime and (optionally) paste a provider key *inside* the onboarding wizard, not before it.
+- **No OpenClaw and no provider key required to launch.** You pick a runtime and (optionally) paste a provider key *inside* the onboarding wizard, not before it. A global install (`npm i -g clawboo`) is recommended for a persistent `clawboo` command and one-click updates, but `npx clawboo` works too.
 </Note>
 
 Check your Node version:
@@ -27,13 +27,16 @@ If it prints `v22.x` or higher, you're set. If not, install a current Node from 
 
 ## Steps
 
-### 1. Run the launcher
+### 1. Install and run
+
+Install Clawboo globally, then run it:
 
 ```bash
-npx clawboo
+npm install -g clawboo
+clawboo
 ```
 
-`npx` downloads the `clawboo` package (currently `0.3.0`) on first run and executes its CLI entry point. There is no separate "install" step and nothing is added to your global `node_modules`; `npx` caches the package and runs it.
+The global install gives you a persistent `clawboo` command and one-click in-app updates from the dashboard. Prefer not to install? `npx clawboo` downloads and runs the latest package (currently `0.3.0`) without adding anything to your global `node_modules`.
 
 **Expected result:** the terminal prints the Clawboo ASCII logo and a version line like `Clawboo v0.3.0`, then begins starting the dashboard.
 

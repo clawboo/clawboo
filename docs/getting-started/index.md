@@ -3,7 +3,7 @@ title: Getting started
 description: 'The two install paths: native-first (paste a key, no Gateway) or the OpenClaw Gateway, plus prerequisites.'
 ---
 
-Clawboo runs the same way for everyone: one command, `npx clawboo`, which launches a local dashboard and walks you through a first-run wizard. Onboarding is **native-first**: you paste one provider key and land in a working team, with no runtime to pick up front. The OpenClaw Gateway and the coding-agent runtimes are **opt-in**, connected during the optional Add-runtimes step or later from Settings. This page explains the fast native path and the OpenClaw path so you can choose which quickstart to follow.
+Clawboo runs the same way for everyone. Install it with `npm install -g clawboo` and run `clawboo` (or `npx clawboo` to try it without installing), which launches a local dashboard and walks you through a first-run wizard. Onboarding is **native-first**: you paste one provider key and land in a working team, with no runtime to pick up front. The OpenClaw Gateway and the coding-agent runtimes are **opt-in**, connected during the optional Add-runtimes step or later from Settings. This page explains the fast native path and the OpenClaw path so you can choose which quickstart to follow.
 
 <Note>
 These docs describe Clawboo **v0.3.0**, the current release.
@@ -14,7 +14,7 @@ These docs describe Clawboo **v0.3.0**, the current release.
 <Note>
 - **Node.js 22 or newer**: Clawboo's `engines` field requires `node >=22.0.0`. The OpenClaw path also enforces this: the wizard's detection step flags Node older than 22.
 - **A provider API key** if you choose the native path: Anthropic (`sk-ant-…`), OpenAI (`sk-…`), or OpenRouter (`sk-or-…`). A running local Ollama works with no key, and a **ChatGPT subscription** works with no key too (the OpenAI card's Sign in with ChatGPT connects the [Codex runtime](/runtimes/codex)). The OpenClaw path needs a provider key too, entered during Gateway configuration.
-- Nothing is installed globally to *run* Clawboo; `npx clawboo` downloads and launches the bundled dashboard server. (The OpenClaw path can install the `openclaw` CLI for you from inside the wizard.)
+- A global install (`npm i -g clawboo`) is recommended for a persistent `clawboo` command and one-click updates, but not required; `npx clawboo` downloads and launches the bundled dashboard server without one. (The OpenClaw path can install the `openclaw` CLI for you from inside the wizard.)
 </Note>
 
 That is the full list. You do not need OpenClaw, a Gateway, Docker, or any database; Clawboo bundles its own SQLite store and dashboard server.

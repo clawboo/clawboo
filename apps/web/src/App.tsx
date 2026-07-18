@@ -5,6 +5,7 @@ import { TeamSidebar } from '@/features/layout/TeamSidebar'
 import { AgentListColumn } from '@/features/layout/AgentListColumn'
 import { ContentArea } from '@/features/layout/ContentArea'
 import { FirstRunNudge } from '@/features/fleet/FirstRunNudge'
+import { UpdateChip } from '@/features/promo/UpdateChip'
 import { AppTopBar } from '@/features/promo/AppTopBar'
 import { SettingsModal } from '@/features/settings/SettingsModal'
 import { ConfirmDialog } from '@/features/shared/ConfirmDialog'
@@ -53,6 +54,9 @@ export function App() {
         </main>
       </div>
       {onDashboard && <FirstRunNudge />}
+      {/* Bottom-left "update available" chip — appears when a newer clawboo
+          version is published; click to copy the update command or apply it. */}
+      {onDashboard && <UpdateChip />}
       <SettingsModal />
       {/* App-root confirmation dialog (design-system replacement for
           window.confirm). Outside the inert app-shell + above the settings

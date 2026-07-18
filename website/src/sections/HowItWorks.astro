@@ -8,7 +8,7 @@ const steps = [
   {
     num: '01',
     title: 'Install and run',
-    body: 'Run npx clawboo. Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard.',
+    body: 'Install with npm install -g clawboo, then run clawboo. Node.js 22+ is the only prerequisite, and the first run opens an onboarding wizard. Or try it instantly with npx clawboo, no install.',
     copy: true,
   },
   {
@@ -46,8 +46,8 @@ const steps = [
               {s.copy && (
                 <div class="mt-3">
                   <CopyButton
-                    text="npx clawboo"
-                    label="npx clawboo"
+                    text="npm install -g clawboo"
+                    label="npm install -g clawboo"
                     class="font-data rounded-lg bg-foreground/[0.06] px-3 py-1.5 text-[12.5px] text-foreground/80 hover:bg-foreground/[0.1]"
                   />
                 </div>

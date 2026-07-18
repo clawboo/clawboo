@@ -178,6 +178,29 @@ export function readApiPortFile(): number | null {
   }
 }
 
+/**
+ * Poll until `port` is free (nothing bound on it), up to `timeoutMs`. Used by a
+ * self-restart successor (in-app update): the exiting parent still holds the
+ * port for a brief window, so the fresh process waits for the parent to release
+ * it before binding — otherwise `resolveApiPort` throws on an explicit-but-taken
+ * `CLAWBOO_API_PORT`. Returns true once free, false on timeout (caller proceeds
+ * and lets the bind surface the real error). `isPortFree` probes on `0.0.0.0`,
+ * which conflicts with any specific-interface bind on the same port, so a parent
+ * bound on loopback is correctly seen as "still taken" here.
+ */
+export async function waitForPortFree(
+  port: number,
+  timeoutMs: number,
+  intervalMs = 250,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (await isPortFree(port)) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+}
+
 /** Resolve home dir reliably even when env is sandboxed. */
 export function resolveHomeDir(): string {
   return os.homedir()

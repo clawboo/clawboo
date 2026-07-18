@@ -47,9 +47,14 @@
 
 ## Quickstart
 
+Install Clawboo, then run it:
+
 ```bash
-npx clawboo
+npm install -g clawboo
+clawboo
 ```
+
+The global install gives you a persistent `clawboo` command and one-click in-app updates. Just trying it out? `npx clawboo` runs the latest with no install.
 
 Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard:
 

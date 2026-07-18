@@ -287,6 +287,9 @@ async function run(): Promise<void> {
         env: {
           ...process.env,
           NODE_ENV: 'production',
+          // The running clawboo version, so the server's self-version check
+          // ("update available" chip) knows what it is without a disk read.
+          CLAWBOO_VERSION: VERSION,
           // Where the bundled MCP stdio bins live (dist/bin next to server.js), so
           // the server's /api/mcp/config emits the right `node <bin>` attach snippet.
           CLAWBOO_MCP_BIN_DIR: path.join(__dirname, 'bin'),
@@ -298,7 +301,7 @@ async function run(): Promise<void> {
     } else {
       const child = spawn('npx', ['tsx', devServerPath!], {
         cwd: monorepoRoot!,
-        env: { ...process.env, NODE_ENV: 'production' },
+        env: { ...process.env, NODE_ENV: 'production', CLAWBOO_VERSION: VERSION },
         detached: true,
         stdio: 'ignore',
       })
