@@ -117,13 +117,24 @@ interface CreateTeamModalProps {
   /** When true (and no `initialProfile`), skip the pick step and open directly on a
    *  blank "start from scratch" customize step. */
   startBlank?: boolean
-  /** Onboarding: after the team is created, pre-satisfy the "Know Your Team"
-   *  gate so a first-run user lands straight in the team space (matching the
-   *  old auto-seed behavior). Off by default (normal team creation runs the gate). */
+  /** Onboarding: mark the gate's "meet your team" phase already seen, because the
+   *  wizard's own `NativeReadyStep` IS that beat (same card) — so the user isn't
+   *  shown two identical welcomes back to back. The gate then opens straight on the
+   *  user's self-introduction, which is NOT skipped: `userIntroText` is the source of
+   *  truth the server injects into every team turn's context preamble, so blanking it
+   *  would permanently deprive the first team of knowing who the user is.
+   *  Off by default (normal team creation runs the full gate). */
   presatisfyOnboardingGate?: boolean
   /** Whether the pick step offers "Start from scratch". Defaults to true;
    *  onboarding disables it (a blank team would strand the first-run user). */
   allowStartFromScratch?: boolean
+  /** Onboarding: default EVERY agent to Clawboo Native regardless of the catalog's
+   *  source rule (which suggests OpenClaw for a marketplace team). The wizard is the
+   *  native-first spine and the provider key just entered is its only guaranteed
+   *  runtime; without this, a first-run user with a reachable Gateway silently
+   *  deploys their first team onto OpenClaw. The per-agent picker still offers every
+   *  connected runtime, so this is a default, not a lock. */
+  preferNativeRuntime?: boolean
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -136,6 +147,7 @@ export function CreateTeamModal({
   startBlank,
   presatisfyOnboardingGate = false,
   allowStartFromScratch = true,
+  preferNativeRuntime = false,
 }: CreateTeamModalProps) {
   const client = useConnectionStore((s) => s.client)
   const connStatus = useConnectionStore((s) => s.status)
@@ -304,16 +316,18 @@ export function CreateTeamModal({
   )
 
   /** The catalog "chef's suggestion" for an agent (before availability degradation):
-   *  its own `suggestedRuntime` (unpopulated today) → the team `defaultRuntime` → the
-   *  source rule (marketplace → OpenClaw, blank → Native). */
+   *  onboarding's `preferNativeRuntime` → its own `suggestedRuntime` (unpopulated
+   *  today) → the team `defaultRuntime` → the source rule (marketplace → OpenClaw,
+   *  blank → Native). */
   const suggestedFor = useCallback(
     (agentCatalogId: string): SelectableSourceId =>
       suggestedRuntimeFor({
         agentSuggested: getAgent(agentCatalogId)?.suggestedRuntime,
         teamDefault: (selectedProfile as TeamTemplate | null)?.defaultRuntime,
         isMarketplaceTeam,
+        preferNative: preferNativeRuntime,
       }),
-    [selectedProfile, isMarketplaceTeam],
+    [selectedProfile, isMarketplaceTeam, preferNativeRuntime],
   )
   /** The resolved default = the suggestion degraded to Native when unavailable;
    *  `.degradedFrom` is non-null when it was degraded (drives the inline note). */
@@ -464,21 +478,25 @@ export function CreateTeamModal({
       })
       useTeamStore.getState().selectTeam(team.id)
 
-      // Onboarding: pre-satisfy the "Know Your Team" gate so a first-run user
-      // lands straight in the team space (matches the old auto-seed behavior).
+      // Onboarding: mark ONLY the "meet your team" phase as seen — the wizard's
+      // `NativeReadyStep` renders that same card, so replaying it in the gate would
+      // show the user two identical welcomes. The gate's `initialPhase` then opens
+      // directly on the user's self-introduction.
+      //
+      // Do NOT also set `userIntroduced` / blank `userIntroText` here: that skipped
+      // the introduction screen entirely AND left the first team's `userIntroText`
+      // permanently empty, so the server's team context preamble never told those
+      // agents who the user is — a gap every marketplace-created team was spared.
+      // The PATCH merges partials, so omitting the field leaves it false.
       if (presatisfyOnboardingGate) {
         try {
           await fetch(`/api/teams/${team.id}/onboarding`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              agentsIntroduced: true,
-              userIntroduced: true,
-              userIntroText: '',
-            }),
+            body: JSON.stringify({ agentsIntroduced: true }),
           })
         } catch {
-          // best-effort — the gate will just run once if this fails
+          // best-effort — the gate will just run its welcome phase too if this fails
         }
       }
 

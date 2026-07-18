@@ -60,13 +60,31 @@ export function runtimeAvailable(sid: SelectableSourceId, a: RuntimeAvailability
 }
 
 /** The catalog "chef's suggestion" BEFORE availability degradation. Precedence:
- *  a per-agent suggestion → the team default → the SOURCE RULE (a browsable
- *  marketplace team suggests OpenClaw; a blank/custom team suggests Clawboo Native). */
+ *  `preferNative` → a per-agent suggestion → the team default → the SOURCE RULE
+ *  (a browsable marketplace team suggests OpenClaw; a blank/custom team suggests
+ *  Clawboo Native). */
 export function suggestedRuntimeFor(args: {
   agentSuggested?: SelectableSourceId
   teamDefault?: SelectableSourceId
   isMarketplaceTeam: boolean
+  /**
+   * Onboarding: suggest Clawboo Native for EVERY agent, outranking the source rule
+   * and the catalog fields.
+   *
+   * Without this, a first-run user whose OpenClaw Gateway happens to be reachable
+   * deploys their first team entirely onto OpenClaw — because the source rule
+   * suggests OpenClaw for a marketplace team and `resolveDefaultRuntime` only
+   * degrades a suggestion that is UNAVAILABLE. That silently contradicts the
+   * native-first wizard (whose only guaranteed-connected runtime is the provider key
+   * just entered) and leaves the team with no native member, so the DEFAULT-NATIVE
+   * Boo Zero is never created and the OpenClaw `main` fallback ends up leading it.
+   *
+   * This changes the DEFAULT only — the per-agent picker still offers every
+   * connected runtime, so OpenClaw remains one override away.
+   */
+  preferNative?: boolean
 }): SelectableSourceId {
+  if (args.preferNative) return 'clawboo-native'
   return (
     args.agentSuggested ??
     args.teamDefault ??

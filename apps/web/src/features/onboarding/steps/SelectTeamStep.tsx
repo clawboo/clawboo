@@ -4,13 +4,23 @@
 // reuses the ONE real deploy engine (CreateTeamModal) so onboarding and the
 // in-app "Create team" flow never drift.
 //
-// The provider key is already connected (previous step), and the wizard has NOT
-// entered native mode yet (no live Gateway client), so CreateTeamModal's
-// openclaw-availability check resolves false → every picked team deploys FULLY
-// NATIVE (Gateway-free), server-orchestrated. "Start from scratch" is disabled
-// here (a blank team deploys no agents, which would leave a first-run user with
-// an empty, leaderless workspace); the gate is pre-satisfied so the user lands
-// straight in the team space.
+// The provider key is already connected (previous step), so every picked team
+// deploys FULLY NATIVE (Gateway-free), server-orchestrated — enforced by
+// `preferNativeRuntime`, NOT inferred.
+//
+// It used to be inferred, and that was wrong: the reasoning was "the wizard has no
+// live Gateway client, so CreateTeamModal's openclaw-availability check resolves
+// false". But that check is `client != null || serverOpenclawConnected`, and the
+// second term is the SERVER's operator connection — entirely independent of the
+// wizard. So a first-run user whose Gateway was reachable deployed their first team
+// onto OpenClaw, which (a) fails outright if that Gateway is not actually usable and
+// (b) leaves the team with no native member, so the DEFAULT-NATIVE Boo Zero is never
+// created and the OpenClaw `main` fallback leads the team.
+//
+// "Start from scratch" is disabled here (a blank team deploys no agents, which would
+// leave a first-run user with an empty, leaderless workspace). Only the gate's
+// WELCOME phase is pre-satisfied — `NativeReadyStep` is that beat — so the user still
+// introduces themselves before landing in the team space.
 
 import { useState } from 'react'
 import { ArrowLeft, ArrowRight, Users } from 'lucide-react'
@@ -79,6 +89,7 @@ export function SelectTeamStep({ onDeployed, onBack }: SelectTeamStepProps) {
         }}
         presatisfyOnboardingGate
         allowStartFromScratch={false}
+        preferNativeRuntime
       />
     </>
   )

@@ -56,6 +56,22 @@ const PROVIDER_CARDS: { id: Provider; name: string; desc: string }[] = [
   { id: 'ollama', name: 'Ollama', desc: 'Local · no key needed' },
 ]
 
+/**
+ * What the key ACTUALLY unlocks, per the runtime descriptors — do not overstate it.
+ * Clawboo Native accepts any of its ten providers (its `altEnvVars` span them all).
+ * OpenClaw reuses the key via auto-configure. Hermes and Claude Code are reused only
+ * where their own env-var matches (Claude Code is `ANTHROPIC_API_KEY`-only; Hermes
+ * takes OpenRouter/Anthropic/OpenAI), hence "when they run on the same provider".
+ * Codex is deliberately ABSENT: it is `authKind: 'oauth'` with `envVar: null`, so no
+ * API key ever powers it. The previous copy claimed "every runtime on that provider
+ * (Claude Code, Hermes, and more)", which read as a blanket promise and was wrong for
+ * e.g. an OpenRouter key. Don't restore it.
+ */
+const CONNECT_SUBTITLE =
+  "Bring a provider key. It powers Clawboo Native, your team's built-in runtime, and is " +
+  'reused by OpenClaw, Hermes and Claude Code when they run on the same provider. ' +
+  "Next, you'll pick and deploy your first team."
+
 type TestState = { phase: 'idle' | 'testing' | 'ok' | 'fail'; message?: string }
 
 export interface ConfigureNativeStepProps {
@@ -192,7 +208,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
       steps={NATIVE_STEPS}
       eyebrow="Connect a provider"
       title="Connect your AI provider"
-      subtitle="Bring a provider key. It powers Clawboo Native and every runtime on that provider (Claude Code, Hermes, and more). Next, you'll pick and deploy your first team."
+      subtitle={CONNECT_SUBTITLE}
       footer={
         <div className="flex items-center justify-between">
           <OnboardingGhost testId="native-back" onClick={onBack} disabled={submitting}>
@@ -272,7 +288,10 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
           More providers
           <ChevronDown
             size={15}
-            style={{ transform: showMore ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }}
+            style={{
+              transform: showMore ? 'rotate(180deg)' : 'none',
+              transition: 'transform 150ms',
+            }}
           />
         </button>
         {showMore ? (
@@ -392,13 +411,21 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
               disabled={!apiKey.trim() || test.phase === 'testing' || submitting}
               onClick={() => void handleTest()}
               className="inline-flex items-center gap-1.5 text-[13px] font-medium underline-offset-4 transition-colors hover:underline disabled:no-underline disabled:opacity-40"
-              style={{ color: muted(0.55), background: 'transparent', border: 'none', cursor: 'pointer' }}
+              style={{
+                color: muted(0.55),
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+              }}
             >
               {test.phase === 'testing' ? <Loader2 size={13} className="animate-spin" /> : null}
               Test connection
             </button>
             {test.phase === 'ok' ? (
-              <span className="flex items-center gap-1 text-[13px]" style={{ color: 'var(--mint)' }}>
+              <span
+                className="flex items-center gap-1 text-[13px]"
+                style={{ color: 'var(--mint)' }}
+              >
                 <Check size={14} /> Key works
               </span>
             ) : null}

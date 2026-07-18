@@ -99,9 +99,11 @@ test.describe('Native onboarding', () => {
     await page.getByTestId('native-continue').click()
 
     // Add-runtimes comes FIRST (so a connected runtime is assignable to a team) —
-    // it's optional; skip it.
+    // it's optional. It has a SINGLE forward action (Continue advances whether or not
+    // anything was connected; nothing here can strand the user, so the old separate
+    // Skip was removed), so connect nothing and continue.
     await expect(page.getByTestId('add-runtimes-step')).toBeVisible({ timeout: 10_000 })
-    await page.getByTestId('addruntimes-skip').click()
+    await page.getByTestId('addruntimes-continue').click()
 
     // Team step: the marketplace opens. Pick a small starter team and deploy it —
     // every agent degrades to clawboo-native (no Gateway), so the deploy is a pure
@@ -116,6 +118,17 @@ test.describe('Native onboarding', () => {
 
     // "Team is ready" landing (appears once the deploy lands) → open the dashboard.
     await expect(page.getByTestId('native-ready-step')).toBeVisible({ timeout: 30_000 })
+
+    // THE end-to-end proof that a fresh install gets a working native leader: the badge
+    // renders only when `/api/agents` `defaultId` resolves to a real Boo Zero, which on
+    // a fresh install exists ONLY if assigning the first native member eagerly created
+    // it (`teamAgentPOST` → `ensureNativeBooZero`). That in turn requires
+    // `hasConnectedNativeProvider()` to see the key the wizard just wrote — and here it
+    // lives ONLY in the encrypted vault, so this exercises the real vault chain rather
+    // than a `process.env` short-circuit. Without it, `defaultId` would fall back to the
+    // OpenClaw `main` (or nothing) and the first team would be led by the wrong agent.
+    await expect(page.getByTestId('led-by-boo-zero-badge')).toBeVisible({ timeout: 10_000 })
+
     await page.getByTestId('native-open-dashboard').click()
 
     // Wizard fully exits before asserting the dashboard (avoid racing the

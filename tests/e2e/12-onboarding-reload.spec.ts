@@ -93,9 +93,10 @@ test.describe('Native onboarding — reload stays on the dashboard', () => {
     await expect(page.getByTestId('configure-native-step')).toBeVisible({ timeout: 10_000 })
     await page.getByTestId('native-api-key').fill('sk-ant-e2e-fake-key')
     await page.getByTestId('native-continue').click()
-    // Add-runtimes comes first (optional) → skip; then pick + deploy a real team.
+    // Add-runtimes comes first (optional; a SINGLE forward action) → continue past it,
+    // then pick + deploy a real team.
     await expect(page.getByTestId('add-runtimes-step')).toBeVisible({ timeout: 10_000 })
-    await page.getByTestId('addruntimes-skip').click()
+    await page.getByTestId('addruntimes-continue').click()
     await expect(page.getByTestId('select-team-step')).toBeVisible({ timeout: 10_000 })
     const search = page.getByPlaceholder(/Search teams/)
     await expect(search).toBeVisible({ timeout: 10_000 })

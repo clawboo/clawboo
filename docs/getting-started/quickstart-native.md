@@ -53,23 +53,23 @@ Optionally, click **Test connection** below the field. Clawboo does a single aut
 
 The **"Add more runtimes"** step is optional. Here you can connect Claude Code, Codex, Hermes, or an OpenClaw Gateway as peers, or set up OpenClaw through an inline "Set up OpenClaw" detour that returns you to this step when it's done. You can skip it now and add runtimes anytime later from **Settings**, then the **Runtimes** panel.
 
-Click **Skip for now** or, once you've connected anything you want, **Continue**.
+Click **Continue** whenever you're ready, with or without connecting anything.
 
-**Expected result:** either button advances to team selection. Nothing on this step can strand you; you can deploy a team with or without extra runtimes.
+**Expected result:** you advance to team selection. Nothing on this step can strand you; you can deploy a team with or without extra runtimes.
 
 ### 5. Pick and deploy a team
 
-The **Team** step opens Clawboo's team marketplace, the same one you'll use later from the dashboard. Browse the starter teams, pick one, then customize it: rename it, choose a color collection, and set each agent's runtime and model. Since you have not connected an OpenClaw Gateway, every agent defaults to **Clawboo Native**, so the whole team deploys Gateway-free. Click **Deploy**.
+The **Team** step opens Clawboo's team marketplace, the same one you'll use later from the dashboard. Browse the starter teams, pick one, then customize it: rename it, choose a color collection, and set each agent's runtime and model. During onboarding every agent defaults to **Clawboo Native**, so the whole team deploys Gateway-free on the key you just connected. You can still switch any agent to another connected runtime from its picker. Click **Deploy**.
 
-**Expected result:** Clawboo creates the team and its `clawboo-native` agents (sharing Clawboo's memory), pre-satisfies the team's "Know Your Team" introduction so you land straight in chat, then advances to the "Your team is ready" screen.
+**Expected result:** Clawboo creates the team and its `clawboo-native` agents (sharing Clawboo's memory), then advances to the "Your team is ready" screen.
 
 ### 6. Open your dashboard
 
-The final wizard screen, **"Your team is ready"**, shows your deployed team's roster (with the agent count in the subtitle) and a note that they share one memory.
+The final wizard screen, **"Your team is ready"**, shows your deployed team's roster and a **"Led by ..."** badge naming Boo Zero, the universal leader that coordinates the team (it is teamless, so it never appears in the roster itself).
 
 Click **Open my dashboard**.
 
-**Expected result:** you enter the dashboard in **native mode**, no Gateway, no GatewayClient, and land directly in your new team's group chat.
+**Expected result:** you enter the dashboard in **native mode**, no Gateway, no GatewayClient, and land in your new team's group chat, which opens on a one-time **"introduce yourself"** screen. Write a short intro and click **Continue to Team Space**: your introduction is saved to the team's context, so every future message carries it.
 
 ## What you should see
 

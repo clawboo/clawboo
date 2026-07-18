@@ -92,14 +92,17 @@ test.describe('Add-runtimes onboarding step', () => {
     await page.getByTestId('native-api-key').fill('sk-ant-e2e-fake-key')
     await page.getByTestId('native-continue').click()
 
-    // Add-runtimes comes FIRST: the tabbed connect surface — OpenClaw FIRST + the
-    // default active pane (so its Gateway setup CTA shows without a click), then
-    // one tab per coding runtime, all mounted (hidden) so installs survive switches.
+    // Add-runtimes comes FIRST: the premium connect LIST (RuntimeConnectList) —
+    // every runtime is a visible row so it's discoverable at a glance, each expanding
+    // in place to its connect flow. (This replaced the earlier tabbed surface; there
+    // are no `runtime-tab-*` tabs any more.) Native shows as the already-connected
+    // foundation, and OpenClaw's row carries its in-place Gateway setup CTA.
     await expect(page.getByTestId('add-runtimes-step')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByTestId('runtime-tab-openclaw')).toHaveAttribute('aria-selected', 'true')
-    await expect(page.getByTestId('runtime-tab-claude-code')).toBeVisible()
-    await expect(page.getByTestId('runtime-tab-codex')).toBeVisible()
-    await expect(page.getByTestId('runtime-tab-hermes')).toBeVisible()
+    await expect(page.getByTestId('runtime-list-row-clawboo-native')).toBeVisible()
+    await expect(page.getByTestId('runtime-list-row-claude-code')).toBeVisible()
+    await expect(page.getByTestId('runtime-list-row-codex')).toBeVisible()
+    await expect(page.getByTestId('runtime-list-row-hermes')).toBeVisible()
+    await expect(page.getByTestId('runtime-list-row-openclaw')).toBeVisible()
     await expect(page.getByTestId('addruntimes-setup-openclaw')).toBeVisible()
 
     // Continue → team selection → deploy a real team (fully native).

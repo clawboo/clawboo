@@ -61,12 +61,16 @@ test.describe('Teams', () => {
     await connectToMockGateway(page, request, gateway.url)
     const agentList = page.locator('[data-testid="agent-list-column"]')
 
-    // Settings modal defaults to the Runtimes pane (OpenClaw is the first/default
-    // tab); switch to the built-in native runtime tab — always present, so its
-    // diagnostics drawer is a stable target.
+    // Settings modal defaults to the Runtimes pane, which renders every runtime as a
+    // row (RuntimeConnectList — this replaced the earlier tabbed surface, so there is
+    // no `runtime-tab-*` to click through). In the panel variant each row carries its
+    // diagnostics (Info) button in the always-visible right control, so the built-in
+    // native runtime's drawer is a stable, directly-clickable target.
     await agentList.locator('[data-testid="nav-settings"]').click()
     await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 5_000 })
-    await page.locator('[data-testid="runtime-tab-clawboo-native"]').click()
+    await expect(page.locator('[data-testid="runtime-list-row-clawboo-native"]')).toBeVisible({
+      timeout: 5_000,
+    })
     await page.locator('[data-testid="runtime-clawboo-native-diagnostics"]').click()
 
     // The drawer is portaled to <body> so it escapes the modal's clipping glass
