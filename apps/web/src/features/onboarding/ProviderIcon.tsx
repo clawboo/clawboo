@@ -53,6 +53,7 @@ export type ProviderId =
   | 'huggingface'
   | 'cerebras'
   | 'venice'
+  | 'openai-codex'
 
 interface BrandMark {
   /**
@@ -74,6 +75,9 @@ export const PROVIDER_BRAND: Record<ProviderId, BrandMark> = {
   // OpenAI's current brand mark is monochrome (they moved off the teal) — render
   // it in the theme foreground like the other monochrome brands (Ollama, xAI).
   openai: { color: 'currentColor', glyph: openaiMark },
+  // The ChatGPT subscription (OpenClaw's `openai-codex` OAuth provider) — the
+  // same monochrome OpenAI mark; the label carries the distinction.
+  'openai-codex': { color: 'currentColor', glyph: openaiMark },
   google: { color: '#4796E3', icon: siGooglegemini },
   ollama: { color: 'currentColor', icon: siOllama },
   // ── More ──
@@ -129,14 +133,26 @@ export function ProviderGlyph({ id, size }: { id: ProviderId; size: number }) {
   }
   if (brand.icon) {
     return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" role="img" aria-hidden>
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        role="img"
+        aria-hidden
+      >
         <path d={brand.icon.path} />
       </svg>
     )
   }
   return (
     <span
-      style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: Math.round(size * 0.85), lineHeight: 1 }}
+      style={{
+        fontFamily: 'var(--font-display)',
+        fontWeight: 700,
+        fontSize: Math.round(size * 0.85),
+        lineHeight: 1,
+      }}
     >
       {brand.monogram}
     </span>

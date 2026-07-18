@@ -22,6 +22,18 @@ describe('TeamChat per-runtime attach (shared layer)', () => {
     expect(url).toContain('postAuthorAgentId=boo-1')
     // It must NOT leak the memory-scope param names.
     expect(url).not.toContain('scopeTeamId')
+    // A team-SCOPED url alone must NOT carry delegate — the tool would be a
+    // silent no-op where nothing observes delegation (executorRunner runs).
+    expect(url).not.toContain('delegate=1')
+  })
+
+  it('mcpHttpUrl carries delegate=1 on the teamchat URL ONLY for orchestrator-driven scopes', () => {
+    const url = mcpHttpUrl('http://localhost:18790', 'teamchat', { ...scope, delegate: true })
+    expect(url).toContain('delegate=1')
+    // The flag is teamchat-only — the memory URL never carries it.
+    expect(
+      mcpHttpUrl('http://localhost:18790', 'memory', { ...scope, delegate: true }),
+    ).not.toContain('delegate=1')
   })
 
   it('Claude Code inline mcpServers includes the bound clawboo-teamchat server', () => {

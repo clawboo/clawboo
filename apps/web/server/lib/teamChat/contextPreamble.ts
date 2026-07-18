@@ -96,6 +96,24 @@ const NATIVE_LEADER_COORDINATION_BLOCK = `[Leading this team — read carefully]
 - Reply with ONE short, plain summary. Suggest a next step only when there is a clear, non-obvious one — do NOT append a menu of options or ask "what's the priority?" every turn.
 [End Leading this team]`
 
+// The leader instructions for a CODING-runtime leader turn (Codex / Claude Code /
+// Hermes). These runtimes are persona-inert — their drivers read no SOUL/systemPrompt,
+// so this volatile-tier block is their ONLY instruction channel: without it a coding
+// leader is never told it leads a team or how to delegate. It teaches the
+// `team_delegate` MCP tool BY NAME (attached to orchestrator-driven runs via the
+// TeamChat server's `delegate=1` binding; the engine observes the tool-call through
+// its name-keyed DELEGATE_TOOL_NAME_RE branch, exactly like native's local `delegate`).
+// Mirrors the native leader block's behavioral rules (answer-directly, no narration,
+// one short summary) so leader behavior is consistent across runtimes.
+const CODING_LEADER_COORDINATION_BLOCK = `[Leading this team — read carefully]
+You are the LEAD of this team. The teammates listed above ALREADY EXIST — never invent, spawn, or launch new agents.
+- Answer simple questions and quick clarifications YOURSELF, directly, in a sentence or two. Do NOT delegate something you can answer or already know.
+- Delegate genuine hands-on, multi-step work (writing code, research, producing or changing a deliverable) by calling the \`team_delegate\` tool with the teammate's name and a clear, self-contained task. One call per task; call it again for each additional teammate or task. Clawboo delivers each task and returns the teammate's result to you.
+- When you delegate, just call the tool(s) and stop — do NOT narrate the hand-off (the user already sees each task appear on the board). Only after the task updates come back do you reply, with ONE short, plain summary of what the team produced.
+- Never narrate your own tool use or internal state to the user; use your tools silently.
+- If YOU were handed a specific task, just do it and report the result — do not re-delegate it.
+[End Leading this team]`
+
 // A delegated WORKER's guardrail — the fix for a worker addressing the user directly
 // ("Hey boss! Quick question…"). Runtime-agnostic: injected for ANY worker (child-task)
 // turn, so it covers a native, OpenClaw, or coding-runtime member. The other half of the
@@ -105,15 +123,24 @@ const WORKER_COORDINATION_BLOCK = `[Your task — read carefully]
 You are executing ONE scoped task delegated to you by your team lead. You CANNOT reach the user — your reply goes to your team lead, not the user. Do the work using your own knowledge and tools. If a detail is missing, make a reasonable assumption and note it — do NOT ask the user or "the boss" a question. When you're done, report a short, concrete result, not a question.
 [End Your task]`
 
+/** The coding runtimes — persona-inert CLI/SDK agents whose only instruction channel
+ *  is this volatile context (they read no SOUL/systemPrompt). */
+const CODING_RUNTIMES = new Set(['codex', 'claude-code', 'hermes'])
+
 /** The coordination block(s) for a team run, or null when none is needed. Composed:
  *  OpenClaw agents get the delegate-protocol + anti-sub-agent block (any turn); a NATIVE
- *  LEADER / user-facing turn gets the behavioral-guidance block; and ANY worker (a
- *  delegated child, `!isLeaderTurn`, any runtime) additionally gets the worker guardrail
- *  (can't-reach-user / assume-and-note / report-to-lead). Multiple blocks are joined. */
+ *  LEADER / user-facing turn gets the behavioral-guidance block; a CODING-runtime LEADER
+ *  turn gets the `team_delegate` leader block (its ONLY instruction channel — without it
+ *  a Codex/Claude Code/Hermes leader is never told it leads or how to delegate); and ANY
+ *  worker (a delegated child, `!isLeaderTurn`, any runtime) additionally gets the worker
+ *  guardrail (can't-reach-user / assume-and-note / report-to-lead). Blocks are joined. */
 function coordinationBlockFor(runtime: string | null, isLeaderTurn: boolean): string | null {
   const blocks: string[] = []
   if (runtime === 'openclaw') blocks.push(OPENCLAW_COORDINATION_BLOCK)
-  else if (runtime === 'clawboo-native' && isLeaderTurn) blocks.push(NATIVE_LEADER_COORDINATION_BLOCK)
+  else if (runtime === 'clawboo-native' && isLeaderTurn)
+    blocks.push(NATIVE_LEADER_COORDINATION_BLOCK)
+  else if (runtime && CODING_RUNTIMES.has(runtime) && isLeaderTurn)
+    blocks.push(CODING_LEADER_COORDINATION_BLOCK)
   if (!isLeaderTurn) blocks.push(WORKER_COORDINATION_BLOCK)
   return blocks.length > 0 ? blocks.join('\n\n') : null
 }

@@ -10,7 +10,10 @@ import {
   suggestedRuntimeFor,
 } from '../runtimeSelection'
 
-const status = (id: RuntimeId, over: Partial<RuntimeStatus> = {}): RuntimeStatus => ({ id, ...over })
+const status = (id: RuntimeId, over: Partial<RuntimeStatus> = {}): RuntimeStatus => ({
+  id,
+  ...over,
+})
 
 describe('runtimeSelection', () => {
   describe('agentRuntimeOptions', () => {
@@ -92,6 +95,39 @@ describe('runtimeSelection', () => {
         }),
       ).toBe('hermes')
     })
+
+    describe('prefer (onboarding — the wizard primary connect choice)', () => {
+      // The wizard's only guaranteed-connected runtime is the one just connected.
+      // Before this, a first-run user with a REACHABLE Gateway deployed their whole
+      // first team onto OpenClaw (the source rule suggests OpenClaw for a
+      // marketplace team, and `resolveDefaultRuntime` only degrades an UNAVAILABLE
+      // suggestion) — leaving the team with no member on the connected runtime, so
+      // the OpenClaw `main` fallback led the team.
+      it('outranks the marketplace source rule (native primary)', () => {
+        expect(suggestedRuntimeFor({ isMarketplaceTeam: true, prefer: 'clawboo-native' })).toBe(
+          'clawboo-native',
+        )
+      })
+
+      it('a CODEX primary (Sign in with ChatGPT) steers every agent to codex', () => {
+        expect(suggestedRuntimeFor({ isMarketplaceTeam: true, prefer: 'codex' })).toBe('codex')
+      })
+
+      it('outranks the catalog fields too — nothing can pull onboarding off the primary', () => {
+        expect(
+          suggestedRuntimeFor({
+            agentSuggested: 'hermes',
+            teamDefault: 'openclaw',
+            isMarketplaceTeam: true,
+            prefer: 'clawboo-native',
+          }),
+        ).toBe('clawboo-native')
+      })
+
+      it('is off by default — normal team creation keeps the source rule', () => {
+        expect(suggestedRuntimeFor({ isMarketplaceTeam: true })).toBe('openclaw')
+      })
+    })
   })
 
   describe('resolveDefaultRuntime (availability degradation)', () => {
@@ -112,7 +148,10 @@ describe('runtimeSelection', () => {
     })
 
     it('degrades an unavailable coding suggestion to native', () => {
-      const a = { statuses: [status('hermes', { connectionState: 'needs-auth' })], openclawConnected: false }
+      const a = {
+        statuses: [status('hermes', { connectionState: 'needs-auth' })],
+        openclawConnected: false,
+      }
       expect(resolveDefaultRuntime('hermes', a)).toEqual({
         selected: 'clawboo-native',
         degradedFrom: 'hermes',

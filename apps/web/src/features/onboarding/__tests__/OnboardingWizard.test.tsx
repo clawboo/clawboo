@@ -68,6 +68,8 @@ describe('OnboardingWizard — native-first spine', () => {
 
   // configureNative: paste a key, continue → addRuntimes (runtimes come first now).
   async function connectToAddRuntimes() {
+    // OpenAI is the default card (ChatGPT sign-in, no key field); pick a key provider.
+    await userEvent.click(await screen.findByTestId('native-provider-anthropic'))
     await userEvent.type(await screen.findByTestId('native-api-key'), 'sk-ant-test')
     await userEvent.click(screen.getByTestId('native-continue'))
     await screen.findByTestId('add-runtimes-step')

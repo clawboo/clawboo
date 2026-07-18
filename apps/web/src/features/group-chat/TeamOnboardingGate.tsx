@@ -15,11 +15,11 @@
 
 import { useCallback, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, Send, ArrowRight } from 'lucide-react'
+import { Send, ArrowRight } from 'lucide-react'
 import type { TranscriptEntry } from '@clawboo/protocol'
-import { BooAvatar } from '@clawboo/ui'
 import { Button } from '@/features/shared/Button'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
+import { MeetYourTeamCard } from '@/features/teams/MeetYourTeamCard'
 import type { AgentState } from '@/stores/fleet'
 import type { Team } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
@@ -235,80 +235,32 @@ export function TeamOnboardingGate({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.2 }}
-                className="mx-auto flex w-full max-w-md flex-col items-center rounded-2xl border border-border bg-surface p-8 text-center"
-                style={{ boxShadow: 'var(--shadow-raised)' }}
+                className="w-full max-w-md"
               >
-                {/* The universal team leader (Boo Zero) presents the team — its avatar
-                  replaces the abstract sparkle icon for a stronger "leader presenting
-                  the team" framing. Falls back to the sparkle in a colored ring when
-                  Boo Zero hasn't been identified (rare — a brief window before
-                  `identifyBooZero` lands after first hydrate). */}
-                {booZeroAgent ? (
-                  <div className="mb-4">
-                    <BooAvatar seed={booZeroAgent.id} size={56} isBooZero />
-                  </div>
-                ) : (
-                  <div
-                    className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
-                    style={{ background: `${team?.color ?? 'var(--mint)'}22` }}
-                  >
-                    <Sparkles size={22} style={{ color: team?.color ?? 'var(--mint)' }} />
-                  </div>
-                )}
-                <h3
-                  className="mb-2 text-[19px] font-bold text-foreground"
-                  style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
+                <MeetYourTeamCard
+                  teamAgents={teamAgents}
+                  booZeroAgent={booZeroAgent}
+                  accentColor={team?.color ?? null}
+                  title="Meet your team"
+                  body={
+                    <>
+                      Your team of {teamAgents.length} is led by {booZeroName}, who takes your
+                      request and routes it to the right specialist. You don&rsquo;t need to track
+                      who does what. Just tell the team what you need to get started.
+                    </>
+                  }
                 >
-                  Meet your team
-                </h3>
-                <p className="mb-6 text-[13px] leading-relaxed text-foreground/55">
-                  Your team of {teamAgents.length} is led by {booZeroName}, who takes your request
-                  and routes it to the right specialist. You don&rsquo;t need to track who does what.
-                  Just tell the team what you need to get started.
-                </p>
-
-                {/* Agent avatars */}
-                <div className="mb-5 flex flex-wrap items-center justify-center gap-3">
-                  {teamAgents.map((agent) => (
-                    <div
-                      key={agent.id}
-                      className="flex flex-col items-center gap-1.5"
-                      style={{ minWidth: 64 }}
-                    >
-                      <BooAvatar seed={agent.id} size={40} />
-                      <span className="max-w-[80px] truncate text-[10.5px] font-medium text-foreground/60">
-                        {agent.name}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* "Led by Boo Zero" badge — Boo Zero is the universal team leader and
-                  responds first in every team chat, even though it doesn't appear in
-                  the team's sidebar agent list. */}
-                {booZeroAgent && (
-                  <div
-                    className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-foreground/[0.02] px-3 py-1.5 text-[11px] text-foreground/60"
-                    data-testid="led-by-boo-zero-badge"
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    onClick={handleKnowYourTeam}
+                    disabled={teamAgents.length === 0}
+                    data-testid="know-your-team-button"
                   >
-                    <BooAvatar seed={booZeroAgent.id} size={20} />
-                    <span>
-                      Led by <strong className="text-foreground">{booZeroAgent.name}</strong> — your
-                      universal team leader
-                    </span>
-                  </div>
-                )}
-
-                <Button
-                  variant="primary"
-                  size="lg"
-                  onClick={handleKnowYourTeam}
-                  disabled={teamAgents.length === 0}
-                  data-testid="know-your-team-button"
-                >
-                  Get Started
-                  <ArrowRight size={16} strokeWidth={2} />
-                </Button>
+                    Get Started
+                    <ArrowRight size={16} strokeWidth={2} />
+                  </Button>
+                </MeetYourTeamCard>
               </motion.div>
             )}
 

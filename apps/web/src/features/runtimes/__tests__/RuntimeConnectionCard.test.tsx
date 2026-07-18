@@ -2,6 +2,7 @@
 // msw (onUnhandledRequest:'error') + jest-dom + userEvent. The card starts at
 // the server's connectionState; there is no flag-flip "available → Add" step.
 
+import { useState } from 'react'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
@@ -52,6 +53,43 @@ describe('RuntimeConnectionCard', () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
   })
 
+  it('after install completes, the "installed" ack appears above the connect step', async () => {
+    server.use(
+      http.post(
+        '/api/runtimes/hermes/install',
+        () =>
+          new HttpResponse('data: {"type":"complete","success":true}\n\n', {
+            headers: { 'Content-Type': 'text/event-stream' },
+          }),
+      ),
+    )
+    // A stateful host: onChanged flips the refetched status from not-installed →
+    // needs-auth, exactly as the live RuntimeConnectList refetch does.
+    function Host() {
+      const [state, setState] = useState<RuntimeStatus>({
+        id: 'hermes',
+        connectionState: 'not-installed',
+        authKind: 'api-key',
+        envVar: 'OPENROUTER_API_KEY',
+      })
+      return (
+        <RuntimeConnectionCard
+          entry={RUNTIME_CATALOG['hermes']}
+          status={state}
+          variant="panel"
+          onChanged={() => setState((s) => ({ ...s, connectionState: 'needs-auth' }))}
+        />
+      )
+    }
+    render(<Host />)
+    expect(screen.queryByTestId('runtime-hermes-installed-ack')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('runtime-hermes-install'))
+    // The success beat lands, and the key input (the connect step) is right there.
+    const ack = await screen.findByTestId('runtime-hermes-installed-ack')
+    expect(ack).toHaveTextContent(/Hermes installed/i)
+    expect(screen.getByTestId('runtime-hermes-key')).toBeInTheDocument()
+  })
+
   it('needs-auth → paste key → Connect POSTs the apiKey → onChanged', async () => {
     const onChanged = vi.fn()
     let captured: unknown = null
@@ -85,7 +123,41 @@ describe('RuntimeConnectionCard', () => {
     expect(captured).toEqual({ apiKey: 'sk-or-test' })
   })
 
-  it('needs-login (codex): shows the login command + Re-check', async () => {
+  it('needs-auth (hermes): the ChatGPT-subscription option appears ONLY once Codex is detected', async () => {
+    const status: RuntimeStatus = {
+      id: 'hermes',
+      connectionState: 'needs-auth',
+      authKind: 'api-key',
+      envVar: 'OPENROUTER_API_KEY',
+    }
+    // Codex NOT connected → no subscription affordance at all: the subscription
+    // gets set up on the Providers surfaces, never demanded from a runtime row.
+    const first = render(
+      <RuntimeConnectionCard entry={RUNTIME_CATALOG['hermes']} status={status} variant="panel" />,
+    )
+    expect(screen.queryByTestId('runtime-hermes-alt-login')).not.toBeInTheDocument()
+    expect(screen.getByTestId('runtime-hermes-key')).toBeInTheDocument()
+    first.unmount()
+
+    // Codex connected → a QUIET optional block under the key input.
+    render(
+      <RuntimeConnectionCard
+        entry={RUNTIME_CATALOG['hermes']}
+        status={status}
+        variant="panel"
+        codexReady
+      />,
+    )
+    const alt = screen.getByTestId('runtime-hermes-alt-login')
+    expect(alt).toHaveTextContent(/Codex is connected/i)
+    expect(alt).toHaveTextContent(/ChatGPT subscription/i)
+    // The one-click sign-in (never a filled-primary demand) is inside the block.
+    expect(screen.getByTestId('chatgpt-signin-hermes-start')).toBeInTheDocument()
+    // The key path stays primary — both affordances coexist.
+    expect(screen.getByTestId('runtime-hermes-key')).toBeInTheDocument()
+  })
+
+  it('needs-login (codex): the one-click sign-in + Re-check', async () => {
     const onChanged = vi.fn()
     const status: RuntimeStatus = { id: 'codex', connectionState: 'needs-login' }
     render(
@@ -96,7 +168,9 @@ describe('RuntimeConnectionCard', () => {
         onChanged={onChanged}
       />,
     )
-    expect(screen.getByText('codex login')).toBeInTheDocument()
+    // The one-click sign-in IS codex's connect action; the manual command
+    // surfaces inside the flow's failure states, not as standing chrome.
+    expect(screen.getByTestId('chatgpt-signin-codex-start')).toBeInTheDocument()
     expect(screen.queryByTestId('runtime-codex-key')).not.toBeInTheDocument() // no key field for oauth
     await userEvent.click(screen.getByTestId('runtime-codex-recheck'))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())

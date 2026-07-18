@@ -128,7 +128,9 @@ You can pair from a terminal instead: run `openclaw devices approve --latest` to
 
 ### 8. Finish onboarding, then deploy an OpenClaw team
 
-Back on **Add more runtimes**, click **Continue** (or **Skip for now** if you connected nothing else). The wizard advances to the **Your team is ready** screen; click **Open my dashboard**. You land in the dashboard connected to the Gateway ("gateway" mode), in the group chat of the native starter team seeded in step 3.
+Back on **Add more runtimes**, click **Continue**. The wizard advances to the **Team** step, where you pick a starter team from the marketplace and deploy it. During onboarding every agent defaults to **Clawboo Native**; now that the Gateway is connected you can switch any member to **OpenClaw** from its runtime picker in the customize step.
+
+Then the **Your team is ready** screen shows the roster and a **"Led by ..."** badge for Boo Zero; click **Open my dashboard**. You land in the dashboard connected to the Gateway ("gateway" mode), in your new team's group chat, which opens on a one-time **introduce yourself** screen.
 
 To build a team of OpenClaw agents, open the **Marketplace** (or **+ Create team** in the leftmost sidebar), pick a template, and choose **OpenClaw** as the runtime for its members. Deploy creates the team and its agents: it `POST /api/teams` to create the team, writes each agent's SOUL.md, IDENTITY.md, TOOLS.md, and an enhanced AGENTS.md with the team roster and collaboration protocol, assigns each agent to the team, sets the team-internal lead when one is detected, and, when any agent has `@mention` routing, enables agent-to-agent coordination in the Gateway config. See [Deploy your first team](/getting-started/first-team) for the full team-building flow.
 
@@ -136,7 +138,7 @@ To build a team of OpenClaw agents, open the **Marketplace** (or **+ Create team
 
 ## What you should see
 
-The dashboard opens connected to the Gateway, with your seeded native team in view and OpenClaw available as a runtime you can build teams on. Once you deploy an OpenClaw team, its Boos are ready to collaborate.
+The dashboard opens connected to the Gateway, with the team you deployed in view and OpenClaw available as a runtime you can build teams on. Once you deploy an OpenClaw team, its Boos are ready to collaborate.
 
 The team space looks like this once you start collaborating:
 

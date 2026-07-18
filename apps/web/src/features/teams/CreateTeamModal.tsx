@@ -14,7 +14,13 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { createAgent } from '@/lib/createAgent'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
-import { fetchRegistryHealth, fetchRuntimes, type RuntimeStatus } from '@clawboo/control-client'
+import {
+  fetchBooZeroOverride,
+  fetchRegistryHealth,
+  fetchRuntimes,
+  setBooZeroOverride,
+  type RuntimeStatus,
+} from '@clawboo/control-client'
 import {
   agentRuntimeOptions,
   resolveDefaultRuntime,
@@ -117,13 +123,27 @@ interface CreateTeamModalProps {
   /** When true (and no `initialProfile`), skip the pick step and open directly on a
    *  blank "start from scratch" customize step. */
   startBlank?: boolean
-  /** Onboarding: after the team is created, pre-satisfy the "Know Your Team"
-   *  gate so a first-run user lands straight in the team space (matching the
-   *  old auto-seed behavior). Off by default (normal team creation runs the gate). */
+  /** Onboarding: mark the gate's "meet your team" phase already seen, because the
+   *  wizard's own `NativeReadyStep` IS that beat (same card) — so the user isn't
+   *  shown two identical welcomes back to back. The gate then opens straight on the
+   *  user's self-introduction, which is NOT skipped: `userIntroText` is the source of
+   *  truth the server injects into every team turn's context preamble, so blanking it
+   *  would permanently deprive the first team of knowing who the user is.
+   *  Off by default (normal team creation runs the full gate). */
   presatisfyOnboardingGate?: boolean
   /** Whether the pick step offers "Start from scratch". Defaults to true;
    *  onboarding disables it (a blank team would strand the first-run user). */
   allowStartFromScratch?: boolean
+  /** Onboarding: default EVERY agent to THIS runtime regardless of the catalog's
+   *  source rule (which suggests OpenClaw for a marketplace team). The wizard passes
+   *  its primary connect choice — `'clawboo-native'` (a provider key) or `'codex'`
+   *  (Sign in with ChatGPT) — the only runtime guaranteed connected at that point;
+   *  without this, a first-run user with a reachable Gateway silently deploys their
+   *  first team onto OpenClaw. The per-agent picker still offers every connected
+   *  runtime, so this is a default, not a lock. A codex-preferred deploy also
+   *  designates an explicit team lead (see the deploy loop) because a codex-only
+   *  install has no universal Boo Zero to coordinate a leaderless team. */
+  preferRuntime?: 'clawboo-native' | 'codex'
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -136,6 +156,7 @@ export function CreateTeamModal({
   startBlank,
   presatisfyOnboardingGate = false,
   allowStartFromScratch = true,
+  preferRuntime,
 }: CreateTeamModalProps) {
   const client = useConnectionStore((s) => s.client)
   const connStatus = useConnectionStore((s) => s.status)
@@ -149,7 +170,6 @@ export function CreateTeamModal({
   const nativeModelGroups = useNativeModelGroups()
   // OpenClaw groups with the same live OpenRouter list (routing-id format).
   const openclawModelGroups = useOpenClawModelGroups(MODEL_GROUPS)
-  const hermesModelGroups = useHermesModelGroups()
   // "OpenClaw available" = a live browser Gateway client OR the server's operator
   // connection (mirrors the Runtimes panel). A bare status check is wrong — native mode
   // sets status='connected' with client=null and no Gateway — so the registry-health
@@ -207,6 +227,13 @@ export function CreateTeamModal({
   // to the catalog "chef's suggestion" (a marketplace team → OpenClaw; a blank team →
   // Native), degraded to Native when unavailable. The universal Boo Zero leads any mix.
   const [runtimeStatuses, setRuntimeStatuses] = useState<RuntimeStatus[]>([])
+  // Hermes picker groups: live OpenRouter + (when a hermes ChatGPT login is
+  // detected — `codexAuth` on the fetched status) the subscription group. An
+  // auth-less pick would degrade at spawn time anyway, but never offering it is
+  // the honest picker.
+  const hermesModelGroups = useHermesModelGroups(
+    runtimeStatuses.find((s) => s.id === 'hermes')?.codexAuth === true,
+  )
   // Per-agent overrides (all agents, leader included). Effective runtime =
   // override ?? resolvedDefaultFor(id). Cleared in reset() so overrides don't leak.
   const [agentRuntimes, setAgentRuntimes] = useState<Record<string, SelectableSourceId>>({})
@@ -304,16 +331,18 @@ export function CreateTeamModal({
   )
 
   /** The catalog "chef's suggestion" for an agent (before availability degradation):
-   *  its own `suggestedRuntime` (unpopulated today) → the team `defaultRuntime` → the
-   *  source rule (marketplace → OpenClaw, blank → Native). */
+   *  onboarding's `preferRuntime` → its own `suggestedRuntime` (unpopulated
+   *  today) → the team `defaultRuntime` → the source rule (marketplace → OpenClaw,
+   *  blank → Native). */
   const suggestedFor = useCallback(
     (agentCatalogId: string): SelectableSourceId =>
       suggestedRuntimeFor({
         agentSuggested: getAgent(agentCatalogId)?.suggestedRuntime,
         teamDefault: (selectedProfile as TeamTemplate | null)?.defaultRuntime,
         isMarketplaceTeam,
+        prefer: preferRuntime,
       }),
-    [selectedProfile, isMarketplaceTeam],
+    [selectedProfile, isMarketplaceTeam, preferRuntime],
   )
   /** The resolved default = the suggestion degraded to Native when unavailable;
    *  `.degradedFrom` is non-null when it was degraded (drives the inline note). */
@@ -464,21 +493,25 @@ export function CreateTeamModal({
       })
       useTeamStore.getState().selectTeam(team.id)
 
-      // Onboarding: pre-satisfy the "Know Your Team" gate so a first-run user
-      // lands straight in the team space (matches the old auto-seed behavior).
+      // Onboarding: mark ONLY the "meet your team" phase as seen — the wizard's
+      // `NativeReadyStep` renders that same card, so replaying it in the gate would
+      // show the user two identical welcomes. The gate's `initialPhase` then opens
+      // directly on the user's self-introduction.
+      //
+      // Do NOT also set `userIntroduced` / blank `userIntroText` here: that skipped
+      // the introduction screen entirely AND left the first team's `userIntroText`
+      // permanently empty, so the server's team context preamble never told those
+      // agents who the user is — a gap every marketplace-created team was spared.
+      // The PATCH merges partials, so omitting the field leaves it false.
       if (presatisfyOnboardingGate) {
         try {
           await fetch(`/api/teams/${team.id}/onboarding`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              agentsIntroduced: true,
-              userIntroduced: true,
-              userIntroText: '',
-            }),
+            body: JSON.stringify({ agentsIntroduced: true }),
           })
         } catch {
-          // best-effort — the gate will just run once if this fails
+          // best-effort — the gate will just run its welcome phase too if this fails
         }
       }
 
@@ -518,6 +551,9 @@ export function CreateTeamModal({
       const universalLeaderName = booZeroAgent?.name ?? null
 
       let leaderAgentId: string | null = null
+      // The first successfully-created agent — the explicit lead a codex-preferred
+      // (ChatGPT-subscription) deploy designates when no genuine leader role exists.
+      let firstCreatedAgentId: string | null = null
       const failedAgents: string[] = []
       let createdCount = 0
 
@@ -647,6 +683,7 @@ export function CreateTeamModal({
         // leadership role (effectiveLeaderAgent non-null). No genuine leader ⇒
         // leaderAgentId stays null and the universal Boo Zero coordinates.
         if (effectiveLeaderAgent && agent.id === effectiveLeaderAgent.id) leaderAgentId = agentId
+        if (!firstCreatedAgentId) firstCreatedAgentId = agentId
 
         // Assign the successfully-created agent to the team (best-effort).
         try {
@@ -663,6 +700,13 @@ export function CreateTeamModal({
       // No forced fallback: leaderAgentId stays null unless a genuine leadership role
       // was detected (and created). Boo Zero universal-leads either way — the server
       // resolves it before leaderAgentId — so a leaderless team is fully functional.
+      //
+      // EXCEPT a codex-preferred (ChatGPT-subscription) deploy: that install has NO
+      // universal Boo Zero to fall back on (the native one needs a provider key, the
+      // OpenClaw one needs a Gateway), so `resolveLeaderId` would land on the
+      // implicit first-member fallback. Designate the lead EXPLICITLY instead —
+      // visible in the UI, deterministic on the server.
+      if (preferRuntime === 'codex' && !leaderAgentId) leaderAgentId = firstCreatedAgentId
 
       // Nothing deployed — surface it. The (empty) team row stays so the user can
       // retry or delete it.
@@ -691,6 +735,23 @@ export function CreateTeamModal({
           useTeamStore.getState().updateTeam(team.id, { leaderAgentId })
         } catch {
           // leader assignment is non-fatal
+        }
+      }
+
+      // Codex-preferred deploy: promote the designated lead to the UNIVERSAL Boo
+      // Zero via the override. This is what makes `defaultId` resolve → the
+      // "Led by" badge renders, the client identifies Boo Zero deterministically,
+      // and the server leads every team with the Codex agent. A DELIBERATE
+      // existing Boo Zero (a prior override, or a native one from a connected
+      // native key) is never stomped — but the weak OpenClaw `main` fallback IS
+      // outranked (an OpenClaw `main` leading a codex team is the exact
+      // "unresponsive first team" failure class the first-team fix closed).
+      if (preferRuntime === 'codex' && leaderAgentId) {
+        try {
+          const { tier } = await fetchBooZeroOverride()
+          if (tier !== 'override' && tier !== 'native') await setBooZeroOverride(leaderAgentId)
+        } catch {
+          // best-effort — `resolveLeaderId` still falls back to team.leaderAgentId
         }
       }
 

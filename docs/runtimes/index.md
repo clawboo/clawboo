@@ -39,7 +39,7 @@ flowchart TD
     persist -->|no| ephemeral["home: ephemeral<br/>preserve* = false"]
 ```
 
-- **`wrapped-oneshot`**: a per-run spawned worker. Clawboo installs the CLI (or, for `clawboo-native`, ships it inside the server), spawns it for one task, drains its events, and tears it down. `claude-code`, `codex`, and `hermes` are wrapped one-shots. A wrapped one-shot may still accrue durable state if it claims a persistent per-identity home (Hermes does).
+- **`wrapped-oneshot`**: a per-run spawned worker. Clawboo installs the CLI (or, for `clawboo-native`, ships it inside the server), spawns it for one task, drains its events, and tears it down. `claude-code`, `codex`, and `hermes` are wrapped one-shots. A wrapped one-shot may still accrue durable state if it claims a persistent per-identity home (Hermes and Codex do).
 - **`connected-substrate`**: a long-lived runtime the host drives over its existing live connection, rather than spawning. `openclaw` is the only connected substrate: runs ride the live Gateway session over the adapter's long-lived client. The server-side executor runner **refuses** a connected substrate before it claims a board task: `POST /api/runtimes/:id/run` would return `422` `connected_substrate`, because OpenClaw work is dispatched through the live Gateway path, not the one-shot runner. (And `openclaw` is not a `/api/runtimes` id, so that route 404s it first.)
 - **`native`**: a host-native participant. `clawboo-native` is the only one: Clawboo _is_ this runtime's substrate, so its private plane (persisted conversation transcripts) lives in a stable per-identity home the host materializes.
 
@@ -67,21 +67,21 @@ Each adapter answers `capabilities()` with a fixed shape. The fields below come 
 
 These claims tell the host which native powers each runtime carries, so it can decide what to materialize and what to preserve across runs.
 
-| Claim                | `clawboo-native` | `openclaw`  | `claude-code` | `codex`   | `hermes`       |
-| -------------------- | ---------------- | ----------- | ------------- | --------- | -------------- |
-| `nativeHome.scope`   | `per-identity`   | _(omitted)_ | _(omitted)_   | `per-run` | `per-identity` |
-| `nativeHome.persist` | `true`           | _(omitted)_ | _(omitted)_   | `false`   | `true`         |
-| `nativeSkills`       | `none`           | `preserve`  | `none`        | `none`    | `preserve`     |
-| `nativeMemory`       | `preserve`       | `preserve`  | `none`        | `none`    | `preserve`     |
-| `nativeChannels`     | `none`           | `gateway`   | `none`        | `none`    | `none`         |
-| `nativeScheduler`    | no               | yes         | no            | no        | yes            |
+| Claim                | `clawboo-native` | `openclaw`  | `claude-code` | `codex`        | `hermes`       |
+| -------------------- | ---------------- | ----------- | ------------- | -------------- | -------------- |
+| `nativeHome.scope`   | `per-identity`   | _(omitted)_ | _(omitted)_   | `per-identity` | `per-identity` |
+| `nativeHome.persist` | `true`           | _(omitted)_ | _(omitted)_   | `true`         | `true`         |
+| `nativeSkills`       | `none`           | `preserve`  | `none`        | `none`         | `preserve`     |
+| `nativeMemory`       | `preserve`       | `preserve`  | `none`        | `none`         | `preserve`     |
+| `nativeChannels`     | `none`           | `gateway`   | `none`        | `none`         | `none`         |
+| `nativeScheduler`    | no               | yes         | no            | no             | yes            |
 
 How those claims resolve through `resolveRuntimeIntegration`:
 
 - **`clawboo-native`**: `home: persistent (per-identity)`, `preserveMemory: true`. Clawboo materializes a stable per-identity home and its persisted conversation transcripts survive and resume across dispatches. No native skills dir (capabilities ride the shared [tools broker](/concepts/capabilities)), no channels (the shared spine is its only voice).
 - **`openclaw`**: `home: connected`. The Gateway owns its own state dir entirely, so the host provisions and preserves nothing; `preserveSkills`/`preserveMemory` resolve to `false` because there is nothing host-managed to keep. `useGatewayChannels` is `true` (`nativeChannels: 'gateway'`); OpenClaw's own channels and cron are runtime-native and the host never serves or co-runs them.
 - **`claude-code`**: `home: ephemeral`. A stateless wrapped one-shot: the cognition is the model, no durable cross-run substrate exists to preserve. `nativeHome` is omitted, so the SDK runs against the user's real HOME / Keychain auth.
-- **`codex`**: `home: ephemeral`. The driver mkdtemps a throwaway `CODEX_HOME` each run. Because `nativeHome` is `per-run` (not `per-identity`), the preserve flags clamp to `false`. (A known limitation: Codex keeps its ChatGPT OAuth in `$CODEX_HOME/auth.json`, so a user's `codex login` against `~/.codex` is invisible to spawned runs; see [Codex](/runtimes/native).)
+- **`codex`**: `home: persistent (per-identity)`. The host materializes a managed per-agent `CODEX_HOME`, so Codex sessions survive across runs and `codex exec resume` gives a Codex leader real conversation continuity. The preserve flags stay `false` (no native skills/memory substrate); the durable state is the session files plus a seeded copy of the user's `~/.codex/auth.json` (parse-validated, freshness-checked, never written back; see [Codex](/runtimes/codex)).
 - **`hermes`**: `home: persistent (per-identity)`, `preserveSkills: true`, `preserveMemory: true`. The Hermes self-improvement loop compounds in one stable home per identity: self-created skills, `MEMORY.md`, and `state.db` accrue across runs.
 
 ### Models

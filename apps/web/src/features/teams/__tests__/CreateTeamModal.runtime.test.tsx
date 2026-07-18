@@ -164,7 +164,12 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 function renderModal(
-  props: { onClose?: () => void; onCreated?: () => void; profile?: ProfileLike } = {},
+  props: {
+    onClose?: () => void
+    onCreated?: () => void
+    profile?: ProfileLike
+    preferRuntime?: 'clawboo-native' | 'codex'
+  } = {},
 ) {
   return render(
     <ThemeProvider>
@@ -173,6 +178,7 @@ function renderModal(
         onClose={props.onClose ?? vi.fn()}
         onCreated={props.onCreated ?? vi.fn()}
         initialProfile={props.profile ?? PROFILE}
+        preferRuntime={props.preferRuntime}
       />
     </ThemeProvider>,
   )
@@ -439,6 +445,47 @@ describe('CreateTeamModal deploy', () => {
     expect(coderCall[3]).toEqual({ provider: 'openrouter', model: 'anthropic/claude-3.5-haiku' })
   })
 
+  it('hermes ChatGPT subscription: the group appears only with codexAuth, and a pick spreads { provider: openai-codex }', async () => {
+    const hermesReady = { id: 'hermes', connectionState: 'ready', hasCredential: true }
+    // WITHOUT codexAuth → the subscription group is never offered.
+    server.use(
+      http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [hermesReady] })),
+      ...baseHandlers(),
+    )
+    const first = renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+    await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[1])
+    await userEvent.click(screen.getByRole('option', { name: /hermes/i }))
+    await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
+    await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
+    expect(screen.queryByRole('option', { name: /ChatGPT subscription/i })).toBeNull()
+    first.unmount()
+
+    // WITH codexAuth (a detected `hermes auth add openai-codex`) → offered;
+    // the pick lands in execConfig as the openai-codex provider + the BARE model id.
+    server.use(
+      http.get('/api/runtimes', () =>
+        HttpResponse.json({ runtimes: [{ ...hermesReady, codexAuth: true }] }),
+      ),
+      ...baseHandlers(),
+    )
+    renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+    await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[1])
+    await userEvent.click(screen.getByRole('option', { name: /hermes/i }))
+    await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
+    await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
+    await userEvent.click(
+      screen.getByRole('option', { name: /GPT-5\.3 Codex · ChatGPT subscription/i }),
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
+    const coderCall = createAgentMock.mock.calls.find((c) => c[0] === 'Coder')!
+    expect(coderCall[2]).toBe('hermes')
+    expect(coderCall[3]).toEqual({ provider: 'openai-codex', model: 'gpt-5.3-codex' })
+  })
+
   it('a team with no genuine leadership role deploys leaderless (no badge, leaderAgentId null, all specialists)', async () => {
     let patchBody: Record<string, unknown> | undefined
     server.use(...baseHandlers(undefined, (b) => (patchBody = b as Record<string, unknown>)))
@@ -457,5 +504,109 @@ describe('CreateTeamModal deploy', () => {
     // leaderAgentId is PATCHed as null (not forced to the first agent).
     await waitFor(() => expect(patchBody).toBeDefined())
     expect(patchBody?.['leaderAgentId']).toBeNull()
+  })
+
+  // Codex-preferred deploy — the onboarding "Sign in with ChatGPT" path. A pure
+  // subscription install has NO universal Boo Zero (no native key, no Gateway), so
+  // the deploy must (a) default every agent to codex, (b) designate a lead even on
+  // a leaderless roster, and (c) promote that lead to the Boo Zero override so
+  // `defaultId` resolves (the badge + client identification + server routing).
+  it('codex-preferred deploy: every agent on codex, first agent designated lead, Boo Zero override set when none resolves', async () => {
+    let patchBody: Record<string, unknown> | undefined
+    let overrideBody: Record<string, unknown> | undefined
+    server.use(
+      http.get('/api/runtimes', () =>
+        HttpResponse.json({
+          runtimes: [{ id: 'codex', installed: true, connectionState: 'ready' }],
+        }),
+      ),
+      http.get('/api/boo-zero/override', () =>
+        HttpResponse.json({ overrideAgentId: null, effective: null, tier: null }),
+      ),
+      http.post('/api/boo-zero/override', async ({ request }) => {
+        overrideBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ ok: true })
+      }),
+      ...baseHandlers(undefined, (b) => (patchBody = b as Record<string, unknown>)),
+    )
+    renderModal({ profile: PROFILE_NO_LEADER, preferRuntime: 'codex' })
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
+
+    // Every agent lands on the codex source (the wizard primary outranks the
+    // marketplace OpenClaw rule).
+    for (const call of createAgentMock.mock.calls) expect(call[2]).toBe('codex')
+
+    // The leaderless roster still gets a designated lead (the first created agent)…
+    await waitFor(() => expect(patchBody).toBeDefined())
+    expect(patchBody?.['leaderAgentId']).toBe('id-Content Writer')
+    // …promoted to the universal Boo Zero via the override.
+    await waitFor(() => expect(overrideBody).toBeDefined())
+    expect(overrideBody).toEqual({ agentId: 'id-Content Writer' })
+  })
+
+  it('codex-preferred deploy never stomps a DELIBERATE Boo Zero (tier native → no override write)', async () => {
+    let overridePosted = false
+    server.use(
+      http.get('/api/runtimes', () =>
+        HttpResponse.json({
+          runtimes: [{ id: 'codex', installed: true, connectionState: 'ready' }],
+        }),
+      ),
+      http.get('/api/boo-zero/override', () =>
+        HttpResponse.json({
+          overrideAgentId: null,
+          effective: { id: 'native-existing-bz' },
+          tier: 'native',
+        }),
+      ),
+      http.post('/api/boo-zero/override', () => {
+        overridePosted = true
+        return HttpResponse.json({ ok: true })
+      }),
+      ...baseHandlers(),
+    )
+    renderModal({ profile: PROFILE_NO_LEADER, preferRuntime: 'codex' })
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
+
+    // The deploy completes (the modal advances past deploy) without an override write.
+    await screen.findByText(/is ready/i, undefined, { timeout: 5000 })
+    expect(overridePosted).toBe(false)
+  })
+
+  // The live e2e failure mode this guards: a leftover teamless OpenClaw `main`
+  // (mock-gateway residue / a half-configured install) makes `resolveBooZero`
+  // fall back to it — but that rung is the weak absence-of-anything-else
+  // default, not a deliberate leader, and an OpenClaw `main` leading a codex
+  // team is the exact "unresponsive first team" class. The codex lead outranks it.
+  it('codex-preferred deploy DOES outrank the weak OpenClaw fallback (tier openclaw → override written)', async () => {
+    let overrideBody: Record<string, unknown> | undefined
+    server.use(
+      http.get('/api/runtimes', () =>
+        HttpResponse.json({
+          runtimes: [{ id: 'codex', installed: true, connectionState: 'ready' }],
+        }),
+      ),
+      http.get('/api/boo-zero/override', () =>
+        HttpResponse.json({ overrideAgentId: null, effective: { id: 'main' }, tier: 'openclaw' }),
+      ),
+      http.post('/api/boo-zero/override', async ({ request }) => {
+        overrideBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ ok: true })
+      }),
+      ...baseHandlers(),
+    )
+    renderModal({ profile: PROFILE_NO_LEADER, preferRuntime: 'codex' })
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(overrideBody).toBeDefined())
+    expect(overrideBody).toEqual({ agentId: 'id-Content Writer' })
   })
 })

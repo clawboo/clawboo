@@ -3,6 +3,8 @@ import type { Request, Response } from 'express'
 import { createDb, setSetting, teams, agents, settings } from '@clawboo/db'
 import { eq, inArray, like, sql } from 'drizzle-orm'
 import { getDbPath } from '../lib/db'
+import { getRegistry } from '../lib/agentSource/registry'
+import { ensureNativeBooZero } from '../lib/teamChat/booZero'
 import { nativeTeamSessionKeysForTeamLike } from '../lib/teamChat/nativeTeamSession'
 import { getTenantId } from '../lib/tenant'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
@@ -248,7 +250,9 @@ export function teamsDELETE(req: Request, res: Response): void {
     // Sweep every member's native leader session-resume pointer for this team
     // (`native-team-session:<agentId>:<teamId>`) — team ids are UUIDs so a stale
     // pointer would never be re-read, but drop it for hygiene.
-    db.delete(settings).where(like(settings.key, nativeTeamSessionKeysForTeamLike(teamId))).run()
+    db.delete(settings)
+      .where(like(settings.key, nativeTeamSessionKeysForTeamLike(teamId)))
+      .run()
 
     // Delete the team (boo_zero_team_briefs FK-cascades).
     db.delete(teams).where(eq(teams.id, teamId)).run()
@@ -263,7 +267,7 @@ export function teamsDELETE(req: Request, res: Response): void {
 // Body: { agentId: string }
 // Assigns an agent to a team.
 
-export function teamAgentPOST(req: Request, res: Response): void {
+export async function teamAgentPOST(req: Request, res: Response): Promise<void> {
   const teamId = req.params['id'] as string | undefined
   if (!teamId) {
     res.status(400).json({ error: 'team id required' })
@@ -296,6 +300,29 @@ export function teamAgentPOST(req: Request, res: Response): void {
         set: { teamId, updatedAt: now },
       })
       .run()
+
+    // THIS is the moment a team actually gains a member: `createAgent` (the
+    // CreateTeamModal deploy path) creates every agent TEAMLESS and assigns it
+    // here, so the sibling hook in `agentsCreatePOST` — gated on `agent.teamId` —
+    // can never fire for it. Without an eager create here, the DEFAULT-NATIVE Boo
+    // Zero only materialized on the team's FIRST MESSAGE (the orchestrator's
+    // `ready` chain): too late for that team, whose client had already hydrated
+    // `defaultId` as the OpenClaw `main` fallback and pinned it as the chat target
+    // ("my first team is unresponsive and led by main"), yet just in time for every
+    // team created after it. Idempotent + self-gated on a native member + a
+    // connected provider, so a pure-OpenClaw / no-key install materializes nothing.
+    //
+    // AWAITED, not fire-and-forget: the wizard reads `/api/agents` for its
+    // "Led by <Boo Zero>" badge immediately after deploy, so Boo Zero must exist
+    // before this response lands. The create is pure SQLite (fast) and never throws.
+    const runtime = db
+      .select({ runtime: agents.runtime })
+      .from(agents)
+      .where(eq(agents.id, body.agentId))
+      .get()?.runtime
+    if (runtime === 'clawboo-native') {
+      await ensureNativeBooZero(db, getRegistry().nativeSource)
+    }
 
     res.json({ ok: true })
   } catch (err) {

@@ -60,13 +60,33 @@ export function runtimeAvailable(sid: SelectableSourceId, a: RuntimeAvailability
 }
 
 /** The catalog "chef's suggestion" BEFORE availability degradation. Precedence:
- *  a per-agent suggestion → the team default → the SOURCE RULE (a browsable
- *  marketplace team suggests OpenClaw; a blank/custom team suggests Clawboo Native). */
+ *  `prefer` → a per-agent suggestion → the team default → the SOURCE RULE
+ *  (a browsable marketplace team suggests OpenClaw; a blank/custom team suggests
+ *  Clawboo Native). */
 export function suggestedRuntimeFor(args: {
   agentSuggested?: SelectableSourceId
   teamDefault?: SelectableSourceId
   isMarketplaceTeam: boolean
+  /**
+   * Onboarding: suggest THIS runtime for EVERY agent, outranking the source rule
+   * and the catalog fields. The wizard passes its PRIMARY connect choice —
+   * `'clawboo-native'` (a provider key) or `'codex'` (Sign in with ChatGPT), the
+   * only runtime guaranteed connected at that point.
+   *
+   * Without this, a first-run user whose OpenClaw Gateway happens to be reachable
+   * deploys their first team entirely onto OpenClaw — because the source rule
+   * suggests OpenClaw for a marketplace team and `resolveDefaultRuntime` only
+   * degrades a suggestion that is UNAVAILABLE. That silently contradicts the
+   * wizard (whose only guaranteed-connected runtime is the one just connected)
+   * and leaves the team with no member on it, so the team's leader resolution
+   * lands on the wrong runtime (the OpenClaw `main` fallback led the first team).
+   *
+   * This changes the DEFAULT only — the per-agent picker still offers every
+   * connected runtime, so any other runtime remains one override away.
+   */
+  prefer?: SelectableSourceId
 }): SelectableSourceId {
+  if (args.prefer) return args.prefer
   return (
     args.agentSuggested ??
     args.teamDefault ??

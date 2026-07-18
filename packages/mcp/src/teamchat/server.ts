@@ -35,6 +35,17 @@ export interface TeamChatBoundIdentity {
   teamId: string
   /** Defaults to `team:<teamId>` — kept explicit so a team could carry >1 room. */
   roomId: string
+  /**
+   * True ONLY when the run is driven by the server team orchestrator (the
+   * `delegate=1` attach-URL param, written exclusively by `serverDeliver`).
+   * Exposes the `team_delegate` signal tool — the coding-runtime analog of the
+   * native driver's team-gated local `delegate` tool. It must NOT be exposed on
+   * a merely team-SCOPED session (an executorRunner board-task run is scoped
+   * too, but nothing observes delegation there — the model would "delegate"
+   * into a silent no-op). Native keeps its LOCAL `delegate` tool and never sets
+   * this, so the two tools never coexist in one tool universe.
+   */
+  delegate?: boolean
 }
 
 export interface TeamChatServerOptions {
@@ -135,6 +146,49 @@ export function createTeamChatServer(db: ClawbooDb, opts: TeamChatServerOptions 
       },
     },
   ]
+
+  // The delegation SIGNAL tool for coding runtimes (Codex / Claude Code / Hermes),
+  // exposed ONLY on an orchestrator-driven session (`bound.delegate` — the
+  // `delegate=1` attach param serverDeliver writes). Named `team_delegate` so it
+  // (a) matches the engine's name-keyed observer (`DELEGATE_TOOL_NAME_RE`,
+  // `/(?:^|[._])delegate(?:[._]|$)/i` — `_delegate` is end-delimited, and it stays
+  // matched under MCP namespacing like `clawboo-teamchat.team_delegate`), and
+  // (b) never collides with the native driver's LOCAL `delegate` tool.
+  //
+  // Signal-ONLY, mirroring `buildDelegateTool` (native): it does NOT touch the
+  // board and does NOT post to the room. The server orchestrator observes the
+  // emitted `tool-call` event (`serverDeliver.drainRun` → `engine.onEvent` →
+  // `extractSignals`) and turns it into a durable board task — create → claim →
+  // deliver → report-up → `[Task Update]`. The engine OWNS every board write.
+  if (bound?.delegate) {
+    tools.push({
+      name: 'team_delegate',
+      description:
+        'Hand a self-contained piece of work to a teammate by name. They pick it up, do the ' +
+        'work, and report back to you when done — you do NOT do it yourself. Use one call per ' +
+        'task; call it again for each additional teammate or task.',
+      inputSchema: z.object({
+        assignee: z.string().describe('The teammate\'s name to hand the task to (e.g. "Coder").'),
+        task: z
+          .string()
+          .describe('A clear, self-contained description of the work for the teammate to do.'),
+      }),
+      handler: (args) => {
+        const assignee = typeof args['assignee'] === 'string' ? args['assignee'].trim() : ''
+        const task = typeof args['task'] === 'string' ? args['task'].trim() : ''
+        if (!assignee || !task)
+          return textResult(
+            'team_delegate requires both an assignee (teammate name) and a task',
+            true,
+          )
+        // Signal-only: acknowledge and return. The orchestrator observes this
+        // tool-call and creates + delivers the board task.
+        return textResult(
+          `Delegated to ${assignee}: ${task}. They'll pick it up and report back when done.`,
+        )
+      },
+    })
+  }
 
   return buildServer('clawboo-teamchat', tools)
 }

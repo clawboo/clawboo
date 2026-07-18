@@ -14,6 +14,7 @@ import { NATIVE_STEPS } from '../StepIndicator'
 import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
 import { ProviderIcon, PROVIDER_BRAND, type ProviderId } from '../ProviderIcon'
 import { ModelDropdown } from '../ModelDropdown'
+import { ChatGptConnected, ChatGptSignIn } from '@/features/runtimes/ChatGptSignIn'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -162,6 +163,7 @@ const PROVIDER_TO_CATALOG_NAME: Record<ProviderId, string> = {
   huggingface: 'Hugging Face',
   cerebras: 'Cerebras',
   venice: 'Venice',
+  'openai-codex': 'OpenAI Codex',
 }
 
 /** Returns the models available for a provider, or null if no catalog entry exists. */
@@ -173,6 +175,13 @@ function getModelsForProvider(provider: ProviderId): { id: string; label: string
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
+interface OpenclawCodexAuth {
+  profile: boolean
+  codexCli: boolean
+  bootstrapTrusted: boolean
+  loginCommand: string
+}
+
 export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
   const [provider, setProvider] = useState<ProviderId | null>(null)
   const [apiKey, setApiKey] = useState('')
@@ -181,12 +190,51 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // The OpenAI card offers TWO auth methods: Sign in with ChatGPT (Recommended —
+  // OpenClaw's own `openai-codex` OAuth, run by the USER in their terminal; the
+  // economical no-key path) and an API key. Mirrors the native step's selector.
+  const [authMethod, setAuthMethod] = useState<'chatgpt' | 'api-key'>('chatgpt')
+  const [codexAuth, setCodexAuth] = useState<OpenclawCodexAuth | null>(null)
+  const [codexChecking, setCodexChecking] = useState(false)
+  const chatgptActive = provider === 'openai' && authMethod === 'chatgpt'
+  // READY needs OpenClaw's OWN oauth profile (a codex-CLI login alone can't call
+  // the backend — distinct credentials, distinct roles). `bootstrapTrusted` is
+  // the server-decided escape hatch for when OpenClaw's ~/.codex bootstrap is
+  // proven to fire headlessly.
+  const codexReady =
+    codexAuth != null && (codexAuth.profile || (codexAuth.bootstrapTrusted && codexAuth.codexCli))
+
+  const refreshCodexAuth = useCallback(async () => {
+    setCodexChecking(true)
+    try {
+      const res = await fetch('/api/system/openclaw-config')
+      // A transient failure must NOT drop a known-good confirmation (the toggle
+      // re-probes on every re-entry). Keep the last state; Re-check re-probes.
+      // A never-succeeded probe stays null, so Continue stays gated as before.
+      if (!res.ok) return
+      const data = (await res.json()) as { codexAuth?: OpenclawCodexAuth }
+      setCodexAuth(data.codexAuth ?? null)
+    } catch {
+      // Network / parse failure: keep the last known state (see above).
+    } finally {
+      setCodexChecking(false)
+    }
+  }, [])
+  useEffect(() => {
+    if (chatgptActive) void refreshCodexAuth()
+  }, [chatgptActive, refreshCodexAuth])
+
   const selected = ALL_PROVIDERS.find((p) => p.id === provider) ?? null
+  // The ChatGPT method configures the `openai-codex` provider (its own model
+  // catalog + a keyless POST); everything else configures the picked card.
+  const effectiveProvider: ProviderId | null = chatgptActive ? 'openai-codex' : provider
   const availableModels = useMemo(
-    () => (provider ? getModelsForProvider(provider) : null),
-    [provider],
+    () => (effectiveProvider ? getModelsForProvider(effectiveProvider) : null),
+    [effectiveProvider],
   )
-  const canSubmit = provider !== null && (provider === 'ollama' || apiKey.trim().length > 0)
+  const canSubmit =
+    provider !== null &&
+    (provider === 'ollama' || (chatgptActive ? codexReady : apiKey.trim().length > 0))
 
   // Default to the first (recommended) model in the catalog whenever the
   // provider changes. The catalog is ordered with the most capable / most
@@ -194,20 +242,20 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
   // user — they can still pick a smaller / faster variant from the
   // dropdown before submitting.
   useEffect(() => {
-    if (!provider) {
+    if (!effectiveProvider) {
       setModel('')
       return
     }
-    const models = getModelsForProvider(provider)
+    const models = getModelsForProvider(effectiveProvider)
     if (models && models.length > 0) {
       setModel(models[0]!.id)
     } else {
       setModel('')
     }
-  }, [provider])
+  }, [effectiveProvider])
 
   const handleSubmit = useCallback(async () => {
-    if (!provider || submitting || !canSubmit) return
+    if (!provider || !effectiveProvider || submitting || !canSubmit) return
 
     setSubmitting(true)
     setError(null)
@@ -217,8 +265,12 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider,
-          apiKey: provider === 'ollama' ? undefined : apiKey.trim(),
+          provider: effectiveProvider,
+          // Keyless providers (ollama / openai-codex): no key rides the request.
+          apiKey:
+            provider === 'ollama' || effectiveProvider === 'openai-codex'
+              ? undefined
+              : apiKey.trim(),
           // Send the user-chosen default model. The server falls back to its
           // own MODEL_MAP if `model` is empty / unrecognised — so this is
           // an additive change, never a breaking one.
@@ -245,7 +297,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
     } finally {
       setSubmitting(false)
     }
-  }, [provider, apiKey, model, submitting, canSubmit, onConfigured])
+  }, [provider, effectiveProvider, apiKey, model, submitting, canSubmit, onConfigured])
 
   return (
     <OnboardingScreen
@@ -384,9 +436,135 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
         })}
       </div>
 
+      {/* OpenAI auth method — Sign in with ChatGPT (Recommended: the economical
+          subscription path, OpenClaw's own `openai-codex` OAuth) vs API key.
+          The login runs in the USER'S terminal; clawboo only probes state. */}
+      {provider === 'openai' ? (
+        <div
+          className="mt-6 grid grid-cols-2 gap-3"
+          role="radiogroup"
+          aria-label="OpenAI auth method"
+        >
+          {[
+            {
+              id: 'chatgpt' as const,
+              title: 'Sign in with ChatGPT',
+              sub: 'Uses your ChatGPT subscription · no API key needed',
+              recommended: true,
+            },
+            {
+              id: 'api-key' as const,
+              title: 'API key',
+              sub: 'OpenAI Platform billing',
+              recommended: false,
+            },
+          ].map((m) => {
+            const active = authMethod === m.id
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                data-testid={`openclaw-auth-${m.id}`}
+                onClick={() => setAuthMethod(m.id)}
+                disabled={submitting}
+                className={[
+                  'flex flex-col items-start gap-1 rounded-2xl border p-4 text-left',
+                  'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                  active
+                    ? ''
+                    : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
+                ].join(' ')}
+                style={{
+                  cursor: submitting ? 'not-allowed' : 'pointer',
+                  ...(active
+                    ? {
+                        borderColor: 'var(--primary)',
+                        background: 'rgb(var(--primary-rgb) / 0.05)',
+                        boxShadow: '0 0 0 1px var(--primary)',
+                      }
+                    : {}),
+                }}
+              >
+                <span className="flex items-center gap-2">
+                  <span
+                    className="text-[13px] font-semibold"
+                    style={{ color: 'var(--foreground)' }}
+                  >
+                    {m.title}
+                  </span>
+                  {m.recommended ? (
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                      style={{ background: 'rgb(var(--mint-rgb) / 0.14)', color: 'var(--mint)' }}
+                    >
+                      Recommended
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-[11.5px] leading-snug" style={{ color: muted(0.5) }}>
+                  {m.sub}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+
+      {/* Sign in with ChatGPT — OpenClaw's own terminal login + Re-check. */}
+      {chatgptActive ? (
+        <div className="mt-5 flex flex-col gap-2.5" data-testid="openclaw-chatgpt-panel">
+          {codexChecking && codexAuth == null ? (
+            <p className="flex items-center gap-2 text-[13px]" style={{ color: muted(0.55) }}>
+              <Loader2 size={13} className="animate-spin" /> Checking your OpenClaw sign-in…
+            </p>
+          ) : codexReady ? (
+            <ChatGptConnected
+              testId="openclaw-chatgpt-ready"
+              detail="OpenClaw will run on your ChatGPT subscription."
+            />
+          ) : (
+            <>
+              <p className="text-[12.5px] leading-relaxed" style={{ color: muted(0.55) }}>
+                {codexAuth?.codexCli
+                  ? 'Your ChatGPT account is signed in to Codex; OpenClaw needs its own quick sign-in.'
+                  : 'OpenClaw signs in with your ChatGPT account.'}
+              </p>
+              {/* One-click sign-in: the local server runs OpenClaw's own
+                  browser-PKCE login; success re-probes automatically. The
+                  manual command surfaces inside the flow's failure states. */}
+              <ChatGptSignIn
+                tool="openclaw"
+                loginCommand={
+                  codexAuth?.loginCommand ?? 'openclaw models auth login --provider openai-codex'
+                }
+                onLoggedIn={() => void refreshCodexAuth()}
+              />
+              <div>
+                <button
+                  type="button"
+                  data-testid="openclaw-chatgpt-recheck"
+                  onClick={() => void refreshCodexAuth()}
+                  className="inline-flex items-center gap-1.5 text-[12px] font-medium underline-offset-4 transition-colors hover:underline"
+                  style={{
+                    color: muted(0.5),
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Already signed in? Re-check
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      ) : null}
+
       {/* API key input */}
       <AnimatePresence initial={false}>
-        {selected && selected.needsKey && (
+        {selected && selected.needsKey && !chatgptActive && (
           <motion.div
             key="api-key"
             initial={{ opacity: 0, height: 0 }}
@@ -455,7 +633,10 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
                 style={{ color: muted(0.5) }}
               >
                 <span>Default Model</span>
-                <span className="font-mono text-[10px] normal-case tracking-wider" style={{ color: muted(0.4) }}>
+                <span
+                  className="font-mono text-[10px] normal-case tracking-wider"
+                  style={{ color: muted(0.4) }}
+                >
                   used for new agents
                 </span>
               </label>

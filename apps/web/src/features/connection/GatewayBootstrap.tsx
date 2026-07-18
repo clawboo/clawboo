@@ -133,14 +133,21 @@ async function hasGatewayIndependentAgents(): Promise<boolean> {
  *  no team). It reads `hasVaultCredential`, NOT `hasCredential`: the latter also counts
  *  an ambient `process.env` shell var, so a bare exported provider key + a stale
  *  `onboarded` flag would otherwise skip the wizard into native mode on a fresh box.
- *  `/api/runtimes` only lists non-OpenClaw runtimes, so OpenClaw is excluded by
- *  construction. Best-effort (REST). */
+ *  An OAUTH runtime (codex) has no vault slot at all — its deliberate on-disk
+ *  credential is the `codex login` the user ran (`loggedIn`, the same deliberateness
+ *  class as a vault key, NOT an ambient env var), so a ChatGPT-subscription-only
+ *  user isn't re-trapped in the wizard on reload. `/api/runtimes` only lists
+ *  non-OpenClaw runtimes, so OpenClaw is excluded by construction. Best-effort. */
 async function hasConnectedRuntime(): Promise<boolean> {
   try {
     const res = await fetch('/api/runtimes')
     if (!res.ok) return false
-    const body = (await res.json()) as { runtimes?: { hasVaultCredential?: boolean }[] }
-    return (body.runtimes ?? []).some((r) => r.hasVaultCredential === true)
+    const body = (await res.json()) as {
+      runtimes?: { hasVaultCredential?: boolean; authKind?: string; loggedIn?: boolean }[]
+    }
+    return (body.runtimes ?? []).some(
+      (r) => r.hasVaultCredential === true || (r.authKind === 'oauth' && r.loggedIn === true),
+    )
   } catch {
     return false
   }
@@ -590,16 +597,23 @@ export function GatewayBootstrap() {
       const configured =
         !!info && info.openclaw.installed && info.openclaw.configExists && info.openclaw.envExists
 
-      // Resolve the remaining inputs only where they matter (one extra GET, not
-      // two): teams disambiguate a returning user from a genuine mid-onboarding
-      // run; a native agent marks a returning Gateway-free user.
-      const hasTeam = configured ? await hasAnyTeam() : false
+      // Resolve the remaining inputs only where they matter (one extra GET per
+      // case, not all three): a native agent marks a returning Gateway-free user.
       const hasNative = statusKnown && !configured ? await hasNativeAgents() : false
       // Only the "maybe-completed-coding-agent" case needs this extra GET: a
       // user who finished the wizard (`onboarded`) with no OpenClaw and no
       // native agent. A connected non-OpenClaw runtime credential confirms it.
       const hasConnected =
         onboarded && statusKnown && !configured && !hasNative ? await hasConnectedRuntime() : false
+      // Teams disambiguate a returning user from a genuine mid-onboarding run
+      // (configured), AND are the last-resort rescue for a completed user whose
+      // runtime credential is invisible to the probes (the codex-login belt in
+      // decideOnboardingView) — so ALSO fetch them when the other signals all
+      // came up empty for an onboarded user.
+      const hasTeam =
+        configured || (onboarded && statusKnown && !hasNative && !hasConnected)
+          ? await hasAnyTeam()
+          : false
 
       const resumeWizard = (): void => {
         markWizardActive() // idempotent — keep the marker through the resume

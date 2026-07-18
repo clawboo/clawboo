@@ -1,20 +1,27 @@
-// Settings → Providers — the multi-provider key hub. Connect any provider once;
-// the key is stored encrypted (the vault) AND mirrored to OpenClaw's config, so it
-// powers every runtime (Clawboo Native, Claude Code, Hermes, OpenClaw). A key value
-// is never displayed — only per-provider connection status.
+// Settings → Providers — the multi-provider hub. Connect one or many; keys are
+// stored encrypted (the vault) AND mirrored to OpenClaw's config, so each powers
+// every runtime on its provider (Clawboo Native, Claude Code, Hermes, OpenClaw).
+// A key value is never displayed — only per-provider connection status.
+//
+// This panel is ALSO the home of the ChatGPT subscription (a dedicated row, not
+// a key): signing in here (via the Codex CLI's own browser login) is how clawboo
+// KNOWS the subscription exists — the runtime surfaces (Hermes / OpenClaw setup)
+// only offer their optional subscription links once this is a detected fact.
 
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ExternalLink, Eye, EyeOff, KeyRound } from 'lucide-react'
 
 import {
   connectProvider,
   disconnectProvider,
   fetchProviders,
+  fetchRuntimes,
   type ProviderStatus,
 } from '@clawboo/control-client'
 
 import { PROVIDER_CATALOG, type ProviderCatalogEntry } from '@/lib/providerCatalog'
 import { ProviderIcon } from '@/features/onboarding/ProviderIcon'
+import { ChatGptSignIn } from '@/features/runtimes/ChatGptSignIn'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Button } from '@/features/shared/Button'
 import { StatusPill } from '@/features/shared/StatusPill'
@@ -115,7 +122,12 @@ function ProviderRow({
             <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
               Update
             </Button>
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => void handleDisconnect()}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => void handleDisconnect()}
+            >
               Disconnect
             </Button>
           </>
@@ -178,15 +190,89 @@ function ProviderRow({
   )
 }
 
+// ─── ChatGPT subscription row ────────────────────────────────────────────────
+//
+// Not an API key — a distinct way to power runtimes (OpenAI's Codex OAuth,
+// billed to the ChatGPT plan). Signing in spawns the OFFICIAL `codex login`
+// locally (browser-PKCE; clawboo never touches tokens). Once connected it also
+// unlocks the OPTIONAL subscription links on the Hermes / OpenClaw surfaces.
+
+function ChatGptSubscriptionRow({
+  connected,
+  onChanged,
+}: {
+  connected: boolean
+  onChanged: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div
+      className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4"
+      style={{ boxShadow: 'var(--shadow-raised)' }}
+      data-testid="provider-row-chatgpt"
+    >
+      <div className="flex items-center gap-3">
+        <ProviderIcon id="openai-codex" size={38} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[13.5px] font-semibold text-foreground">
+              ChatGPT subscription
+            </span>
+            {connected && <StatusPill tone="success" label="Connected" />}
+          </div>
+          <div className="mt-0.5 truncate text-[11px] text-foreground/45">
+            {connected
+              ? 'Signed in. Powers Codex, and optionally OpenClaw and Hermes'
+              : 'No API key needed. Sign in with your ChatGPT account'}
+          </div>
+        </div>
+
+        {connected ? (
+          <span className="text-[11px] text-foreground/40">Managed by the Codex CLI</span>
+        ) : expanded ? (
+          <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>
+            Cancel
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setExpanded(true)}
+            data-testid="provider-chatgpt-connect"
+          >
+            Connect
+          </Button>
+        )}
+      </div>
+
+      {expanded && !connected && (
+        <div className="pl-[50px]">
+          <ChatGptSignIn
+            tool="codex"
+            loginCommand="codex login"
+            onLoggedIn={() => {
+              setExpanded(false)
+              onChanged()
+            }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Panel ───────────────────────────────────────────────────────────────────
 
 export function ProvidersPanel() {
   const [statuses, setStatuses] = useState<Record<string, ProviderStatus> | null>(null)
+  const [codexReady, setCodexReady] = useState(false)
   const [showMore, setShowMore] = useState(false)
 
   const refresh = useCallback(async () => {
-    const list = await fetchProviders()
+    const [list, runtimes] = await Promise.all([fetchProviders(), fetchRuntimes()])
     setStatuses(Object.fromEntries(list.map((p) => [p.id, p])))
+    setCodexReady(runtimes.some((r) => r.id === 'codex' && r.connectionState === 'ready'))
   }, [])
 
   useEffect(() => {
@@ -200,7 +286,7 @@ export function ProvidersPanel() {
     <div className="flex h-full flex-col bg-background">
       <PanelHeader
         title="Providers"
-        subtitle="Connect once — your keys are stored encrypted and reused across every runtime."
+        subtitle="Connect one or many. Each is stored encrypted and reused across every runtime."
         icon={KeyRound}
         border
         actions={
@@ -219,12 +305,17 @@ export function ProvidersPanel() {
           ) : (
             <>
               {primary.map((entry) => (
-                <ProviderRow
-                  key={entry.id}
-                  entry={entry}
-                  status={statuses[entry.id]}
-                  onChanged={refresh}
-                />
+                <Fragment key={entry.id}>
+                  <ProviderRow entry={entry} status={statuses[entry.id]} onChanged={refresh} />
+                  {/* The subscription row sits beside its sibling: OpenAI the
+                      key, ChatGPT the plan — two billing paths, one brand. */}
+                  {entry.id === 'openai' && (
+                    <ChatGptSubscriptionRow
+                      connected={codexReady}
+                      onChanged={() => void refresh()}
+                    />
+                  )}
+                </Fragment>
               ))}
 
               <button
@@ -252,9 +343,10 @@ export function ProvidersPanel() {
                 ))}
 
               <p className="mt-2 text-[12px] leading-relaxed text-foreground/45">
-                Keys are stored encrypted in Clawboo's vault and mirrored to OpenClaw's config, so
-                one key works across Clawboo Native, Claude Code, Hermes, and OpenClaw. Ollama runs
-                locally and needs no key.
+                Connect as many providers as you like. Keys are stored encrypted in Clawboo's vault
+                and mirrored to OpenClaw's config, so one key works across Clawboo Native, Claude
+                Code, Hermes, and OpenClaw. The ChatGPT subscription signs in through the Codex CLI
+                instead of a key. Ollama runs locally and needs no key.
               </p>
             </>
           )}

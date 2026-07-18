@@ -21,6 +21,17 @@ export interface AttachScope {
   teamId?: string | null
   agentId?: string | null
   tenantId?: string | null
+  /**
+   * True ONLY for a run driven by the server team orchestrator, whose engine
+   * observes a `delegate`-named tool-call and turns it into a board task. It
+   * makes the TeamChat server expose the `team_delegate` signal tool — the
+   * coding-runtime analog of the native driver's `isTeamSessionKey` gating.
+   * A team-SCOPED run is not enough: an executorRunner board-task run is also
+   * team-scoped but nothing observes delegation there, so exposing the tool on
+   * scope alone would let the model "delegate" into a silent no-op (the exact
+   * failure the native-LOCAL delegate tool exists to avoid).
+   */
+  delegate?: boolean
 }
 
 export interface AttachConfigInput {
@@ -61,6 +72,9 @@ export function mcpHttpUrl(
     // clawboo-written config, so the runtime can't post as a peer it isn't.
     if (scope.teamId) p.set('roomTeamId', scope.teamId)
     if (scope.agentId) p.set('postAuthorAgentId', scope.agentId)
+    // Orchestrated runs only — exposes the `team_delegate` signal tool (see
+    // AttachScope.delegate for why scope alone must not).
+    if (scope.delegate) p.set('delegate', '1')
   } else {
     return base // tasks / tools stay bare
   }

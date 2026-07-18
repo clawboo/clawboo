@@ -24,6 +24,12 @@ export interface RuntimeCatalogEntry {
   keyPlaceholder?: string
   /** Terminal command shown for oauth runtimes (codex). */
   loginCommand?: string
+  /** ALTERNATIVE terminal auth for an api-key runtime (hermes: a ChatGPT-
+   *  subscription login instead of a key). Surfaced as a QUIET optional
+   *  affordance under the key input, and ONLY once Codex is a detected fact
+   *  (the subscription is set up on the Providers surfaces first); the
+   *  existing Re-check picks up the resulting on-disk auth. */
+  altLoginCommand?: string
   /** Human-readable install command (shown before the live status arrives).
    *  Absent for built-in runtimes — there is nothing to install. */
   installCommand?: string
@@ -42,7 +48,7 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
     id: 'clawboo-native',
     name: 'Clawboo Native',
     blurb:
-      'Built-in conversational runtime. Talks to Anthropic, OpenAI, OpenRouter, or Ollama directly — paste a key and go.',
+      'Built-in conversational runtime. Talks to Anthropic, OpenAI, OpenRouter, or Ollama directly. Paste a key and go.',
     authKind: 'api-key',
     envVar: 'ANTHROPIC_API_KEY',
     keyPlaceholder: 'sk-ant-…',
@@ -77,10 +83,15 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
   hermes: {
     id: 'hermes',
     name: 'Hermes',
-    blurb: 'Open-source agent runtime over OpenRouter. Paste an OpenRouter key.',
+    blurb:
+      'Open-source agent runtime over OpenRouter. Paste an OpenRouter key, or sign in with ChatGPT.',
     authKind: 'api-key',
     envVar: 'OPENROUTER_API_KEY',
     keyPlaceholder: 'sk-or-…',
+    // Hermes's native `openai-codex` provider runs on a ChatGPT subscription —
+    // a fresh device-code login in the user's terminal (never the codex-CLI
+    // import: separate grant lineages avoid refresh-token conflicts).
+    altLoginCommand: 'hermes auth add openai-codex',
     installCommand: "pipx install 'hermes-agent[anthropic]'",
     docsUrl: 'https://pypi.org/project/hermes-agent/',
     keyUrl: 'https://openrouter.ai/keys',
@@ -88,7 +99,10 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
   },
 }
 
-export const RUNTIME_ORDER: RuntimeId[] = ['clawboo-native', 'claude-code', 'codex', 'hermes']
+// Display order for the runtime list. OpenClaw (not a RuntimeId) is rendered
+// FIRST by RuntimeConnectList; the built-in native runtime sits LAST (it is
+// always connected, so there is nothing to do there). Codex precedes Claude Code.
+export const RUNTIME_ORDER: RuntimeId[] = ['codex', 'claude-code', 'hermes', 'clawboo-native']
 
 /**
  * Console URLs where a user can mint an API key, keyed by the lowercase

@@ -4,13 +4,24 @@
 // reuses the ONE real deploy engine (CreateTeamModal) so onboarding and the
 // in-app "Create team" flow never drift.
 //
-// The provider key is already connected (previous step), and the wizard has NOT
-// entered native mode yet (no live Gateway client), so CreateTeamModal's
-// openclaw-availability check resolves false → every picked team deploys FULLY
-// NATIVE (Gateway-free), server-orchestrated. "Start from scratch" is disabled
-// here (a blank team deploys no agents, which would leave a first-run user with
-// an empty, leaderless workspace); the gate is pre-satisfied so the user lands
-// straight in the team space.
+// The wizard's PRIMARY runtime is already connected (previous step) — a native
+// provider key, or Codex via Sign in with ChatGPT — so every picked team deploys
+// FULLY on that runtime, server-orchestrated — enforced by `preferRuntime`, NOT
+// inferred.
+//
+// It used to be inferred, and that was wrong: the reasoning was "the wizard has no
+// live Gateway client, so CreateTeamModal's openclaw-availability check resolves
+// false". But that check is `client != null || serverOpenclawConnected`, and the
+// second term is the SERVER's operator connection — entirely independent of the
+// wizard. So a first-run user whose Gateway was reachable deployed their first team
+// onto OpenClaw, which (a) fails outright if that Gateway is not actually usable and
+// (b) leaves the team with no member on the connected runtime, so the OpenClaw
+// `main` fallback led the team.
+//
+// "Start from scratch" is disabled here (a blank team deploys no agents, which would
+// leave a first-run user with an empty, leaderless workspace). Only the gate's
+// WELCOME phase is pre-satisfied — `NativeReadyStep` is that beat — so the user still
+// introduces themselves before landing in the team space.
 
 import { useState } from 'react'
 import { ArrowLeft, ArrowRight, Users } from 'lucide-react'
@@ -26,9 +37,16 @@ export interface SelectTeamStepProps {
   onDeployed: (teamId: string | null) => void
   /** Back to the connect step. */
   onBack: () => void
+  /** The wizard's PRIMARY connect choice — every agent defaults to it. Defaults to
+   *  native (the provider-key path); 'codex' for Sign in with ChatGPT. */
+  primaryRuntime?: 'clawboo-native' | 'codex'
 }
 
-export function SelectTeamStep({ onDeployed, onBack }: SelectTeamStepProps) {
+export function SelectTeamStep({
+  onDeployed,
+  onBack,
+  primaryRuntime = 'clawboo-native',
+}: SelectTeamStepProps) {
   // Open the team marketplace immediately — the whole point of this step. If the
   // user closes it without deploying, this screen stays visible so they can reopen.
   const [browseOpen, setBrowseOpen] = useState(true)
@@ -41,7 +59,11 @@ export function SelectTeamStep({ onDeployed, onBack }: SelectTeamStepProps) {
         steps={NATIVE_STEPS}
         align="center"
         title="Choose your first team"
-        subtitle="Pick a ready-made crew from the marketplace and deploy it. Your agents run natively, no extra setup. You can add more teams anytime."
+        subtitle={
+          primaryRuntime === 'codex'
+            ? 'Pick a ready-made crew from the marketplace and deploy it. Your agents run on Codex with your ChatGPT subscription. You can add more teams anytime.'
+            : 'Pick a ready-made crew from the marketplace and deploy it. Your agents run natively, no extra setup. You can add more teams anytime.'
+        }
         footer={
           <div className="flex items-center justify-between">
             <OnboardingGhost testId="select-team-back" onClick={onBack}>
@@ -79,6 +101,7 @@ export function SelectTeamStep({ onDeployed, onBack }: SelectTeamStepProps) {
         }}
         presatisfyOnboardingGate
         allowStartFromScratch={false}
+        preferRuntime={primaryRuntime}
       />
     </>
   )

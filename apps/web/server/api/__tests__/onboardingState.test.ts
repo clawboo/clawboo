@@ -54,6 +54,9 @@ describe('GET /api/onboarding/state', () => {
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
     process.env['OPENCLAW_STATE_DIR'] = path.join(home, '.openclaw')
+    // Keep the hermes ChatGPT-login probe sandboxed (userHermesHome honours
+    // HERMES_HOME first, else ~/.hermes under the sandboxed HOME).
+    delete process.env['HERMES_HOME']
   })
   afterEach(async () => {
     if (prevHome === undefined) delete process.env['HOME']
@@ -83,7 +86,14 @@ describe('GET /api/onboarding/state', () => {
     const db = createDb(getDbPath())
     const now = Date.now()
     db.insert(teams)
-      .values({ id: 't1', name: 'My First Team', icon: '👻', color: '#fff', createdAt: now, updatedAt: now })
+      .values({
+        id: 't1',
+        name: 'My First Team',
+        icon: '👻',
+        color: '#fff',
+        createdAt: now,
+        updatedAt: now,
+      })
       .run()
     db.insert(agents)
       .values({
@@ -116,5 +126,21 @@ describe('GET /api/onboarding/state', () => {
     await onboardingStateGET(req(), r.res)
     const body = r.body() as StateBody
     expect(body.hasConnectedRuntime).toBe(true)
+  })
+
+  it('flips hasConnectedRuntime on a hermes ChatGPT login (no vault key at all)', async () => {
+    const { writeFile } = await import('node:fs/promises')
+    await mkdir(path.join(home, '.hermes'), { recursive: true })
+    await writeFile(
+      path.join(home, '.hermes', 'auth.json'),
+      JSON.stringify({
+        providers: { 'openai-codex': { tokens: { access_token: 'at', refresh_token: 'rt' } } },
+      }),
+    )
+    const m = mockRes()
+    await onboardingStateGET(req(), m.res)
+    // Without this signal a hermes-login-only user reads hasConnectedRuntime=false
+    // and the reload decision re-traps them in a fresh wizard.
+    expect((m.body() as StateBody).hasConnectedRuntime).toBe(true)
   })
 })

@@ -1,11 +1,15 @@
 ---
 title: Codex runtime
-description: 'The codex runtime: spawns codex exec, authenticates via ChatGPT OAuth, synthesizes text-deltas, reports no USD cost, and carries a thread id.'
+description: 'The codex runtime: spawns codex exec, signs in with your ChatGPT subscription, resumes sessions across runs, reports no USD cost, and can lead a team.'
 ---
 
 `codex` is the [runtime](/appendices/glossary) that drives OpenAI's `codex exec` CLI: Clawboo installs the `codex` binary, spawns it per board task in an isolated home, and reshapes its `--json` event stream into the normalized [RuntimeEvent](/appendices/glossary) stream every other runtime emits. It is one of the five runtimes, a co-equal peer beside `openclaw`, `clawboo-native`, `claude-code`, and `hermes`.
 
-Codex differs from the other CLI runtimes in two ways that matter operationally: it authenticates through an **interactive ChatGPT OAuth login** (`codex login`), not a pasted API key; and it reports **no USD cost**, so spend is surfaced as token usage with an explicitly estimated, null dollar figure. Use this page to understand its capabilities, how to install and connect it, how the driver works, and the documented authentication limitation.
+Codex differs from the other CLI runtimes in two ways that matter operationally: it authenticates through an **interactive ChatGPT OAuth login** (`codex login`), not a pasted API key; and it reports **no USD cost**, so spend is surfaced as token usage with an explicitly estimated, null dollar figure. Because the credential is a ChatGPT account, Codex is also the runtime a **ChatGPT-subscription user without any API key** runs their whole team on: the onboarding wizard's OpenAI card offers **Sign in with ChatGPT** (Recommended, the economical path), deploys every agent on Codex, and designates a Codex agent as the team's universal leader. Use this page to understand its capabilities, how to install and connect it, how the driver works, and how a Codex agent leads a team.
+
+<Note>
+**Authentication posture.** Clawboo only ever reuses your own `codex login`: it never automates the OAuth exchange, never reads or refreshes the token, and never calls the ChatGPT backend directly. You sign in with OpenAI's official CLI in your own terminal; Clawboo spawns that CLI and lets it do its own auth.
+</Note>
 
 ## What it is
 
@@ -24,22 +28,22 @@ Codex is a peer, not a substitute. Clawboo never migrates a `codex` agent into a
 
 The Codex adapter reports the following capabilities. Callers branch on these (never on the runtime id), so they describe what the host may do with a Codex run.
 
-| Capability        | Value                                  | Meaning                                                                                         |
-| ----------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `streaming`       | `true`                                 | Text surfaces as deltas (synthesized from whole blocks when needed)                             |
-| `mcp`             | `true`                                 | Attaches Clawboo's MCP servers via a generated `config.toml`                                    |
-| `worktrees`       | `true`                                 | Gets an isolated git [worktree](/appendices/glossary) for file-mutating tasks                   |
-| `resume`          | `true`                                 | The adapter captures a `thread` id (see [the limitation](#the-thread-id-and-resume-limitation)) |
-| `toolApproval`    | `true`                                 | Tool calls go through the broker's approval pipeline                                            |
-| `models`          | `['gpt-5-codex', 'gpt-5', 'o4-mini']`  | A routable surface, not an exhaustive list                                                      |
-| `runtimeClass`    | `'wrapped-oneshot'`                    | Resolves to the plain one-shot integration plan                                                 |
-| `nativeHome`      | `{ scope: 'per-run', persist: false }` | A throwaway `CODEX_HOME` per run; nothing preserved across runs                                 |
-| `nativeSkills`    | `'none'`                               | No native skills dir to preserve                                                                |
-| `nativeMemory`    | `'none'`                               | No cross-run self-improvement substrate                                                         |
-| `nativeChannels`  | `'none'`                               | The shared MCP spine is the only voice                                                          |
-| `nativeScheduler` | `false`                                | The host owns when-to-run                                                                       |
+| Capability        | Value                                      | Meaning                                                                            |
+| ----------------- | ------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `streaming`       | `true`                                     | Text surfaces as deltas (synthesized from whole blocks when needed)                |
+| `mcp`             | `true`                                     | Attaches Clawboo's MCP servers via a generated `config.toml`                       |
+| `worktrees`       | `true`                                     | Gets an isolated git [worktree](/appendices/glossary) for file-mutating tasks      |
+| `resume`          | `true`                                     | Session continuity via `codex exec resume` (see [session resume](#session-resume)) |
+| `toolApproval`    | `true`                                     | Tool calls go through the broker's approval pipeline                               |
+| `models`          | `['gpt-5-codex', 'gpt-5', 'o4-mini']`      | A routable surface, not an exhaustive list                                         |
+| `runtimeClass`    | `'wrapped-oneshot'`                        | Resolves to the plain one-shot integration plan                                    |
+| `nativeHome`      | `{ scope: 'per-identity', persist: true }` | A managed per-agent `CODEX_HOME` that persists sessions across runs                |
+| `nativeSkills`    | `'none'`                                   | No native skills dir to preserve                                                   |
+| `nativeMemory`    | `'none'`                                   | No cross-run self-improvement substrate                                            |
+| `nativeChannels`  | `'none'`                                   | The shared MCP spine is the only voice                                             |
+| `nativeScheduler` | `false`                                    | The host owns when-to-run                                                          |
 
-Because `runtimeClass` is `'wrapped-oneshot'` with `nativeHome: { scope: 'per-run', persist: false }`, the integration planner resolves a Codex run to an **ephemeral home** with both preserve flags clamped to `false`. This is today's reality, declared honestly: the driver mkdtemps a fresh `CODEX_HOME` each run, and there is no durable native plane to keep intact. The shared plane (board, memory, tools) is reached through MCP.
+Because `nativeHome` is `{ scope: 'per-identity', persist: true }`, the integration planner materializes a **persistent managed `CODEX_HOME`** per agent under Clawboo's own state dir, which is what makes session resume work: Codex writes its session files there, and a later run can resume them. Your real `~/.codex` is never the run home; the driver seeds a copy of its `auth.json` into the managed home (see [authentication](#2-authenticate-with-codex-login-oauth)). The shared plane (board, memory, tools) is reached through MCP.
 
 ## How to install and connect
 
@@ -59,25 +63,26 @@ The package is pinned to the current `0.x` major so a future `1.0` is never auto
 
 This is where Codex departs from the other api-key runtimes. Codex authenticates via an interactive ChatGPT OAuth flow, and it **cannot be connected with a pasted API key on current versions**. The descriptor declares `authKind: 'oauth'`, `envVar: null`, and `headlessAuth: false`; there is no vault slot for a Codex credential.
 
-`POST /api/runtimes/codex/connect` is therefore a no-op on storage. It returns the terminal login command instead of writing a key:
+`POST /api/runtimes/codex/connect` is therefore a no-op on storage. It probes the login (`codex login status`) and returns the CURRENT state, plus the terminal login command when one is still needed:
 
 ```json
 { "ok": true, "connectionState": "needs-login", "loginCommand": "codex login" }
 ```
 
-The card surfaces the `codex login` command with a copy button. Run it in your own terminal to complete the ChatGPT OAuth flow, then click **Re-check** in the card. Once `codex login` has authenticated locally, the adapter's run path uses Codex's own `CODEX_HOME` (which the driver isolates per run); Clawboo never stores a Codex credential in its vault, and `disconnect` is likewise a no-op for Codex.
+The card surfaces the `codex login` command with a copy button. Run it in your own terminal to complete the ChatGPT OAuth flow, then click **Re-check** in the card. The status probe DETECTS an existing login (`codex login status` is parsed, never the token file), so a user who signed in before ever opening Clawboo reads `ready` immediately. Once signed in, every spawned run gets a managed `CODEX_HOME` seeded with a copy of your `~/.codex/auth.json` (copy-only, freshness-checked so a rotated refresh token in the managed home is never clobbered; the real `~/.codex` is never written). Clawboo never stores a Codex credential in its vault, and `disconnect` is likewise a no-op for Codex.
 
 <Info>
-The connection state machine reflects this: an installed `oauth` runtime is always `needs-login`, and it never reaches `ready` from a vault key. After `codex login` succeeds, the card still shows `needs-login` until you click **Re-check**; the card does not auto-detect the login.
+The connection state machine reflects this: an installed `oauth` runtime reads `ready` when the login probe detects a signed-in Codex, `needs-login` otherwise; it never reaches `ready` from a vault key.
 </Info>
 
 ### 3. Run a board task
 
 `POST /api/runtimes/codex/run` drives a board task on Codex end to end: claim → worktree → run → report-up. The driver:
 
-1. Creates a throwaway `CODEX_HOME` with `mkdtemp`.
-2. Writes a `config.toml` pointing Codex's MCP client at this server's hosted Tasks, Memory, and Tools servers (the run's [memory](/concepts/memory) scope is appended to the Memory server's URL only).
-3. Spawns `codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check [--model <m>] <prompt>` with `CODEX_HOME` set and a process-group leader so the whole tree can be killed on abort.
+1. Uses the managed per-agent `CODEX_HOME` (created `0700` on first run; a run with no agent identity falls back to a throwaway `mkdtemp` home).
+2. Seeds a copy of your `~/.codex/auth.json` into the managed home if the managed copy is missing, unusable, or older than yours (Codex rotates refresh tokens inside the managed home, so a blind re-copy would break it). No usable auth anywhere and no API key → the run fails fast with `no Codex credentials provisioned` instead of sending an unauthenticated request.
+3. Writes a `config.toml` pointing Codex's MCP client at this server's hosted Tasks, Memory, Tools, and TeamChat servers (the run's [memory](/concepts/memory) scope is appended to the Memory server's URL only).
+4. Spawns `codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check [--model <m>] <prompt>` — or `codex exec resume <session-id> …` when a resume handle is provided — with `CODEX_HOME` set and a process-group leader so the whole tree can be killed on abort.
 
 The bypass flags are deliberate: the worktree is the isolation boundary (and already a git repo), so Codex's own sandbox and approval prompts are turned off; Clawboo gates externally instead. Clawboo's own server secrets are scrubbed from the child environment before the untrusted subprocess inherits it; only the explicitly granted env is merged on top.
 
@@ -113,33 +118,37 @@ The synthesis is idempotent: the subprocess substrate fires `onClose` from both 
 
 Codex reports token usage but no USD, so the pure mapper translates a `result` with usage into a `cost` event with `costUsd: null` and `estimated: true`. The accompanying `done` event also carries `costUsd: null`. This is the deliberate asymmetry versus the runtimes that report real dollars; the host gets honest usage counts and an explicit "not priced" signal instead of a fabricated cost.
 
-## The thread id and resume limitation
+## Session resume
 
-The adapter declares `resume: true` and the driver captures Codex's `thread` id (its resume handle) from the event stream. But the wired run path does **not** currently feed a thread id back into `codex exec`; the Codex driver does not pass a `ctx.resume` handle into its args, and the Codex adapter (unlike Claude Code and Hermes) defines no `sessionCodec`. So a same-runtime Codex resume is not yet wired end to end; a cross-runtime pickup rides the prose handoff note in the [worktree](/concepts/worktrees-and-handoff) like any other runtime.
+The adapter defines a `sessionCodec` and the driver captures Codex's session id from the event stream. On a later run the host passes it back as `codex exec resume <session-id>`, so the run continues the SAME Codex session (its transcript lives in the managed `CODEX_HOME`). This is what gives a Codex team LEADER conversation continuity: each leader turn resumes the previous one via a per-agent-per-team resume pointer, exactly like the native leader. A cross-runtime pickup still rides the prose handoff note in the [worktree](/concepts/worktrees-and-handoff) like any other runtime, and a resume attempt against a stale id self-heals (the failed run clears the pointer, the next turn starts fresh).
 
-<Info>
-**Codex's OAuth lives in `$CODEX_HOME/auth.json`.** Because the driver mkdtemps a throwaway `CODEX_HOME` per run, a user's `codex login` against the default `~/.codex` is invisible to a spawned run. Flipping to a persistent per-identity home would change auth behavior and needs its own login-against-that-home connect flow first. This is the reason Codex is declared `nativeHome: { scope: 'per-run', persist: false }` rather than persistent.
-</Info>
+## Leading a team
+
+A Codex agent can be a team's universal leader, which is what makes the ChatGPT-subscription onboarding work end to end (no native key, no Gateway — nothing else can lead):
+
+- **Delegation is a tool call.** Team-orchestrated Codex runs attach a `team_delegate` MCP tool (hosted on the TeamChat server, bound to the run's team). The orchestration engine observes the tool call by NAME and turns it into a real board task — the same signal path every runtime's leader uses. The tool is attached ONLY on orchestrator-driven team runs, so it can never silently no-op elsewhere.
+- **The leader is taught per turn.** A coding-runtime leader turn carries a coordination block that teaches `team_delegate` (answer simple questions directly, delegate real work, one summary after results) — injected in the volatile per-turn context, so it reaches existing agents too.
+- **Designation is explicit.** A Codex-preferred deploy designates the lead and promotes it to the universal Boo Zero via `POST /api/boo-zero/override` (only when nothing else resolves — an existing native or OpenClaw Boo Zero is never stomped).
 
 ## Verify it worked
 
-- `GET /api/runtimes` should show the `codex` entry with `installed: true` once the CLI resolves, `authKind: "oauth"`, `envVar: null`, and `connectionState: "needs-login"`. An installed `oauth` runtime is always `needs-login`; it never reads `ready` from a stored credential.
-- After running `codex login` in your terminal, click **Re-check** in the card. (The card does not auto-detect the login.)
+- `GET /api/runtimes` should show the `codex` entry with `installed: true` once the CLI resolves, `authKind: "oauth"`, `envVar: null`, and `connectionState: "ready"` when you are signed in (`needs-login` otherwise). It never reads `ready` from a stored vault key.
+- After running `codex login` in your terminal, click **Re-check** in the card to re-probe.
 - Run a board task via `POST /api/runtimes/codex/run`. A clean run returns `doneReason: 'success'` with `costUsd: null` and `usedWorktree: true`.
 
 ## Troubleshooting
 
 <Warning>
-**Codex shows "Needs login" after a successful `codex login`.** The card does not auto-detect the login; click **Re-check** to re-fetch status. Codex never reaches `ready` from a vault key; its auth lives in `CODEX_HOME`, and `connect`/`disconnect` are no-ops on storage.
+**Codex shows "Needs login" after a successful `codex login`.** Click **Re-check** to re-probe (`codex login status` is parsed; a signed-in Codex reads `ready`). Codex never reaches `ready` from a vault key; its auth lives in `CODEX_HOME`, and `connect`/`disconnect` are no-ops on storage.
 </Warning>
 
 <Warning>
 **A run reports `costUsd: null`.** This is correct, not a bug. Codex reports token usage but no USD, so the mapper surfaces `cost` with `costUsd: null, estimated: true`. The budget kill-switch sees usage but cannot enforce a dollar cap on a Codex run.
 </Warning>
 
-<Danger>
-**Codex's OAuth is per-`CODEX_HOME`.** A `codex login` against your default `~/.codex` does not carry into a Clawboo-spawned run, which uses an isolated `CODEX_HOME`. On versions where API-key/OpenRouter routing is not possible, the auth is the user's to provide inside that flow; see [the limitation](#the-thread-id-and-resume-limitation).
-</Danger>
+<Warning>
+**A run fails with `no Codex credentials provisioned`.** The managed `CODEX_HOME` had no usable auth to seed: run `codex login` in your terminal (it writes `~/.codex/auth.json`, which the next run seeds into the managed home), then retry. Clawboo deliberately fails fast here rather than sending an unauthenticated request.
+</Warning>
 
 ## Related
 
@@ -148,5 +157,5 @@ The adapter declares `resume: true` and the driver captures Codex's `thread` id 
 - [`/api/runtimes` reference](/reference/rest-api/runtimes): full request/response shapes for connect, run, and the install SSE stream
 - [The board](/concepts/the-board): the durable task substrate a Codex run drives
 - [Worktrees and handoff](/concepts/worktrees-and-handoff): the isolated world a Codex task carries
-- [Claude Code](/runtimes/claude-code) · [Clawboo Native](/runtimes/native) · [Hermes](/runtimes/hermes): the sibling runtimes
+- [Claude Code](/runtimes/claude-code) · [Clawboo Native](/runtimes/native) · [Hermes](/runtimes/hermes): the sibling runtimes — Hermes and [OpenClaw](/runtimes/openclaw) can ALSO run on the same ChatGPT subscription (each via its own `openai-codex` login)
 - [Environment variables](/reference/environment-variables): `CLAWBOO_HOME`, `CLAWBOO_SECRETS_MASTER_KEY`

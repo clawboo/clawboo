@@ -40,7 +40,7 @@ The `nativeHome`/`nativeSkills`/`nativeMemory` claims are what route Hermes to a
 Hermes installs through Python. `pipx` is preferred; a `pip --user` fallback applies if `pipx` is absent. You need **Python 3.11 or newer** (`hermes-agent` requires `>=3.11,<3.14`) with `pip`/`pipx` available. A present-but-too-old interpreter is its own failure (`PYTHON_TOO_OLD`), not `PYTHON_MISSING`; the installer prefers a `python3.13`/`3.12`/`3.11` binary over a bare `python3` so a fresh macOS default does not trip it.
 </Note>
 
-- An [OpenRouter](https://openrouter.ai/) API key; Hermes's `authKind` is `api-key` and its vault slot is `OPENROUTER_API_KEY`. (If your seeded Hermes config already names a provider, that provider wins and the key for _it_ is what matters; see [Provider precedence](#provider-precedence).)
+- An [OpenRouter](https://openrouter.ai/) API key — Hermes's `authKind` is `api-key` and its vault slot is `OPENROUTER_API_KEY` — **or a ChatGPT subscription** (no key: see [Or: use your ChatGPT subscription](#or-use-your-chatgpt-subscription)). (If your seeded Hermes config already names a provider, that provider wins and the key for _it_ is what matters; see [Provider precedence](#provider-precedence).)
 - The Clawboo server running. Connect, install, and run all go through `/api/runtimes/*`.
 
 ## Steps
@@ -73,6 +73,24 @@ curl -X POST http://localhost:18790/api/runtimes/hermes/connect \
 <Tip>
 Because `resolveRuntimeKey` falls back to `process.env` and OpenClaw's `~/.openclaw/.env`, an `OPENROUTER_API_KEY` already exported in the server's environment (or present in `~/.openclaw/.env`) is enough; Hermes reads as connected without an explicit Connect.
 </Tip>
+
+### Or: use your ChatGPT subscription
+
+Hermes has a native `openai-codex` provider that runs on a ChatGPT subscription — the same backend the Codex CLI uses, no API key anywhere. Once the subscription is connected (the ChatGPT row on the Providers page, or the wizard's OpenAI card), the Hermes card offers an optional one-click **Use my ChatGPT subscription** that runs Hermes's own login for you and shows the one-time code right in the UI. Or run it yourself in a terminal:
+
+```bash
+hermes auth add openai-codex
+```
+
+Then click **Re-check** on the Hermes card. Clawboo detects the on-disk login (a presence-only shape check of `~/.hermes/auth.json`; token values are never read into responses or logs) and the card reads **Connected**. In the team-creation model picker, Hermes gains a **ChatGPT subscription** group (GPT-5.5, GPT-5.4, GPT-5.4 mini, GPT-5.3 Codex, and the Pro-plan Spark); a pick pins `--provider openai-codex` with the bare backend model id.
+
+<Warning>
+Hermes's codex login is a **device-code** flow, and OpenAI gates it behind a ChatGPT account setting: if the sign-in page reports device authorization is disabled, enable **device code authorization** under ChatGPT Settings → Security, then retry. (The Codex and OpenClaw sign-ins use the browser flow and are not affected.)
+</Warning>
+
+<Note>
+Either way, the OAuth exchange runs entirely inside the official Hermes CLI and you authorize in your own browser on openai.com — Clawboo only relays the user-facing code and never touches tokens. Prefer this fresh sign-in over Hermes's offer to import your Codex CLI credentials: each tool holding its own OAuth grant keeps refresh-token lineages separate (an imported token family shared across tools is how "refresh token reused" conflicts happen). Also note the subscription quota is shared — Codex-runtime agents, Hermes subscription runs, and your own `codex` usage all draw from the same ChatGPT plan allowance, and these runs report no USD cost (budgets see estimated/zero spend).
+</Note>
 
 ### 3. Run a board task on Hermes
 
@@ -128,8 +146,11 @@ The adapter's `sessionCodec` serializes the captured native session id. On a sam
 Hermes resolves its model provider with a strict precedence (`detectProvider` + `buildHermesSpawnPlan`):
 
 1. **The home `config.yaml`'s `model.provider` wins.** When the seeded config names a provider (including a user-defined provider name), Clawboo passes **no** `--provider` flag; Hermes resolves it itself. `detectProvider` reads the provider with a block-scoped line scan of the `model:` block (no YAML dependency), so the top-level `providers:` map can never false-positive.
-2. **Otherwise, a connected `OPENROUTER_API_KEY` adds `--provider openrouter`** as the no-config compatibility fallback; a pasted OpenRouter key just works.
-3. **Otherwise, nothing** is passed, and Hermes uses its built-in default (`auto`).
+2. **Otherwise, a connected `OPENROUTER_API_KEY` adds `--provider openrouter`** as the no-config compatibility fallback; a pasted OpenRouter key just works. (An Anthropic or OpenAI key reused from the native connect derives `--provider anthropic` / `--provider openai-api` the same way.)
+3. **Otherwise, a detected ChatGPT-subscription login adds `--provider openai-codex`** (with Hermes's own codex default model) — the last rung before `auto`, AFTER every key rung, so keyed setups keep their exact behavior.
+4. **Otherwise, nothing** is passed, and Hermes uses its built-in default (`auto`).
+
+A PICKED subscription model (the ChatGPT-subscription group in the team-creation picker) is usable on auth **presence**, not an env key: if the login is absent at spawn time, the pick degrades to the key-derived default exactly like a keyless direct-provider pick — never a hard `codex_auth_missing` failure.
 
 <Info>
 Your own Hermes config is honored. There is no `--ignore-user-config`. If you configure a provider in `~/.hermes/config.yaml`, it is seed-copied into the home and that provider wins over the OpenRouter fallback.
@@ -139,16 +160,17 @@ Your own Hermes config is honored. There is no `--ignore-user-config`. If you co
 
 When the runner resolves Hermes to a persistent home, the home lives at `<clawboo home>/runtimes/hermes/<sanitized agentId>` (under `resolveClawbooDir()`, so the `CLAWBOO_HOME` override applies). The agent id is collapsed to a safe path segment; dots are excluded entirely, so directory traversal is impossible by construction. The home is created owner-only (`0700`). Without a runner-materialized home (the conservative default), the driver falls back to a throwaway `mkdtemp` home, and nothing compounds.
 
-Inside a Clawboo-owned home, **Clawboo performs exactly two writes**, and everything else belongs to Hermes:
+Inside a Clawboo-owned home, **Clawboo performs exactly three writes**, and everything else belongs to Hermes:
 
-| Clawboo writes | When                                                                                                                                            |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mcp.json`     | Refreshed every run (the server port can change across restarts; removed when there is no MCP base URL so a stale attach config never lingers). |
-| `config.yaml`  | A one-time seed copy from the user's `~/.hermes/config.yaml`, copy-if-absent, never overwritten, never written back.                            |
+| Clawboo writes | When                                                                                                                                                                                                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mcp.json`     | Refreshed every run (the server port can change across restarts; removed when there is no MCP base URL so a stale attach config never lingers).                                                                                                                                                |
+| `config.yaml`  | A one-time seed copy from the user's `~/.hermes/config.yaml`, copy-if-absent, never overwritten, never written back.                                                                                                                                                                           |
+| `auth.json`    | A freshness-gated seed copy of the user's `~/.hermes/auth.json` (the ChatGPT-subscription login). Hermes rotates tokens inside the managed copy, so the user's file only replaces it when newer (a re-login) or when the managed copy is unusable — never a blind re-copy, never written back. |
 
 These invariants define how Clawboo integrates with Hermes:
 
-- **Clawboo never writes into the user's real `~/.hermes`**; it reads/copies from it only.
+- **Clawboo never writes into the user's real `~/.hermes`**; it reads/copies from it only. (The `auth.json` seed exists because a managed home outside `~/.hermes` is its OWN Hermes root — Hermes's global-auth fallback never reaches the user's real store from a spawned run.)
 - **`.env` is never seeded.** Provider keys ride the spawned process's environment (the vault is the source of truth); copying credentials would multiply secret surfaces on disk.
 - **There is no Hermes-skills writer.** `hermesSkills.ts` exposes a read-only view (`listNativeSkills`) and a pure merge policy (`mergeSkillSets`) where the **native skill wins on any name collision**; Clawboo never shadows a self-created skill, and the absence of a `syncSkills` writer is an explicit invariant, not an omission.
 - **`--resume` only into a pre-existing home, and never on a rotation successor**; resuming an exhausted session would re-exhaust it; continuity rides the handoff note instead.

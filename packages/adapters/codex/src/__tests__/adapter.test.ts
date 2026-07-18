@@ -44,16 +44,35 @@ runAdapterContract(makeCodexHarness())
 // ─── Codex-specific behavior ─────────────────────────────────────────────────
 
 describe('CodexAdapter specifics', () => {
-  it("capabilities() declares a throwaway per-run home (today's reality; no native preservation)", () => {
+  it('capabilities() declares a PERSISTENT per-identity home (leader continuity: sessions/ must survive between turns)', () => {
     const caps = new CodexAdapter(() => new FakeCodexDriver()).capabilities()
     expect(caps).toMatchObject({
       runtimeClass: 'wrapped-oneshot',
-      nativeHome: { scope: 'per-run', persist: false },
+      nativeHome: { scope: 'per-identity', persist: true },
       nativeSkills: 'none',
       nativeMemory: 'none',
       nativeScheduler: false,
     })
-    expect(resolveRuntimeIntegration(caps).home).toEqual({ kind: 'ephemeral' })
+    // The integration plan resolves to a persistent home — what makes the runner /
+    // serverDeliver hand the driver a stable CODEX_HOME whose sessions/ dir outlives
+    // a run, so `codex exec resume <thread-id>` has something to resume.
+    expect(resolveRuntimeIntegration(caps).home.kind).toBe('persistent')
+  })
+
+  it('sessionCodec round-trips the captured native thread id (the resume handle)', async () => {
+    const driver = new FakeCodexDriver()
+    const adapter = new CodexAdapter(() => driver)
+    const run = await adapter.start({}, { agentId: 'codex-1', sessionKey: SK, message: 'go' })
+    const iterator = adapter.events(run)[Symbol.asyncIterator]()
+    driver.emit({ type: 'thread', threadId: 'thread-abc', model: 'gpt-5-codex' })
+    await iterator.next()
+
+    const blob = await adapter.sessionCodec.serialize(run)
+    expect(JSON.parse(blob)).toEqual({ sessionKey: SK, sessionId: 'thread-abc' })
+
+    const restored = await adapter.sessionCodec.restore(blob)
+    expect(restored).toEqual({ adapterId: 'codex', sessionKey: SK, runId: 'thread-abc' })
+    await iterator.return?.()
   })
 
   it('events() late-binds runId from the thread id', async () => {

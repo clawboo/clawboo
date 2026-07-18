@@ -75,7 +75,7 @@ The new row starts at `spent 0 / active`. Note two validation rules baked into t
 `limitUsdCents` must be a **positive integer** (`z.number().int().positive()`). A cap of `$0` is rejected with `400 { "error": "invalid body" }`. If you omit `mode`, the budget defaults to `warn`; you must pass `"mode":"cap"` to get the auto-pause. Full body shape: [`POST /api/governance/budgets`](/reference/rest-api/governance#post-apigovernancebudgets).
 </Info>
 
-### 3. Watch the kill-switch pause at 100%
+### 3. Watch the kill-switch pause at the cap
 
 Now dispatch work that spends past the cap (run a task on the team, or let the team chat drive a delegation). Spend is recorded _inside_ the executor's cost loop, not over REST: on every `cost` event the runner records the dollar delta against all three concrete scopes atomically: `agent`, the `mission` (the root task of the delegation tree), and `team`.
 

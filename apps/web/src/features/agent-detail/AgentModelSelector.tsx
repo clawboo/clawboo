@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Check, ChevronDown, ChevronLeft } from 'lucide-react'
-import { findModelLabel, formatProviderName, type ModelGroup } from '@/lib/modelCatalog'
+import {
+  findModelLabel,
+  formatProviderName,
+  type ModelGroup,
+  providerSlug,
+} from '@/lib/modelCatalog'
 import { useModelCatalog } from '@/lib/useModelCatalog'
 import { Button } from '@/features/shared/Button'
 import { SearchInput } from '@/features/shared/SearchInput'
@@ -25,6 +30,7 @@ interface AgentModelSelectorProps {
 }
 
 const LOCAL_PROVIDERS = new Set(['ollama', 'sglang', 'opencode', 'opencode-go'])
+const LOCAL_PROVIDER_SLUGS = new Set([...LOCAL_PROVIDERS].map(providerSlug))
 
 export function AgentModelSelector({
   currentModel,
@@ -137,14 +143,22 @@ export function AgentModelSelector({
   // Determine if current model is custom (not in the active catalog and not default)
   const isCustomModel = currentModel !== null && labelFor(currentModel) === null
 
-  // Check if a provider has API key configured
+  // Check if a provider has a credential configured. Compared via providerSlug
+  // so a group DISPLAY name ('Hugging Face', 'OpenAI Codex') matches its
+  // configured ID ('huggingface', 'openai-codex') — a bare .toLowerCase()
+  // mismatches on spaces/hyphens and greyed those groups out incorrectly.
+  const configuredProviderSlugs = useMemo(
+    () => new Set([...configuredProviders].map(providerSlug)),
+    [configuredProviders],
+  )
   const isProviderConfigured = useCallback(
     (provider: string) => {
       if (configuredProviders.size === 0) return true // No data yet — don't grey out
-      if (LOCAL_PROVIDERS.has(provider.toLowerCase())) return true
-      return configuredProviders.has(provider.toLowerCase())
+      const slug = providerSlug(provider)
+      if (LOCAL_PROVIDER_SLUGS.has(slug)) return true
+      return configuredProviderSlugs.has(slug)
     },
-    [configuredProviders],
+    [configuredProviders, configuredProviderSlugs],
   )
 
   // Get active Level 2 group
@@ -233,7 +247,9 @@ export function AgentModelSelector({
                 }}
                 className={[
                   'flex w-full cursor-pointer items-center gap-1.5 border-b border-foreground/[0.06] px-3 py-[7px] text-left transition-colors',
-                  isUsingDefault ? 'bg-mint/[0.08] text-mint' : 'text-foreground/50 hover:bg-foreground/[0.04]',
+                  isUsingDefault
+                    ? 'bg-mint/[0.08] text-mint'
+                    : 'text-foreground/50 hover:bg-foreground/[0.04]',
                 ].join(' ')}
               >
                 <span className="flex-1 text-[11px]">Default ({defaultLabel})</span>

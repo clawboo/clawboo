@@ -102,13 +102,31 @@ A global npm install can hit `EACCES`. The stream emits an `error` event with co
 
 ### 3. Configure
 
-`POST /api/system/configure-openclaw` with body `{ provider, apiKey?, model?, gatewayPort? }` writes OpenClaw's `openclaw.json` and `.env`, generates a Gateway token, and saves Clawboo's settings. `provider` is required; `apiKey` is required for every provider except `ollama`. The handler writes a local-mode Gateway config (`gateway.mode: 'local'`, token auth via `${GATEWAY_AUTH_TOKEN}`), enables agent-to-agent tooling (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`), and resolves a default model from the provider.
+`POST /api/system/configure-openclaw` with body `{ provider, apiKey?, model?, gatewayPort? }` writes OpenClaw's `openclaw.json` and `.env`, generates a Gateway token, and saves Clawboo's settings. `provider` is required; `apiKey` is required for every provider except the keyless ones — `ollama` (local) and `openai-codex` (the ChatGPT subscription; see below). The handler writes a local-mode Gateway config (`gateway.mode: 'local'`, token auth via `${GATEWAY_AUTH_TOKEN}`), enables agent-to-agent tooling (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`), and resolves a default model from the provider.
 
 ```json
 { "ok": true, "gatewayUrl": "ws://localhost:18789" }
 ```
 
 The raw token is never returned in the body; it is persisted server-side, and the same-origin proxy injects it on connect.
+
+### Or: use your ChatGPT subscription
+
+OpenClaw has a built-in `openai-codex` provider that runs on a ChatGPT subscription (the same backend the [Codex runtime](/runtimes/codex) uses) — no API key anywhere. Its credential is OpenClaw's OWN OAuth profile, created by running OpenClaw's login in your terminal (Clawboo never automates the exchange):
+
+```bash
+openclaw models auth login --provider openai-codex
+```
+
+<Warning>
+Use `models auth login`, never `openclaw onboard` — the onboard wizard can reset channels, memory, and cron unless you carefully choose "Use existing values". The login command is non-destructive: it only adds the auth profile.
+</Warning>
+
+Clawboo surfaces this in two places: the onboarding wizard's OpenAI card offers **Sign in with ChatGPT** (Recommended — the economical path), and once Codex is connected the OpenClaw setup flow offers a one-click **Sign in with ChatGPT** of its own. The one-click button spawns OpenClaw's login locally and relays its output; the login runs the same browser flow as `codex login` (your browser opens, you approve, no code to type, and no dependence on the ChatGPT device-authorization setting). Detection is a presence-only scan of the auth-profile files (an `oauth`-type `openai-codex` profile; token values are never read into responses or logs). Once the profile exists, the configure path is fully keyless: the default model is set to `openai-codex/gpt-5.5` and no key line touches `.env`. A codex-CLI login alone is NOT enough — OpenClaw needs its own sign-in (distinct OAuth grants; this also keeps refresh-token lineages separate).
+
+<Note>
+Model refs: `openai-codex/<model>` is the minimal activation on the current OpenClaw generation (2026.5.x); newer OpenClaw's `doctor --fix` rewrites these refs to the canonical `openai/*` form. Also note the subscription quota is shared — OpenClaw agents, Codex-runtime agents, Hermes subscription runs, and your own `codex` usage all draw from the same ChatGPT plan allowance, and these turns report no USD cost to Clawboo's budgets.
+</Note>
 
 ### 4. Start the Gateway
 

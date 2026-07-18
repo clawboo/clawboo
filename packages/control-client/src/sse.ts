@@ -9,7 +9,9 @@ import { apiUrl, getRequestHeaders } from './config'
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface SSEEvent {
-  type: 'progress' | 'output' | 'complete' | 'error'
+  /** The well-known types the switch routes, plus any stream-specific type the
+   *  `onEvent` catch-all consumers handle (e.g. `device-code` / `auth-url`). */
+  type: 'progress' | 'output' | 'complete' | 'error' | (string & {})
   step?: string
   message?: string
   percent?: number
@@ -25,6 +27,10 @@ export interface SSEHandlers {
   onOutput?: (event: SSEEvent) => void
   onComplete?: (event: SSEEvent) => void
   onError?: (event: SSEEvent) => void
+  /** Catch-all invoked for EVERY parsed event (including types the switch below
+   *  doesn't know — e.g. the cli-login stream's `device-code` / `auth-url`).
+   *  Fires BEFORE the typed handler. Additive: existing consumers are unchanged. */
+  onEvent?: (event: SSEEvent) => void
 }
 
 // ─── Consumer ────────────────────────────────────────────────────────────────
@@ -85,6 +91,7 @@ export function consumeSSE(
           const json = dataLine.slice(6) // strip "data: "
           try {
             const event = JSON.parse(json) as SSEEvent
+            handlers.onEvent?.(event)
             switch (event.type) {
               case 'progress':
                 handlers.onProgress?.(event)

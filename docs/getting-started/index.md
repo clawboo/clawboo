@@ -13,7 +13,7 @@ These docs describe Clawboo **v0.3.0**, the current release.
 
 <Note>
 - **Node.js 22 or newer**: Clawboo's `engines` field requires `node >=22.0.0`. The OpenClaw path also enforces this: the wizard's detection step flags Node older than 22.
-- **A provider API key** if you choose the native path: Anthropic (`sk-ant-…`), OpenAI (`sk-…`), or OpenRouter (`sk-or-…`). A running local Ollama works with no key. The OpenClaw path needs a provider key too, entered during Gateway configuration.
+- **A provider API key** if you choose the native path: Anthropic (`sk-ant-…`), OpenAI (`sk-…`), or OpenRouter (`sk-or-…`). A running local Ollama works with no key, and a **ChatGPT subscription** works with no key too (the OpenAI card's Sign in with ChatGPT connects the [Codex runtime](/runtimes/codex)). The OpenClaw path needs a provider key too, entered during Gateway configuration.
 - Nothing is installed globally to *run* Clawboo; `npx clawboo` downloads and launches the bundled dashboard server. (The OpenClaw path can install the `openclaw` CLI for you from inside the wizard.)
 </Note>
 

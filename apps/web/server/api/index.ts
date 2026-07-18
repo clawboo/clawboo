@@ -58,6 +58,7 @@ import {
   displayNameGET,
   displayNamePUT,
 } from './booZero'
+import { booZeroOverrideGET, booZeroOverridePOST } from './booZeroOverride'
 import {
   boardListGET,
   boardGetGET,
@@ -96,9 +97,11 @@ import {
   runtimesInstallPOST,
   runtimesConnectPOST,
   runtimesDisconnectPOST,
+  runtimesLogoutPOST,
   runtimesHealthcheckPOST,
   runtimesRunPOST,
 } from './runtimes'
+import { cliLoginPOST } from './cliLogin'
 import {
   providersListGET,
   providerConnectPOST,
@@ -252,6 +255,10 @@ router.get('/api/boo-zero/global-brief', globalBriefGET)
 router.put('/api/boo-zero/global-brief', globalBriefPUT)
 router.get('/api/boo-zero/display-name/:agentId', displayNameGET)
 router.put('/api/boo-zero/display-name/:agentId', displayNamePUT)
+// The runtime-neutral leader OVERRIDE ("Make this agent Boo Zero") — the writer
+// for the `boo-zero:agent-id` setting `resolveBooZero` reads FIRST. Any runtime.
+router.get('/api/boo-zero/override', booZeroOverrideGET)
+router.post('/api/boo-zero/override', booZeroOverridePOST)
 
 // Durable board.
 router.get('/api/board', boardListGET)
@@ -312,9 +319,13 @@ router.post('/api/providers/:id/connect', providerConnectPOST)
 router.post('/api/providers/:id/disconnect', providerDisconnectPOST)
 // Install the runtime CLI (SSE) / connect the provider key (encrypted vault) /
 // disconnect. Distinct two-segment suffixes — no collision with `:id/run`.
+// UI-driven "Sign in with ChatGPT": spawn the official CLI's login locally and
+// relay its device-code/URL output (SSE, killable — Cancel aborts the child tree).
+router.post('/api/auth/cli-login/:tool', cliLoginPOST)
 router.post('/api/runtimes/:id/install', runtimesInstallPOST)
 router.post('/api/runtimes/:id/connect', runtimesConnectPOST)
 router.post('/api/runtimes/:id/disconnect', runtimesDisconnectPOST)
+router.post('/api/runtimes/:id/logout', runtimesLogoutPOST)
 // Verify a pasted provider key (native, multi-provider) BEFORE seeding. Distinct
 // two-segment suffix — no collision with `:id/run`.
 router.post('/api/runtimes/:id/healthcheck', runtimesHealthcheckPOST)

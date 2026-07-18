@@ -11,7 +11,7 @@ description: Codex RuntimeAdapter that maps the codex exec event stream into the
 | **Workspace deps** | `@clawboo/executor`                                                                                                                                                                                                                 |
 | **External deps**  | none (runtime) · `tsup`, `typescript`, `vitest`, `@clawboo/tsconfig` (dev)                                                                                                                                                          |
 
-This package is the contract-testable shell. It does **not** spawn `codex`, a fresh `CodexDriver` is minted per run via the injected `driverFactory`, and the real driver (`createCodexDriver`) lives in `apps/web/server/lib/runtimes/`. Same shape as the Claude Code adapter (per-run injected driver, eager subscribe, late-bound runId); the two Codex realities, **no USD cost** and **thread-id resume**, live entirely in `mapCodexEvent` and the driver, so the trait surface is identical.
+This package is the contract-testable shell. It does **not** spawn `codex`, a fresh `CodexDriver` is minted per run via the injected `driverFactory`, and the real driver (`createCodexDriver`) lives in `apps/web/server/lib/runtimes/`. Same shape as the Claude Code adapter (per-run injected driver, eager subscribe, late-bound runId); the two Codex realities, **no USD cost** and **session-id resume**, live entirely in `mapCodexEvent` and the driver, so the trait surface is identical.
 
 ## Public API
 
@@ -25,7 +25,7 @@ All exports come from `src/index.ts`. The package declares a single `.` export i
 
 **`CodexAdapter` members:**
 
-- `capabilities(): Capabilities`, returns `{ streaming: true, mcp: true, worktrees: true, resume: true, toolApproval: true, models: ['gpt-5-codex','gpt-5','o4-mini'], runtimeClass: 'wrapped-oneshot', nativeHome: { scope: 'per-run', persist: false }, nativeSkills: 'none', nativeMemory: 'none', nativeChannels: 'none', nativeScheduler: false }`. `nativeHome` declares a throwaway per-run `CODEX_HOME` (the driver mkdtemps one each run), no cross-run self-improvement substrate to preserve. There is no `sessionCodec` and no `contextWindowTokens`.
+- `capabilities(): Capabilities`, returns `{ streaming: true, mcp: true, worktrees: true, resume: true, toolApproval: true, models: ['gpt-5-codex','gpt-5','o4-mini'], runtimeClass: 'wrapped-oneshot', nativeHome: { scope: 'per-identity', persist: true }, nativeSkills: 'none', nativeMemory: 'none', nativeChannels: 'none', nativeScheduler: false }`. `nativeHome` declares a persistent managed per-agent `CODEX_HOME` (the host materializes it; the driver falls back to a throwaway `mkdtemp` when no identity home is supplied), which is what makes `codex exec resume` continuity possible. The adapter defines a `sessionCodec` (serializes the captured session id per sessionKey, the Hermes mirror); there is no `contextWindowTokens`.
 - `health(): Promise<HealthResult>`, races the injected `healthCheck` against a 2 s timeout (`{ ok: false, message: 'health check timed out' }` on timeout); any throw → `{ ok: false, message }`.
 - `start(_task: TaskHandle, opts: StartOpts): Promise<RunHandle>`, mints a driver via `driverFactory(opts)`, stores it by `opts.sessionKey`, calls `driver.start()`, returns `{ adapterId: 'codex', sessionKey, runId: null }`. The `runId` late-binds in `events()` from the first native frame carrying a thread id, falling back to `sessionKey`.
 - `events(run: RunHandle): AsyncIterable<RuntimeEvent>`, subscribes to the run's driver stream, late-binds `runId`, accumulates non-`reasoning` `text-delta` text, and yields the mapped normalized stream via a bounded `createAsyncQueue` (`max: 1000`). Consumer termination (`return()`) unsubscribes the driver. Returns an empty (closed) queue if no driver is registered for the run.
@@ -54,7 +54,7 @@ The `Capabilities`, `HealthResult`, `RunHandle`, `RuntimeAdapter`, `RuntimeEvent
 </Note>
 
 <Warning>
-Codex keeps its ChatGPT OAuth in `$CODEX_HOME/auth.json`, so a user's `codex login` (`~/.codex`) is invisible to spawned runs, the per-run `CODEX_HOME` is a throwaway. This is the `authKind: 'oauth'` known limitation; see the [Codex runtime](/runtimes/codex) page.
+Codex keeps its ChatGPT OAuth in `$CODEX_HOME/auth.json`. The driver seeds a copy of the user's `~/.codex/auth.json` into the managed home (parse-validated, freshness-checked so a rotated refresh token is never clobbered, never written back), so a spawned run authenticates with the user's own `codex login`; a home with no usable auth fails fast. See the [Codex runtime](/runtimes/codex) page.
 </Warning>
 
 ## Used by

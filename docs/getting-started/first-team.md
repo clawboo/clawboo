@@ -30,7 +30,7 @@ Team chat and delegation run **server-side** and work for every runtime, includi
 
 You either already have one (from native onboarding) or you deploy one now.
 
-**You already have a team.** During native onboarding you picked a starter team from the marketplace and deployed it (every agent `clawboo-native`), with its introduction flow pre-satisfied, so you landed straight in the team's group chat. Skip to [step 3](#3-run-the-know-your-team-gate); your team already exists and is introduced.
+**You already have a team.** During native onboarding you picked a starter team from the marketplace and deployed it (every agent `clawboo-native`). The wizard's "Your team is ready" screen was that team's **Meet your team** beat, so its group chat opens directly on the **introduce yourself** step. Skip to [step 3](#3-run-the-know-your-team-gate) and start from the second screen there; your team already exists.
 
 **Deploy a template team.** The **+** button in the leftmost sidebar takes you to the Marketplace's **Teams** tab (the catalog of 82 teams, 304 agents). Press **Deploy** on a team card, then customize its name, icon, color, and the runtime each member runs on. You can mix runtimes: a native leader with a Claude Code or OpenClaw specialist, for example. (Prefer a blank team? Use the **Start from scratch** card on that same tab.)
 
@@ -58,6 +58,8 @@ The gate has two phases:
 
 1. **Meet your team**: a welcome card showing each agent's avatar and, when Boo Zero (the universal team leader) is identified, a "Led by ..." badge. The copy explains that your team is led by Boo Zero, who takes your request and routes it to the right specialist. Click **Get Started**.
 2. **Your turn**: a textarea asks you to introduce yourself ("your name, what you're working on, how you'd like the team to help"). Type a short intro and click **Continue to Team Space**.
+
+A team deployed during onboarding opens straight on phase 2: the wizard's "Your team is ready" screen already showed you the same **Meet your team** card, so the gate does not repeat it.
 
 Your introduction is persisted to SQLite as the source of truth and injected into the team's context preamble on every future message, so every agent always sees it, and Boo Zero replies in-character to acknowledge it.
 

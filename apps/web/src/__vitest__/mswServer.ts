@@ -32,6 +32,10 @@ export const server = setupServer(
     HttpResponse.json({ stargazers_count: 0 }),
   ),
   http.get('/api/tools/approvals', () => HttpResponse.json({ ok: true, approvals: [] })),
+  // ConfigureNativeStep probes the Codex sign-in (Sign in with ChatGPT is the
+  // DEFAULT method on the OpenAI card, so merely selecting OpenAI fires this).
+  // Empty default = "codex not installed"; ChatGPT-path tests override it.
+  http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [] })),
   http.get('/api/runtimes/openrouter/models', () => HttpResponse.json({ models: [] })),
   http.get('/api/providers', () => HttpResponse.json({ providers: [] })),
   // The native model pickers also fetch each provider's LIVE model list (Anthropic /

@@ -21,7 +21,13 @@ import {
   parseHermesLine,
   type HermesRunState,
 } from '../hermesDriver'
-import { detectProvider, provisionHermesHome, type ProvisionedHermesHome } from '../hermesHome'
+import {
+  detectProvider,
+  provisionHermesHome,
+  seedHermesAuth,
+  type ProvisionedHermesHome,
+} from '../hermesHome'
+import { hasUsableHermesCodexAuth } from '../hermesAuth'
 import { runtimeIdentityHomePath, sanitizeAgentId } from '../identityHome'
 import type { RuntimeRunContext } from '../types'
 
@@ -43,6 +49,8 @@ describe('hermes driver (preserved runtime)', () => {
     sandbox = await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-test-'))
     prevHome = process.env['HOME']
     process.env['HOME'] = sandbox
+    // userHermesHome() honours HERMES_HOME before ~/.hermes — keep the sandbox authoritative.
+    delete process.env['HERMES_HOME']
   })
   afterEach(async () => {
     if (prevHome === undefined) delete process.env['HOME']
@@ -220,14 +228,14 @@ describe('hermes driver (preserved runtime)', () => {
     expect((await plan(home)).args).not.toContain('--provider')
 
     // 2. No config + OPENROUTER_API_KEY → openrouter (the default path).
-    expect(providerArg((await plan(home, { apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' } })).args)).toBe(
-      'openrouter',
-    )
+    expect(
+      providerArg((await plan(home, { apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' } })).args),
+    ).toBe('openrouter')
 
     // 3. A REUSED native Anthropic key → the `anthropic` provider.
-    expect(providerArg((await plan(home, { apiKeyEnv: { ANTHROPIC_API_KEY: 'sk-ant' } })).args)).toBe(
-      'anthropic',
-    )
+    expect(
+      providerArg((await plan(home, { apiKeyEnv: { ANTHROPIC_API_KEY: 'sk-ant' } })).args),
+    ).toBe('anthropic')
 
     // 4. A REUSED OpenAI key → `openai-api` (NOT bare `openai`, which is not a
     //    valid hermes provider id).
@@ -416,5 +424,175 @@ describe('hermes driver (preserved runtime)', () => {
   it('the session-line regex matches the sanctioned base form exactly', () => {
     expect(HERMES_SESSION_LINE.exec('session_id: 0f3a-9b')?.[1]).toBe('0f3a-9b')
     expect(HERMES_SESSION_LINE.test('the session_id: 0f3a was used')).toBe(false) // anchored — never mid-prose
+  })
+
+  // ── ChatGPT subscription (openai-codex) ────────────────────────────────────
+  // Hermes's native `openai-codex` OAuth provider. Auth lives in
+  // ~/.hermes/auth.json (per-provider tokens), seeded into the managed home
+  // (a managed home outside ~/.hermes is its OWN hermes root — no global-auth
+  // fallback reaches the user's store from a spawned run).
+
+  const HERMES_CODEX_AUTH = JSON.stringify({
+    version: 3,
+    providers: {
+      'openai-codex': {
+        tokens: { access_token: 'at-user', refresh_token: 'rt-user' },
+        last_refresh: '2026-07-01T00:00:00Z',
+      },
+    },
+  })
+  const userAuthPath = (): string => path.join(sandbox, '.hermes', 'auth.json')
+  const writeUserAuth = async (body: string = HERMES_CODEX_AUTH): Promise<void> => {
+    await mkdir(path.join(sandbox, '.hermes'), { recursive: true })
+    await writeFile(userAuthPath(), body, 'utf8')
+  }
+  const providerArg = (args: string[]): string | undefined => {
+    const i = args.indexOf('--provider')
+    return i > -1 ? args[i + 1] : undefined
+  }
+  const modelArg = (args: string[]): string | undefined => {
+    const i = args.indexOf('-m')
+    return i > -1 ? args[i + 1] : undefined
+  }
+
+  it('hasUsableHermesCodexAuth enforces the store shape hermes itself reads (fail-closed)', async () => {
+    const p = (name: string): string => path.join(sandbox, name)
+    await writeFile(p('good.json'), HERMES_CODEX_AUTH)
+    expect(hasUsableHermesCodexAuth(p('good.json'))).toBe(true)
+
+    // Both tokens are required (hermes's own codex_auth_* validation).
+    await writeFile(
+      p('no-refresh.json'),
+      JSON.stringify({ providers: { 'openai-codex': { tokens: { access_token: 'a' } } } }),
+    )
+    expect(hasUsableHermesCodexAuth(p('no-refresh.json'))).toBe(false)
+    await writeFile(
+      p('empty-access.json'),
+      JSON.stringify({
+        providers: { 'openai-codex': { tokens: { access_token: ' ', refresh_token: 'r' } } },
+      }),
+    )
+    expect(hasUsableHermesCodexAuth(p('empty-access.json'))).toBe(false)
+    // A DIFFERENT provider's tokens never count.
+    await writeFile(
+      p('other-provider.json'),
+      JSON.stringify({
+        providers: { nous: { tokens: { access_token: 'a', refresh_token: 'r' } } },
+      }),
+    )
+    expect(hasUsableHermesCodexAuth(p('other-provider.json'))).toBe(false)
+    await writeFile(p('garbage.json'), 'not json {')
+    expect(hasUsableHermesCodexAuth(p('garbage.json'))).toBe(false)
+    expect(hasUsableHermesCodexAuth(p('missing.json'))).toBe(false)
+
+    // Shape 2 — the credential POOL: what `hermes auth add openai-codex` (the
+    // surfaced command) actually writes; hermes runtime resolution accepts it.
+    await writeFile(
+      p('pool.json'),
+      JSON.stringify({
+        credential_pool: {
+          'openai-codex': [
+            { access_token: 'at-pool', refresh_token: 'rt-pool', auth_type: 'oauth' },
+          ],
+        },
+      }),
+    )
+    expect(hasUsableHermesCodexAuth(p('pool.json'))).toBe(true)
+    // An empty/blank pool entry fails closed; another provider's pool never counts.
+    await writeFile(
+      p('pool-empty.json'),
+      JSON.stringify({ credential_pool: { 'openai-codex': [{ access_token: ' ' }] } }),
+    )
+    expect(hasUsableHermesCodexAuth(p('pool-empty.json'))).toBe(false)
+    await writeFile(
+      p('pool-other.json'),
+      JSON.stringify({ credential_pool: { nous: [{ access_token: 'a' }] } }),
+    )
+    expect(hasUsableHermesCodexAuth(p('pool-other.json'))).toBe(false)
+  })
+
+  it('seedHermesAuth: seeds into an empty managed home; provision reports seededAuth', async () => {
+    // No user login → nothing seeded, no throw.
+    const bare = await provisionHermesHome(identityHome())
+    expect(bare.seededAuth).toBe(false)
+    expect(existsSync(path.join(bare.home, 'auth.json'))).toBe(false)
+
+    await writeUserAuth()
+    const seeded = await provisionHermesHome(identityHome())
+    expect(seeded.seededAuth).toBe(true)
+    expect(hasUsableHermesCodexAuth(path.join(seeded.home, 'auth.json'))).toBe(true)
+    // Copy-only: the user's store is untouched.
+    expect(await readFile(userAuthPath(), 'utf8')).toBe(HERMES_CODEX_AUTH)
+  })
+
+  it('seedHermesAuth KEEPS a fresher usable managed token; REPLACES on user re-login or unusable managed copy', async () => {
+    const home = await provisionHermesHome(identityHome())
+    const managedAuth = path.join(home.home, 'auth.json')
+    const ROTATED = JSON.stringify({
+      providers: {
+        'openai-codex': { tokens: { access_token: 'rotated', refresh_token: 'rotated-r' } },
+      },
+    })
+
+    // Fresher usable managed copy is KEPT (hermes rotates tokens in the managed home).
+    await writeUserAuth()
+    await writeFile(managedAuth, ROTATED)
+    const past = new Date(Date.now() - 60_000)
+    const { utimes } = await import('node:fs/promises')
+    await utimes(userAuthPath(), past, past)
+    expect(await seedHermesAuth(home.home)).toBe(false)
+    expect((await readFile(managedAuth, 'utf8')).includes('rotated')).toBe(true)
+
+    // User re-login (user file newer) REPLACES the managed copy.
+    await utimes(managedAuth, past, past)
+    await writeUserAuth() // fresh mtime
+    expect(await seedHermesAuth(home.home)).toBe(true)
+    expect((await readFile(managedAuth, 'utf8')).includes('at-user')).toBe(true)
+
+    // An UNUSABLE managed copy is replaced even when fresher.
+    await writeFile(managedAuth, 'corrupt {')
+    await utimes(userAuthPath(), past, past)
+    expect(await seedHermesAuth(home.home)).toBe(true)
+    expect(hasUsableHermesCodexAuth(managedAuth)).toBe(true)
+  })
+
+  it('derived rung: NO keys + seeded subscription auth → --provider openai-codex with its own default model', async () => {
+    await writeUserAuth()
+    const home = await provisionHermesHome(identityHome())
+    const spawn = await plan(home, { apiKeyEnv: {} })
+    expect(providerArg(spawn.args)).toBe('openai-codex')
+    // Flat-cost subscription → hermes's codex default, not a "mini" tier.
+    expect(modelArg(spawn.args)).toBe('gpt-5.5')
+  })
+
+  it("every key rung outranks the subscription rung (existing keyed setups keep today's behavior)", async () => {
+    await writeUserAuth()
+    const home = await provisionHermesHome(identityHome())
+    const spawn = await plan(home, { apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' } })
+    expect(providerArg(spawn.args)).toBe('openrouter')
+  })
+
+  it('a PICKED openai-codex is usable on auth PRESENCE (not an env key): pins provider + model', async () => {
+    await writeUserAuth()
+    const home = await provisionHermesHome(identityHome())
+    const spawn = await plan(home, {
+      providerHint: 'openai-codex',
+      model: 'gpt-5.3-codex',
+      apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' }, // pick outranks the key rung
+    })
+    expect(providerArg(spawn.args)).toBe('openai-codex')
+    expect(modelArg(spawn.args)).toBe('gpt-5.3-codex')
+  })
+
+  it('a PICKED openai-codex with NO auth anywhere degrades like a keyless pick (pin + model dropped)', async () => {
+    const home = await provisionHermesHome(identityHome())
+    const spawn = await plan(home, {
+      providerHint: 'openai-codex',
+      model: 'gpt-5.3-codex',
+      apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' },
+    })
+    // Degraded to the key-derived rung; the codex-specific model went with the pin.
+    expect(providerArg(spawn.args)).toBe('openrouter')
+    expect(modelArg(spawn.args)).toBe('openai/gpt-4o-mini')
   })
 })

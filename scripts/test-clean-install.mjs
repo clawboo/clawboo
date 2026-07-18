@@ -16,8 +16,10 @@
  *      for Clawboo and route the browser to an "Unauthorized" page.
  *
  * Test scenario:
- *   1. Bind port 18791 with a fake service that returns 401 "Unauthorized"
- *      — mimics OpenClaw Gateway's auxiliary port behavior.
+ *   1. Bind a fake service that returns 401 "Unauthorized" on 18791 (with
+ *      retry + sibling-port fallback inside the CLI's 18790-18809 scan
+ *      window, so a just-finished e2e run's dying server can't false-fail
+ *      the bind) — mimics OpenClaw Gateway's auxiliary port behavior.
  *   2. Spawn the bundled CLI in an isolated state dir with no env-var
  *      pins. With the v0.1.3 fix, the CLI's HTTP-signature probe rejects
  *      18791 (wrong JSON shape) and Clawboo's own server picks 18790.
@@ -42,7 +44,16 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const REPO_ROOT = path.resolve(__dirname, '..')
 const CLI_PATH = path.join(REPO_ROOT, 'apps/cli/dist/index.js')
-const FAKE_PORT = 18791
+// Preferred fake-listener port first, then fallbacks. Every candidate sits
+// inside the CLI's 18790-18809 discovery scan window, so an alive non-Clawboo
+// listener on ANY of them exercises the same probe-rejection guard. Fallbacks
+// exist because a `pnpm e2e` run that finished moments earlier can leave a
+// dying process still holding 18791 — binding a sibling port keeps the
+// chained local gate (`pnpm e2e && pnpm prepublish:check`) reliable.
+const FAKE_PORT_CANDIDATES = [18791, 18795, 18799, 18803]
+// Total budget for bind attempts before giving up (covers slow teardown of a
+// just-killed e2e server; each retry round also best-effort kills leftovers).
+const FAKE_BIND_RETRY_MS = 10_000
 const READY_TIMEOUT_MS = 30_000
 // /api/system/status does multiple I/O ops: filesystem checks for
 // openclaw.json + .env, a 2-s probeGatewayPort fetch to :18789, plus
@@ -65,6 +76,7 @@ function fail(msg) {
 // ─── State for cleanup ───────────────────────────────────────────────────────
 
 let fakeService = null
+let fakePort = null
 let cliProc = null
 let tmpDir = null
 let shadowBinDir = null
@@ -141,6 +153,71 @@ function runCmd(cmd, args) {
     child.on('error', reject)
     child.on('close', () => resolve(out))
   })
+}
+
+// Bind an HTTP server that answers 401 "Unauthorized" (mimics an OpenClaw
+// Gateway aux port). Resolves the listening server or rejects with the listen
+// error (EADDRINUSE when the port is held).
+function tryListenFake(port) {
+  return new Promise((resolve, reject) => {
+    const srv = createServer((_req, res) => {
+      res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end('Unauthorized')
+    })
+    srv.once('error', (err) => reject(err))
+    srv.listen(port, '127.0.0.1', () => resolve(srv))
+  })
+}
+
+// Bind the fake listener robustly. A `pnpm e2e` run that ended moments before
+// can leave a dying process still holding the preferred port, which used to
+// EADDRINUSE-crash this whole gate in ~250ms. Strategy per round: try every
+// candidate port; on EADDRINUSE best-effort kill whatever holds it (a leftover
+// from a prior aborted run) and move on; between rounds back off, up to the
+// retry budget. The first successful bind wins — normally 18791 on the first
+// attempt, or a sibling port with zero delay in the chained-after-e2e case.
+async function bindFakeService() {
+  const deadline = Date.now() + FAKE_BIND_RETRY_MS
+  let delay = 250
+  let lastErr = null
+  // Candidate ports a foreign process held at any point during binding. The
+  // caller must assert the CLI did NOT attach to one of these — in fallback
+  // mode the fake sits ABOVE the busy port in the CLI's ascending scan, so a
+  // surviving squatter (worst case: a stale Clawboo-shaped server) would
+  // otherwise be discovered first and the probe-rejection guard would pass
+  // vacuously against the wrong server.
+  const busy = new Set()
+  for (;;) {
+    for (const port of FAKE_PORT_CANDIDATES) {
+      try {
+        const srv = await tryListenFake(port)
+        busy.delete(port) // we own it now — no foreign holder left
+        return { srv, port, busyPorts: [...busy] }
+      } catch (err) {
+        if (err?.code !== 'EADDRINUSE') throw err
+        lastErr = err
+        busy.add(port)
+        await killByPort(port)
+      }
+    }
+    if (Date.now() >= deadline) break
+    log(
+      `fake-listener ports ${FAKE_PORT_CANDIDATES.join('/')} busy ` +
+        `(likely still releasing after an e2e run) — retrying in ${delay}ms...`,
+    )
+    await new Promise((r) => setTimeout(r, delay))
+    delay = Math.min(delay * 2, 2_000)
+  }
+  // Out of budget — name the squatters so the failure is self-diagnosing.
+  let holders = ''
+  if (process.platform !== 'win32') {
+    holders = await runCmd('lsof', ['-nP', '-iTCP:18790-18809', '-sTCP:LISTEN']).catch(() => '')
+  }
+  throw new Error(
+    `could not bind a fake listener on any of :${FAKE_PORT_CANDIDATES.join(', :')} ` +
+      `within ${FAKE_BIND_RETRY_MS}ms (${lastErr?.message ?? 'EADDRINUSE'}).` +
+      (holders.trim() ? `\nListeners in the 18790-18809 window:\n${holders.trim()}` : ''),
+  )
 }
 
 async function httpGet(url, opts = {}) {
@@ -242,20 +319,19 @@ async function main() {
   }
   log(`Bundled CLI: ${CLI_PATH}`)
 
-  // 2. Sanity-check port 18791 is free before we try to bind it
-  await killByPort(FAKE_PORT) // best-effort clean from prior aborted runs
-  await new Promise((r) => setTimeout(r, 200))
-
-  // 3. Start the fake "Gateway-aux" listener on 18791
-  fakeService = createServer((_req, res) => {
-    res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end('Unauthorized')
-  })
-  await new Promise((resolve, reject) => {
-    fakeService.once('error', (err) => reject(err))
-    fakeService.listen(FAKE_PORT, '127.0.0.1', () => resolve())
-  })
-  log(`Fake service on :${FAKE_PORT} (returns 401 "Unauthorized" — mimics Gateway aux port)`)
+  // 2+3. Start the fake "Gateway-aux" listener (retry + sibling-port fallback
+  //      so a just-finished e2e run's dying server can't false-fail the gate).
+  let fakeBusyPorts = []
+  try {
+    const bound = await bindFakeService()
+    fakeService = bound.srv
+    fakePort = bound.port
+    fakeBusyPorts = bound.busyPorts
+  } catch (err) {
+    fail(err?.message ?? String(err))
+    return
+  }
+  log(`Fake service on :${fakePort} (returns 401 "Unauthorized" — mimics Gateway aux port)`)
 
   // 4. Create isolated state dir + isolated $HOME so the developer's real
   //    ~/.openclaw/ is never touched.
@@ -352,13 +428,24 @@ async function main() {
   log(`CLI announced dashboard at: ${openedUrl} (port ${clawbooPort})`)
 
   // ─── CRITICAL ASSERTION ─────────────────────────────────────────────────
-  // Even though :18791 is "alive" (TCP), the CLI must reject it because
-  // the HTTP signature probe sees non-Clawboo content.
-  if (clawbooPort === FAKE_PORT) {
-    fail(`CLI routed browser to fake :${FAKE_PORT} — port verification regressed`)
+  // Even though the fake port is "alive" (TCP), the CLI must reject it
+  // because the HTTP signature probe sees non-Clawboo content.
+  if (clawbooPort === fakePort) {
+    fail(`CLI routed browser to fake :${fakePort} — port verification regressed`)
     return
   }
-  log(`✓ CLI correctly skipped fake :${FAKE_PORT}`)
+  // Fallback-mode guard: if the CLI attached to a port a FOREIGN process held
+  // during fake-bind, we're either looking at a probe regression (it accepted
+  // the squatter) or a stale Clawboo-shaped leftover server — either way the
+  // fresh bundle was never exercised, so the run must not go green.
+  if (fakeBusyPorts.includes(clawbooPort)) {
+    fail(
+      `CLI attached to :${clawbooPort}, a port a foreign process held during fake-bind — ` +
+        `it should have spawned a fresh server (stale/foreign listener, or probe regression)`,
+    )
+    return
+  }
+  log(`✓ CLI correctly skipped fake :${fakePort}`)
 
   // 8. Test 1: GET / returns SPA HTML
   const root = await httpGet(`${openedUrl}/`)

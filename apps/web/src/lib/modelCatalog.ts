@@ -33,6 +33,23 @@ export const MODEL_GROUPS: ModelGroup[] = [
     ],
   },
   {
+    // The ChatGPT subscription (Codex OAuth) — OpenClaw's `openai-codex` provider.
+    // Keyless: configured via `openclaw models auth login --provider openai-codex`,
+    // never an API key. Model ids are the 2026.5.x routing refs (newer OpenClaw
+    // `doctor --fix` rewrites them to `openai/*`). The display name must slug to
+    // `openaicodex` so the live CLI's lowercase `openai-codex` group canonicalizes
+    // onto this one (see providerSlug).
+    provider: 'OpenAI Codex',
+    models: [
+      { id: 'openai-codex/gpt-5.5', label: 'GPT-5.5' },
+      { id: 'openai-codex/gpt-5.5-pro', label: 'GPT-5.5 Pro · Pro plan' },
+      { id: 'openai-codex/gpt-5.4', label: 'GPT-5.4' },
+      { id: 'openai-codex/gpt-5.4-mini', label: 'GPT-5.4 mini' },
+      { id: 'openai-codex/gpt-5.3-codex', label: 'GPT-5.3 Codex' },
+      { id: 'openai-codex/gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark · Pro plan' },
+    ],
+  },
+  {
     provider: 'Google',
     models: [
       { id: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
@@ -200,14 +217,19 @@ export function findProviderForModel(id: string): string | null {
 // for casing. The live `/api/system/models` groups come from the OpenClaw CLI,
 // which emits lowercase provider ids (e.g. "huggingface", "minimax") — this maps
 // them back to the catalog's proper casing ("Hugging Face", "MiniMax").
-const PROVIDER_SLUG = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]/g, '')
-const CANONICAL_PROVIDER_NAMES: Record<string, string> = MODEL_GROUPS.reduce<Record<string, string>>(
-  (acc, g) => {
-    acc[PROVIDER_SLUG(g.provider)] = g.provider
-    return acc
-  },
-  {},
-)
+/** Space/case/punctuation-insensitive provider slug — the ONE comparison key for
+ *  provider identity across display names ('Hugging Face', 'OpenAI Codex') and
+ *  lowercase ids ('huggingface', 'openai-codex'). Exported so the server model
+ *  route and the selector grey-out compare through the same function instead of
+ *  ad-hoc `.toLowerCase()` (which mismatches on spaces/hyphens). */
+export const providerSlug = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]/g, '')
+const PROVIDER_SLUG = providerSlug
+const CANONICAL_PROVIDER_NAMES: Record<string, string> = MODEL_GROUPS.reduce<
+  Record<string, string>
+>((acc, g) => {
+  acc[PROVIDER_SLUG(g.provider)] = g.provider
+  return acc
+}, {})
 
 /**
  * Normalize a provider name to its canonical display casing. Falls back to a

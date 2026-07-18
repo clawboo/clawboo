@@ -24,10 +24,20 @@ import { Button } from '@/features/shared/Button'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { Select } from '@/features/shared/Select'
 import { ProviderIcon, type ProviderId } from '@/features/onboarding/ProviderIcon'
+import { ChatGptSignIn } from './ChatGptSignIn'
+import { InstalledAck } from './InstalledAck'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
-type Phase = 'preparing' | 'needs-key' | 'installing' | 'starting' | 'pairing' | 'connected' | 'error'
+type Phase =
+  | 'preparing'
+  | 'needs-key'
+  | 'needs-codex-auth'
+  | 'installing'
+  | 'starting'
+  | 'pairing'
+  | 'connected'
+  | 'error'
 
 export interface OpenClawInlineSetupProps {
   /** Called with the live client on connect. When provided (onboarding) the host
@@ -54,6 +64,11 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [codexLoginCommand, setCodexLoginCommand] = useState(
+    'openclaw models auth login --provider openai-codex',
+  )
+  // Set only when THIS run installed the OpenClaw binary → the "installed" ack.
+  const [justInstalled, setJustInstalled] = useState(false)
   const firedRef = useRef(false)
 
   const appendLog = useCallback((line?: string) => {
@@ -77,7 +92,8 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
             onProgress: (e) => appendLog(typeof e.message === 'string' ? e.message : undefined),
             onOutput: (e) => appendLog(typeof e.line === 'string' ? e.line : undefined),
             onComplete: (e) => (e.success ? resolve() : reject(new Error('step failed'))),
-            onError: (e) => reject(new Error(typeof e.message === 'string' ? e.message : 'step failed')),
+            onError: (e) =>
+              reject(new Error(typeof e.message === 'string' ? e.message : 'step failed')),
           },
         )
       }),
@@ -104,11 +120,35 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
     setError(null)
     try {
       setPhase('preparing')
-      // Reuse an already-connected provider key — configures OpenClaw with no prompt.
+      // Reuse an already-connected credential — a provider key, or an existing
+      // OpenClaw ChatGPT-subscription (openai-codex) auth profile.
       const auto = (await fetch('/api/system/auto-configure-openclaw', { method: 'POST' })
         .then((r) => r.json())
-        .catch(() => ({ ok: false, needsKey: true }))) as { ok?: boolean; needsKey?: boolean }
+        .catch(() => ({ ok: false, needsKey: true }))) as {
+        ok?: boolean
+        needsKey?: boolean
+        needsCodexAuth?: boolean
+        loginCommand?: string
+      }
       if (!auto.ok) {
+        if (auto.needsCodexAuth) {
+          // The subscription EXISTS (codex login) but OpenClaw needs its OWN
+          // sign-in — which needs the BINARY, so ensure the install FIRST
+          // (showing `openclaw models auth login …` with no openclaw is useless).
+          if (typeof auto.loginCommand === 'string' && auto.loginCommand) {
+            setCodexLoginCommand(auto.loginCommand)
+          }
+          const st = (await fetch('/api/system/status')
+            .then((r) => r.json())
+            .catch(() => null)) as { openclaw?: { installed?: boolean } } | null
+          if (!st?.openclaw?.installed) {
+            setPhase('installing')
+            await runSSE('/api/system/install-openclaw', {})
+            setJustInstalled(true) // acknowledge the install in the sign-in panel
+          }
+          setPhase('needs-codex-auth')
+          return
+        }
         setPhase('needs-key')
         return
       }
@@ -248,6 +288,46 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
               data-testid="openclaw-inline-connect-key"
             >
               Connect &amp; set up <ArrowRight size={13} />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'needs-codex-auth' && (
+        <div className="flex flex-col gap-2.5" data-testid="openclaw-inline-codex-auth">
+          {justInstalled && <InstalledAck name="OpenClaw" testId="openclaw-inline-installed-ack" />}
+          <p className="text-[12px] leading-relaxed" style={{ color: muted(0.55) }}>
+            <span className="font-medium" style={{ color: muted(0.75) }}>
+              Codex is connected.
+            </span>{' '}
+            OpenClaw can run on your ChatGPT subscription too. Each runtime keeps its own sign-in,
+            so it needs one quick browser sign-in here (no code to type).
+          </p>
+          {/* One-click sign-in (the server spawns OpenClaw's own browser-PKCE
+              login under a PTY); on-disk success re-runs the setup pipeline
+              automatically. The manual command surfaces inside the flow's
+              failure states. */}
+          <ChatGptSignIn
+            tool="openclaw"
+            loginCommand={codexLoginCommand}
+            onLoggedIn={() => void run()}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setPhase('needs-key')}
+              data-testid="openclaw-inline-use-key"
+            >
+              Use an API key instead
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void run()}
+              data-testid="openclaw-inline-codex-recheck"
+            >
+              Re-check
             </Button>
           </div>
         </div>
