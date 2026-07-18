@@ -7,7 +7,7 @@ import { booAvatarToDataUrl } from '../lib/boo-avatar'
 
 const boo = booAvatarToDataUrl({ seed: 'lost-boo', isBooZero: true })
 ---
-<BaseLayout title="Page not found · Clawboo" description="That page drifted off. Head back home or run npx clawboo.">
+<BaseLayout title="Page not found · Clawboo" description="That page drifted off. Head back home or install Clawboo with npm i -g clawboo.">
   <section class="relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden px-5 text-center bg-[#8fb9ee] dark:bg-[#070d1e]">
     <SignatureSky boos={5} />
     <div class="relative z-10 flex flex-col items-center">
@@ -19,7 +19,7 @@ const boo = booAvatarToDataUrl({ seed: 'lost-boo', isBooZero: true })
       </p>
       <div class="mt-7 flex flex-col items-center gap-4">
         <Button href="/" variant="primary" size="lg" iconRight="arrow-right">Back home</Button>
-        <InstallCommand onSky />
+        <InstallCommand caption="Or try npx clawboo, no install." onSky />
       </div>
     </div>
   </section>

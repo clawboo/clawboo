@@ -18,7 +18,12 @@ import { startApprovalReaper } from './lib/approvalReaper'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { getRegistry } from './lib/agentSource'
-import { resolveApiPort, writeApiPortFile, removeApiPortFile } from './lib/portUtils'
+import {
+  resolveApiPort,
+  writeApiPortFile,
+  removeApiPortFile,
+  waitForPortFree,
+} from './lib/portUtils'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
 
@@ -59,6 +64,17 @@ const parseCsvEnv = (raw: string | undefined): string[] =>
 async function main() {
   const dev = process.argv.includes('--dev')
   const hostname = resolveHost()
+
+  // If we were launched as a self-restart successor by an in-app update, the
+  // exiting parent still holds the API port for a brief moment. Wait for it to
+  // free before resolveApiPort — which throws on an explicit-but-taken
+  // CLAWBOO_API_PORT — so the successor rebinds the SAME port the browser is
+  // already pointed at. A missing/invalid value is a no-op (the common path).
+  const awaitPortRaw = Number(process.env['CLAWBOO_AWAIT_PORT'])
+  if (Number.isInteger(awaitPortRaw) && awaitPortRaw > 0 && awaitPortRaw <= 65535) {
+    log.info({ port: awaitPortRaw }, 'Self-restart: waiting for the previous port to free')
+    await waitForPortFree(awaitPortRaw, 15_000)
+  }
 
   // Pick the API port up front. In dev mode the orchestrator script picks
   // a port first and exports it as `CLAWBOO_API_PORT` so the Vite proxy

@@ -20,6 +20,7 @@ import {
   systemModelsGET,
   approveDevicePOST,
 } from './system'
+import { selfVersionGET, selfUpdatePOST } from './systemUpdate'
 import {
   teamsGET,
   teamsPOST,
@@ -182,6 +183,11 @@ router.get('/api/system/openclaw-config', openclawConfigGET)
 router.patch('/api/system/openclaw-config', openclawConfigPATCH)
 router.get('/api/system/models', systemModelsGET)
 router.post('/api/system/approve-device', approveDevicePOST)
+// Self-update ("update available" chip): version check + SSE apply. The check
+// probes the npm registry server-side (cached, fail-silent); the apply installs
+// clawboo@latest and restarts into it (global installs only).
+router.get('/api/system/self-version', selfVersionGET)
+router.post('/api/system/self-update', selfUpdatePOST)
 
 // Teams
 router.get('/api/teams', teamsGET)

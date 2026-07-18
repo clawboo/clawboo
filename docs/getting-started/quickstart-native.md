@@ -1,6 +1,6 @@
 ---
 title: 'Quickstart: the native runtime (no Gateway)'
-description: Run npx clawboo, connect the built-in native runtime with a provider key, pick and deploy a starter team, and land in it with no OpenClaw Gateway.
+description: Install Clawboo, connect the built-in native runtime with a provider key, pick and deploy a starter team, and land in it with no OpenClaw Gateway.
 ---
 
 By the end of this tutorial you'll have a working team, picked from Clawboo's built-in marketplace and running entirely inside Clawboo, with no OpenClaw Gateway, started from a single pasted provider API key.
@@ -16,20 +16,21 @@ These docs describe Clawboo **v0.3.0**, the current release.
 <Note>
 - **Node.js 22 or newer**: Clawboo's `engines` field requires `node >=22.0.0`.
 - **A provider API key** for one of: Anthropic (`sk-ant-…`), OpenAI (`sk-…`), or OpenRouter (`sk-or-…`). Or a running local Ollama, in which case no key is needed.
-- No OpenClaw, no Gateway, no global install required.
+- No OpenClaw or Gateway required.
 </Note>
 
 ## Steps
 
-### 1. Launch Clawboo
+### 1. Install and launch Clawboo
 
-Run the launcher:
+Install Clawboo globally, then run it:
 
 ```bash
-npx clawboo
+npm install -g clawboo
+clawboo
 ```
 
-The CLI prints the Clawboo logo, does a quick informational probe of the OpenClaw Gateway port (`localhost:18789`), starts the bundled dashboard server, then opens your browser at the discovered URL.
+The global install gives you a persistent `clawboo` command and one-click in-app updates; prefer not to install? `npx clawboo` runs the latest instead. Either way, the CLI prints the Clawboo logo, does a quick informational probe of the OpenClaw Gateway port (`localhost:18789`), starts the bundled dashboard server, then opens your browser at the discovered URL.
 
 **Expected result:** your terminal shows `Dashboard started` and `Clawboo opened at http://localhost:18790` (or the next free port in the `18790–18809` range), and the dashboard loads in your browser. Because this is a fresh machine, the onboarding wizard appears.
 

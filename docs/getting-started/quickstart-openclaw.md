@@ -1,6 +1,6 @@
 ---
 title: 'Quickstart: the OpenClaw Gateway'
-description: Run npx clawboo, connect the native runtime, then add OpenClaw by detecting, installing, and configuring it, starting the Gateway, and approving the device.
+description: Install Clawboo, connect the native runtime, then add OpenClaw by detecting, installing, and configuring it, starting the Gateway, and approving the device.
 ---
 
 By the end of this tutorial you'll have a running OpenClaw Gateway connected to Clawboo, set up from the onboarding wizard's **Add more runtimes** step. Onboarding is native-first, so you connect the native runtime first, then add OpenClaw through its setup detour: detect your environment, install OpenClaw if needed, configure a model provider, start the Gateway, and approve the one-time device pairing. Once OpenClaw is connected you deploy an OpenClaw team from the dashboard.
@@ -24,15 +24,16 @@ OpenClaw is a separate project; Clawboo connects to a Gateway you run locally, i
 
 ## Steps
 
-### 1. Launch Clawboo
+### 1. Install and launch Clawboo
 
-Run the launcher:
+Install Clawboo globally, then run it:
 
 ```bash
-npx clawboo
+npm install -g clawboo
+clawboo
 ```
 
-The CLI prints the Clawboo logo, does a quick informational probe of the OpenClaw Gateway port (`localhost:18789`), starts the bundled dashboard server, then opens your browser at the discovered URL.
+Prefer not to install? `npx clawboo` runs the latest instead. Either way, the CLI prints the Clawboo logo, does a quick informational probe of the OpenClaw Gateway port (`localhost:18789`), starts the bundled dashboard server, then opens your browser at the discovered URL.
 
 **Expected result:** your terminal shows `Dashboard started` and `Clawboo opened at http://localhost:18790` (or the next free port in the `18790–18809` range), and the dashboard loads. Because this is a fresh machine, the onboarding wizard appears.
 
