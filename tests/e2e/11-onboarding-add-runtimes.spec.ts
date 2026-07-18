@@ -89,6 +89,8 @@ test.describe('Add-runtimes onboarding step', () => {
     // Welcome → ConfigureNative → continue (connect the key; no team yet).
     await page.getByRole('button', { name: /Get Started/ }).click()
     await expect(page.getByTestId('configure-native-step')).toBeVisible({ timeout: 10_000 })
+    // OpenAI is the default card (ChatGPT sign-in, no key field); pick Anthropic.
+    await page.getByTestId('native-provider-anthropic').click()
     await page.getByTestId('native-api-key').fill('sk-ant-e2e-fake-key')
     await page.getByTestId('native-continue').click()
 

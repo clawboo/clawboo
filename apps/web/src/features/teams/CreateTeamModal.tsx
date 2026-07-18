@@ -170,7 +170,6 @@ export function CreateTeamModal({
   const nativeModelGroups = useNativeModelGroups()
   // OpenClaw groups with the same live OpenRouter list (routing-id format).
   const openclawModelGroups = useOpenClawModelGroups(MODEL_GROUPS)
-  const hermesModelGroups = useHermesModelGroups()
   // "OpenClaw available" = a live browser Gateway client OR the server's operator
   // connection (mirrors the Runtimes panel). A bare status check is wrong — native mode
   // sets status='connected' with client=null and no Gateway — so the registry-health
@@ -228,6 +227,13 @@ export function CreateTeamModal({
   // to the catalog "chef's suggestion" (a marketplace team → OpenClaw; a blank team →
   // Native), degraded to Native when unavailable. The universal Boo Zero leads any mix.
   const [runtimeStatuses, setRuntimeStatuses] = useState<RuntimeStatus[]>([])
+  // Hermes picker groups: live OpenRouter + (when a hermes ChatGPT login is
+  // detected — `codexAuth` on the fetched status) the subscription group. An
+  // auth-less pick would degrade at spawn time anyway, but never offering it is
+  // the honest picker.
+  const hermesModelGroups = useHermesModelGroups(
+    runtimeStatuses.find((s) => s.id === 'hermes')?.codexAuth === true,
+  )
   // Per-agent overrides (all agents, leader included). Effective runtime =
   // override ?? resolvedDefaultFor(id). Cleared in reset() so overrides don't leak.
   const [agentRuntimes, setAgentRuntimes] = useState<Record<string, SelectableSourceId>>({})

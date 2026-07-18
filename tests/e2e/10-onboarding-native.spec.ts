@@ -93,8 +93,10 @@ test.describe('Native onboarding', () => {
     await page.getByRole('button', { name: /Get Started/ }).click()
     await expect(page.getByTestId('configure-native-step')).toBeVisible({ timeout: 10_000 })
 
-    // Paste a (fake) key and continue. The connect route writes the vault
-    // (offline); no team is created here — real team selection is the next step.
+    // Pick Anthropic (OpenAI is the default card + ChatGPT sign-in, which hides
+    // the key field), then paste a (fake) key and continue. The connect route
+    // writes the vault (offline); no team here — real team selection is next.
+    await page.getByTestId('native-provider-anthropic').click()
     await page.getByTestId('native-api-key').fill('sk-ant-e2e-fake-key')
     await page.getByTestId('native-continue').click()
 

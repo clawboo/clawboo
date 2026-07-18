@@ -14,12 +14,18 @@ import {
 } from '../lib/processManager'
 import { getModelsFromCli } from '../lib/modelCache'
 import { isWindows, resolveShimName } from '../lib/platform'
-import { ENV_KEY_MAP, envVarForOpenclawProvider, writeOpenclawProviderKeys } from '../lib/openclawEnv'
+import {
+  detectOauthProfileProviders,
+  ENV_KEY_MAP,
+  envVarForOpenclawProvider,
+  writeOpenclawProviderKeys,
+} from '../lib/openclawEnv'
+import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
 import { providerStatus } from '../lib/providerKeys'
 import { resolveRuntimeKey } from '../lib/secretsVault'
 import { getRegistry } from '../lib/agentSource'
 import { detectOpenClaw, invalidateOpenClawCache } from '../lib/openclawDetect'
-import { MODEL_GROUPS as STATIC_MODEL_GROUPS } from '../../src/lib/modelCatalog'
+import { MODEL_GROUPS as STATIC_MODEL_GROUPS, providerSlug } from '../../src/lib/modelCatalog'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -43,7 +49,30 @@ const OPENCLAW_MODEL_MAP: Record<string, string> = {
   cerebras: 'cerebras/zai-glm-4.7',
   venice: 'venice/llama-3.3-70b',
   ollama: 'ollama/llama3.2',
+  // The ChatGPT subscription (Codex OAuth). The `openai-codex/*` ref is the
+  // minimal activation on the installed 2026.5.x generation; newer OpenClaw
+  // `doctor --fix` auto-repairs it forward to `openai/*`.
+  'openai-codex': 'openai-codex/gpt-5.5',
 }
+
+/** Providers that authenticate WITHOUT a pasted key: ollama is local, and
+ *  `openai-codex` is OpenClaw's own ChatGPT-subscription OAuth (the user runs
+ *  `openclaw models auth login --provider openai-codex` in their terminal —
+ *  clawboo never automates the exchange, never stores a key for it). Their
+ *  configure path skips every key write. */
+const KEYLESS_PROVIDERS = new Set(['ollama', 'openai-codex'])
+
+/** The terminal command that creates OpenClaw's ChatGPT-subscription auth
+ *  profile. NON-destructive (unlike `openclaw onboard`, which can reset
+ *  channels/memory/cron); surfaced to the UI, never executed by clawboo. */
+export const OPENCLAW_CODEX_LOGIN_COMMAND = 'openclaw models auth login --provider openai-codex'
+
+/** Whether OpenClaw's bootstrap-from-~/.codex is trusted to materialize the
+ *  auth profile WITHOUT the login command. Probed on 2026.5.27: quota-free
+ *  commands (models auth list / status / list) do NOT trigger it, so the
+ *  Re-check rule requires the ACTUAL profile. Flip only after a live run
+ *  proves the bootstrap fires on first use. */
+export const OPENCLAW_CODEX_BOOTSTRAP_TRUSTED = false
 
 /**
  * Read GATEWAY_AUTH_TOKEN from the .env file and sync it to Clawboo settings
@@ -525,8 +554,8 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
       res.status(400).json({ error: 'provider is required' })
       return
     }
-    if (provider !== 'ollama' && (typeof apiKey !== 'string' || !apiKey)) {
-      res.status(400).json({ error: 'apiKey is required for non-ollama providers' })
+    if (!KEYLESS_PROVIDERS.has(provider) && (typeof apiKey !== 'string' || !apiKey)) {
+      res.status(400).json({ error: 'apiKey is required for non-keyless providers' })
       return
     }
 
@@ -567,12 +596,13 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
       'utf8',
     )
 
-    // Build .env
+    // Build .env. A KEYLESS provider (ollama / openai-codex) writes NO key line —
+    // openai-codex auth is OpenClaw's own OAuth profile, never an env var.
     let envContent = `GATEWAY_AUTH_TOKEN=${gatewayToken}\n`
     const envKeyName = ENV_KEY_MAP[provider]
     if (envKeyName && typeof apiKey === 'string' && apiKey) {
       envContent += `${envKeyName}=${apiKey}\n`
-    } else if (provider !== 'ollama' && typeof apiKey === 'string' && apiKey) {
+    } else if (!KEYLESS_PROVIDERS.has(provider) && typeof apiKey === 'string' && apiKey) {
       envContent += `CUSTOM_API_KEY=${apiKey}\n`
     }
     fs.writeFileSync(path.join(stateDir, '.env'), envContent, 'utf8')
@@ -590,22 +620,40 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
 }
 
 // POST /api/system/auto-configure-openclaw — provision OpenClaw from an ALREADY-
-// connected provider key (from native onboarding's vault or the Providers hub), so
-// the OpenClaw setup flow never re-asks for a key. Non-destructive: upserts the key
-// + gateway token into .env (never overwrites) and ensures openclaw.json exists with
-// a local gateway + a default model. Returns { ok:false, needsKey:true } when no
-// provider is connected (the UI then falls back to asking for a key).
-export function autoConfigureOpenclawPOST(_req: Request, res: Response): void {
+// connected credential, so the OpenClaw setup flow never re-asks. Rungs:
+//   1. A connected provider KEY (vault / Providers hub) → today's path, unchanged.
+//   2. An OpenClaw `openai-codex` OAUTH PROFILE (the user already ran the login) →
+//      config writes only (no key exists to write) → { ok:true, provider:'openai-codex' }.
+//   3. A codex-CLI login ONLY (subscription exists, but OpenClaw holds no profile —
+//      the bootstrap is not trusted to fire headlessly; see
+//      OPENCLAW_CODEX_BOOTSTRAP_TRUSTED) → { ok:false, needsCodexAuth:true,
+//      loginCommand } so the UI shows the terminal command + Re-check.
+//   4. Nothing → { ok:false, needsKey:true } (the UI falls back to the key prompt).
+// Non-destructive: upserts the key + gateway token into .env (never overwrites) and
+// ensures openclaw.json exists with a local gateway + a default model.
+export async function autoConfigureOpenclawPOST(_req: Request, res: Response): Promise<void> {
   try {
     const stateDir = resolveStateDir()
+    let provider: string
+    let key: string | null = null
     const connected = providerStatus().find((p) => p.connected)
-    if (!connected) {
-      res.json({ ok: false, needsKey: true })
+    const connectedKey = connected
+      ? resolveRuntimeKey(envVarForOpenclawProvider(connected.id))
+      : null
+    if (connected && connectedKey) {
+      // Rung 1 — a connected key, today's exact path.
+      provider = connected.id
+      key = connectedKey
+    } else if (detectOauthProfileProviders(stateDir).has('openai-codex')) {
+      // Rung 2 — OpenClaw already holds the ChatGPT-subscription OAuth profile.
+      provider = 'openai-codex'
+    } else if (await isCodexLoggedIn()) {
+      // Rung 3 — the subscription EXISTS (codex CLI login) but OpenClaw has no
+      // profile of its own; the user runs the (non-destructive) login command.
+      res.json({ ok: false, needsCodexAuth: true, loginCommand: OPENCLAW_CODEX_LOGIN_COMMAND })
       return
-    }
-    const provider = connected.id
-    const key = resolveRuntimeKey(envVarForOpenclawProvider(provider))
-    if (!key) {
+    } else {
+      // Rung 4 — nothing connected at all.
       res.json({ ok: false, needsKey: true })
       return
     }
@@ -639,8 +687,9 @@ export function autoConfigureOpenclawPOST(_req: Request, res: Response): void {
       fs.writeFileSync(envPath, envLines.join('\n') + '\n', 'utf8')
     }
 
-    // Upsert the provider key into .env + auth-profiles (non-destructive).
-    writeOpenclawProviderKeys(stateDir, [{ provider, key }])
+    // Upsert the provider key into .env + auth-profiles (non-destructive). The
+    // oauth rung has NO key — its credential is OpenClaw's own auth profile.
+    if (key) writeOpenclawProviderKeys(stateDir, [{ provider, key }])
 
     // Ensure openclaw.json — a local gateway + a default model (read-modify-write,
     // never clobbering fields the user may have set).
@@ -982,12 +1031,26 @@ export async function openclawConfigGET(_req: Request, res: Response): Promise<v
         ? (execSection as Record<string, unknown>)
         : null
 
+    // ChatGPT-subscription auth signals (presence only, never values):
+    //   profile   — OpenClaw holds its own `openai-codex` oauth profile → READY.
+    //   codexCli  — a `codex login` exists (the subscription is provable) → the
+    //               UI OFFERS the path + shows the login command.
+    // Distinct credentials with distinct roles — never conflate (the codex CLI
+    // login does not by itself let OpenClaw call the backend).
+    const codexAuth = {
+      profile: detectOauthProfileProviders(stateDir).has('openai-codex'),
+      codexCli: await isCodexLoggedIn(),
+      bootstrapTrusted: OPENCLAW_CODEX_BOOTSTRAP_TRUSTED,
+      loginCommand: OPENCLAW_CODEX_LOGIN_COMMAND,
+    }
+
     res.json({
       config,
       env,
       version: oc.version,
       execAsk: execConfig?.['ask'] ?? null,
       execSecurity: execConfig?.['security'] ?? null,
+      codexAuth,
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -1154,6 +1217,9 @@ export async function systemModelsGET(_req: Request, res: Response): Promise<voi
     }
     const envFlags = parseEnvFlags(envContent)
     const authProviders = detectAuthProfileKeys(stateDir)
+    // OAuth auth profiles (e.g. `openai-codex` after a ChatGPT-subscription
+    // sign-in) — the key detector requires `provider && key` and never sees them.
+    const oauthProviders = detectOauthProfileProviders(stateDir)
 
     const configured: string[] = []
     for (const [flag, providerName] of Object.entries(AUTH_PROFILE_PROVIDERS)) {
@@ -1161,11 +1227,18 @@ export async function systemModelsGET(_req: Request, res: Response): Promise<voi
         configured.push(providerName)
       }
     }
+    for (const p of oauthProviders) configured.push(p)
     // Local providers are always available
     configured.push('ollama')
 
-    // Only include providers that are in our known API keys list + local
-    const knownProviders = new Set([...Object.values(AUTH_PROFILE_PROVIDERS), 'ollama'])
+    // Only include providers that are in our known API keys list + local +
+    // the keyless oauth provider. Compared via providerSlug: display names
+    // ('Hugging Face', 'OpenAI Codex') and ids ('huggingface', 'openai-codex')
+    // must land on the same key — a bare .toLowerCase() mismatches on
+    // spaces/hyphens (the latent Hugging Face drop this fixes).
+    const knownProviders = new Set(
+      [...Object.values(AUTH_PROFILE_PROVIDERS), 'ollama', 'openai-codex'].map(providerSlug),
+    )
 
     // Normalize provider names to the static catalog's TitleCase form. The
     // CLI returns lowercase ('anthropic', 'cerebras', etc.) while the static
@@ -1176,10 +1249,10 @@ export async function systemModelsGET(_req: Request, res: Response): Promise<voi
     // ad-hoc capitalisation.
     const CANONICAL_NAMES: Record<string, string> = {}
     for (const staticGroup of STATIC_MODEL_GROUPS) {
-      CANONICAL_NAMES[staticGroup.provider.toLowerCase()] = staticGroup.provider
+      CANONICAL_NAMES[providerSlug(staticGroup.provider)] = staticGroup.provider
     }
     function canonicalize<T extends { provider: string }>(group: T): T {
-      const canonical = CANONICAL_NAMES[group.provider.toLowerCase()]
+      const canonical = CANONICAL_NAMES[providerSlug(group.provider)]
       return canonical && canonical !== group.provider ? { ...group, provider: canonical } : group
     }
 
@@ -1187,19 +1260,19 @@ export async function systemModelsGET(_req: Request, res: Response): Promise<voi
     if (groups) {
       // Start with CLI groups, filtered to known providers, with canonical names.
       resultGroups = groups
-        .filter((g) => knownProviders.has(g.provider.toLowerCase()))
+        .filter((g) => knownProviders.has(providerSlug(g.provider)))
         .map(canonicalize)
       // Supplement with static catalog entries for any known providers missing from CLI
-      const cliProviders = new Set(resultGroups.map((g) => g.provider.toLowerCase()))
+      const cliProviders = new Set(resultGroups.map((g) => providerSlug(g.provider)))
       for (const staticGroup of STATIC_MODEL_GROUPS) {
-        const key = staticGroup.provider.toLowerCase()
+        const key = providerSlug(staticGroup.provider)
         if (knownProviders.has(key) && !cliProviders.has(key)) {
           resultGroups.push(staticGroup)
         }
       }
     } else {
       // CLI unavailable — use full static catalog filtered to known providers
-      resultGroups = STATIC_MODEL_GROUPS.filter((g) => knownProviders.has(g.provider.toLowerCase()))
+      resultGroups = STATIC_MODEL_GROUPS.filter((g) => knownProviders.has(providerSlug(g.provider)))
     }
 
     res.json({ groups: resultGroups, configuredProviders: configured })

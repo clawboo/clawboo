@@ -147,6 +147,13 @@ export function RuntimesPanel() {
   const [statuses, setStatuses] = useState<RuntimeStatus[]>([])
   const [loaded, setLoaded] = useState(false)
   const [diagId, setDiagId] = useState<string | null>(null)
+  // OpenClaw's OWN ChatGPT-subscription (openai-codex) oauth profile — lets the
+  // connected OpenClaw row show/offer the subscription. From the openclaw-config
+  // endpoint (the wizard's signal), fetched alongside the runtimes poll.
+  const [openclawSubConnected, setOpenclawSubConnected] = useState(false)
+  // OpenClaw was set up before (openclaw.json exists) — so an offline gateway
+  // reads as "Disconnected · Reconnect", not a pristine "Set up".
+  const [openclawConfigured, setOpenclawConfigured] = useState(false)
   // The standalone OpenClaw setup flow (detect → install → configure → start),
   // launched from the OpenClaw tab's "Set up OpenClaw" CTA when not connected.
   const [setupOpen, setSetupOpen] = useState(false)
@@ -180,6 +187,16 @@ export function RuntimesPanel() {
     const health = await fetchRegistryHealth()
     const srvConn = health.connection === 'connected'
     setServerOpenclawConnected(srvConn)
+    // OpenClaw's own ChatGPT-subscription oauth profile (defensive: false on any
+    // error). `codexAuth.profile` is the ACTUAL profile, distinct from a bare
+    // codex-CLI login (which only OFFERS the path).
+    const cfg = (await fetch('/api/system/openclaw-config')
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)) as { config?: unknown; codexAuth?: { profile?: boolean } } | null
+    setOpenclawSubConnected(!!cfg?.codexAuth?.profile)
+    // `config` is the parsed openclaw.json (null when never set up) — the "was
+    // configured" signal, independent of whether the gateway is currently up.
+    setOpenclawConfigured(!!cfg?.config)
     const conn = useConnectionStore.getState()
     const ocOk = (conn.status === 'connected' && conn.client !== null) || srvConn
     record('openclaw', {
@@ -305,10 +322,13 @@ export function RuntimesPanel() {
             onDiagnostics={(id) => setDiagId(id)}
             openclaw={{
               connected: openclawConnected,
-              statusLabel: openclawConnected ? 'Healthy' : (openclawMessage || 'Unavailable'),
+              statusLabel: openclawConnected ? 'Healthy' : openclawMessage || 'Unavailable',
               onSetup: () => setSetupOpen(true),
               setupTestId: 'runtime-openclaw-setup',
               onDiagnostics: () => setDiagId('openclaw'),
+              subscriptionConnected: openclawSubConnected,
+              codexReady: statuses.some((s) => s.id === 'codex' && s.connectionState === 'ready'),
+              configured: openclawConfigured,
               extra: <McpAttach runtimeId="openclaw" />,
               setupOpen,
               setupContent: (

@@ -19,7 +19,11 @@ import {
   OPENAI_GROUP_NAME,
   OPENROUTER_GROUP_NAME,
 } from './nativeModelCatalog'
-import { HERMES_MODEL_GROUPS, HERMES_OPENROUTER_GROUP_NAME } from './hermesModelCatalog'
+import {
+  HERMES_MODEL_GROUPS,
+  HERMES_OPENROUTER_GROUP_NAME,
+  HERMES_CODEX_GROUP,
+} from './hermesModelCatalog'
 import { useProviderModels } from './useProviderModels'
 
 const FALLBACK_OPENROUTER_MODELS: ModelOption[] =
@@ -96,7 +100,8 @@ export function useNativeModelGroups(): ModelGroup[] {
     () =>
       NATIVE_MODEL_GROUPS.map((g) => {
         if (g.provider === OPENROUTER_GROUP_NAME) return { ...g, models: openrouter }
-        if (g.provider === ANTHROPIC_GROUP_NAME && anthropic.length > 0) return { ...g, models: anthropic }
+        if (g.provider === ANTHROPIC_GROUP_NAME && anthropic.length > 0)
+          return { ...g, models: anthropic }
         if (g.provider === OPENAI_GROUP_NAME && openai.length > 0) return { ...g, models: openai }
         return g
       }),
@@ -107,8 +112,10 @@ export function useNativeModelGroups(): ModelGroup[] {
 /** The Hermes model groups: a SINGLE "OpenRouter" group with the LIVE OpenRouter
  *  catalog (Hermes reaches every model through OpenRouter with one key), falling back
  *  to the small curated set while loading / on error. Every pick therefore pins
- *  `--provider openrouter`, so it always works with the connected OpenRouter key. */
-export function useHermesModelGroups(): ModelGroup[] {
+ *  `--provider openrouter`, so it always works with the connected OpenRouter key.
+ *  `includeCodex` (a detected hermes ChatGPT login — `RuntimeStatus.codexAuth`)
+ *  appends the subscription group; its picks pin `--provider openai-codex`. */
+export function useHermesModelGroups(includeCodex = false): ModelGroup[] {
   const { liveModels } = useOpenRouterModels()
   return useMemo(
     () => [
@@ -116,8 +123,9 @@ export function useHermesModelGroups(): ModelGroup[] {
         provider: HERMES_OPENROUTER_GROUP_NAME,
         models: liveModels.length > 0 ? liveModels : HERMES_MODEL_GROUPS[0]!.models,
       },
+      ...(includeCodex ? [HERMES_CODEX_GROUP] : []),
     ],
-    [liveModels],
+    [liveModels, includeCodex],
   )
 }
 
@@ -149,5 +157,8 @@ export function mergeOpenRouterGroup(base: ModelGroup[], orGroup: ModelGroup | n
  *  routing-id format. Keeps `base` untouched until the live list loads. */
 export function useOpenClawModelGroups(base: ModelGroup[]): ModelGroup[] {
   const { liveModels } = useOpenRouterModels()
-  return useMemo(() => mergeOpenRouterGroup(base, openClawOpenRouterGroup(liveModels)), [base, liveModels])
+  return useMemo(
+    () => mergeOpenRouterGroup(base, openClawOpenRouterGroup(liveModels)),
+    [base, liveModels],
+  )
 }

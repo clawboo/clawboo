@@ -85,9 +85,9 @@ describe('RuntimesPanel', () => {
     // its live region both carry the text); the built-in native (needs a key)
     // shows an explicit Connect CTA, never Install (it ships in the server).
     expect((await screen.findAllByText('Connected')).length).toBeGreaterThan(0)
-    expect(await screen.findByTestId('runtime-list-row-clawboo-native-toggle')).toHaveAccessibleName(
-      /connect clawboo native/i,
-    )
+    expect(
+      await screen.findByTestId('runtime-list-row-clawboo-native-toggle'),
+    ).toHaveAccessibleName(/connect clawboo native/i)
     expect(screen.queryByTestId('runtime-clawboo-native-install')).not.toBeInTheDocument()
   })
 
@@ -156,22 +156,33 @@ describe('RuntimesPanel', () => {
     )
   })
 
-  it('every row exposes a diagnostics button (no tab switch needed)', async () => {
-    server.use(http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })))
+  it("a connected runtime's Manage body exposes a Details link (diagnostics)", async () => {
+    server.use(
+      http.get('/api/runtimes', () =>
+        HttpResponse.json({
+          runtimes: [
+            {
+              id: 'clawboo-native',
+              connectionState: 'ready',
+              capabilities: {},
+              health: { ok: true },
+            },
+          ],
+          available: [],
+        }),
+      ),
+    )
     render(<RuntimesPanel />)
-    // Native's diagnostics are reachable directly on its row.
-    expect(await screen.findByTestId('runtime-clawboo-native-diagnostics')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-openclaw-diagnostics')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-claude-code-diagnostics')).toBeInTheDocument()
+    // The ⓘ header button is gone; diagnostics now lives inside Manage as "Details".
+    expect(await screen.findByTestId('runtime-clawboo-native-details')).toBeInTheDocument()
   })
 
-  it('the OpenClaw row carries setup + diagnostics + the MCP attach config', async () => {
+  it('the disconnected OpenClaw row carries Set up + the MCP attach config', async () => {
     useConnectionStore.setState({ status: 'disconnected', client: null })
     server.use(http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })))
     render(<RuntimesPanel />)
-    // Diagnostics is on the row itself; expanding the row reveals setup + MCP.
-    expect(await screen.findByTestId('runtime-openclaw-diagnostics')).toBeInTheDocument()
-    await userEvent.click(screen.getByTestId('runtime-list-row-openclaw-toggle'))
+    // Expanding the Set up row reveals the setup CTA + MCP config.
+    await userEvent.click(await screen.findByTestId('runtime-list-row-openclaw-toggle'))
     expect(screen.getByTestId('runtime-openclaw-setup')).toBeInTheDocument()
     expect(screen.getByText('MCP attach config')).toBeInTheDocument()
   })

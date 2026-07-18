@@ -16,10 +16,11 @@
 // There is NO chevron anywhere. A per-row visually-hidden live region announces
 // the Installing/Connecting/Connected transitions to assistive tech.
 //
-// Panel extras (variant "panel"): a diagnostics Info button on every row (opens
-// the shared drawer, where Re-check + Disconnect live), the built-in native
-// runtime is a managed row (not the static foundation), and the OpenClaw row
-// carries its MCP attach config.
+// Panel extras (variant "panel"): a connected row gets a "Manage" footer button
+// that expands the inline management body (subscription + Re-check + Disconnect +
+// a "Details" link to the read-only diagnostics drawer). The built-in native
+// runtime is a managed row (not the static foundation); the OpenClaw row carries
+// its MCP attach config inside Manage.
 //
 // The expandable body stays MOUNTED when a row is collapsed (a CSS grid
 // 0fr↔1fr height animation + `inert`, NOT display:none) so an in-flight SSE
@@ -28,14 +29,15 @@
 // OpenClaw isn't a RuntimeId, so its row hosts the inline Gateway setup directly.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowRight, Check, Download, Info, LogIn, Plug2, Settings2, X } from 'lucide-react'
+import { ArrowRight, Download, LogIn, Plug2, RefreshCw, Settings2, X } from 'lucide-react'
 
 import type { RuntimeStatus } from '@clawboo/control-client'
 
-import { Button, IconButton } from '@/features/shared/Button'
+import { Button } from '@/features/shared/Button'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { Spinner } from '@/features/shared/Spinner'
 import { RuntimeConnectionCard, type DisplayState } from './RuntimeConnectionCard'
+import { RuntimeManageBody } from './RuntimeManageBody'
 import { OpenClawIcon, RuntimeIcon } from './RuntimeBrand'
 import { RUNTIME_CATALOG, type RuntimeCatalogEntry, type RuntimeId } from './runtimeCatalog'
 
@@ -62,6 +64,15 @@ export interface OpenClawTabConfig {
    *  OpenClaw setup) instead of the "Set up OpenClaw" button. */
   setupOpen?: boolean
   setupContent?: ReactNode
+  /** OpenClaw already has its own ChatGPT-subscription (openai-codex) oauth
+   *  profile — the connected Manage body shows the "connected" confirmation. */
+  subscriptionConnected?: boolean
+  /** Codex itself is connected — the prerequisite for adding the subscription
+   *  to OpenClaw later. */
+  codexReady?: boolean
+  /** OpenClaw was set up before (openclaw.json exists) but is not currently
+   *  connected → the row reads "Disconnected · Reconnect", not a fresh "Set up". */
+  configured?: boolean
 }
 
 // Concise one-liners for the row summary (the catalog blurbs are longer, sized
@@ -112,17 +123,9 @@ export function RuntimeConnectList({
 }: RuntimeConnectListProps) {
   return (
     <div className="flex flex-col gap-2.5">
-      {/* Onboarding only: the native foundation — already connected; the anchor
-          for "add MORE". In the panel, native is a managed row in `runtimeIds`. */}
-      {variant === 'onboarding' && (
-        <AccordionRow
-          testId="runtime-list-row-clawboo-native"
-          icon={<RuntimeIcon id="clawboo-native" size={36} />}
-          name={RUNTIME_CATALOG['clawboo-native'].name}
-          blurb={NATIVE_FOUNDATION_BLURB}
-          rightControl={<ConnectedIndicator />}
-        />
-      )}
+      {/* OpenClaw leads the list (swapped ahead of the built-in native runtime,
+          which is always connected and sits LAST). */}
+      <OpenClawRow config={openclaw} onChanged={onChanged} />
 
       {runtimeIds.map((id) => (
         <RuntimeRow
@@ -133,10 +136,22 @@ export function RuntimeConnectList({
           variant={variant}
           onChanged={onChanged}
           onDiagnostics={onDiagnostics}
+          codexReady={statuses.some((s) => s.id === 'codex' && s.connectionState === 'ready')}
         />
       ))}
 
-      <OpenClawRow config={openclaw} />
+      {/* Onboarding only: the native foundation — already connected, so it sits
+          LAST (nothing to set up). In the panel, native is a managed row that
+          `runtimeIds` (RUNTIME_ORDER) already places last. */}
+      {variant === 'onboarding' && (
+        <AccordionRow
+          testId="runtime-list-row-clawboo-native"
+          icon={<RuntimeIcon id="clawboo-native" size={36} />}
+          name={RUNTIME_CATALOG['clawboo-native'].name}
+          blurb={NATIVE_FOUNDATION_BLURB}
+          status={<StatusChip state="ready" />}
+        />
+      )}
     </div>
   )
 }
@@ -148,6 +163,7 @@ function RuntimeRow({
   variant,
   onChanged,
   onDiagnostics,
+  codexReady,
 }: {
   entry: RuntimeCatalogEntry
   status?: RuntimeStatus
@@ -155,6 +171,7 @@ function RuntimeRow({
   variant: RuntimeConnectVariant
   onChanged: () => void | Promise<void>
   onDiagnostics?: (id: RuntimeId) => void
+  codexReady?: boolean
 }) {
   const [userExpanded, setUserExpanded] = useState(false)
   const [display, setDisplay] = useState<DisplayState>('unknown')
@@ -175,52 +192,70 @@ function RuntimeRow({
     name: entry.name,
     blurb: LIST_BLURB[entry.id],
   }
-  const diag =
-    variant === 'panel' && onDiagnostics ? (
-      <DiagnosticsButton id={entry.id} name={entry.name} onClick={() => onDiagnostics(entry.id)} />
-    ) : null
-  const withDiag = (control: ReactNode) => (
-    <div className="flex shrink-0 items-center gap-1">
-      {diag}
-      {control}
-    </div>
-  )
+  const diagnostics =
+    variant === 'panel' && onDiagnostics ? () => onDiagnostics(entry.id) : undefined
 
   const inProgress = shown === 'installing' || shown === 'connecting'
 
   // On a genuine connect/install completion, the focused control (key input /
   // Connect button, then the whole card) unmounts as the row settles to the
-  // static Connected indicator — move focus to the row's diagnostics button
-  // (panel) so keyboard/AT focus is not dumped to <body>. No-op in onboarding.
+  // Manage footer — move focus to the Manage toggle so keyboard/AT focus is not
+  // dumped to <body>.
   useEffect(() => {
     const prev = prevShownRef.current
     prevShownRef.current = shown
     if (shown === 'ready' && (prev === 'connecting' || prev === 'installing')) {
       const active = document.activeElement
       if (!active || active === document.body) {
-        document
-          .querySelector<HTMLElement>(`[data-testid="runtime-${entry.id}-diagnostics"]`)
-          ?.focus?.()
+        document.querySelector<HTMLElement>(`[data-testid="${testId}-toggle"]`)?.focus?.()
       }
     }
-  }, [shown, entry.id])
+  }, [shown, testId])
 
   // Before the first status fetch lands, don't flash a generic "Connect" CTA (an
   // already-connected runtime would briefly look unconnected). Neutral placeholder.
   if (!loaded && shown === 'unknown') {
-    return <AccordionRow {...rowProps} rightControl={withDiag(<Skeleton width={92} height={30} radius={9} />)} />
+    return <AccordionRow {...rowProps} status={<Skeleton width={92} height={26} radius={9} />} />
   }
 
-  // A connected runtime settles to the indicator (its visible label is the
-  // accessible "Connected"); the card unmounts. In the panel its Re-check /
-  // Disconnect live in the diagnostics drawer (the Info button).
+  // Connected → a small "Connected" (top-right) + a Manage footer button that
+  // expands the inline management body (subscription + Re-check + Disconnect +
+  // Details). The ChatGPT-subscription option lives inside Manage now.
   if (shown === 'ready') {
-    return <AccordionRow {...rowProps} rightControl={withDiag(<ConnectedIndicator />)} />
+    return (
+      <AccordionRow
+        {...rowProps}
+        status={<StatusChip state="ready" />}
+        footer={
+          <CtaToggle
+            expanded={userExpanded}
+            onToggle={() => setUserExpanded((v) => !v)}
+            bodyId={`${testId}-body`}
+            cta={MANAGE_CTA}
+            name={entry.name}
+            testId={testId}
+          />
+        }
+        expanded={userExpanded}
+      >
+        <RuntimeManageBody
+          runtimeId={entry.id}
+          name={entry.name}
+          onChanged={onChanged}
+          onDiagnostics={diagnostics}
+          subscriptionTool={entry.altLoginCommand ? 'hermes' : undefined}
+          subscriptionConnected={status?.codexAuth === true}
+          subscriptionLoginCommand={entry.altLoginCommand}
+          codexReady={codexReady}
+        />
+      </AccordionRow>
+    )
   }
 
+  // Unconnected → the connect CTA footer over the connect state machine.
   const expanded = userExpanded || inProgress
   const progressLabel = shown === 'installing' ? 'Installing…' : 'Connecting…'
-  const control = inProgress ? (
+  const footer = inProgress ? (
     <InProgressChip label={progressLabel} />
   ) : (
     <CtaToggle
@@ -236,7 +271,8 @@ function RuntimeRow({
   return (
     <AccordionRow
       {...rowProps}
-      rightControl={withDiag(control)}
+      status={<StatusChip state={shown} />}
+      footer={footer}
       expanded={expanded}
       announce={inProgress ? progressLabel : ''}
     >
@@ -247,12 +283,19 @@ function RuntimeRow({
         variant={variant}
         onChanged={onChanged}
         onDisplayState={setDisplay}
+        codexReady={codexReady}
       />
     </AccordionRow>
   )
 }
 
-function OpenClawRow({ config }: { config: OpenClawTabConfig }) {
+function OpenClawRow({
+  config,
+  onChanged,
+}: {
+  config: OpenClawTabConfig
+  onChanged: () => void | Promise<void>
+}) {
   const [userExpanded, setUserExpanded] = useState(false)
   const testId = 'runtime-list-row-openclaw'
   const rowProps = {
@@ -261,51 +304,57 @@ function OpenClawRow({ config }: { config: OpenClawTabConfig }) {
     name: 'OpenClaw',
     blurb: 'Run OpenClaw agents on a local Gateway',
   }
-  const diag = config.onDiagnostics ? (
-    <DiagnosticsButton id="openclaw" name="OpenClaw" onClick={config.onDiagnostics} />
-  ) : null
-  const withDiag = (control: ReactNode) => (
-    <div className="flex shrink-0 items-center gap-1">
-      {diag}
-      {control}
-    </div>
-  )
 
   if (config.connected) {
-    // Panel: expandable "Manage" to the MCP attach config. Onboarding (no extra):
-    // a static Connected indicator, nothing to manage.
+    // Panel (has MCP + diagnostics): a small "Connected" (top-right) + a Manage
+    // footer that expands the management body (ChatGPT subscription + MCP attach
+    // + Re-check + Disconnect [stops the gateway] + Details). Onboarding (no
+    // extra): a static Connected chip, nothing to manage.
     if (config.extra) {
       return (
         <AccordionRow
           {...rowProps}
-          rightControl={withDiag(
-            <div className="flex shrink-0 items-center gap-1.5">
-              <ConnectedIndicator />
-              <CtaToggle
-                expanded={userExpanded}
-                onToggle={() => setUserExpanded((v) => !v)}
-                bodyId={`${testId}-body`}
-                cta={{ label: 'Manage', icon: <Settings2 size={13} /> }}
-                name="OpenClaw"
-                testId={testId}
-              />
-            </div>,
-          )}
+          status={<StatusChip state="ready" />}
+          footer={
+            <CtaToggle
+              expanded={userExpanded}
+              onToggle={() => setUserExpanded((v) => !v)}
+              bodyId={`${testId}-body`}
+              cta={MANAGE_CTA}
+              name="OpenClaw"
+              testId={testId}
+            />
+          }
           expanded={userExpanded}
         >
-          {config.extra}
+          <RuntimeManageBody
+            runtimeId="openclaw"
+            name="OpenClaw"
+            onChanged={onChanged}
+            onDiagnostics={config.onDiagnostics}
+            subscriptionTool="openclaw"
+            subscriptionConnected={!!config.subscriptionConnected}
+            subscriptionLoginCommand="openclaw models auth login --provider openai-codex"
+            codexReady={!!config.codexReady}
+            extra={config.extra}
+          />
         </AccordionRow>
       )
     }
-    return <AccordionRow {...rowProps} rightControl={withDiag(<ConnectedIndicator />)} />
+    return <AccordionRow {...rowProps} status={<StatusChip state="ready" />} />
   }
 
   const settingUp = !!config.setupOpen
   const expanded = userExpanded || settingUp
+  // Set up before but not currently connected → the gateway is offline. Read as
+  // "Disconnected · Reconnect", never a pristine "Set up" (which loses the fact
+  // that OpenClaw is already configured). Reconnect reuses the existing config +
+  // starts the gateway via the SAME inline setup flow.
+  const wasConfigured = !!config.configured
   // While the inline setup is open it moves through automated AND user-waiting
   // phases (paste a key, approve the device). The body owns the live phase UI,
-  // so the header shows a calm neutral marker, never a perpetual spinner.
-  const control = settingUp ? (
+  // so the footer shows a calm neutral marker, never a perpetual spinner.
+  const footer = settingUp ? (
     <span className="inline-flex shrink-0 items-center text-[12px]" style={{ color: muted(0.55) }}>
       In setup
     </span>
@@ -314,21 +363,31 @@ function OpenClawRow({ config }: { config: OpenClawTabConfig }) {
       expanded={expanded}
       onToggle={() => setUserExpanded((v) => !v)}
       bodyId={`${testId}-body`}
-      cta={{ label: 'Set up', icon: <ArrowRight size={13} /> }}
+      cta={
+        wasConfigured
+          ? { label: 'Reconnect', icon: <RefreshCw size={13} /> }
+          : { label: 'Set up', icon: <ArrowRight size={13} /> }
+      }
       name="OpenClaw"
       testId={testId}
     />
   )
 
   return (
-    <AccordionRow {...rowProps} rightControl={withDiag(control)} expanded={expanded}>
+    <AccordionRow
+      {...rowProps}
+      status={wasConfigured ? <OpenClawOfflineChip /> : <StatusChip state="unknown" />}
+      footer={footer}
+      expanded={expanded}
+    >
       {settingUp && config.setupContent ? (
         config.setupContent
       ) : (
         <div className="flex flex-col gap-3">
           <p className="text-[12px] leading-relaxed" style={{ color: muted(0.55) }}>
-            The pro path: Clawboo detects, installs, and starts a local OpenClaw Gateway, reusing the
-            provider key you already connected.
+            {wasConfigured
+              ? 'OpenClaw is set up, but its local Gateway is offline. Reconnect to bring your OpenClaw agents back online — your existing configuration is reused.'
+              : 'The pro path: Clawboo detects, installs, and starts a local OpenClaw Gateway, reusing the provider key you already connected.'}
           </p>
           {config.onSetup && (
             <div>
@@ -338,7 +397,7 @@ function OpenClawRow({ config }: { config: OpenClawTabConfig }) {
                 data-testid={config.setupTestId}
                 onClick={config.onSetup}
               >
-                Set up OpenClaw
+                {wasConfigured ? 'Reconnect OpenClaw' : 'Set up OpenClaw'}
               </Button>
             </div>
           )}
@@ -349,27 +408,26 @@ function OpenClawRow({ config }: { config: OpenClawTabConfig }) {
   )
 }
 
-/** Ghost Info button that opens the shared diagnostics drawer (panel only). */
-function DiagnosticsButton({
-  id,
-  name,
-  onClick,
-}: {
-  id: string
-  name: string
-  onClick: () => void
-}) {
+/** OpenClaw's "set up before, gateway offline" status — an amber dot + a calm
+ *  "Disconnected" (distinct from a pristine, never-configured row). */
+function OpenClawOfflineChip() {
   return (
-    <IconButton
-      variant="ghost"
-      size="sm"
-      label={`${name} diagnostics`}
-      data-testid={`runtime-${id}-diagnostics`}
-      onClick={onClick}
-      className="shrink-0"
-    >
-      <Info size={15} />
-    </IconButton>
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        aria-hidden
+        className="inline-block"
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: 999,
+          background: 'var(--amber)',
+          boxShadow: '0 0 0 3px rgb(var(--amber-rgb) / 0.14)',
+        }}
+      />
+      <span className="text-[11.5px] font-medium" style={{ color: muted(0.62) }}>
+        Disconnected
+      </span>
+    </span>
   )
 }
 
@@ -431,52 +489,65 @@ function InProgressChip({ label }: { label: string }) {
   )
 }
 
-/** The premium "connected" indicator that replaces the outdated status pill:
- *  a small filled mint verified-disc (rhyming with the row's brand tile) + a
- *  calm neutral-ink sentence-case label. No pill, no uppercase, no mono. */
-function ConnectedIndicator() {
+/** The Manage footer CTA for a connected runtime (opens the inline management
+ *  body: subscription + Re-check + Disconnect + Details). */
+const MANAGE_CTA = { label: 'Manage', icon: <Settings2 size={13} /> }
+
+/** Small muted labels for the top-right status of an UNCONNECTED runtime (the
+ *  footer button carries the action). In-progress states show nothing here (the
+ *  footer's spinner + the live region cover them). */
+const STATE_LABEL: Partial<Record<DisplayState, string>> = {
+  'not-installed': 'Not installed',
+  'needs-auth': 'Needs key',
+  'needs-login': 'Needs login',
+}
+
+/** The quiet top-right status indicator. Connected = a small mint dot + a
+ *  calm "Connected" (the accessible label). Other settled states = a small muted
+ *  word. Nothing for in-progress/unknown (the footer conveys those). */
+function StatusChip({ state }: { state: DisplayState }) {
+  if (state === 'ready') {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span
+          aria-hidden
+          className="inline-block"
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 999,
+            background: 'var(--mint)',
+            boxShadow: '0 0 0 3px rgb(var(--mint-rgb) / 0.14)',
+          }}
+        />
+        <span className="text-[11.5px] font-medium" style={{ color: muted(0.62) }}>
+          Connected
+        </span>
+      </span>
+    )
+  }
+  const label = STATE_LABEL[state]
+  if (!label) return null
   return (
-    // The "Connected" text is the accessible label (read on navigation); the mint
-    // disc is decorative. In-progress transitions are announced via the row's
-    // live region — the connected state is not re-announced (it would spam on load
-    // + double-read against this label).
-    <span className="inline-flex shrink-0 items-center gap-1.5">
-      <span
-        aria-hidden
-        className="inline-flex items-center justify-center"
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: 999,
-          background: 'var(--mint)',
-          boxShadow: '0 1px 2px rgb(var(--mint-rgb) / 0.35)',
-          animation: 'clawboo-disc-pop 0.26s cubic-bezier(0.34, 1.4, 0.64, 1)',
-        }}
-      >
-        <Check size={11} strokeWidth={2.75} style={{ color: 'var(--background)' }} aria-hidden />
-      </span>
-      <span
-        className="text-[12.5px] font-medium"
-        style={{ color: 'rgb(var(--foreground-rgb) / 0.72)', letterSpacing: '-0.006em' }}
-      >
-        Connected
-      </span>
+    <span className="text-[11px] font-medium" style={{ color: muted(0.42) }}>
+      {label}
     </span>
   )
 }
 
-/** One list row: a presentational header (brand tile + name + blurb + the single
- *  state-driven right control) over a height-animated body that stays mounted
- *  when collapsed (so an in-flight install survives). Omit `children` for a
- *  static row (the connected native foundation / a settled runtime). `announce`
- *  feeds a persistent visually-hidden live region so state transitions
- *  (Installing/Connecting/Connected) are spoken to assistive tech. */
+/** One list CARD: a header (brand tile + name + blurb + a small top-right
+ *  status) over an optional footer actions row (the Manage / connect button)
+ *  over a height-animated body that stays mounted when collapsed (so an in-flight
+ *  install survives). Omit `footer` + `children` for a static card (the connected
+ *  native foundation). `announce` feeds a persistent visually-hidden live region
+ *  so state transitions (Installing/Connecting/Connected) are spoken to AT. */
 function AccordionRow({
   testId,
   icon,
   name,
   blurb,
-  rightControl,
+  status,
+  footer,
   expanded = false,
   announce = '',
   children,
@@ -485,7 +556,8 @@ function AccordionRow({
   icon: ReactNode
   name: string
   blurb: string
-  rightControl: ReactNode
+  status?: ReactNode
+  footer?: ReactNode
   expanded?: boolean
   announce?: string
   children?: ReactNode
@@ -512,7 +584,10 @@ function AccordionRow({
       className="overflow-hidden rounded-2xl border border-border"
       style={{ background: 'var(--surface)' }}
     >
-      <div className="flex w-full items-center gap-3 px-4 py-3.5">
+      {/* Header — identity on the left; the status + action button stacked on the
+          right, so the card is one balanced two-column row (no floating button,
+          no dead vertical space). Both columns are vertically centered. */}
+      <div className="flex items-center gap-3 px-4 py-4">
         {icon}
         <span className="min-w-0 flex-1">
           <span
@@ -525,11 +600,15 @@ function AccordionRow({
             {blurb}
           </span>
         </span>
-        {rightControl}
+        {(status || footer) && (
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            {status}
+            {footer}
+          </div>
+        )}
       </div>
 
-      {/* The row's accessible status — read after the name on navigation, and
-          announced (polite) on Installing/Connecting/Connected transitions. */}
+      {/* The row's accessible status — announced (polite) on Installing/Connecting. */}
       <span role="status" aria-live="polite" className="sr-only">
         {announce}
       </span>

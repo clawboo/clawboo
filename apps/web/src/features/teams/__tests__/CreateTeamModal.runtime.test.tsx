@@ -445,6 +445,47 @@ describe('CreateTeamModal deploy', () => {
     expect(coderCall[3]).toEqual({ provider: 'openrouter', model: 'anthropic/claude-3.5-haiku' })
   })
 
+  it('hermes ChatGPT subscription: the group appears only with codexAuth, and a pick spreads { provider: openai-codex }', async () => {
+    const hermesReady = { id: 'hermes', connectionState: 'ready', hasCredential: true }
+    // WITHOUT codexAuth → the subscription group is never offered.
+    server.use(
+      http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [hermesReady] })),
+      ...baseHandlers(),
+    )
+    const first = renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+    await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[1])
+    await userEvent.click(screen.getByRole('option', { name: /hermes/i }))
+    await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
+    await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
+    expect(screen.queryByRole('option', { name: /ChatGPT subscription/i })).toBeNull()
+    first.unmount()
+
+    // WITH codexAuth (a detected `hermes auth add openai-codex`) → offered;
+    // the pick lands in execConfig as the openai-codex provider + the BARE model id.
+    server.use(
+      http.get('/api/runtimes', () =>
+        HttpResponse.json({ runtimes: [{ ...hermesReady, codexAuth: true }] }),
+      ),
+      ...baseHandlers(),
+    )
+    renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+    await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[1])
+    await userEvent.click(screen.getByRole('option', { name: /hermes/i }))
+    await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
+    await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
+    await userEvent.click(
+      screen.getByRole('option', { name: /GPT-5\.3 Codex · ChatGPT subscription/i }),
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
+    const coderCall = createAgentMock.mock.calls.find((c) => c[0] === 'Coder')!
+    expect(coderCall[2]).toBe('hermes')
+    expect(coderCall[3]).toEqual({ provider: 'openai-codex', model: 'gpt-5.3-codex' })
+  })
+
   it('a team with no genuine leadership role deploys leaderless (no badge, leaderAgentId null, all specialists)', async () => {
     let patchBody: Record<string, unknown> | undefined
     server.use(...baseHandlers(undefined, (b) => (patchBody = b as Record<string, unknown>)))

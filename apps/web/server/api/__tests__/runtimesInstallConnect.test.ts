@@ -7,7 +7,7 @@
 // NEVER echoes the key, codex's no-op needs-login, disconnect, the status shape +
 // connectionState matrix, and that a connected key reaches the run ctx.
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -120,6 +120,7 @@ import {
   runtimesHealthcheckPOST,
   runtimesInstallPOST,
   runtimesListGET,
+  runtimesLogoutPOST,
   runtimesRunPOST,
 } from '../runtimes'
 import { hasRuntimeSecret } from '../../lib/secretsVault'
@@ -186,6 +187,7 @@ describe('runtimes install/connect REST', () => {
     'OPENROUTER_API_KEY',
     'OPENAI_API_KEY',
     'GROQ_API_KEY',
+    'HERMES_HOME',
   ] as const
 
   beforeEach(() => {
@@ -206,6 +208,8 @@ describe('runtimes install/connect REST', () => {
     spawnState.children = []
     runnerState.lastInput = null
     codexAuthState.loggedIn = false
+    // Keep the hermes ChatGPT-login probe sandboxed (userHermesHome honours it).
+    process.env['HERMES_HOME'] = path.join(home, '.hermes')
   })
   afterEach(() => {
     for (const k of SAVED) {
@@ -391,6 +395,31 @@ describe('runtimes install/connect REST', () => {
     expect((m.body() as { connectionState: string }).connectionState).toBe('needs-auth')
   })
 
+  // ── logout (oauth sign-out) ──────────────────────────────────────────────────
+  it('logout (codex) runs `codex logout` and reports the re-probed state', async () => {
+    platformState.bins['codex'] = '/home/u/.local/bin/codex'
+    codexAuthState.loggedIn = false // signed out after the logout
+    const m = mockRes()
+    const p = runtimesLogoutPOST(req({ params: { id: 'codex' } }), m.res)
+    // The spawn runs synchronously in the Promise executor; close the child so
+    // the handler's await resolves.
+    ;(spawnState.children.at(-1) as FakeChild).emitClose(0)
+    await p
+    expect(spawnState.calls.at(-1)).toEqual({ cmd: '/home/u/.local/bin/codex', args: ['logout'] })
+    expect(m.statusCode()).toBe(200)
+    expect((m.body() as { ok: boolean }).ok).toBe(true)
+    expect((m.body() as { connectionState: string }).connectionState).toBe('needs-login')
+  })
+
+  it('logout 404s for a non-oauth (api-key) runtime — those use /disconnect', async () => {
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    const m = mockRes()
+    await runtimesLogoutPOST(req({ params: { id: 'hermes' } }), m.res)
+    expect(m.statusCode()).toBe(404)
+    // No CLI spawned for a non-oauth runtime.
+    expect(spawnState.calls.some((c) => c.args.includes('logout'))).toBe(false)
+  })
+
   // ── GET status enrichment + connectionState matrix ──────────────────────────
   it('GET /api/runtimes lists all runtimes with install/auth status', async () => {
     platformState.bins['hermes'] = '/home/u/.local/bin/hermes' // installed, no key
@@ -406,6 +435,37 @@ describe('runtimes install/connect REST', () => {
     expect(hermes['envVar']).toBe('OPENROUTER_API_KEY')
     expect(hermes['hasCredential']).toBe(false)
     expect(hermes['connectionState']).toBe('needs-auth')
+  })
+
+  it('Hermes reads ready from a ChatGPT login (no key): codexAuth folds into hasCredential', async () => {
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    // The user's `hermes auth add openai-codex` store (shape hermes itself
+    // reads: providers['openai-codex'].tokens with BOTH tokens non-empty).
+    mkdirSync(path.join(home, '.hermes'), { recursive: true })
+    writeFileSync(
+      path.join(home, '.hermes', 'auth.json'),
+      JSON.stringify({
+        providers: {
+          'openai-codex': { tokens: { access_token: 'at', refresh_token: 'rt' } },
+        },
+      }),
+    )
+    const m = mockRes()
+    await runtimesListGET(req(), m.res)
+    const hermes = (m.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+      (r) => r['id'] === 'hermes',
+    )!
+    expect(hermes['codexAuth']).toBe(true)
+    expect(hermes['hasCredential']).toBe(true)
+    // NOT a vault credential — the onboarding native-skip decision must not
+    // mistake an on-disk login for a vault-connected key.
+    expect(hermes['hasVaultCredential']).toBe(false)
+    expect(hermes['connectionState']).toBe('ready')
+    // No other runtime picks up the signal.
+    const codex = (m.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+      (r) => r['id'] === 'codex',
+    )!
+    expect(codex['codexAuth']).toBe(false)
   })
 
   it('Hermes REUSES a connected Anthropic key (no second prompt)', async () => {

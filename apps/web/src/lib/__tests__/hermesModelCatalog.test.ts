@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  HERMES_CODEX_GROUP,
+  HERMES_CODEX_MODELS,
   HERMES_MODEL_GROUPS,
   HERMES_OPENROUTER_GROUP_NAME,
   hermesModelExec,
@@ -35,5 +37,33 @@ describe('hermesModelCatalog', () => {
       expect(m.id).toContain('/') // OpenRouter vendor/model slug
       expect(hermesModelExec(m.id)).toEqual({ provider: 'openrouter', model: m.id })
     }
+  })
+
+  // ── ChatGPT subscription (openai-codex) ────────────────────────────────────
+  it('routes ONLY the openai-codex/ routing prefix to the subscription provider (prefix stripped)', () => {
+    expect(hermesModelExec('openai-codex/gpt-5.5')).toEqual({
+      provider: 'openai-codex',
+      model: 'gpt-5.5',
+    })
+    // The load-bearing discriminator: `openai/…` is an OpenRouter VENDOR slug,
+    // not the subscription prefix — a generic first-slash split would misroute it.
+    expect(hermesModelExec('openai/gpt-4o-mini')).toEqual({
+      provider: 'openrouter',
+      model: 'openai/gpt-4o-mini',
+    })
+  })
+
+  it('every subscription-group id carries the routing prefix and resolves to a bare backend id', () => {
+    expect(HERMES_CODEX_GROUP.models).toBe(HERMES_CODEX_MODELS)
+    expect(HERMES_CODEX_MODELS.length).toBeGreaterThan(0)
+    for (const m of HERMES_CODEX_MODELS) {
+      const exec = hermesModelExec(m.id)
+      expect(exec).toEqual({ provider: 'openai-codex', model: m.id.slice('openai-codex/'.length) })
+      expect(exec!.model).not.toContain('/') // bare backend id, prefix stripped
+    }
+  })
+
+  it('the subscription group is NOT in the static fallback (it is offered only when auth is detected)', () => {
+    expect(HERMES_MODEL_GROUPS.some((g) => g.provider === HERMES_CODEX_GROUP.provider)).toBe(false)
   })
 })

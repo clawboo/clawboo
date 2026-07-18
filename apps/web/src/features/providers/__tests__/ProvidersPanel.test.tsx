@@ -37,4 +37,36 @@ describe('ProvidersPanel', () => {
     expect(await screen.findByRole('button', { name: 'Save' })).toBeInTheDocument()
     expect(screen.getByPlaceholderText('sk-ant-…')).toBeInTheDocument()
   })
+
+  it('the ChatGPT-subscription row: Connect expands the one-click sign-in (no key input)', async () => {
+    server.use(
+      http.get('/api/providers', () => HttpResponse.json({ providers: [] })),
+      http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [] })),
+    )
+    render(<ProvidersPanel />)
+    const row = await screen.findByTestId('provider-row-chatgpt')
+    expect(row).toHaveTextContent('ChatGPT subscription')
+    expect(row).toHaveTextContent(/no API key/i)
+    fireEvent.click(screen.getByTestId('provider-chatgpt-connect'))
+    // The sign-in flow, not a key field.
+    expect(await screen.findByTestId('chatgpt-signin-codex-start')).toBeInTheDocument()
+    expect(row.querySelector('input')).toBeNull()
+  })
+
+  it('the ChatGPT-subscription row reads Connected from the codex runtime state', async () => {
+    server.use(
+      http.get('/api/providers', () => HttpResponse.json({ providers: [] })),
+      http.get('/api/runtimes', () =>
+        HttpResponse.json({
+          runtimes: [{ id: 'codex', installed: true, connectionState: 'ready' }],
+        }),
+      ),
+    )
+    render(<ProvidersPanel />)
+    const row = await screen.findByTestId('provider-row-chatgpt')
+    expect(row).toHaveTextContent('Connected')
+    expect(row).toHaveTextContent(/powers Codex/i)
+    // No Connect demand once connected; the credential is the Codex CLI's.
+    expect(row).toHaveTextContent(/Managed by the Codex CLI/i)
+  })
 })

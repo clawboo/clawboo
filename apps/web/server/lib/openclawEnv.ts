@@ -26,7 +26,11 @@ export const ENV_KEY_MAP: Record<string, string> = {
   venice: 'VENICE_API_KEY',
 }
 
-/** The env-var name for a provider (falls back to `<PROVIDER>_API_KEY`). */
+/** The env-var name for a provider (falls back to `<PROVIDER>_API_KEY`).
+ *  GUARD: keyless OAuth providers (`openai-codex`, the ChatGPT subscription)
+ *  must NEVER reach this — the fallback would fabricate an invalid hyphenated
+ *  env-var name. Every call site is behind a keyless carve-out (configure /
+ *  auto-configure / providers hub), which is what guarantees it. */
 export function envVarForOpenclawProvider(provider: string): string {
   return ENV_KEY_MAP[provider] ?? `${provider.toUpperCase()}_API_KEY`
 }
@@ -45,6 +49,44 @@ export function getAgentAuthProfilePaths(stateDir: string): string[] {
     // Non-fatal
   }
   return paths
+}
+
+/**
+ * Providers with an OAUTH auth profile (`type: 'oauth'`, or token material with
+ * no `key`) across ALL agents' auth-profiles.json — the shape OpenClaw's own
+ * `models auth login` writes (e.g. `openai-codex` after a ChatGPT-subscription
+ * sign-in). The api-key detector (`detectAuthProfileKeys` in system.ts) requires
+ * `provider && key` and so never sees these. Presence/shape ONLY — token values
+ * never leave this function. Scans every agent (no first-hit break: profiles are
+ * per-agent and an OAuth login may exist on one agent only). Fails CLOSED: an
+ * unreadable/misshapen file contributes nothing.
+ */
+export function detectOauthProfileProviders(stateDir: string): Set<string> {
+  const providers = new Set<string>()
+  for (const profilePath of getAgentAuthProfilePaths(stateDir)) {
+    try {
+      const raw = fs.readFileSync(profilePath, 'utf8')
+      const data = JSON.parse(raw) as {
+        profiles?: Record<
+          string,
+          { provider?: unknown; type?: unknown; key?: unknown; access?: unknown; refresh?: unknown }
+        >
+      }
+      for (const profile of Object.values(data.profiles ?? {})) {
+        if (typeof profile?.provider !== 'string' || !profile.provider) continue
+        const isOauthType = profile.type === 'oauth'
+        const hasTokenMaterial =
+          (typeof profile.access === 'string' && profile.access.length > 0) ||
+          (typeof profile.refresh === 'string' && profile.refresh.length > 0)
+        if (isOauthType || (hasTokenMaterial && typeof profile.key !== 'string')) {
+          providers.add(profile.provider)
+        }
+      }
+    } catch {
+      // Fail closed — skip unreadable/misshapen profile files.
+    }
+  }
+  return providers
 }
 
 /** Upsert provider keys into `~/.openclaw/.env` + every existing agent's

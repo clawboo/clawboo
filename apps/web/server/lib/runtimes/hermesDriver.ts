@@ -36,6 +36,7 @@ import type { StartOpts } from '@clawboo/executor'
 
 import { resolveRuntimeBin } from '../platform'
 import { detectProvider, provisionHermesHome, type ProvisionedHermesHome } from './hermesHome'
+import { hasUsableHermesCodexAuth, userHermesAuthPath } from './hermesAuth'
 import { createSpawnDriver, type ResolvedSpawn } from './subprocess'
 import type { RuntimeRunContext } from './types'
 
@@ -134,6 +135,10 @@ const DERIVED_PROVIDER_MODEL: Record<string, string> = {
   openrouter: 'openai/gpt-4o-mini',
   anthropic: 'claude-haiku-4-5',
   'openai-api': 'gpt-4o-mini',
+  // The ChatGPT-subscription backend's own default. Deliberately NOT a "mini"
+  // tier: subscription usage is flat-cost, so the cheap-model pressure that
+  // picked the other rungs' defaults doesn't apply here.
+  'openai-codex': 'gpt-5.5',
 }
 
 /** Per-provider vault env-var — used to check a PICKED provider is actually connected
@@ -162,10 +167,21 @@ export async function buildHermesSpawnPlan(
   // gracefully instead of hard-failing "No <provider> credentials found" (e.g. an
   // Anthropic-direct pick on an OpenRouter-only setup).
   const requestedProvider = ctx.providerHint ?? null
+  // `openai-codex` (the ChatGPT subscription) is OAuth, not an env-var key: its
+  // usability is auth-file PRESENCE — the managed home's seeded auth.json (what
+  // the run actually reads), falling back to the user's real ~/.hermes store
+  // (first-provision timing). An EXPLICIT rule, not the unmapped-provider pass
+  // below, so an auth-less subscription pick degrades exactly like a keyless
+  // key-provider pick instead of hard-failing "codex_auth_missing".
+  const hermesCodexUsable = () =>
+    hasUsableHermesCodexAuth(path.join(home.home, 'auth.json')) ||
+    hasUsableHermesCodexAuth(userHermesAuthPath())
   const pickUsable =
     requestedProvider != null &&
-    (PICK_PROVIDER_ENV[requestedProvider] == null ||
-      !!ctx.apiKeyEnv?.[PICK_PROVIDER_ENV[requestedProvider]!])
+    (requestedProvider === 'openai-codex'
+      ? hermesCodexUsable()
+      : PICK_PROVIDER_ENV[requestedProvider] == null ||
+        !!ctx.apiKeyEnv?.[PICK_PROVIDER_ENV[requestedProvider]!])
   const pickedProvider = pickUsable ? requestedProvider : null
   // A dropped (unusable) pick also drops its provider-specific model.
   const effectiveModel = requestedProvider != null && !pickUsable ? undefined : explicitModel
@@ -189,7 +205,12 @@ export async function buildHermesSpawnPlan(
           ? 'anthropic'
           : ctx.apiKeyEnv?.['OPENAI_API_KEY']
             ? 'openai-api'
-            : null
+            : // Last rung before hermes `auto`: the ChatGPT subscription. Keyed
+              // on seeded-auth presence, AFTER every key rung so existing keyed
+              // setups keep today's exact behavior.
+              hermesCodexUsable()
+              ? 'openai-codex'
+              : null
   // Resume only into a PRE-EXISTING home — a freshly created one cannot hold
   // the prior session.
   const resume = !home.created && ctx.resume ? ctx.resume : null

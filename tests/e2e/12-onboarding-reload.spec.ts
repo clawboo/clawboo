@@ -91,6 +91,8 @@ test.describe('Native onboarding — reload stays on the dashboard', () => {
     // deploy a real team → skip runtimes → open the dashboard.
     await page.getByRole('button', { name: /Get Started/ }).click()
     await expect(page.getByTestId('configure-native-step')).toBeVisible({ timeout: 10_000 })
+    // OpenAI is the default card (ChatGPT sign-in, no key field); pick Anthropic.
+    await page.getByTestId('native-provider-anthropic').click()
     await page.getByTestId('native-api-key').fill('sk-ant-e2e-fake-key')
     await page.getByTestId('native-continue').click()
     // Add-runtimes comes first (optional; a SINGLE forward action) → continue past it,

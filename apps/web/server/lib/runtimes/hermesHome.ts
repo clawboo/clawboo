@@ -6,15 +6,18 @@
 //
 // INVARIANTS:
 // - clawboo NEVER writes into the user's real ~/.hermes (read/copy-from only).
-// - Inside a clawboo-owned home, clawboo performs exactly TWO writes:
-//   `mcp.json` (clawboo-owned, refreshed every run) and a ONE-TIME `config.yaml`
-//   seed copy (never overwritten, never written back). Everything else in the
-//   home belongs to Hermes itself.
+// - Inside a clawboo-owned home, clawboo performs exactly THREE writes:
+//   `mcp.json` (clawboo-owned, refreshed every run), a ONE-TIME `config.yaml`
+//   seed copy (never overwritten, never written back), and a FRESHNESS-GATED
+//   `auth.json` seed copy (the ChatGPT-subscription OAuth — see seedHermesAuth).
+//   Everything else in the home belongs to Hermes itself.
 
-import { chmod, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+
+import { hasUsableHermesCodexAuth, userHermesAuthPath } from './hermesAuth'
 
 export function userHermesConfigPath(): string {
   return path.join(os.homedir(), '.hermes', 'config.yaml')
@@ -27,6 +30,38 @@ export interface ProvisionedHermesHome {
   created: boolean
   /** True when config.yaml was seed-copied from the user's ~/.hermes this run. */
   seededConfig: boolean
+  /** True when auth.json was seed-copied from the user's ~/.hermes this run. */
+  seededAuth: boolean
+}
+
+/**
+ * Seed the user's `hermes login` auth store into the managed home. Copy-only —
+ * NEVER writes back to `~/.hermes`. Mirrors `seedCodexAuth` (codexDriver.ts):
+ * for a persistent managed home this is a FRESHNESS DECISION — hermes refreshes
+ * (and on terminal failure quarantines) tokens inside the managed home's own
+ * auth.json, so the user's copy only replaces it when the user's file is NEWER
+ * (a re-login) or the managed one is missing/unusable. A blind re-copy would
+ * replay an already-consumed refresh token. Rotation hazard, documented: every
+ * home seeded from one login is another rotator on that grant family — the
+ * surfaced auth path is a FRESH `hermes auth add openai-codex` (never
+ * the codex-CLI import) precisely to keep lineages narrow. Best-effort: never
+ * throws. Exported for tests.
+ */
+export async function seedHermesAuth(home: string): Promise<boolean> {
+  try {
+    const src = userHermesAuthPath()
+    if (!existsSync(src)) return false
+    const dst = path.join(home, 'auth.json')
+    if (existsSync(dst) && hasUsableHermesCodexAuth(dst)) {
+      const [srcStat, dstStat] = await Promise.all([stat(src), stat(dst)])
+      if (srcStat.mtimeMs <= dstStat.mtimeMs) return false // managed token is as fresh or fresher
+    }
+    await copyFile(src, dst)
+    await chmod(dst, 0o600).catch(() => undefined) // owner-only (no-op on Windows)
+    return true
+  } catch {
+    return false // best-effort — auth seeding is not fatal to provisioning
+  }
 }
 
 export async function provisionHermesHome(
@@ -53,6 +88,12 @@ export async function provisionHermesHome(
     }
   }
 
+  // Seed the ChatGPT-subscription auth (freshness-gated; see seedHermesAuth).
+  // A managed home outside ~/.hermes is its OWN hermes root (no global-auth
+  // fallback), so without this copy the user's `hermes login` is invisible to
+  // spawned runs and an `openai-codex` pick would fail auth.
+  const seededAuth = await seedHermesAuth(home)
+
   // mcp.json is clawboo-OWNED: refreshed every run (the server port can change
   // across restarts) and removed when there is no MCP base URL so a stale
   // attach config never lingers.
@@ -60,7 +101,7 @@ export async function provisionHermesHome(
   if (opts.mcpJson) await writeFile(mcpPath, opts.mcpJson, { encoding: 'utf8', mode: 0o600 })
   else await rm(mcpPath, { force: true })
 
-  return { home, created, seededConfig }
+  return { home, created, seededConfig, seededAuth }
 }
 
 /**

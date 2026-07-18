@@ -16,8 +16,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ArrowRight,
-  Check,
-  Copy,
   Download,
   ExternalLink,
   Eye,
@@ -31,6 +29,8 @@ import {
 
 import { Button, IconButton } from '@/features/shared/Button'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
+import { ChatGptSignIn } from './ChatGptSignIn'
+import { InstalledAck } from './InstalledAck'
 import { Spinner } from '@/features/shared/Spinner'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import {
@@ -89,6 +89,11 @@ export interface RuntimeConnectionCardProps {
   /** Hide the internal name+status header — the LIST host (RuntimeConnectList)
    *  renders its own row summary, so the card supplies only the connect body. */
   hideHeader?: boolean
+  /** Whether Codex (the ChatGPT-subscription runtime) is already connected.
+   *  Gates the OPTIONAL "use your ChatGPT subscription" affordance on OTHER
+   *  runtimes' cards (hermes) — the subscription is set up on the Providers
+   *  surfaces first; here it only surfaces once that's a detected fact. */
+  codexReady?: boolean
 }
 
 export function RuntimeConnectionCard({
@@ -100,14 +105,16 @@ export function RuntimeConnectionCard({
   onDiagnostics,
   onDisplayState,
   hideHeader,
+  codexReady,
 }: RuntimeConnectionCardProps) {
   const [installing, setInstalling] = useState(false)
+  // Set only by an install's own completion → drives the "just installed" ack.
+  const [justInstalled, setJustInstalled] = useState(false)
   const [installLog, setInstallLog] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
   const controllerRef = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
 
@@ -160,6 +167,7 @@ export function RuntimeConnectionCard({
         void (async () => {
           await onChanged?.()
           setInstalling(false)
+          setJustInstalled(true) // acknowledge the install before the connect step
         })()
       },
     })
@@ -213,14 +221,6 @@ export function RuntimeConnectionCard({
     onChanged?.()
   }
 
-  function handleCopyLogin(): void {
-    const cmd = entry.loginCommand ?? status?.installCommand
-    if (!cmd) return
-    void navigator.clipboard?.writeText(cmd)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
   return (
     <div data-testid={`runtime-card-${entry.id}`} className="flex flex-col gap-3.5">
       {/* Header — name + status. Hidden in the LIST host (hideHeader), which
@@ -250,8 +250,9 @@ export function RuntimeConnectionCard({
         </div>
       )}
 
-      {/* Install terminal log */}
-      {installing || installLog.length > 0 ? (
+      {/* Install terminal log — collapses to the clean "installed" ack below
+          once the install completes (the raw log has served its purpose). */}
+      {installing || (installLog.length > 0 && !justInstalled) ? (
         <div
           className="overflow-y-auto rounded-lg p-2.5"
           style={{ maxHeight: 160, background: 'var(--terminal-bg, #0d1117)' }}
@@ -276,6 +277,14 @@ export function RuntimeConnectionCard({
           <div ref={logEndRef} />
         </div>
       ) : null}
+
+      {/* Just-installed acknowledgement — the success beat between "Installing…"
+          and the connect/sign-in step. Only in a genuine post-install connect
+          state (never contradicting a still-'not-installed' refetch), and it
+          clears once the runtime is connected. */}
+      {justInstalled && (display === 'needs-auth' || display === 'needs-login') && (
+        <InstalledAck name={entry.name} testId={`runtime-${entry.id}-installed-ack`} />
+      )}
 
       {/* Error */}
       {error && <FormattedAlert tone="error">{error}</FormattedAlert>}
@@ -329,30 +338,41 @@ export function RuntimeConnectionCard({
         </div>
       )}
 
-      {/* Login command (oauth runtimes — codex) */}
-      {display === 'needs-login' && (
-        <div className="flex flex-col gap-1.5">
-          <FormattedAlert tone="info">
-            {entry.name} uses your terminal login. Run the command below, then re-check.
-          </FormattedAlert>
-          <div
-            className="flex items-center justify-between gap-2 rounded-lg px-3 py-2"
-            style={{ background: 'var(--code-block-bg, rgb(var(--foreground-rgb) / 0.05))' }}
-          >
-            <code className="font-mono text-[12px]" style={{ color: 'var(--foreground)' }}>
-              {entry.loginCommand ?? status?.installCommand}
-            </code>
-            <IconButton
-              variant="ghost"
-              size="sm"
-              data-testid={`runtime-${entry.id}-login-copy`}
-              label="Copy command"
-              onClick={handleCopyLogin}
-            >
-              {copied ? <Check size={13} className="text-mint" /> : <Copy size={13} />}
-            </IconButton>
-          </div>
+      {/* Optional ChatGPT-subscription path (hermes) — surfaced ONLY once Codex
+          is a detected fact (it gets connected on the Providers surfaces, not
+          here). Deliberately quiet: the key input above stays the primary
+          connect path; this is a subordinate alternative, never a demand. */}
+      {display === 'needs-auth' && entry.altLoginCommand && codexReady && (
+        <div
+          className="flex flex-col gap-2 rounded-xl border border-border px-3.5 py-3"
+          style={{ background: 'rgb(var(--foreground-rgb) / 0.02)' }}
+          data-testid={`runtime-${entry.id}-alt-login`}
+        >
+          <p className="text-[11.5px] leading-snug" style={{ color: muted(0.55) }}>
+            <span className="font-medium" style={{ color: muted(0.75) }}>
+              Codex is connected.
+            </span>{' '}
+            {entry.name} can run on your ChatGPT subscription instead of a key. Each runtime keeps
+            its own sign-in, so connect it here too.
+          </p>
+          <ChatGptSignIn
+            tool="hermes"
+            loginCommand={entry.altLoginCommand}
+            onLoggedIn={() => void handleRecheck()}
+            label="Use my ChatGPT subscription"
+          />
         </div>
+      )}
+
+      {/* ChatGPT sign-in (oauth runtimes — codex): signing in IS this runtime's
+          connect action. The manual command surfaces inside the flow's failure
+          states — not as standing chrome. */}
+      {display === 'needs-login' && entry.id === 'codex' && (
+        <ChatGptSignIn
+          tool="codex"
+          loginCommand={entry.loginCommand ?? 'codex login'}
+          onLoggedIn={() => void handleRecheck()}
+        />
       )}
 
       {/* Install command — subdued, its own row (the primary action is the

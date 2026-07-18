@@ -23,7 +23,9 @@ import {
   resolveRuntimeBin,
   resolveShimName,
 } from '../lib/platform'
-import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
+import { invalidateCodexAuthCache, isCodexLoggedIn } from '../lib/runtimes/codexAuth'
+import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
+import { resolveWindowsSpawn } from '../lib/runtimes/winSpawn'
 import { nativeCompatProvider } from '../lib/runtimes/native/nativeProviders'
 import { adapterFactoryFor, enabledRuntimeIds } from '../lib/runtimes'
 import {
@@ -83,7 +85,13 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
   // Presence only — resolveRuntimeKey returns the value but we never expose it.
   // A multi-provider runtime is connected when ANY of its env vars resolves.
   const envVars = [d.envVar, ...(d.altEnvVars ?? [])].filter((v): v is string => Boolean(v))
-  const hasCredential = envVars.some((v) => Boolean(resolveRuntimeKey(v)))
+  // Hermes can ALSO be credentialed by a ChatGPT-subscription login (`hermes
+  // login --provider openai-codex`, tokens in ~/.hermes/auth.json — no env var,
+  // no vault slot). A presence-only shape check (sync read of a tiny file, the
+  // detectAuthProfileKeys precedent; values never leave the helper) folds into
+  // hasCredential so a subscription-only hermes reads Connected/ready.
+  const hermesCodexAuth = id === 'hermes' && installed ? isHermesCodexAuthPresent() : false
+  const hasCredential = envVars.some((v) => Boolean(resolveRuntimeKey(v))) || hermesCodexAuth
   // Vault-only signal: a credential DELIBERATELY connected during onboarding (written
   // to the encrypted vault), as opposed to an ambient `process.env` shell var that
   // `resolveRuntimeKey` ALSO honors. The onboarding native-skip decision reads THIS so
@@ -103,6 +111,9 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
     hasCredential,
     hasVaultCredential,
     loggedIn,
+    // Additive: hermes-only "signed in with ChatGPT" signal (the picker + card
+    // gate the subscription model group on it). Always false for other runtimes.
+    codexAuth: hermesCodexAuth,
     installCommand: d.installCommand,
     docsUrl: d.docsUrl,
     connectionState: deriveConnectionState(d, installed, hasCredential, loggedIn),
@@ -566,6 +577,46 @@ export function runtimesDisconnectPOST(req: Request, res: Response): void {
   const d = getDescriptor(id)
   if (d.envVar) deleteRuntimeSecret(d.envVar)
   res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
+}
+
+// ─── POST /api/runtimes/:id/logout ───────────────────────────────────────────
+// Sign out an OAUTH runtime (Codex): runs the CLI's OWN `logout` (posture: the
+// official CLI removes its own tokens; clawboo never touches them directly).
+// Signs out the ChatGPT subscription EVERY tool shares (the UI warns). 404 for a
+// non-oauth runtime (api-key runtimes use /disconnect). Truth = the re-probe.
+export async function runtimesLogoutPOST(req: Request, res: Response): Promise<void> {
+  const id = requireRuntimeId(req, res)
+  if (!id) return
+  const d = getDescriptor(id)
+  if (d.authKind !== 'oauth') {
+    res.status(404).json({ error: `runtime '${id}' has no sign-out` })
+    return
+  }
+  const bin = resolveRuntimeBin(d.healthBin ?? id)
+  if (!bin) {
+    res.status(400).json({ error: `${d.name} is not installed` })
+    return
+  }
+  // Best-effort spawn (safe on Windows shims via resolveWindowsSpawn); the
+  // re-probe below is the source of truth, so a spawn failure just leaves the
+  // reported state unchanged.
+  try {
+    await new Promise<void>((resolve) => {
+      const plan = resolveWindowsSpawn({ command: bin, args: ['logout'] })
+      const child = spawn(plan.command, plan.args, {
+        stdio: 'ignore',
+        windowsHide: isWindows,
+        windowsVerbatimArguments: plan.windowsVerbatimArguments,
+      })
+      child.on('error', () => resolve())
+      child.on('close', () => resolve())
+    })
+  } catch {
+    /* re-probe is the truth */
+  }
+  invalidateCodexAuthCache()
+  const loggedIn = await isCodexLoggedIn()
+  res.json({ ok: !loggedIn, connectionState: runtimeStatus(id, loggedIn)['connectionState'] })
 }
 
 // ─── POST /api/runtimes/:id/run ──────────────────────────────────────────────

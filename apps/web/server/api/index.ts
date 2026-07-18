@@ -97,9 +97,11 @@ import {
   runtimesInstallPOST,
   runtimesConnectPOST,
   runtimesDisconnectPOST,
+  runtimesLogoutPOST,
   runtimesHealthcheckPOST,
   runtimesRunPOST,
 } from './runtimes'
+import { cliLoginPOST } from './cliLogin'
 import {
   providersListGET,
   providerConnectPOST,
@@ -317,9 +319,13 @@ router.post('/api/providers/:id/connect', providerConnectPOST)
 router.post('/api/providers/:id/disconnect', providerDisconnectPOST)
 // Install the runtime CLI (SSE) / connect the provider key (encrypted vault) /
 // disconnect. Distinct two-segment suffixes — no collision with `:id/run`.
+// UI-driven "Sign in with ChatGPT": spawn the official CLI's login locally and
+// relay its device-code/URL output (SSE, killable — Cancel aborts the child tree).
+router.post('/api/auth/cli-login/:tool', cliLoginPOST)
 router.post('/api/runtimes/:id/install', runtimesInstallPOST)
 router.post('/api/runtimes/:id/connect', runtimesConnectPOST)
 router.post('/api/runtimes/:id/disconnect', runtimesDisconnectPOST)
+router.post('/api/runtimes/:id/logout', runtimesLogoutPOST)
 // Verify a pasted provider key (native, multi-provider) BEFORE seeding. Distinct
 // two-segment suffix — no collision with `:id/run`.
 router.post('/api/runtimes/:id/healthcheck', runtimesHealthcheckPOST)

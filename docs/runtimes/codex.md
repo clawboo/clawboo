@@ -157,5 +157,5 @@ A Codex agent can be a team's universal leader, which is what makes the ChatGPT-
 - [`/api/runtimes` reference](/reference/rest-api/runtimes): full request/response shapes for connect, run, and the install SSE stream
 - [The board](/concepts/the-board): the durable task substrate a Codex run drives
 - [Worktrees and handoff](/concepts/worktrees-and-handoff): the isolated world a Codex task carries
-- [Claude Code](/runtimes/claude-code) · [Clawboo Native](/runtimes/native) · [Hermes](/runtimes/hermes): the sibling runtimes
+- [Claude Code](/runtimes/claude-code) · [Clawboo Native](/runtimes/native) · [Hermes](/runtimes/hermes): the sibling runtimes — Hermes and [OpenClaw](/runtimes/openclaw) can ALSO run on the same ChatGPT subscription (each via its own `openai-codex` login)
 - [Environment variables](/reference/environment-variables): `CLAWBOO_HOME`, `CLAWBOO_SECRETS_MASTER_KEY`

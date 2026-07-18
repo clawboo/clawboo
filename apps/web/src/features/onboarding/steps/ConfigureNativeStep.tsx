@@ -5,7 +5,7 @@
 // no longer creates a team: real team selection + deployment is the NEXT step
 // (the user picks a template from the marketplace and deploys it).
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -23,11 +23,15 @@ import { NATIVE_STEPS } from '../StepIndicator'
 import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
 import { ProviderIcon } from '../ProviderIcon'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
+import { CommandStream, useCommandLog } from '@/features/shared/CommandStream'
+import { ChatGptConnected, ChatGptSignIn } from '@/features/runtimes/ChatGptSignIn'
+import { InstalledAck } from '@/features/runtimes/InstalledAck'
 import {
   connectRuntime,
   fetchProviderModelsWithKey,
   fetchRuntimes,
   healthcheckNativeKey,
+  installRuntime,
   setNativeLeaderModel,
 } from '@clawboo/control-client'
 import { getKeyUrl, RUNTIME_CATALOG } from '@/features/runtimes/runtimeCatalog'
@@ -50,10 +54,11 @@ const PROVIDERS: { id: Exclude<Provider, 'ollama'>; name: string; placeholder: s
   { id: 'openrouter', name: 'OpenRouter', placeholder: 'sk-or-…' },
 ]
 
-/** The provider grid — the three key-based providers plus local Ollama. */
+/** The provider grid — the three key-based providers plus local Ollama. OpenAI
+ *  leads (the most common choice + the ChatGPT-subscription path). */
 const PROVIDER_CARDS: { id: Provider; name: string; desc: string }[] = [
-  { id: 'anthropic', name: 'Anthropic', desc: 'Claude models' },
   { id: 'openai', name: 'OpenAI', desc: 'GPT models' },
+  { id: 'anthropic', name: 'Anthropic', desc: 'Claude models' },
   { id: 'openrouter', name: 'OpenRouter', desc: 'Any model, one key' },
   { id: 'ollama', name: 'Ollama', desc: 'Local · no key needed' },
 ]
@@ -70,8 +75,9 @@ const PROVIDER_CARDS: { id: Provider; name: string; desc: string }[] = [
  * e.g. an OpenRouter key. Don't restore it.
  */
 const CONNECT_SUBTITLE =
-  "Bring a provider key. It powers Clawboo Native, your team's built-in runtime, and is " +
-  'reused by OpenClaw, Hermes and Claude Code when they run on the same provider. ' +
+  'Start with one provider. You can connect as many as you like, now or later. ' +
+  "A key powers Clawboo Native, your team's built-in runtime, and is reused by " +
+  'OpenClaw, Hermes and Claude Code when they run on the same provider. ' +
   "Next, you'll pick and deploy your first team."
 
 type TestState = { phase: 'idle' | 'testing' | 'ok' | 'fail'; message?: string }
@@ -119,7 +125,7 @@ export interface ConfigureNativeStepProps {
 
 export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStepProps) {
   // A non-ollama provider id — one of the primary cards OR an extra ("more") provider.
-  const [provider, setProvider] = useState<string>('anthropic')
+  const [provider, setProvider] = useState<string>('openai')
   const [useOllama, setUseOllama] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [apiKey, setApiKey] = useState('')
@@ -137,19 +143,60 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
   const [codexPhase, setCodexPhase] = useState<
     'checking' | 'not-installed' | 'needs-login' | 'ready'
   >('checking')
-  const [loginCopied, setLoginCopied] = useState(false)
+  // Track the live phase so a re-probe can read the last SETTLED answer without
+  // re-subscribing the callback (the onLoggedInRef precedent).
+  const codexPhaseRef = useRef(codexPhase)
+  codexPhaseRef.current = codexPhase
   const chatgptActive = !useOllama && provider === 'openai' && authMethod === 'chatgpt'
 
   const refreshCodex = useCallback(async () => {
-    setCodexPhase('checking')
-    const statuses = await fetchRuntimes() // defensive: [] on any failure
+    // Only flash the spinner on a COLD probe; a re-probe (e.g. toggling the
+    // auth method back to ChatGPT) keeps the current settled state visible until
+    // the fresh answer lands — no flicker, and no dropped confirmation.
+    if (codexPhaseRef.current === 'checking') setCodexPhase('checking')
+    const statuses = await fetchRuntimes() // defensive: [] on ANY failure
     const codex = statuses.find((s) => s.id === 'codex')
-    if (!codex || codex.installed === false) {
-      setCodexPhase('not-installed')
+    if (statuses.length === 0 || !codex) {
+      // `/api/runtimes` ALWAYS includes codex when it succeeds, so an empty list
+      // / missing entry means the probe FAILED — never proof codex is missing.
+      // Don't collapse "couldn't check" into the alarming "install codex" state:
+      // keep a known-good answer, else fall to the sign-in state (Re-check there).
+      setCodexPhase((prev) => (prev === 'ready' || prev === 'not-installed' ? prev : 'needs-login'))
       return
     }
-    setCodexPhase(codex.connectionState === 'ready' ? 'ready' : 'needs-login')
+    setCodexPhase(
+      codex.installed === false
+        ? 'not-installed'
+        : codex.connectionState === 'ready'
+          ? 'ready'
+          : 'needs-login',
+    )
   }, [])
+
+  // Install-if-missing chaining: a real button-driven install (the same SSE the
+  // Runtimes card uses), auto-advancing to the sign-in state on completion.
+  const [installingCodex, setInstallingCodex] = useState(false)
+  const [justInstalledCodex, setJustInstalledCodex] = useState(false)
+  const [installError, setInstallError] = useState<string | null>(null)
+  const installLog = useCommandLog()
+  const installCodex = useCallback(async () => {
+    setInstallingCodex(true)
+    setInstallError(null)
+    installLog.clear()
+    installRuntime('codex', {
+      onProgress: (e) => installLog.append(typeof e.message === 'string' ? e.message : undefined),
+      onOutput: (e) => installLog.append(typeof e.line === 'string' ? e.line : undefined),
+      onComplete: () => {
+        setInstallingCodex(false)
+        setJustInstalledCodex(true) // acknowledge the install before the sign-in
+        void refreshCodex() // installed → needs-login → the sign-in button
+      },
+      onError: (e) => {
+        setInstallingCodex(false)
+        setInstallError(typeof e.message === 'string' ? e.message : 'Install failed.')
+      },
+    })
+  }, [installLog, refreshCodex])
 
   // Probe the Codex login whenever the ChatGPT method becomes active.
   useEffect(() => {
@@ -503,55 +550,72 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
               <Loader2 size={13} className="animate-spin" /> Checking your Codex sign-in…
             </p>
           ) : codexPhase === 'ready' ? (
-            <p
-              className="flex items-center gap-1.5 text-[13.5px] font-medium"
-              style={{ color: 'var(--mint)' }}
-              data-testid="native-chatgpt-ready"
-            >
-              <Check size={15} /> Signed in with ChatGPT — your team will run on your subscription.
-            </p>
+            <ChatGptConnected
+              testId="native-chatgpt-ready"
+              detail="Your team will run on your ChatGPT subscription. No API key needed."
+            />
+          ) : codexPhase === 'not-installed' ? (
+            <>
+              <FormattedAlert tone="info">
+                Install the Codex CLI first, then sign in with your ChatGPT account.
+              </FormattedAlert>
+              {installingCodex ? (
+                <>
+                  <p
+                    className="flex items-center gap-2 text-[12.5px]"
+                    style={{ color: muted(0.55) }}
+                  >
+                    <Loader2 size={13} className="animate-spin" /> Installing Codex…
+                  </p>
+                  <CommandStream
+                    log={installLog}
+                    placeholder="Starting install…"
+                    maxHeight={140}
+                    testId="native-codex-install-log"
+                  />
+                </>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <OnboardingPrimary
+                    testId="native-codex-install"
+                    onClick={() => void installCodex()}
+                  >
+                    Install Codex
+                  </OnboardingPrimary>
+                </div>
+              )}
+              {installError ? <FormattedAlert tone="error">{installError}</FormattedAlert> : null}
+              <CommandRow
+                command={RUNTIME_CATALOG.codex.installCommand ?? 'npm install -g @openai/codex'}
+              />
+            </>
           ) : (
             <>
-              {codexPhase === 'not-installed' ? (
-                <FormattedAlert tone="info">
-                  Install the Codex CLI first, then sign in with your ChatGPT account. Both run in
-                  your terminal.
-                </FormattedAlert>
-              ) : (
-                <FormattedAlert tone="info">
-                  Codex uses your own terminal sign-in. Run the command below, then re-check.
-                </FormattedAlert>
+              {justInstalledCodex && (
+                <InstalledAck name="Codex" testId="native-codex-installed-ack" />
               )}
-              {codexPhase === 'not-installed' ? (
-                <CommandRow
-                  command={RUNTIME_CATALOG.codex.installCommand ?? 'npm install -g @openai/codex'}
-                />
-              ) : null}
-              <CommandRow
-                command={RUNTIME_CATALOG.codex.loginCommand ?? 'codex login'}
-                copied={loginCopied}
-                onCopy={() => {
-                  void navigator.clipboard?.writeText(
-                    RUNTIME_CATALOG.codex.loginCommand ?? 'codex login',
-                  )
-                  setLoginCopied(true)
-                  setTimeout(() => setLoginCopied(false), 1500)
-                }}
+              {/* One-click sign-in: the local server runs `codex login` (the CLI
+                  opens the browser itself); success re-probes automatically. The
+                  manual command surfaces inside the flow's failure states. */}
+              <ChatGptSignIn
+                tool="codex"
+                loginCommand={RUNTIME_CATALOG.codex.loginCommand ?? 'codex login'}
+                onLoggedIn={() => void refreshCodex()}
               />
               <div>
                 <button
                   type="button"
                   data-testid="native-chatgpt-recheck"
                   onClick={() => void refreshCodex()}
-                  className="inline-flex items-center gap-1.5 text-[13px] font-medium underline-offset-4 transition-colors hover:underline"
+                  className="inline-flex items-center gap-1.5 text-[12px] font-medium underline-offset-4 transition-colors hover:underline"
                   style={{
-                    color: muted(0.55),
+                    color: muted(0.5),
                     background: 'transparent',
                     border: 'none',
                     cursor: 'pointer',
                   }}
                 >
-                  Re-check
+                  Already signed in? Re-check
                 </button>
               </div>
             </>

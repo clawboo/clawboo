@@ -24,6 +24,7 @@ import { getDbPath } from '../lib/db'
 import { detectOpenClaw } from '../lib/openclawDetect'
 import { enabledRuntimeIds } from '../lib/runtimes'
 import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
+import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
 import { getDescriptor } from '../lib/runtimes/descriptor'
 import { getRuntimeSecret } from '../lib/secretsVault'
 
@@ -58,7 +59,11 @@ export async function onboardingStateGET(_req: Request, res: Response): Promise<
         .filter((v): v is string => Boolean(v))
         .some((v) => Boolean(getRuntimeSecret(v)))
     })
-    const hasConnectedRuntime = hasVaultKey || (await isCodexLoggedIn())
+    // Hermes's ChatGPT-subscription login (~/.hermes/auth.json) is the same class
+    // of deliberate on-disk credential — without it, a hermes-login-only user is
+    // re-trapped in the wizard on every reload.
+    const hasConnectedRuntime =
+      hasVaultKey || (await isCodexLoggedIn()) || isHermesCodexAuthPresent()
 
     res.json({ configured, hasNative, hasTeam, hasConnectedRuntime })
   } catch (err) {

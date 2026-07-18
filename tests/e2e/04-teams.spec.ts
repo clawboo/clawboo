@@ -62,16 +62,17 @@ test.describe('Teams', () => {
     const agentList = page.locator('[data-testid="agent-list-column"]')
 
     // Settings modal defaults to the Runtimes pane, which renders every runtime as a
-    // row (RuntimeConnectList — this replaced the earlier tabbed surface, so there is
-    // no `runtime-tab-*` to click through). In the panel variant each row carries its
-    // diagnostics (Info) button in the always-visible right control, so the built-in
-    // native runtime's drawer is a stable, directly-clickable target.
+    // row (RuntimeConnectList). A CONNECTED row shows a "Manage" footer that expands
+    // to the inline management body, where a "Details" link opens the diagnostics
+    // drawer (the ⓘ header button was folded into Manage). OpenClaw is connected via
+    // the mock gateway here, so its Manage → Details is the stable target.
     await agentList.locator('[data-testid="nav-settings"]').click()
     await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 5_000 })
-    await expect(page.locator('[data-testid="runtime-list-row-clawboo-native"]')).toBeVisible({
+    await expect(page.locator('[data-testid="runtime-list-row-openclaw"]')).toBeVisible({
       timeout: 5_000,
     })
-    await page.locator('[data-testid="runtime-clawboo-native-diagnostics"]').click()
+    await page.locator('[data-testid="runtime-list-row-openclaw-toggle"]').click()
+    await page.locator('[data-testid="runtime-openclaw-details"]').click()
 
     // The drawer is portaled to <body> so it escapes the modal's clipping glass
     // container — assert it renders roughly full viewport height (the regression

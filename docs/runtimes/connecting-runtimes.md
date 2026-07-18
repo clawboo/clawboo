@@ -17,7 +17,7 @@ The Runtimes panel is always available; every runtime is listed regardless of in
 
 - `claude-code`, `codex`, and `hermes` are external CLIs Clawboo installs for you. `clawboo-native` ships inside the Clawboo server; there is nothing to install.
 - `npm` (bundled with Node.js) is required to install `claude-code` and `codex`. `hermes` installs via Python; `pipx` is preferred, with a `pip --user` fallback.
-- A provider API key for the runtimes that authenticate head-less (`claude-code`, `hermes`, `clawboo-native`). `codex` authenticates through an interactive ChatGPT OAuth login instead of a pasted key.
+- A provider API key for the runtimes that authenticate head-less (`claude-code`, `hermes`, `clawboo-native`). `codex` authenticates through an interactive ChatGPT OAuth login instead of a pasted key — and `hermes` accepts the same ChatGPT-subscription login as a keyless ALTERNATIVE (`hermes auth add openai-codex`, then Re-check; see [Hermes](/runtimes/hermes#or-use-your-chatgpt-subscription)).
 
 ## At a glance
 
@@ -33,12 +33,12 @@ Every runtime resolves to one **connection state** that drives the card UI. The 
 
 ## Per-runtime matrix
 
-| Runtime                           | Built-in | Install                                      | Auth    | Env var written to vault                                       | Notes                                                                                                |
-| --------------------------------- | -------- | -------------------------------------------- | ------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `clawboo-native` (Clawboo Native) | yes      | none                                         | api-key | `ANTHROPIC_API_KEY` (+ `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) | In-process harness; multi-provider; any of the three keys (or `OLLAMA_BASE_URL`) counts as connected |
-| `claude-code` (Claude Code)       | no       | `npm install -g @anthropic-ai/claude-code@2` | api-key | `ANTHROPIC_API_KEY`                                            | Health binary `claude`                                                                               |
-| `codex` (Codex)                   | no       | `npm install -g @openai/codex@0`             | oauth   | none                                                           | Connects via `codex login`, not a pasted key; health binary `codex`                                  |
-| `hermes` (Hermes)                 | no       | `pipx install 'hermes-agent[anthropic]<1'`   | api-key | `OPENROUTER_API_KEY`                                           | Python 3.11+ CLI; installs to the user-site bin (resolved off PATH); health binary `hermes`          |
+| Runtime                           | Built-in | Install                                      | Auth    | Env var written to vault                                       | Notes                                                                                                                                                                                                |
+| --------------------------------- | -------- | -------------------------------------------- | ------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clawboo-native` (Clawboo Native) | yes      | none                                         | api-key | `ANTHROPIC_API_KEY` (+ `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) | In-process harness; multi-provider; any of the three keys (or `OLLAMA_BASE_URL`) counts as connected                                                                                                 |
+| `claude-code` (Claude Code)       | no       | `npm install -g @anthropic-ai/claude-code@2` | api-key | `ANTHROPIC_API_KEY`                                            | Health binary `claude`                                                                                                                                                                               |
+| `codex` (Codex)                   | no       | `npm install -g @openai/codex@0`             | oauth   | none                                                           | Connects via `codex login`, not a pasted key; health binary `codex`                                                                                                                                  |
+| `hermes` (Hermes)                 | no       | `pipx install 'hermes-agent[anthropic]<1'`   | api-key | `OPENROUTER_API_KEY`                                           | Python 3.11+ CLI; installs to the user-site bin (resolved off PATH); health binary `hermes`. Keyless alternative: a ChatGPT-subscription login (`hermes auth add openai-codex`) also reads Connected |
 
 ## Steps
 
@@ -83,7 +83,7 @@ For `clawboo-native` the optional `provider` field routes the key to the right v
 { "ok": true, "connectionState": "needs-login", "loginCommand": "codex login" }
 ```
 
-The card shows the `codex login` command (with a copy button), you run it in your terminal, then click **Re-check**. A signed-in Codex is detected by the status probe (the token file is never read), and each spawned run gets a managed `CODEX_HOME` seeded with a copy of your `~/.codex/auth.json`; Clawboo does not store a Codex credential in its vault. The onboarding wizard's OpenAI card offers the same flow as **Sign in with ChatGPT** (see [Codex](/runtimes/codex)).
+The card offers a one-click **Sign in with ChatGPT** (Clawboo's local server runs `codex login` for you; the CLI opens your browser and you approve there — no code to type). The manual `codex login` command remains the fallback: run it in a terminal, then click **Re-check**. A signed-in Codex is detected by the status probe (the token file is never read), and each spawned run gets a managed `CODEX_HOME` seeded with a copy of your `~/.codex/auth.json`; Clawboo does not store a Codex credential in its vault. The subscription's primary home is the Providers page (the **ChatGPT subscription** row) and the onboarding wizard's OpenAI card (see [Codex](/runtimes/codex)); once it is connected, the Hermes and OpenClaw surfaces offer their own optional subscription links.
 
 ### 5. Health-check a native provider key (optional)
 

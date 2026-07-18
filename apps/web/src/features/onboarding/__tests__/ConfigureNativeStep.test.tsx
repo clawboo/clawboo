@@ -21,22 +21,28 @@ const SECRET = 'sk-ant-SECRET-DO-NOT-LEAK'
 describe('ConfigureNativeStep', () => {
   it('reveal toggle switches the key field between password and text', async () => {
     render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+    // OpenAI (default) hides the key field behind ChatGPT sign-in; use a key provider.
+    await userEvent.click(screen.getByTestId('native-provider-anthropic'))
     const input = screen.getByTestId('native-api-key')
     expect(input).toHaveAttribute('type', 'password')
     await userEvent.click(screen.getByLabelText('Show API key'))
     expect(input).toHaveAttribute('type', 'text')
   })
 
-  it('selecting a provider marks its card checked', async () => {
+  it('selecting a provider marks its card checked (OpenAI is the default)', async () => {
     render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
-    expect(screen.getByTestId('native-provider-anthropic')).toHaveAttribute('aria-checked', 'true')
-    await userEvent.click(screen.getByTestId('native-provider-openai'))
+    // OpenAI leads the grid and is the default selection.
     expect(screen.getByTestId('native-provider-openai')).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByTestId('native-provider-anthropic')).toHaveAttribute('aria-checked', 'false')
+    await userEvent.click(screen.getByTestId('native-provider-anthropic'))
+    expect(screen.getByTestId('native-provider-anthropic')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('native-provider-openai')).toHaveAttribute('aria-checked', 'false')
   })
 
   it('shows a "Get a key" link that re-points per selected provider', async () => {
     render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+    // OpenAI (the default) uses the ChatGPT sign-in — no key field. Pick a
+    // key-based provider to exercise the "Get a key" link.
+    await userEvent.click(screen.getByTestId('native-provider-anthropic'))
     expect(screen.getByTestId('native-get-key').getAttribute('href')).toContain(
       'console.anthropic.com',
     )
@@ -52,10 +58,10 @@ describe('ConfigureNativeStep', () => {
     // The extra providers are now shown.
     const groq = await screen.findByTestId('native-provider-groq')
     expect(screen.getByTestId('native-provider-google')).toBeInTheDocument()
-    // Selecting one activates it + deselects the primary Anthropic card…
+    // Selecting one activates it + deselects the default OpenAI card…
     await userEvent.click(groq)
     expect(groq).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByTestId('native-provider-anthropic')).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByTestId('native-provider-openai')).toHaveAttribute('aria-checked', 'false')
     // …and re-points the "Get a key" link to that provider.
     expect(screen.getByTestId('native-get-key').getAttribute('href')).toContain('groq.com')
   })
@@ -65,6 +71,7 @@ describe('ConfigureNativeStep', () => {
       http.post('/api/runtimes/clawboo-native/healthcheck', () => HttpResponse.json({ ok: true })),
     )
     render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-anthropic'))
     await userEvent.type(screen.getByTestId('native-api-key'), SECRET)
     await userEvent.click(screen.getByTestId('native-test-connection'))
     expect(await screen.findByText('Key works')).toBeInTheDocument()
@@ -92,6 +99,7 @@ describe('ConfigureNativeStep', () => {
     )
 
     render(<ConfigureNativeStep onConnected={onConnected} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-anthropic'))
     await userEvent.type(screen.getByTestId('native-api-key'), SECRET)
     await userEvent.click(screen.getByTestId('native-continue'))
 
@@ -149,7 +157,9 @@ describe('ConfigureNativeStep', () => {
     it('is the DEFAULT method on the OpenAI card, carries the Recommended chip, and hides the key + model fields; no method cards on other providers', async () => {
       server.use(codexRuntimes({ connectionState: 'needs-login' }))
       render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
-      // Anthropic (default provider) shows no auth-method selector.
+      // OpenAI is the DEFAULT provider now → the auth-method selector shows on
+      // mount; a key-based provider (Anthropic) shows none.
+      await userEvent.click(screen.getByTestId('native-provider-anthropic'))
       expect(screen.queryByTestId('native-auth-chatgpt')).not.toBeInTheDocument()
       await userEvent.click(screen.getByTestId('native-provider-openai'))
       // ChatGPT is pre-selected + Recommended (the economical/subscription framing).
@@ -160,18 +170,49 @@ describe('ConfigureNativeStep', () => {
       // The key field + model picker are the api-key method's UI — hidden here.
       expect(screen.queryByTestId('native-api-key')).not.toBeInTheDocument()
       expect(screen.queryByText('Model')).not.toBeInTheDocument()
-      // Not signed in yet → Continue stays disabled.
+      // Not signed in yet → the one-click sign-in shows (the manual command
+      // lives inside the flow's failure states, not as standing chrome) and
+      // Continue stays disabled.
       await screen.findByTestId('native-chatgpt-panel')
-      expect(screen.getByText('codex login')).toBeInTheDocument()
+      expect(await screen.findByTestId('chatgpt-signin-codex-start')).toBeInTheDocument()
       expect(screen.getByTestId('native-continue')).toBeDisabled()
     })
 
-    it('not-installed shows the install command alongside the login command', async () => {
-      server.use(http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [] })))
+    it('not-installed offers a button-driven Install (SSE) that chains into the sign-in state', async () => {
+      let calls = 0
+      server.use(
+        http.get('/api/runtimes', () => {
+          calls += 1
+          // Before the install: the codex descriptor is present with
+          // `installed: false` (the REAL "not installed" shape — the endpoint
+          // always includes codex; it never drops it from the list). After: the
+          // binary is installed but not signed in.
+          return HttpResponse.json({
+            runtimes: [
+              calls > 1
+                ? { id: 'codex', installed: true, connectionState: 'needs-login' }
+                : { id: 'codex', installed: false, connectionState: 'not-installed' },
+            ],
+          })
+        }),
+        http.post(
+          '/api/runtimes/codex/install',
+          () =>
+            new HttpResponse('data: {"type":"complete","success":true}\n\n', {
+              headers: { 'Content-Type': 'text/event-stream' },
+            }),
+        ),
+      )
       render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
       await userEvent.click(screen.getByTestId('native-provider-openai'))
-      expect(await screen.findByText('npm install -g @openai/codex')).toBeInTheDocument()
-      expect(screen.getByText('codex login')).toBeInTheDocument()
+      // The install affordance is a real button (+ the manual command as reference).
+      expect(await screen.findByTestId('native-codex-install')).toBeInTheDocument()
+      expect(screen.getByText('npm install -g @openai/codex')).toBeInTheDocument()
+      expect(screen.getByTestId('native-continue')).toBeDisabled()
+
+      // Install completes → re-probe → the one-click sign-in state.
+      await userEvent.click(screen.getByTestId('native-codex-install'))
+      expect(await screen.findByTestId('chatgpt-signin-codex-start')).toBeInTheDocument()
       expect(screen.getByTestId('native-continue')).toBeDisabled()
     })
 
@@ -196,6 +237,34 @@ describe('ConfigureNativeStep', () => {
       await userEvent.click(await screen.findByTestId('native-chatgpt-recheck'))
       await screen.findByTestId('native-chatgpt-ready')
       expect(screen.getByTestId('native-continue')).toBeEnabled()
+    })
+
+    it('a transient runtimes-probe failure on re-entry keeps the ready confirmation — never the alarming "install codex"', async () => {
+      // Repro: reach ready → toggle to API key → back to ChatGPT (the effect
+      // re-probes) → the re-probe FAILS (500 → fetchRuntimes returns []). The
+      // empty list means "probe failed", NOT "codex uninstalled", so the ready
+      // confirmation must be retained and the install prompt must never appear.
+      let calls = 0
+      server.use(
+        http.get('/api/runtimes', () => {
+          calls += 1
+          return calls === 1
+            ? HttpResponse.json({
+                runtimes: [{ id: 'codex', installed: true, connectionState: 'ready' }],
+              })
+            : new HttpResponse(null, { status: 500 })
+        }),
+      )
+      render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+      await userEvent.click(screen.getByTestId('native-provider-openai'))
+      await screen.findByTestId('native-chatgpt-ready')
+      await userEvent.click(screen.getByTestId('native-auth-api-key'))
+      await userEvent.click(screen.getByTestId('native-auth-chatgpt'))
+      // The failed re-probe must NOT collapse to the install prompt…
+      await waitFor(() => expect(calls).toBeGreaterThan(1))
+      expect(screen.queryByTestId('native-codex-install')).not.toBeInTheDocument()
+      // …and the ready confirmation stays put.
+      expect(screen.getByTestId('native-chatgpt-ready')).toBeInTheDocument()
     })
 
     it('Continue on a ready sign-in fires onConnected("codex", "") WITHOUT calling the native connect or model routes', async () => {

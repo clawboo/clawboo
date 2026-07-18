@@ -21,6 +21,9 @@ export interface RuntimeStatus {
   authKind?: 'api-key' | 'oauth' | 'none'
   envVar?: string | null
   hasCredential?: boolean
+  /** Hermes-only: a ChatGPT-subscription login (`hermes login --provider
+   *  openai-codex`) is present — gates the subscription model group. */
+  codexAuth?: boolean
   installCommand?: string | null
   builtIn?: boolean
   docsUrl?: string
@@ -73,6 +76,17 @@ export async function recheckRuntime(id: RuntimeId): Promise<RuntimeStatus | nul
  *  caller can cancel; mirrors the onboarding InstallStep usage of consumeApiSSE. */
 export function installRuntime(id: RuntimeId, handlers: SSEHandlers): AbortController {
   return consumeApiSSE(`/api/runtimes/${id}/install`, { method: 'POST' }, handlers)
+}
+
+/** The UI-driven ChatGPT sign-in: the server spawns the OFFICIAL CLI's login
+ *  command and relays its user-facing output (`device-code {url,code}` /
+ *  `auth-url {url}` / `output` / `complete {loggedIn}` / typed `error`s incl.
+ *  NOT_INSTALLED + UNSUPPORTED_PLATFORM). Aborting the returned controller is
+ *  CANCEL — the server kills the whole child tree on disconnect. */
+export type CliLoginTool = 'codex' | 'hermes' | 'openclaw'
+
+export function startCliLogin(tool: CliLoginTool, handlers: SSEHandlers): AbortController {
+  return consumeApiSSE(`/api/auth/cli-login/${tool}`, { method: 'POST' }, handlers)
 }
 
 export interface ConnectResult {
@@ -135,6 +149,19 @@ export async function disconnectRuntime(id: RuntimeId): Promise<{ ok: boolean; e
     const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
     const ok = res.ok && body.ok !== false
     // Surface a real reason on failure so the caller can show it (don't swallow).
+    return ok ? { ok } : { ok, error: body.error ?? `HTTP ${res.status}` }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/** POST /api/runtimes/:id/logout — sign out an OAUTH runtime (Codex) via the
+ *  CLI's own `logout`. Signs out the shared ChatGPT subscription. */
+export async function signOutRuntime(id: RuntimeId): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await apiFetch(`/api/runtimes/${id}/logout`, { method: 'POST' })
+    const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+    const ok = res.ok && body.ok !== false
     return ok ? { ok } : { ok, error: body.error ?? `HTTP ${res.status}` }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
