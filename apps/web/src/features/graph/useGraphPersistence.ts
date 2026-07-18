@@ -48,12 +48,27 @@ export function useGraphPersistence(scope: GhostGraphScope = 'team') {
         ? `team-${selectedTeamId}`
         : 'default'
 
-  // Load on mount / when connected gateway, team, or atlasLayout changes
+  // The persistence scope key. In NATIVE mode there is no Gateway, so
+  // `gatewayUrl` is '' (or null before hydration) — a valid key on its own, NOT
+  // a reason to skip loading. The server keys graph layouts by (name, url) and
+  // already treats '' as a real key (GET returns empty positions for it), so we
+  // persist native-mode positions under the empty-url scope.
+  const scopeUrl = gatewayUrl ?? ''
+
+  // Load on mount / when the gateway URL, team, or atlasLayout changes.
+  //
+  // Load-bearing: this does NOT gate on `gatewayUrl` being truthy. It used to
+  // early-return when `!gatewayUrl`, which left `isLoaded` stuck at `false`
+  // forever in native mode (no Gateway) — and `GhostGraph`'s ELK layout effect
+  // is gated on `isLoaded`, so the layout never ran, `hasRunLayout` stayed
+  // false, and the graph wrapper sat at `opacity: 0`. Net effect: the Ghost
+  // Graph only appeared once an OpenClaw Gateway was connected (a URL was set)
+  // and vanished the moment it disconnected. The graph is fleet + capability
+  // driven (all REST / SQLite-backed) and must render without OpenClaw.
   useEffect(() => {
-    if (!gatewayUrl) return
     setIsLoaded(false) // Reset on team / mode switch — wait for fresh positions
 
-    const url = `/api/graph-layout?name=${encodeURIComponent(layoutName)}&url=${encodeURIComponent(gatewayUrl)}`
+    const url = `/api/graph-layout?name=${encodeURIComponent(layoutName)}&url=${encodeURIComponent(scopeUrl)}`
     void fetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: LayoutData | null) => {
@@ -71,24 +86,26 @@ export function useGraphPersistence(scope: GhostGraphScope = 'team') {
         setSavedPositions({})
         setIsLoaded(true)
       })
-  }, [gatewayUrl, selectedTeamId, layoutName, setSavedPositions])
+  }, [scopeUrl, selectedTeamId, layoutName, setSavedPositions])
 
-  // Debounced save (called on node drag stop)
+  // Debounced save (called on node drag stop). Persists under the same scope
+  // key as the load (`scopeUrl`), so native-mode ('' url) drag positions survive
+  // a reload just like Gateway-mode ones. The server POST accepts the empty-url
+  // key (matching the GET).
   const savePositions = useCallback(
     (positions: LayoutData['positions']) => {
-      if (!gatewayUrl) return
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => {
         void fetch('/api/graph-layout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: layoutName, positions, gatewayUrl }),
+          body: JSON.stringify({ name: layoutName, positions, gatewayUrl: scopeUrl }),
         }).catch(() => {
           // Non-fatal
         })
       }, 800)
     },
-    [gatewayUrl, layoutName],
+    [scopeUrl, layoutName],
   )
 
   return { savePositions, isLoaded }

@@ -47,7 +47,11 @@ export async function graphLayoutPOST(req: Request, res: Response): Promise<void
   const name = body.name ?? 'default'
   const { positions, gatewayUrl } = body
 
-  if (!gatewayUrl) {
+  // gatewayUrl is the persistence SCOPE key, not a live connection. Native mode
+  // (no Gateway) legitimately keys layouts under '' — the same value the GET
+  // reads back — so accept any string, including empty. Only a missing /
+  // non-string field is rejected.
+  if (typeof gatewayUrl !== 'string') {
     res.status(400).json({ ok: false, error: 'gatewayUrl required' })
     return
   }
