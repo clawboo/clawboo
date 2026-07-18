@@ -49,11 +49,11 @@ describe('useGraphPersistence — the graph renders without a Gateway (native mo
   })
 
   it('persists positions under the empty-url scope key (POST fires in native mode)', async () => {
-    let posted: { gatewayUrl?: string } | null = null
+    const posted: Array<{ gatewayUrl?: string }> = []
     server.use(
       http.get('/api/graph-layout', () => HttpResponse.json({ positions: {} })),
       http.post('/api/graph-layout', async ({ request }) => {
-        posted = (await request.json()) as { gatewayUrl?: string }
+        posted.push((await request.json()) as { gatewayUrl?: string })
         return HttpResponse.json({ ok: true })
       }),
     )
@@ -66,7 +66,7 @@ describe('useGraphPersistence — the graph renders without a Gateway (native mo
     })
 
     // Debounced 800ms — waitFor polls until the POST lands.
-    await waitFor(() => expect(posted).not.toBeNull(), { timeout: 2000 })
-    expect(posted?.gatewayUrl).toBe('')
+    await waitFor(() => expect(posted.length).toBeGreaterThan(0), { timeout: 2000 })
+    expect(posted[0]?.gatewayUrl).toBe('')
   })
 })
