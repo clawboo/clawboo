@@ -7,7 +7,7 @@ import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useBoardStore } from '@/stores/board'
-import { useBooZeroStore } from '@/stores/booZero'
+import { useBooZeroStore, isBooZeroEligibleForTeam } from '@/stores/booZero'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { parseMention } from './parseMention'
 import { useTeamChatStream } from './useTeamChatStream'
@@ -82,6 +82,18 @@ export function GroupChatPanel({
     () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
     [agents, booZeroAgentId],
   )
+  // The universal Boo Zero presides over EVERY team — but only when it is
+  // cross-team-neutral: a TEAMLESS coordinator (the native / OpenClaw default),
+  // or, in the override case, already a member of THIS team. An override that
+  // points Boo Zero at an agent belonging to a DIFFERENT team (e.g. the
+  // codex-preferred deploy promoting that team's leader) is a member of its own
+  // team, not a leader here, so it MUST NOT leak into this team's roster / tag
+  // chips / @mention list. `isBooZeroEligibleForTeam` gates that; downstream
+  // (participants + send routing) reads this filtered value, never the raw one.
+  const teamBooZeroAgent = useMemo(
+    () => (isBooZeroEligibleForTeam(booZeroAgent, teamId) ? booZeroAgent : null),
+    [booZeroAgent, teamId],
+  )
   // ── Server-orchestrated teams (the only mode) ────────────────────────────
   // Every team's chat is driven by the SERVER orchestrator: the browser is a THIN
   // CLIENT — it POSTs the message + renders the SSE transcript stream. There is no
@@ -101,14 +113,14 @@ export function GroupChatPanel({
     setServerBusy(true)
   }, [])
 
-  // "Effective participants" — DB team members + Boo Zero (when present),
-  // deduplicated by agent id.
+  // "Effective participants" — DB team members + the team-eligible Boo Zero
+  // (`teamBooZeroAgent`, when present), deduplicated by agent id.
   //
   // Boo Zero is teamless in the DB and SHOULD NOT appear in `teamAgents`,
   // but the auto-migrate path in `GatewayBootstrap` (which can assign
   // unassigned agents to a "Default" team) plus any future migration that
   // attaches Boo Zero to a team could cause it to leak into both
-  // `teamAgents` AND the explicit `booZeroAgent` spread. Two copies of the
+  // `teamAgents` AND the explicit `teamBooZeroAgent` spread. Two copies of the
   // same agent in `participants` causes `mergedEntries` to pull the same
   // transcript twice — a contributing factor to the production triple-
   // render bug. Dedupe by id defensively.
@@ -117,7 +129,7 @@ export function GroupChatPanel({
   // mentionAgentList, knownAgentNames, persisted-history-load, activeStreams)
   // walks `participants` directly, so a single dedup here covers them all.
   const participants = useMemo(() => {
-    const combined = booZeroAgent ? [...teamAgents, booZeroAgent] : teamAgents
+    const combined = teamBooZeroAgent ? [...teamAgents, teamBooZeroAgent] : teamAgents
     const seen = new Set<string>()
     const out: typeof combined = []
     for (const a of combined) {
@@ -126,7 +138,7 @@ export function GroupChatPanel({
       out.push(a)
     }
     return out
-  }, [teamAgents, booZeroAgent])
+  }, [teamAgents, teamBooZeroAgent])
 
   // Agent lookup for resolving names from sessionKeys
   const agentLookup = useMemo(() => {
@@ -540,8 +552,12 @@ export function GroupChatPanel({
       // runtime-neutral (`GET /api/agents` `defaultId`): a native-first install
       // identifies the DEFAULT-NATIVE Boo Zero here, so native teams route to it too.
       const { targetAgentId } = parseMention(message, mentionAgentList)
+      // Route to the SAME Boo Zero shown in the roster — never the raw
+      // (possibly cross-team) one — so display + routing stay consistent. When
+      // Boo Zero belongs to a different team it's excluded here too, and the
+      // message falls to this team's own leader / first member.
       const targetId =
-        targetAgentId ?? booZeroAgent?.id ?? team?.leaderAgentId ?? teamAgents[0]?.id
+        targetAgentId ?? teamBooZeroAgent?.id ?? team?.leaderAgentId ?? teamAgents[0]?.id
       if (!targetId) return
       const targetSk = teamSessionKeys.get(targetId)
       if (!targetSk) return
@@ -558,7 +574,7 @@ export function GroupChatPanel({
     [
       teamId,
       team?.leaderAgentId,
-      booZeroAgent,
+      teamBooZeroAgent,
       mentionAgentList,
       teamAgents,
       participants,

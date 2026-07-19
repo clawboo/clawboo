@@ -53,3 +53,26 @@ export function identifyBooZero(
   // Priority 3: First agent overall
   return agents[0]!.id
 }
+
+/**
+ * Whether the universal Boo Zero should surface in a specific team's scoped
+ * views — the group-chat participant list (tag chips + `@mention` autocomplete +
+ * merged transcript) AND the team-scoped Ghost Graph.
+ *
+ * By design the universal coordinator is TEAMLESS (the native or OpenClaw default
+ * agent, `teamId === null`), so it presides over — and is shown in — EVERY team.
+ * But an explicit override (the "Make this agent Boo Zero" action, or the
+ * codex-preferred deploy that promotes a team's leader) can point Boo Zero at an
+ * agent that BELONGS to one team. Such an agent is a member of ITS OWN team, not
+ * a cross-team leader, and must never leak into a DIFFERENT team's scoped views
+ * (the reported "an agent from another team shows up in this team's chat" bug).
+ *
+ * Eligible when Boo Zero is teamless (universal) or already a member of `teamId`.
+ */
+export function isBooZeroEligibleForTeam(
+  booZero: { teamId: string | null } | null | undefined,
+  teamId: string,
+): boolean {
+  if (!booZero) return false
+  return booZero.teamId == null || booZero.teamId === teamId
+}

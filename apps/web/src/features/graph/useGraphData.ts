@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
-import { useBooZeroStore } from '@/stores/booZero'
+import { useBooZeroStore, isBooZeroEligibleForTeam } from '@/stores/booZero'
 import type { Team } from '@/stores/team'
 import { useGraphStore } from './store'
 import { parseAgentsMd } from './parsers/parseAgentsMd'
@@ -159,18 +159,30 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
     [agents, booZeroAgentId],
   )
 
+  // The Boo Zero to inject into THIS view — the single source of truth every
+  // downstream Boo Zero use reads (graphAgents + buildGraphElements). Atlas (the
+  // global org root) always shows it. In team scope it appears only when a team
+  // is selected AND Boo Zero is cross-team-neutral: teamless (the native /
+  // OpenClaw default) or already a member of the selected team. An override that
+  // points Boo Zero at a DIFFERENT team's agent (e.g. a codex-preferred deploy
+  // promoting that team's leader) must NOT leak into this team's graph, so it is
+  // filtered to `null` here (the reported cross-team-agent bug). `null` when no
+  // team is selected preserves the pre-atlas all-agents peek (no universal-leader
+  // synthesis).
+  const scopedBooZero = useMemo(() => {
+    if (!booZeroAgent) return null
+    if (scope === 'atlas') return booZeroAgent
+    if (!selectedTeamId) return null
+    return isBooZeroEligibleForTeam(booZeroAgent, selectedTeamId) ? booZeroAgent : null
+  }, [booZeroAgent, scope, selectedTeamId])
+
   // "Graph agents" — the agents whose files we fetch and which appear in the
   // built graph. Dedup by id in case Boo Zero is somehow already in filtered
-  // (auto-migrate edge case).
+  // (auto-migrate edge case). `scopedBooZero` already encodes the atlas-always /
+  // team-eligible-only inclusion rule.
   const graphAgents = useMemo(() => {
-    if (!booZeroAgent) return filteredAgents
-    // Atlas always includes Boo Zero; team scope only includes Boo Zero
-    // when a team is actually selected (preserves the pre-atlas behavior
-    // for `selectedTeamId === null`, which is otherwise an all-agents
-    // peek without the universal-leader synthesis).
-    const shouldIncludeBooZero = scope === 'atlas' || Boolean(selectedTeamId)
-    if (!shouldIncludeBooZero) return filteredAgents
-    const combined = [...filteredAgents, booZeroAgent]
+    if (!scopedBooZero) return filteredAgents
+    const combined = [...filteredAgents, scopedBooZero]
     const seen = new Set<string>()
     const out: typeof combined = []
     for (const a of combined) {
@@ -179,7 +191,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
       out.push(a)
     }
     return out
-  }, [filteredAgents, booZeroAgent, selectedTeamId, scope])
+  }, [filteredAgents, scopedBooZero])
 
   // Stable string key for team metadata — drives structural rebuild when a
   // team is renamed/recolored mid-session so BooNodeData.teamName/Color/Emoji
@@ -325,7 +337,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
         agentFiles,
         teams,
         teamInternalLeadId,
-        booZeroAgent,
+        scopedBooZero,
         selectedTeamId,
         scope,
         teamInternalLeadByTeamId,
@@ -337,7 +349,7 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
       agentFiles,
       teamsMetaKey,
       teamInternalLeadId,
-      booZeroAgent,
+      scopedBooZero,
       selectedTeamId,
       scope,
       teamInternalLeadByTeamId,
