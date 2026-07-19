@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useBooZeroStore, identifyBooZero } from '../booZero'
+import { useBooZeroStore, identifyBooZero, isBooZeroEligibleForTeam } from '../booZero'
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +45,29 @@ describe('identifyBooZero', () => {
     ]
     // a1 would win via teamless fallback, but a2 is the default
     expect(identifyBooZero(agents, 'a2')).toBe('a2')
+  })
+})
+
+describe('isBooZeroEligibleForTeam', () => {
+  it('returns false when Boo Zero is null/undefined', () => {
+    expect(isBooZeroEligibleForTeam(null, 't1')).toBe(false)
+    expect(isBooZeroEligibleForTeam(undefined, 't1')).toBe(false)
+  })
+
+  it('is eligible for every team when Boo Zero is teamless (the universal coordinator)', () => {
+    const bz = { teamId: null }
+    expect(isBooZeroEligibleForTeam(bz, 't1')).toBe(true)
+    expect(isBooZeroEligibleForTeam(bz, 't2')).toBe(true)
+  })
+
+  it('is eligible for the team it already belongs to', () => {
+    expect(isBooZeroEligibleForTeam({ teamId: 't1' }, 't1')).toBe(true)
+  })
+
+  it('is NOT eligible for a DIFFERENT team (the cross-team-leak bug)', () => {
+    // A codex-preferred deploy / manual override can point Boo Zero at an agent
+    // that belongs to team t2; it must never surface in team t1's scoped views.
+    expect(isBooZeroEligibleForTeam({ teamId: 't2' }, 't1')).toBe(false)
   })
 })
 

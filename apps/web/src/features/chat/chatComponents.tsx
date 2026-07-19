@@ -13,7 +13,15 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowDown, ArrowUp, ChevronRight, Clock, SendHorizontal, Square, Wrench } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronRight,
+  Clock,
+  SendHorizontal,
+  Square,
+  Wrench,
+} from 'lucide-react'
 import { BooAvatar, resolveBooTint } from '@clawboo/ui'
 import { Button } from '@/features/shared/Button'
 import type { TranscriptEntry } from '@clawboo/protocol'
@@ -838,23 +846,26 @@ export function blockMarginClass(index: number, isFollowup: boolean): string {
 
 export const NEAR_BOTTOM_PX = 80
 
-export const MessageList = memo(function MessageList({
-  blocks,
-  streamingText,
-  agentId,
-  agentName,
-  isRunning,
-}: {
-  blocks: RenderBlock[]
-  streamingText: string | null
-  agentId: string
-  agentName: string
-  isRunning: boolean
-}) {
+/**
+ * Shared chat auto-scroll + "jump to latest" state. Keeps the view pinned to the
+ * bottom while the user is there, and — the moment they scroll up to read
+ * history — stops yanking them down and instead surfaces a jump affordance.
+ *
+ * `contentSignature` is a value that changes whenever the transcript grows or
+ * streams (each caller passes its own, e.g. `${blocks.length}|${streamText}`).
+ * It drives BOTH the pinned auto-scroll and the "new content arrived while I was
+ * scrolled up" flag.
+ *
+ * Returns refs for the scroll container + bottom anchor, the `onScroll` handler,
+ * `atBottom` / `hasNewBelow` (button state), and `jumpToBottom` (the click).
+ */
+export function useChatAutoScroll(contentSignature: string | number) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
   const rafRef = useRef<number | null>(null)
+  const [atBottom, setAtBottom] = useState(true)
+  const [hasNewBelow, setHasNewBelow] = useState(false)
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'instant' })
@@ -868,114 +879,203 @@ export const MessageList = memo(function MessageList({
     })
   }, [scrollToBottom])
 
-  // Auto-scroll when content changes (if pinned)
+  // Auto-scroll when content changes IF the user is pinned to the bottom; if
+  // they've scrolled up, flag that fresh content landed below instead.
   useEffect(() => {
-    if (pinnedRef.current) scheduleScroll()
+    if (pinnedRef.current) {
+      scheduleScroll()
+    } else {
+      setHasNewBelow(true)
+    }
     return () => {
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
       }
     }
-  }, [blocks.length, streamingText, scheduleScroll])
+  }, [contentSignature, scheduleScroll])
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+    pinnedRef.current = nearBottom
+    // `handleScroll` fires on every scroll tick — only setState on a transition
+    // so we don't re-render the list on each pixel of scroll.
+    setAtBottom((prev) => (prev === nearBottom ? prev : nearBottom))
+    if (nearBottom) setHasNewBelow((prev) => (prev ? false : prev))
   }, [])
+
+  const jumpToBottom = useCallback(() => {
+    pinnedRef.current = true
+    setAtBottom(true)
+    setHasNewBelow(false)
+    scrollToBottom()
+  }, [scrollToBottom])
+
+  return { scrollRef, bottomRef, handleScroll, atBottom, hasNewBelow, jumpToBottom }
+}
+
+/**
+ * Floating "jump to latest" control. Render inside a `relative` wrapper around
+ * the scroll region. Fades in when the user scrolls up (a plain down-arrow to
+ * return to the latest), and upgrades to an accent "New messages" pill when
+ * fresh content arrived while they were reading history above.
+ *
+ * The show/hide is a COMPOSITOR-driven CSS transition (opacity + transform),
+ * NOT a JS/`requestAnimationFrame` animation — so it can't stall half-visible
+ * when the main thread is busy (a heavy stream, a slow machine). The button is
+ * always mounted; when hidden it's `pointer-events-none` + `aria-hidden` +
+ * out of the tab order, so it neither intercepts clicks nor reaches AT.
+ */
+export function JumpToLatestButton({
+  show,
+  hasNew,
+  onClick,
+}: {
+  show: boolean
+  hasNew: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-hidden={!show}
+      tabIndex={show ? 0 : -1}
+      aria-label={hasNew ? 'Jump to new messages' : 'Scroll to latest'}
+      data-testid="jump-to-latest"
+      data-visible={show ? 'true' : 'false'}
+      className={[
+        'absolute bottom-3 left-1/2 z-10 -translate-x-1/2 transition-[opacity,transform] duration-200 ease-out',
+        show ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
+      ].join(' ')}
+    >
+      <span
+        className={[
+          'flex items-center gap-1.5 rounded-full shadow-floating',
+          hasNew
+            ? 'bg-primary py-1.5 pl-3.5 pr-3 text-[12px] font-semibold text-primary-foreground'
+            : 'surface-floating-tier h-9 w-9 justify-center text-foreground/70 hover:text-foreground',
+        ].join(' ')}
+      >
+        {hasNew && 'New messages'}
+        <ArrowDown className="h-4 w-4" strokeWidth={2.5} />
+      </span>
+    </button>
+  )
+}
+
+export const MessageList = memo(function MessageList({
+  blocks,
+  streamingText,
+  agentId,
+  agentName,
+  isRunning,
+}: {
+  blocks: RenderBlock[]
+  streamingText: string | null
+  agentId: string
+  agentName: string
+  isRunning: boolean
+}) {
+  const { scrollRef, bottomRef, handleScroll, atBottom, hasNewBelow, jumpToBottom } =
+    useChatAutoScroll(`${blocks.length}|${streamingText ?? ''}`)
 
   const isEmpty = blocks.length === 0 && !streamingText
   const showLive = isRunning && streamingText !== null
 
   return (
-    <div
-      ref={scrollRef}
-      data-testid="chat-message-list"
-      className="flex-1 overflow-y-auto px-4 py-4"
-      onScroll={handleScroll}
-    >
-      {isEmpty ? (
-        <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-          <div className="opacity-80">
-            <AgentBooAvatar agentId={agentId} size={56} />
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={scrollRef}
+        data-testid="chat-message-list"
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+        onScroll={handleScroll}
+      >
+        {isEmpty ? (
+          <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+            <div className="opacity-80">
+              <AgentBooAvatar agentId={agentId} size={56} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <p
+                className="text-[15px] font-semibold text-foreground/80"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                Say hi to {agentName}
+              </p>
+              <p className="max-w-[280px] text-[12px] leading-relaxed text-foreground/45">
+                Send a message below to start the conversation.
+              </p>
+            </div>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <p
-              className="text-[15px] font-semibold text-foreground/80"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
-              Say hi to {agentName}
-            </p>
-            <p className="max-w-[280px] text-[12px] leading-relaxed text-foreground/45">
-              Send a message below to start the conversation.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col pb-2">
-          {blocks.map((block, i) => {
-            const prev = i > 0 ? (blocks[i - 1] ?? null) : null
-            // 1:1 chat: every assistant turn is from the same agent (the
-            // `agentId` prop), so the owner check collapses to "is the
-            // previous block also an assistant-turn?" — handled by
-            // `isFollowupBlock` against equal owner ids.
-            const isFollowup = isFollowupBlock(prev, block, agentId, agentId)
-            const margin = blockMarginClass(i, isFollowup)
+        ) : (
+          <div className="flex flex-col pb-2">
+            {blocks.map((block, i) => {
+              const prev = i > 0 ? (blocks[i - 1] ?? null) : null
+              // 1:1 chat: every assistant turn is from the same agent (the
+              // `agentId` prop), so the owner check collapses to "is the
+              // previous block also an assistant-turn?" — handled by
+              // `isFollowupBlock` against equal owner ids.
+              const isFollowup = isFollowupBlock(prev, block, agentId, agentId)
+              const margin = blockMarginClass(i, isFollowup)
 
-            if (block.kind === 'meta') {
+              if (block.kind === 'meta') {
+                return (
+                  <div key={block.entry.entryId} className={margin}>
+                    <MetaMessageCard entry={block.entry} />
+                  </div>
+                )
+              }
+              if (block.kind === 'user') {
+                return (
+                  <div key={block.entry.entryId} className={margin}>
+                    <UserMessageCard entry={block.entry} />
+                  </div>
+                )
+              }
               return (
-                <div key={block.entry.entryId} className={margin}>
-                  <MetaMessageCard entry={block.entry} />
-                </div>
-              )
-            }
-            if (block.kind === 'user') {
-              return (
-                <div key={block.entry.entryId} className={margin}>
-                  <UserMessageCard entry={block.entry} />
-                </div>
-              )
-            }
-            return (
-              <div key={`turn-${i}`} className={margin}>
-                <AssistantTurnCard
-                  block={block}
-                  agentId={agentId}
-                  agentName={agentName}
-                  streaming={isRunning && i === blocks.length - 1 && !showLive}
-                  isFollowup={isFollowup}
-                />
-              </div>
-            )
-          })}
-
-          {/* Live uncommitted stream — applies the same follow-up rule
-              against the last committed block so a streaming continuation
-              of the agent's own burst stays tight. */}
-          {showLive &&
-            (() => {
-              const last = blocks.length > 0 ? (blocks[blocks.length - 1] ?? null) : null
-              const streamIsFollowup =
-                last !== null &&
-                last.kind === 'assistant-turn' &&
-                last.timestampMs !== null &&
-                Date.now() - last.timestampMs <= FOLLOWUP_WINDOW_MS
-              const margin = blocks.length === 0 ? '' : streamIsFollowup ? 'mt-2' : 'mt-7'
-              return (
-                <div className={margin}>
-                  <StreamingCard
-                    text={streamingText ?? ''}
+                <div key={`turn-${i}`} className={margin}>
+                  <AssistantTurnCard
+                    block={block}
                     agentId={agentId}
                     agentName={agentName}
+                    streaming={isRunning && i === blocks.length - 1 && !showLive}
+                    isFollowup={isFollowup}
                   />
                 </div>
               )
-            })()}
+            })}
 
-          <div ref={bottomRef} aria-hidden />
-        </div>
-      )}
+            {/* Live uncommitted stream — applies the same follow-up rule
+              against the last committed block so a streaming continuation
+              of the agent's own burst stays tight. */}
+            {showLive &&
+              (() => {
+                const last = blocks.length > 0 ? (blocks[blocks.length - 1] ?? null) : null
+                const streamIsFollowup =
+                  last !== null &&
+                  last.kind === 'assistant-turn' &&
+                  last.timestampMs !== null &&
+                  Date.now() - last.timestampMs <= FOLLOWUP_WINDOW_MS
+                const margin = blocks.length === 0 ? '' : streamIsFollowup ? 'mt-2' : 'mt-7'
+                return (
+                  <div className={margin}>
+                    <StreamingCard
+                      text={streamingText ?? ''}
+                      agentId={agentId}
+                      agentName={agentName}
+                    />
+                  </div>
+                )
+              })()}
+
+            <div ref={bottomRef} aria-hidden />
+          </div>
+        )}
+      </div>
+      <JumpToLatestButton show={!atBottom} hasNew={hasNewBelow} onClick={jumpToBottom} />
     </div>
   )
 })
