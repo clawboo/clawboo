@@ -15,10 +15,10 @@ Both transports read and write the **same SQLite database**, which is the shared
 ## Prerequisites
 
 <Note>
-Node 22+ is required to run the stdio bins (they are `node` scripts). For HTTP, a running Clawboo server is required (`npx clawboo`; see [Installation](/getting-started/installation)).
+Node 22+ is required to run the stdio bins (they are `node` scripts). For HTTP, a running Clawboo server is required (`clawboo`; see [Installation](/getting-started/installation)).
 </Note>
 
-- The four stdio bins ship in the `clawboo` npm package (`bin` entries), so a clean `npx clawboo` install has them. For HTTP, nothing extra is needed beyond a running server.
+- The four stdio bins ship in the `clawboo` npm package (`bin` entries), so a clean Clawboo install has them. For HTTP, nothing extra is needed beyond a running server.
 - The external agent must already speak MCP (initialize → `tools/list` → `tools/call`). The tool surface per server is in [MCP tools reference](/reference/mcp-tools).
 
 ## At a glance

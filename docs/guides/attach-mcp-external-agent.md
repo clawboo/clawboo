@@ -18,10 +18,10 @@ Clawboo's own runtimes get a *scoped* attach config injected automatically at ru
 ## Prerequisites
 
 <Note>
-Node 22+ (the stdio bins are `node` scripts). For Streamable HTTP, a running Clawboo server (`npx clawboo`, see [Installation](/getting-started/installation)).
+Node 22+ (the stdio bins are `node` scripts). For Streamable HTTP, a running Clawboo server (`clawboo`, see [Installation](/getting-started/installation)).
 </Note>
 
-- A running Clawboo, or a clean `npx clawboo` install (the four stdio bins ship in the CLI package).
+- A running Clawboo, or a clean Clawboo install (the four stdio bins ship in the CLI package).
 - An external agent that already speaks MCP: `initialize` → `tools/list` → `tools/call`. Anything MCP-capable can attach; it does not have to be a Clawboo runtime.
 - The team id (and, for scoping, the agent id) you want the external agent to act as. Read them from [`GET /api/teams`](/reference/rest-api/teams) and [`GET /api/agents`](/reference/rest-api/agents).
 
@@ -98,7 +98,7 @@ The agent then runs `initialize` (which mints an `mcp-session-id`), `tools/list`
 
 ### 2b. Wire it in: over stdio (Claude Code)
 
-The agent spawns the bin and talks JSON-RPC over stdio. The bin ships in the `clawboo` package, so a clean `npx clawboo` install has it:
+The agent spawns the bin and talks JSON-RPC over stdio. The bin ships in the `clawboo` package, so a clean Clawboo install has it:
 
 ```bash
 claude mcp add clawboo-tasks -e CLAWBOO_DB_PATH=/Users/you/.clawboo/clawboo.db -- node /path/to/dist/bin/tasks.js

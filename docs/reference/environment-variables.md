@@ -305,7 +305,7 @@ The OTel export bridge is the only opt-in subsystem. Without these variables, th
 ## See also
 
 - [Configuration reference](/reference/configuration): `settings.json` schema, state directory, and the OpenClaw token-resolution chain
-- [CLI reference](/reference/cli): `npx clawboo` and the MCP stdio bins
+- [CLI reference](/reference/cli): `clawboo` and the MCP stdio bins
 - [Connecting runtimes](/runtimes/connecting-runtimes): install, connect, and the encrypted credential vault
 - [Security](/operating/security): access gate, loopback binding, vault, and redaction
 - [Deployment](/operating/deployment): ports, fallback, state directory, and the bundled server

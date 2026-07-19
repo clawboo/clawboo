@@ -83,7 +83,7 @@ Clawboo is ready!
 
 ## What just happened
 
-`npx clawboo` ran a launcher that started Clawboo's **bundled server**, a single self-contained Node process that serves both the dashboard UI and every `/api/*` route, and pointed your browser at it. The server bound to **loopback only** (`127.0.0.1`) so a fresh install is never reachable from other machines on your network, picked a free port, and recorded that port so the next `npx clawboo` can find it again. All of Clawboo's own state lives under `~/.clawboo`; nothing was written into your project or your global Node install.
+`clawboo` ran a launcher that started Clawboo's **bundled server**, a single self-contained Node process that serves both the dashboard UI and every `/api/*` route, and pointed your browser at it. The server bound to **loopback only** (`127.0.0.1`) so a fresh install is never reachable from other machines on your network, picked a free port, and recorded that port so the next `clawboo` can find it again. All of Clawboo's own state lives under `~/.clawboo`; nothing was written into your project or your global Node install.
 
 ## Port discovery
 
@@ -96,7 +96,7 @@ The launcher and the server share one port-resolution scheme so they always agre
 | **Signature probe**  | The CLI doesn't trust a bare open TCP port. It does an HTTP `GET /api/settings` and only accepts a response that is Clawboo-shaped JSON (it must contain a `gatewayUrl` string and a `hasToken` boolean). This is why the launcher correctly skips an OpenClaw Gateway auxiliary port or a Chrome `--remote-debugging-port` that happens to sit in the same range. |
 | **Free-port scan**   | When starting fresh, the server tries `18790` and scans up to 20 consecutive ports (`18790`→`18809`) for the first free one.                                                                                                                                                                                                                                       |
 | **Explicit pin**     | Set `CLAWBOO_API_PORT=<port>` to force a specific port. It is used exactly and the server fails loudly if that port is taken (no fallback when you've chosen explicitly).                                                                                                                                                                                          |
-| **Port file**        | After binding, the server writes the chosen port to `~/.clawboo/api-port.txt` so the next `npx clawboo` (and the Vite dev proxy, and the e2e helpers) can discover it without scanning.                                                                                                                                                                            |
+| **Port file**        | After binding, the server writes the chosen port to `~/.clawboo/api-port.txt` so the next `clawboo` (and the Vite dev proxy, and the e2e helpers) can discover it without scanning.                                                                                                                                                                                |
 
 <Tip>
 If `18790` is busy, both the launcher and the server will quietly move up to the next free port and report it. You never have to free port 3000-style collisions; Clawboo stays out of the commonly-contested low ports.
@@ -104,12 +104,12 @@ If `18790` is busy, both the launcher and the server will quietly move up to the
 
 ## Bundled vs dev launch
 
-`npx clawboo` runs the **bundled server**; `server.js` sits next to the CLI entry point in the published package, and the launcher `fork`s it with `NODE_ENV=production`, detached, so it keeps running after the CLI exits. This is the path every end user takes.
+`clawboo` runs the **bundled server**; `server.js` sits next to the CLI entry point in the published package, and the launcher `fork`s it with `NODE_ENV=production`, detached, so it keeps running after the CLI exits. This is the path every end user takes.
 
 There is also a **dev launch** used only when you run the CLI from inside a checkout of the Clawboo monorepo (no bundled `server.js` present): the launcher walks up to find the repo root and spawns `npx tsx apps/web/server/index.ts` instead. Working inside the repo, you'll normally start the dev environment directly with `pnpm dev`, which runs an orchestrator that picks a free API port up front and then runs the Express API and the Vite dev server (`:5173`) together so both agree on the port.
 
 <Note>
-The dev launch is an internal fallback for contributors. For installing and using Clawboo, `npx clawboo` and the bundled server are all you need. See [Deployment](/operating/deployment) for the full launch model.
+The dev launch is an internal fallback for contributors. For installing and using Clawboo, `clawboo` and the bundled server are all you need. See [Deployment](/operating/deployment) for the full launch model.
 </Note>
 
 ## Where state lives
@@ -137,11 +137,11 @@ Deleting `~/.clawboo` permanently removes your teams, board tasks, chat history,
 </Warning>
 
 <Warning>
-**"Dashboard is taking too long to start."** On a first cold boot, especially on Windows, where Defender scans the freshly-extracted package, the bundled server can take 20–30 seconds to bind. The launcher waits up to 45 seconds. If it still times out, run `npx clawboo` again; the second launch is warm and fast.
+**"Dashboard is taking too long to start."** On a first cold boot, especially on Windows, where Defender scans the freshly-extracted package, the bundled server can take 20–30 seconds to bind. The launcher waits up to 45 seconds. If it still times out, run `clawboo` again; the second launch is warm and fast.
 </Warning>
 
 <Warning>
-**The browser opened to the wrong page (e.g. "Unauthorized").** The launcher matched a non-Clawboo listener in the `18790`→`18809` range. The current launcher verifies the Clawboo JSON signature before opening the browser, so it skips Gateway auxiliary ports and Chrome's debug port. To pin a specific known-free port, set `CLAWBOO_API_PORT=<port> npx clawboo`.
+**The browser opened to the wrong page (e.g. "Unauthorized").** The launcher matched a non-Clawboo listener in the `18790`→`18809` range. The current launcher verifies the Clawboo JSON signature before opening the browser, so it skips Gateway auxiliary ports and Chrome's debug port. To pin a specific known-free port, set `CLAWBOO_API_PORT=<port> clawboo`.
 </Warning>
 
 ## Next steps

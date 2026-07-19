@@ -25,7 +25,7 @@ This page is a reading guide to those files, not a replacement for them. When in
 
 The repository's [`LICENSE`](https://github.com/clawboo/clawboo/blob/main/LICENSE) is the standard MIT License, `Copyright (c) 2026 Sanreds`. It grants permission to use, copy, modify, merge, publish, distribute, sublicense, and sell copies, with the usual "AS IS", no-warranty disclaimer, on the condition that the copyright notice and permission notice are retained in copies or substantial portions.
 
-The only npm-published artifact is the **`clawboo` CLI package** ([`apps/cli/package.json`](https://github.com/clawboo/clawboo/blob/main/apps/cli/package.json)), whose `license` field is `MIT`. Everything you install with `npx clawboo` ships under that license. See [The CLI](/reference/cli) for what the package contains and [Deployment](/operating/deployment) for how it boots.
+The only npm-published artifact is the **`clawboo` CLI package** ([`apps/cli/package.json`](https://github.com/clawboo/clawboo/blob/main/apps/cli/package.json)), whose `license` field is `MIT`. Everything you install with `npm install -g clawboo` (or `npx clawboo` to try it without installing) ships under that license. See [The CLI](/reference/cli) for what the package contains and [Deployment](/operating/deployment) for how it boots.
 
 <Note>
 Every workspace library under `packages/` is named `@clawboo/*` and marked `private: true`. None of them publish to npm independently; they are bundled into the CLI's `dist/server.js` and `dist/ui/` at assembly time. So "the published software" is exactly the one `clawboo` package, under MIT. See the [package overview](/reference/packages/index).

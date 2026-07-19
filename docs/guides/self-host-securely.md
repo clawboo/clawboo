@@ -13,7 +13,7 @@ Clawboo is single-tenant and local-first. There are no user accounts, roles, or 
 
 ## Prerequisites
 
-- A working Clawboo server you can start with `node dist/server.js` or `npx clawboo`. See [Deployment](/operating/deployment).
+- A working Clawboo server you can start with `node dist/server.js` or `clawboo`. See [Deployment](/operating/deployment).
 - For the recommended path: SSH access to the box, or a reverse proxy (nginx, Caddy) you can terminate TLS on.
 - For the wide-bind path: the ability to set environment variables on the process (`HOST`, `STUDIO_ACCESS_TOKEN`).
 

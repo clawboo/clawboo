@@ -15,7 +15,7 @@ The Board panel lives in the `BoardPanel` React module and reads `GET /api/board
 The Board panel is always available. Its subsystem is always on, so the panel renders real content with no feature gate; an empty board is just a board with no tasks yet.
 </Note>
 
-- A running Clawboo dashboard (`npx clawboo`).
+- A running Clawboo dashboard (`clawboo`).
 - Tasks on the board. Tasks appear when a team delegates work in group chat, when an agent claims work, or when you create one directly via `POST /api/board`. A fresh install with no team activity shows empty columns.
 
 ## Open the board

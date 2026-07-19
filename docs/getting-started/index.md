@@ -19,10 +19,10 @@ These docs describe Clawboo **v0.3.0**, the current release.
 
 That is the full list. You do not need OpenClaw, a Gateway, Docker, or any database; Clawboo bundles its own SQLite store and dashboard server.
 
-## What `npx clawboo` does
+## What `clawboo` does
 
 ```bash
-npx clawboo
+clawboo
 ```
 
 The launcher prints the Clawboo logo, does a quick **informational** probe of the OpenClaw Gateway port (`localhost:18789`) so it can tell you whether a Gateway is already up, starts the bundled dashboard server, then opens your browser at the discovered URL. The dashboard binds to loopback `127.0.0.1` on port `18790` (auto-falling back through `18790–18809` if that port is busy). On a fresh machine the first-run wizard appears.
@@ -72,7 +72,7 @@ This path involves more moving parts (a separate CLI and a long-lived Gateway pr
 
 ## Next steps
 
-- [Installation](/getting-started/installation): what `npx clawboo` downloads and launches, ports, and the bundled server
+- [Installation](/getting-started/installation): what `clawboo` launches, ports, and the bundled server
 - [Quickstart: the native runtime (no Gateway)](/getting-started/quickstart-native): the recommended ~60-second path
 - [Quickstart: OpenClaw](/getting-started/quickstart-openclaw): the Gateway path
 - [Deploy your first team and watch it collaborate](/getting-started/first-team)
