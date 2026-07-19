@@ -10,18 +10,26 @@
 //     on connect, the `/api/chat-history` hydration, AND the optimistic user bubble
 //     all carry matching entryIds).
 //   • delta:     `event: delta`, `data` = { sessionKey, runId, text } with the FULL
-//     running text (REPLACE), NO `id:` (ephemeral — never advances the cursor).
+//     running text (REPLACE), NO `id:` (ephemeral — never advances the cursor). An
+//     EMPTY `text` is the CLEAR sentinel: the server publishes it when a streamed
+//     turn ends without a committed replacement, so the StreamingCard is dropped
+//     instead of lingering (and later "vanishing" against a wiped transcript).
 //   • board:     `event: board`, `data` = a `BoardChange`, NO `id:` (ephemeral). Applied
 //     to the board projection store so a cascade's BoardTaskCards update live; a
 //     gap-missed change is reconciled by a `GET /api/board` reload on (re)connect.
+//   • status:    `event: status`, `data` = { agentId, status }, NO `id:` (ephemeral).
+//     Patches the fleet store so the left-pane Working/Idle badges track a
+//     server-orchestrated run live (nothing else updates status for those runs).
 
 import { useEffect, useRef } from 'react'
 
+import type { AgentStatus } from '@clawboo/gateway-client'
 import type { TranscriptEntry } from '@clawboo/protocol'
 
 import type { BoardChange } from '@/features/group-chat/boardOrchestration'
 import { useBoardStore } from '@/stores/board'
 import { useChatStore } from '@/stores/chat'
+import { useFleetStore } from '@/stores/fleet'
 
 export interface TeamChatDelta {
   sessionKey: string
@@ -51,7 +59,10 @@ export function applyCommittedFrame(raw: string): void {
 
 /** Apply a live token delta: REPLACE the session's streaming text (the delta carries
  *  the FULL running text) + anchor its stream-start slot (first-capture-wins, so the
- *  live card sorts at the moment the turn began, not always-at-the-end). */
+ *  live card sorts at the moment the turn began, not always-at-the-end). An EMPTY
+ *  `text` is the server's CLEAR sentinel — the run ended with no committed
+ *  replacement, so drop the live card (the store would otherwise keep rendering an
+ *  orphaned StreamingCard until some unrelated later commit wiped it). */
 export function applyDeltaFrame(raw: string): void {
   let delta: TeamChatDelta
   try {
@@ -61,8 +72,43 @@ export function applyDeltaFrame(raw: string): void {
   }
   if (!delta || typeof delta.sessionKey !== 'string' || typeof delta.text !== 'string') return
   const chat = useChatStore.getState()
+  if (delta.text === '') {
+    chat.setStreamingText(delta.sessionKey, null)
+    chat.clearStreamStart(delta.sessionKey)
+    return
+  }
   chat.setStreamingText(delta.sessionKey, delta.text)
   chat.setStreamStart(delta.sessionKey, Date.now())
+}
+
+/** One agent's live run-state change (the SSE `status` frame payload). */
+export interface TeamAgentStatusUpdate {
+  agentId: string
+  status: 'running' | 'idle' | 'error'
+}
+
+const AGENT_STATUS_VALUES = new Set<string>(['running', 'idle', 'error'])
+
+/** Apply a live agent-status frame: patch the fleet store so the left-pane
+ *  Working/Idle badges (AgentRow + the GroupChatRow aggregate) track a
+ *  server-orchestrated run. Idempotent — repeated same-value frames are harmless
+ *  (for an OpenClaw team in gateway mode the browser's Gateway lifecycle patches
+ *  are a second writer; both converge on the same terminal state). Deliberately
+ *  patches STATUS ONLY — never `runId`: that field belongs to the Gateway 1:1
+ *  path (the surgical `chat.abort(sessionKey, runId)` Stop), and a team-run
+ *  terminal must not clobber a concurrent 1:1 run's live handle. */
+export function applyAgentStatusFrame(raw: string): void {
+  let update: TeamAgentStatusUpdate
+  try {
+    update = JSON.parse(raw) as TeamAgentStatusUpdate
+  } catch {
+    return
+  }
+  if (!update || typeof update.agentId !== 'string' || !AGENT_STATUS_VALUES.has(update.status))
+    return
+  const fleet = useFleetStore.getState()
+  fleet.patchAgent(update.agentId, { status: update.status as AgentStatus })
+  if (update.status !== 'running') fleet.updateLastSeen(update.agentId, Date.now())
 }
 
 /** Apply a board-projection change frame: last-write-wins into the board store for
@@ -126,6 +172,10 @@ export function useTeamChatStream({
       applyBoardChangeFrame(teamId, e.data as string)
       onActivityRef.current?.()
     }
+    const onStatus = (e: MessageEvent): void => {
+      applyAgentStatusFrame(e.data as string)
+      onActivityRef.current?.()
+    }
     // On (re)connect, reconcile any board change missed during the gap (board frames
     // are cursor-less). Idempotent last-write-wins merge; the initial-connect load is
     // redundant with GroupChatPanel's mount load but harmless.
@@ -135,12 +185,14 @@ export function useTeamChatStream({
     es.addEventListener('message', onCommitted)
     es.addEventListener('delta', onDelta as EventListener)
     es.addEventListener('board', onBoard as EventListener)
+    es.addEventListener('status', onStatus as EventListener)
     es.addEventListener('open', onOpen)
 
     return () => {
       es.removeEventListener('message', onCommitted)
       es.removeEventListener('delta', onDelta as EventListener)
       es.removeEventListener('board', onBoard as EventListener)
+      es.removeEventListener('status', onStatus as EventListener)
       es.removeEventListener('open', onOpen)
       es.close()
     }

@@ -9,8 +9,14 @@ import type { TranscriptEntry } from '@clawboo/protocol'
 
 import { useBoardStore } from '@/stores/board'
 import { useChatStore } from '@/stores/chat'
+import { useFleetStore, type AgentState } from '@/stores/fleet'
 
-import { applyBoardChangeFrame, applyCommittedFrame, applyDeltaFrame } from '../useTeamChatStream'
+import {
+  applyAgentStatusFrame,
+  applyBoardChangeFrame,
+  applyCommittedFrame,
+  applyDeltaFrame,
+} from '../useTeamChatStream'
 
 const SK = 'agent:a2:team:t1'
 
@@ -67,7 +73,11 @@ describe('applyCommittedFrame', () => {
   it('does NOT clear streaming for a non-assistant (meta) commit', () => {
     const chat = useChatStore.getState()
     chat.setStreamingText(SK, 'streaming…')
-    applyCommittedFrame(JSON.stringify(entry({ entryId: 'm', kind: 'meta', role: 'system', text: '[Task Update] x' })))
+    applyCommittedFrame(
+      JSON.stringify(
+        entry({ entryId: 'm', kind: 'meta', role: 'system', text: '[Task Update] x' }),
+      ),
+    )
     expect(useChatStore.getState().streamingText.get(SK)).toBe('streaming…')
   })
 
@@ -93,6 +103,68 @@ describe('applyDeltaFrame', () => {
     applyDeltaFrame('nope')
     applyDeltaFrame(JSON.stringify({ runId: 'r1' }))
     expect(useChatStore.getState().streamingText.size).toBe(0)
+  })
+
+  it('an EMPTY text is the CLEAR sentinel — drops the live card + its anchor', () => {
+    applyDeltaFrame(JSON.stringify({ sessionKey: SK, runId: 'r1', text: 'streamed then dropped' }))
+    expect(useChatStore.getState().streamingText.get(SK)).toBe('streamed then dropped')
+    // The server publishes an empty delta when a streamed turn ends with no committed
+    // replacement (silent delegation / write-time drop / dead stream) — without this
+    // the StreamingCard lingers and later "vanishes" against a wiped transcript.
+    applyDeltaFrame(JSON.stringify({ sessionKey: SK, runId: 'r1', text: '' }))
+    expect(useChatStore.getState().streamingText.get(SK)).toBeUndefined()
+    expect(useChatStore.getState().streamStartedAt.get(SK)).toBeUndefined()
+  })
+})
+
+describe('applyAgentStatusFrame', () => {
+  const agent = (over: Partial<AgentState>): AgentState => ({
+    id: 'a2',
+    name: 'Data Analyst Boo',
+    status: 'idle',
+    sessionKey: 'agent:a2:main',
+    model: null,
+    createdAt: null,
+    streamingText: null,
+    runId: null,
+    lastSeenAt: null,
+    teamId: 't1',
+    runtime: 'openclaw',
+    execConfig: null,
+    ...over,
+  })
+
+  beforeEach(() => {
+    useFleetStore.setState({ agents: [agent({})] })
+  })
+
+  it('patches the fleet status to running (the left-pane Working badge)', () => {
+    applyAgentStatusFrame(JSON.stringify({ agentId: 'a2', status: 'running' }))
+    expect(useFleetStore.getState().agents[0]?.status).toBe('running')
+  })
+
+  it('flips back to idle and freshens last-seen — but NEVER touches runId (the Gateway 1:1 abort handle)', () => {
+    useFleetStore.setState({ agents: [agent({ status: 'running', runId: 'r9' })] })
+    applyAgentStatusFrame(JSON.stringify({ agentId: 'a2', status: 'idle' }))
+    const a = useFleetStore.getState().agents[0]
+    expect(a?.status).toBe('idle')
+    // A team-run terminal must not clobber a concurrent 1:1 Gateway run's runId
+    // (the surgical chat.abort Stop needs it).
+    expect(a?.runId).toBe('r9')
+    expect(a?.lastSeenAt).not.toBeNull()
+  })
+
+  it('is idempotent — repeated same-value frames are harmless', () => {
+    applyAgentStatusFrame(JSON.stringify({ agentId: 'a2', status: 'running' }))
+    applyAgentStatusFrame(JSON.stringify({ agentId: 'a2', status: 'running' }))
+    expect(useFleetStore.getState().agents[0]?.status).toBe('running')
+  })
+
+  it('ignores malformed JSON / an unknown status value / an unknown agent', () => {
+    applyAgentStatusFrame('not json')
+    applyAgentStatusFrame(JSON.stringify({ agentId: 'a2', status: 'sprinting' }))
+    applyAgentStatusFrame(JSON.stringify({ agentId: 'ghost', status: 'running' }))
+    expect(useFleetStore.getState().agents[0]?.status).toBe('idle')
   })
 })
 

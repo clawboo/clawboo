@@ -8,6 +8,7 @@
 import { useEffect, useRef } from 'react'
 
 import {
+  applyAgentStatusFrame,
   applyCommittedFrame,
   applyDeltaFrame,
   type EventSourceFactory,
@@ -47,12 +48,21 @@ export function useNativeAgentChatStream({
       applyDeltaFrame(e.data as string)
       onActivityRef.current?.()
     }
+    // Live working/idle badge for the left pane — the server publishes run-boundary
+    // status frames; the applier patches the fleet store (nothing else reports
+    // run-state for a native 1:1 turn).
+    const onStatus = (e: MessageEvent): void => {
+      applyAgentStatusFrame(e.data as string)
+      onActivityRef.current?.()
+    }
     es.addEventListener('message', onCommitted)
     es.addEventListener('delta', onDelta as EventListener)
+    es.addEventListener('status', onStatus as EventListener)
 
     return () => {
       es.removeEventListener('message', onCommitted)
       es.removeEventListener('delta', onDelta as EventListener)
+      es.removeEventListener('status', onStatus as EventListener)
       es.close()
     }
   }, [agentId, enabled, eventSourceFactory])

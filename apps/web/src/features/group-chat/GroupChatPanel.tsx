@@ -331,7 +331,10 @@ export function GroupChatPanel({
       const teamSk = teamSessionKeys.get(agent.id)
       if (!teamSk) continue
       const text = streamingTextMap.get(teamSk)
-      if (text != null) {
+      // Empty string never renders — '' is the CLEAR sentinel on the SSE delta
+      // channel (applyDeltaFrame deletes the key, this is defense-in-depth), and an
+      // empty StreamingCard is a blank ghost either way.
+      if (text != null && text !== '') {
         // Stream-start anchors the live card's chronological position in
         // the timeline. Falls back to "now" on the first render after a
         // chunk lands but before the store update commits (vanishingly
@@ -442,8 +445,10 @@ export function GroupChatPanel({
     return items
   }, [topLevelBlocks, activeStreams, boardTaskList])
 
-  // The fleet store never reports "running" for a server-orchestrated team (no Gateway
-  // pushing status) — derive it from the SSE activity window.
+  // The composer's busy signal stays the SSE activity window: fleet statuses now DO
+  // track server-orchestrated runs (the SSE `status` frames patch them for the
+  // left-pane badges), but per-agent boundaries flap between delegated turns while
+  // the graced window holds Stop stable across a whole cascade.
   const running = serverBusy
 
   // ── Send handler ──────────────────────────────────────────────────────────

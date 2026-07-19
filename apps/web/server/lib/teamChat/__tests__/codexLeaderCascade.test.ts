@@ -11,8 +11,9 @@
 //   → extractSignals → board task create + claim → delivery to the codex WORKER
 //   → worker `done` → task `done` + report-up comment
 //   → `[Task Update]` reflection re-delivered to the LEADER (after REFLECT_WINDOW_MS)
-//   → the leader's SYNTHESIS turn is chat-persisted, while its delegation-ack turn is
-//     SUPPRESSED (delegatedThisTurn — the runtime-agnostic ack suppression).
+//   → BOTH leader turns are chat-persisted (the delegation turn's prose and the
+//     later synthesis — streamed replies never vanish), while the worker's task
+//     turn stays off the chat timeline (its surface is the BoardTaskCard).
 //
 // In this Boo-Zero-less install (no native member/key, no OpenClaw default) the
 // leader resolves via `booZeroForTeam` → null → `team.leaderAgentId` — the exact
@@ -225,7 +226,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
               input: { assignee: 'Codex Worker', task: 'write the CSV parser' },
               partial: false,
             } as unknown as RuntimeEvent,
-            done('handed off to the worker'), // the premature ack — must be SUPPRESSED
+            done('handed off to the worker'), // the ack — persists (streamed prose never vanishes)
           ],
           [done('SYNTHESIS: the CSV parser is written and tested')],
         ]),
@@ -243,7 +244,9 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
       onEvent: (sk, ev) => engineRef.current!.onEvent(sk, ev),
       onSessionClosed: (sk) => engineRef.current!.onSessionClosed(sk),
       taskForSession: (sk) => engineRef.current!.taskForSession(sk),
-      persistTurn: (sk, text) => persisted.push({ sk, text }),
+      persistTurn: (sk, text) => {
+        persisted.push({ sk, text })
+      },
       makeAdapterForAgent: (agentId) => adapters.get(agentId) ?? null,
     })
     const engine = createBoardOrchestrator({
@@ -266,8 +269,10 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     await deliver(skFor(LEAD), LEAD, 'team: build a CSV parser')
 
     // Settle the whole cascade: leader drain → spawn → worker drain → report-up →
-    // the 3s reflect batch → the leader's synthesis turn persisting to chat.
-    await settle(() => persisted.length >= 1)
+    // the 3s reflect batch → the leader's synthesis turn persisting to chat. The
+    // delegation-turn ack persists too now (streamed prose never vanishes), so wait
+    // for BOTH leader turns — settling on the first would race the synthesis.
+    await settle(() => persisted.length >= 2)
 
     // 1. The delegation became a DURABLE board task, ran on the worker, and is DONE.
     const tasks = listTasks(db, { teamId: TEAM })
@@ -290,13 +295,15 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     expect(leadStarts).toHaveLength(2)
     expect(leadStarts[1]!.message).toContain('[Task Update]')
 
-    // 5. Chat cleanliness: the leader's delegation-ACK turn was SUPPRESSED
-    //    (delegatedThisTurn — the runtime-agnostic DELEGATE_TOOL_RE), and the
-    //    worker's task turn never persists to chat — ONLY the synthesis lands.
-    expect(persisted).toHaveLength(1)
-    expect(persisted[0]!.sk).toBe(skFor(LEAD))
-    expect(persisted[0]!.text).toContain('SYNTHESIS')
-    expect(persisted.map((p) => p.text).join('\n')).not.toContain('handed off')
+    // 5. Chat surfacing: BOTH leader turns persist — the delegation turn's prose
+    //    (the old suppression made streamed replies vanish; retired) and the later
+    //    synthesis. The WORKER's task turn still never persists to chat — its
+    //    output surface is the BoardTaskCard (the report-up comment above).
+    expect(persisted).toHaveLength(2)
+    expect(persisted.every((p) => p.sk === skFor(LEAD))).toBe(true)
+    expect(persisted[0]!.text).toContain('handed off')
+    expect(persisted[1]!.text).toContain('SYNTHESIS')
+    expect(persisted.map((p) => p.text).join('\n')).not.toContain('parser written')
 
     // 6. Leader CONTINUITY: the pointer holds the LAST leader turn's native thread
     //    id (turn 2 = the synthesis run), written via the adapter's sessionCodec —

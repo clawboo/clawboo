@@ -6,6 +6,7 @@ import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useChatStore } from '@/stores/chat'
+import { useFleetStore, type AgentState } from '@/stores/fleet'
 
 import { useTeamChatStream } from '../useTeamChatStream'
 
@@ -92,6 +93,35 @@ describe('useTeamChatStream', () => {
     expect(onActivity).toHaveBeenCalledTimes(2)
   })
 
+  it('routes status frames into the fleet store (the left-pane Working/Idle badges)', () => {
+    const a: AgentState = {
+      id: 'a2',
+      name: 'Data Analyst Boo',
+      status: 'idle',
+      sessionKey: 'agent:a2:main',
+      model: null,
+      createdAt: null,
+      streamingText: null,
+      runId: null,
+      lastSeenAt: null,
+      teamId: 't1',
+      runtime: 'openclaw',
+      execConfig: null,
+    }
+    useFleetStore.setState({ agents: [a] })
+    const es = new FakeEventSource('/x')
+    const onActivity = vi.fn()
+    render(<Harness es={es} onActivity={onActivity} />)
+
+    act(() => es.emit('status', JSON.stringify({ agentId: 'a2', status: 'running' })))
+    expect(useFleetStore.getState().agents[0]?.status).toBe('running')
+
+    act(() => es.emit('status', JSON.stringify({ agentId: 'a2', status: 'idle' })))
+    expect(useFleetStore.getState().agents[0]?.status).toBe('idle')
+
+    expect(onActivity).toHaveBeenCalledTimes(2)
+  })
+
   it('closes the stream on unmount', () => {
     const es = new FakeEventSource('/x')
     const { unmount } = render(<Harness es={es} onActivity={vi.fn()} />)
@@ -102,9 +132,7 @@ describe('useTeamChatStream', () => {
 
   it('is inert when disabled (no EventSource opened)', () => {
     const factory = vi.fn()
-    render(
-      <DisabledHarness factory={factory} />,
-    )
+    render(<DisabledHarness factory={factory} />)
     expect(factory).not.toHaveBeenCalled()
   })
 })

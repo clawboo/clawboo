@@ -15,6 +15,7 @@ import {
 } from '../lib/agentChat/driveAgentChat'
 import { getDbPath } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
+import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
 import { subscribeChatDelta } from '../lib/teamChat/chatDeltaBus'
 
 const STREAM_POLL_MS = 750
@@ -23,12 +24,7 @@ const STREAM_KEEPALIVE_MS = 20_000
 /** Persist the user's message under the native 1:1 session so the SSE tail replays
  *  it AND it's durable. Idempotent on entryId (the optimistic client bubble + this
  *  replay share the id → the client dedups). */
-function persistUserEntry(
-  db: ClawbooDb,
-  agentId: string,
-  text: string,
-  entryId: string,
-): void {
+function persistUserEntry(db: ClawbooDb, agentId: string, text: string, entryId: string): void {
   const sessionKey = nativeChatSessionKey(agentId)
   const now = Date.now()
   try {
@@ -145,7 +141,11 @@ export function agentChatStreamGET(req: Request, res: Response): void {
   const poll = (): void => {
     if (closed) return
     try {
-      const rows = listChatMessagesSince(db, { sessionKeys: [sessionKey], afterId: cursor, limit: 500 })
+      const rows = listChatMessagesSince(db, {
+        sessionKeys: [sessionKey],
+        afterId: cursor,
+        limit: 500,
+      })
       for (const r of rows) {
         if (r.id > cursor) cursor = r.id
         res.write(`id: ${r.id}\n`)
@@ -163,6 +163,19 @@ export function agentChatStreamGET(req: Request, res: Response): void {
     res.write(`data: ${JSON.stringify(delta)}\n\n`)
   })
 
+  // Live working/idle signal for THIS agent's native turn — a named `status` event
+  // with NO `id:` line (ephemeral, off the resume cursor); the client patches the
+  // fleet store so the left-pane badge tracks the turn. The connect-time snapshot
+  // replay reconciles a badge left stale by a terminal that published while no
+  // stream was open (status frames are never cursor-replayed).
+  const writeStatus = (update: { agentId: string; status: string }): void => {
+    if (closed) return
+    res.write('event: status\n')
+    res.write(`data: ${JSON.stringify(update)}\n\n`)
+  }
+  for (const update of getAgentStatusSnapshot(sessionKey)) writeStatus(update)
+  const unsubStatus = subscribeAgentStatus(sessionKey, writeStatus)
+
   const pollTimer = setInterval(poll, STREAM_POLL_MS)
   const keepalive = setInterval(() => {
     if (!closed) res.write(': keepalive\n\n')
@@ -173,6 +186,7 @@ export function agentChatStreamGET(req: Request, res: Response): void {
     clearInterval(pollTimer)
     clearInterval(keepalive)
     unsub()
+    unsubStatus()
     try {
       db.$client.close()
     } catch {

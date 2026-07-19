@@ -27,8 +27,10 @@ import { homeDispatchMutex } from '../executorRunner'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
+import { persistNativeChatEntry } from '../runtimes/native/nativeDriver'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKey } from '../secretsVault'
+import { publishAgentStatus } from '../teamChat/agentStatusBus'
 import { publishChatDelta } from '../teamChat/chatDeltaBus'
 
 const NATIVE_RUNTIME = 'clawboo-native'
@@ -164,15 +166,32 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
       return
     }
     abortMap.set(sessionKey, { adapter, run })
+    // Left-pane liveness: flip the agent's badge to Working for the turn (the SSE
+    // stream forwards this as an ephemeral `status` event; the thin client patches
+    // the fleet store — nothing else reports run-state for a native 1:1 turn).
+    publishAgentStatus(sessionKey, { agentId, status: 'running' })
     // Accumulate the run's user-visible assistant text; publish the RUNNING total on
     // each delta (REPLACE semantics matching the client store). Tolerate BOTH delta
     // conventions (native emits incremental chunks; a cumulative delta REPLACES).
     let acc = ''
+    // Stream-without-commit belt (mirrors serverDeliver): a turn that streamed live
+    // tokens but will never land a committed row must not leave a StreamingCard
+    // that lingers-then-vanishes. Two arms below: a turn that DIED mid-reply
+    // (fatal error / max-turns / dead stream) commits the watched partial text —
+    // the team-path parity, so it survives reload; a user Stop (`done:aborted`)
+    // stays discarded (the client cleared optimistically — the Gateway 1:1 Stop
+    // convention) and gets one CLEARING delta instead.
+    let publishedDelta = false
+    let sawCleanCommit = false
+    let userAborted = false
     try {
       for await (const ev of adapter.events(run) as AsyncIterable<RuntimeEvent>) {
         if (ev.kind === 'text-delta' && ev.channel !== 'reasoning') {
           acc = acc && ev.text.startsWith(acc) ? ev.text : acc + ev.text
-          publishChatDelta(sessionKey, { sessionKey, runId: ev.runId, text: acc })
+          if (acc) {
+            publishChatDelta(sessionKey, { sessionKey, runId: ev.runId, text: acc })
+            publishedDelta = true
+          }
         }
         if (ev.kind === 'cost' && ev.costUsd != null && ev.costUsd > 0) {
           const r = recordSpend(db, 'agent', agentId, usdToFractionalCents(ev.costUsd))
@@ -180,13 +199,29 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
             await adapter.abort(run).catch(() => undefined)
         }
         const terminal = ev.kind === 'done' || (ev.kind === 'error' && ev.fatal)
-        if (terminal) break
+        if (terminal) {
+          // The native driver's own persist condition (`result && ev.ok` + non-empty
+          // text) — only a matching terminal produces the committed row that clears
+          // the client's streaming card.
+          sawCleanCommit = ev.kind === 'done' && ev.reason === 'success' && !!ev.summary?.trim()
+          userAborted = ev.kind === 'done' && ev.reason === 'aborted'
+          break
+        }
       }
     } catch {
       // Stream / observer error — fall through to cleanup (the driver persisted
       // whatever reply it produced; a partial run just ends).
     }
     abortMap.delete(sessionKey)
+    if (!sawCleanCommit && !userAborted && acc.trim()) {
+      // Died mid-reply: commit the partial the user watched (the SSE tail replays
+      // it as a committed frame, which also clears the client's StreamingCard).
+      persistNativeChatEntry(db, agentId, acc)
+    } else if (publishedDelta && !sawCleanCommit) {
+      publishChatDelta(sessionKey, { sessionKey, runId: null, text: '' })
+    }
+    // Turn over (clean terminal, abort, or dead stream) — back to Idle either way.
+    publishAgentStatus(sessionKey, { agentId, status: 'idle' })
     // CONTINUATION: remember THIS turn's harness session id so the NEXT turn resumes
     // it (the harness saved the cumulative transcript under it at the terminal, before
     // emitting `done`). Best-effort — only when the runtime persists (homeDir) + exposes

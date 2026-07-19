@@ -10,7 +10,8 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { agents, createDb, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { agents, chatMessages, createDb, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import type {
   Capabilities,
   RunHandle,
@@ -123,13 +124,17 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     const deltas: string[] = []
     const unsub = subscribeChatDelta(sk, (d) => deltas.push(d.text))
 
-    const adapter = new FakeAdapter(
-      (run) =>
-        (async function* () {
-          yield { ...base(run.sessionKey, 1), kind: 'text-delta', text: 'Hi ', channel: 'assistant' }
-          yield { ...base(run.sessionKey, 2), kind: 'text-delta', text: 'there', channel: 'assistant' }
-          yield { ...base(run.sessionKey, 3), kind: 'done', reason: 'success', summary: 'Hi there' }
-        })(),
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'text-delta', text: 'Hi ', channel: 'assistant' }
+        yield {
+          ...base(run.sessionKey, 2),
+          kind: 'text-delta',
+          text: 'there',
+          channel: 'assistant',
+        }
+        yield { ...base(run.sessionKey, 3), kind: 'done', reason: 'success', summary: 'Hi there' }
+      })(),
     )
 
     await driveAgentChat({
@@ -151,15 +156,30 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     const sk = nativeChatSessionKey('native-x')
     const deltas: string[] = []
     const unsub = subscribeChatDelta(sk, (d) => deltas.push(d.text))
-    const adapter = new FakeAdapter(
-      (run) =>
-        (async function* () {
-          yield { ...base(run.sessionKey, 1), kind: 'text-delta', text: 'thinking…', channel: 'reasoning' }
-          yield { ...base(run.sessionKey, 2), kind: 'text-delta', text: 'answer', channel: 'assistant' }
-          yield { ...base(run.sessionKey, 3), kind: 'done', reason: 'success', summary: 'answer' }
-        })(),
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'text-delta',
+          text: 'thinking…',
+          channel: 'reasoning',
+        }
+        yield {
+          ...base(run.sessionKey, 2),
+          kind: 'text-delta',
+          text: 'answer',
+          channel: 'assistant',
+        }
+        yield { ...base(run.sessionKey, 3), kind: 'done', reason: 'success', summary: 'answer' }
+      })(),
     )
-    await driveAgentChat({ db, agentId: 'native-x', message: 'q', mcpBaseUrl: null, makeAdapter: () => adapter })
+    await driveAgentChat({
+      db,
+      agentId: 'native-x',
+      message: 'q',
+      mcpBaseUrl: null,
+      makeAdapter: () => adapter,
+    })
     expect(deltas).toEqual(['answer'])
     unsub()
   })
@@ -167,13 +187,12 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
   it('stopAgentChat aborts the in-flight run', async () => {
     seedAgent('native-x', 'clawboo-native')
     const gate = deferred()
-    const adapter = new FakeAdapter(
-      (run) =>
-        (async function* () {
-          yield { ...base(run.sessionKey, 1), kind: 'text-delta', text: 'x', channel: 'assistant' }
-          await gate.promise
-          yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'x' }
-        })(),
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'text-delta', text: 'x', channel: 'assistant' }
+        await gate.promise
+        yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'x' }
+      })(),
     )
     const running = driveAgentChat({
       db,
@@ -187,6 +206,72 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     expect(adapter.aborted).toBe(1)
     gate.resolve()
     await running
+  })
+
+  it('a turn that DIES mid-reply commits the watched partial text (survives reload); a user Stop clears instead', async () => {
+    seedAgent('native-x', 'clawboo-native')
+    const sk = nativeChatSessionKey('native-x')
+    const rows = (): string[] =>
+      db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionKey, sk))
+        .all()
+        .map((r) => (JSON.parse(r.data as string) as { text: string }).text)
+
+    // Fatal provider error after streaming a partial → the partial is PERSISTED
+    // (the SSE tail replays it as a committed frame, which clears the client card).
+    const dying = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'text-delta',
+          text: 'partial reply',
+          channel: 'assistant',
+        }
+        yield {
+          ...base(run.sessionKey, 2),
+          kind: 'error',
+          code: 'provider_down',
+          message: 'boom',
+          fatal: true,
+        }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'native-x',
+      message: 'q',
+      mcpBaseUrl: null,
+      makeAdapter: () => dying,
+    })
+    expect(rows()).toContain('partial reply')
+
+    // A user Stop (`done:aborted`) stays DISCARDED (the Gateway 1:1 convention; the
+    // client cleared optimistically) — a clearing delta rides the bus instead.
+    const deltas: string[] = []
+    const unsub = subscribeChatDelta(sk, (d) => deltas.push(d.text))
+    const stopped = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'text-delta',
+          text: 'cut short',
+          channel: 'assistant',
+        }
+        yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'aborted', summary: '' }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'native-x',
+      message: 'q2',
+      mcpBaseUrl: null,
+      makeAdapter: () => stopped,
+    })
+    expect(rows()).not.toContain('cut short')
+    expect(deltas).toEqual(['cut short', ''])
+    unsub()
   })
 
   it('a non-native agent (no injected adapter) never runs', async () => {
@@ -203,9 +288,9 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     setSetting(db, key, 'native-abc123')
     expect(getSetting(db, key)).toBe('native-abc123')
     // chatHistoryDELETE opens its own createDb(getDbPath()) — the SAME sandbox file.
-    const req = { query: { sessionKey: nativeChatSessionKey('native-x') } } as unknown as Parameters<
-      typeof chatHistoryDELETE
-    >[0]
+    const req = {
+      query: { sessionKey: nativeChatSessionKey('native-x') },
+    } as unknown as Parameters<typeof chatHistoryDELETE>[0]
     const res = {
       json: () => res,
       status: () => res,
