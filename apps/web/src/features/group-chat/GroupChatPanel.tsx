@@ -22,7 +22,8 @@ import {
   StreamingCard,
   MetaMessageCard,
   MessageComposer,
-  NEAR_BOTTOM_PX,
+  useChatAutoScroll,
+  JumpToLatestButton,
   isFollowupBlock,
   blockMarginClass,
   type MessageComposerHandle,
@@ -315,24 +316,6 @@ export function GroupChatPanel({
     void useBoardStore.getState().load(teamId)
   }, [teamId])
 
-  // ── Auto-scroll ───────────────────────────────────────────────────────────
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const pinnedRef = useRef(true)
-  const rafRef = useRef<number | null>(null)
-
-  const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'instant' })
-  }, [])
-
-  const scheduleScroll = useCallback(() => {
-    if (rafRef.current !== null) return
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null
-      scrollToBottom()
-    })
-  }, [scrollToBottom])
-
   // Collect all streaming texts for participants (using team-scoped sessionKeys).
   // Boo Zero's stream lands in the merged transcript with its own avatar/name.
   // Every participant's live stream renders as a top-level StreamingCard.
@@ -365,6 +348,12 @@ export function GroupChatPanel({
     }
     return streams
   }, [participants, teamSessionKeys, streamingTextMap, streamStartedAtMap])
+
+  // Auto-scroll + jump-to-latest (shared with 1:1 chat). The signature re-fires
+  // the pinned auto-scroll whenever a block commits or a stream starts/stops, and
+  // flags "new messages below" when that happens while the user is scrolled up.
+  const { scrollRef, bottomRef, handleScroll, atBottom, hasNewBelow, jumpToBottom } =
+    useChatAutoScroll(`${topLevelBlocks.length}|${activeStreams.length}`)
 
   // ── Activity-window busy clear (server teams) ─────────────────────────────
   // Poll while busy: once no SSE frame has arrived for `SERVER_BUSY_GRACE_MS` AND
@@ -456,22 +445,6 @@ export function GroupChatPanel({
   // The fleet store never reports "running" for a server-orchestrated team (no Gateway
   // pushing status) — derive it from the SSE activity window.
   const running = serverBusy
-
-  useEffect(() => {
-    if (pinnedRef.current) scheduleScroll()
-    return () => {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current)
-        rafRef.current = null
-      }
-    }
-  }, [topLevelBlocks.length, activeStreams.length, scheduleScroll])
-
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
-  }, [])
 
   // ── Send handler ──────────────────────────────────────────────────────────
   const handleSend = useCallback(
@@ -620,151 +593,161 @@ export function GroupChatPanel({
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4" onScroll={handleScroll}>
-        {isEmpty ? (
-          <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
-            {/* Team mascot stack — up to 4 avatars overlapping, mirroring
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+          onScroll={handleScroll}
+        >
+          {isEmpty ? (
+            <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
+              {/* Team mascot stack — up to 4 avatars overlapping, mirroring
                 the GroupChatRow visual so the empty state visually anchors
                 to the same team identity the user clicked to get here. */}
-            {participants.length > 0 && (
-              <div className="flex items-center">
-                {participants.slice(0, 4).map((agent, idx) => (
-                  <div
-                    key={agent.id}
-                    className="rounded-full ring-2 ring-background"
-                    style={{
-                      marginLeft: idx === 0 ? 0 : -10,
-                      zIndex: participants.length - idx,
-                    }}
-                  >
-                    <AgentBooAvatar agentId={agent.id} size={42} />
-                  </div>
-                ))}
-                {participants.length > 4 && (
-                  <div
-                    className="font-data flex h-[42px] w-[42px] items-center justify-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground/60 ring-2 ring-background"
-                    style={{ marginLeft: -10 }}
-                  >
-                    +{participants.length - 4}
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="flex flex-col gap-1.5">
-              <p
-                className="text-[17px] font-bold text-foreground/90"
-                style={{
-                  fontFamily: 'var(--font-display)',
-                  letterSpacing: '-0.01em',
-                }}
-              >
-                {team?.name ? `Welcome to ${team.name}` : 'Welcome to the team'}
-              </p>
-              <p className="max-w-[300px] text-[13px] leading-relaxed text-foreground/50">
-                Send a message to start, or ping a teammate with{' '}
-                <span className="font-data text-foreground/60">@</span>.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col pb-2">
-            {(() => {
-              // Track previous BLOCK across the loop (not previous stream)
-              // so the same-author follow-up grouping survives stream
-              // interruptions. Streams are always rendered with the
-              // "new section" margin — they don't participate in the
-              // Slack/Discord/iMessage author-grouping rhythm.
-              let prevBlock: (typeof topLevelBlocks)[number] | null = null
-              let prevOwnerAgentId: string | null = null
-              let blockIdx = -1
-              const lastBlockSeenIdx = topLevelBlocks.length - 1
-
-              return renderItems.map((item, i) => {
-                if (item.kind === 'stream') {
-                  const stream = item.stream
-                  return (
+              {participants.length > 0 && (
+                <div className="flex items-center">
+                  {participants.slice(0, 4).map((agent, idx) => (
                     <div
-                      key={`stream-wrap-${stream.agentId}-${stream.sessionKey}`}
-                      className={i === 0 ? '' : 'mt-7'}
+                      key={agent.id}
+                      className="rounded-full ring-2 ring-background"
+                      style={{
+                        marginLeft: idx === 0 ? 0 : -10,
+                        zIndex: participants.length - idx,
+                      }}
                     >
-                      <StreamingCard
-                        text={stream.text}
-                        agentId={stream.agentId}
-                        agentName={stream.agentName}
-                      />
+                      <AgentBooAvatar agentId={agent.id} size={42} />
                     </div>
-                  )
-                }
-                if (item.kind === 'board-task') {
-                  return (
-                    <div key={`board-task-${item.task.id}`} className={i === 0 ? '' : 'mt-3'}>
-                      <BoardTaskCard task={item.task} />
+                  ))}
+                  {participants.length > 4 && (
+                    <div
+                      className="font-data flex h-[42px] w-[42px] items-center justify-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground/60 ring-2 ring-background"
+                      style={{ marginLeft: -10 }}
+                    >
+                      +{participants.length - 4}
                     </div>
+                  )}
+                </div>
+              )}
+              <div className="flex flex-col gap-1.5">
+                <p
+                  className="text-[17px] font-bold text-foreground/90"
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    letterSpacing: '-0.01em',
+                  }}
+                >
+                  {team?.name ? `Welcome to ${team.name}` : 'Welcome to the team'}
+                </p>
+                <p className="max-w-[300px] text-[13px] leading-relaxed text-foreground/50">
+                  Send a message to start, or ping a teammate with{' '}
+                  <span className="font-data text-foreground/60">@</span>.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col pb-2">
+              {(() => {
+                // Track previous BLOCK across the loop (not previous stream)
+                // so the same-author follow-up grouping survives stream
+                // interruptions. Streams are always rendered with the
+                // "new section" margin — they don't participate in the
+                // Slack/Discord/iMessage author-grouping rhythm.
+                let prevBlock: (typeof topLevelBlocks)[number] | null = null
+                let prevOwnerAgentId: string | null = null
+                let blockIdx = -1
+                const lastBlockSeenIdx = topLevelBlocks.length - 1
+
+                return renderItems.map((item, i) => {
+                  if (item.kind === 'stream') {
+                    const stream = item.stream
+                    return (
+                      <div
+                        key={`stream-wrap-${stream.agentId}-${stream.sessionKey}`}
+                        className={i === 0 ? '' : 'mt-7'}
+                      >
+                        <StreamingCard
+                          text={stream.text}
+                          agentId={stream.agentId}
+                          agentName={stream.agentName}
+                        />
+                      </div>
+                    )
+                  }
+                  if (item.kind === 'board-task') {
+                    return (
+                      <div key={`board-task-${item.task.id}`} className={i === 0 ? '' : 'mt-3'}>
+                        <BoardTaskCard task={item.task} />
+                      </div>
+                    )
+                  }
+                  blockIdx += 1
+                  const block = item.block
+                  let currentOwnerAgentId: string | null = null
+                  if (block.kind === 'assistant-turn') {
+                    const firstEntry =
+                      block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
+                    currentOwnerAgentId = firstEntry
+                      ? agentIdFromSessionKey(firstEntry.sessionKey)
+                      : null
+                  }
+                  const isFollowup = isFollowupBlock(
+                    prevBlock,
+                    block,
+                    prevOwnerAgentId,
+                    currentOwnerAgentId,
                   )
-                }
-                blockIdx += 1
-                const block = item.block
-                let currentOwnerAgentId: string | null = null
-                if (block.kind === 'assistant-turn') {
-                  const firstEntry = block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
-                  currentOwnerAgentId = firstEntry
-                    ? agentIdFromSessionKey(firstEntry.sessionKey)
+                  // Use `i === 0` (timeline position) for the "first item
+                  // has no top margin" check; `blockIdx` only matters for
+                  // the followup-vs-new-author choice.
+                  const margin = i === 0 ? '' : blockMarginClass(blockIdx, isFollowup)
+                  prevBlock = block
+                  prevOwnerAgentId = currentOwnerAgentId
+
+                  if (block.kind === 'meta') {
+                    return (
+                      <div key={block.entry.entryId} className={margin}>
+                        <MetaMessageCard entry={block.entry} />
+                      </div>
+                    )
+                  }
+                  if (block.kind === 'user') {
+                    const targetId = agentIdFromSessionKey(block.entry.sessionKey)
+                    const targetAgent = targetId ? agentLookup.get(targetId) : null
+                    return (
+                      <div key={block.entry.entryId} className={margin}>
+                        <UserMessageCard
+                          entry={block.entry}
+                          targetAgentName={targetAgent?.name}
+                          knownAgentNames={knownAgentNames}
+                        />
+                      </div>
+                    )
+                  }
+                  const ownerAgent = currentOwnerAgentId
+                    ? agentLookup.get(currentOwnerAgentId)
                     : null
-                }
-                const isFollowup = isFollowupBlock(
-                  prevBlock,
-                  block,
-                  prevOwnerAgentId,
-                  currentOwnerAgentId,
-                )
-                // Use `i === 0` (timeline position) for the "first item
-                // has no top margin" check; `blockIdx` only matters for
-                // the followup-vs-new-author choice.
-                const margin = i === 0 ? '' : blockMarginClass(blockIdx, isFollowup)
-                prevBlock = block
-                prevOwnerAgentId = currentOwnerAgentId
-
-                if (block.kind === 'meta') {
                   return (
-                    <div key={block.entry.entryId} className={margin}>
-                      <MetaMessageCard entry={block.entry} />
-                    </div>
-                  )
-                }
-                if (block.kind === 'user') {
-                  const targetId = agentIdFromSessionKey(block.entry.sessionKey)
-                  const targetAgent = targetId ? agentLookup.get(targetId) : null
-                  return (
-                    <div key={block.entry.entryId} className={margin}>
-                      <UserMessageCard
-                        entry={block.entry}
-                        targetAgentName={targetAgent?.name}
-                        knownAgentNames={knownAgentNames}
+                    <div key={`turn-${blockIdx}`} className={margin}>
+                      <AssistantTurnCard
+                        block={block}
+                        agentId={ownerAgent?.id ?? 'unknown'}
+                        agentName={ownerAgent?.name ?? 'Agent'}
+                        streaming={
+                          running && blockIdx === lastBlockSeenIdx && activeStreams.length === 0
+                        }
+                        teamId={teamId}
+                        isFollowup={isFollowup}
                       />
                     </div>
                   )
-                }
-                const ownerAgent = currentOwnerAgentId ? agentLookup.get(currentOwnerAgentId) : null
-                return (
-                  <div key={`turn-${blockIdx}`} className={margin}>
-                    <AssistantTurnCard
-                      block={block}
-                      agentId={ownerAgent?.id ?? 'unknown'}
-                      agentName={ownerAgent?.name ?? 'Agent'}
-                      streaming={
-                        running && blockIdx === lastBlockSeenIdx && activeStreams.length === 0
-                      }
-                      teamId={teamId}
-                      isFollowup={isFollowup}
-                    />
-                  </div>
-                )
-              })
-            })()}
+                })
+              })()}
 
-            <div ref={bottomRef} aria-hidden />
-          </div>
-        )}
+              <div ref={bottomRef} aria-hidden />
+            </div>
+          )}
+        </div>
+        <JumpToLatestButton show={!atBottom} hasNew={hasNewBelow} onClick={jumpToBottom} />
       </div>
 
       {/* Agent chips for quick tagging */}
