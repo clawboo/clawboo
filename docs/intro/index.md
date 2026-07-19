@@ -1,9 +1,9 @@
 ---
 title: Clawboo documentation
-description: Clawboo is an open-source, local-first multi-agent mission-control dashboard and orchestrator you install with npx clawboo.
+description: Clawboo is an open-source, local-first multi-agent mission-control dashboard and orchestrator you install with npm i -g clawboo.
 ---
 
-Clawboo is an open-source, local-first dashboard and orchestrator for teams of AI agents. You install it with one command, `npx clawboo`, and it runs entirely on your machine: a single Node server binds to loopback by default, persists everything to one local SQLite file, and opens a browser dashboard. There is no cloud account, no managed control plane, and no telemetry leaving your laptop.
+Clawboo is an open-source, local-first dashboard and orchestrator for teams of AI agents. You install it with `npm install -g clawboo` and run `clawboo` (or `npx clawboo` to try it without installing), and it runs entirely on your machine: a single Node server binds to loopback by default, persists everything to one local SQLite file, and opens a browser dashboard. There is no cloud account, no managed control plane, and no telemetry leaving your laptop.
 
 What makes Clawboo more than a chat wrapper is that it runs _heterogeneous_ runtimes as one team. Native agents are built in; paste a provider key and Clawboo runs them in-process, while Claude Code, Codex, Hermes, and the OpenClaw Gateway connect as peer teammates in the same room. They share one board, one memory, and one capability inventory, and their autonomous work is independently verified before it counts as done.
 

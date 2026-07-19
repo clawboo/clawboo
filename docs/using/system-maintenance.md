@@ -14,7 +14,7 @@ The System panel is built for the OpenClaw path. If you are running native-only 
 </Note>
 
 - OpenClaw installed (the System Info section shows the detected version, or "Not installed").
-- The dashboard running (`npx clawboo`); the System panel lives in the Settings modal.
+- The dashboard running (`clawboo`); the System panel lives in the Settings modal.
 
 ## Where it lives
 

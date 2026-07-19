@@ -1,9 +1,9 @@
 ---
 title: Deploying Clawboo
-description: Run Clawboo via npx, in dev mode, or as a bundled server, covering ports, state dir, host binding, and reverse-proxy setup.
+description: Run Clawboo locally, in dev mode, or as a bundled server, covering ports, state dir, host binding, and reverse-proxy setup.
 ---
 
-Use this page when you want to run the Clawboo dashboard server: locally with `npx clawboo`, from the monorepo in dev mode, or on a remote/headless box behind a reverse proxy. Clawboo is a single Express server that serves both the SPA and every `/api/*` route, plus a WebSocket proxy at `/api/gateway/ws`.
+Use this page when you want to run the Clawboo dashboard server: locally with `clawboo`, from the monorepo in dev mode, or on a remote/headless box behind a reverse proxy. Clawboo is a single Express server that serves both the SPA and every `/api/*` route, plus a WebSocket proxy at `/api/gateway/ws`.
 
 <Note>
 These docs describe Clawboo **v0.3.0**, the current release.
@@ -19,19 +19,22 @@ These docs describe Clawboo **v0.3.0**, the current release.
 
 | Mode                 | Command                                                       | What runs                                                 | Where it binds                               |
 | -------------------- | ------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------- |
-| Bundled (production) | `npx clawboo`                                                 | Forks `dist/server.js` (the SPA + API), opens the browser | Loopback `127.0.0.1`, auto-port from `18790` |
+| Bundled (production) | `npm install -g clawboo`, then `clawboo` (or `npx clawboo`)   | Forks `dist/server.js` (the SPA + API), opens the browser | Loopback `127.0.0.1`, auto-port from `18790` |
 | Dev                  | `pnpm dev`                                                    | Express API (watch) + Vite SPA on `:5173`, proxied        | API on the chosen port; Vite serves `:5173`  |
 | Standalone server    | `node dist/server.js` (or `pnpm --filter @clawboo/web start`) | The server only, no browser, no CLI                       | Loopback by default; `HOST` widens it        |
 
 The default bind is **loopback only** (`127.0.0.1`). A fresh install is never reachable from another host until you explicitly set `HOST` (and `HOST` alone; `HOSTNAME` is ignored, see below).
 
-## Bundled mode: `npx clawboo`
+## Bundled mode: `clawboo`
 
-`npx clawboo` is a thin launcher. It probes for an already-running dashboard, starts one if needed, then opens your browser at the resolved URL.
+`clawboo` is a thin launcher. It probes for an already-running dashboard, starts one if needed, then opens your browser at the resolved URL.
 
 ```bash
-npx clawboo
+npm install -g clawboo
+clawboo
 ```
+
+Or run `npx clawboo` to try it without installing.
 
 What the launcher does, in order:
 
@@ -42,7 +45,7 @@ What the launcher does, in order:
 5. **Open the browser** at `http://localhost:<port>`.
 
 <Tip>
-If a Clawboo dashboard is already running, `npx clawboo` skips the spawn and just opens the browser to the existing instance. Run it again any time to re-open the tab.
+If a Clawboo dashboard is already running, `clawboo` skips the spawn and just opens the browser to the existing instance. Run it again any time to re-open the tab.
 </Tip>
 
 ### What the bundle contains
@@ -194,7 +197,7 @@ Bind Clawboo to loopback and let the proxy be the only network-facing surface, *
 </Warning>
 
 <Warning>
-**`npx clawboo` opens a 401 or an unrelated page.** Older launchers used a bare TCP probe and could route to the Gateway's aux ports or Chrome's debug port. The current launcher validates `GET /api/settings`, so make sure you are on a build that ships the HTTP-signature probe (v0.1.2+). If a stale `api-port.txt` points at a dead port, the launcher re-scans; delete the file if it persists.
+**`clawboo` opens a 401 or an unrelated page.** Older launchers used a bare TCP probe and could route to the Gateway's aux ports or Chrome's debug port. The current launcher validates `GET /api/settings`, so make sure you are on a build that ships the HTTP-signature probe (v0.1.2+). If a stale `api-port.txt` points at a dead port, the launcher re-scans; delete the file if it persists.
 </Warning>
 
 <Danger>
@@ -206,5 +209,5 @@ Bind Clawboo to loopback and let the proxy be the only network-facing surface, *
 - [Security](/operating/security), access gate, device auth, the vault, redaction, safe exposure
 - [MCP servers](/operating/mcp-servers), attaching the bundled MCP bins
 - [Environment variables](/reference/environment-variables), `CLAWBOO_API_PORT`, `CLAWBOO_HOME`, `CLAWBOO_UI_DIR`, `HOST`, `STUDIO_ACCESS_TOKEN`, and the rest
-- [`npx clawboo` CLI reference](/reference/cli), the single command and the MCP bins
+- [`clawboo` CLI reference](/reference/cli), the single command and the MCP bins
 - [Configuration](/reference/configuration), `settings.json` and file locations

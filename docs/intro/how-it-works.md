@@ -3,7 +3,7 @@ title: How Clawboo works
 description: 'An end-to-end architecture overview: the CLI, the bundled server and SPA, the durable board, the runtime seam, and the MCP spine.'
 ---
 
-Clawboo is a single `npx clawboo` command that becomes a local mission-control dashboard for a fleet of AI agents. Under that one command sits a small, deliberate stack: a bundled Express server serving a Vite single-page app, a SQLite database that is the durable source of truth for task coordination, a uniform interface (`RuntimeAdapter`) that lets one orchestrator drive five different agent runtimes, four Model Context Protocol servers that those runtimes share, and an append-only event log that every visualization is a projection of.
+Clawboo installs with `npm install -g clawboo` (or `npx clawboo` to try it without installing) and runs as a single `clawboo` command that becomes a local mission-control dashboard for a fleet of AI agents. Under that one command sits a small, deliberate stack: a bundled Express server serving a Vite single-page app, a SQLite database that is the durable source of truth for task coordination, a uniform interface (`RuntimeAdapter`) that lets one orchestrator drive five different agent runtimes, four Model Context Protocol servers that those runtimes share, and an append-only event log that every visualization is a projection of.
 
 This page is the 10,000-foot view. It walks each layer once: how a command launches a server, how the browser talks to it, where task state lives, how agents actually execute, and how the live graph is derived, and links into the concept deep-dives for each piece. If you want to understand _why_ before _what_, start with [What is Clawboo](/intro/what-is-clawboo); if you want to run it, jump to [installation](/getting-started/installation).
 
@@ -52,7 +52,7 @@ Two execution paths reach the agents. OpenClaw runs ride the **live Gateway conn
 
 ### 1. The CLI launches a server, then gets out of the way
 
-`npx clawboo` is a thin launcher. It probes for an already-running dashboard (env var → a runtime port file at `~/.clawboo/api-port.txt` → a scan of `18790`–`18809`), and if it finds none it `fork`s the bundled server (`server.js`, sitting next to the CLI) in production mode, detached, and polls until the server writes its port. Then it opens your browser at the resolved URL and exits.
+`clawboo` is a thin launcher. It probes for an already-running dashboard (env var → a runtime port file at `~/.clawboo/api-port.txt` → a scan of `18790`–`18809`), and if it finds none it `fork`s the bundled server (`server.js`, sitting next to the CLI) in production mode, detached, and polls until the server writes its port. Then it opens your browser at the resolved URL and exits.
 
 The port-discovery probe is signature-checked, not just a TCP test: the CLI does an HTTP `GET /api/settings` and confirms a Clawboo-shaped JSON response (`gatewayUrl` plus `hasToken`) before trusting a port, because the fallback range overlaps the OpenClaw Gateway's auxiliary ports and Chrome's remote-debugging port, which a naive TCP probe would mistake for the dashboard. The server resolves its own bind interface and port: it binds **loopback `127.0.0.1` by default** and picks the first free port from `18790` upward, so a fresh install is never network-exposed and never collides with whatever else you run on `:3000`. See [deployment](/operating/deployment).
 
@@ -118,5 +118,5 @@ These docs describe Clawboo **v0.3.0**, the current release.
 - [Observability](/concepts/observability): the event log and the Ghost Graph projection
 - [Runtimes overview](/runtimes/index): the five runtimes and the capability matrix
 - [MCP servers](/operating/mcp-servers): attaching the shared spine to a runtime
-- [Installation](/getting-started/installation): `npx clawboo` and what it launches
+- [Installation](/getting-started/installation): `clawboo` and what it launches
 - [Glossary](/appendices/glossary): canonical term definitions

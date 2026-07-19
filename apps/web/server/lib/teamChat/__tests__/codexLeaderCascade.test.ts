@@ -123,14 +123,23 @@ const done = (summary: string): RuntimeEvent =>
 
 /** Advance fake time in small steps (interleaving REAL macrotasks — fs I/O in the
  *  drains isn't timer-gated) until `until()` holds or the fake-time budget runs out.
- *  A fixed advance sequence is flaky under full-suite load: the cascade mixes
- *  timer-gated stages (the 3s reflect batch) with real-I/O stages (mkdir, sqlite). */
-async function settle(until: () => boolean, budgetMs = 4 * REFLECT_WINDOW_MS): Promise<void> {
+ *  The cascade mixes timer-gated stages (the 3s reflect batch) with real-I/O stages
+ *  (mkdir, sqlite), so under full-suite load on a slow CI runner the drains' I/O lags
+ *  the fake-time advance. A single setImmediate per step and a tight budget let the
+ *  cascade stall after the worker completes but before the leader's synthesis turn is
+ *  delivered (leadStarts=1 not 2). Fix: a generous budget PLUS several real macrotask
+ *  turns per step so the I/O keeps pace; the loop still exits the instant `until()`
+ *  flips, so the fast (local) path is unchanged. */
+async function settle(until: () => boolean, budgetMs = 30 * REFLECT_WINDOW_MS): Promise<void> {
   const step = 250
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
+  }
   for (let t = 0; t < budgetMs && !until(); t += step) {
     await vi.advanceTimersByTimeAsync(step)
-    await new Promise((r) => setImmediate(r)) // real macrotask flush (I/O completions)
+    await flush() // real macrotask flushes (I/O completions)
   }
+  await flush() // let any last real I/O settle before the caller asserts
 }
 
 describe('Codex-led cascade (delegate MCP tool → board → report-up → synthesis)', () => {

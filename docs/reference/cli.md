@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: The single npx clawboo launcher (only --version/--help) plus the four bundled MCP stdio bins.
+description: The single clawboo launcher (only --version/--help) plus the four bundled MCP stdio bins.
 ---
 
 Clawboo ships one user-facing command and four MCP stdio binaries. The `clawboo` command is a thin launcher: it finds or starts the bundled dashboard server and opens a browser. There are **no subcommands**; onboarding, Gateway detection, runtime connection, and team deployment all happen in the web UI. The MCP bins are not launched by humans; an external agent runtime spawns them to attach Clawboo's board, memory, tools, and team-chat surfaces over stdio.
@@ -11,13 +11,13 @@ These docs describe Clawboo **v0.3.0**, the current release.
 
 ## At a glance
 
-| Binary                 | Invocation           | Purpose                                                   |
-| ---------------------- | -------------------- | --------------------------------------------------------- |
-| `clawboo`              | `npx clawboo`        | Launch the dashboard (find-or-start server, open browser) |
-| `clawboo-mcp-tasks`    | spawned by a runtime | Tasks (board) MCP server over stdio                       |
-| `clawboo-mcp-memory`   | spawned by a runtime | Memory MCP server over stdio                              |
-| `clawboo-mcp-tools`    | spawned by a runtime | Tools-broker MCP server over stdio                        |
-| `clawboo-mcp-teamchat` | spawned by a runtime | TeamChat MCP server over stdio                            |
+| Binary                 | Invocation                         | Purpose                                                   |
+| ---------------------- | ---------------------------------- | --------------------------------------------------------- |
+| `clawboo`              | `npm i -g clawboo`, then `clawboo` | Launch the dashboard (find-or-start server, open browser) |
+| `clawboo-mcp-tasks`    | spawned by a runtime               | Tasks (board) MCP server over stdio                       |
+| `clawboo-mcp-memory`   | spawned by a runtime               | Memory MCP server over stdio                              |
+| `clawboo-mcp-tools`    | spawned by a runtime               | Tools-broker MCP server over stdio                        |
+| `clawboo-mcp-teamchat` | spawned by a runtime               | TeamChat MCP server over stdio                            |
 
 All five are declared in the package's `bin` map and shipped in the published `dist/` tarball.
 
@@ -36,7 +36,7 @@ The launcher is built on Commander with a single default action; there are no `c
 
 There are no other flags. The launch flow is not configurable on the command line; it is steered by [environment variables](#environment-variables-honored).
 
-### What `npx clawboo` does
+### What `clawboo` does
 
 Running `clawboo` with no flags executes the launch sequence below.
 
@@ -102,15 +102,18 @@ These are the only environment variables the `clawboo` launcher itself reads or 
 ### Example
 
 ```bash
-# Launch (find-or-start the dashboard, then open the browser)
-npx clawboo
+# Install, then launch (find-or-start the dashboard, then open the browser)
+npm install -g clawboo
+clawboo
 
 # Print the version
-npx clawboo --version
+clawboo --version
 
 # Pin the dashboard port the launcher probes
-CLAWBOO_API_PORT=18790 npx clawboo
+CLAWBOO_API_PORT=18790 clawboo
 ```
+
+Or run `npx clawboo` to try it without installing.
 
 ---
 
@@ -131,7 +134,7 @@ For the tool list and zod input shapes each server registers, see the [MCP tools
 
 ### Packaging
 
-The bins are bundled **self-contained** (the MCP SDK, `@clawboo/db`, and drizzle are inlined) so they run from a clean `npx clawboo` install. Only native and process-level deps stay external (`better-sqlite3`, `ws`, `pino`, `pino-pretty`) and are resolved from the CLI's installed dependencies; OpenTelemetry stays external and is lazily loaded, so the bins never require it at boot. The `#!/usr/bin/env node` shebang is preserved on each.
+The bins are bundled **self-contained** (the MCP SDK, `@clawboo/db`, and drizzle are inlined) so they run from a clean Clawboo install. Only native and process-level deps stay external (`better-sqlite3`, `ws`, `pino`, `pino-pretty`) and are resolved from the CLI's installed dependencies; OpenTelemetry stays external and is lazily loaded, so the bins never require it at boot. The `#!/usr/bin/env node` shebang is preserved on each.
 
 ### Attaching from a runtime
 
@@ -157,7 +160,7 @@ CLAWBOO_DB_PATH=/tmp/clawboo-test.db clawboo-mcp-tasks
 
 ## See also
 
-- [Installation](/getting-started/installation), what `npx clawboo` launches and the prerequisites
+- [Installation](/getting-started/installation), what `clawboo` launches and the prerequisites
 - [Deployment](/operating/deployment), ports, the runtime port file, the bundled server, state dir
 - [Environment variables](/reference/environment-variables), the full env-var surface (the server reads many more than the CLI)
 - [Configuration](/reference/configuration), `settings.json` and file/dir locations
