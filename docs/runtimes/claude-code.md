@@ -13,7 +13,7 @@ Claude Code is one of the four non-OpenClaw [runtimes](/appendices/glossary). Li
 Node 22+ and `npm` (bundled with Node); Claude Code installs via `npm install -g`. An Anthropic API key, **or** an existing local `claude` login (the SDK falls back to the logged-in CLI's own auth when no key is in the vault).
 </Note>
 
-- The Clawboo dashboard running (`npx clawboo`).
+- The Clawboo dashboard running (`clawboo`).
 - A board task to run on, created via the [board](/concepts/the-board) (you can also drive it directly with `POST /api/runtimes/claude-code/run`).
 
 ## Capabilities
@@ -90,7 +90,7 @@ The pure adapter lives in `@clawboo/adapter-claude-code`; the real driver that t
 const mod = (await import('@anthropic-ai/claude-agent-sdk')) as unknown as SdkModule
 ```
 
-A default `npx clawboo` install therefore carries no Claude Code dependency in its boot graph; the SDK is loaded only when a Claude Code run actually starts. The driver's structural types are deliberately decoupled from the SDK's deep generated types (which reference a different zod major).
+A default Clawboo install therefore carries no Claude Code dependency in its boot graph; the SDK is loaded only when a Claude Code run actually starts. The driver's structural types are deliberately decoupled from the SDK's deep generated types (which reference a different zod major).
 
 ### Message translation
 

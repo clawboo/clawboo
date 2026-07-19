@@ -70,7 +70,7 @@ Pair Routines with [governance](/concepts/governance) before leaving a fleet una
 There is no schema migration ladder; a schema change is a hard reset of the local database, which `createDb()` re-bootstraps on the next connect. So "reset" means delete the database file.
 
 - **Reset just the data** (keep keys + settings): stop the server, then `rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm`.
-- **Full reset** (everything, including provider keys): `rm -rf ~/.clawboo` then `npx clawboo`.
+- **Full reset** (everything, including provider keys): `rm -rf ~/.clawboo` then `clawboo` (or `npx clawboo`).
 
 The full reset is destructive; it removes the vault, the proxy device identity, and all teams/board/chat/memory data. Back up `~/.clawboo` first if any of it matters. Full instructions and the WAL-sidecar caveat are in [data and state → hard reset](/operating/data-and-state#hard-reset).
 

@@ -16,7 +16,7 @@ Clawboo's own state lives under `resolveClawbooDir()`, which defaults to `~/.cla
 ~/.clawboo/
 
 # override
-CLAWBOO_HOME=/data/clawboo npx clawboo
+CLAWBOO_HOME=/data/clawboo clawboo
 ```
 
 Every file Clawboo owns:
@@ -140,7 +140,7 @@ The clean-slate remedy, also what the boot probe recommends after a fatal failur
 
 ```bash
 rm -rf ~/.clawboo
-npx clawboo
+clawboo
 ```
 
 <Warning>

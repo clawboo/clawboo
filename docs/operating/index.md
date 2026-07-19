@@ -29,12 +29,12 @@ When you need the exact value rather than the framing, go to the reference clust
 
 - [Configuration](/reference/configuration), `settings.json` shape and the file/directory locations Clawboo resolves.
 - [Environment variables](/reference/environment-variables), every `CLAWBOO_*`, `OPENCLAW_*`, and provider variable Clawboo reads (`CLAWBOO_HOME`, `CLAWBOO_API_PORT`, `STUDIO_ACCESS_TOKEN`, `CLAWBOO_SECRETS_MASTER_KEY`, and the rest).
-- [CLI](/reference/cli), `npx clawboo` and the bundled MCP stdio bins.
+- [CLI](/reference/cli), `clawboo` and the bundled MCP stdio bins.
 - [REST API overview](/reference/rest-api/index), base URL, the access-gate behavior on every route, and the error envelope.
 - [Database schema](/reference/database-schema), the 27 tables and their relationships.
 
 ## See also
 
 - [How it works](/intro/how-it-works), the end-to-end architecture this section operates.
-- [Installation](/getting-started/installation), `npx clawboo` and what it launches.
+- [Installation](/getting-started/installation), `clawboo` and what it launches.
 - [Glossary](/appendices/glossary), canonical terms (the board, runtime, AgentSource, MCP quartet).

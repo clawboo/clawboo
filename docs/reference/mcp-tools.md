@@ -283,7 +283,7 @@ Every server is served over two transports built from the same factory.
 
 ### stdio bin
 
-A consuming runtime spawns one bin per server; the runtime owns the process lifecycle and the server serves over stdio. The `@clawboo/mcp` package declares them as bins, and the `clawboo` CLI re-exposes them so a clean `npx clawboo` install ships them:
+A consuming runtime spawns one bin per server; the runtime owns the process lifecycle and the server serves over stdio. The `@clawboo/mcp` package declares them as bins, and the `clawboo` CLI re-exposes them so a clean Clawboo install ships them:
 
 | Bin                    | Server   |
 | ---------------------- | -------- |
