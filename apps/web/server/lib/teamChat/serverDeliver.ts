@@ -50,7 +50,7 @@ import { estimateRunCostUsd } from '../runtimes/estimateCost'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import type { RuntimeRunContext } from '../runtimes/types'
-import { resolveRuntimeKey } from '../secretsVault'
+import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { buildServerTeamContext } from './contextPreamble'
 import { nativeTeamSessionSettingKey, teamResumeEligible } from './nativeTeamSession'
 
@@ -115,7 +115,7 @@ function buildApiKeyEnv(runtime: string): Record<string, string> {
   const d = getDescriptor(runtime)
   for (const v of [d.envVar, ...(d.altEnvVars ?? [])]) {
     if (!v) continue
-    const key = resolveRuntimeKey(v)
+    const key = resolveRuntimeKeyForRuntime(runtime, v)
     if (key) env[v] = key
   }
   return env

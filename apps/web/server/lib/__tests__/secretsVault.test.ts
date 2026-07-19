@@ -14,7 +14,10 @@ import {
   deleteRuntimeSecret,
   getRuntimeSecret,
   hasRuntimeSecret,
+  isRuntimeDisconnected,
   resolveRuntimeKey,
+  resolveRuntimeKeyForRuntime,
+  setRuntimeDisconnected,
   setRuntimeSecret,
 } from '../secretsVault'
 
@@ -163,5 +166,39 @@ describe('secretsVault', () => {
     writeFileSync(path.join(stateDir, '.env'), 'ANTHROPIC_API_KEY=sk-ant-from-openclaw\n', 'utf8')
     expect(hasRuntimeSecret('ANTHROPIC_API_KEY')).toBe(false)
     expect(resolveRuntimeKey('ANTHROPIC_API_KEY')).toBe('sk-ant-from-openclaw')
+  })
+
+  describe('per-runtime disconnect override', () => {
+    it('round-trips the flag (set / clear / absent default)', () => {
+      expect(isRuntimeDisconnected('clawboo-native')).toBe(false)
+      setRuntimeDisconnected('clawboo-native', true)
+      expect(isRuntimeDisconnected('clawboo-native')).toBe(true)
+      setRuntimeDisconnected('clawboo-native', false)
+      expect(isRuntimeDisconnected('clawboo-native')).toBe(false)
+    })
+
+    it('a disconnected runtime resolves vault-only — the ambient fallbacks are suppressed', () => {
+      // The disconnect-does-nothing bug: the key ALSO lives in OpenClaw's .env
+      // (and/or the shell env), so after a vault delete the runtime silently
+      // re-credentialed itself through resolveRuntimeKey's fallback chain.
+      mkdirSync(stateDir, { recursive: true })
+      writeFileSync(path.join(stateDir, '.env'), 'OPENROUTER_API_KEY=sk-or-ambient\n', 'utf8')
+      process.env['ANTHROPIC_API_KEY'] = 'sk-ant-shell'
+      try {
+        setRuntimeDisconnected('clawboo-native', true)
+        // Both ambient sources are invisible to the disconnected runtime…
+        expect(resolveRuntimeKeyForRuntime('clawboo-native', 'OPENROUTER_API_KEY')).toBeNull()
+        expect(resolveRuntimeKeyForRuntime('clawboo-native', 'ANTHROPIC_API_KEY')).toBeNull()
+        // …while an explicit vault key still counts…
+        setRuntimeSecret('OPENROUTER_API_KEY', 'sk-or-vault')
+        expect(resolveRuntimeKeyForRuntime('clawboo-native', 'OPENROUTER_API_KEY')).toBe(
+          'sk-or-vault',
+        )
+        // …and OTHER runtimes keep the full auto-connect chain.
+        expect(resolveRuntimeKeyForRuntime('claude-code', 'ANTHROPIC_API_KEY')).toBe('sk-ant-shell')
+      } finally {
+        delete process.env['ANTHROPIC_API_KEY']
+      }
+    })
   })
 })

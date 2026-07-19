@@ -132,6 +132,11 @@ export function RuntimeManageBody({
         type: 'success',
       })
       void onChanged()
+      // Slow-settling disconnects (the OpenClaw gateway stop, the server's operator
+      // connection dropping) may still probe "connected" milliseconds after the
+      // POST — re-probe once more shortly so the row flips without waiting for
+      // the panel's 8s poll.
+      setTimeout(() => void onChanged(), 2500)
     } else {
       addToast({ message: result.error ?? `Failed to disconnect ${name}`, type: 'error' })
     }

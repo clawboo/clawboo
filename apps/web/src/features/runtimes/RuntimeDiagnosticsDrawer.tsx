@@ -30,15 +30,12 @@ import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { fetchCapabilities } from '@/lib/capabilitiesClient'
 import { formatRelative } from '@/lib/formatRelative'
 import { ENTER_SPRING } from '@/lib/motion'
-import { disconnectRuntime, type ConnectionState, type RuntimeClass } from '@clawboo/control-client'
+import { type ConnectionState, type RuntimeClass } from '@clawboo/control-client'
 import { useCapabilityFilterStore } from '@/stores/capabilityFilter'
-import { useToastStore } from '@/stores/toast'
-import { confirm } from '@/stores/confirm'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 
 import { RuntimeDepthBadge, RuntimeGlyph } from './runtimeDepth'
 import { useRuntimeProbeStore, type ProbeSample } from './runtimeProbeStore'
-import type { RuntimeId } from './runtimeCatalog'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -141,7 +138,6 @@ export function RuntimeDiagnosticsDrawer({
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [, setNow] = useState(Date.now())
-  const addToast = useToastStore((s) => s.addToast)
 
   // Recent errors from the obs taxonomy, filtered to this runtime (defensive).
   useEffect(() => {
@@ -192,28 +188,6 @@ export function RuntimeDiagnosticsDrawer({
     setTimeout(() => setBusy(false), 400)
   }, [onRecheck])
 
-  const handleDisconnect = useCallback(async () => {
-    if (
-      !(await confirm({
-        title: `Disconnect ${target.name}?`,
-        message:
-          "This removes its saved API key from the encrypted vault — you'll need to re-enter it to reconnect.",
-        confirmLabel: 'Disconnect',
-        tone: 'danger',
-      }))
-    ) {
-      return
-    }
-    setBusy(true)
-    const r = await disconnectRuntime(target.id as RuntimeId)
-    setBusy(false)
-    if (!r.ok) {
-      addToast({ message: r.error ?? `Failed to disconnect ${target.name}`, type: 'error' })
-      return
-    }
-    await onRecheck()
-  }, [target.id, target.name, onRecheck, addToast])
-
   function handleViewCapabilities(): void {
     setPendingRuntime(target.id)
     // Capabilities lives in the Settings modal now — switch the modal to it
@@ -229,7 +203,10 @@ export function RuntimeDiagnosticsDrawer({
     setTimeout(() => setCopied(false), 1500)
   }
 
-  const canDisconnect = target.connectionState === 'ready' && target.authKind === 'api-key'
+  // NOTE: no Disconnect here — the drawer is the read-only "Details" surface;
+  // the single Disconnect lives in the card's Manage body (RuntimeManageBody),
+  // which is also where the per-runtime confirm copy is honest about what a
+  // disconnect actually does. A second button here duplicated it.
 
   // Portalled to <body> so the fixed-position drawer resolves against the
   // viewport (not clipped/contained when this panel is rendered inside the
@@ -503,19 +480,9 @@ export function RuntimeDiagnosticsDrawer({
                 rel="noreferrer"
                 className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[13px] font-medium text-foreground no-underline shadow-[var(--shadow-raised)] transition-[background-color,border-color] hover:border-border-strong hover:bg-foreground/[0.02]"
               >
-                <BookOpen size={13} strokeWidth={2} /> Docs <ExternalLink size={11} strokeWidth={2} />
+                <BookOpen size={13} strokeWidth={2} /> Docs{' '}
+                <ExternalLink size={11} strokeWidth={2} />
               </a>
-            ) : null}
-            {canDisconnect ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                data-testid="runtime-diagnostics-disconnect"
-                onClick={() => void handleDisconnect()}
-                className="ml-auto"
-              >
-                <Plug size={13} strokeWidth={2} /> Disconnect
-              </Button>
             ) : null}
           </div>
         </div>

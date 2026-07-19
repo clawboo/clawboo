@@ -106,3 +106,54 @@ const MORE_BY_ID = new Map(NATIVE_MORE_PROVIDERS.map((p) => [p.id as string, p])
 export function nativeMoreProvider(id: string): NativeMoreProvider | null {
   return MORE_BY_ID.get(id) ?? null
 }
+
+/** The 3 PRIMARY key-based native providers (Ollama is keyless and handled as a
+ *  special case by connect surfaces), in the same shape as the "more" set so a
+ *  connect surface can render ONE uniform provider list. */
+export const NATIVE_PRIMARY_PROVIDERS: NativeMoreProvider[] = [
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    desc: 'Claude models',
+    placeholder: 'sk-ant-…',
+    keyUrl: 'https://console.anthropic.com/settings/keys',
+    envVar: 'ANTHROPIC_API_KEY',
+    recommendedModel: 'claude-sonnet-4-6',
+    recommendedLabel: 'Claude Sonnet',
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    desc: 'GPT models',
+    placeholder: 'sk-…',
+    keyUrl: 'https://platform.openai.com/api-keys',
+    envVar: 'OPENAI_API_KEY',
+    recommendedModel: 'gpt-4o',
+    recommendedLabel: 'GPT-4o',
+  },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    desc: 'Any model, one key',
+    placeholder: 'sk-or-…',
+    keyUrl: 'https://openrouter.ai/settings/keys',
+    envVar: 'OPENROUTER_API_KEY',
+    recommendedModel: 'anthropic/claude-haiku-4.5',
+    recommendedLabel: 'Claude Haiku (via OpenRouter)',
+  },
+]
+
+/** Every KEY-BASED provider the native runtime can connect with (primaries first,
+ *  then the "more" set) — the single list the Runtimes-panel native connect card
+ *  renders. Excludes Ollama (keyless). */
+export const NATIVE_CONNECT_PROVIDERS: NativeMoreProvider[] = [
+  ...NATIVE_PRIMARY_PROVIDERS,
+  ...NATIVE_MORE_PROVIDERS,
+]
+
+const CONNECT_BY_ID = new Map(NATIVE_CONNECT_PROVIDERS.map((p) => [p.id as string, p]))
+
+/** Look up ANY key-based native provider by id (primary or "more"). */
+export function nativeConnectProvider(id: string): NativeMoreProvider | null {
+  return CONNECT_BY_ID.get(id) ?? null
+}

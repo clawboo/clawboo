@@ -28,7 +28,7 @@ import { emitEvent } from '../obs'
 import { runTaskOnRuntime } from '../executorRunner'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
-import { resolveRuntimeKey } from '../secretsVault'
+import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { dispatchConnectedSubstrate, type OperatorClientLike } from './openclawDispatch'
 
 export interface RoutineDispatchOutcome {
@@ -61,7 +61,7 @@ function buildApiKeyEnv(runtime: string): Record<string, string> {
   const d = getDescriptor(runtime)
   for (const envVar of [d.envVar, ...(d.altEnvVars ?? [])]) {
     if (!envVar) continue
-    const key = resolveRuntimeKey(envVar)
+    const key = resolveRuntimeKeyForRuntime(runtime, envVar)
     if (key) apiKeyEnv[envVar] = key
   }
   return apiKeyEnv

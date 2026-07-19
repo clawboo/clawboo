@@ -98,7 +98,10 @@ export interface ConnectResult {
 
 /** POST /api/runtimes/:id/connect — writes the provider key to the vault. The
  *  optional `provider` lets the multi-provider native runtime route the key to
- *  the right env-var slot (OpenAI / OpenRouter, not always ANTHROPIC_API_KEY). */
+ *  the right env-var slot (OpenAI / OpenRouter, not always ANTHROPIC_API_KEY).
+ *  An EMPTY `apiKey` with a `provider` is the keyless REUSE form: reconnect the
+ *  native runtime with a key that already exists for that provider (the
+ *  Providers hub / OpenClaw .env) instead of demanding a re-paste. */
 export async function connectRuntime(
   id: RuntimeId,
   apiKey: string,
@@ -108,7 +111,10 @@ export async function connectRuntime(
     const res = await apiFetch(`/api/runtimes/${id}/connect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(provider ? { apiKey, provider } : { apiKey }),
+      body: JSON.stringify({
+        ...(apiKey ? { apiKey } : {}),
+        ...(provider ? { provider } : {}),
+      }),
     })
     const body = (await res.json().catch(() => ({}))) as ConnectResult
     return { ...body, ok: res.ok && body.ok !== false }

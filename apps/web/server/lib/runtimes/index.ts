@@ -12,7 +12,7 @@ import { NativeAdapter } from '@clawboo/adapter-native'
 import type { HealthResult, RuntimeAdapter } from '@clawboo/executor'
 
 import { resolveRuntimeBin } from '../platform'
-import { resolveRuntimeKey } from '../secretsVault'
+import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { createClaudeCodeDriver } from './claudeCodeDriver'
 import { createCodexDriver } from './codexDriver'
 import { getDescriptor, NON_OPENCLAW_RUNTIME_IDS, type NonOpenClawRuntimeId } from './descriptor'
@@ -47,7 +47,8 @@ function nativeKeyHealth(): Promise<HealthResult> {
   const d = getDescriptor('clawboo-native')
   const envVars = [d.envVar, ...(d.altEnvVars ?? [])].filter((v): v is string => Boolean(v))
   const connected =
-    envVars.some((v) => Boolean(resolveRuntimeKey(v))) || Boolean(process.env['OLLAMA_BASE_URL'])
+    envVars.some((v) => Boolean(resolveRuntimeKeyForRuntime('clawboo-native', v))) ||
+    Boolean(process.env['OLLAMA_BASE_URL'])
   return Promise.resolve(
     connected
       ? { ok: true }

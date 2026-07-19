@@ -208,6 +208,42 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     await running
   })
 
+  it('a run that fails BEFORE any text (no provider key) persists a VISIBLE meta with the reason', async () => {
+    // The classic silent non-responder: keyless native → the provider router
+    // throws before a single token streams. The user must SEE why.
+    seedAgent('native-x', 'clawboo-native')
+    const sk = nativeChatSessionKey('native-x')
+    const rows = (): Array<{ kind: string; text: string }> =>
+      db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionKey, sk))
+        .all()
+        .map((r) => JSON.parse(r.data as string) as { kind: string; text: string })
+
+    const keyless = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'error',
+          code: 'auth',
+          message: 'no provider key available (checked ANTHROPIC_API_KEY and fallbacks)',
+          fatal: true,
+        }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'native-x',
+      message: 'q',
+      mcpBaseUrl: null,
+      makeAdapter: () => keyless,
+    })
+    const meta = rows().find((r) => r.kind === 'meta')
+    expect(meta?.text).toMatch(/no provider key/i)
+    expect(meta?.text).toMatch(/Settings/)
+  })
+
   it('a turn that DIES mid-reply commits the watched partial text (survives reload); a user Stop clears instead', async () => {
     seedAgent('native-x', 'clawboo-native')
     const sk = nativeChatSessionKey('native-x')

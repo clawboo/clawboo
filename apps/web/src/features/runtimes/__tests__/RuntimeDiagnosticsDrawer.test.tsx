@@ -1,11 +1,9 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { cleanup, render, screen } from '@testing-library/react'
 import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { server } from '../../../__vitest__/mswServer'
-import { useToastStore } from '@/stores/toast'
 import { confirm } from '@/stores/confirm'
 import {
   RuntimeDiagnosticsDrawer,
@@ -138,17 +136,7 @@ describe('RuntimeDiagnosticsDrawer', () => {
     expect(document.body.textContent ?? '').not.toContain(SECRET)
   })
 
-  it('Disconnect confirms before clearing the credential, then re-checks', async () => {
-    let disconnected = 0
-    let rechecked = 0
-    server.use(
-      http.post('/api/runtimes/claude-code/disconnect', () => {
-        disconnected += 1
-        return HttpResponse.json({ ok: true })
-      }),
-    )
-    vi.mocked(confirm).mockResolvedValue(false)
-    const user = userEvent.setup()
+  it('has NO Disconnect — the drawer is read-only Details; the single Disconnect lives in the Manage body', async () => {
     render(
       <RuntimeDiagnosticsDrawer
         target={target({
@@ -159,59 +147,14 @@ describe('RuntimeDiagnosticsDrawer', () => {
           hasCredential: true,
         })}
         onClose={noop}
-        onRecheck={() => {
-          rechecked += 1
-        }}
+        onRecheck={noop}
       />,
     )
-    const btn = await screen.findByTestId('runtime-diagnostics-disconnect')
-
-    // Cancelled at the confirm → nothing happens.
-    await user.click(btn)
-    await waitFor(() => expect(confirm).toHaveBeenCalled())
-    expect(disconnected).toBe(0)
-    expect(rechecked).toBe(0)
-
-    // Confirmed → POSTs + re-checks.
-    vi.mocked(confirm).mockResolvedValue(true)
-    await user.click(btn)
-    await waitFor(() => expect(disconnected).toBe(1))
-    await waitFor(() => expect(rechecked).toBe(1))
-  })
-
-  it('a failed Disconnect surfaces an error toast and does NOT re-check', async () => {
-    let rechecked = 0
-    server.use(
-      http.post('/api/runtimes/claude-code/disconnect', () =>
-        HttpResponse.json({ ok: false, error: 'vault is locked' }, { status: 500 }),
-      ),
-    )
-    vi.mocked(confirm).mockResolvedValue(true)
-    const user = userEvent.setup()
-    render(
-      <RuntimeDiagnosticsDrawer
-        target={target({
-          id: 'claude-code',
-          name: 'Claude Code',
-          authKind: 'api-key',
-          connectionState: 'ready',
-          hasCredential: true,
-        })}
-        onClose={noop}
-        onRecheck={() => {
-          rechecked += 1
-        }}
-      />,
-    )
-    await user.click(await screen.findByTestId('runtime-diagnostics-disconnect'))
-    await waitFor(() =>
-      expect(
-        useToastStore
-          .getState()
-          .toasts.some((t) => t.type === 'error' && /vault is locked/.test(t.message)),
-      ).toBe(true),
-    )
-    expect(rechecked).toBe(0)
+    await screen.findByTestId('runtime-diagnostics-drawer')
+    // The duplicate footer Disconnect was removed (RuntimeManageBody owns the one
+    // Disconnect, with per-runtime honest confirm copy) — it must not come back.
+    expect(screen.queryByTestId('runtime-diagnostics-disconnect')).toBeNull()
+    expect(screen.queryByRole('button', { name: /disconnect/i })).toBeNull()
   })
 
   it('has no level-A/AA a11y violations', async () => {

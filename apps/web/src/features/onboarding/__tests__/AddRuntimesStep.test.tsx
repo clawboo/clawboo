@@ -24,6 +24,7 @@ const noRuntimes = () =>
 function renderStep(overrides: Partial<Parameters<typeof AddRuntimesStep>[0]> = {}) {
   const props = {
     onContinue: vi.fn(),
+    onBack: vi.fn(),
     onOpenClawConnected: vi.fn(),
     openClawConnected: false,
     ...overrides,
@@ -36,10 +37,11 @@ describe('AddRuntimesStep', () => {
   it('lists every runtime as a row, each unconnected row with an explicit CTA toggle (no pill, no chevron)', async () => {
     noRuntimes()
     renderStep()
-    // Native is the already-connected foundation: a static row (no toggle).
+    // Native is the already-connected foundation: its only affordance is the
+    // Manage toggle revealing the READ-ONLY provider list (connected keys).
     const nativeRow = await screen.findByTestId('runtime-list-row-clawboo-native')
     expect(nativeRow.tagName).toBe('DIV')
-    expect(screen.queryByTestId('runtime-list-row-clawboo-native-toggle')).not.toBeInTheDocument()
+    expect(screen.getByTestId('runtime-list-row-clawboo-native-toggle')).toBeInTheDocument()
     // Wait for the first runtimes fetch to settle — until then rows show a
     // neutral placeholder rather than a premature "Connect" affordance.
     await screen.findByTestId('runtime-list-row-claude-code-toggle')
@@ -120,6 +122,7 @@ describe('AddRuntimesStep', () => {
     const { container } = render(
       <AddRuntimesStep
         onContinue={vi.fn()}
+        onBack={vi.fn()}
         onOpenClawConnected={vi.fn()}
         openClawConnected={false}
       />,

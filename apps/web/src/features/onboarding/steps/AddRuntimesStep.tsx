@@ -10,12 +10,12 @@
 // strand the user (the native team exists), so there is a single forward action.
 
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowRight } from 'lucide-react'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
 
 import type { GatewayClient } from '@clawboo/gateway-client'
 
 import { NATIVE_STEPS } from '../StepIndicator'
-import { OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
+import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
 import { RuntimeConnectList } from '@/features/runtimes/RuntimeConnectList'
 import { OpenClawInlineSetup } from '@/features/runtimes/OpenClawInlineSetup'
 import { RUNTIME_ORDER, type RuntimeId } from '@/features/runtimes/runtimeCatalog'
@@ -29,6 +29,9 @@ const CODING_RUNTIMES: RuntimeId[] = RUNTIME_ORDER.filter((id) => id !== 'clawbo
 export interface AddRuntimesStepProps {
   /** Finish — advance to the ready landing (works with or without connections). */
   onContinue: () => void
+  /** Back to the provider-connect step (the ONE place a key is added — the
+   *  runtime rows here only show what is already connected). */
+  onBack: () => void
   /** The inline OpenClaw setup connected a live Gateway client — the wizard tracks
    *  it (staying in the wizard; NOT the global enterGatewayMode). */
   onOpenClawConnected: (client: GatewayClient, gatewayUrl: string) => void
@@ -38,6 +41,7 @@ export interface AddRuntimesStepProps {
 
 export function AddRuntimesStep({
   onContinue,
+  onBack,
   onOpenClawConnected,
   openClawConnected,
 }: AddRuntimesStepProps) {
@@ -63,7 +67,10 @@ export function AddRuntimesStep({
       title="Add more runtimes"
       subtitle="Optional. Connect any of these to work alongside your native team, or continue and add them anytime from Settings → Runtimes."
       footer={
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between">
+          <OnboardingGhost testId="addruntimes-back" onClick={onBack}>
+            <ArrowLeft size={15} /> Back
+          </OnboardingGhost>
           <OnboardingPrimary testId="addruntimes-continue" onClick={onContinue}>
             Continue <ArrowRight size={16} />
           </OnboardingPrimary>

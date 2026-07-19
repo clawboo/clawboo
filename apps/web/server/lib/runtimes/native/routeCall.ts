@@ -12,7 +12,7 @@
 
 import { envVarForProvider, type AgentConfig } from '@clawboo/adapter-native'
 
-import { resolveRuntimeKey } from '../../secretsVault'
+import { resolveRuntimeKeyForRuntime } from '../../secretsVault'
 import { nativeCompatProvider } from './nativeProviders'
 import { createAnthropicProvider } from './providers/anthropic'
 import { createOpenAiProvider, ollamaBaseUrl, OPENROUTER_BASE_URL } from './providers/openai'
@@ -71,7 +71,11 @@ function defaultMakeProvider(c: RouteCandidate): ProviderClient {
       // through the OpenAI client with the registry's base-URL override.
       const ep = nativeCompatProvider(c.provider)
       if (ep) {
-        return createOpenAiProvider({ provider: c.provider, apiKey: c.key ?? '', baseURL: ep.baseURL })
+        return createOpenAiProvider({
+          provider: c.provider,
+          apiKey: c.key ?? '',
+          baseURL: ep.baseURL,
+        })
       }
       throw new ProviderError(`unknown provider: ${c.provider}`, 'bad_request')
     }
@@ -110,7 +114,10 @@ export function createRoutedClient(
   apiKeyEnv: Record<string, string> | undefined,
   deps: RouteDeps = {},
 ): RoutedProviderClient {
-  const resolveKey = deps.resolveKey ?? resolveRuntimeKey
+  // Native-scoped by construction (this IS the native harness): an explicit
+  // user disconnect suppresses the ambient env fallbacks here too.
+  const resolveKey =
+    deps.resolveKey ?? ((envVar: string) => resolveRuntimeKeyForRuntime('clawboo-native', envVar))
   const makeProvider = deps.makeProvider ?? defaultMakeProvider
   const candidates = buildCandidates(config, apiKeyEnv, resolveKey)
   const clients = new Map<number, ProviderClient>()

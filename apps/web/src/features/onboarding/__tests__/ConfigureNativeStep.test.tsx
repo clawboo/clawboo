@@ -140,7 +140,9 @@ describe('ConfigureNativeStep', () => {
     expect(screen.queryByTestId('native-api-key')).not.toBeInTheDocument()
     await userEvent.click(screen.getByTestId('native-continue'))
     await waitFor(() => expect(onConnected).toHaveBeenCalledWith('ollama', 'llama3.2'))
-    expect(connectBody).toEqual({ apiKey: '', provider: 'ollama' })
+    // Keyless: the client omits the empty apiKey entirely (the same wire form the
+    // Runtimes panel's one-click provider reuse sends).
+    expect(connectBody).toEqual({ provider: 'ollama' })
   })
 
   // Sign in with ChatGPT — the Codex subscription path on the OpenAI card. Codex

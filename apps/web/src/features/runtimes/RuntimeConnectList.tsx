@@ -36,6 +36,7 @@ import type { RuntimeStatus } from '@clawboo/control-client'
 import { Button } from '@/features/shared/Button'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { Spinner } from '@/features/shared/Spinner'
+import { RuntimeProvidersBody } from './RuntimeProvidersBody'
 import { RuntimeConnectionCard, type DisplayState } from './RuntimeConnectionCard'
 import { RuntimeManageBody } from './RuntimeManageBody'
 import { OpenClawIcon, RuntimeIcon } from './RuntimeBrand'
@@ -121,6 +122,12 @@ export function RuntimeConnectList({
   variant = 'onboarding',
   onDiagnostics,
 }: RuntimeConnectListProps) {
+  // Onboarding: the native foundation row expands to its provider manager
+  // (connected keys + the one-tap add-chip grid) via the same Manage toggle
+  // the panel rows use.
+  const [nativeOpen, setNativeOpen] = useState(false)
+  const codexReady = statuses.some((s) => s.id === 'codex' && s.connectionState === 'ready')
+
   return (
     <div className="flex flex-col gap-2.5">
       {/* OpenClaw leads the list (swapped ahead of the built-in native runtime,
@@ -136,13 +143,13 @@ export function RuntimeConnectList({
           variant={variant}
           onChanged={onChanged}
           onDiagnostics={onDiagnostics}
-          codexReady={statuses.some((s) => s.id === 'codex' && s.connectionState === 'ready')}
+          codexReady={codexReady}
         />
       ))}
 
       {/* Onboarding only: the native foundation — already connected, so it sits
-          LAST (nothing to set up). In the panel, native is a managed row that
-          `runtimeIds` (RUNTIME_ORDER) already places last. */}
+          LAST (nothing to set up; Manage reveals its providers). In the panel,
+          native is a managed row that `runtimeIds` (RUNTIME_ORDER) places last. */}
       {variant === 'onboarding' && (
         <AccordionRow
           testId="runtime-list-row-clawboo-native"
@@ -150,7 +157,25 @@ export function RuntimeConnectList({
           name={RUNTIME_CATALOG['clawboo-native'].name}
           blurb={NATIVE_FOUNDATION_BLURB}
           status={<StatusChip state="ready" />}
-        />
+          footer={
+            <CtaToggle
+              expanded={nativeOpen}
+              onToggle={() => setNativeOpen((v) => !v)}
+              bodyId="runtime-list-row-clawboo-native-body"
+              cta={MANAGE_CTA}
+              name={RUNTIME_CATALOG['clawboo-native'].name}
+              testId="runtime-list-row-clawboo-native"
+            />
+          }
+          expanded={nativeOpen}
+        >
+          <RuntimeProvidersBody
+            variant="onboarding"
+            nativeReady
+            codexReady={codexReady}
+            onChanged={onChanged}
+          />
+        </AccordionRow>
       )}
     </div>
   )
@@ -247,6 +272,16 @@ function RuntimeRow({
           subscriptionConnected={status?.codexAuth === true}
           subscriptionLoginCommand={entry.altLoginCommand}
           codexReady={codexReady}
+          // The Manage view carries the shared provider manager (connected keys,
+          // per-provider disconnect, native's default-model pick) — for the
+          // runtimes whose keys live in the Providers hub.
+          extra={
+            entry.id === 'clawboo-native' ? (
+              <RuntimeProvidersBody nativeReady codexReady={codexReady} onChanged={onChanged} />
+            ) : entry.id === 'hermes' ? (
+              <RuntimeProvidersBody runtime="hermes" onChanged={onChanged} />
+            ) : undefined
+          }
         />
       </AccordionRow>
     )
@@ -336,7 +371,12 @@ function OpenClawRow({
             subscriptionConnected={!!config.subscriptionConnected}
             subscriptionLoginCommand="openclaw models auth login --provider openai-codex"
             codexReady={!!config.codexReady}
-            extra={config.extra}
+            extra={
+              <>
+                <RuntimeProvidersBody runtime="openclaw" onChanged={onChanged} />
+                {config.extra}
+              </>
+            }
           />
         </AccordionRow>
       )

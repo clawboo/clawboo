@@ -31,6 +31,7 @@ import { Button, IconButton } from '@/features/shared/Button'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { ChatGptSignIn } from './ChatGptSignIn'
 import { InstalledAck } from './InstalledAck'
+import { RuntimeProvidersBody } from './RuntimeProvidersBody'
 import { Spinner } from '@/features/shared/Spinner'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import {
@@ -117,6 +118,11 @@ export function RuntimeConnectionCard({
   const [error, setError] = useState<string | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
+
+  // The native runtime is multi-provider — its whole connect body is the
+  // RuntimeProvidersBody provider manager (connected keys, one-click reuse,
+  // default-model pick), never the single hardcoded-envVar key input below.
+  const isNative = entry.id === 'clawboo-native'
 
   // Computed ABOVE the wizard early-return so the display-state effect (a hook)
   // always runs in the same order regardless of variant.
@@ -289,8 +295,14 @@ export function RuntimeConnectionCard({
       {/* Error */}
       {error && <FormattedAlert tone="error">{error}</FormattedAlert>}
 
-      {/* Key input (api-key runtimes that need a key) */}
-      {display === 'needs-auth' && entry.authKind === 'api-key' && (
+      {/* Native (multi-provider): the full provider manager — every LLM option
+          with per-provider connect / one-click reuse / default-model pick. */}
+      {display === 'needs-auth' && isNative && (
+        <RuntimeProvidersBody nativeReady={false} codexReady={codexReady} onChanged={onChanged} />
+      )}
+
+      {/* Key input (single-provider api-key runtimes that need a key). */}
+      {display === 'needs-auth' && entry.authKind === 'api-key' && !isNative && (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <label
@@ -410,7 +422,9 @@ export function RuntimeConnectionCard({
           </span>
         )}
 
-        {display === 'needs-auth' && (
+        {/* Native's connect actions live INSIDE the provider manager (per-row
+            Connect / Use) — a global Connect here would be a dead button. */}
+        {display === 'needs-auth' && !isNative && (
           <ActionButton
             testid={`runtime-${entry.id}-connect`}
             primary={variant === 'panel'}

@@ -123,7 +123,12 @@ import {
   runtimesLogoutPOST,
   runtimesRunPOST,
 } from '../runtimes'
-import { hasRuntimeSecret } from '../../lib/secretsVault'
+import {
+  hasRuntimeSecret,
+  isRuntimeDisconnected,
+  setRuntimeDisconnected,
+  setRuntimeSecret,
+} from '../../lib/secretsVault'
 
 interface Mock {
   res: Response
@@ -393,6 +398,60 @@ describe('runtimes install/connect REST', () => {
     expect(m.statusCode()).toBe(200)
     expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(false)
     expect((m.body() as { connectionState: string }).connectionState).toBe('needs-auth')
+  })
+
+  it('disconnect clears an ALT-slot credential too (native connected via OpenRouter)', () => {
+    // The reported bug's first half: native's primary slot is ANTHROPIC_API_KEY,
+    // but a key connected under a provider lands in an altEnvVars slot — deleting
+    // only the primary left the real credential behind and the card "Connected".
+    runtimesConnectPOST(
+      req({
+        params: { id: 'clawboo-native' },
+        body: { apiKey: 'sk-or-live', provider: 'openrouter' },
+      }),
+      mockRes().res,
+    )
+    expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(true)
+    const m = mockRes()
+    runtimesDisconnectPOST(req({ params: { id: 'clawboo-native' } }), m.res)
+    expect(m.statusCode()).toBe(200)
+    expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(false)
+    expect((m.body() as { connectionState: string }).connectionState).toBe('needs-auth')
+  })
+
+  it('disconnect suppresses the ambient OpenClaw-.env fallback until reconnect', async () => {
+    // The reported bug's second half: the same key also lives in OpenClaw's
+    // ~/.openclaw/.env (the deliberate reuse chain), so even a full vault delete
+    // left the runtime re-credentialed through the fallback — "nothing happens".
+    // An explicit disconnect records a per-runtime override: vault-only until
+    // the next connect.
+    writeFileSync(path.join(stateDir, '.env'), 'OPENROUTER_API_KEY=sk-or-ambient\n')
+    const g0 = mockRes()
+    await runtimesListGET(req(), g0.res)
+    const native0 = (
+      g0.body() as { runtimes: Array<{ id: string; hasCredential: boolean }> }
+    ).runtimes.find((r) => r.id === 'clawboo-native')
+    expect(native0?.hasCredential).toBe(true) // ambient reuse (auto-connect) works
+
+    runtimesDisconnectPOST(req({ params: { id: 'clawboo-native' } }), mockRes().res)
+    const g1 = mockRes()
+    await runtimesListGET(req(), g1.res)
+    const native1 = (
+      g1.body() as { runtimes: Array<{ id: string; hasCredential: boolean }> }
+    ).runtimes.find((r) => r.id === 'clawboo-native')
+    expect(native1?.hasCredential).toBe(false) // genuinely disconnected
+
+    // Reconnecting lifts the override — ambient reuse applies again.
+    runtimesConnectPOST(
+      req({ params: { id: 'clawboo-native' }, body: { apiKey: 'sk-new', provider: 'anthropic' } }),
+      mockRes().res,
+    )
+    const g2 = mockRes()
+    await runtimesListGET(req(), g2.res)
+    const native2 = (
+      g2.body() as { runtimes: Array<{ id: string; hasCredential: boolean }> }
+    ).runtimes.find((r) => r.id === 'clawboo-native')
+    expect(native2?.hasCredential).toBe(true)
   })
 
   // ── logout (oauth sign-out) ──────────────────────────────────────────────────
@@ -694,6 +753,33 @@ describe('runtimes install/connect REST', () => {
     )
     expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(true)
     expect(hasRuntimeSecret('ANTHROPIC_API_KEY')).toBe(false)
+  })
+
+  it('native keyless REUSE: an existing provider key + explicit provider lifts the disconnect override', () => {
+    // The Providers hub still holds an OpenRouter key; the runtime was explicitly
+    // disconnected. Reconnecting must NOT demand a re-paste — { provider } alone
+    // verifies a key resolves and lifts the override.
+    setRuntimeSecret('OPENROUTER_API_KEY', 'sk-or-existing')
+    setRuntimeDisconnected('clawboo-native', true)
+    const m = mockRes()
+    runtimesConnectPOST(
+      req({ params: { id: 'clawboo-native' }, body: { provider: 'openrouter' } }),
+      m.res,
+    )
+    expect(m.statusCode()).toBe(200)
+    expect((m.body() as { connectionState?: string }).connectionState).toBe('ready')
+    expect(isRuntimeDisconnected('clawboo-native')).toBe(false)
+    expect(JSON.stringify(m.body())).not.toContain('sk-or-existing')
+  })
+
+  it('native keyless connect 400s when NO key exists for the chosen provider', () => {
+    const m = mockRes()
+    runtimesConnectPOST(
+      req({ params: { id: 'clawboo-native' }, body: { provider: 'groq' } }),
+      m.res,
+    )
+    expect(m.statusCode()).toBe(400)
+    expect(String((m.body() as { error?: string }).error)).toMatch(/groq/i)
   })
 
   it('native connect with ollama is a keyless no-op (stores nothing, still ok)', () => {

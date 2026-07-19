@@ -41,7 +41,7 @@ import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
-import { resolveRuntimeKey } from '../secretsVault'
+import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { dispatchChatTurn } from './dispatchChatTurn'
 import {
   DEFAULT_MAX_EXCHANGE_TURNS,
@@ -124,7 +124,7 @@ function buildApiKeyEnv(runtime: string): Record<string, string> {
   const d = getDescriptor(runtime)
   for (const v of [d.envVar, ...(d.altEnvVars ?? [])]) {
     if (!v) continue
-    const key = resolveRuntimeKey(v)
+    const key = resolveRuntimeKeyForRuntime(runtime, v)
     if (key) env[v] = key
   }
   return env
