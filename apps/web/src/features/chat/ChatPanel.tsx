@@ -5,11 +5,13 @@ import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useBooZeroStore } from '@/stores/booZero'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useTeamStore } from '@/stores/team'
 import { sendChatMessage } from './chatSendOperation'
 import { stopAgentRun } from './stopChatOperation'
 import { sendNativeAgentMessage, stopNativeAgentChat } from './nativeAgentChatSend'
 import { useNativeAgentChatStream } from './useNativeAgentChatStream'
+import { useNativeRuntimeState } from '@/features/runtimes/useNativeRuntimeState'
 import {
   groupEntriesToBlocks,
   MessageList,
@@ -101,9 +103,20 @@ export function ChatPanel({
   })
 
   const isRunning = isNativeChat ? nativeBusy : agent?.status === 'running'
+  // Truthful native credential state: 'needs-auth' = the runtime has NO provider
+  // key, so a send cannot possibly succeed — gate the composer + badge on it
+  // instead of showing green "Connected" over a silent non-responder. Fail-safe:
+  // null (probe pending/failed) never degrades the UI.
+  const nativeState = useNativeRuntimeState(isNativeChat)
+  const nativeKeyless = isNativeChat && nativeState === 'needs-auth'
   // A native chat needs NO Gateway client; an OpenClaw chat does.
   const canSend = Boolean(
-    (isNativeChat || client) && connectionStatus === 'connected' && agent && sessionKey && !isRunning,
+    (isNativeChat || client) &&
+    connectionStatus === 'connected' &&
+    agent &&
+    sessionKey &&
+    !isRunning &&
+    !nativeKeyless,
   )
 
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
@@ -279,12 +292,28 @@ export function ChatPanel({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span
-              className={`h-1.5 w-1.5 rounded-full ${connectionStatus === 'connected' ? 'bg-mint' : 'bg-foreground/25'}`}
+              className={`h-1.5 w-1.5 rounded-full ${nativeKeyless ? 'bg-amber/80' : connectionStatus === 'connected' ? 'bg-mint' : 'bg-foreground/25'}`}
               aria-hidden
             />
-            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-foreground/45">
-              {connectionStatus === 'connected' ? 'Connected' : connectionStatus}
+            <span
+              className={`font-mono text-[10px] uppercase tracking-[0.1em] ${nativeKeyless ? 'text-amber/90' : 'text-foreground/45'}`}
+            >
+              {nativeKeyless
+                ? 'Disconnected'
+                : connectionStatus === 'connected'
+                  ? 'Connected'
+                  : connectionStatus}
             </span>
+            {nativeKeyless && (
+              <button
+                type="button"
+                data-testid="native-disconnected-chip"
+                onClick={() => useSettingsModalStore.getState().openSettings('runtimes')}
+                className="cursor-pointer rounded-full border border-amber/25 bg-amber/10 px-2 py-0.5 text-[10px] font-medium text-amber transition-colors hover:bg-amber/20"
+              >
+                Set up in Runtimes →
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -336,17 +365,19 @@ export function ChatPanel({
           }
         }}
         placeholder={
-          !isNativeChat && !client
-            ? 'Gateway not connected…'
-            : !sessionKey
-              ? 'No active session…'
-              : isRunning
-                ? isNativeChat
-                  ? 'Thinking…'
-                  : 'Agent is working…'
-                : isBooZeroChat
-                  ? 'Ask me anything… use @ to tag a team'
-                  : 'Message…'
+          nativeKeyless
+            ? 'Clawboo Native is disconnected — set it up in Settings → Runtimes…'
+            : !isNativeChat && !client
+              ? 'Gateway not connected…'
+              : !sessionKey
+                ? 'No active session…'
+                : isRunning
+                  ? isNativeChat
+                    ? 'Thinking…'
+                    : 'Agent is working…'
+                  : isBooZeroChat
+                    ? 'Ask me anything… use @ to tag a team'
+                    : 'Message…'
         }
       />
     </div>

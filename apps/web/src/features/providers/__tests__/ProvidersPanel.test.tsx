@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 
 import { server } from '@/__vitest__/mswServer'
@@ -30,9 +30,12 @@ describe('ProvidersPanel', () => {
   it('Connect reveals the key input for a provider', async () => {
     server.use(http.get('/api/providers', () => HttpResponse.json({ providers: [] })))
     render(<ProvidersPanel />)
-    await screen.findByText('Anthropic')
-    const connectButtons = await screen.findAllByRole('button', { name: 'Connect' })
-    fireEvent.click(connectButtons[0]!)
+    // Target Anthropic's OWN Connect button (order-agnostic — the catalog leads
+    // with OpenAI/OpenRouter now, so "the first Connect" is no longer Anthropic).
+    const anthropicRow = (await screen.findByText('Anthropic')).closest(
+      '.rounded-2xl',
+    ) as HTMLElement
+    fireEvent.click(within(anthropicRow).getByRole('button', { name: 'Connect' }))
     // The editing row appears (Save button + the masked key input).
     expect(await screen.findByRole('button', { name: 'Save' })).toBeInTheDocument()
     expect(screen.getByPlaceholderText('sk-ant-…')).toBeInTheDocument()
@@ -65,7 +68,6 @@ describe('ProvidersPanel', () => {
     render(<ProvidersPanel />)
     const row = await screen.findByTestId('provider-row-chatgpt')
     expect(row).toHaveTextContent('Connected')
-    expect(row).toHaveTextContent(/powers Codex/i)
     // No Connect demand once connected; the credential is the Codex CLI's.
     expect(row).toHaveTextContent(/Managed by the Codex CLI/i)
   })

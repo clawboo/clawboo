@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 import { useTeamStore, type Team } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
@@ -10,6 +11,65 @@ import { confirm } from '@/stores/confirm'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { TeamContextMenu } from '@/features/teams/TeamContextMenu'
 import { refreshTeamAgentsMd } from '@/lib/createAgent'
+
+// ─── RailTip ─────────────────────────────────────────────────────────────────
+
+// How long a rail icon must be hovered before its tooltip shows. The rail used
+// the native `title` attribute, whose ~1s delay is browser-controlled and can't
+// be shortened — this custom tip appears near-instantly (just enough delay to
+// not flicker on pass-through hovers).
+const RAIL_TIP_DELAY_MS = 150
+
+/** Fast hover tooltip for the icon rail — rendered to the RIGHT of the icon via
+ *  a body portal (so the rail's scroll container never clips it). Replaces the
+ *  slow native `title`; the accessible name moves to `aria-label` on the button. */
+function RailTip({ label, children }: { label: string; children: React.ReactNode }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const timerRef = useRef<number | null>(null)
+
+  const clearTimer = () => {
+    if (timerRef.current != null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+  const show = () => {
+    clearTimer()
+    timerRef.current = window.setTimeout(() => {
+      const r = wrapRef.current?.getBoundingClientRect()
+      if (r) setPos({ x: r.right + 10, y: r.top + r.height / 2 })
+    }, RAIL_TIP_DELAY_MS)
+  }
+  const hide = () => {
+    clearTimer()
+    setPos(null)
+  }
+  useEffect(() => clearTimer, [])
+
+  return (
+    <div
+      ref={wrapRef}
+      className="flex shrink-0"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onMouseDown={hide}
+    >
+      {children}
+      {pos &&
+        createPortal(
+          <div
+            role="tooltip"
+            className="pointer-events-none fixed z-[80] whitespace-nowrap rounded-lg border border-border bg-popover px-2.5 py-1.5 text-[12px] font-medium text-popover-foreground shadow-[var(--shadow-floating)]"
+            style={{ left: pos.x, top: pos.y, transform: 'translateY(-50%)' }}
+          >
+            {label}
+          </div>,
+          document.body,
+        )}
+    </div>
+  )
+}
 
 // ─── MascotIcon ──────────────────────────────────────────────────────────────
 
@@ -23,19 +83,23 @@ function MascotIcon({
   onContextMenu: (e: React.MouseEvent) => void
 }) {
   return (
-    <button
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      title="All Agents"
-      className={[
-        'flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] p-0 transition-all duration-150',
-        selected
-          ? 'border-2 border-primary bg-primary/10'
-          : 'border-2 border-transparent bg-foreground/[0.04] hover:bg-foreground/[0.07]',
-      ].join(' ')}
-    >
-      <img src="/logo.svg" width={26} height={24} alt="All teams" />
-    </button>
+    // Clicking the mascot opens BOO ZERO (the global leader's 1:1 chat) — the
+    // "all agents" view is the right-click action — so the tip must say Boo Zero.
+    <RailTip label="Boo Zero">
+      <button
+        onClick={onClick}
+        onContextMenu={onContextMenu}
+        aria-label="Boo Zero"
+        className={[
+          'flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] p-0 transition-all duration-150',
+          selected
+            ? 'border-2 border-primary bg-primary/10'
+            : 'border-2 border-transparent bg-foreground/[0.04] hover:bg-foreground/[0.07]',
+        ].join(' ')}
+      >
+        <img src="/logo.svg" width={26} height={24} alt="Boo Zero" />
+      </button>
+    </RailTip>
   )
 }
 
@@ -53,31 +117,33 @@ function TeamIcon({
   onContextMenu: (e: React.MouseEvent) => void
 }) {
   return (
-    <div className="relative flex items-center">
-      {/* Selected indicator pill on the left edge — brand red. */}
-      {selected && (
-        <div
-          className="absolute h-5 w-1 rounded-r-full"
-          style={{ left: -8, background: 'var(--primary)' }}
-        />
-      )}
-      <button
-        onClick={onClick}
-        onContextMenu={onContextMenu}
-        title={team.name}
-        className={[
-          'flex h-10 w-10 shrink-0 items-center justify-center border-none p-0 text-xl leading-none transition-all duration-200 cursor-pointer',
-          selected ? 'rounded-[13px]' : 'rounded-[20px] hover:rounded-[14px]',
-          team.color ? '' : 'bg-foreground/[0.06]',
-        ].join(' ')}
-        style={{
-          ...(team.color ? { background: team.color } : {}),
-          ...(selected ? { boxShadow: '0 0 0 2px var(--primary)' } : {}),
-        }}
-      >
-        {team.icon}
-      </button>
-    </div>
+    <RailTip label={team.name}>
+      <div className="relative flex items-center">
+        {/* Selected indicator pill on the left edge — brand red. */}
+        {selected && (
+          <div
+            className="absolute h-5 w-1 rounded-r-full"
+            style={{ left: -8, background: 'var(--primary)' }}
+          />
+        )}
+        <button
+          onClick={onClick}
+          onContextMenu={onContextMenu}
+          aria-label={team.name}
+          className={[
+            'flex h-10 w-10 shrink-0 items-center justify-center border-none p-0 text-xl leading-none transition-all duration-200 cursor-pointer',
+            selected ? 'rounded-[13px]' : 'rounded-[20px] hover:rounded-[14px]',
+            team.color ? '' : 'bg-foreground/[0.06]',
+          ].join(' ')}
+          style={{
+            ...(team.color ? { background: team.color } : {}),
+            ...(selected ? { boxShadow: '0 0 0 2px var(--primary)' } : {}),
+          }}
+        >
+          {team.icon}
+        </button>
+      </div>
+    </RailTip>
   )
 }
 
@@ -352,35 +418,39 @@ export function TeamSidebar() {
 
       {/* Add team button — opens the Marketplace Teams showcase (the single
           canonical place to browse + deploy a team, or start one from scratch). */}
-      <button
-        title="Create a team"
-        onClick={openTeamMarketplace}
-        className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] border border-dashed border-border-strong bg-transparent p-0 text-foreground/40 transition-all duration-150 hover:border-primary hover:text-primary hover:bg-primary/[0.06]"
-      >
-        <Plus size={16} strokeWidth={2} />
-      </button>
+      <RailTip label="Create a team">
+        <button
+          aria-label="Create a team"
+          onClick={openTeamMarketplace}
+          className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] border border-dashed border-border-strong bg-transparent p-0 text-foreground/40 transition-all duration-150 hover:border-primary hover:text-primary hover:bg-primary/[0.06]"
+        >
+          <Plus size={16} strokeWidth={2} />
+        </button>
+      </RailTip>
 
       {/* Column 2 collapse/expand toggle */}
-      <button
-        title={columnCollapsed || isBooZero ? 'Expand sidebar' : 'Collapse sidebar'}
-        onClick={() => {
-          if (isBooZero) {
-            useViewStore.getState().navigateTo('graph')
-            if (useViewStore.getState().columnCollapsed) {
+      <RailTip label={columnCollapsed || isBooZero ? 'Expand sidebar' : 'Collapse sidebar'}>
+        <button
+          aria-label={columnCollapsed || isBooZero ? 'Expand sidebar' : 'Collapse sidebar'}
+          onClick={() => {
+            if (isBooZero) {
+              useViewStore.getState().navigateTo('graph')
+              if (useViewStore.getState().columnCollapsed) {
+                useViewStore.getState().toggleColumnCollapsed()
+              }
+            } else {
               useViewStore.getState().toggleColumnCollapsed()
             }
-          } else {
-            useViewStore.getState().toggleColumnCollapsed()
-          }
-        }}
-        className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] border-none bg-transparent p-0 text-foreground/40 transition-all duration-150 hover:bg-foreground/[0.05] hover:text-foreground/70"
-      >
-        {columnCollapsed || isBooZero ? (
-          <PanelLeftOpen size={16} strokeWidth={2} />
-        ) : (
-          <PanelLeftClose size={16} strokeWidth={2} />
-        )}
-      </button>
+          }}
+          className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] border-none bg-transparent p-0 text-foreground/40 transition-all duration-150 hover:bg-foreground/[0.05] hover:text-foreground/70"
+        >
+          {columnCollapsed || isBooZero ? (
+            <PanelLeftOpen size={16} strokeWidth={2} />
+          ) : (
+            <PanelLeftClose size={16} strokeWidth={2} />
+          )}
+        </button>
+      </RailTip>
 
       {/* Mascot right-click context menu */}
       {mascotMenu && (

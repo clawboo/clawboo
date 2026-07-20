@@ -28,6 +28,7 @@ import { eq } from 'drizzle-orm'
 import { resolveDelegationApproval } from '../../api/delegationApproval'
 import { getRegistry } from '../agentSource/registry'
 import { getDbPath } from '../db'
+import { publishAgentStatus } from './agentStatusBus'
 import { publishBoardChange } from './boardChangeBus'
 import { booZeroForTeam, ensureNativeBooZero } from './booZero'
 import { publishChatDelta } from './chatDeltaBus'
@@ -156,12 +157,25 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     taskForSession: (sk) => engineRef.current!.taskForSession(sk),
     persistTurn: (sk, text) => {
       const agentId = agentIdFromSessionKey(sk)
-      if (agentId)
-        persistTeamChatEntry(db, { teamId, agentId, text, role: 'assistant', kind: 'assistant' })
+      if (!agentId) return false
+      // Report back whether the entry actually reached the transcript — a `false`
+      // makes the drain publish a CLEARING delta so a streamed-but-uncommitted turn
+      // never leaves a lingering StreamingCard.
+      return persistTeamChatEntry(db, {
+        teamId,
+        agentId,
+        text,
+        role: 'assistant',
+        kind: 'assistant',
+      })
     },
     // Tier-2 live tokens: fan a run's running assistant text to the team's in-memory
     // delta bus, which each open team-chat SSE stream forwards as a `delta` event.
     publishDelta: (sk, runId, text) => publishChatDelta(teamId, { sessionKey: sk, runId, text }),
+    // Left-pane liveness: fan run-boundary working/idle signals to the team's status
+    // bus, which each open team-chat SSE stream forwards as a `status` event; the
+    // thin client patches the fleet store so the sidebar badges track the cascade.
+    publishStatus: (agentId, status) => publishAgentStatus(teamId, { agentId, status }),
   })
 
   const engine = createBoardOrchestrator({
@@ -290,7 +304,10 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
           if (recovered) {
             // Operator is back — retry the SAME turn transparently.
             await deliver(sk, targetId, stimulus).catch((retryErr: unknown) => {
-              log.error({ err: retryErr, teamId, targetId }, 'team-orchestrator retry after reconnect failed')
+              log.error(
+                { err: retryErr, teamId, targetId },
+                'team-orchestrator retry after reconnect failed',
+              )
               persistDeliverFailure(isOperatorDown(retryErr))
             })
             return

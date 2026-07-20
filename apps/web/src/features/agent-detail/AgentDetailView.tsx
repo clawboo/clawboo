@@ -1,10 +1,12 @@
 import { Group, Panel } from 'react-resizable-panels'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { ChatPanel } from '@/features/chat/ChatPanel'
 import { ResizeHandle } from '@/features/shared/ResizeHandle'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { useNativeRuntimeState } from '@/features/runtimes/useNativeRuntimeState'
 import { MiniGraph } from './MiniGraph'
 import { InlineEditor } from './InlineEditor'
 
@@ -25,6 +27,12 @@ import { InlineEditor } from './InlineEditor'
 export function AgentDetailView({ agentId }: { agentId: string }) {
   const agent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
   const connectionStatus = useConnectionStore((s) => s.status)
+  // A NATIVE agent's badge must reflect the native runtime's credential state —
+  // the app-shell connection store is 'connected' in native mode even with zero
+  // provider keys, which showed a green "Connected" over an agent that could not
+  // possibly respond. Fail-safe: null (unknown/probe failed) keeps the shell badge.
+  const nativeState = useNativeRuntimeState(agent?.runtime === 'clawboo-native')
+  const nativeKeyless = nativeState === 'needs-auth'
 
   if (!agent) {
     return (
@@ -54,20 +62,37 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
               No session
             </span>
           )}
-          <span
-            className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45"
-            aria-label={`Connection: ${connectionStatus}`}
-          >
+          {nativeKeyless ? (
+            <span className="ml-0.5 flex items-center gap-2">
+              <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-amber/90">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber/80" />
+                Disconnected
+              </span>
+              <button
+                type="button"
+                data-testid="native-disconnected-chip"
+                onClick={() => useSettingsModalStore.getState().openSettings('runtimes')}
+                className="cursor-pointer rounded-full border border-amber/25 bg-amber/10 px-2 py-0.5 text-[10px] font-medium text-amber transition-colors hover:bg-amber/20"
+              >
+                Set up in Runtimes →
+              </button>
+            </span>
+          ) : (
             <span
-              className={[
-                'inline-block h-1.5 w-1.5 rounded-full',
-                connectionStatus === 'connected'
-                  ? 'bg-mint shadow-[0_0_6px_rgb(var(--mint-rgb)/0.6)]'
-                  : 'bg-amber/70',
-              ].join(' ')}
-            />
-            {connectionStatus === 'connected' ? 'Connected' : connectionStatus}
-          </span>
+              className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45"
+              aria-label={`Connection: ${connectionStatus}`}
+            >
+              <span
+                className={[
+                  'inline-block h-1.5 w-1.5 rounded-full',
+                  connectionStatus === 'connected'
+                    ? 'bg-mint shadow-[0_0_6px_rgb(var(--mint-rgb)/0.6)]'
+                    : 'bg-amber/70',
+                ].join(' ')}
+              />
+              {connectionStatus === 'connected' ? 'Connected' : connectionStatus}
+            </span>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <GitHubStarButton />

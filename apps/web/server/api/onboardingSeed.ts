@@ -17,7 +17,7 @@ import type { Request, Response } from 'express'
 import { eq } from 'drizzle-orm'
 
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
-import { createDb, setSetting, teams } from '@clawboo/db'
+import { createDb, getSetting, setSetting, teams } from '@clawboo/db'
 
 import { getRegistry } from '../lib/agentSource'
 import { getDbPath } from '../lib/db'
@@ -25,7 +25,8 @@ import { getTenantId } from '../lib/tenant'
 // Per-provider model picks live in the shared native-defaults helper (the native
 // AgentSource's provider auto-resolution uses the same map).
 import { MODEL_DEFAULTS } from '../lib/runtimes/native/nativeProviderDefaults'
-import { SETTING_NATIVE_LEADER_MODEL } from '../lib/teamChat/booZero'
+import { loadAgentConfig, saveAgentConfig } from '../lib/runtimes/native/agentConfigStore'
+import { SETTING_NATIVE_BOO_ZERO_ID, SETTING_NATIVE_LEADER_MODEL } from '../lib/teamChat/booZero'
 import { serverOrchestratedSettingKey } from '../lib/teamChat/resolveServerOrchestrated'
 
 // The leader coordinates by delegating to teammates with the `delegate` tool —
@@ -88,9 +89,47 @@ export function onboardingNativeLeaderModelPOST(req: Request, res: Response): vo
   try {
     const db = createDb(getDbPath())
     setSetting(db, SETTING_NATIVE_LEADER_MODEL, JSON.stringify({ provider, model }))
+    // Retro-apply to the EXISTING native Boo Zero so the pick takes effect
+    // immediately — the setting alone only reaches a FUTURE lazily-created leader
+    // (ensureNativeBooZero reads it at creation time). Best-effort: no Boo Zero
+    // yet (fresh install mid-onboarding) is the normal case, not an error.
+    try {
+      const bzId = getSetting(db, SETTING_NATIVE_BOO_ZERO_ID)
+      const cfg = bzId ? loadAgentConfig(db, bzId) : null
+      if (bzId && cfg) {
+        const envVar = envVarForProvider(provider)
+        saveAgentConfig(db, {
+          ...cfg,
+          primaryProvider: provider,
+          primaryModel: model,
+          ...(envVar ? { envVar } : {}),
+          updatedAt: Date.now(),
+        })
+      }
+    } catch {
+      /* best-effort */
+    }
     res.status(200).json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
+// GET /api/onboarding/native-leader-model — the current default provider + model
+// for the native leader (null/null when never set). Read by the Runtimes panel's
+// native provider manager so its "Default" tag + model dropdown reflect reality.
+export function onboardingNativeLeaderModelGET(_req: Request, res: Response): void {
+  try {
+    const db = createDb(getDbPath())
+    const raw = getSetting(db, SETTING_NATIVE_LEADER_MODEL)
+    if (!raw) {
+      res.json({ provider: null, model: null })
+      return
+    }
+    const parsed = JSON.parse(raw) as { provider?: string; model?: string }
+    res.json({ provider: parsed.provider ?? null, model: parsed.model ?? null })
+  } catch {
+    res.json({ provider: null, model: null })
   }
 }
 

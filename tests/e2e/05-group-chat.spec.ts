@@ -90,10 +90,12 @@ async function connectWithTeam(
 
   // Wait for team icon to appear in team sidebar
   const teamSidebar = page.locator('[data-testid="team-sidebar"]')
-  await expect(teamSidebar.locator('button[title="Test Team"]')).toBeVisible({ timeout: 20_000 })
+  await expect(teamSidebar.locator('button[aria-label="Test Team"]')).toBeVisible({
+    timeout: 20_000,
+  })
 
   // Click team icon to select it
-  await teamSidebar.locator('button[title="Test Team"]').click()
+  await teamSidebar.locator('button[aria-label="Test Team"]').click()
 
   // Wait for agent to appear in filtered list
   const agentList = page.locator('[data-testid="agent-list-column"]')

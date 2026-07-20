@@ -16,6 +16,8 @@ import { createAgent } from '@/lib/createAgent'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import {
   fetchBooZeroOverride,
+  fetchNativeLeaderModel,
+  fetchProviders,
   fetchRegistryHealth,
   fetchRuntimes,
   setBooZeroOverride,
@@ -41,8 +43,9 @@ import {
   useNativeModelGroups,
   useOpenClawModelGroups,
 } from '@/lib/useOpenRouterModels'
-import { MODEL_GROUPS, type ModelGroup } from '@/lib/modelCatalog'
-import { Select } from '@/features/shared/Select'
+import { MODEL_GROUPS, providerSlug, type ModelGroup } from '@/lib/modelCatalog'
+import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
+import { MemberModelSelect, type ModelPickerGroup } from './MemberModelSelect'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
 import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
@@ -78,30 +81,63 @@ function runtimeHasModelPicker(sourceId: SelectableSourceId): boolean {
   return sourceId === 'clawboo-native' || sourceId === 'openclaw' || sourceId === 'hermes'
 }
 
-/** The model dropdown options for a runtime — its OWN catalog (native uses the
- *  provider-native ids; OpenClaw uses the routing ids; Hermes its own
- *  provider+model ids), led by an empty "Recommended" that leaves the model unset
- *  (native → tier auto-resolve; OpenClaw → the global default; Hermes → the
- *  key-derived default). The provider suffix disambiguates same-named models across
- *  providers (e.g. GPT-4o under both OpenAI and OpenRouter). */
-function modelOptionsFor(
+/** The runtime's OWN model catalog (native → provider-native ids; OpenClaw →
+ *  routing ids; Hermes → its provider+model ids), FILTERED to the providers the
+ *  user has actually connected — the model picker is a two-layer provider→model
+ *  flow, so an unconnected provider is never shown. The `OpenAI Codex` group
+ *  (the ChatGPT subscription, keyless OAuth — not a hub key) is kept only when
+ *  Codex reads connected. Graceful fallback: if we can't determine connectivity
+ *  at all (empty set + no codex), show every group so the picker is never empty. */
+// The ChatGPT-subscription (Codex OAuth) group as it appears across catalogs —
+// OpenClaw's "OpenAI Codex" and Hermes's "ChatGPT subscription" both mean the same
+// keyless subscription, gated by `codexReady` rather than a hub key.
+const CODEX_GROUP_SLUGS = new Set(['openaicodex', 'chatgptsubscription'])
+
+function groupsForRuntime(
   sourceId: SelectableSourceId,
   nativeGroups: ModelGroup[],
   openclawGroups: ModelGroup[],
   hermesGroups: ModelGroup[],
-): { value: string; label: string }[] {
+  connectedSlugs: Set<string>,
+  codexReady: boolean,
+): ModelPickerGroup[] {
   const groups =
     sourceId === 'clawboo-native'
       ? nativeGroups
       : sourceId === 'hermes'
         ? hermesGroups
         : openclawGroups
-  return [
-    { value: '', label: 'Recommended' },
-    ...groups.flatMap((g) =>
-      g.models.map((m) => ({ value: m.id, label: `${m.label} · ${g.provider}` })),
-    ),
-  ]
+  if (connectedSlugs.size === 0 && !codexReady) return groups
+  return groups.filter((g) => {
+    const slug = providerSlug(g.provider)
+    if (CODEX_GROUP_SLUGS.has(slug)) return codexReady
+    return connectedSlugs.has(slug)
+  })
+}
+
+/** The model that ACTUALLY runs when the user leaves the picker on its default —
+ *  shown transparently in the trigger (never an opaque "Recommended"). OpenClaw's
+ *  is the Gateway default (`agents.defaults.model.primary`); native's is the
+ *  configured leader model; Hermes is key-derived server-side (unknowable
+ *  client-side → the trigger reads plain "Default"). */
+function defaultModelFor(
+  sourceId: SelectableSourceId,
+  openclawDefault: string | null,
+  nativeDefault: string | null,
+): string | null {
+  if (sourceId === 'openclaw') return openclawDefault
+  if (sourceId === 'clawboo-native') return nativeDefault
+  return null
+}
+
+/** The provider the runtime's default belongs to — pre-selects the picker's
+ *  provider column. OpenClaw's default id carries a routing prefix (inferable),
+ *  so only native (bare ids) needs the explicit provider. */
+function defaultProviderFor(
+  sourceId: SelectableSourceId,
+  nativeDefaultProvider: string | null,
+): string | null {
+  return sourceId === 'clawboo-native' ? nativeDefaultProvider : null
 }
 
 // ─── Steps ───────────────────────────────────────────────────────────────────
@@ -240,6 +276,24 @@ export function CreateTeamModal({
   // Per-agent MODEL override for native agents (catalog model id; absent = the tier
   // default auto-resolved from the connected key). Cleared in reset().
   const [agentModels, setAgentModels] = useState<Record<string, string>>({})
+  // The CONNECTED LLM providers (Providers hub / OpenClaw .env) — the model picker
+  // shows ONLY these. Slugs (providerSlug), so display names + ids compare cleanly.
+  const [connectedProviderSlugs, setConnectedProviderSlugs] = useState<Set<string>>(new Set())
+  // The native leader's configured default model + provider — shown transparently
+  // in the native picker's trigger + used to pre-select its provider column.
+  const [nativeDefaultModel, setNativeDefaultModel] = useState<string | null>(null)
+  const [nativeDefaultProvider, setNativeDefaultProvider] = useState<string | null>(null)
+  // OpenClaw's Gateway default model (agents.defaults.model.primary) — the exact
+  // model an unset OpenClaw row runs, shown in its picker's trigger.
+  const openclawDefaultModel = useOpenclawDefaultModel()
+  // The ChatGPT subscription (Codex OAuth) counts as a connected "provider" for the
+  // OpenAI-Codex model group when Codex is signed in OR a runtime carries its auth.
+  const codexReady = useMemo(
+    () =>
+      runtimeStatuses.some((s) => s.id === 'codex' && s.connectionState === 'ready') ||
+      runtimeStatuses.some((s) => s.codexAuth === true),
+    [runtimeStatuses],
+  )
   useEffect(() => {
     if (!isOpen) return
     void fetchRuntimes()
@@ -251,6 +305,25 @@ export function CreateTeamModal({
     void fetchRegistryHealth()
       .then((h) => setServerOpenclawConnected(h.connection === 'connected'))
       .catch(() => setServerOpenclawConnected(false))
+    // The connected LLM providers → the model picker filters to these.
+    void fetchProviders()
+      .then((list) =>
+        setConnectedProviderSlugs(
+          new Set(list.filter((p) => p.connected).map((p) => providerSlug(p.id))),
+        ),
+      )
+      .catch(() => setConnectedProviderSlugs(new Set()))
+    // The native default leader model + provider → transparent trigger label +
+    // provider pre-selection for native rows.
+    void fetchNativeLeaderModel()
+      .then((r) => {
+        setNativeDefaultModel(r.model)
+        setNativeDefaultProvider(r.provider)
+      })
+      .catch(() => {
+        setNativeDefaultModel(null)
+        setNativeDefaultProvider(null)
+      })
   }, [isOpen])
 
   // Deploy state
@@ -1115,24 +1188,31 @@ export function CreateTeamModal({
                                     onDisabledClick={handleRuntimeConnectClick}
                                   />
                                   {showModel && (
-                                    <Select
-                                      size="sm"
+                                    <MemberModelSelect
                                       className="shrink-0"
                                       style={{ width: 184 }}
-                                      menuWidth={252}
-                                      searchable
-                                      searchPlaceholder="Search models…"
                                       data-testid="member-model-trigger"
                                       aria-label={`Model for ${agent.name}`}
                                       value={agentModels[agent.id] ?? ''}
                                       onChange={(m) =>
                                         setAgentModels((prev) => ({ ...prev, [agent.id]: m }))
                                       }
-                                      options={modelOptionsFor(
+                                      groups={groupsForRuntime(
                                         value,
                                         nativeModelGroups,
                                         openclawModelGroups,
                                         hermesModelGroups,
+                                        connectedProviderSlugs,
+                                        codexReady,
+                                      )}
+                                      defaultModelId={defaultModelFor(
+                                        value,
+                                        openclawDefaultModel,
+                                        nativeDefaultModel,
+                                      )}
+                                      defaultProvider={defaultProviderFor(
+                                        value,
+                                        nativeDefaultProvider,
                                       )}
                                     />
                                   )}

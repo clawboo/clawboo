@@ -87,9 +87,27 @@ describe('persistTeamChatEntry (the single team-chat writer)', () => {
 
   describe('write-time control-token drop (assistant-role only)', () => {
     it('drops an assistant turn whose body is a control token / short refusal', () => {
-      persistTeamChatEntry(db, { teamId: TEAM, agentId: 'drop', text: '__skipped__', role: 'assistant', kind: 'assistant' })
-      persistTeamChatEntry(db, { teamId: TEAM, agentId: 'drop', text: 'NO_REPLY', role: 'assistant', kind: 'assistant' })
-      persistTeamChatEntry(db, { teamId: TEAM, agentId: 'drop', text: 'Nope.', role: 'assistant', kind: 'assistant' })
+      persistTeamChatEntry(db, {
+        teamId: TEAM,
+        agentId: 'drop',
+        text: '__skipped__',
+        role: 'assistant',
+        kind: 'assistant',
+      })
+      persistTeamChatEntry(db, {
+        teamId: TEAM,
+        agentId: 'drop',
+        text: 'NO_REPLY',
+        role: 'assistant',
+        kind: 'assistant',
+      })
+      persistTeamChatEntry(db, {
+        teamId: TEAM,
+        agentId: 'drop',
+        text: 'Nope.',
+        role: 'assistant',
+        kind: 'assistant',
+      })
       expect(rowsFor('drop')).toHaveLength(0)
     })
 
@@ -107,23 +125,85 @@ describe('persistTeamChatEntry (the single team-chat writer)', () => {
     it('does NOT drop the SAME text when role is user or meta (role gate)', () => {
       // A `[Task Update]` meta + a user message that happens to look like a refusal
       // must never be dropped — only assistant turns are filtered.
-      persistTeamChatEntry(db, { teamId: TEAM, agentId: 'u', text: 'Nope.', role: 'user', kind: 'user' })
-      persistTeamChatEntry(db, { teamId: TEAM, agentId: 'm', text: '__skipped__', role: 'system', kind: 'meta' })
+      persistTeamChatEntry(db, {
+        teamId: TEAM,
+        agentId: 'u',
+        text: 'Nope.',
+        role: 'user',
+        kind: 'user',
+      })
+      persistTeamChatEntry(db, {
+        teamId: TEAM,
+        agentId: 'm',
+        text: '__skipped__',
+        role: 'system',
+        kind: 'meta',
+      })
       expect(rowsFor('u')).toHaveLength(1)
       expect(rowsFor('m')).toHaveLength(1)
     })
   })
 
   it('assigns a strictly-increasing server sequenceKey (the merged-sort tiebreaker)', () => {
-    persistTeamChatEntry(db, { teamId: TEAM, agentId: 'seq', text: 'first', role: 'user', kind: 'user' })
-    persistTeamChatEntry(db, { teamId: TEAM, agentId: 'seq', text: 'second', role: 'assistant', kind: 'assistant' })
+    persistTeamChatEntry(db, {
+      teamId: TEAM,
+      agentId: 'seq',
+      text: 'first',
+      role: 'user',
+      kind: 'user',
+    })
+    persistTeamChatEntry(db, {
+      teamId: TEAM,
+      agentId: 'seq',
+      text: 'second',
+      role: 'assistant',
+      kind: 'assistant',
+    })
     const entries = rowsFor('seq').sort((a, b) => a.sequenceKey - b.sequenceKey)
     expect(entries).toHaveLength(2)
     expect(entries[1]!.sequenceKey).toBeGreaterThan(entries[0]!.sequenceKey)
   })
 
   it('drops empty / whitespace-only text', () => {
-    persistTeamChatEntry(db, { teamId: TEAM, agentId: 'empty', text: '   ', role: 'assistant', kind: 'assistant' })
+    persistTeamChatEntry(db, {
+      teamId: TEAM,
+      agentId: 'empty',
+      text: '   ',
+      role: 'assistant',
+      kind: 'assistant',
+    })
     expect(rowsFor('empty')).toHaveLength(0)
+  })
+
+  it('reports whether the entry reached the transcript (drives the clearing delta)', () => {
+    // Persisted → true; write-time drops → false. serverDeliver publishes a
+    // StreamingCard-clearing delta whenever a streamed turn returns false here.
+    expect(
+      persistTeamChatEntry(db, {
+        teamId: TEAM,
+        agentId: 'rv',
+        text: 'A real reply the user watched streaming.',
+        role: 'assistant',
+        kind: 'assistant',
+      }),
+    ).toBe(true)
+    expect(
+      persistTeamChatEntry(db, {
+        teamId: TEAM,
+        agentId: 'rv',
+        text: 'NO_REPLY',
+        role: 'assistant',
+        kind: 'assistant',
+      }),
+    ).toBe(false)
+    expect(
+      persistTeamChatEntry(db, {
+        teamId: TEAM,
+        agentId: 'rv',
+        text: '  ',
+        role: 'assistant',
+        kind: 'assistant',
+      }),
+    ).toBe(false)
   })
 })

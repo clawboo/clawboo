@@ -100,8 +100,10 @@ async function connectWithTeam(
 
 async function openGroupChat(page: import('@playwright/test').Page): Promise<void> {
   const teamSidebar = page.locator('[data-testid="team-sidebar"]')
-  await expect(teamSidebar.locator('button[title="Test Team"]')).toBeVisible({ timeout: 20_000 })
-  await teamSidebar.locator('button[title="Test Team"]').click()
+  await expect(teamSidebar.locator('button[aria-label="Test Team"]')).toBeVisible({
+    timeout: 20_000,
+  })
+  await teamSidebar.locator('button[aria-label="Test Team"]').click()
   const agentList = page.locator('[data-testid="agent-list-column"]')
   const row = agentList.locator('[data-testid="group-chat-row"]')
   await expect(row).toBeVisible({ timeout: 15_000 })

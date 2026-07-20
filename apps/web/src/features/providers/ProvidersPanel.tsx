@@ -48,7 +48,6 @@ function ProviderRow({
   const addToast = useToastStore((s) => s.addToast)
 
   const connected = status?.connected ?? false
-  const powers = status?.poweredRuntimes ?? []
 
   const handleSave = useCallback(async () => {
     const key = apiKey.trim()
@@ -98,11 +97,6 @@ function ProviderRow({
             <span className="text-[13.5px] font-semibold text-foreground">{entry.name}</span>
             {connected && <StatusPill tone="success" label="Connected" />}
           </div>
-          {powers.length > 0 && (
-            <div className="mt-0.5 truncate text-[11px] text-foreground/45">
-              {connected ? 'Powers' : 'Used by'} {powers.join(' · ')}
-            </div>
-          )}
         </div>
 
         {editing ? (
@@ -221,11 +215,9 @@ function ChatGptSubscriptionRow({
             </span>
             {connected && <StatusPill tone="success" label="Connected" />}
           </div>
-          <div className="mt-0.5 truncate text-[11px] text-foreground/45">
-            {connected
-              ? 'Signed in. Powers Codex, and optionally OpenClaw and Hermes'
-              : 'No API key needed. Sign in with your ChatGPT account'}
-          </div>
+          {!connected && (
+            <div className="mt-0.5 truncate text-[11px] text-foreground/45">No API key needed</div>
+          )}
         </div>
 
         {connected ? (
@@ -341,13 +333,6 @@ export function ProvidersPanel() {
                     onChanged={refresh}
                   />
                 ))}
-
-              <p className="mt-2 text-[12px] leading-relaxed text-foreground/45">
-                Connect as many providers as you like. Keys are stored encrypted in Clawboo's vault
-                and mirrored to OpenClaw's config, so one key works across Clawboo Native, Claude
-                Code, Hermes, and OpenClaw. The ChatGPT subscription signs in through the Codex CLI
-                instead of a key. Ollama runs locally and needs no key.
-              </p>
             </>
           )}
         </div>

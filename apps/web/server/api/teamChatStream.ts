@@ -21,6 +21,7 @@ import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
 import { getDbPath } from '../lib/db'
+import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
 import { subscribeBoardChange } from '../lib/teamChat/boardChangeBus'
 import { booZeroForTeam } from '../lib/teamChat/booZero'
 import { subscribeChatDelta } from '../lib/teamChat/chatDeltaBus'
@@ -104,6 +105,21 @@ export function teamChatStreamGET(req: Request, res: Response): void {
     res.write(`data: ${JSON.stringify(change)}\n\n`)
   })
 
+  // Live agent working/idle signals — forwarded as named `status` events, also with
+  // NO `id:` line (EPHEMERAL, off the resume cursor). The thin client patches the
+  // fleet store so the left-pane badges track a server-orchestrated cascade live.
+  // On connect, REPLAY the channel's last-status snapshot: status frames are never
+  // replayed by the cursor, so a client whose stream was closed when a terminal
+  // `idle` published would otherwise keep a stale Working badge — and a mid-run
+  // connect learns who is already running instead of waiting for the next boundary.
+  const writeStatus = (update: { agentId: string; status: string }): void => {
+    if (closed) return
+    res.write('event: status\n')
+    res.write(`data: ${JSON.stringify(update)}\n\n`)
+  }
+  for (const update of getAgentStatusSnapshot(teamId)) writeStatus(update)
+  const unsubStatus = subscribeAgentStatus(teamId, writeStatus)
+
   const pollTimer = setInterval(poll, STREAM_POLL_MS)
   const keepalive = setInterval(() => {
     if (!closed) res.write(': keepalive\n\n')
@@ -115,6 +131,7 @@ export function teamChatStreamGET(req: Request, res: Response): void {
     clearInterval(keepalive)
     unsub()
     unsubBoard()
+    unsubStatus()
     // Close the per-connection better-sqlite3 handle (createDb opens a FRESH one per
     // SSE stream) so a long-lived/dropped stream doesn't leak a DB handle until GC.
     try {

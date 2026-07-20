@@ -110,7 +110,11 @@ import {
   providerModelsGET,
   providerModelsPOST,
 } from './providers'
-import { onboardingNativeLeaderModelPOST, onboardingSeedNativeTeamPOST } from './onboardingSeed'
+import {
+  onboardingNativeLeaderModelGET,
+  onboardingNativeLeaderModelPOST,
+  onboardingSeedNativeTeamPOST,
+} from './onboardingSeed'
 import { onboardingStateGET } from './onboardingState'
 import { budgetsListGET, budgetsResumePOST, budgetsSetPOST } from './budgets'
 import { governanceAuditGET } from './governanceAudit'
@@ -343,6 +347,7 @@ router.post('/api/runtimes/:id/run', runtimesRunPOST)
 // hasConnectedRuntime) so a thin client skips the multi-call decision dance.
 router.post('/api/onboarding/seed-native-team', onboardingSeedNativeTeamPOST)
 router.post('/api/onboarding/native-leader-model', onboardingNativeLeaderModelPOST)
+router.get('/api/onboarding/native-leader-model', onboardingNativeLeaderModelGET)
 router.get('/api/onboarding/state', onboardingStateGET)
 
 // Governance. Budget kill-switch caps + the forensic audit.

@@ -73,36 +73,37 @@ describe('RuntimeConnectList — connected card + Manage', () => {
     expect(manage).toHaveAttribute('aria-expanded', 'true')
   })
 
-  it('Manage hosts the ChatGPT-subscription sign-in when Codex is connected and Hermes lacks it', () => {
+  it('Manage hosts the ChatGPT-subscription sign-in (a provider row) when Codex is connected and Hermes lacks it', async () => {
     renderList([
       { id: 'hermes', connectionState: 'ready', codexAuth: false },
       { id: 'codex', connectionState: 'ready' },
     ])
     expect(screen.getByTestId('runtime-hermes-manage')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-hermes-subscription-add')).toBeInTheDocument()
+    // The subscription is now a row inside the providers list (async load).
+    expect(await screen.findByTestId('runtime-hermes-subscription-add')).toBeInTheDocument()
     expect(screen.getByTestId('chatgpt-signin-hermes-start')).toBeInTheDocument()
     // Disconnect + Details live in the same Manage body.
     expect(screen.getByTestId('runtime-hermes-disconnect')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-hermes-details')).toBeInTheDocument()
   })
 
-  it('Manage shows the subscription CONFIRMATION (not the sign-in) once Hermes has it', () => {
+  it('Manage shows the subscription CONFIRMATION (not the sign-in) once Hermes has it', async () => {
     renderList([
       { id: 'hermes', connectionState: 'ready', codexAuth: true },
       { id: 'codex', connectionState: 'ready' },
     ])
-    expect(screen.getByTestId('runtime-hermes-subscription-connected')).toBeInTheDocument()
+    expect(await screen.findByTestId('runtime-hermes-subscription-connected')).toBeInTheDocument()
     expect(screen.queryByTestId('chatgpt-signin-hermes-start')).not.toBeInTheDocument()
   })
 
-  it('with Codex NOT connected, Manage shows the "connect Codex first" hint (no sign-in)', () => {
+  it('with Codex NOT connected, Manage shows the "connect Codex first" hint (no sign-in)', async () => {
     renderList([{ id: 'hermes', connectionState: 'ready', codexAuth: false }])
-    expect(screen.getByTestId('runtime-hermes-subscription-needs-codex')).toBeInTheDocument()
+    expect(await screen.findByTestId('runtime-hermes-subscription-needs-codex')).toBeInTheDocument()
     expect(screen.queryByTestId('runtime-hermes-subscription-add')).not.toBeInTheDocument()
     expect(screen.queryByTestId('chatgpt-signin-hermes-start')).not.toBeInTheDocument()
   })
 
-  it('the connected OpenClaw Manage offers the subscription above its MCP config', () => {
+  it('the connected OpenClaw Manage carries the subscription as a provider row + gateway + default model', async () => {
     renderList([{ id: 'codex', connectionState: 'ready' }], {
       connected: true,
       statusLabel: 'Healthy',
@@ -113,8 +114,13 @@ describe('RuntimeConnectList — connected card + Manage', () => {
       extra: <div data-testid="mcp-attach-stub">MCP config</div>,
     })
     expect(screen.getByTestId('runtime-list-row-openclaw-toggle')).toHaveTextContent(/Manage/i)
-    expect(screen.getByTestId('runtime-openclaw-subscription-add')).toBeInTheDocument()
     expect(screen.getByTestId('mcp-attach-stub')).toBeInTheDocument()
+    // The Gateway process controls + the OpenClaw default-model picker moved here
+    // from the System panel (this runtime's home now).
+    expect(screen.getByTestId('openclaw-gateway-section')).toBeInTheDocument()
+    expect(await screen.findByTestId('openclaw-default-model')).toBeInTheDocument()
+    // The ChatGPT subscription is a peer row in the providers list (async load).
+    expect(await screen.findByTestId('runtime-openclaw-subscription-add')).toBeInTheDocument()
     // OpenClaw's Disconnect (stops the gateway) + Details are present too.
     expect(screen.getByTestId('runtime-openclaw-disconnect')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-openclaw-details')).toBeInTheDocument()

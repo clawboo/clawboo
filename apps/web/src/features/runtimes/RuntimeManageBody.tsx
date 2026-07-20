@@ -1,6 +1,7 @@
 // The inline "Manage" body for a CONNECTED runtime — revealed by the card's
-// Manage footer button. Holds (in order): the ChatGPT-subscription option
-// (Hermes / OpenClaw), OpenClaw's MCP attach config, and an actions row with
+// Manage footer button. Holds (in order): the runtime's body content (its
+// provider list — which now carries the ChatGPT-subscription option as a peer
+// row — plus OpenClaw's MCP attach config), and an actions row with
 // Re-check · Disconnect · Details. "Details" opens the read-only diagnostics
 // drawer (health checks, integration); the actions live here now.
 //
@@ -17,7 +18,6 @@ import { disconnectRuntime, signOutRuntime, type RuntimeId } from '@clawboo/cont
 import { Button } from '@/features/shared/Button'
 import { confirm } from '@/stores/confirm'
 import { useToastStore } from '@/stores/toast'
-import { RuntimeSubscriptionSection } from './RuntimeSubscriptionSection'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -75,12 +75,8 @@ export interface RuntimeManageBodyProps {
   onChanged: () => void | Promise<void>
   /** Open the read-only diagnostics drawer (the "Details" affordance). */
   onDiagnostics?: () => void
-  /** Render the ChatGPT-subscription section (Hermes / OpenClaw). */
-  subscriptionTool?: 'hermes' | 'openclaw'
-  subscriptionConnected?: boolean
-  subscriptionLoginCommand?: string
-  codexReady?: boolean
-  /** Extra body content, above the actions row (OpenClaw's MCP attach config). */
+  /** Body content above the actions row — the runtime's provider list (which
+   *  carries the ChatGPT-subscription row) + OpenClaw's MCP attach config. */
   extra?: ReactNode
 }
 
@@ -89,10 +85,6 @@ export function RuntimeManageBody({
   name,
   onChanged,
   onDiagnostics,
-  subscriptionTool,
-  subscriptionConnected,
-  subscriptionLoginCommand,
-  codexReady,
   extra,
 }: RuntimeManageBodyProps) {
   const [busy, setBusy] = useState(false)
@@ -132,6 +124,11 @@ export function RuntimeManageBody({
         type: 'success',
       })
       void onChanged()
+      // Slow-settling disconnects (the OpenClaw gateway stop, the server's operator
+      // connection dropping) may still probe "connected" milliseconds after the
+      // POST — re-probe once more shortly so the row flips without waiting for
+      // the panel's 8s poll.
+      setTimeout(() => void onChanged(), 2500)
     } else {
       addToast({ message: result.error ?? `Failed to disconnect ${name}`, type: 'error' })
     }
@@ -145,16 +142,6 @@ export function RuntimeManageBody({
 
   return (
     <div className="flex flex-col gap-3" data-testid={`runtime-${runtimeId}-manage`}>
-      {subscriptionTool && (
-        <RuntimeSubscriptionSection
-          tool={subscriptionTool}
-          name={name}
-          loginCommand={subscriptionLoginCommand ?? ''}
-          connected={!!subscriptionConnected}
-          codexReady={!!codexReady}
-          onChanged={onChanged}
-        />
-      )}
       {extra}
       <div className="flex flex-wrap items-center gap-2">
         <Button

@@ -35,8 +35,15 @@ export interface NativeDriverDeps {
 
 /** Persist the agent's final reply into its chat history so the conversation
  *  shows in the UI chat panel (sessionKey `agent:<id>:native`). Best-effort —
- *  narrative, never load-bearing. */
-export function persistNativeChatEntry(db: ClawbooDb, agentId: string, text: string): void {
+ *  narrative, never load-bearing. `opts` lets a caller persist a user-facing
+ *  META notice instead (e.g. driveAgentChat surfacing a failed run's reason —
+ *  a keyless/errored turn must never just silently not respond). */
+export function persistNativeChatEntry(
+  db: ClawbooDb,
+  agentId: string,
+  text: string,
+  opts?: { kind?: 'assistant' | 'meta'; role?: 'assistant' | 'system' },
+): void {
   try {
     if (!text.trim()) return
     const now = Date.now()
@@ -48,8 +55,8 @@ export function persistNativeChatEntry(db: ClawbooDb, agentId: string, text: str
         timestampMs: now,
         data: JSON.stringify({
           entryId: `native-chat-${now}`,
-          role: 'assistant',
-          kind: 'assistant',
+          role: opts?.role ?? 'assistant',
+          kind: opts?.kind ?? 'assistant',
           text,
           sessionKey: `agent:${agentId}:native`,
           runId: null,

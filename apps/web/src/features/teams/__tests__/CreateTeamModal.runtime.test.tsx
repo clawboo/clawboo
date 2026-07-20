@@ -147,6 +147,26 @@ function baseHandlers(
       HttpResponse.json({ defaultId: null, mainKey: null, agents: [], stale: false }),
     ),
     http.get('/api/teams', () => HttpResponse.json({ teams: [] })),
+    // The model picker filters to CONNECTED providers — connect the ones the tests
+    // pick a model from (Anthropic + OpenRouter + OpenAI).
+    http.get('/api/providers', () =>
+      HttpResponse.json({
+        providers: [
+          { id: 'anthropic', connected: true, poweredRuntimes: [] },
+          { id: 'openai', connected: true, poweredRuntimes: [] },
+          { id: 'openrouter', connected: true, poweredRuntimes: [] },
+        ],
+      }),
+    ),
+    // The OpenClaw Gateway default model → shown in an unset OpenClaw picker trigger.
+    http.get('/api/system/openclaw-config', () =>
+      HttpResponse.json({
+        config: { agents: { defaults: { model: { primary: 'anthropic/claude-sonnet-4-5' } } } },
+      }),
+    ),
+    http.get('/api/onboarding/native-leader-model', () =>
+      HttpResponse.json({ provider: 'anthropic', model: 'claude-sonnet-4-5' }),
+    ),
   ]
 }
 
@@ -353,9 +373,11 @@ describe('CreateTeamModal deploy', () => {
     // Gateway online + marketplace team → both rows default OpenClaw → each shows a model picker.
     expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2)
 
-    // Pick a model on the Leader row (index 0). OpenClaw catalog id = `anthropic/claude-sonnet-4-5`.
+    // Pick a model on the Leader row (index 0). Two-layer: open → Anthropic
+    // provider column → the model. OpenClaw catalog id = `anthropic/claude-sonnet-4-5`.
     await userEvent.click(screen.getAllByTestId('member-model-trigger')[0])
-    await userEvent.click(screen.getByRole('option', { name: /Claude Sonnet 4\.5 · Anthropic/i }))
+    await userEvent.click(await screen.findByTestId('model-provider-anthropic'))
+    await userEvent.click(screen.getByRole('option', { name: /Claude Sonnet 4\.5/i }))
 
     await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
     await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
@@ -379,15 +401,17 @@ describe('CreateTeamModal deploy', () => {
     server.use(...baseHandlers())
     renderModal()
     await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
-    // Both default OpenClaw → pick a model on the Coder (row 1).
+    // Both default OpenClaw → pick a model on the Coder (row 1): open → Anthropic → model.
     await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
-    await userEvent.click(screen.getByRole('option', { name: /Claude Haiku 4\.5 · Anthropic/i }))
+    await userEvent.click(await screen.findByTestId('model-provider-anthropic'))
+    await userEvent.click(screen.getByRole('option', { name: /Claude Haiku 4\.5/i }))
     expect(screen.getAllByTestId('member-model-trigger')[1]).toHaveTextContent(/Claude Haiku 4\.5/i)
 
-    // Switch the Coder to Clawboo Native → its model override is cleared → back to Recommended.
+    // Switch the Coder to Clawboo Native → its model override is cleared → the
+    // trigger falls back to the transparent DEFAULT label (never "Recommended").
     await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[1])
     await userEvent.click(screen.getByRole('option', { name: /clawboo native/i }))
-    expect(screen.getAllByTestId('member-model-trigger')[1]).toHaveTextContent(/Recommended/i)
+    expect(screen.getAllByTestId('member-model-trigger')[1]).toHaveTextContent(/Default/i)
   })
 
   it('native member: a picked model spreads into the createAgent execConfig', async () => {
@@ -395,9 +419,11 @@ describe('CreateTeamModal deploy', () => {
     server.use(...baseHandlers())
     renderModal()
     await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
-    // Pick a native model on the Coder (row 1). Native ids are bare (`claude-haiku-4-5`).
+    // Pick a native model on the Coder (row 1): open → Anthropic → model. Native
+    // ids are bare (`claude-haiku-4-5`).
     await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
-    await userEvent.click(screen.getByRole('option', { name: /Claude Haiku 4\.5 · Anthropic/i }))
+    await userEvent.click(await screen.findByTestId('model-provider-anthropic'))
+    await userEvent.click(screen.getByRole('option', { name: /Claude Haiku 4\.5/i }))
 
     await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
     await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
@@ -432,9 +458,10 @@ describe('CreateTeamModal deploy', () => {
     await userEvent.click(screen.getByRole('option', { name: /hermes/i }))
     await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
 
-    // Pick a Hermes OpenRouter model (the provider suffix disambiguates the label).
+    // Pick a Hermes OpenRouter model: open → OpenRouter provider column → model.
     await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
-    await userEvent.click(screen.getByRole('option', { name: /Claude 3\.5 Haiku · OpenRouter/i }))
+    await userEvent.click(await screen.findByTestId('model-provider-openrouter'))
+    await userEvent.click(screen.getByRole('option', { name: /Claude 3\.5 Haiku/i }))
 
     await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
     await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
@@ -458,7 +485,8 @@ describe('CreateTeamModal deploy', () => {
     await userEvent.click(screen.getByRole('option', { name: /hermes/i }))
     await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
     await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
-    expect(screen.queryByRole('option', { name: /ChatGPT subscription/i })).toBeNull()
+    // The subscription provider column is never offered without codexAuth.
+    expect(screen.queryByTestId('model-provider-chatgptsubscription')).toBeNull()
     first.unmount()
 
     // WITH codexAuth (a detected `hermes auth add openai-codex`) → offered;
@@ -474,10 +502,10 @@ describe('CreateTeamModal deploy', () => {
     await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[1])
     await userEvent.click(screen.getByRole('option', { name: /hermes/i }))
     await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
+    // With codexAuth → the ChatGPT-subscription provider column appears; pick a model.
     await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
-    await userEvent.click(
-      screen.getByRole('option', { name: /GPT-5\.3 Codex · ChatGPT subscription/i }),
-    )
+    await userEvent.click(await screen.findByTestId('model-provider-chatgptsubscription'))
+    await userEvent.click(screen.getByRole('option', { name: /^GPT-5\.3 Codex$/i }))
 
     await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
     await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))

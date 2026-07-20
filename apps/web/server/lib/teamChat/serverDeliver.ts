@@ -50,16 +50,9 @@ import { estimateRunCostUsd } from '../runtimes/estimateCost'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import type { RuntimeRunContext } from '../runtimes/types'
-import { resolveRuntimeKey } from '../secretsVault'
+import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { buildServerTeamContext } from './contextPreamble'
 import { nativeTeamSessionSettingKey, teamResumeEligible } from './nativeTeamSession'
-
-/** The native `delegate` tool name (mirrors the engine's `DELEGATE_TOOL_NAME_RE`;
- *  disjoint from `sessions_send`). A leader turn that calls it is a delegation turn
- *  whose text is a premature "handed off, they're working on it" ack — the delegation
- *  itself IS the board cards, so that turn is suppressed from chat (like the OpenClaw
- *  leader's `<delegate>` XML turn, which is filtered client-side). */
-const DELEGATE_TOOL_RE = /(?:^|[._])delegate(?:[._]|$)/i
 
 /** clawboo's own in-process runtime — the only one that uses the native leader
  *  session-resume pointer (mirrors driveAgentChat's native-only 1:1 continuity). */
@@ -86,14 +79,27 @@ export interface ServerDeliverDeps {
   /** The engine's `taskForSession` — used to attribute a delegated run's mission spend. */
   taskForSession: (sessionKey: string) => string | null
   /** Persist a run's terminal turn text for chat-history observability (a seed for
-   *  the unified writer). Optional — omitted in tests that only assert the wiring. */
-  persistTurn?: (sessionKey: string, text: string) => void
+   *  the unified writer). Optional — omitted in tests that only assert the wiring.
+   *  May return whether the entry actually reached the transcript: an explicit
+   *  `false` (empty / control-token drop / insert error) makes the drain publish a
+   *  CLEARING delta so a streamed turn without a commit never leaves a lingering
+   *  StreamingCard. A `void` return (legacy stubs) counts as persisted. */
+  persistTurn?: (sessionKey: string, text: string) => boolean | void
   /** Tier-2 live-token hook: publish a run's FULL running assistant text on each
    *  streamed delta (the team-chat SSE's ephemeral channel). `text` is the running
    *  accumulation, NOT the chunk — it matches the client store's REPLACE semantics.
    *  Optional + fire-and-forget; the committed turn (`persistTurn` on `done`) is the
    *  durable source of truth, so a missing/throwing hook never affects the drain. */
   publishDelta?: (sessionKey: string, runId: string | null, text: string) => void
+  /** Live working/idle signal: publish the target agent's run-state at the run's
+   *  boundaries (`running` once the run starts; `idle` / `error` on its terminal or
+   *  a dead stream). The team-chat SSE forwards it as an ephemeral `status` event so
+   *  the thin client can patch the fleet store's left-pane badges. For native /
+   *  coding runtimes this is the ONLY status writer; for an OpenClaw team in gateway
+   *  mode the browser's Gateway lifecycle patches coexist — both converge on the
+   *  same terminal state, and duplicate patches are harmless (idempotent client
+   *  patch). Optional + fire-and-forget. */
+  publishStatus?: (agentId: string, status: 'running' | 'idle' | 'error') => void
   /** TEST-ONLY seam: build the adapter for an agent directly, bypassing the DB
    *  runtime lookup + the real driver factory + the home mutex. Production OMITS
    *  it → the real runtime-resolution path below runs byte-identically. Mirrors the
@@ -109,7 +115,7 @@ function buildApiKeyEnv(runtime: string): Record<string, string> {
   const d = getDescriptor(runtime)
   for (const v of [d.envVar, ...(d.altEnvVars ?? [])]) {
     if (!v) continue
-    const key = resolveRuntimeKey(v)
+    const key = resolveRuntimeKeyForRuntime(runtime, v)
     if (key) env[v] = key
   }
   return env
@@ -144,6 +150,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
   const { db, teamId, mcpBaseUrl, nudge, abortMap, onEvent, onSessionClosed, taskForSession } = deps
   const persistTurn = deps.persistTurn
   const publishDelta = deps.publishDelta
+  const publishStatus = deps.publishStatus
   const makeAdapterForAgent = deps.makeAdapterForAgent
 
   /** Record this run's spend; return true if a CAP budget crossed 100% (kill-switch).
@@ -273,21 +280,32 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // timeline — its progress + output live on its BoardTaskCard. Only a leader /
     // user-facing turn (no task) belongs in chat. Capturing once avoids a per-delta
     // Map.get and keeps the two gates below consistent.
+    //
+    // NOTE the retired second gate: a leader DELEGATION turn (one that calls the
+    // `delegate` tool) used to be suppressed from chat too. That made streamed
+    // replies VANISH — the prose the user watched streaming was never committed, so
+    // the next commit / a reload wiped it with nothing in its place. The prose now
+    // streams AND commits like any leader turn (the delegation itself still renders
+    // as durable BoardTaskCards; a pure-delegation turn with no prose strips to
+    // nothing client-side and is dropped there, exactly like the OpenClaw leader's
+    // `<delegate>` XML turn always was).
     const runTaskId = taskForSession(sessionKey)
     const isTaskRun = runTaskId != null
-    // A LEADER turn that DELEGATES (calls the `delegate` tool) must not surface its
-    // text in chat either: the delegation IS the board cards, and the leader's
-    // "handed off, they're working on it" narration is premature noise. (The OpenClaw
-    // leader's `<delegate>` XML delegation turn is filtered client-side for the same
-    // reason; native's is prose, so it's suppressed here.) Flips true on the first
-    // `delegate` tool-call; the leader's LATER synthesis turn — the one it runs when it
-    // reacts to the `[Task Update]`, which makes NO delegate call — still shows.
-    let delegatedThisTurn = false
-    const chatVisible = (): boolean => !isTaskRun && !delegatedThisTurn
+    const chatVisible = !isTaskRun
+    // Did this run publish any live delta / commit its turn? Drives the
+    // stream-without-commit belt at the terminal: a turn that STREAMED but persisted
+    // nothing publishes one CLEARING delta (empty text) so the client's lingering
+    // StreamingCard is dropped instead of sticking around and later "vanishing".
+    let publishedDelta = false
+    let persistedTurn = false
+    /** Persist via the injected writer; a `void` return (legacy stubs) counts as
+     *  persisted — only an explicit `false` (write-time drop / insert error) doesn't. */
+    const tryPersist = (text: string): boolean => {
+      if (!persistTurn) return false
+      return persistTurn(sessionKey, text) !== false
+    }
     try {
       for await (const ev of adapter.events(run) as AsyncIterable<RuntimeEvent>) {
-        if (ev.kind === 'tool-call' && !ev.partial && DELEGATE_TOOL_RE.test(ev.name))
-          delegatedThisTurn = true
         if (ev.kind === 'text-delta' && ev.channel !== 'reasoning') {
           // Tolerate BOTH delta conventions so the running text is never garbled:
           // native emits INCREMENTAL chunks, but the OpenClaw adapter emits CUMULATIVE
@@ -296,11 +314,13 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // Without this, a cumulative delta was `+=`-accumulated into garbled repeated
           // text ("We plantWe plantWe plant data seeds…").
           acc = acc && ev.text.startsWith(acc) ? ev.text : acc + ev.text
-          // Stream live tokens to the group chat ONLY for a chat-visible turn (a leader /
-          // user-facing NON-delegation turn). A delegated child or a delegation turn must
-          // NOT stream: its committed turn is suppressed (below), so a lingering
-          // StreamingCard would never be cleared and would stick on screen.
-          if (chatVisible()) publishDelta?.(sessionKey, ev.runId, acc)
+          // Stream live tokens to the group chat for a chat-visible turn (a leader /
+          // user-facing turn — a delegated child's surface is its BoardTaskCard). The
+          // non-empty guard keeps a blank chunk from reading as the CLEAR sentinel.
+          if (chatVisible && acc) {
+            publishDelta?.(sessionKey, ev.runId, acc)
+            publishedDelta = true
+          }
         }
         if (ev.kind === 'cost' && ev.costUsd != null && ev.costUsd > 0) {
           // Real per-turn USD (native): sum it for the task ledger, then run the budget
@@ -311,13 +331,17 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             await adapter.abort(run).catch(() => undefined)
         }
         if (ev.kind === 'done') {
-          // A DELEGATED-CHILD task turn (report-up on its BoardTaskCard) AND a leader
-          // DELEGATION turn (the premature "handed off" ack — the delegation shows as
-          // the board cards) are both kept OUT of the chat timeline. Only a chat-visible
-          // turn — a leader / user-facing NON-delegation turn, e.g. the synthesis it runs
-          // after the `[Task Update]` — commits. Same gate as the streaming channel, so a
-          // suppressed turn neither streams nor commits.
-          if (ev.summary && chatVisible()) persistTurn?.(sessionKey, ev.summary)
+          // Commit a chat-visible (leader / user-facing) turn — a DELEGATED-CHILD task
+          // turn stays off the timeline (its report-up lives on the BoardTaskCard).
+          // The ACCUMULATED stream text is committed FIRST — it is exactly what the
+          // user watched streaming, so the committed card replaces the StreamingCard
+          // with identical content. `summary` is only the fallback for a run that
+          // streamed nothing: native's summary is the LAST turn's text only (earlier
+          // turns' streamed prose would vanish on commit), and an aborted OpenClaw
+          // run's summary is the adapter's naïvely-concatenated (garbled-for-
+          // cumulative) accumulation — `acc` is the correctly-merged text for both.
+          const doneText = acc.trim() ? acc : (ev.summary ?? '')
+          if (chatVisible && doneText.trim()) persistedTurn = tryPersist(doneText)
           // Cost fallback for a runtime that reports no USD (OpenClaw's Gateway, Codex,
           // Hermes): a char-based ESTIMATE so the task ledger + budget cap aren't stuck
           // at $0. Only when nothing real was summed (native already has runCostUsd > 0).
@@ -325,7 +349,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             const usd = estimateRunCostUsd({
               model: null,
               inputChars: obs.contextChars + obs.message.length,
-              outputChars: ev.summary?.length ?? 0,
+              outputChars: doneText.length,
             })
             if (usd > 0) {
               runCostUsd += usd
@@ -368,7 +392,27 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         emitRunObs(sessionKey, agentId, obs.runtime, ev)
         const terminal = ev.kind === 'done' || (ev.kind === 'error' && ev.fatal)
         if (terminal) {
+          // A fatal-error terminal never reaches the `done` persist above — commit the
+          // partial streamed text (what the user already watched) so it survives the
+          // failure instead of vanishing with the stream.
+          if (ev.kind === 'error' && chatVisible && acc.trim()) persistedTurn = tryPersist(acc)
+          // Stream-without-commit belt: a turn that streamed live tokens but persisted
+          // nothing (pure silent delegation, a write-time drop, an insert error) gets
+          // one CLEARING delta — empty text tells the client to drop its StreamingCard
+          // (nothing will ever replace it, so leaving it lingers-then-vanishes).
+          if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
+          // Evict THIS run's abort entry BEFORE markIdle — this run is terminal, so
+          // its handle is dead weight, and markIdle synchronously flushes the
+          // session's next QUEUED delivery: for a mutex-less runtime (ephemeral
+          // home, e.g. claude-code) the successor's runJob can `abortMap.set` its
+          // own entry while we're still awaiting `onEvent(done)` below. A delete
+          // left until after that await would evict the SUCCESSOR's entry, making
+          // the in-flight run invisible to `stop()` and the wedge abort.
+          abortMap.delete(sessionKey)
           nudge.markIdle(sessionKey)
+          // Left-pane liveness: the run is over. `error` only on a fatal error — a
+          // clean `done` (success OR aborted) reads as back-to-idle.
+          publishStatus?.(agentId, ev.kind === 'error' ? 'error' : 'idle')
           // Persist the run's cost + REAL runtime onto its task so the board card +
           // drawer show them: the engine creates the task at cost 0 with a hardcoded
           // `assigneeRuntime: 'openclaw'`, and nothing else writes them. Delegated-child
@@ -391,7 +435,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         }
         if (terminal) {
           sawTerminal = true
-          abortMap.delete(sessionKey)
+          // NO abortMap.delete here: this run's entry was evicted BEFORE markIdle
+          // above, and by now the map slot may hold the flushed SUCCESSOR run's
+          // entry — deleting it would hide that in-flight run from stop()/onWedge.
           break
         }
       }
@@ -401,9 +447,13 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     if (!sawTerminal) {
       // The stream ended WITHOUT a terminal (connection drop / error): free the
       // session and tell the engine its observer ended, so it fails the in-flight
-      // delegation instead of leaving the leader waiting on a dead observer.
+      // delegation instead of leaving the leader waiting on a dead observer. The
+      // dead stream never commits, so drop any lingering StreamingCard + flip the
+      // left-pane badge back.
+      if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
       abortMap.delete(sessionKey)
       nudge.markIdle(sessionKey)
+      publishStatus?.(agentId, 'idle')
       try {
         await onSessionClosed(sessionKey)
       } catch {
@@ -625,6 +675,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               return
             }
             abortMap.set(targetSessionKey, { adapter, run })
+            // Left-pane liveness: the run is in flight — flip the agent's badge to
+            // Working the moment its run starts (the drain flips it back on the
+            // terminal). Delegated children get this too, so a cascade shows every
+            // busy teammate, not just the leader.
+            publishStatus?.(targetAgentId, 'running')
             // `deliver` resolves HERE — after start, BEFORE the drain — so the
             // engine's `await deps.deliver` doesn't serialize the cascade. The home /
             // connected mutex (when held) stays held for the WHOLE drain below.

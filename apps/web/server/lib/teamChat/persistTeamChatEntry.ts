@@ -22,8 +22,11 @@
 import { randomUUID } from 'node:crypto'
 
 import { chatMessages, type ClawbooDb } from '@clawboo/db'
+import { createLogger } from '@clawboo/logger'
 import type { TranscriptEntry, TranscriptEntryKind, TranscriptEntryRole } from '@clawboo/protocol'
 import { buildTeamSessionKey, shouldDropAssistantTurn } from '@clawboo/team-orchestration'
+
+const log = createLogger('team-chat-persist')
 
 // Process-local strictly-increasing tiebreaker for same-millisecond entries (the
 // merged client sort is timestampMs then sequenceKey). Mirrors the browser's
@@ -48,14 +51,20 @@ export interface PersistTeamChatEntryInput {
 /** Build + insert one team-chat TranscriptEntry. Best-effort (chat persistence is
  *  observability, never the orchestration spine). Idempotent via the unique
  *  `entry_id` (ON CONFLICT DO NOTHING), like the chat-history POST. Assistant turns
- *  whose entire body is a broken-shape control token are dropped at write time. */
-export function persistTeamChatEntry(db: ClawbooDb, input: PersistTeamChatEntryInput): void {
-  if (!input.text.trim()) return
+ *  whose entire body is a broken-shape control token are dropped at write time.
+ *
+ *  Returns whether a row was actually written (true also on the idempotent
+ *  conflict no-op — the entry IS in the transcript either way). `false` means the
+ *  entry never reached the transcript (empty / control-token drop / insert error) —
+ *  serverDeliver uses that to publish a CLEARING delta so a streamed turn whose
+ *  commit never lands doesn't leave a lingering StreamingCard that later vanishes. */
+export function persistTeamChatEntry(db: ClawbooDb, input: PersistTeamChatEntryInput): boolean {
+  if (!input.text.trim()) return false
   // Write-time drop (assistant-role only, mirroring the render gate): a control
   // token (__skipped__ / NO_REPLY / a short refusal) never reaches the transcript,
   // so a thin client that skips the render filter still shows a clean chat. Meta
   // ([Task Update]) and user entries pass through untouched.
-  if (input.role === 'assistant' && shouldDropAssistantTurn(input.text)) return
+  if (input.role === 'assistant' && shouldDropAssistantTurn(input.text)) return false
   const sessionKey = buildTeamSessionKey(input.agentId, input.teamId)
   const now = Date.now()
   const entry: TranscriptEntry = {
@@ -82,7 +91,12 @@ export function persistTeamChatEntry(db: ClawbooDb, input: PersistTeamChatEntryI
       })
       .onConflictDoNothing()
       .run()
-  } catch {
-    // best-effort
+    return true
+  } catch (err) {
+    // Best-effort — chat persistence must never break orchestration — but NEVER
+    // silent: a failing insert here means the whole team transcript is invisibly
+    // ephemeral (replies render from the live delta bus, then vanish on reload).
+    log.warn({ err, sessionKey }, 'team-chat entry insert failed — turn not persisted')
+    return false
   }
 }

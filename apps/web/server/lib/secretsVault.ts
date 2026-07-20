@@ -234,3 +234,63 @@ export function resolveRuntimeKey(envVar: string): string | null {
   if (fromVault) return fromVault
   return readOpenclawEnvVar(envVar)
 }
+
+// ─── Per-runtime disconnect override ─────────────────────────────────────────
+// The ambient fallbacks in `resolveRuntimeKey` (a shell-exported var, OpenClaw's
+// ~/.openclaw/.env) are the deliberate AUTO-CONNECT chain — an OpenClaw provider
+// key auto-satisfies a sibling runtime with zero setup. But they also made the
+// Runtimes panel's Disconnect a silent no-op: deleting the vault slot changed
+// nothing when the same key still resolved from OpenClaw's .env, so the card
+// stayed "Connected" and the runtime kept running. An EXPLICIT user disconnect
+// records this per-runtime override; while set, key resolution for THAT runtime
+// is vault-only (empty after the disconnect), so status AND runs genuinely lose
+// the credential. Cleared by the next connect for the runtime. Stored as a tiny
+// sibling file in the secrets dir (no secret material — just runtime ids).
+
+function disconnectedPath(): string {
+  return path.join(secretsDir(), 'disconnected-runtimes.json')
+}
+
+function readDisconnected(): Record<string, boolean> {
+  try {
+    const parsed = JSON.parse(readFileSync(disconnectedPath(), 'utf8')) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, boolean> = {}
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (v === true) out[k] = true
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+/** Record (or clear) the user's explicit disconnect for a runtime. */
+export function setRuntimeDisconnected(runtimeId: string, disconnected: boolean): void {
+  const flags = readDisconnected()
+  if (disconnected) flags[runtimeId] = true
+  else delete flags[runtimeId]
+  ensureSecretsDir()
+  const file = disconnectedPath()
+  const tmp = `${file}.tmp`
+  writeFileSync(tmp, JSON.stringify(flags, null, 2), { encoding: 'utf8', mode: 0o600 })
+  renameSync(tmp, file)
+}
+
+/** True when the user explicitly disconnected this runtime (and hasn't reconnected). */
+export function isRuntimeDisconnected(runtimeId: string): boolean {
+  return readDisconnected()[runtimeId] === true
+}
+
+/**
+ * Runtime-scoped key resolution: the full `resolveRuntimeKey` chain, EXCEPT for
+ * a runtime the user explicitly disconnected — then vault-only, so the ambient
+ * process-env / OpenClaw-.env fallbacks can't silently re-credential it. Every
+ * per-runtime key-assembly site (status, team runs, 1:1 chat, REST runs,
+ * routines) resolves through this; the bare `resolveRuntimeKey` remains for
+ * non-runtime-scoped reads (OpenClaw provisioning reuse).
+ */
+export function resolveRuntimeKeyForRuntime(runtimeId: string, envVar: string): string | null {
+  if (isRuntimeDisconnected(runtimeId)) return getRuntimeSecret(envVar)
+  return resolveRuntimeKey(envVar)
+}

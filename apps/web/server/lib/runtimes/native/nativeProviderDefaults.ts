@@ -8,7 +8,7 @@
 
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
 
-import { resolveRuntimeKey } from '../../secretsVault'
+import { resolveRuntimeKeyForRuntime } from '../../secretsVault'
 
 export type ModelTier = 'leader' | 'specialist'
 
@@ -60,7 +60,7 @@ export function resolveConnectedNativeDefaults(tier: ModelTier): NativeProviderD
       return { primaryProvider: 'ollama', primaryModel: models[tier], envVar: 'OLLAMA_BASE_URL' }
     }
     const envVar = envVarForProvider(provider)
-    if (envVar && resolveRuntimeKey(envVar)) {
+    if (envVar && resolveRuntimeKeyForRuntime('clawboo-native', envVar)) {
       const models = MODEL_DEFAULTS[provider] ?? MODEL_DEFAULTS['anthropic']!
       return { primaryProvider: provider, primaryModel: models[tier], envVar }
     }
@@ -79,7 +79,7 @@ export function hasConnectedNativeProvider(): boolean {
       continue
     }
     const envVar = envVarForProvider(provider)
-    if (envVar && resolveRuntimeKey(envVar)) return true
+    if (envVar && resolveRuntimeKeyForRuntime('clawboo-native', envVar)) return true
   }
   return false
 }

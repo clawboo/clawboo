@@ -319,4 +319,63 @@ describe('RuntimeConnectionCard', () => {
     // After the SSE completes, the state settles back to the server-derived one.
     await waitFor(() => expect(onDisplayState).toHaveBeenLastCalledWith('not-installed'))
   })
+
+  // ── Native multi-provider connect (the reconnect-only-showed-Anthropic fix) ──
+
+  const NATIVE_STATUS: RuntimeStatus = {
+    id: 'clawboo-native',
+    connectionState: 'needs-auth',
+    authKind: 'api-key',
+    envVar: 'ANTHROPIC_API_KEY',
+  }
+
+  it('native needs-auth renders the PROVIDER MANAGER (no single hardcoded-Anthropic input, no global Connect)', async () => {
+    server.use(
+      http.get('/api/providers', () =>
+        HttpResponse.json({
+          providers: [{ id: 'openrouter', connected: true, poweredRuntimes: [] }],
+        }),
+      ),
+    )
+    render(
+      <RuntimeConnectionCard
+        entry={RUNTIME_CATALOG['clawboo-native']}
+        status={NATIVE_STATUS}
+        variant="panel"
+      />,
+    )
+    // The provider manager owns the body…
+    expect(await screen.findByTestId('native-providers-body')).toBeInTheDocument()
+    await screen.findByTestId('native-provider-row-openrouter')
+    // …and the old single-envVar affordances are gone: no card-level key input,
+    // no global Connect (the per-row buttons own the action).
+    expect(screen.queryByTestId('runtime-clawboo-native-key')).toBeNull()
+    expect(screen.queryByTestId('runtime-clawboo-native-connect')).toBeNull()
+  })
+
+  it('a NON-native api-key runtime keeps the single-envVar body (no provider manager, no provider in the POST)', async () => {
+    const posts: unknown[] = []
+    server.use(
+      http.post('/api/runtimes/hermes/connect', async ({ request }) => {
+        posts.push(await request.json())
+        return HttpResponse.json({ ok: true, connectionState: 'ready' })
+      }),
+    )
+    render(
+      <RuntimeConnectionCard
+        entry={RUNTIME_CATALOG['hermes']}
+        status={{
+          id: 'hermes',
+          connectionState: 'needs-auth',
+          authKind: 'api-key',
+          envVar: 'OPENROUTER_API_KEY',
+        }}
+        variant="panel"
+      />,
+    )
+    expect(screen.queryByTestId('native-providers-body')).toBeNull()
+    await userEvent.type(screen.getByTestId('runtime-hermes-key'), 'sk-or-h')
+    await userEvent.click(screen.getByTestId('runtime-hermes-connect'))
+    await waitFor(() => expect(posts).toContainEqual({ apiKey: 'sk-or-h' }))
+  })
 })

@@ -752,6 +752,7 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
           >
             <AddRuntimesStep
               onContinue={handleAddRuntimesDone}
+              onBack={() => goTo('configureNative')}
               onOpenClawConnected={(newClient, url) => {
                 setClient(newClient)
                 setGatewayUrl(url)

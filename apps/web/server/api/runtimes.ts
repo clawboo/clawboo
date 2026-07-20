@@ -40,6 +40,8 @@ import {
   deleteRuntimeSecret,
   getRuntimeSecret,
   resolveRuntimeKey,
+  resolveRuntimeKeyForRuntime,
+  setRuntimeDisconnected,
   setRuntimeSecret,
 } from '../lib/secretsVault'
 
@@ -91,7 +93,11 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
   // detectAuthProfileKeys precedent; values never leave the helper) folds into
   // hasCredential so a subscription-only hermes reads Connected/ready.
   const hermesCodexAuth = id === 'hermes' && installed ? isHermesCodexAuthPresent() : false
-  const hasCredential = envVars.some((v) => Boolean(resolveRuntimeKey(v))) || hermesCodexAuth
+  // Runtime-scoped resolution: an EXPLICITLY disconnected runtime is vault-only,
+  // so the ambient process-env / OpenClaw-.env fallbacks can't keep the card
+  // reading "Connected" after a disconnect (the disconnect-does-nothing bug).
+  const hasCredential =
+    envVars.some((v) => Boolean(resolveRuntimeKeyForRuntime(id, v))) || hermesCodexAuth
   // Vault-only signal: a credential DELIBERATELY connected during onboarding (written
   // to the encrypted vault), as opposed to an ambient `process.env` shell var that
   // `resolveRuntimeKey` ALSO honors. The onboarding native-skip decision reads THIS so
@@ -415,6 +421,7 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
     // their terminal. Report the CURRENT state: 'ready' when we detect an existing
     // login (reuse it), else 'needs-login' with the command to run.
     const loggedIn = id === 'codex' ? await isCodexLoggedIn() : false
+    setRuntimeDisconnected(id, false)
     res.json({
       ok: true,
       connectionState: runtimeStatus(id, loggedIn)['connectionState'],
@@ -424,6 +431,7 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
   }
 
   if (d.authKind === 'none' || !d.envVar) {
+    setRuntimeDisconnected(id, false)
     res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
     return
   }
@@ -436,16 +444,35 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
   // is nothing to store; connectionState is re-derived from what already resolves.
   const targetEnvVar = resolveConnectEnvVar(d, body.provider)
   if (targetEnvVar === null) {
+    setRuntimeDisconnected(id, false)
     res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
     return
   }
 
   const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
   if (!apiKey) {
-    res.status(400).json({ error: 'apiKey is required' })
+    // Keyless REUSE (native + explicit provider, no key pasted): reconnect using a
+    // key that ALREADY exists for that provider — the Providers hub's vault slot or
+    // OpenClaw's .env. Deliberately the UNSCOPED resolve chain: the explicit-
+    // disconnect override is exactly what this request is lifting, so ambient
+    // stores must count. Nothing is stored and the key is never echoed.
+    const provider = typeof body.provider === 'string' ? body.provider.trim() : ''
+    if (d.id === 'clawboo-native' && provider && resolveRuntimeKey(targetEnvVar)) {
+      setRuntimeDisconnected(id, false)
+      res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
+      return
+    }
+    res.status(400).json({
+      error: provider
+        ? `no existing key found for ${provider} — paste one to connect`
+        : 'apiKey is required',
+    })
     return
   }
   setRuntimeSecret(targetEnvVar, apiKey)
+  // A reconnect lifts the explicit-disconnect override — ambient key reuse
+  // (process env / OpenClaw's .env) applies again for this runtime.
+  setRuntimeDisconnected(id, false)
   // Re-derive (never echo the key). With the key now in the vault and the CLI
   // installed, connectionState becomes 'ready'.
   res.json({
@@ -570,12 +597,28 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
 }
 
 // ─── POST /api/runtimes/:id/disconnect ───────────────────────────────────────
-// Clears the stored credential; keeps the binary + the flag on (card → needs-auth).
+// Clears the stored credential; keeps the binary (card → needs-auth). TWO parts,
+// both load-bearing (each alone left the card silently "Connected" — the reported
+// disconnect-does-nothing bug):
+//  • Delete EVERY vault slot the runtime draws on (envVar + altEnvVars) — a
+//    multi-provider runtime's key usually lives under an ALT slot (e.g. native
+//    connected via OpenRouter stores OPENROUTER_API_KEY, not the primary
+//    ANTHROPIC_API_KEY), so deleting only `d.envVar` missed the real credential.
+//    The vault holds ONE copy of each provider key, so a sibling runtime reusing
+//    the same key loses it too — inherent to key sharing, and honest.
+//  • Record the per-runtime disconnect override — without it the ambient
+//    fallbacks (a shell-exported var, OpenClaw's ~/.openclaw/.env) immediately
+//    re-credential the runtime through `resolveRuntimeKey` and nothing visibly
+//    changes. While set, this runtime resolves keys vault-only; the next
+//    connect clears it.
 export function runtimesDisconnectPOST(req: Request, res: Response): void {
   const id = requireRuntimeId(req, res)
   if (!id) return
   const d = getDescriptor(id)
-  if (d.envVar) deleteRuntimeSecret(d.envVar)
+  for (const envVar of [d.envVar, ...(d.altEnvVars ?? [])]) {
+    if (envVar) deleteRuntimeSecret(envVar)
+  }
+  setRuntimeDisconnected(id, true)
   res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
 }
 
@@ -655,7 +698,7 @@ export async function runtimesRunPOST(req: Request, res: Response): Promise<void
   const apiKeyEnv: Record<string, string> = {}
   for (const envVar of [d.envVar, ...(d.altEnvVars ?? [])]) {
     if (!envVar) continue
-    const key = resolveRuntimeKey(envVar)
+    const key = resolveRuntimeKeyForRuntime(id, envVar)
     if (key) apiKeyEnv[envVar] = key
   }
 
