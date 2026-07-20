@@ -201,4 +201,67 @@ describe('RuntimeProvidersBody', () => {
     // With the subscription connected, the surface isn't "empty".
     expect(screen.queryByTestId('native-providers-empty')).toBeNull()
   })
+
+  // The ChatGPT subscription for a CONSUMING runtime (openclaw / hermes) is a peer
+  // row in the providers list, never a special card above it.
+  it('subscription row (openclaw) — CONNECTED shows a chip, no sign-in', async () => {
+    hub(['openrouter'])
+    render(
+      <RuntimeProvidersBody
+        runtime="openclaw"
+        subscriptionTool="openclaw"
+        subscriptionConnected
+        codexReady
+      />,
+    )
+    expect(await screen.findByTestId('runtime-openclaw-subscription-connected')).toBeInTheDocument()
+    expect(screen.queryByTestId('runtime-openclaw-subscription-add')).toBeNull()
+    expect(screen.queryByTestId('chatgpt-signin-openclaw-start')).toBeNull()
+  })
+
+  it('subscription row (openclaw) — ADDABLE (Codex ready, not yet added) shows the inline sign-in', async () => {
+    hub(['openrouter'])
+    render(
+      <RuntimeProvidersBody
+        runtime="openclaw"
+        subscriptionTool="openclaw"
+        subscriptionConnected={false}
+        subscriptionLoginCommand="openclaw models auth login --provider openai-codex"
+        codexReady
+      />,
+    )
+    expect(await screen.findByTestId('runtime-openclaw-subscription-add')).toBeInTheDocument()
+    expect(screen.getByTestId('chatgpt-signin-openclaw-start')).toBeInTheDocument()
+    expect(screen.queryByTestId('runtime-openclaw-subscription-connected')).toBeNull()
+  })
+
+  it('subscription row (openclaw) — Codex NOT connected shows a quiet prerequisite, no sign-in', async () => {
+    hub(['openrouter'])
+    render(
+      <RuntimeProvidersBody
+        runtime="openclaw"
+        subscriptionTool="openclaw"
+        subscriptionConnected={false}
+      />,
+    )
+    expect(
+      await screen.findByTestId('runtime-openclaw-subscription-needs-codex'),
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId('runtime-openclaw-subscription-add')).toBeNull()
+    expect(screen.queryByTestId('chatgpt-signin-openclaw-start')).toBeNull()
+  })
+
+  it('subscription row shows even with NO key providers connected (it IS a provider option)', async () => {
+    hub([])
+    render(
+      <RuntimeProvidersBody
+        runtime="openclaw"
+        subscriptionTool="openclaw"
+        subscriptionConnected
+        codexReady
+      />,
+    )
+    expect(await screen.findByTestId('runtime-openclaw-subscription-connected')).toBeInTheDocument()
+    expect(screen.queryByTestId('native-providers-empty')).toBeNull()
+  })
 })

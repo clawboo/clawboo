@@ -37,6 +37,7 @@ import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { Select } from '@/features/shared/Select'
 import { Spinner } from '@/features/shared/Spinner'
 import { ProviderIcon } from '@/features/onboarding/ProviderIcon'
+import { ChatGptSignIn } from './ChatGptSignIn'
 import {
   NATIVE_CONNECT_PROVIDERS,
   nativeConnectProvider,
@@ -60,6 +61,14 @@ export interface RuntimeProvidersBodyProps {
   nativeReady?: boolean
   /** The Codex runtime's sign-in state — drives the ChatGPT-subscription row. */
   codexReady?: boolean
+  /** Fold the ChatGPT subscription into the providers list (as a peer row, not a
+   *  separate card) for a runtime that can CONSUME it. Native omits this (its
+   *  subscription row is the codexReady-gated informational one below). */
+  subscriptionTool?: 'hermes' | 'openclaw'
+  /** This runtime already holds the subscription credential. */
+  subscriptionConnected?: boolean
+  /** The manual terminal command ChatGptSignIn falls back to on failure. */
+  subscriptionLoginCommand?: string
   /** Re-probe the host's runtime list after any state-changing action. */
   onChanged?: () => void | Promise<void>
   /** "settings" (default) shows the quiet Providers-hub link; "onboarding" is
@@ -97,6 +106,9 @@ export function RuntimeProvidersBody({
   runtime = 'clawboo-native',
   nativeReady = true,
   codexReady,
+  subscriptionTool,
+  subscriptionConnected,
+  subscriptionLoginCommand,
   onChanged,
   variant = 'settings',
 }: RuntimeProvidersBodyProps) {
@@ -216,7 +228,10 @@ export function RuntimeProvidersBody({
 
   const loading = hubConnected === null
   const showChatGpt = isNative && !!codexReady
-  const empty = !loading && rows.length === 0 && !showChatGpt
+  // openclaw / hermes can CONSUME the subscription — it's a peer provider row here
+  // (connected / addable / needs-codex), never a special card above the list.
+  const showSubscription = !!subscriptionTool
+  const empty = !loading && rows.length === 0 && !showChatGpt && !showSubscription
 
   // Onboarding is read-only: with nothing to show, show NOTHING (the previous
   // wizard step owns connecting; an empty card pointing at a hub that isn't
@@ -253,7 +268,7 @@ export function RuntimeProvidersBody({
           <ProvidersLink label="Open Providers" />
         </div>
       ) : (
-        (rows.length > 0 || showChatGpt) && (
+        (rows.length > 0 || showChatGpt || showSubscription) && (
           <div className="flex flex-col overflow-hidden rounded-xl border border-border">
             {rows.map((p, i) => {
               const isDefault = isNative && leader.provider === p.id
@@ -382,6 +397,51 @@ export function RuntimeProvidersBody({
                   <span className="inline-block h-1.5 w-1.5 rounded-full bg-mint" />
                   Connected · Codex
                 </span>
+              </div>
+            )}
+
+            {/* ChatGPT subscription (openclaw / hermes) — a peer provider row, not
+                a separate card. Connected → a chip; addable (Codex connected) →
+                the inline sign-in; Codex missing → a quiet prerequisite note. */}
+            {showSubscription && subscriptionTool && (
+              <div className={rows.length > 0 ? 'border-t border-border' : ''}>
+                <div className="flex items-center gap-2.5 px-3 py-2.5">
+                  <ProviderIcon id="openai" size={18} />
+                  <span className="truncate text-[12.5px] font-semibold text-foreground">
+                    ChatGPT subscription
+                  </span>
+                  <span className="flex-1" />
+                  {subscriptionConnected ? (
+                    <span
+                      data-testid={`runtime-${subscriptionTool}-subscription-connected`}
+                      className="flex shrink-0 items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-wider text-mint"
+                    >
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-mint" />
+                      Connected
+                    </span>
+                  ) : !codexReady ? (
+                    <span
+                      data-testid={`runtime-${subscriptionTool}-subscription-needs-codex`}
+                      className="shrink-0 text-[11px]"
+                      style={{ color: muted(0.45) }}
+                    >
+                      Connect Codex first
+                    </span>
+                  ) : null}
+                </div>
+                {!subscriptionConnected && codexReady && (
+                  <div
+                    data-testid={`runtime-${subscriptionTool}-subscription-add`}
+                    className="border-t border-border bg-foreground/[0.02] px-3.5 py-3"
+                  >
+                    <ChatGptSignIn
+                      tool={subscriptionTool}
+                      loginCommand={subscriptionLoginCommand ?? ''}
+                      onLoggedIn={() => void onChanged?.()}
+                      label="Sign in with ChatGPT"
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>

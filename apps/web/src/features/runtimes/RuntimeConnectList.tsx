@@ -37,6 +37,8 @@ import { Button } from '@/features/shared/Button'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { Spinner } from '@/features/shared/Spinner'
 import { RuntimeProvidersBody } from './RuntimeProvidersBody'
+import { OpenClawGatewaySection } from './OpenClawGatewaySection'
+import { OpenClawDefaultModel } from './OpenClawDefaultModel'
 import { RuntimeConnectionCard, type DisplayState } from './RuntimeConnectionCard'
 import { RuntimeManageBody } from './RuntimeManageBody'
 import { OpenClawIcon, RuntimeIcon } from './RuntimeBrand'
@@ -268,18 +270,22 @@ function RuntimeRow({
           name={entry.name}
           onChanged={onChanged}
           onDiagnostics={diagnostics}
-          subscriptionTool={entry.altLoginCommand ? 'hermes' : undefined}
-          subscriptionConnected={status?.codexAuth === true}
-          subscriptionLoginCommand={entry.altLoginCommand}
-          codexReady={codexReady}
           // The Manage view carries the shared provider manager (connected keys,
-          // per-provider disconnect, native's default-model pick) — for the
-          // runtimes whose keys live in the Providers hub.
+          // per-provider disconnect, native's default-model pick, and the ChatGPT
+          // subscription as a peer row) — for the runtimes whose keys live in the
+          // Providers hub.
           extra={
             entry.id === 'clawboo-native' ? (
               <RuntimeProvidersBody nativeReady codexReady={codexReady} onChanged={onChanged} />
             ) : entry.id === 'hermes' ? (
-              <RuntimeProvidersBody runtime="hermes" onChanged={onChanged} />
+              <RuntimeProvidersBody
+                runtime="hermes"
+                onChanged={onChanged}
+                subscriptionTool={entry.altLoginCommand ? 'hermes' : undefined}
+                subscriptionConnected={status?.codexAuth === true}
+                subscriptionLoginCommand={entry.altLoginCommand}
+                codexReady={codexReady}
+              />
             ) : undefined
           }
         />
@@ -367,13 +373,18 @@ function OpenClawRow({
             name="OpenClaw"
             onChanged={onChanged}
             onDiagnostics={config.onDiagnostics}
-            subscriptionTool="openclaw"
-            subscriptionConnected={!!config.subscriptionConnected}
-            subscriptionLoginCommand="openclaw models auth login --provider openai-codex"
-            codexReady={!!config.codexReady}
             extra={
               <>
-                <RuntimeProvidersBody runtime="openclaw" onChanged={onChanged} />
+                <OpenClawGatewaySection onChanged={onChanged} />
+                <RuntimeProvidersBody
+                  runtime="openclaw"
+                  onChanged={onChanged}
+                  subscriptionTool="openclaw"
+                  subscriptionConnected={!!config.subscriptionConnected}
+                  subscriptionLoginCommand="openclaw models auth login --provider openai-codex"
+                  codexReady={!!config.codexReady}
+                />
+                <OpenClawDefaultModel />
                 {config.extra}
               </>
             }

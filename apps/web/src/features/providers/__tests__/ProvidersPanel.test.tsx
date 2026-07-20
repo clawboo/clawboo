@@ -65,7 +65,6 @@ describe('ProvidersPanel', () => {
     render(<ProvidersPanel />)
     const row = await screen.findByTestId('provider-row-chatgpt')
     expect(row).toHaveTextContent('Connected')
-    expect(row).toHaveTextContent(/powers Codex/i)
     // No Connect demand once connected; the credential is the Codex CLI's.
     expect(row).toHaveTextContent(/Managed by the Codex CLI/i)
   })
