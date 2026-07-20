@@ -1,6 +1,6 @@
 {
   "name": "clawboo",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A TypeScript orchestrator for heterogeneous AI agent runtimes: native agents built in, with Claude Code, Codex, Hermes, and OpenClaw as peer teammates in one chat.",
   "license": "MIT",
   "repository": {
