@@ -13,8 +13,9 @@ import Surface from '../sections/Surface.astro'
 import Observability from '../sections/Observability.astro'
 import Faq from '../sections/Faq.astro'
 import FinalCta from '../sections/FinalCta.astro'
+import { faqs } from '../lib/faq'
 ---
-<BaseLayout>
+<BaseLayout faq={faqs} ogTitle="clawboo: deploy a team of AI agents and watch them collaborate live">
   <Nav />
   <main>
     <Hero />

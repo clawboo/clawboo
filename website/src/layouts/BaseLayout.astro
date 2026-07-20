@@ -1,32 +1,85 @@
 ---
 import { ClientRouter } from 'astro:transitions'
 import { site, links } from '../lib/site'
+import type { FaqItem } from '../lib/faq'
 import '../styles/global.css'
 
 interface Props {
   title?: string
   description?: string
+  ogTitle?: string
+  robots?: string
+  faq?: FaqItem[]
 }
 const {
   title = 'Clawboo: a TypeScript orchestrator for heterogeneous AI agent runtimes',
   description = site.description,
+  ogTitle = title,
+  robots = 'index,follow',
+  faq,
 } = Astro.props
 
 const canonical = new URL(Astro.url.pathname, site.url).href
 const ogImage = new URL('/og-card.jpg', site.url).href
 
-const jsonLd = {
-  '@context': 'https://schema.org',
-  '@type': 'SoftwareApplication',
-  name: 'Clawboo',
-  applicationCategory: 'DeveloperApplication',
-  operatingSystem: 'macOS, Linux, Windows',
-  description: site.description,
-  url: site.url,
-  license: 'https://opensource.org/licenses/MIT',
-  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-  sameAs: [links.github, links.npm],
+// One JSON-LD @graph, cross-linked by @id, so search and AI engines read the
+// site, its publisher, and the app as one connected entity. The FAQPage node is
+// appended only when a page passes `faq` (homepage today, nowhere else). Fields
+// are honest only: no invented ratings, no fabricated on-site search action.
+const orgId = `${site.url}/#organization`
+const siteId = `${site.url}/#website`
+const appId = `${site.url}/#software`
+
+const graph: Record<string, unknown>[] = [
+  {
+    '@type': 'Organization',
+    '@id': orgId,
+    name: 'Sanreds',
+    url: site.url,
+    logo: new URL('/logo.svg', site.url).href,
+    sameAs: [links.github, links.npm],
+  },
+  {
+    '@type': 'WebSite',
+    '@id': siteId,
+    url: site.url,
+    name: site.name,
+    description: site.description,
+    inLanguage: 'en',
+    publisher: { '@id': orgId },
+  },
+  {
+    '@type': 'SoftwareApplication',
+    '@id': appId,
+    name: 'Clawboo',
+    applicationCategory: 'DeveloperApplication',
+    operatingSystem: 'macOS, Linux, Windows',
+    description: site.description,
+    url: site.url,
+    image: ogImage,
+    license: 'https://opensource.org/licenses/MIT',
+    softwareVersion: site.version.replace(/^v/, ''),
+    downloadUrl: links.npm,
+    author: { '@id': orgId },
+    publisher: { '@id': orgId },
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    sameAs: [links.github, links.npm],
+  },
+]
+
+if (faq?.length) {
+  graph.push({
+    '@type': 'FAQPage',
+    '@id': `${site.url}/#faq`,
+    mainEntity: faq.map((f) => ({
+      '@type': 'Question',
+      name: f.q,
+      acceptedAnswer: { '@type': 'Answer', text: f.a },
+    })),
+  })
 }
+
+const jsonLd = { '@context': 'https://schema.org', '@graph': graph }
 ---
 <!doctype html>
 <html lang="en">
@@ -36,13 +89,14 @@ const jsonLd = {
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
-    <meta name="robots" content="index,follow" />
+    <meta name="robots" content={robots} />
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
 
     <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0a0e1a" media="(prefers-color-scheme: dark)" />
@@ -51,17 +105,20 @@ const jsonLd = {
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="clawboo" />
     <meta property="og:url" content={canonical} />
-    <meta property="og:title" content="clawboo: deploy a team of AI agents and watch them collaborate live" />
+    <meta property="og:title" content={ogTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:image" content={ogImage} />
     <meta property="og:image:width" content="1280" />
     <meta property="og:image:height" content="600" />
     <meta property="og:image:alt" content="clawboo: a team of ghost-lobster Boo agents on a calm day sky" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:locale" content="en_US" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="clawboo: deploy a team of AI agents and watch them collaborate live" />
+    <meta name="twitter:title" content={ogTitle} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content="clawboo: a team of ghost-lobster Boo agents on a calm day sky" />
 
     <!-- Fonts: DM Sans (body), Cabinet Grotesk (display), Geist Mono (local). -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -159,7 +216,7 @@ const jsonLd = {
       })
     </script>
 
-    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, '\\u003c')} />
 
     <ClientRouter />
   </head>

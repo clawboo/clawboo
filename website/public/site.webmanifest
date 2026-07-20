@@ -1,0 +1,14 @@
+{
+  "name": "Clawboo",
+  "short_name": "Clawboo",
+  "description": "An open-source, local-first orchestrator for teams of AI agents that run on your own hardware.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#f8fafc",
+  "icons": [
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any" },
+    { "src": "/favicon-32.png", "type": "image/png", "sizes": "32x32" },
+    { "src": "/apple-touch-icon.png", "type": "image/png", "sizes": "180x180" }
+  ]
+}
