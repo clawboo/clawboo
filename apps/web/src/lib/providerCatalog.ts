@@ -14,15 +14,9 @@ export interface ProviderCatalogEntry {
   tier: 'primary' | 'more'
 }
 
+// Order is presentation order: OpenAI + OpenRouter lead (the most-used), then the
+// rest of the primary tier, then the `more` tier behind the toggle.
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
-  {
-    id: 'anthropic',
-    name: 'Anthropic',
-    envVar: 'ANTHROPIC_API_KEY',
-    placeholder: 'sk-ant-…',
-    keyUrl: 'https://console.anthropic.com/settings/keys',
-    tier: 'primary',
-  },
   {
     id: 'openai',
     name: 'OpenAI',
@@ -32,19 +26,27 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     tier: 'primary',
   },
   {
-    id: 'google',
-    name: 'Google',
-    envVar: 'GEMINI_API_KEY',
-    placeholder: 'AIza…',
-    keyUrl: 'https://aistudio.google.com/apikey',
-    tier: 'primary',
-  },
-  {
     id: 'openrouter',
     name: 'OpenRouter',
     envVar: 'OPENROUTER_API_KEY',
     placeholder: 'sk-or-…',
     keyUrl: 'https://openrouter.ai/keys',
+    tier: 'primary',
+  },
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    envVar: 'ANTHROPIC_API_KEY',
+    placeholder: 'sk-ant-…',
+    keyUrl: 'https://console.anthropic.com/settings/keys',
+    tier: 'primary',
+  },
+  {
+    id: 'google',
+    name: 'Google',
+    envVar: 'GEMINI_API_KEY',
+    placeholder: 'AIza…',
+    keyUrl: 'https://aistudio.google.com/apikey',
     tier: 'primary',
   },
   {
@@ -71,7 +73,13 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     keyUrl: 'https://console.mistral.ai/api-keys',
     tier: 'primary',
   },
-  { id: 'moonshot', name: 'Moonshot', envVar: 'MOONSHOT_API_KEY', placeholder: 'sk-…', tier: 'more' },
+  {
+    id: 'moonshot',
+    name: 'Moonshot',
+    envVar: 'MOONSHOT_API_KEY',
+    placeholder: 'sk-…',
+    tier: 'more',
+  },
   { id: 'minimax', name: 'MiniMax', envVar: 'MINIMAX_API_KEY', placeholder: 'eyJh…', tier: 'more' },
   { id: 'together', name: 'Together', envVar: 'TOGETHER_API_KEY', placeholder: '', tier: 'more' },
   { id: 'nvidia', name: 'NVIDIA', envVar: 'NVIDIA_API_KEY', placeholder: 'nvapi-…', tier: 'more' },
@@ -83,6 +91,12 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     keyUrl: 'https://huggingface.co/settings/tokens',
     tier: 'more',
   },
-  { id: 'cerebras', name: 'Cerebras', envVar: 'CEREBRAS_API_KEY', placeholder: 'csk-…', tier: 'more' },
+  {
+    id: 'cerebras',
+    name: 'Cerebras',
+    envVar: 'CEREBRAS_API_KEY',
+    placeholder: 'csk-…',
+    tier: 'more',
+  },
   { id: 'venice', name: 'Venice', envVar: 'VENICE_API_KEY', placeholder: 'vapi_…', tier: 'more' },
 ]
