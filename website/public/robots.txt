@@ -1,0 +1,32 @@
+# Clawboo (https://www.claw.boo) - open-source AI agent orchestrator.
+# We welcome all crawlers: search engines and AI / LLM answer engines alike.
+
+User-agent: *
+Allow: /
+
+# Explicitly welcome AI / LLM crawlers and answer engines.
+User-agent: GPTBot
+Allow: /
+User-agent: OAI-SearchBot
+Allow: /
+User-agent: ChatGPT-User
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: anthropic-ai
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: Perplexity-User
+Allow: /
+User-agent: Google-Extended
+Allow: /
+User-agent: Applebot-Extended
+Allow: /
+User-agent: CCBot
+Allow: /
+User-agent: cohere-ai
+Allow: /
+
+# AI-agent entry point: https://www.claw.boo/llms.txt
+Sitemap: https://www.claw.boo/sitemap-index.xml

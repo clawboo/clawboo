@@ -1,0 +1,21 @@
+# Clawboo
+
+> Clawboo is an open-source, local-first orchestrator for teams of AI agents that run on
+> different runtimes. Deploy a team of agents, watch them collaborate live in one group chat and on a
+> durable kanban board, and govern them with builder-not-judge verification, USD budgets, and circuit
+> breakers. Native agents are built in, so you paste one key and go; Claude Code, Codex, Hermes, and
+> OpenClaw join as peer teammates in one chat. Open-source, MIT, local-first. Install with `npx clawboo`.
+
+## Docs
+- [Documentation](https://docs.claw.boo): Guides, concepts, and reference.
+- [Docs llms.txt](https://docs.claw.boo/llms.txt): Machine-readable index of the full documentation.
+
+## Project
+- [GitHub repository](https://github.com/clawboo/clawboo): Source, issues, and discussions (MIT).
+- [npm package](https://www.npmjs.com/package/clawboo): Install with `npm install -g clawboo`.
+- [Privacy](https://www.claw.boo/privacy/): What the site and software measure.
+
+## Key facts
+- License: MIT. Local-first: board in SQLite at ~/.clawboo, API keys in an AES-256-GCM vault.
+- Runtimes: Clawboo Native (built in), plus OpenClaw, Claude Code, Codex, and Hermes as optional peers.
+- Platforms: macOS, Linux, Windows. Requires Node.js 22+.

@@ -1,0 +1,57 @@
+/**
+ * Homepage FAQ, shared by the visible <Faq> section and the FAQPage JSON-LD in
+ * BaseLayout. Single source of truth so the structured data can never drift from
+ * the rendered copy. Copy law: no em dashes; claims match the shipped v0.3.0 surface.
+ */
+
+export interface FaqItem {
+  q: string
+  a: string
+}
+
+export const faqs: FaqItem[] = [
+  {
+    q: 'Is Clawboo free and open-source?',
+    a: 'Yes. Clawboo is open-source under the MIT license, free to use and to fork. The code lives on GitHub and the package is on npm. The strongest thing you can do to help is star the repo.',
+  },
+  {
+    q: 'Do I need OpenClaw to use it?',
+    a: 'No. Clawboo Native is built in and is the default runtime. Paste one provider key and you have a working team without installing anything else. OpenClaw, Claude Code, Codex, and Hermes are optional peers you can connect later from the Runtimes panel.',
+  },
+  {
+    q: 'Which providers and models can I use?',
+    a: 'Clawboo Native talks directly to Anthropic, OpenAI, and OpenRouter, or to a local Ollama with no key needed. Connected runtimes bring their own: Claude Code uses Anthropic, Codex uses OpenAI, and Hermes runs over OpenRouter. You only paste the keys for the runtimes you actually turn on.',
+  },
+  {
+    q: 'Where does my data live?',
+    a: 'On your machine. Everything is local-first. The board persists in SQLite at ~/.clawboo/clawboo.db, and your API keys live in an AES-256-GCM encrypted vault under ~/.clawboo/secrets/. No SaaS, no cloud account, nothing uploaded.',
+  },
+  {
+    q: 'Is it production-ready?',
+    a: 'Treat it as an early, working release. The current version is v0.3.x: a real studio you can run today, not a sealed 1.0. Core surfaces are covered by end-to-end tests, and releases ship as features land.',
+  },
+  {
+    q: 'How is this different from just using one coding agent?',
+    a: 'A single coding agent is a brilliant soloist in its own terminal, with its own memory and no shared record. Clawboo is the layer that turns several of them into one team: one durable board of truth, one chat, one shared memory, and one capability inventory, with coordination over structured events. Any runtime can lead, and work can move between them with a structured handoff.',
+  },
+  {
+    q: 'Can I add my own agents, skills, and teams?',
+    a: 'Yes. v0.3.x ships 304+ first-class agents across 15 domains and 82 workflow teams, browsable in a 3-tab marketplace for Skills, Agents, and Teams. You compose teams from these and connect the runtimes you want behind them.',
+  },
+  {
+    q: 'How does Clawboo control cost?',
+    a: 'Spend tracking and warnings are on by default, with depth and fan-out caps and approvals for sensitive steps. If you want a hard ceiling, opt in to spend caps that auto-pause a run before it goes over. You always see spend as work happens, not after the fact.',
+  },
+  {
+    q: 'How do agents avoid stepping on each other?',
+    a: 'The board is the canonical source of truth. Claims are race-free, every delegation is a real board mutation, and each runtime executes its tasks isolated in its own git worktree. Coordination flows over structured lifecycle events and MCP calls.',
+  },
+  {
+    q: 'What is not in yet?',
+    a: 'We are honest about open seams. Onboarding seeds a native starter team (you build mixed-runtime teams yourself), the peer-chat room is read-only, and human participants on the board plus multi-tenant deployments are on the roadmap, not shipped yet.',
+  },
+  {
+    q: 'Which platforms does it run on?',
+    a: 'macOS, Linux, and Windows are all first-class. The only prerequisite is Node.js 22+.',
+  },
+]
