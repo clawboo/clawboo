@@ -370,7 +370,7 @@ This posture is enforced by `schemaSource.test.ts`, which:
 2. asserts the unapplied drizzle ladder does **not** ship or run: `package.json` `files` excludes `drizzle`, there are no `db:migrate` / `db:generate` scripts, and **no migration-ladder directory exists on disk**.
 
 <Danger>
-Five legacy drizzle migration stubs (`0000`–`0004`) remain tracked in git under `packages/db/drizzle/`, but they are not present in the working tree, are excluded from the published npm package, and are never applied. Do not run them against a bootstrapped DB. The only `drizzle-kit` script wired up is `db:studio` (a read-only browser); `drizzle.config.ts` exists for that tool only.
+Five drizzle migration stubs (`0000`–`0004`) existed before the migration ladder was removed; they now survive only in git history, never on disk. There is no `packages/db/drizzle/` directory in the checked-out tree, and `schemaSource.test.ts` asserts it stays absent. Nothing applies them, so never resurrect one from history against a bootstrapped DB. The only `drizzle-kit` script wired up is `db:studio` (a read-only browser), and `drizzle.config.ts` exists for that tool only.
 </Danger>
 
 ## Pragmas and contention
