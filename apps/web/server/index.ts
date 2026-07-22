@@ -419,8 +419,21 @@ async function main() {
   // stale entries don't mislead the CLI on the next launch. We don't rely
   // on this for correctness (the file is just a hint — the CLI probes the
   // port before opening the browser).
+  //
+  // We also checkpoint the SQLite WAL so a naive single-file copy of
+  // `clawboo.db` captures all recent committed writes without the WAL
+  // sidecars. This is defense-in-depth only — the WAL is crash-safe and
+  // recovered on the next open — so a checkpoint failure is logged and
+  // never blocks shutdown or changes the exit code.
   const cleanup = () => {
     removeApiPortFile()
+    try {
+      const db = createDb(getDbPath())
+      db.$client.pragma('wal_checkpoint(TRUNCATE)')
+      db.$client.close()
+    } catch (err) {
+      log.warn({ err }, 'WAL checkpoint on shutdown failed (non-fatal)')
+    }
   }
   process.once('SIGINT', () => {
     cleanup()
