@@ -1,0 +1,14 @@
+# Generated / machine-managed files that must not be reformatted.
+# Prettier is run over YAML/JSON via the format script and the lint-staged
+# pre-commit hook; without this, committing a dependency change rewrites the
+# entire lockfile in Prettier's style (thousands of lines of churn).
+
+# pnpm lockfiles (root workspace + standalone website)
+pnpm-lock.yaml
+website/pnpm-lock.yaml
+
+# Build output and caches
+dist/
+**/dist/
+.turbo/
+coverage/
