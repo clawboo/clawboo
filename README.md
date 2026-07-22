@@ -243,3 +243,11 @@ MIT, see [LICENSE](./LICENSE). Third-party attributions in [THIRD_PARTY_NOTICES.
 <p align="center">
   MIT © Sanreds
 </p>
+
+## Setup
+
+Copy the example environment file and adjust values:
+
+```bash
+cp .env.example .env
+```
