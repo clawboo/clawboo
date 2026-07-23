@@ -110,7 +110,20 @@ cp ~/.clawboo/clawboo.db-shm ~/clawboo.db-shm.bak 2>/dev/null || true
 ```
 
 <Tip>
-If you have the `sqlite3` CLI, the most robust single-file backup is `sqlite3 ~/.clawboo/clawboo.db ".backup '/path/to/clawboo.db.bak'"`, which runs an online, checkpoint-consistent copy and produces one file with no separate WAL.
+The easiest single-file backup is the built-in `clawboo backup` command, which runs an online, checkpoint-consistent copy via better-sqlite3's `.backup()`. It's safe to run while the server is live and produces one file with no separate WAL sidecars:
+
+```bash
+# write ./clawboo-backup-<timestamp>.db in the current directory
+clawboo backup
+
+# or name the destination explicitly
+clawboo backup /path/to/clawboo.db.bak
+
+# overwrite an existing destination file
+clawboo backup /path/to/clawboo.db.bak --force
+```
+
+If you don't have the Clawboo CLI handy, the `sqlite3` CLI equivalent is `sqlite3 ~/.clawboo/clawboo.db ".backup '/path/to/clawboo.db.bak'"`.
 </Tip>
 
 <Danger>

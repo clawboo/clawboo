@@ -375,6 +375,92 @@ async function run(): Promise<void> {
   )
 }
 
+// ─── `clawboo backup` ─────────────────────────────────────────────────────────
+
+/**
+ * Resolve the Clawboo SQLite database path the server actually uses — mirrors
+ * `apps/web/server/lib/db.ts`'s `getDbPath()` (`resolveClawbooDir()/clawboo.db`).
+ * Kept local so the launcher stays thin and doesn't pull in `@clawboo/db`.
+ */
+function clawbooDbPath(): string {
+  return path.join(resolveClawbooDir(), 'clawboo.db')
+}
+
+function timestampedBackupName(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const stamp =
+    `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+    `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  return `clawboo-backup-${stamp}.db`
+}
+
+async function runBackup(destArg: string | undefined, opts: { force: boolean }): Promise<void> {
+  const source = clawbooDbPath()
+  if (!fs.existsSync(source)) {
+    throw new Error(
+      `No Clawboo database found at ${source}. Start the server once to create it, or set CLAWBOO_HOME.`,
+    )
+  }
+
+  // Resolve destination: default to ./<timestamped>.db in the cwd; if the arg
+  // is an existing directory, write inside it; otherwise treat it as the file.
+  let dest: string
+  if (destArg) {
+    dest = path.resolve(destArg)
+    if (fs.existsSync(dest) && fs.statSync(dest).isDirectory()) {
+      dest = path.join(dest, timestampedBackupName())
+    }
+  } else {
+    dest = path.resolve(timestampedBackupName())
+  }
+
+  if (fs.existsSync(dest)) {
+    if (!opts.force) {
+      throw new Error(`${dest} already exists. Refusing to overwrite (pass --force to clobber).`)
+    }
+    // better-sqlite3's `.backup()` opens the destination as a SQLite file and
+    // copies pages in; it cannot overwrite a non-SQLite file (SQLITE_NOTADB) and
+    // a stale smaller SQLite target would keep trailing junk pages. Unlink first
+    // so the backup always writes a clean single-file image.
+    fs.unlinkSync(dest)
+  }
+
+  // Open the source read-only so a backup can run while the server is live
+  // without taking a write lock. better-sqlite3's online `.backup()` reads
+  // pages via the shared WAL and produces a single checkpoint-consistent file
+  // with no `-wal`/`-shm` sidecars — the documented "one-file" backup recipe.
+  const Database = (await import('better-sqlite3')).default as typeof import('better-sqlite3')
+  const src = new Database(source, { readonly: true, fileMustExist: true })
+  try {
+    const spinner = ora({ text: `Backing up ${source} → ${dest}`, color: 'cyan' }).start()
+    await src.backup(dest)
+    spinner.succeed(chalk.green('Backup complete'))
+  } finally {
+    src.close()
+  }
+
+  const bytes = fs.statSync(dest).size
+  const kb = (bytes / 1024).toFixed(1)
+  p.outro(
+    chalk.bold.hex('#E94560')('Backup ready!') +
+      '\n' +
+      chalk.gray('  File:  ') +
+      chalk.white(dest) +
+      '\n' +
+      chalk.gray('  Size:  ') +
+      chalk.white(`${kb} KB`) +
+      '\n\n' +
+      chalk.gray('  This is a single checkpoint-consistent file — no ') +
+      chalk.gray('`-wal`/`-shm`') +
+      chalk.gray(' sidecars needed.') +
+      '\n' +
+      chalk.gray('  Restore by copying it back over ') +
+      chalk.white('clawboo.db') +
+      chalk.gray(' with the server stopped.'),
+  )
+}
+
 // ─── CLI entry ────────────────────────────────────────────────────────────────
 
 const program = new Command()
@@ -390,5 +476,19 @@ program.action(() => {
     process.exit(1)
   })
 })
+
+program
+  .command('backup [dest]')
+  .description(
+    'Back up the Clawboo SQLite database to a single checkpoint-consistent .db file ' +
+      '(runs an online backup — safe while the server is live).',
+  )
+  .option('-f, --force', 'Overwrite the destination file if it already exists.')
+  .action((dest: string | undefined, opts: { force: boolean }) => {
+    runBackup(dest, opts).catch((err: unknown) => {
+      console.error(chalk.red('\nError:'), err instanceof Error ? err.message : String(err))
+      process.exit(1)
+    })
+  })
 
 program.parse()
