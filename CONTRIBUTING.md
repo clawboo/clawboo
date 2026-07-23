@@ -7,7 +7,7 @@ Thanks for taking the time to contribute. Please read this guide before opening 
 ## Prerequisites
 
 - Node.js 22+
-- pnpm 9+
+- pnpm 9 (pinned to 9.15.0; `corepack enable` selects it, see Setup)
 
 That's it. Clawboo runs agents natively (paste a provider key), so you do not need any external runtime to develop or test. Connecting OpenClaw, Claude Code, Codex, or Hermes is optional and only needed when you are working on those adapters.
 
@@ -16,6 +16,7 @@ That's it. Clawboo runs agents natively (paste a provider key), so you do not ne
 ```bash
 git clone https://github.com/clawboo/clawboo.git
 cd clawboo
+corepack enable   # use the repo's pinned pnpm (9.15.0) so lockfile diffs stay clean
 pnpm install
 pnpm dev          # Vite UI on :5173, API on :18790 (auto-fallback)
 ```
@@ -31,6 +32,8 @@ New here? Welcome. The friendliest way in:
 3. Follow **Setup** above, make your change on a branch, and open a PR. If you get stuck, say so in the issue. A half-finished PR with a question is completely welcome.
 
 Good starting areas that rarely need core changes: **new marketplace team templates**, **docs pages**, **a provider or runtime icon**, or **a test for an uncovered component**. If you are unsure whether an idea fits, open a [Discussion](https://github.com/clawboo/clawboo/discussions) first, before writing code.
+
+New to the codebase? The [Internals map](https://docs.claw.boo/internals) is a guided tour of how the pieces fit together, and it flags "caution surfaces": files that encode load-bearing fixes worth reading before you change them.
 
 ## Branching
 
@@ -62,13 +65,15 @@ Run them locally before pushing to avoid back-and-forth.
 
 Keep PRs focused. Split unrelated changes into separate PRs.
 
+Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines, you are on a different pnpm than the pinned `9.15.0`: run `corepack enable`, then `pnpm install`, and commit only the intended lockfile change.
+
 ### 2. Pass CI before requesting review
 
 Every PR must pass `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`. New surfaces should also pass `pnpm e2e`.
 
 ### 3. Add a changeset for user-facing changes
 
-We use [Changesets](https://github.com/changesets/changesets) to manage versions and changelogs. Any change that affects a published package (`@clawboo/*` or `clawboo`) needs one:
+We use [Changesets](https://github.com/changesets/changesets) to manage versions and changelogs. Every `@clawboo/*` library is `private: true`; only the `clawboo` CLI publishes to npm, with the libraries inlined into its bundle. So a changeset is needed when your change reaches the `clawboo` CLI's bundled behavior:
 
 ```bash
 pnpm changeset
@@ -90,7 +95,7 @@ Add a test for anything you add. Unit logic goes in Vitest (`*.test.ts` in the n
 - **No `console.log`.** Log through `@clawboo/logger` (pino).
 - **Lucide icons only.** Never emoji in the UI.
 - **Theme tokens, never raw hex.** Use the CSS variables and Tailwind tokens (brand marks are the only exception).
-- **Forward-only migrations.** Files in `drizzle/` are append-only; never edit a committed migration.
+- **No migration ladder.** The SQLite schema is the inline `CREATE TABLE IF NOT EXISTS` DDL in `packages/db/src/db.ts` (there is no `drizzle/` directory, no `.sql` migrations, and no `db:migrate`/`db:generate`). Keep that DDL additive and idempotent; a schema change targets a fresh DB and locally means a hard reset of `~/.clawboo`, not an in-place migration. `schemaSource.test.ts` guards this posture.
 - **Pure where it claims to be.** Policy and projection functions stay side-effect-free and unit-testable.
 - **No secrets in logs, responses, or storage.** A credential's presence may be shown (the env-var name plus true/false), never its value.
 
