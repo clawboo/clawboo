@@ -1,9 +1,10 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, Suspense, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { NAV_PANELS } from './navPanels'
 import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
 import { AgentDetailView } from '@/features/agent-detail'
 import { GroupChatView } from '@/features/group-chat/GroupChatView'
+import { Spinner } from '@/features/shared/Spinner'
 import { WelcomeState } from './WelcomeState'
 import { useViewStore } from '@/stores/view'
 import { useEditorStore } from '@/stores/editor'
@@ -148,7 +149,19 @@ export function ContentArea() {
       break
     case 'nav':
       viewKey = `nav-${viewMode.view}`
-      viewContent = NAV_PANELS[viewMode.view]()
+      viewContent = (
+        <Suspense
+          fallback={
+            <div
+              style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Spinner size={20} />
+            </div>
+          }
+        >
+          {NAV_PANELS[viewMode.view]()}
+        </Suspense>
+      )
       break
     default:
       viewKey = 'welcome'
