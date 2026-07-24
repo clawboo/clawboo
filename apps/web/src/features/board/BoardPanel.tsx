@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CornerDownRight, KanbanSquare, RefreshCw } from 'lucide-react'
+import { Bot, CornerDownRight, KanbanSquare, Plus, RefreshCw, Sparkles } from 'lucide-react'
 
 import { useTeamStore } from '@/stores/team'
 import { fetchBoardResult, type BoardTask } from '@/lib/boardClient'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Button } from '@/features/shared/Button'
+import { EmptyState } from '@/features/shared/EmptyState'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
@@ -16,21 +17,21 @@ import { ENTER_SPRING, listDelay } from '@/lib/motion'
 
 import { TaskDetailDrawer } from './TaskDetailDrawer'
 import { ApprovalsColumn } from './ApprovalsColumn'
+import { NewTaskDialog } from './NewTaskDialog'
+import { STATUS_LABEL, TASK_STATUSES } from './boardStatus'
 
 const SECTION_LABEL =
   'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
 const COUNT_PILL =
   'font-data rounded-full bg-foreground/[0.06] px-2.5 py-0.5 text-[11px] font-semibold text-foreground/55'
 
-const COLUMNS: { id: string; label: string }[] = [
-  { id: 'backlog', label: 'Backlog' },
-  { id: 'todo', label: 'To do' },
-  { id: 'in_progress', label: 'In progress' },
-  { id: 'in_review', label: 'In review' },
-  { id: 'blocked', label: 'Blocked' },
-  { id: 'done', label: 'Done' },
-  { id: 'cancelled', label: 'Cancelled' },
-]
+// One column per canonical status, in lifecycle order. Derived from the shared
+// status metadata so the columns, the New-task composer, and the drawer's status
+// editor never drift on labels or ordering.
+const COLUMNS: { id: string; label: string }[] = TASK_STATUSES.map((id) => ({
+  id,
+  label: STATUS_LABEL[id],
+}))
 const COLUMN_IDS = new Set(COLUMNS.map((c) => c.id))
 // A task with a status outside the canonical 7 lands here instead of being
 // silently dropped (counted in the header but rendered nowhere).
@@ -109,6 +110,7 @@ export function BoardPanel() {
   const [teamFilter, setTeamFilter] = useState<string>(selectedTeamId ?? 'all')
   const [tasks, setTasks] = useState<BoardTask[]>([])
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+  const [composerOpen, setComposerOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [loaded, setLoaded] = useState(false) // false until the first fetch resolves → skeleton
   const [fetchOk, setFetchOk] = useState(true) // false when the last fetch failed → error/retry
@@ -144,6 +146,20 @@ export function BoardPanel() {
     const id = setInterval(() => void refresh(), 5000)
     return () => clearInterval(id)
   }, [refresh])
+
+  // A manually-created task: show it instantly (optimistic prepend) unless the
+  // active team filter would exclude it, then reconcile against the server. The
+  // authoritative `refresh` corrects any drift (e.g. server-assigned fields).
+  const handleCreated = useCallback(
+    (task: BoardTask) => {
+      const matchesFilter = teamFilter === 'all' || task.teamId === teamFilter
+      if (matchesFilter) {
+        setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [task, ...prev]))
+      }
+      void refresh()
+    },
+    [teamFilter, refresh],
+  )
 
   const byStatus = useMemo(() => {
     const map: Record<string, BoardTask[]> = {}
@@ -186,14 +202,39 @@ export function BoardPanel() {
                 </option>
               ))}
             </Select>
-            <Button variant="secondary" size="sm" onClick={() => void refresh()} aria-label="Refresh">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void refresh()}
+              aria-label="Refresh"
+            >
               {refreshing ? <Spinner size={13} /> : <RefreshCw size={13} strokeWidth={2} />}
               Refresh
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => setComposerOpen(true)}>
+              <Plus size={14} strokeWidth={2.4} />
+              New task
             </Button>
             <GitHubStarButton />
           </>
         }
       />
+
+      {/* The board is a live projection of agent work — cards are created and
+          moved by agents through chat. A Kanban invites drag/create, so without a
+          word this reads as broken rather than intentional. This one-liner sets
+          the expectation the moment the board opens, while the header's New-task
+          button and the drawer's status editor make the manual path real. */}
+      <div
+        data-testid="board-agent-hint"
+        className="flex items-center gap-2 border-b border-border px-6 py-2 text-[12px] text-foreground/50"
+      >
+        <Bot size={13} strokeWidth={2} className="shrink-0 text-foreground/40" />
+        <span>
+          AI agents continuously create and move work.{' '}
+          <span className="text-foreground/35">You can also manage tasks manually.</span>
+        </span>
+      </div>
 
       <div className="flex-1 overflow-auto px-6 py-5">
         <div className="flex min-h-full items-start gap-4">
@@ -232,6 +273,27 @@ export function BoardPanel() {
                   </Button>
                 </span>
               </FormattedAlert>
+            </div>
+          ) : tasks.length === 0 ? (
+            // A genuinely empty board (fetch OK, zero tasks) → one board-level
+            // empty state with a manual CTA, rather than seven identical "No
+            // tasks" columns. Reinforces the agent-driven model and offers the
+            // manual escape hatch in the same place a first-time user looks.
+            <div
+              data-testid="board-empty"
+              className="flex flex-1 items-center justify-center py-16"
+            >
+              <EmptyState
+                icon={Sparkles}
+                tone="primary"
+                title="No tasks yet"
+                helper="Agents populate this board automatically as work is delegated in chat. You can also add the first task yourself."
+                action={
+                  <Button variant="primary" size="sm" onClick={() => setComposerOpen(true)}>
+                    <Plus size={14} strokeWidth={2.4} /> New task
+                  </Button>
+                }
+              />
             </div>
           ) : (
             columns.map((col) => {
@@ -275,6 +337,13 @@ export function BoardPanel() {
       <AnimatePresence>
         {openTaskId && <TaskDetailDrawer taskId={openTaskId} onClose={() => setOpenTaskId(null)} />}
       </AnimatePresence>
+
+      <NewTaskDialog
+        open={composerOpen}
+        onClose={() => setComposerOpen(false)}
+        defaultTeamId={teamFilter !== 'all' ? teamFilter : undefined}
+        onCreated={handleCreated}
+      />
     </div>
   )
 }

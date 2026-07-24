@@ -34,6 +34,110 @@ describe('BoardPanel', () => {
     ).toBeInTheDocument()
   })
 
+  it('explains the agent-driven model so the read-only board is self-explanatory', async () => {
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Wire the widget', status: 'todo' }] }),
+      ),
+    )
+    render(<BoardPanel />)
+    const hint = await screen.findByTestId('board-agent-hint')
+    expect(hint).toHaveTextContent(/AI agents continuously create and move work/i)
+    expect(hint).toHaveTextContent(/manage tasks manually/i)
+  })
+
+  it('offers a New task button in the header', async () => {
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Wire the widget', status: 'todo' }] }),
+      ),
+    )
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+    expect(screen.getByRole('button', { name: /New task/i })).toBeInTheDocument()
+  })
+
+  it('shows a branded empty state with a manual CTA when the board is empty', async () => {
+    server.use(http.get('/api/board', () => HttpResponse.json({ tasks: [] })))
+    render(<BoardPanel />)
+    const empty = await screen.findByTestId('board-empty')
+    expect(within(empty).getByText('No tasks yet')).toBeInTheDocument()
+    // The empty state offers the same manual escape hatch as the header.
+    expect(within(empty).getByRole('button', { name: /New task/i })).toBeInTheDocument()
+  })
+
+  it('creates a task through the composer and posts it to /api/board', async () => {
+    let createdBody: { title?: string; status?: string } | null = null
+    server.use(
+      // Populated board → only the header "New task" button renders (no empty-state CTA).
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Existing', status: 'todo' }] }),
+      ),
+      http.post('/api/board', async ({ request }) => {
+        createdBody = (await request.json()) as { title: string; status?: string }
+        return HttpResponse.json({
+          task: { id: 'new1', title: createdBody.title, status: createdBody.status ?? 'todo' },
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    await user.click(screen.getByRole('button', { name: /New task/i }))
+    const dialog = await screen.findByTestId('new-task-dialog')
+    await user.type(within(dialog).getByLabelText('Title'), 'Draft the changelog')
+    await user.click(within(dialog).getByRole('button', { name: /Create task/i }))
+
+    await waitFor(() => expect(createdBody).not.toBeNull())
+    expect(createdBody).toMatchObject({ title: 'Draft the changelog', status: 'todo' })
+    // The dialog closes on success.
+    await waitFor(() => expect(screen.queryByTestId('new-task-dialog')).toBeNull())
+  })
+
+  it('moves focus into the composer (title field) when it opens', async () => {
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Existing', status: 'todo' }] }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    await user.click(screen.getByRole('button', { name: /New task/i }))
+    const dialog = await screen.findByTestId('new-task-dialog')
+    // useFocusTrap moves focus to the first focusable — the title input.
+    await waitFor(() => expect(within(dialog).getByLabelText('Title')).toHaveFocus())
+  })
+
+  it('Escape dismisses an open field dropdown without closing the composer', async () => {
+    // Regression: the dialog's Escape handler must not co-fire with the Select's,
+    // or dismissing a dropdown would tear down the whole form and lose typed input.
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Existing', status: 'todo' }] }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    await user.click(screen.getByRole('button', { name: /New task/i }))
+    const dialog = await screen.findByTestId('new-task-dialog')
+    await user.type(within(dialog).getByLabelText('Title'), 'Keep me')
+
+    // Open the Status dropdown, then press Escape to dismiss it.
+    await user.click(within(dialog).getByLabelText('Initial status'))
+    expect(await screen.findByRole('option', { name: 'Backlog' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+
+    // The menu closes, but the dialog — and the typed title — survive.
+    await waitFor(() => expect(screen.queryByRole('option', { name: 'Backlog' })).toBeNull())
+    expect(screen.getByTestId('new-task-dialog')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Title')).toHaveValue('Keep me')
+  })
+
   it('shows a skeleton on first mount, before the board fetch resolves', () => {
     server.use(http.get('/api/board', () => HttpResponse.json({ tasks: [] })))
     render(<BoardPanel />)
