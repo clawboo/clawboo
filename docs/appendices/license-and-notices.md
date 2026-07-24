@@ -33,7 +33,7 @@ Every workspace library under `packages/` is named `@clawboo/*` and marked `priv
 
 ## Bundled third-party dependencies
 
-The code listed below ships inside the published `clawboo` package (the bundled server and the dashboard UI). Full license texts are distributed with each package in `node_modules`. The authoritative table lives in [`THIRD_PARTY_NOTICES.md`](https://github.com/clawboo/clawboo/blob/main/THIRD_PARTY_NOTICES.md); the summary here highlights the licenses you most need to know about.
+The code listed below ships inside the published `clawboo` package. Most of it is bundled (inlined) at build time into the server bundle (`dist/server.js`) and the dashboard UI (`dist/ui/`), so it does **not** appear as separate entries in the installed package's `node_modules`; a few packages (`better-sqlite3`, `ws`, `pino`) are declared runtime dependencies and carry their own license texts in `node_modules`. For the inlined packages, the aggregated notices ship in [`THIRD_PARTY_NOTICES.md`](https://github.com/clawboo/clawboo/blob/main/THIRD_PARTY_NOTICES.md) (included in the package as `dist/THIRD_PARTY_NOTICES.md`), which is also the authoritative table; the summary here highlights the licenses you most need to know about.
 
 | Package                     | License    | Role                                                                       |
 | --------------------------- | ---------- | -------------------------------------------------------------------------- |

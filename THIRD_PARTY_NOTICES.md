@@ -8,9 +8,13 @@ licenses verified for each.
 
 ## Bundled dependencies
 
-Code from these packages ships inside the published `clawboo` npm package (the bundled
-server and the dashboard). Full license texts are distributed with each package in
-`node_modules`.
+Code from these packages ships inside the published `clawboo` npm package. Most are
+bundled (inlined) at build time into the server bundle (`dist/server.js`) and the
+dashboard UI (`dist/ui/`), so they do **not** appear as separate entries in the
+installed package's `node_modules`. A few (`better-sqlite3`, `ws`, `pino`) are declared
+runtime dependencies and are installed normally, carrying their own license texts in
+`node_modules`. For the inlined packages, the copyright and license notices are
+aggregated in this file, which ships in the package (`dist/THIRD_PARTY_NOTICES.md`).
 
 | Package                     | License    |
 | --------------------------- | ---------- |

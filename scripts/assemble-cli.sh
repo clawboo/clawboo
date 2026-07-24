@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # ── assemble-cli.sh ──────────────────────────────────────────────────────
-# Copies the bundled server.js and Vite UI output into apps/cli/dist/
-# so that `npx clawboo` has everything it needs.
+# Copies the bundled server.js, Vite UI output, MCP stdio bins, and the
+# third-party notices into apps/cli/dist/ so that `npx clawboo` has
+# everything it needs.
 #
 # Prerequisites: pnpm build must have completed successfully.
 # ─────────────────────────────────────────────────────────────────────────
@@ -63,10 +64,19 @@ cp "$WEB_DIST/mcp/memory.js" "$CLI_DIST/bin/memory.js"
 cp "$WEB_DIST/mcp/tools.js" "$CLI_DIST/bin/tools.js"
 cp "$WEB_DIST/mcp/teamchat.js" "$CLI_DIST/bin/teamchat.js"
 
+# ── Copy third-party notices ─────────────────────────────────────────────
+# The dependencies bundled into server.js / ui/ are inlined at build time,
+# so their own license files do NOT travel in the user's node_modules. Ship
+# the aggregated notices inside dist/ (which `files: ["dist"]` publishes) so
+# the bundled MIT / Apache-2.0 / EPL-2.0 notices reach every install.
+
+echo "Copying THIRD_PARTY_NOTICES.md → $CLI_DIST/"
+cp "$ROOT/THIRD_PARTY_NOTICES.md" "$CLI_DIST/THIRD_PARTY_NOTICES.md"
+
 # ── Verify ───────────────────────────────────────────────────────────────
 
 echo ""
 echo "Assembly complete:"
-ls -lh "$CLI_DIST/index.js" "$CLI_DIST/server.js" "$CLI_DIST/ui/index.html" "$CLI_DIST/bin/tasks.js"
+ls -lh "$CLI_DIST/index.js" "$CLI_DIST/server.js" "$CLI_DIST/ui/index.html" "$CLI_DIST/bin/tasks.js" "$CLI_DIST/THIRD_PARTY_NOTICES.md"
 echo ""
 echo "Test with: node $CLI_DIST/index.js"
