@@ -293,8 +293,9 @@ export function SettingsModal() {
                       ContentArea's boundary (it's mounted directly under App). */}
                   <Suspense
                     fallback={
-                      <div className="flex flex-1 items-center justify-center">
+                      <div role="status" className="flex flex-1 items-center justify-center">
                         <Spinner size={20} />
+                        <span className="sr-only">Loading…</span>
                       </div>
                     }
                   >

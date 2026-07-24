@@ -153,9 +153,11 @@ export function ContentArea() {
         <Suspense
           fallback={
             <div
+              role="status"
               style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' }}
             >
               <Spinner size={20} />
+              <span className="sr-only">Loading…</span>
             </div>
           }
         >

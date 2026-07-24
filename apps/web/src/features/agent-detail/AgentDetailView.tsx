@@ -22,8 +22,9 @@ const InlineEditor = lazy(() => import('./InlineEditor').then((m) => ({ default:
 // Shared fallback for the two lazy panes — centered spinner, sized to the pane.
 function PaneFallback() {
   return (
-    <div className="flex h-full items-center justify-center">
+    <div role="status" className="flex h-full items-center justify-center">
       <Spinner size={20} />
+      <span className="sr-only">Loading…</span>
     </div>
   )
 }
