@@ -4,8 +4,10 @@ import type { NavView } from '@/stores/view'
 // Each panel is lazy-loaded so it stays off the initial entry chunk and only
 // downloads/parses when its nav view is first opened. Panels are named exports,
 // so we map each to `default` for React.lazy. The heavy features (Ghost Graph +
-// ELK, Marketplace catalog, CodeMirror, recharts) now load on demand rather
-// than up front. Rendered behind a <Suspense> boundary in ContentArea.
+// ELK, CodeMirror, recharts) now load on demand rather than up front; extracting
+// the marketplace agent catalog itself is separate follow-up work. Rendered
+// behind a <Suspense> boundary in ContentArea AND in SettingsModal, which
+// renders this same map outside ContentArea's boundary.
 const GhostGraphPanel = lazy(() =>
   import('@/features/graph/GhostGraphPanel').then((m) => ({ default: m.GhostGraphPanel })),
 )
