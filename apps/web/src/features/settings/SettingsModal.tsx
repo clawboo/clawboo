@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   Activity,
@@ -18,6 +18,7 @@ import {
 import { useSettingsModalStore, type SettingsView } from '@/stores/settingsModal'
 import { NAV_PANELS } from '@/features/layout/navPanels'
 import { InSettingsModalContext } from './settingsModalContext'
+import { Spinner } from '@/features/shared/Spinner'
 
 interface SettingsItem {
   id: SettingsView
@@ -40,26 +41,66 @@ const GROUPS: SettingsGroup[] = [
   {
     label: 'Workspace',
     items: [
-      { id: 'providers', label: 'Providers', icon: KeyRound, keywords: 'api key anthropic openai google openrouter vault provider llm' },
-      { id: 'runtimes', label: 'Runtimes', icon: Cpu, keywords: 'connect install claude codex hermes native openclaw' },
+      {
+        id: 'providers',
+        label: 'Providers',
+        icon: KeyRound,
+        keywords: 'api key anthropic openai google openrouter vault provider llm',
+      },
+      {
+        id: 'runtimes',
+        label: 'Runtimes',
+        icon: Cpu,
+        keywords: 'connect install claude codex hermes native openclaw',
+      },
       { id: 'memory', label: 'Memory', icon: Brain, keywords: 'facts recall knowledge' },
-      { id: 'capabilities', label: 'Capabilities', icon: Puzzle, keywords: 'tools skills connectors' },
+      {
+        id: 'capabilities',
+        label: 'Capabilities',
+        icon: Puzzle,
+        keywords: 'tools skills connectors',
+      },
       { id: 'scheduler', label: 'Scheduler', icon: Clock, keywords: 'routines cron schedule' },
     ],
   },
   {
     label: 'Insights',
     items: [
-      { id: 'cost', label: 'Tokens Used', icon: BarChart3, keywords: 'cost usage spend budget tokens' },
-      { id: 'obs', label: 'Observability', icon: Activity, keywords: 'traces telemetry events fleet health' },
-      { id: 'governance', label: 'Governance', icon: ShieldAlert, keywords: 'budget audit approvals caps' },
+      {
+        id: 'cost',
+        label: 'Tokens Used',
+        icon: BarChart3,
+        keywords: 'cost usage spend budget tokens',
+      },
+      {
+        id: 'obs',
+        label: 'Observability',
+        icon: Activity,
+        keywords: 'traces telemetry events fleet health',
+      },
+      {
+        id: 'governance',
+        label: 'Governance',
+        icon: ShieldAlert,
+        keywords: 'budget audit approvals caps',
+      },
     ],
   },
   {
     label: 'System',
     items: [
-      { id: 'system', label: 'System', icon: SettingsIcon, keywords: 'openclaw model api key gateway maintenance' },
-      { id: 'health', label: 'System Health', icon: HeartPulse, keywords: 'boot probe diagnostics status' },
+      {
+        id: 'system',
+        label: 'System',
+        icon: SettingsIcon,
+        keywords: 'openclaw model api key gateway maintenance',
+      },
+      {
+        id: 'health',
+        label: 'System Health',
+        icon: HeartPulse,
+        keywords: 'boot probe diagnostics status',
+      },
     ],
   },
 ]
@@ -209,7 +250,9 @@ export function SettingsModal() {
                             size={16}
                             strokeWidth={2}
                             className={
-                              active ? 'text-primary' : 'text-foreground/55 group-hover:text-foreground/80'
+                              active
+                                ? 'text-primary'
+                                : 'text-foreground/55 group-hover:text-foreground/80'
                             }
                           />
                           {it.label}
@@ -245,7 +288,18 @@ export function SettingsModal() {
               </div>
               <InSettingsModalContext.Provider value={true}>
                 <div key={view} className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                  {NAV_PANELS[view]()}
+                  {/* NAV_PANELS entries are lazy-loaded, so this surface needs its
+                      own Suspense boundary — the modal renders outside
+                      ContentArea's boundary (it's mounted directly under App). */}
+                  <Suspense
+                    fallback={
+                      <div className="flex flex-1 items-center justify-center">
+                        <Spinner size={20} />
+                      </div>
+                    }
+                  >
+                    {NAV_PANELS[view]()}
+                  </Suspense>
                 </div>
               </InSettingsModalContext.Provider>
             </div>
