@@ -319,14 +319,40 @@ export function dropTask(db: ClawbooDb, taskId: string): void {
 
 // ─── Dependencies (Beads-style blocks / blocked-by) ──────────────────────────
 
+export class TaskDependencyCycleError extends Error {
+  readonly code = 'task_dependency_cycle'
+
+  constructor(taskId: string, dependsOnTaskId: string) {
+    super(`linking ${taskId} to ${dependsOnTaskId} would create a dependency cycle`)
+    this.name = 'TaskDependencyCycleError'
+  }
+}
+
 export function linkDep(db: ClawbooDb, taskId: string, dependsOnTaskId: string): void {
-  withWriteRetry(() =>
-    db
-      .insert(taskDeps)
+  immediateWrite(db, (tx) => {
+    if (taskId === dependsOnTaskId) {
+      throw new TaskDependencyCycleError(taskId, dependsOnTaskId)
+    }
+    const reachable = tx.all(
+      sql`
+        WITH RECURSIVE dependencies(id) AS (
+          SELECT depends_on_task_id FROM task_deps WHERE task_id = ${dependsOnTaskId}
+          UNION
+          SELECT td.depends_on_task_id
+          FROM task_deps td
+          JOIN dependencies dep ON td.task_id = dep.id
+        )
+        SELECT id FROM dependencies WHERE id = ${taskId} LIMIT 1
+      `,
+    ) as Array<{ id: string }>
+    if (reachable.length > 0) {
+      throw new TaskDependencyCycleError(taskId, dependsOnTaskId)
+    }
+    tx.insert(taskDeps)
       .values({ taskId, dependsOnTaskId, tenantId: null })
       .onConflictDoNothing()
-      .run(),
-  )
+      .run()
+  })
 }
 
 /**

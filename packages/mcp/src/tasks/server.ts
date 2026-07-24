@@ -16,6 +16,7 @@ import {
   linkDep,
   listTasks,
   releaseTask,
+  TaskDependencyCycleError,
   unblockTask,
   updateStatus,
   type ClawbooDb,
@@ -201,7 +202,14 @@ export function createTasksServer(db: ClawbooDb): Server {
         'Make taskId depend on dependsOnTaskId (it stays unready until the dependency is done).',
       inputSchema: z.object({ taskId: z.string(), dependsOnTaskId: z.string() }),
       handler: (args) => {
-        linkDep(db, str(args['taskId']), str(args['dependsOnTaskId']))
+        try {
+          linkDep(db, str(args['taskId']), str(args['dependsOnTaskId']))
+        } catch (error) {
+          if (error instanceof TaskDependencyCycleError) {
+            return textResult(error.message, true)
+          }
+          throw error
+        }
         return textResult(
           `linked: ${str(args['taskId'])} depends on ${str(args['dependsOnTaskId'])}`,
         )
