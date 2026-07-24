@@ -44,7 +44,24 @@ const apiPort = resolveApiPort()
 
 export default defineConfig({
   plugins: [react(), tsconfigPaths({ ignoreConfigErrors: true })],
-  build: { outDir: 'dist/ui' },
+  build: {
+    outDir: 'dist/ui',
+    rollupOptions: {
+      output: {
+        // Split the heaviest vendor libraries into their own chunks so they're
+        // not part of the entry chunk. Combined with the lazy panels/graph, a
+        // first-run user only downloads/parses these when they open the feature
+        // that needs them (editor, charts, or the graph).
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('@codemirror') || id.includes('/codemirror/') || id.includes('@lezer'))
+            return 'codemirror'
+          if (id.includes('recharts') || id.includes('/d3-')) return 'charts'
+          if (id.includes('@xyflow') || id.includes('elkjs')) return 'graph'
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
