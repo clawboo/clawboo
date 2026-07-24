@@ -21,17 +21,23 @@
 // in `GroupChatPanel` is gated only by the connection status (so it stays quiet
 // when the Gateway is down).
 
-import { useEffect, useMemo, useRef } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { TeamOnboardingGate } from './TeamOnboardingGate'
 import { GroupChatViewHeader } from './GroupChatViewHeader'
-import { TeamSpaceSplit } from './TeamSpaceSplit'
 import { useTeamOnboarding } from './useTeamOnboarding'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
 import { useBooZeroStore } from '@/stores/booZero'
 import { buildTeamSessionKey } from '@/lib/sessionUtils'
+
+// The settled team space (TeamSpaceSplit) owns the team-scoped Ghost Graph,
+// which pulls in React Flow + elk.bundled.js. Lazy-load it so those libraries
+// stay off the entry chunk until a user actually opens a team space.
+const TeamSpaceSplit = lazy(() =>
+  import('./TeamSpaceSplit').then((m) => ({ default: m.TeamSpaceSplit })),
+)
 
 export function GroupChatView({ teamId }: { teamId: string }) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
@@ -43,13 +49,8 @@ export function GroupChatView({ teamId }: { teamId: string }) {
     [agents, booZeroAgentId],
   )
 
-  const {
-    agentsIntroduced,
-    userIntroduced,
-    isLoading,
-    markAgentsIntroduced,
-    markUserIntroduced,
-  } = useTeamOnboarding(teamId)
+  const { agentsIntroduced, userIntroduced, isLoading, markAgentsIntroduced, markUserIntroduced } =
+    useTeamOnboarding(teamId)
 
   const onboardingComplete = agentsIntroduced && userIntroduced
 
@@ -105,10 +106,15 @@ export function GroupChatView({ teamId }: { teamId: string }) {
         ) : (
           // Settled team space — when the user came through the gate this
           // session, the split plays its "open" animation (graph grows down
-          // from the top into its slot; chat settles below).
-          <div className="h-full">
-            <TeamSpaceSplit teamId={teamId} animateOpen={sawGateRef.current} />
-          </div>
+          // from the top into its slot; chat settles below). The split is
+          // lazy-loaded (it owns the team-scoped Ghost Graph + React Flow/ELK),
+          // so we hold a neutral full-window beat while its chunk resolves —
+          // matching the hydrating placeholder above, so there's no flash.
+          <Suspense fallback={<div className="h-full bg-background" />}>
+            <div className="h-full">
+              <TeamSpaceSplit teamId={teamId} animateOpen={sawGateRef.current} />
+            </div>
+          </Suspense>
         )}
       </div>
     </div>
