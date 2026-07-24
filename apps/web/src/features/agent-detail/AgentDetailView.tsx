@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Group, Panel } from 'react-resizable-panels'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -7,8 +8,25 @@ import { ChatPanel } from '@/features/chat/ChatPanel'
 import { ResizeHandle } from '@/features/shared/ResizeHandle'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { useNativeRuntimeState } from '@/features/runtimes/useNativeRuntimeState'
-import { MiniGraph } from './MiniGraph'
-import { InlineEditor } from './InlineEditor'
+import { Spinner } from '@/features/shared/Spinner'
+
+// This view is on the eager path (ContentArea imports it statically), so both of
+// its heavy panes are lazy-loaded — otherwise they'd anchor their libraries to
+// the entry chunk regardless of how the vendor chunks are split.
+//
+// MiniGraph pulls in React Flow (+ ELK via the shared graph modules); InlineEditor
+// owns one of the two CodeMirror entry points (AgentFileEditorOverlay is the other).
+const MiniGraph = lazy(() => import('./MiniGraph').then((m) => ({ default: m.MiniGraph })))
+const InlineEditor = lazy(() => import('./InlineEditor').then((m) => ({ default: m.InlineEditor })))
+
+// Shared fallback for the two lazy panes — centered spinner, sized to the pane.
+function PaneFallback() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <Spinner size={20} />
+    </div>
+  )
+}
 
 // ─── AgentDetailView ─────────────────────────────────────────────────────────
 //
@@ -113,13 +131,17 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
           <Panel defaultSize={55} minSize={25}>
             <Group orientation="vertical" id="agent-detail-v">
               <Panel defaultSize={55} minSize={15}>
-                <MiniGraph agentId={agentId} />
+                <Suspense fallback={<PaneFallback />}>
+                  <MiniGraph agentId={agentId} />
+                </Suspense>
               </Panel>
 
               <ResizeHandle direction="vertical" />
 
               <Panel defaultSize={45} minSize={15}>
-                <InlineEditor agentId={agentId} agentName={agent.name} />
+                <Suspense fallback={<PaneFallback />}>
+                  <InlineEditor agentId={agentId} agentName={agent.name} />
+                </Suspense>
               </Panel>
             </Group>
           </Panel>
