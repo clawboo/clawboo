@@ -52,12 +52,19 @@ export default defineConfig({
         // not part of the entry chunk. Combined with the lazy panels/graph, a
         // first-run user only downloads/parses these when they open the feature
         // that needs them (editor, charts, or the graph).
+        // d3-* gets its own chunk rather than being folded into `charts`.
+        // React Flow and recharts both depend on parts of d3, so letting it
+        // land in `charts` couples the two — anything that pulls the graph then
+        // drags recharts (~383 KB) onto the same load path. An explicit `d3`
+        // chunk lets each side depend on the shared code independently.
         manualChunks(id) {
           if (!id.includes('node_modules')) return
           if (id.includes('@codemirror') || id.includes('/codemirror/') || id.includes('@lezer'))
             return 'codemirror'
-          if (id.includes('recharts') || id.includes('/d3-')) return 'charts'
           if (id.includes('@xyflow') || id.includes('elkjs')) return 'graph'
+          if (id.includes('recharts')) return 'charts'
+          if (id.includes('/d3-') || id.includes('/internmap/') || id.includes('/victory-vendor/'))
+            return 'd3'
         },
       },
     },
