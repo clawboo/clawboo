@@ -1,19 +1,55 @@
-import { type ReactNode } from 'react'
-import { GhostGraphPanel } from '@/features/graph/GhostGraphPanel'
-import { SchedulerPanel } from '@/features/scheduler/SchedulerPanel'
-import { CostDashboard } from '@/app/cost/CostDashboard'
-import { MarketplacePanel } from '@/features/marketplace/MarketplacePanel'
-import { MaintenancePanel } from '@/features/maintenance'
-import { ObsPanel } from '@/features/obs'
-import { BoardPanel } from '@/features/board/BoardPanel'
-import { RuntimesPanel } from '@/features/runtimes/RuntimesPanel'
-import { ProvidersPanel } from '@/features/providers/ProvidersPanel'
-import { FleetHealth } from '@/features/fleet/FleetHealth'
-import { MemoryPanel } from '@/features/memory/MemoryPanel'
-import { CapabilitiesPanel } from '@/features/capabilities/CapabilitiesPanel'
-import { GovernancePanel } from '@/features/governance/GovernancePanel'
-import { SystemHealthPanel } from '@/features/health'
+import { lazy, type ReactNode } from 'react'
 import type { NavView } from '@/stores/view'
+
+// Each panel is lazy-loaded so it stays off the initial entry chunk and only
+// downloads/parses when its nav view is first opened. Panels are named exports,
+// so we map each to `default` for React.lazy. The heavy features (Ghost Graph +
+// ELK, CodeMirror, recharts) now load on demand rather than up front; extracting
+// the marketplace agent catalog itself is separate follow-up work. Rendered
+// behind a <Suspense> boundary in ContentArea AND in SettingsModal, which
+// renders this same map outside ContentArea's boundary.
+const GhostGraphPanel = lazy(() =>
+  import('@/features/graph/GhostGraphPanel').then((m) => ({ default: m.GhostGraphPanel })),
+)
+const SchedulerPanel = lazy(() =>
+  import('@/features/scheduler/SchedulerPanel').then((m) => ({ default: m.SchedulerPanel })),
+)
+const CostDashboard = lazy(() =>
+  import('@/app/cost/CostDashboard').then((m) => ({ default: m.CostDashboard })),
+)
+const MarketplacePanel = lazy(() =>
+  import('@/features/marketplace/MarketplacePanel').then((m) => ({ default: m.MarketplacePanel })),
+)
+const MaintenancePanel = lazy(() =>
+  import('@/features/maintenance').then((m) => ({ default: m.MaintenancePanel })),
+)
+const ObsPanel = lazy(() => import('@/features/obs').then((m) => ({ default: m.ObsPanel })))
+const BoardPanel = lazy(() =>
+  import('@/features/board/BoardPanel').then((m) => ({ default: m.BoardPanel })),
+)
+const RuntimesPanel = lazy(() =>
+  import('@/features/runtimes/RuntimesPanel').then((m) => ({ default: m.RuntimesPanel })),
+)
+const ProvidersPanel = lazy(() =>
+  import('@/features/providers/ProvidersPanel').then((m) => ({ default: m.ProvidersPanel })),
+)
+const FleetHealth = lazy(() =>
+  import('@/features/fleet/FleetHealth').then((m) => ({ default: m.FleetHealth })),
+)
+const MemoryPanel = lazy(() =>
+  import('@/features/memory/MemoryPanel').then((m) => ({ default: m.MemoryPanel })),
+)
+const CapabilitiesPanel = lazy(() =>
+  import('@/features/capabilities/CapabilitiesPanel').then((m) => ({
+    default: m.CapabilitiesPanel,
+  })),
+)
+const GovernancePanel = lazy(() =>
+  import('@/features/governance/GovernancePanel').then((m) => ({ default: m.GovernancePanel })),
+)
+const SystemHealthPanel = lazy(() =>
+  import('@/features/health').then((m) => ({ default: m.SystemHealthPanel })),
+)
 
 // The single source of truth mapping each NavView → its panel renderer.
 // Shared by ContentArea (full-screen work surfaces) AND the SettingsModal
