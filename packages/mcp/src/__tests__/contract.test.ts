@@ -56,6 +56,29 @@ describe('Tasks MCP', () => {
     const list = await callText(client, 'list_tasks', { teamId: 't1' })
     expect((JSON.parse(list.text) as unknown[]).length).toBe(1)
   })
+
+  it('returns a tool error when a dependency link would create a cycle', async () => {
+    const client = await connectInMemory(createTasksServer(db))
+    const first = JSON.parse(
+      (await callText(client, 'create_task', { title: 'First' })).text,
+    ) as { id: string }
+    const second = JSON.parse(
+      (await callText(client, 'create_task', { title: 'Second' })).text,
+    ) as { id: string }
+
+    const linked = await callText(client, 'link_task', {
+      taskId: second.id,
+      dependsOnTaskId: first.id,
+    })
+    expect(linked.isError).toBe(false)
+
+    const cycle = await callText(client, 'link_task', {
+      taskId: first.id,
+      dependsOnTaskId: second.id,
+    })
+    expect(cycle.isError).toBe(true)
+    expect(cycle.text).toContain('dependency cycle')
+  })
 })
 
 describe('Memory MCP', () => {

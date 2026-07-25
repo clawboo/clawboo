@@ -24,6 +24,7 @@ import {
   listTasks,
   reconcileOrphans,
   reconcileStaleInProgress,
+  TaskDependencyCycleError,
   updateStatus,
   updateTaskFields,
 } from '../repository'
@@ -244,6 +245,25 @@ describe('state machine', () => {
 })
 
 describe('dependencies, lineage, comments, soft-delete', () => {
+  it('rejects a direct dependency cycle without changing readiness', () => {
+    const a = createTask(db, { title: 'A' })
+    const b = createTask(db, { title: 'B' })
+    linkDep(db, b.id, a.id)
+
+    expect(() => linkDep(db, a.id, b.id)).toThrow(TaskDependencyCycleError)
+    expect(getReadyTasks(db).map((task) => task.id)).toContain(a.id)
+  })
+
+  it('rejects a transitive dependency cycle', () => {
+    const a = createTask(db, { title: 'A' })
+    const b = createTask(db, { title: 'B' })
+    const c = createTask(db, { title: 'C' })
+    linkDep(db, b.id, a.id)
+    linkDep(db, c.id, b.id)
+
+    expect(() => linkDep(db, a.id, c.id)).toThrow(TaskDependencyCycleError)
+  })
+
   it('getReadyTasks excludes tasks with unsatisfied dependencies', () => {
     const a = createTask(db, { title: 'A' })
     const b = createTask(db, { title: 'B' })
