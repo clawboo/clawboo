@@ -2,19 +2,37 @@
 // re-fetch. msw's onUnhandledRequest:'error' keeps the test honest about which
 // endpoints are hit.
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useTeamStore } from '@/stores/team'
+import { useToastStore } from '@/stores/toast'
 
 import { server } from '../../../__vitest__/mswServer'
+import { ConfirmDialog } from '../../shared/ConfirmDialog'
 import { BoardPanel } from '../BoardPanel'
+
+// dnd-kit's real pointer drag can't run in jsdom (no layout/rects), so we capture
+// the REAL onDragEnd handler by passing through DndContext (keeping the real provider
+// so useDraggable/useDroppable still work) and invoke it with synthetic drag events.
+const dnd = vi.hoisted(() => ({ onDragEnd: undefined as undefined | ((e: unknown) => void) }))
+vi.mock('@dnd-kit/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@dnd-kit/core')>()
+  return {
+    ...actual,
+    DndContext: (props: React.ComponentProps<typeof actual.DndContext>) => {
+      dnd.onDragEnd = props.onDragEnd as (e: unknown) => void
+      return <actual.DndContext {...props} />
+    },
+  }
+})
 
 beforeEach(() => {
   // teamFilter init = selectedTeamId ?? 'all' → keep it 'all' so the fetch has no ?teamId.
   useTeamStore.setState({ teams: [], selectedTeamId: null })
+  useToastStore.setState({ toasts: [] }) // isolate toast assertions across tests
 })
 afterEach(() => cleanup())
 
@@ -215,5 +233,136 @@ describe('BoardPanel', () => {
 
     expect(await screen.findByText('Second')).toBeInTheDocument()
     expect(calls).toBeGreaterThanOrEqual(2)
+  })
+
+  it('drag-moves a card to a legal column and PATCHes the status', async () => {
+    let patched: { status?: string } | null = null
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Ship it', status: 'in_progress' }] }),
+      ),
+      http.patch('/api/board/t1', async ({ request }) => {
+        patched = (await request.json()) as { status: string }
+        return HttpResponse.json({ ok: true, task: { id: 't1', status: patched.status } })
+      }),
+    )
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    // Simulate dropping the in_progress card onto the Done column (a legal move).
+    await act(async () => {
+      dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'done' } })
+    })
+
+    await waitFor(() => expect(patched).toEqual({ status: 'done' }))
+    // Optimistic move: the card now sits in the Done column.
+    expect(
+      within(screen.getByTestId('board-column-done')).getByTestId('board-card'),
+    ).toBeInTheDocument()
+  })
+
+  it('rejects an illegal drag client-side without a PATCH', async () => {
+    let patchCalled = false
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Ship it', status: 'todo' }] }),
+      ),
+      http.patch('/api/board/t1', () => {
+        patchCalled = true
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    // todo → done is not a legal transition; the shared mutation must reject it
+    // client-side (no wasted PATCH), matching the drawer editor.
+    await act(async () => {
+      dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'done' } })
+    })
+
+    expect(patchCalled).toBe(false)
+    // The card stays in the To do column.
+    expect(
+      within(screen.getByTestId('board-column-todo')).getByTestId('board-card'),
+    ).toBeInTheDocument()
+    // And the rejection actually ran (not a silent no-op): an error toast was raised.
+    await waitFor(() =>
+      expect(
+        useToastStore
+          .getState()
+          .toasts.some((t) => t.type === 'error' && /can’t move/i.test(t.message)),
+      ).toBe(true),
+    )
+  })
+
+  it('does not stay pinned when the server advances the task past the drag target', async () => {
+    // Regression: a committed drag must not leave the card stuck in its target column
+    // when a concurrent agent moves it further before the next poll (drag → To do, then
+    // an agent re-claims it → In progress). The move commits, then the poll wins.
+    let board = [{ id: 't1', title: 'Ship it', status: 'in_progress' }]
+    server.use(
+      http.get('/api/board', () => HttpResponse.json({ tasks: board })),
+      http.patch('/api/board/t1', () =>
+        HttpResponse.json({ ok: true, task: { id: 't1', status: 'done' } }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    await act(async () => {
+      dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'done' } }) // in_progress → done (legal)
+    })
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('board-column-done')).queryByTestId('board-card'),
+      ).not.toBeNull(),
+    )
+
+    // A poll now reports the task advanced past 'done' to 'cancelled'.
+    board = [{ id: 't1', title: 'Ship it', status: 'cancelled' }]
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+
+    // The card follows the server to Cancelled — it is NOT stuck in Done.
+    expect(
+      await within(screen.getByTestId('board-column-cancelled')).findByTestId('board-card'),
+    ).toBeInTheDocument()
+    expect(within(screen.getByTestId('board-column-done')).queryByTestId('board-card')).toBeNull()
+  })
+
+  it('confirms before a drag that unassigns a running agent (→ To do)', async () => {
+    let patched: { status?: string } | null = null
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({
+          tasks: [
+            { id: 't1', title: 'Ship it', status: 'in_progress', assigneeAgentId: 'agent-7' },
+          ],
+        }),
+      ),
+      http.patch('/api/board/t1', async ({ request }) => {
+        patched = (await request.json()) as { status: string }
+        return HttpResponse.json({ ok: true, task: { id: 't1', status: patched.status } })
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <>
+        <BoardPanel />
+        <ConfirmDialog />
+      </>,
+    )
+    await screen.findByTestId('board-card')
+
+    await act(async () => {
+      dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'todo' } }) // in_progress → todo (release)
+    })
+
+    // The shared confirm gate intercepts the drag — nothing is sent until confirmed.
+    const dialog = await screen.findByTestId('confirm-dialog')
+    expect(patched).toBeNull()
+    await user.click(within(dialog).getByTestId('confirm-ok'))
+    await waitFor(() => expect(patched).toEqual({ status: 'todo' }))
   })
 })
