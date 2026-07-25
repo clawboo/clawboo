@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { SKILL_CATALOG, getCatalogSkill, searchCatalog } from '../catalog'
 
 const VALID_CATEGORIES = new Set(['code', 'web', 'data', 'comm', 'file', 'other'])
-const VALID_SOURCES = new Set(['clawhub', 'skill.sh', 'verified', 'local'])
 
 describe('SKILL_CATALOG', () => {
   it('has 30 skills', () => {
@@ -15,10 +14,6 @@ describe('SKILL_CATALOG', () => {
       expect(skill.name).toBeTruthy()
       expect(skill.description).toBeTruthy()
       expect(skill.category).toBeTruthy()
-      expect(skill.source).toBeTruthy()
-      expect(typeof skill.trustScore).toBe('number')
-      expect(skill.version).toBeTruthy()
-      expect(skill.author).toBeTruthy()
       expect(Array.isArray(skill.tags)).toBe(true)
       expect(skill.tags.length).toBeGreaterThan(0)
     }
@@ -29,22 +24,9 @@ describe('SKILL_CATALOG', () => {
     expect(new Set(ids).size).toBe(SKILL_CATALOG.length)
   })
 
-  it('all trustScores are between 0 and 100', () => {
-    for (const skill of SKILL_CATALOG) {
-      expect(skill.trustScore).toBeGreaterThanOrEqual(0)
-      expect(skill.trustScore).toBeLessThanOrEqual(100)
-    }
-  })
-
   it('all categories are valid', () => {
     for (const skill of SKILL_CATALOG) {
       expect(VALID_CATEGORIES.has(skill.category)).toBe(true)
-    }
-  })
-
-  it('all sources are valid', () => {
-    for (const skill of SKILL_CATALOG) {
-      expect(VALID_SOURCES.has(skill.source)).toBe(true)
     }
   })
 

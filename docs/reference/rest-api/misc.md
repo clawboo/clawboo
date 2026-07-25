@@ -515,11 +515,11 @@ Lists installed skills, newest first. With `agentId`, filters to rows whose `met
   skills: Array<{
     id: string
     name: string
-    source: string // 'clawhub' | 'skill.sh' | 'verified' | 'local'
+    source: string // free-text provenance (e.g. 'curated'); not an external registry
     category: string | null
-    trustScore: number | null
+    trustScore: number | null // retained column, no longer populated
     installedAt: number | null
-    metadata: string | null // JSON; { agentIds: string[], version?, author? }
+    metadata: string | null // JSON; { agentIds: string[] }
   }>
 }
 ```
@@ -538,7 +538,7 @@ curl "http://localhost:18790/api/skills?agentId=<agent-id>"
 
 ### `POST /api/skills`
 
-Installs a skill for an agent. Before recording anything, the handler runs `scanForInjection` over the install blob (name + source + category + author + the raw body). A finding blocks the install with **422** and writes a blocked-install audit row; a clean install is also audited (the forensic trail). On a clean scan, an existing skill row merges the `agentId` into `metadata.agentIds`; otherwise a new row is inserted.
+Adds a skill (a capability annotation) to an agent. Before recording anything, the handler runs `scanForInjection` over the install blob (name + source + category + the raw body). A finding blocks the install with **422** and writes a blocked-install audit row; a clean install is also audited (the forensic trail). On a clean scan, an existing skill row merges the `agentId` into `metadata.agentIds`; otherwise a new row is inserted.
 
 - **Request body**:
 
@@ -546,12 +546,9 @@ Installs a skill for an agent. Before recording anything, the handler runs `scan
 {
   id: string               // required
   name: string             // required
-  source: string           // required
+  source: string           // required (e.g. 'curated')
   agentId: string          // required
   category?: string | null
-  trustScore?: number | null
-  version?: string | null
-  author?: string | null
 }
 ```
 

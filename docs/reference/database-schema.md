@@ -170,7 +170,7 @@ A typed key/value store. Backs durable per-team briefs, team rules, onboarding f
 
 Installed-skill tracking for the legacy markdown-bullet skill model (the brokered tool layer in `tool_registry` supersedes it; both coexist).
 
-- **Columns**: `id` (PK, text), `name`, `source` (`clawhub`|`skill.sh`|`verified`|`local`), `category`, `trust_score` (`REAL`), `installed_at`, `metadata` (JSON; carries the `agentIds` list).
+- **Columns**: `id` (PK, text), `name`, `source` (free-text provenance, e.g. `curated`; not an external registry), `category`, `trust_score` (`REAL`, nullable — retained but no longer populated), `installed_at`, `metadata` (JSON; carries the `agentIds` list).
 - **Indexes**: `idx_skills_source`, `idx_skills_category`.
 
 ### `team_profiles`

@@ -8,9 +8,7 @@ function makeRecord(overrides: Partial<InstalledSkillRecord> = {}): InstalledSki
   return {
     skillId: 'test-skill',
     name: 'Test Skill',
-    source: 'verified',
     category: 'code',
-    trustScore: 90,
     installedAt: Date.now(),
     agentIds: ['agent-1'],
     ...overrides,
@@ -265,8 +263,8 @@ describe('useMarketplaceStore', () => {
 
   describe('setSortBy', () => {
     it('sets sort order', () => {
-      useMarketplaceStore.getState().setSortBy('trust')
-      expect(useMarketplaceStore.getState().sortBy).toBe('trust')
+      useMarketplaceStore.getState().setSortBy('category')
+      expect(useMarketplaceStore.getState().sortBy).toBe('category')
     })
   })
 

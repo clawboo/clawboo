@@ -24,11 +24,11 @@ The panel opens on the **Teams** tab by default. The toolbar shows all three tab
 
 ## The three tabs
 
-| Tab        | Count | What it lists                                                 | Default? |
-| ---------- | ----- | ------------------------------------------------------------- | -------- |
-| **Teams**  | 82    | Pre-wired `TeamTemplate`s (a roster of agents + routing)      | yes      |
-| **Agents** | 304   | Individual `AgentCatalogEntry` records, one specialist each   | no       |
-| **Skills** | 30    | `CatalogSkill` entries you can install onto an existing agent | no       |
+| Tab        | Count | What it lists                                                          | Default? |
+| ---------- | ----- | ---------------------------------------------------------------------- | -------- |
+| **Teams**  | 82    | Pre-wired `TeamTemplate`s (a roster of agents + routing)               | yes      |
+| **Agents** | 304   | Individual `AgentCatalogEntry` records, one specialist each            | no       |
+| **Skills** | 30    | `CatalogSkill` capability annotations you can add to an existing agent | no       |
 
 ### Teams tab
 
@@ -40,21 +40,21 @@ Each agent renders as an `AgentCard` showing its mascot avatar, name, role, a so
 
 ### Skills tab
 
-Each skill renders as a `SkillCard` with a category dot, a source badge (`Verified` / `Clawboo Marketplace` / `skill.sh` / `Local`), a trust-score bar (mint ≥ 80, amber ≥ 50, red below), the author and version, and an **Install** button. When a skill is used by catalog agents, a `Used by N agents` link appears that cross-jumps to the Agents tab pre-searched on that skill name.
+Each skill renders as a `SkillCard` with a category dot, a neutral **Curated** tag (these are a hand-curated, first-party catalog — there is no external skill registry, fetch, or vetting behind them), a two-line description, and an **Add** button. When a skill is used by catalog agents, a `Used by N agents` link appears that cross-jumps to the Agents tab pre-searched on that skill name.
 
 <Note>
-Installing a skill is different from deploying an agent. **Install** appends the skill to an *existing* agent in your fleet (you pick the target from a dropdown); it `POST`s to `/api/skills`, which injection-scans the entry before recording it. Deploying an agent or team *creates new Boos*.
+Adding a skill is different from deploying an agent. **Add** records a **capability annotation** on an *existing* agent in your fleet (you pick the target from a dropdown); it `POST`s to `/api/skills`, which injection-scans the entry before recording it. The annotation surfaces on the [Ghost Graph](/using/ghost-graph) and the [Capabilities dashboard](/using/capabilities-dashboard) — it labels intent, it does **not** provision a runtime tool (an agent's executable tools come from the MCP broker). Deploying an agent or team *creates new Boos*.
 </Note>
 
 ## Search and filters
 
 Each tab has its own search box and filter pills. Search is a case-insensitive substring match; it never hits the network.
 
-| Tab    | Search matches                   | Filter pills                                                                                               |
-| ------ | -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Agents | name · role · description · tags | **Domain** (one pill per agent domain present, e.g. Engineering, Marketing, Design) + **Source**           |
-| Teams  | name · description · tags        | **Category** (only categories with ≥ 1 team) + **Source**                                                  |
-| Skills | name · description · tags        | **Category** (Code / File / Web / Comm / Data / Other) + sort dropdown (Name A–Z · Trust Score · Category) |
+| Tab    | Search matches                   | Filter pills                                                                                     |
+| ------ | -------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Agents | name · role · description · tags | **Domain** (one pill per agent domain present, e.g. Engineering, Marketing, Design) + **Source** |
+| Teams  | name · description · tags        | **Category** (only categories with ≥ 1 team) + **Source**                                        |
+| Skills | name · description · tags        | **Category** (Code / File / Web / Comm / Data / Other) + sort dropdown (Name A–Z · Category)     |
 
 The **Source** filter (shared by Agents and Teams) has four options:
 
@@ -125,7 +125,7 @@ When the modal finishes, Clawboo selects the new team and opens its **group chat
 
 - After a deploy, the dashboard switches you into the new team's group chat. The team appears in the team sidebar and the [Ghost Graph](/using/ghost-graph).
 - Open the agent in the fleet; its **IDENTITY.md** should contain the same source text you saw in the agent detail modal.
-- After a skill **Install**, a success toast confirms it, the skill appears on the agent in the [Capabilities dashboard](/using/capabilities-dashboard) and on the Ghost Graph, and the `Used by N agents` count on the skill card reflects it.
+- After you **Add** a skill, a success toast confirms it (_"Added … to … tool profile"_), and the skill appears as a capability annotation on the agent in the [Capabilities dashboard](/using/capabilities-dashboard) and on the Ghost Graph.
 
 ## Troubleshooting
 

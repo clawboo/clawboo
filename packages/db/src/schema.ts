@@ -189,7 +189,7 @@ export const skills = sqliteTable(
   {
     id: text('id').primaryKey(),
     name: text('name').notNull(),
-    source: text('source').notNull(), // 'clawhub' | 'skill.sh' | 'verified' | 'local'
+    source: text('source').notNull(), // free-text provenance (e.g. 'curated' | 'capability'); not an external registry
     category: text('category'),
     trustScore: real('trust_score'),
     installedAt: integer('installed_at'),
