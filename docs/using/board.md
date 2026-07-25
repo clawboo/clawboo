@@ -42,11 +42,19 @@ The board renders **seven columns**, one per task status, in lifecycle order:
 
 Each column shows its label and a live count of the tasks in it. The panel header shows a total task count (`{N} tasks`) and polls `GET /api/board` every five seconds, so status changes and new tasks appear without a manual refresh. A **Refresh** button forces an immediate re-fetch.
 
+Because the board is a live projection of agent activity — cards are created and moved by agents as they work — a one-line hint under the header (_"AI agents continuously create and move work. You can also manage tasks manually."_) sets that expectation up front, so the absence of drag-to-reorder reads as intentional rather than broken. The manual path is real, though: a **New task** button in the header opens a composer, and each task's status is editable from its [detail drawer](#the-task-detail-drawer).
+
 A task whose status falls outside the canonical seven is not silently dropped; an **Other** column is appended only when such a task exists, so off-list statuses stay visible and counted.
 
 <Note>
 Until the first fetch resolves, the board shows skeleton columns. If that first fetch fails, the board shows a "Couldn't load the board" error with a **Retry** link (distinct from a genuinely empty board). A *transient* poll failure after a good load keeps the last good snapshot rather than blanking an actively-watched board.
 </Note>
+
+A genuinely empty board (loaded fine, zero tasks) shows one **"No tasks yet"** empty state — explaining that agents populate the board automatically as work is delegated, with a **New task** button to add the first one manually — instead of seven identical empty columns.
+
+## Creating a task manually
+
+The header's **New task** button opens a small composer for adding work to the board by hand — the human counterpart to agent delegation. It collects a **title** (required), an optional **description**, a **team** (prefilled from the active team filter), and an initial **status** (**To do** by default, or **Backlog** for triage), then writes it through `POST /api/board`. On success the task appears on the board immediately (optimistically, then reconciled by the next poll) and a toast confirms it; a failed write keeps the composer open and toasts the error. Once on the board, a manually-created task is indistinguishable from a delegated one — an agent can claim and run it normally.
 
 ## Task cards
 
@@ -78,6 +86,8 @@ The drawer sections, top to bottom:
 ### Overview
 
 The task's core fields: **Status**, **Assignee** (`assigneeAgentId`), **Runtime** (`assigneeRuntime`, default `openclaw`), **Cost** (`costUsd` to four decimals), and **Parent** (a truncated `parentTaskId`, shown only for subtasks).
+
+**Status** is an inline editor, not just a label: a dropdown that offers only the transitions the [state machine](/concepts/the-board) permits from the current status (so it never lets you pick a move the server would reject), writes through `PATCH /api/board/:taskId`, and updates optimistically — rolling back and toasting if the write is refused (an illegal transition, or the `→done` verification gate). Terminal tasks (`done` / `cancelled`) have no legal moves, so the control locks.
 
 ### Verification
 

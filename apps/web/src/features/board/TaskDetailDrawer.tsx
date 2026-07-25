@@ -26,6 +26,8 @@ import { Skeleton } from '@/features/shared/Skeleton'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import { ENTER_SPRING } from '@/lib/motion'
 
+import { StatusSelect } from './StatusSelect'
+
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 const SECTION_LABEL =
   'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
@@ -104,6 +106,20 @@ function kv(label: string, value: string) {
       >
         {value}
       </span>
+    </div>
+  )
+}
+
+// Same label rhythm as `kv`, but the value is an interactive control (e.g. the
+// status editor) rather than plain text — so no font-data/word-break, and the
+// row is vertically centered on the control.
+function kvControl(label: string, control: React.ReactNode) {
+  return (
+    <div
+      style={{ display: 'flex', gap: 12, fontSize: 12.5, marginBottom: 6, alignItems: 'center' }}
+    >
+      <span style={{ color: muted(0.45), minWidth: 82 }}>{label}</span>
+      {control}
     </div>
   )
 }
@@ -249,7 +265,39 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
               )}
 
               <Section icon={<ListChecks size={13} />} title="Overview">
-                {kv('Status', task.status)}
+                {kvControl(
+                  'Status',
+                  <StatusSelect
+                    taskId={task.id}
+                    status={task.status}
+                    assigneeAgentId={task.assigneeAgentId}
+                    onChange={(next) =>
+                      setDetail((d) =>
+                        d
+                          ? {
+                              ...d,
+                              // Mirror the server: a →todo release clears the assignee,
+                              // runtime, and verification verdict (repository.ts, the
+                              // cross-runtime rebind boundary). Without this the Assignee
+                              // row reads stale, a prior verdict lingers, and the release
+                              // confirm would re-fire on the next move.
+                              task: {
+                                ...d.task,
+                                status: next,
+                                ...(next === 'todo'
+                                  ? {
+                                      assigneeAgentId: null,
+                                      assigneeRuntime: null,
+                                      verification: null,
+                                    }
+                                  : {}),
+                              },
+                            }
+                          : d,
+                      )
+                    }
+                  />,
+                )}
                 {kv('Assignee', String(task['assigneeAgentId'] ?? '—'))}
                 {kv('Runtime', String(task['assigneeRuntime'] ?? 'openclaw'))}
                 {kv('Cost', cost != null ? `$${cost.toFixed(4)}` : '—')}
@@ -370,7 +418,10 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
                       </span>{' '}
                       <span className="text-foreground/50">{ex.status}</span>
                       {typeof ex.costUsd === 'number' && (
-                        <span className="font-data text-foreground/50"> · ${ex.costUsd.toFixed(4)}</span>
+                        <span className="font-data text-foreground/50">
+                          {' '}
+                          · ${ex.costUsd.toFixed(4)}
+                        </span>
                       )}
                       {(ex.inputTokens != null || ex.outputTokens != null) && (
                         <span className="font-data text-foreground/40">
