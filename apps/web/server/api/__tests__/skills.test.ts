@@ -80,4 +80,13 @@ describe('skills install — supply-chain injection scan', () => {
       ),
     ).toBe(true)
   })
+
+  it('rejects a truthy-but-non-string required field with 400 (no orphan row)', () => {
+    const res = mockRes()
+    // agentId as an object is truthy but not a string — it must never persist.
+    skillsPOST(req({ id: 's3', name: 'API Tester', source: 'curated', agentId: {} }), res.res)
+    expect(res.statusCode()).toBe(400)
+    const db = createDb(getDbPath())
+    expect(db.select().from(skills).all()).toHaveLength(0) // never recorded
+  })
 })

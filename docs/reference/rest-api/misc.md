@@ -560,7 +560,7 @@ Adds a skill (a capability annotation) to an agent. Before recording anything, t
 { "ok": false, "error": "Invalid JSON body" }
 ```
 
-**`400 Bad Request`**: a required field is missing:
+**`400 Bad Request`**: a required field is missing or not a non-empty string (or `category` is a non-string):
 
 ```json
 { "ok": false, "error": "id, name, source, and agentId are required" }

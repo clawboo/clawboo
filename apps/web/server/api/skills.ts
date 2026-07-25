@@ -51,7 +51,17 @@ export function skillsPOST(req: Request, res: Response): void {
 
   const { id, name, source, category, agentId } = body
 
-  if (!id || !name || !source || !agentId) {
+  const isNonEmptyString = (value: unknown): value is string =>
+    typeof value === 'string' && value.trim().length > 0
+
+  // Validate TYPES, not just truthiness. A truthy-but-non-string agentId (e.g. {})
+  // would persist an unmatchable `metadata.agentIds` entry (an orphan row that
+  // GET/DELETE can never resolve); a non-string id/name/source would reach the
+  // DB driver and surface as a 500 instead of a clean 400.
+  if (
+    ![id, name, source, agentId].every(isNonEmptyString) ||
+    (category !== undefined && category !== null && typeof category !== 'string')
+  ) {
     res.status(400).json({ ok: false, error: 'id, name, source, and agentId are required' })
     return
   }
