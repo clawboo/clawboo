@@ -9,12 +9,8 @@ export interface InstalledSkillRecord {
   skillId: string
   /** Display name */
   name: string
-  /** Source marketplace */
-  source: string
   /** Skill category */
   category: string | null
-  /** Trust score 0–100 */
-  trustScore: number | null
   /** Epoch ms when first installed */
   installedAt: number | null
   /** Agent IDs that have this skill installed */
@@ -25,7 +21,7 @@ export interface InstalledSkillRecord {
 
 export type MarketplaceTab = 'skills' | 'agents' | 'teams'
 
-export type SortBy = 'name' | 'trust' | 'category'
+export type SortBy = 'name' | 'category'
 
 interface MarketplaceStore {
   /** Per-agent install tracking: agentId → Set of skillIds */

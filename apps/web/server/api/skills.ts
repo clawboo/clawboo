@@ -39,10 +39,7 @@ interface PostBody {
   name: string
   source: string
   category?: string | null
-  trustScore?: number | null
   agentId: string
-  version?: string | null
-  author?: string | null
 }
 
 export function skillsPOST(req: Request, res: Response): void {
@@ -52,9 +49,19 @@ export function skillsPOST(req: Request, res: Response): void {
     return
   }
 
-  const { id, name, source, category, trustScore, agentId, version, author } = body
+  const { id, name, source, category, agentId } = body
 
-  if (!id || !name || !source || !agentId) {
+  const isNonEmptyString = (value: unknown): value is string =>
+    typeof value === 'string' && value.trim().length > 0
+
+  // Validate TYPES, not just truthiness. A truthy-but-non-string agentId (e.g. {})
+  // would persist an unmatchable `metadata.agentIds` entry (an orphan row that
+  // GET/DELETE can never resolve); a non-string id/name/source would reach the
+  // DB driver and surface as a 500 instead of a clean 400.
+  if (
+    ![id, name, source, agentId].every(isNonEmptyString) ||
+    (category !== undefined && category !== null && typeof category !== 'string')
+  ) {
     res.status(400).json({ ok: false, error: 'id, name, source, and agentId are required' })
     return
   }
@@ -68,7 +75,7 @@ export function skillsPOST(req: Request, res: Response): void {
     // recorded / can run. A destructive/exfil/injection finding blocks the
     // install (422) + audits it; a clean install is audited too (the forensic
     // trail).
-    const blob = [name, source, category ?? '', author ?? '', JSON.stringify(req.body)].join('\n')
+    const blob = [name, source, category ?? '', JSON.stringify(req.body)].join('\n')
     const findings = scanForInjection(blob)
     if (findings.length > 0) {
       appendAudit(db, {
@@ -102,8 +109,6 @@ export function skillsPOST(req: Request, res: Response): void {
         agentIds.push(agentId)
       }
       meta.agentIds = agentIds
-      if (version) meta.version = version
-      if (author) meta.author = author
 
       db.update(skills)
         .set({ metadata: JSON.stringify(meta) })
@@ -115,10 +120,9 @@ export function skillsPOST(req: Request, res: Response): void {
       return
     }
 
-    // Insert new skill row
+    // Insert new skill row. `trust_score` stays a nullable column but is no longer
+    // populated — catalog skills are curated, not scored.
     const meta: Record<string, unknown> = { agentIds: [agentId] }
-    if (version) meta.version = version
-    if (author) meta.author = author
 
     const rows = db
       .insert(skills)
@@ -127,7 +131,7 @@ export function skillsPOST(req: Request, res: Response): void {
         name,
         source,
         category: category ?? null,
-        trustScore: trustScore ?? null,
+        trustScore: null,
         installedAt: now,
         metadata: JSON.stringify(meta),
       })

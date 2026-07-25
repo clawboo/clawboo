@@ -54,19 +54,6 @@ const CATEGORY_META: Record<SkillCategory | 'all', { color: string; label: strin
   other: { color: 'var(--category-other)', label: 'Other' },
 }
 
-const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
-  verified: { label: 'Verified', color: 'var(--category-web)' },
-  clawhub: { label: 'Clawboo Marketplace', color: 'var(--category-data)' },
-  'skill.sh': { label: 'skill.sh', color: 'var(--category-comm)' },
-  local: { label: 'Local', color: 'var(--category-other)' },
-}
-
-function trustColor(score: number): string {
-  if (score >= 80) return 'var(--mint)'
-  if (score >= 50) return 'var(--amber)'
-  return 'var(--primary)'
-}
-
 // ─── Install skill from marketplace ──────────────────────────────────────────
 
 async function installSkillFromMarketplace(
@@ -85,12 +72,10 @@ async function installSkillFromMarketplace(
       body: JSON.stringify({
         id: skill.id,
         name: skill.name,
-        source: skill.source,
+        // Curated in-repo catalog — no external registry, no vetting.
+        source: 'curated',
         category: skill.category,
-        trustScore: skill.trustScore,
         agentId,
-        version: skill.version,
-        author: skill.author,
       }),
     })
     if (!res.ok) {
@@ -106,9 +91,7 @@ async function installSkillFromMarketplace(
     const record: InstalledSkillRecord = {
       skillId: skill.id,
       name: skill.name,
-      source: skill.source,
       category: skill.category,
-      trustScore: skill.trustScore,
       installedAt: Date.now(),
       agentIds: [agentId],
     }
@@ -117,7 +100,7 @@ async function installSkillFromMarketplace(
     useGraphStore.getState().triggerRefresh()
 
     useToastStore.getState().addToast({
-      message: `Installed "${skill.name}" on ${agentName}`,
+      message: `Added "${skill.name}" to ${agentName}'s tool profile`,
       type: 'success',
     })
   } catch (err) {
@@ -136,7 +119,6 @@ async function installSkillFromMarketplace(
 function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
   const [showPicker, setShowPicker] = useState(false)
   const cat = CATEGORY_META[skill.category] ?? CATEGORY_META.other
-  const src = SOURCE_LABELS[skill.source] ?? SOURCE_LABELS.local
   const agentCount = useMemo(() => getAgentsForSkill(skill.id).length, [skill.id])
 
   const onAgentCountClick = () => {
@@ -153,25 +135,18 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
       className="group relative flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong"
       style={{ boxShadow: 'var(--shadow-raised)' }}
     >
-      {/* Top row: dot + name + source badge */}
+      {/* Top row: dot + name + curated tag */}
       <div className="flex items-center gap-2">
-        <span
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={{ background: cat.color }}
-        />
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: cat.color }} />
         <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-foreground">
           {skill.name}
         </span>
         <span
-          className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
-          style={{
-            color: src.color,
-            background: `${src.color}18`,
-            borderColor: `${src.color}35`,
-            letterSpacing: '0.03em',
-          }}
+          className="whitespace-nowrap rounded-md border border-border px-1.5 py-0.5 text-[9px] font-semibold uppercase text-foreground/45"
+          style={{ letterSpacing: '0.03em' }}
+          title="Hand-picked clawboo catalog skill"
         >
-          {src.label}
+          Curated
         </span>
       </div>
 
@@ -189,39 +164,18 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
         {skill.description}
       </div>
 
-      {/* Trust bar */}
+      {/* Bottom row: usage + add */}
       <div className="flex items-center gap-2">
-        <div className="h-1 flex-1 overflow-hidden rounded-full bg-foreground/[0.06]">
-          <div
-            className="h-full rounded-full"
-            style={{
-              width: `${skill.trustScore}%`,
-              background: trustColor(skill.trustScore),
-              transition: 'width var(--motion-base)',
-            }}
-          />
-        </div>
-        <span className="font-data whitespace-nowrap text-[10px] text-foreground/40">
-          {skill.trustScore}%
-        </span>
-      </div>
-
-      {/* Bottom row: author + version + install */}
-      <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-[10.5px] text-foreground/40">
-          {skill.author}
-          {skill.version && (
-            <span className="font-data ml-1.5 text-foreground/25">v{skill.version}</span>
-          )}
-        </span>
-        {agentCount > 0 && (
+        {agentCount > 0 ? (
           <button
             onClick={onAgentCountClick}
             title="Browse agents using this skill"
-            className="cursor-pointer whitespace-nowrap border-none bg-transparent p-0 text-[10.5px] text-mint/70 transition-colors hover:text-mint hover:underline"
+            className="min-w-0 flex-1 cursor-pointer truncate border-none bg-transparent p-0 text-left text-[10.5px] text-mint/70 transition-colors hover:text-mint hover:underline"
           >
             Used by {agentCount} agent{agentCount === 1 ? '' : 's'}
           </button>
+        ) : (
+          <span className="min-w-0 flex-1" />
         )}
         <Button
           variant="primary"
@@ -231,7 +185,7 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
             setShowPicker((v) => !v)
           }}
         >
-          Install
+          Add
         </Button>
       </div>
 
@@ -397,9 +351,6 @@ export function MarketplacePanel() {
     }
 
     switch (sortBy) {
-      case 'trust':
-        results.sort((a, b) => b.trustScore - a.trustScore)
-        break
       case 'category':
         results.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
         break
@@ -432,10 +383,9 @@ export function MarketplacePanel() {
                 size="sm"
                 aria-label="Sort skills"
                 value={sortBy}
-                onChange={(v) => setSortBy(v as 'name' | 'trust' | 'category')}
+                onChange={(v) => setSortBy(v as 'name' | 'category')}
                 options={[
                   { value: 'name', label: 'Name A–Z' },
-                  { value: 'trust', label: 'Trust Score' },
                   { value: 'category', label: 'Category' },
                 ]}
               />
@@ -674,7 +624,7 @@ export function MarketplacePanel() {
                 icon={Blocks}
                 eyebrow="Capability catalog"
                 title="Skills for every agent"
-                subtitle="Install trusted, injection-scanned capabilities onto your Boos."
+                subtitle="Curated skills you can add to any Boo's tool profile."
               />
               {filteredSkills.map((skill, i) => (
                 <SkillCard key={skill.id} skill={skill} index={i} />
