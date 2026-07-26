@@ -261,6 +261,41 @@ describe('BoardPanel', () => {
     ).toBeInTheDocument()
   })
 
+  it('rolls back an optimistic drag when the server rejects the move (500)', async () => {
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Ship it', status: 'in_progress' }] }),
+      ),
+      // A legal move (in_progress → done) that the server refuses.
+      http.patch('/api/board/t1', () => new HttpResponse(null, { status: 500 })),
+    )
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+    // Sanity: it starts in the In progress column.
+    expect(
+      within(screen.getByTestId('board-column-in_progress')).getByTestId('board-card'),
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'done' } })
+    })
+
+    // The optimistic override is rolled back: the card returns to In progress and is
+    // NOT left stuck in Done (no lingering override).
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('board-column-in_progress')).queryByTestId('board-card'),
+      ).not.toBeNull(),
+    )
+    expect(within(screen.getByTestId('board-column-done')).queryByTestId('board-card')).toBeNull()
+    // A subsequent poll doesn't resurrect the move either (override truly cleared).
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(
+      within(screen.getByTestId('board-column-in_progress')).getByTestId('board-card'),
+    ).toBeInTheDocument()
+  })
+
   it('rejects an illegal drag client-side without a PATCH', async () => {
     let patchCalled = false
     server.use(
