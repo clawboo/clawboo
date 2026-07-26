@@ -1,27 +1,20 @@
 // Inline status editor for the task-detail drawer. Replaces the static status
-// text with a Select that writes through boardClient.updateStatus.
+// text with a Select that writes through the shared `useStatusMutation` (the same
+// path the board's drag-and-drop uses, so the two stay in lock-step).
 //
 // It only offers the transitions the server will accept (statusOptions mirrors
 // the state machine), updates optimistically for a snappy feel, and rolls back +
-// toasts if the write is rejected (an illegal transition or a blocking
-// verification gate both surface as `false`). Terminal tasks (done / cancelled)
-// have no legal moves, so the control locks.
-//
-// Guard rail: the server clears the assignee on ANY transition to `todo` (the
-// agent-release path — see updateStatus in @clawboo/db). So moving a task that an
-// agent is actively working on back to "To do" would pull it out from under that
-// agent mid-run. When that's the case we confirm first, rather than silently
-// unassigning a live run.
+// toasts if the write is rejected. Terminal tasks (done / cancelled) have no legal
+// moves, so the control locks. The agent-release (`→ todo`) confirm gate lives in
+// `useStatusMutation`.
 
 import { useEffect, useState } from 'react'
 
-import { boardClient } from '@/lib/boardClient'
-import { confirm } from '@/stores/confirm'
-import { useToastStore } from '@/stores/toast'
 import { Select } from '@/features/shared/Select'
 import { Spinner } from '@/features/shared/Spinner'
 
 import { STATUS_LABEL, isTerminalStatus, statusLabel, statusOptions } from './boardStatus'
+import { useStatusMutation } from './useStatusMutation'
 
 export interface StatusSelectProps {
   taskId: string
@@ -34,7 +27,7 @@ export interface StatusSelectProps {
 }
 
 export function StatusSelect({ taskId, status, assigneeAgentId, onChange }: StatusSelectProps) {
-  const addToast = useToastStore((s) => s.addToast)
+  const mutate = useStatusMutation()
   const [value, setValue] = useState(status)
   const [saving, setSaving] = useState(false)
 
@@ -60,30 +53,24 @@ export function StatusSelect({ taskId, status, assigneeAgentId, onChange }: Stat
 
   async function handleChange(next: string) {
     if (next === value) return
-    // Moving to `todo` releases the task for re-claim and clears its assignee. If
-    // an agent is on it, confirm before yanking the work out from under the run.
-    if (next === 'todo' && assigneeAgentId) {
-      const proceed = await confirm({
-        title: 'Unassign the agent?',
-        message:
-          'Moving this task back to “To do” releases it for re-claim — the agent assigned to it will be unassigned.',
-        confirmLabel: 'Move & unassign',
-        tone: 'danger',
-      })
-      if (!proceed) return // leave the Select on its current value; nothing sent
-    }
     const prev = value
-    setValue(next) // optimistic
-    setSaving(true)
-    const ok = await boardClient.updateStatus(taskId, next)
+    // The confirm gate, illegal-transition guard, PATCH, and toasts all live in the
+    // shared hook; StatusSelect only owns its own optimistic value + spinner. `saving`
+    // flips on inside applyOptimistic (after the confirm gate passes and the write
+    // begins), so the spinner/disabled-select never show during the confirm wait.
+    const ok = await mutate({
+      taskId,
+      from: value,
+      to: next,
+      assigneeAgentId,
+      applyOptimistic: () => {
+        setValue(next)
+        setSaving(true)
+      },
+      rollback: () => setValue(prev),
+    })
     setSaving(false)
-    if (ok) {
-      addToast({ type: 'success', message: `Status updated to ${statusLabel(next)}` })
-      onChange?.(next)
-    } else {
-      setValue(prev) // rollback
-      addToast({ type: 'error', message: `Couldn’t move this task to ${statusLabel(next)}.` })
-    }
+    if (ok) onChange?.(next)
   }
 
   return (

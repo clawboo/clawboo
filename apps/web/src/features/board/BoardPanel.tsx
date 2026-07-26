@@ -1,6 +1,29 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bot, CornerDownRight, KanbanSquare, Plus, RefreshCw, Sparkles } from 'lucide-react'
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  pointerWithin,
+  rectIntersection,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
+import {
+  Bot,
+  CornerDownRight,
+  GripVertical,
+  KanbanSquare,
+  Plus,
+  RefreshCw,
+  Sparkles,
+} from 'lucide-react'
 
 import { useTeamStore } from '@/stores/team'
 import { fetchBoardResult, type BoardTask } from '@/lib/boardClient'
@@ -18,7 +41,9 @@ import { ENTER_SPRING, listDelay } from '@/lib/motion'
 import { TaskDetailDrawer } from './TaskDetailDrawer'
 import { ApprovalsColumn } from './ApprovalsColumn'
 import { NewTaskDialog } from './NewTaskDialog'
-import { STATUS_LABEL, TASK_STATUSES } from './boardStatus'
+import { STATUS_LABEL, TASK_STATUSES, canTransition, statusOptions } from './boardStatus'
+import { useStatusMutation } from './useStatusMutation'
+import { resolveDrop } from './resolveDrop'
 
 const SECTION_LABEL =
   'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
@@ -103,6 +128,103 @@ function TaskCard({ task, onClick }: { task: BoardTask; onClick: () => void }) {
   )
 }
 
+// Columns are large targets, so pointer position is the most predictable hit test;
+// fall back to rect intersection for keyboard drags (which have no pointer coords).
+const boardCollision: CollisionDetection = (args) => {
+  const hits = pointerWithin(args)
+  return hits.length ? hits : rectIntersection(args)
+}
+
+// A card wrapped for drag-and-drop. The card body keeps its click-to-open behavior;
+// a dedicated grip handle is the drag activator (so dragging never competes with the
+// open-drawer click, and keyboard pickup — Space/arrows/Space — has a clear, labelled
+// target). Terminal / off-list cards pass `disabled` and render no handle.
+function DraggableCard({
+  task,
+  disabled,
+  onOpen,
+}: {
+  task: BoardTask
+  disabled: boolean
+  onOpen: () => void
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: task.id,
+    data: { fromStatus: task.status },
+    disabled,
+  })
+  return (
+    <div ref={setNodeRef} className="group/card relative" style={{ opacity: isDragging ? 0.4 : 1 }}>
+      <TaskCard task={task} onClick={onOpen} />
+      {!disabled && (
+        <button
+          type="button"
+          aria-label={`Drag to move “${task.title ?? 'task'}” to another column`}
+          className="absolute right-1.5 top-1.5 flex h-6 w-6 cursor-grab items-center justify-center rounded-md text-foreground/30 opacity-0 transition hover:bg-foreground/[0.08] hover:text-foreground/60 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 active:cursor-grabbing group-hover/card:opacity-100"
+          style={{ touchAction: 'none' }}
+          {...listeners}
+          {...attributes}
+        >
+          <GripVertical size={14} strokeWidth={2} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// A status column that is also a drop target. `dropDisabled` turns off the column
+// mid-drag when the active card can't legally move here, so illegal targets don't
+// highlight or accept a drop (the server-legal transitions come from boardStatus).
+function BoardColumn({
+  col,
+  items,
+  dropDisabled,
+  cardDisabled,
+  onCardOpen,
+}: {
+  col: { id: string; label: string }
+  items: BoardTask[]
+  dropDisabled: boolean
+  cardDisabled: (task: BoardTask) => boolean
+  onCardOpen: (id: string) => void
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: col.id, disabled: dropDisabled })
+  return (
+    <div
+      ref={setNodeRef}
+      data-testid={`board-column-${col.id}`}
+      className={[
+        'flex w-[264px] shrink-0 flex-col gap-2.5 rounded-2xl border p-3 transition-colors',
+        isOver && !dropDisabled
+          ? 'border-primary bg-primary/[0.05]'
+          : 'border-border bg-foreground/[0.02]',
+      ].join(' ')}
+    >
+      <div className="flex items-center justify-between px-1">
+        <span className={SECTION_LABEL}>{col.label}</span>
+        <span className="font-data rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-semibold text-foreground/50">
+          {items.length}
+        </span>
+      </div>
+      <div className="flex flex-col gap-2.5">
+        {items.map((t, i) => (
+          <motion.div
+            key={t.id}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
+          >
+            <DraggableCard task={t} disabled={cardDisabled(t)} onOpen={() => onCardOpen(t.id)} />
+          </motion.div>
+        ))}
+        {items.length === 0 && (
+          <div className="py-3.5 text-center text-[11px] text-foreground/30">No tasks</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function BoardPanel() {
   const teams = useTeamStore((s) => s.teams)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
@@ -117,6 +239,23 @@ export function BoardPanel() {
   // Mirrors `loaded` for the refresh closure so `refresh` stays dep-stable
   // (`[teamFilter]`) and the 5s poll doesn't re-create the interval each load.
   const loadedRef = useRef(false)
+
+  // Optimistic drag moves: taskId → target status, laid on top of `tasks` so the card
+  // sits in its new column while the PATCH is in flight. Short-lived — cleared the
+  // moment the mutation resolves (committed into `tasks` on success, or rolled back).
+  const [overrides, setOverrides] = useState<Record<string, string>>({})
+  const [activeTask, setActiveTask] = useState<BoardTask | null>(null)
+  const mutate = useStatusMutation()
+  const sensors = useSensors(
+    // Grip-handle drags only. distance:5 → a stationary press on the handle doesn't
+    // start a drag, and the card body's click-to-open is never intercepted (the handle
+    // is a separate element, so click vs. drag don't compete).
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    // Keyboard DnD: focus a handle, Space to pick up, arrows to move, Space to drop,
+    // Esc to cancel. Uses the default coordinate getter (25px/arrow, resolved via the
+    // rectIntersection fallback); crisp column-to-column snapping is a follow-up.
+    useSensor(KeyboardSensor),
+  )
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -161,23 +300,92 @@ export function BoardPanel() {
     [teamFilter, refresh],
   )
 
+  // Tasks with any in-flight optimistic drag move applied, so the board (and the 5s
+  // poll) keep the moved card in its target column until the server confirms.
+  const effectiveTasks = useMemo(
+    () =>
+      Object.keys(overrides).length === 0
+        ? tasks
+        : tasks.map((t) => (overrides[t.id] ? { ...t, status: overrides[t.id]! } : t)),
+    [tasks, overrides],
+  )
+
   const byStatus = useMemo(() => {
     const map: Record<string, BoardTask[]> = {}
     for (const col of COLUMNS) map[col.id] = []
     const other: BoardTask[] = []
-    for (const t of tasks) {
+    for (const t of effectiveTasks) {
       if (COLUMN_IDS.has(t.status)) (map[t.status] ??= []).push(t)
       else other.push(t)
     }
     if (other.length) map[OTHER_COLUMN.id] = other
     return map
-  }, [tasks])
+  }, [effectiveTasks])
 
   // Append the catch-all "Other" column only when an off-list status appears.
   const columns = useMemo(
     () => (byStatus[OTHER_COLUMN.id]?.length ? [...COLUMNS, OTHER_COLUMN] : COLUMNS),
     [byStatus],
   )
+
+  const onDragStart = useCallback(
+    ({ active }: DragStartEvent) => {
+      setActiveTask(effectiveTasks.find((t) => t.id === active.id) ?? null)
+    },
+    [effectiveTasks],
+  )
+
+  // Resolve the drop to a status move and commit it through the SAME shared mutation
+  // the drawer editor uses (legal-transition guard + agent-release confirm + rollback
+  // + toast). The override only bridges the in-flight PATCH; on success the move is
+  // committed into `tasks` and the override dropped, so the poll stays authoritative
+  // (if the server later advances the task further, the next poll simply shows that).
+  const clearOverride = useCallback(
+    (taskId: string) =>
+      setOverrides((o) => {
+        if (!(taskId in o)) return o
+        const n = { ...o }
+        delete n[taskId]
+        return n
+      }),
+    [],
+  )
+
+  const onDragEnd = useCallback(
+    async ({ active, over }: DragEndEvent) => {
+      setActiveTask(null)
+      const move = resolveDrop(String(active.id), over ? String(over.id) : null, effectiveTasks)
+      if (!move) return
+      const task = effectiveTasks.find((t) => t.id === move.taskId)
+      const ok = await mutate({
+        taskId: move.taskId,
+        from: move.from,
+        to: move.to,
+        assigneeAgentId: (task?.assigneeAgentId as string | null | undefined) ?? null,
+        applyOptimistic: () => setOverrides((o) => ({ ...o, [move.taskId]: move.to })),
+        rollback: () => clearOverride(move.taskId),
+      })
+      if (ok) {
+        setTasks((prev) => prev.map((t) => (t.id === move.taskId ? { ...t, status: move.to } : t)))
+        clearOverride(move.taskId)
+      }
+    },
+    [effectiveTasks, mutate, clearOverride],
+  )
+
+  // Mid-drag, a card may only land on a column it can legally transition to; all other
+  // columns are disabled as drop targets (so they neither highlight nor accept a drop).
+  const columnDropDisabled = useCallback(
+    (columnId: string) =>
+      activeTask != null &&
+      activeTask.status !== columnId &&
+      !canTransition(activeTask.status, columnId),
+    [activeTask],
+  )
+
+  // Draggable only when the card has at least one legal target — so terminal
+  // (done/cancelled) and off-list "Other" cards can't be dragged into illegal states.
+  const cardDisabled = useCallback((task: BoardTask) => statusOptions(task.status).length <= 1, [])
 
   return (
     <div className="flex h-full flex-col">
@@ -237,101 +445,94 @@ export function BoardPanel() {
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-5">
-        <div className="flex min-h-full items-start gap-4">
-          {/* Approvals are decoupled from the board-task fetch (an exec store + a
+        <DndContext
+          sensors={sensors}
+          collisionDetection={boardCollision}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onDragCancel={() => setActiveTask(null)}
+        >
+          <div className="flex min-h-full items-start gap-4">
+            {/* Approvals are decoupled from the board-task fetch (an exec store + a
               /api/tools/approvals poll), so this column ALWAYS renders as the first
               column — a /api/board outage never hides a pending, time-sensitive gate.
               Scoped to the team filter; a rail when empty, auto-expands on a new gate. */}
-          <ApprovalsColumn teamFilter={teamFilter} />
-          {!loaded ? (
-            // Skeleton columns until the first fetch resolves (mirrors the
-            // RuntimesPanel `!loaded` pattern — empty columns shouldn't flash first).
-            <div
-              data-testid="board-skeleton"
-              style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}
-            >
-              {COLUMNS.map((col) => (
-                <div
-                  key={col.id}
-                  style={{ flex: '0 0 264px', display: 'flex', flexDirection: 'column', gap: 10 }}
-                >
-                  <Skeleton width="50%" height={11} />
-                  <Skeleton height={72} radius={16} />
-                  <Skeleton height={72} radius={16} />
-                </div>
-              ))}
-            </div>
-          ) : !fetchOk ? (
-            // The fetch FAILED — distinct from a genuinely empty board (which would
-            // otherwise show "No tasks" in every column with no hint of an error).
-            <div data-testid="board-fetch-error" className="max-w-[460px]">
-              <FormattedAlert tone="error">
-                <span className="flex items-center gap-2">
-                  Couldn’t load the board.
-                  <Button variant="ghost" size="sm" onClick={() => void refresh()}>
-                    Retry
-                  </Button>
-                </span>
-              </FormattedAlert>
-            </div>
-          ) : tasks.length === 0 ? (
-            // A genuinely empty board (fetch OK, zero tasks) → one board-level
-            // empty state with a manual CTA, rather than seven identical "No
-            // tasks" columns. Reinforces the agent-driven model and offers the
-            // manual escape hatch in the same place a first-time user looks.
-            <div
-              data-testid="board-empty"
-              className="flex flex-1 items-center justify-center py-16"
-            >
-              <EmptyState
-                icon={Sparkles}
-                tone="primary"
-                title="No tasks yet"
-                helper="Agents populate this board automatically as work is delegated in chat. You can also add the first task yourself."
-                action={
-                  <Button variant="primary" size="sm" onClick={() => setComposerOpen(true)}>
-                    <Plus size={14} strokeWidth={2.4} /> New task
-                  </Button>
-                }
-              />
-            </div>
-          ) : (
-            columns.map((col) => {
-              const items = byStatus[col.id] ?? []
-              return (
-                <div
-                  key={col.id}
-                  data-testid={`board-column-${col.id}`}
-                  className="flex w-[264px] shrink-0 flex-col gap-2.5 rounded-2xl border border-border bg-foreground/[0.02] p-3"
-                >
-                  <div className="flex items-center justify-between px-1">
-                    <span className={SECTION_LABEL}>{col.label}</span>
-                    <span className="font-data rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-semibold text-foreground/50">
-                      {items.length}
-                    </span>
+            <ApprovalsColumn teamFilter={teamFilter} />
+            {!loaded ? (
+              // Skeleton columns until the first fetch resolves (mirrors the
+              // RuntimesPanel `!loaded` pattern — empty columns shouldn't flash first).
+              <div
+                data-testid="board-skeleton"
+                style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}
+              >
+                {COLUMNS.map((col) => (
+                  <div
+                    key={col.id}
+                    style={{ flex: '0 0 264px', display: 'flex', flexDirection: 'column', gap: 10 }}
+                  >
+                    <Skeleton width="50%" height={11} />
+                    <Skeleton height={72} radius={16} />
+                    <Skeleton height={72} radius={16} />
                   </div>
-                  <div className="flex flex-col gap-2.5">
-                    {items.map((t, i) => (
-                      <motion.div
-                        key={t.id}
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
-                      >
-                        <TaskCard task={t} onClick={() => setOpenTaskId(t.id)} />
-                      </motion.div>
-                    ))}
-                    {items.length === 0 && (
-                      <div className="py-3.5 text-center text-[11px] text-foreground/30">
-                        No tasks
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })
-          )}
-        </div>
+                ))}
+              </div>
+            ) : !fetchOk ? (
+              // The fetch FAILED — distinct from a genuinely empty board (which would
+              // otherwise show "No tasks" in every column with no hint of an error).
+              <div data-testid="board-fetch-error" className="max-w-[460px]">
+                <FormattedAlert tone="error">
+                  <span className="flex items-center gap-2">
+                    Couldn’t load the board.
+                    <Button variant="ghost" size="sm" onClick={() => void refresh()}>
+                      Retry
+                    </Button>
+                  </span>
+                </FormattedAlert>
+              </div>
+            ) : tasks.length === 0 ? (
+              // A genuinely empty board (fetch OK, zero tasks) → one board-level
+              // empty state with a manual CTA, rather than seven identical "No
+              // tasks" columns. Reinforces the agent-driven model and offers the
+              // manual escape hatch in the same place a first-time user looks.
+              <div
+                data-testid="board-empty"
+                className="flex flex-1 items-center justify-center py-16"
+              >
+                <EmptyState
+                  icon={Sparkles}
+                  tone="primary"
+                  title="No tasks yet"
+                  helper="Agents populate this board automatically as work is delegated in chat. You can also add the first task yourself."
+                  action={
+                    <Button variant="primary" size="sm" onClick={() => setComposerOpen(true)}>
+                      <Plus size={14} strokeWidth={2.4} /> New task
+                    </Button>
+                  }
+                />
+              </div>
+            ) : (
+              columns.map((col) => (
+                <BoardColumn
+                  key={col.id}
+                  col={col}
+                  items={byStatus[col.id] ?? []}
+                  dropDisabled={columnDropDisabled(col.id)}
+                  cardDisabled={cardDisabled}
+                  onCardOpen={setOpenTaskId}
+                />
+              ))
+            )}
+          </div>
+          {/* Rendered in an overlay so the moving card isn't clipped by column
+              overflow, and follows the pointer/keyboard cursor across columns. */}
+          <DragOverlay>
+            {activeTask ? (
+              <div className="w-[240px] cursor-grabbing">
+                <TaskCard task={activeTask} onClick={() => {}} />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       </div>
 
       <AnimatePresence>

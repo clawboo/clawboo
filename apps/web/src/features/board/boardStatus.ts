@@ -52,6 +52,19 @@ export function isTaskStatus(value: unknown): value is TaskStatus {
   return typeof value === 'string' && (TASK_STATUSES as readonly string[]).includes(value)
 }
 
+/**
+ * Whether the server would accept a `from → to` status change. Same-status is an
+ * idempotent no-op (allowed), matching the server's `canTransition`. Off-list
+ * statuses have no legal moves. Used by the drag-and-drop handler to reject an
+ * illegal move client-side (no wasted PATCH), exactly as the drawer's status
+ * editor only offers legal targets.
+ */
+export function canTransition(from: string, to: string): boolean {
+  if (!isTaskStatus(from) || !isTaskStatus(to)) return false
+  if (from === to) return true
+  return LEGAL_TRANSITIONS[from].includes(to)
+}
+
 /** Terminal statuses have no outgoing transitions — the editor locks on them. */
 export function isTerminalStatus(status: string): boolean {
   return status === 'done' || status === 'cancelled'

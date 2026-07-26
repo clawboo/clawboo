@@ -42,7 +42,7 @@ The board renders **seven columns**, one per task status, in lifecycle order:
 
 Each column shows its label and a live count of the tasks in it. The panel header shows a total task count (`{N} tasks`) and polls `GET /api/board` every five seconds, so status changes and new tasks appear without a manual refresh. A **Refresh** button forces an immediate re-fetch.
 
-Because the board is a live projection of agent activity — cards are created and moved by agents as they work — a one-line hint under the header (_"AI agents continuously create and move work. You can also manage tasks manually."_) sets that expectation up front, so the absence of drag-to-reorder reads as intentional rather than broken. The manual path is real, though: a **New task** button in the header opens a composer, and each task's status is editable from its [detail drawer](#the-task-detail-drawer).
+Because the board is a live projection of agent activity — cards are created and moved by agents as they work — a one-line hint under the header (_"AI agents continuously create and move work. You can also manage tasks manually."_) sets that expectation up front. The manual path is real, though, and there are three ways to drive the board by hand: a **New task** button in the header opens a composer, each task's status is editable from its [detail drawer](#the-task-detail-drawer), and you can **drag a card between columns** (see below).
 
 A task whose status falls outside the canonical seven is not silently dropped; an **Other** column is appended only when such a task exists, so off-list statuses stay visible and counted.
 
@@ -55,6 +55,17 @@ A genuinely empty board (loaded fine, zero tasks) shows one **"No tasks yet"** e
 ## Creating a task manually
 
 The header's **New task** button opens a small composer for adding work to the board by hand — the human counterpart to agent delegation. It collects a **title** (required), an optional **description**, a **team** (prefilled from the active team filter), and an initial **status** (**To do** by default, or **Backlog** for triage), then writes it through `POST /api/board`. On success the task appears on the board immediately (optimistically, then reconciled by the next poll) and a toast confirms it; a failed write keeps the composer open and toasts the error. Once on the board, a manually-created task is indistinguishable from a delegated one — an agent can claim and run it normally.
+
+## Moving a task by drag-and-drop
+
+Each card has a **grip handle** (top-right, visible on hover or keyboard focus). Dragging a card to another column is a status change: it writes through the same `PATCH /api/board/:taskId` path as the drawer's status editor, so the server stays authoritative and the same rules apply.
+
+- **Only legal moves are offered.** Mid-drag, columns the card can't legally transition to (per the [state machine](/concepts/the-board)) are dimmed and won't accept a drop; terminal cards (`done` / `cancelled`) and off-list **Other** cards aren't draggable at all.
+- **The agent-release guard still applies.** Dragging an _assigned_ task to **To do** — which unassigns its agent — asks for confirmation first, exactly as the drawer editor does.
+- **Optimistic + poll-safe.** The card moves instantly and is reconciled against the server; a rejected move (e.g. a `→ done` verification gate) rolls back with a toast, and an in-flight move isn't reverted by the five-second poll.
+- **Keyboard and touch.** Focus a card's handle and press **Space** to pick it up, **arrow keys** to choose a column, **Space** to drop, **Escape** to cancel; touch drag is supported too.
+
+Clicking a card (rather than its handle) still opens the detail drawer — a click and a drag don't conflict.
 
 ## Task cards
 
