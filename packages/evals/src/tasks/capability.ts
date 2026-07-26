@@ -1,10 +1,12 @@
-// Capability evals — "what can the orchestration do WELL?" Two of these are
-// ABLATION-SENSITIVE by construction: they model real clawboo behaviors that
-// depend on a specific subsystem, so removing it measurably drops the pass rate.
-// (cap-cross-runtime-resume needs structured state; cap-verification-catches-bug
-// needs the verifier.) The third exercises end-to-end delegation. Deterministic +
-// code-graded so the same tasks run in the PR smoke subset; the nightly adds
-// live-model graders for the subjective dimensions.
+// Capability evals — "what can the orchestration do WELL?" These are STRUCTURAL
+// self-tests: they MODEL clawboo behaviors on a throwaway board. Two are
+// ablation-sensitive BY CONSTRUCTION — they read a subsystem FLAG and behave
+// accordingly, so toggling it moves the harness's OWN pass rate (that is a self-test
+// of the ablation wiring, not a measurement of the live orchestrator — the
+// real-subsystem coverage is apps/web's executorRunner integration test).
+// cap-cross-runtime-resume reads structured state; cap-verification-catches-bug reads
+// the verifier flag; the third exercises delegation fan-out. All deterministic +
+// code-graded → they run in the PR smoke subset.
 
 import {
   addComment,
@@ -16,7 +18,7 @@ import {
   updateStatus,
 } from '@clawboo/db'
 
-import { outcomeGrader } from '../graders/code'
+import { boardStateGrader, outcomeGrader } from '../graders/code'
 import type { EvalTask } from '../types'
 
 const TEAM = 'eval-team'
@@ -48,10 +50,7 @@ export const CAPABILITY_TASKS: EvalTask[] = [
     },
     graders: [
       outcomeGrader('resumed-with-context', (o) => o.data?.['resumed'] === true),
-      outcomeGrader(
-        'task-completed',
-        (o, ctx) => getTask(ctx.db, o.data?.['taskId'] as string)?.status === 'in_review',
-      ),
+      boardStateGrader((o) => o.data?.['taskId'] as string, ['in_review'], 'task-completed'),
     ],
   },
   {

@@ -405,7 +405,7 @@ curl -X POST http://localhost:18790/api/obs/ingest \
 
 ## `POST /api/eval/smoke`
 
-Runs the deterministic eval smoke suite (`SMOKE_TASKS`), the exact subset CI runs, and returns the real `SuiteReport`. It uses no live model, no provider keys, no executor/RuntimeAdapter, and no network; each trial gets its own temp-dir SQLite board (disjoint from the real `clawboo.db`), and the contexts are cleaned up after the run. The full live ablation (multiple variants × N trials with the live-model judge) stays CI-only; it is explained in the UI but never driven from this route.
+Runs the deterministic eval smoke suite (`SMOKE_TASKS`), the exact subset CI runs, and returns the real `SuiteReport`. It uses no live model, no provider keys, no executor/RuntimeAdapter, and no network; each trial gets its own temp-dir SQLite board (disjoint from the real `clawboo.db`), and the contexts are cleaned up after the run. The ablation self-test (variants over the harness's own subsystem flags) runs only from the manual `evals.yml` workflow; it is explained in the UI but never driven from this route, and no live-model judge is wired into it yet.
 
 - **Path/query params**: none.
 - **Request body**:

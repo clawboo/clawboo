@@ -99,7 +99,7 @@ The report renders:
 - **k** and **tasks** counts
 - A per-task table: task id, suite (`capability` / `regression`), kind (`coding` / `research` / `coordination`), per-task pass@1, and mean score.
 
-Below the live report is the **Ablation** card. It renders the `±verifier × ±structured-state` marginal-contribution scorecard as a **shape, explained, not run**; a `CI only` pill marks it. The four variants (`full`, `−verifier`, `−structured`, `none`) and the two contribution rows (`verifier`, `structured-state`) are listed with em-dash placeholders. The full ablation (4 variants × N trials with a live-model judge) runs only in CI, never from this button.
+Below the live report is the **Ablation** card. It renders the `±verifier × ±structured-state` scorecard as a **shape, explained, not run**; a `CI only` pill marks it. The four variants (`full`, `−verifier`, `−structured`, `none`) and the two contribution rows (`verifier`, `structured-state`) are listed with em-dash placeholders. The ablation is a harness self-test (the 4 variants toggle the harness's own subsystem flags); it runs only from the manual `evals.yml` workflow, never from this button, and no live-model judge is wired into it yet.
 
 ### 6. Watch the live activity terminal
 

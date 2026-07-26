@@ -7,7 +7,7 @@
 import type { EvalTask, EvalContext, GraderResult, SuiteReport, TaskReport, Trial } from './types'
 
 export interface RunOptions {
-  /** Trials per task (K). Default 1 (smoke); the nightly uses ≥3. */
+  /** Trials per task (K). Default 1 (smoke); the on-demand full run uses ≥3. */
   trials?: number
   /** The exponent for pass^k. Defaults to `trials`. */
   k?: number
