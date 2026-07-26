@@ -56,16 +56,11 @@ export const boardClient: BoardClient = {
   },
 
   async updateStatus(taskId, status) {
-    try {
-      const r = await fetch(`/api/board/${encodeURIComponent(taskId)}`, {
-        method: 'PATCH',
-        headers: JSON_HEADERS,
-        body: JSON.stringify({ status }),
-      })
-      return r.ok
-    } catch {
-      return false
-    }
+    // Delegate to `updateStatusResult` (below) so a single implementation owns the
+    // status PATCH. This interface method stays boolean, so the server/orchestrator
+    // bindings that consume `BoardClient` are unaffected; the dashboard UI calls
+    // `updateStatusResult` directly when it needs the failure reason / human override.
+    return (await updateStatusResult(taskId, status)).ok
   },
 
   async addComment(taskId, body, authorType = 'system', authorAgentId) {
@@ -193,6 +188,49 @@ export async function fetchBoardResult(teamId?: string): Promise<BoardFetchResul
 /** All non-dropped tasks, optionally scoped to a team (omit teamId = all teams). */
 export async function fetchBoardTasks(teamId?: string): Promise<BoardTask[]> {
   return (await fetchBoardResult(teamId)).tasks
+}
+
+/** Why a status change was refused, surfaced from the PATCH 409/404 body so the UI
+ *  can react to it (e.g. offer the human override for a blocking verification gate)
+ *  instead of collapsing every failure into a bare boolean. */
+export type StatusChangeReason =
+  | 'illegal_transition'
+  | 'verification_required'
+  | 'not_found'
+  | 'error'
+
+export interface StatusChangeResult {
+  ok: boolean
+  /** Present only on failure. */
+  reason?: StatusChangeReason
+}
+
+/**
+ * The status-PATCH the dashboard UI uses: like `boardClient.updateStatus` (which
+ * now delegates here), but it returns the failure REASON (from the server's
+ * `{ ok:false, error }` 409/404 body) rather than a bare boolean, and allows the
+ * audited `humanOverride` (a human shipping to `done` despite a non-promotable
+ * verification verdict — recorded server-side). Keeping the reason out of the
+ * `BoardClient` interface leaves `updateStatus` boolean, so the orchestrator/server
+ * bindings that share that interface are unaffected.
+ */
+export async function updateStatusResult(
+  taskId: string,
+  status: string,
+  opts: { humanOverride?: boolean } = {},
+): Promise<StatusChangeResult> {
+  try {
+    const r = await fetch(`/api/board/${encodeURIComponent(taskId)}`, {
+      method: 'PATCH',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ status, ...(opts.humanOverride ? { humanOverride: true } : {}) }),
+    })
+    if (r.ok) return { ok: true }
+    const body = (await r.json().catch(() => null)) as { error?: string } | null
+    return { ok: false, reason: (body?.error as StatusChangeReason) ?? 'error' }
+  } catch {
+    return { ok: false, reason: 'error' }
+  }
 }
 
 export interface BoardExecution {

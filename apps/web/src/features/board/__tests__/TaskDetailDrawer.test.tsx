@@ -8,6 +8,8 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { useToastStore } from '@/stores/toast'
+
 import { server } from '../../../__vitest__/mswServer'
 import { ConfirmDialog } from '../../shared/ConfirmDialog'
 import { TaskDetailDrawer } from '../TaskDetailDrawer'
@@ -80,6 +82,110 @@ describe('TaskDetailDrawer', () => {
     await user.click(await screen.findByRole('option', { name: 'Done' }))
 
     await waitFor(() => expect(patched).toEqual({ status: 'done' }))
+  })
+
+  it('offers "Complete anyway" when the verification gate blocks → done, then overrides', async () => {
+    const bodies: Array<{ status?: string; humanOverride?: boolean }> = []
+    server.use(
+      ...detailHandlers(), // t1 is in_review; → done is legal but the gate refuses it
+      http.patch('/api/board/t1', async ({ request }) => {
+        const body = (await request.json()) as { status: string; humanOverride?: boolean }
+        bodies.push(body)
+        // The server gates → done unless the human override is set (audited path).
+        if (body.humanOverride) {
+          return HttpResponse.json({ ok: true, task: { id: 't1', status: 'done' } })
+        }
+        return HttpResponse.json({ ok: false, error: 'verification_required' }, { status: 409 })
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <>
+        <TaskDetailDrawer taskId="t1" onClose={() => {}} />
+        <ConfirmDialog />
+      </>,
+    )
+
+    await screen.findByText('Ship it')
+    await user.click(screen.getByTestId('task-status-select'))
+    await user.click(await screen.findByRole('option', { name: 'Done' }))
+
+    // The gated attempt is refused → a "Complete anyway?" override confirm appears.
+    const dialog = await screen.findByTestId('confirm-dialog')
+    expect(within(dialog).getByText(/passed verification/i)).toBeInTheDocument()
+    await user.click(within(dialog).getByTestId('confirm-ok'))
+
+    // Exactly two writes: the gated attempt, then the audited override retry.
+    await waitFor(() =>
+      expect(bodies).toEqual([{ status: 'done' }, { status: 'done', humanOverride: true }]),
+    )
+  })
+
+  it('leaves the task unchanged when "Complete anyway" is declined', async () => {
+    const bodies: Array<{ status?: string; humanOverride?: boolean }> = []
+    server.use(
+      ...detailHandlers(),
+      http.patch('/api/board/t1', async ({ request }) => {
+        bodies.push((await request.json()) as { status: string; humanOverride?: boolean })
+        return HttpResponse.json({ ok: false, error: 'verification_required' }, { status: 409 })
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <>
+        <TaskDetailDrawer taskId="t1" onClose={() => {}} />
+        <ConfirmDialog />
+      </>,
+    )
+
+    await screen.findByText('Ship it')
+    await user.click(screen.getByTestId('task-status-select'))
+    await user.click(await screen.findByRole('option', { name: 'Done' }))
+
+    const dialog = await screen.findByTestId('confirm-dialog')
+    await user.click(within(dialog).getByTestId('confirm-cancel'))
+
+    // No override sent (only the initial gated attempt), and the editor rolled back —
+    // a deliberate decline, so no error toast either.
+    await waitFor(() => expect(screen.queryByTestId('confirm-dialog')).toBeNull())
+    expect(bodies).toEqual([{ status: 'done' }])
+    expect(screen.getByTestId('task-status-select')).toHaveTextContent('In review')
+  })
+
+  it('rolls back and reports failure when the override retry is still refused', async () => {
+    useToastStore.setState({ toasts: [] })
+    const bodies: Array<{ status?: string; humanOverride?: boolean }> = []
+    server.use(
+      ...detailHandlers(),
+      // Refuse both the gated attempt AND the human-override retry.
+      http.patch('/api/board/t1', async ({ request }) => {
+        bodies.push((await request.json()) as { status: string; humanOverride?: boolean })
+        return HttpResponse.json({ ok: false, error: 'verification_required' }, { status: 409 })
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <>
+        <TaskDetailDrawer taskId="t1" onClose={() => {}} />
+        <ConfirmDialog />
+      </>,
+    )
+
+    await screen.findByText('Ship it')
+    await user.click(screen.getByTestId('task-status-select'))
+    await user.click(await screen.findByRole('option', { name: 'Done' }))
+    await user.click(within(await screen.findByTestId('confirm-dialog')).getByTestId('confirm-ok'))
+
+    // Both writes attempted (gated, then override), then a clean rollback + error toast.
+    await waitFor(() =>
+      expect(bodies).toEqual([{ status: 'done' }, { status: 'done', humanOverride: true }]),
+    )
+    expect(screen.getByTestId('task-status-select')).toHaveTextContent('In review')
+    expect(
+      useToastStore
+        .getState()
+        .toasts.some((t) => t.type === 'error' && /verification/i.test(t.message)),
+    ).toBe(true)
   })
 
   it('confirms before unassigning a running agent, then PATCHes on confirm', async () => {

@@ -2,16 +2,35 @@
 // status editor (StatusSelect) and the board's drag-and-drop. Centralizing it
 // guarantees both paths behave identically: they reject an illegal transition
 // client-side (no wasted PATCH), confirm before the agent-release (`→ todo`)
-// move, update optimistically via caller-supplied callbacks, roll back on a
-// server rejection, and toast either way.
+// move, offer the audited "Complete anyway" override when the verification gate
+// blocks a `→ done`, update optimistically via caller-supplied callbacks, roll
+// back on a server rejection, and toast a cause-specific message.
 
 import { useCallback } from 'react'
 
-import { boardClient } from '@/lib/boardClient'
+import { updateStatusResult, type StatusChangeReason } from '@/lib/boardClient'
 import { confirm } from '@/stores/confirm'
 import { useToastStore } from '@/stores/toast'
 
 import { canTransition, statusLabel } from './boardStatus'
+
+/** A refusal message that names the actual cause, so the user isn't left guessing. */
+function statusErrorMessage(
+  reason: StatusChangeReason | undefined,
+  from: string,
+  to: string,
+): string {
+  switch (reason) {
+    case 'verification_required':
+      return 'Verification hasn’t passed — this task can’t be completed.'
+    case 'illegal_transition':
+      return `Can’t move ${statusLabel(from)} → ${statusLabel(to)}.`
+    case 'not_found':
+      return 'This task no longer exists on the board.'
+    default:
+      return `Couldn’t move this task to ${statusLabel(to)}.`
+  }
+}
 
 export interface StatusMutationInput {
   taskId: string
@@ -64,14 +83,33 @@ export function useStatusMutation(): (input: StatusMutationInput) => Promise<boo
       }
 
       applyOptimistic?.()
-      const ok = await boardClient.updateStatus(taskId, to)
-      if (ok) {
-        addToast({ type: 'success', message: `Status updated to ${statusLabel(to)}` })
-      } else {
-        rollback?.()
-        addToast({ type: 'error', message: `Couldn’t move this task to ${statusLabel(to)}.` })
+      let res = await updateStatusResult(taskId, to)
+
+      // The verification gate refused a manual → done. Not a dead-end: offer the
+      // server's audited human override (a person shipping despite a non-promotable
+      // verdict, recorded in the audit log) instead of just rolling back.
+      if (!res.ok && res.reason === 'verification_required' && to === 'done') {
+        const proceed = await confirm({
+          title: 'Complete anyway?',
+          message:
+            'This task hasn’t passed verification. Completing it is a manual override and will be recorded in the audit log.',
+          confirmLabel: 'Complete anyway',
+          tone: 'danger',
+        })
+        if (!proceed) {
+          rollback?.() // a deliberate decline — roll back quietly, no error toast
+          return false
+        }
+        res = await updateStatusResult(taskId, to, { humanOverride: true })
       }
-      return ok
+
+      if (res.ok) {
+        addToast({ type: 'success', message: `Status updated to ${statusLabel(to)}` })
+        return true
+      }
+      rollback?.()
+      addToast({ type: 'error', message: statusErrorMessage(res.reason, from, to) })
+      return false
     },
     [addToast],
   )

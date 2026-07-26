@@ -400,4 +400,46 @@ describe('BoardPanel', () => {
     await user.click(within(dialog).getByTestId('confirm-ok'))
     await waitFor(() => expect(patched).toEqual({ status: 'todo' }))
   })
+
+  it('offers "Complete anyway" when a drag to Done hits the verification gate', async () => {
+    // The shared useStatusMutation means the override the drawer got in #97 also
+    // works from the drag path — a drag to Done blocked by the gate offers the override.
+    const bodies: Array<{ status?: string; humanOverride?: boolean }> = []
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Ship it', status: 'in_progress' }] }),
+      ),
+      http.patch('/api/board/t1', async ({ request }) => {
+        const body = (await request.json()) as { status: string; humanOverride?: boolean }
+        bodies.push(body)
+        if (body.humanOverride) {
+          return HttpResponse.json({ ok: true, task: { id: 't1', status: 'done' } })
+        }
+        return HttpResponse.json({ ok: false, error: 'verification_required' }, { status: 409 })
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <>
+        <BoardPanel />
+        <ConfirmDialog />
+      </>,
+    )
+    await screen.findByTestId('board-card')
+
+    await act(async () => {
+      dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'done' } }) // in_progress → done (gated)
+    })
+
+    const dialog = await screen.findByTestId('confirm-dialog')
+    await user.click(within(dialog).getByTestId('confirm-ok'))
+
+    // The gated attempt, then the audited override retry — same flow as the drawer.
+    await waitFor(() =>
+      expect(bodies).toEqual([{ status: 'done' }, { status: 'done', humanOverride: true }]),
+    )
+    expect(
+      within(screen.getByTestId('board-column-done')).getByTestId('board-card'),
+    ).toBeInTheDocument()
+  })
 })

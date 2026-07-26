@@ -98,7 +98,9 @@ The drawer sections, top to bottom:
 
 The task's core fields: **Status**, **Assignee** (`assigneeAgentId`), **Runtime** (`assigneeRuntime`, default `openclaw`), **Cost** (`costUsd` to four decimals), and **Parent** (a truncated `parentTaskId`, shown only for subtasks).
 
-**Status** is an inline editor, not just a label: a dropdown that offers only the transitions the [state machine](/concepts/the-board) permits from the current status (so it never lets you pick a move the server would reject), writes through `PATCH /api/board/:taskId`, and updates optimistically — rolling back and toasting if the write is refused (an illegal transition, or the `→done` verification gate). Terminal tasks (`done` / `cancelled`) have no legal moves, so the control locks.
+**Status** is an inline editor, not just a label: a dropdown that offers only the transitions the [state machine](/concepts/the-board) permits from the current status (so it never lets you pick a move the server would reject), writes through `PATCH /api/board/:taskId`, and updates optimistically — rolling back and toasting if the write is refused, with the message naming the cause (an illegal transition vs. the verification gate). Terminal tasks (`done` / `cancelled`) have no legal moves, so the control locks.
+
+When a `→ done` is refused **specifically by the [verification](/concepts/verification) gate** (the task carries a non-promotable verdict), the editor doesn't dead-end: it offers a **"Complete anyway"** confirmation that re-submits with the server's `humanOverride`. That's the supported path for a human shipping despite a non-promotable verdict — and, like on the server, the override is **recorded in the audit log**. An _illegal_ transition can't be overridden this way (the override only bypasses the verification gate, not the state machine). This lives in the shared status-mutation path, so it works the same whether you change status from this drawer or by [dragging a card](#moving-a-task-by-drag-and-drop) to the Done column.
 
 ### Verification
 
