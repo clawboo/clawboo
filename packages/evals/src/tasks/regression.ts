@@ -16,7 +16,7 @@ import {
   updateStatus,
 } from '@clawboo/db'
 
-import { outcomeGrader } from '../graders/code'
+import { boardStateGrader, outcomeGrader, readyGrader } from '../graders/code'
 import type { EvalTask } from '../types'
 
 const TEAM = 'eval-team'
@@ -62,12 +62,12 @@ export const REGRESSION_TASKS: EvalTask[] = [
       const readyBefore = getReadyTasks(ctx.db, { teamId: TEAM }).some((x) => x.id === dependent.id)
       claimTask(ctx.db, blocker.id, 'agentA', 'rtA')
       updateStatus(ctx.db, blocker.id, 'done') // in_progress → done (legal)
-      const readyAfter = getReadyTasks(ctx.db, { teamId: TEAM }).some((x) => x.id === dependent.id)
-      return { data: { readyBefore, readyAfter } }
+      // readyGrader re-checks the dependent against the FINAL board (blocker done).
+      return { data: { readyBefore, dependentId: dependent.id } }
     },
     graders: [
       outcomeGrader('blocked-before', (o) => o.data?.['readyBefore'] === false),
-      outcomeGrader('ready-after-blocker-done', (o) => o.data?.['readyAfter'] === true),
+      readyGrader((o) => o.data?.['dependentId'] as string, true, TEAM, 'ready-after-blocker-done'),
     ],
   },
   {
@@ -91,10 +91,7 @@ export const REGRESSION_TASKS: EvalTask[] = [
     },
     graders: [
       outcomeGrader('report-recorded', (o) => o.data?.['hasReport'] === true),
-      outcomeGrader(
-        'progressed-to-review',
-        (o, ctx) => getTask(ctx.db, o.data?.['taskId'] as string)?.status === 'in_review',
-      ),
+      boardStateGrader((o) => o.data?.['taskId'] as string, ['in_review'], 'progressed-to-review'),
     ],
   },
   {

@@ -1,9 +1,12 @@
-// The ablation scorecard — the harness-health metric. Hold the model fixed,
-// remove one subsystem at a time (±verifier × ±structured-state), and measure the
-// drop in pass rate. The size of each drop estimates that subsystem's MARGINAL
-// CONTRIBUTION for the current task set. A near-zero drop is NOT "useless" — it
-// means redundant / unexercised on these tasks (lead with failure attribution).
-// Re-run on each major model release: criticality migrates.
+// The ablation scorecard — a HARNESS SELF-TEST, not a measurement of the live
+// orchestrator. Hold the harness fixed and toggle its two subsystem FLAGS
+// (±verifier × ±structured-state); the capability tasks read those flags and behave
+// accordingly, so each "marginal contribution" here is the harness's own scripted
+// response to the flag — it confirms the ablation wiring is sound, nothing more.
+// Measuring the REAL subsystems' contribution needs the live executor: apps/web's
+// executorRunner integration test drives it deterministically today, and a
+// live-model version is the deferred canary. The structure is kept so that canary can
+// plug a real per-subsystem run in here.
 
 import { runSuite } from './runner'
 import type { EvalContext, EvalFlags, EvalTask } from './types'

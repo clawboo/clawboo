@@ -2,7 +2,8 @@
 // subjective dimensions code can't grade (coordination/handoff quality,
 // groundedness). Reuses the SHARED structured-output judge drive from @clawboo/obs
 // (the same one the read-only critic uses), with a way-out and one isolated judge
-// per dimension. Non-deterministic + priced → the NIGHTLY set, never the PR smoke.
+// per dimension. It needs a real adapter + provider keys, so it is NOT wired into any
+// task yet — the deferred live path (see the eval canary); never the PR smoke.
 
 import type { RuntimeAdapter } from '@clawboo/executor'
 import { buildJudgePrompt, driveStructuredJudge } from '@clawboo/obs'

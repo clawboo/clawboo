@@ -12,7 +12,7 @@ description: "Server-only eval harness for clawboo's own orchestration: capabili
 Each trial runs against its own temp-dir sqlite board (isolation; leftover state causes correlated failures). pass@1 = ≥1 of k trials succeeds; pass^k = all k succeed; pass^k is the production-readiness bar. The package exposes a single `.` entry point (no subpath exports); the barrel re-exports six modules: `./types`, `./env`, `./runner`, `./ablation`, `./graders`, `./tasks`.
 
 <Note>
-Scorecards + ablation results are written outside the repo. Graders come in three families (code / model / human); only code and model graders are implemented here; the model (LLM-as-judge) graders are non-deterministic + priced and run in the heavier on-demand suite, never the PR smoke subset.
+Scorecards + ablation results are written outside the repo. Graders come in three families (code / model / human); only code and model graders are implemented here. The model (LLM-as-judge) grader is non-deterministic + priced and is **not yet wired into any task** (a deferred live path), so nothing runs it today; never the PR smoke subset.
 </Note>
 
 ## Public API
@@ -35,15 +35,15 @@ Scorecards + ablation results are written outside the repo. Graders come in thre
 
 **graders/code** (`./graders` → `./code`); fast, objective, deterministic; inspect the board + event log, not the transcript.
 
-| Signature                                                          | Contract                                                                                                                                           |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `boardStateGrader(taskId: string, expectStatus: string[]): Grader` | Pass when the board task's status is one of `expectStatus` (`missing` when the task is absent).                                                    |
-| `logParseGrader(kind, minCount?, filter?): Grader`                 | Pass when an `OrchestrationEventKind` was recorded ≥ `minCount` times (default 1), optionally filtered by `taskId` (via `listEvents`).             |
-| `readyGrader(taskId, shouldBeReady, teamId?): Grader`              | Pass when the task's presence in `getReadyTasks` matches `shouldBeReady`, the dep-gate check.                                                      |
-| `outcomeGrader(name, predicate): Grader`                           | Free-form predicate over `(outcome, ctx)`; a `number` return is clamped to `[0,1]` (partial credit), a `boolean` maps to 1/0. Passes at score ≥ 1. |
-| `eventBudgetGrader(maxEvents, filter?): Grader`                    | Pass when the recorded event count ≤ `maxEvents` (a transcript-cost bound).                                                                        |
+| Signature                                                   | Contract                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `boardStateGrader(task, expectStatus, label?): Grader`      | Pass when the board task's status is one of `expectStatus` (`missing` when absent). `task` is a static id or a resolver `(outcome) => id`; `label` names the result. Wired into the regression + capability tasks.                                          |
+| `logParseGrader(kind, minCount?, filter?): Grader`          | Pass when an `OrchestrationEventKind` was recorded ≥ `minCount` times (default 1), optionally filtered by `taskId` (via `listEvents`). Reads the obs event log, which the board-CRUD tasks don't emit, so it's a seam for the deferred event-emitting path. |
+| `readyGrader(task, shouldBeReady, teamId?, label?): Grader` | Pass when the task's presence in `getReadyTasks` matches `shouldBeReady`, the dep-gate check. `task` is a static id or an outcome resolver. Wired into `reg-dep-gate`.                                                                                      |
+| `outcomeGrader(name, predicate): Grader`                    | Free-form predicate over `(outcome, ctx)`; a `number` return is clamped to `[0,1]` (partial credit), a `boolean` maps to 1/0. Passes at score ≥ 1.                                                                                                          |
+| `eventBudgetGrader(maxEvents, filter?): Grader`             | Pass when the recorded event count ≤ `maxEvents` (a transcript-cost bound). Like `logParseGrader`, a seam for the deferred event-emitting path.                                                                                                             |
 
-**graders/model** (`./graders` → `./model`), LLM-as-judge for subjective dimensions; nightly-only.
+**graders/model** (`./graders` → `./model`), LLM-as-judge for subjective dimensions; **defined but not yet wired into any task** (the deferred live path).
 
 | Signature                                       | Contract                                                                                                                                                                                                                                                                                                                |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -51,9 +51,9 @@ Scorecards + ablation results are written outside the repo. Graders come in thre
 
 **ablation** (`./ablation`)
 
-| Signature                                                           | Contract                                                                                                                                                                                                                                                    |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runAblation(opts: RunAblationOptions): Promise<AblationScorecard>` | Hold the model fixed, run the 4 variants (`full` / `-verifier` / `-structured` / `none`), and compute each subsystem's marginal contribution to pass@1 (averaged over the other subsystem's two settings, controlled-variable exclusion). Default 3 trials. |
+| Signature                                                           | Contract                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runAblation(opts: RunAblationOptions): Promise<AblationScorecard>` | Hold the harness fixed, run the 4 variants (`full` / `-verifier` / `-structured` / `none`); the capability tasks read the flags, so each "marginal contribution" is the harness's scripted response to the flag, a self-test of the ablation wiring, not a live-orchestrator measurement. Default 3 trials. |
 
 ### Types & interfaces
 
@@ -96,14 +96,14 @@ Scorecards + ablation results are written outside the repo. Graders come in thre
 
 ### Constants
 
-| Name               | Value / contract                                                                                                                                                                |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_FLAGS`    | `{ verify: true, structuredState: true }`, the full-harness default (`./env`).                                                                                                  |
-| `ALL_TASKS`        | `[...REGRESSION_TASKS, ...CAPABILITY_TASKS]`, every task (`./tasks`).                                                                                                           |
-| `SMOKE_TASKS`      | `ALL_TASKS.filter((t) => t.smoke)`, the cheap, deterministic, no-live-model PR subset.                                                                                          |
-| `ABLATION_TASKS`   | `CAPABILITY_TASKS`, the ablation-sensitive set (success depends on a toggled subsystem).                                                                                        |
-| `REGRESSION_TASKS` | 4 load-bearing-guarantee snapshots: `reg-claim-409-no-retry`, `reg-dep-gate`, `reg-report-up`, `reg-state-machine`. All smoke; target pass ≈100%.                               |
-| `CAPABILITY_TASKS` | 3 capability evals: `cap-cross-runtime-resume` (needs structured state), `cap-verification-catches-bug` (needs the verifier), `cap-delegation-fanout`. All smoke + code-graded. |
+| Name               | Value / contract                                                                                                                                                                              |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DEFAULT_FLAGS`    | `{ verify: true, structuredState: true }`, the full-harness default (`./env`).                                                                                                                |
+| `ALL_TASKS`        | `[...REGRESSION_TASKS, ...CAPABILITY_TASKS]`, every task (`./tasks`).                                                                                                                         |
+| `SMOKE_TASKS`      | `ALL_TASKS.filter((t) => t.smoke)`, the cheap, deterministic, no-live-model PR subset.                                                                                                        |
+| `ABLATION_TASKS`   | `CAPABILITY_TASKS`, the ablation-sensitive set (success depends on a toggled subsystem).                                                                                                      |
+| `REGRESSION_TASKS` | 4 load-bearing-guarantee snapshots: `reg-claim-409-no-retry`, `reg-dep-gate`, `reg-report-up`, `reg-state-machine`. All smoke; target pass ≈100%.                                             |
+| `CAPABILITY_TASKS` | 3 capability evals: `cap-cross-runtime-resume` (reads the structured-state flag), `cap-verification-catches-bug` (reads the verifier flag), `cap-delegation-fanout`. All smoke + code-graded. |
 
 ### Classes
 
@@ -112,7 +112,7 @@ None; this package exports only functions, types, and constants.
 ## Used by
 
 - **`apps/web` (server)**, `api/evalSmoke.ts` (`POST /api/eval/smoke`) imports `SMOKE_TASKS`, `makeBoardContext`, `runSuite`, `cleanupEvalContexts` to run the deterministic suite on ephemeral boards on demand from the Observability dashboard. The SPA never imports the package directly; `apps/web/src/lib/evalsClient.ts` mirrors the `SuiteReport` / `TaskReport` shapes over REST.
-- **CI**, `.github/workflows/evals.yml` (`workflow_dispatch`) builds `@clawboo/evals` + its deps and runs the full suite + the ablation scorecard; the live-model graders activate only when provider keys are present as repo secrets.
+- **CI**, `.github/workflows/evals.yml` (`workflow_dispatch`) builds `@clawboo/evals` + its deps and runs the deterministic suite + the ablation self-test; no provider keys are used (the live-model grader is not yet wired into any task).
 
 ## Source
 
