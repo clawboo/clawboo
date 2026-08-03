@@ -12,6 +12,7 @@
   <a href="https://www.npmjs.com/package/clawboo"><img src="https://img.shields.io/npm/v/clawboo?color=E94560&label=clawboo&style=flat-square" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/clawboo"><img src="https://img.shields.io/npm/dm/clawboo?color=E94560&style=flat-square&label=downloads" alt="npm downloads" /></a>
   <a href="https://github.com/clawboo/clawboo/actions/workflows/ci.yml"><img src="https://github.com/clawboo/clawboo/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/clawboo/clawboo/actions/workflows/codeql.yml"><img src="https://github.com/clawboo/clawboo/actions/workflows/codeql.yml/badge.svg" alt="CodeQL" /></a>
   <a href="https://github.com/clawboo/clawboo/stargazers"><img src="https://img.shields.io/github/stars/clawboo/clawboo?style=flat-square&color=FBBF24" alt="GitHub Stars" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-34D399?style=flat-square" alt="License: MIT" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" /></a>
@@ -225,6 +226,7 @@ After that:
 - Ask questions or share team templates in [Discussions](https://github.com/clawboo/clawboo/discussions).
 - File [issues](https://github.com/clawboo/clawboo/issues) for bugs, repros, and regressions. macOS, Linux, and Windows are all first-class.
 - Send a PR. Small fixes very welcome, see [CONTRIBUTING.md](./CONTRIBUTING.md).
+- Found a security issue? Report it privately, not as an issue, see [SECURITY.md](./SECURITY.md).
 
 <br/>
 

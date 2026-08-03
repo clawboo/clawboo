@@ -26,6 +26,7 @@ import {
 } from './lib/portUtils'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
+import { mountSpa } from './lib/serveSpa'
 
 // ── Loggers ─────────────────────────────────────────────────────────────────
 
@@ -233,18 +234,7 @@ async function main() {
 
   // Production: serve Vite build output as static SPA
   if (!dev) {
-    const uiDir = path.resolve(process.env['CLAWBOO_UI_DIR'] || path.join(__dirname, 'ui'))
-    app.use(express.static(uiDir))
-    // SPA catch-all: any unmatched GET serves index.html so client-side
-    // routing works. We use `app.use(handler)` rather than a wildcard pattern
-    // (`'/*splat'` / `'/{*splat}'`) — Express 5 + path-to-regexp v8 have
-    // subtle matching quirks around the bare `/` path that produced
-    // "Cannot GET /". `app.use` with no path matches every
-    // request by definition. Restricting to GET keeps non-GET 404s honest.
-    app.use((req, res, next) => {
-      if (req.method !== 'GET') return next()
-      res.sendFile(path.join(uiDir, 'index.html'))
-    })
+    mountSpa(app, process.env['CLAWBOO_UI_DIR'] || path.join(__dirname, 'ui'))
   }
 
   // ── HTTP server (raw, for WS upgrade handling) ────────────────────────────
