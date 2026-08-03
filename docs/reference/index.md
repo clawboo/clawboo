@@ -21,7 +21,7 @@ These docs describe Clawboo **v0.3.0**, the current release.
 | MCP           | [MCP tools](/reference/mcp-tools)                         | 4 servers, tool list, zod input shapes                     |
 | Marketplace   | [Marketplace catalog](/reference/marketplace-catalog)     | Agent/team schemas, sources, ingestion                     |
 | Events        | [Events & errors](/reference/events-and-errors)           | Orchestration event kinds + error taxonomy                 |
-| Packages      | [Packages overview](/reference/packages/index)            | Dependency graph + build order + 25 package pages          |
+| Packages      | [Packages overview](/reference/packages/index)            | Dependency graph + build order + 28 package pages          |
 
 ## REST API
 
@@ -61,8 +61,9 @@ Base URL, loopback posture, the shared `{ error: string }` envelope, and the rou
 - Adapters, [adapter-claude-code](/reference/packages/adapter-claude-code), [adapter-codex](/reference/packages/adapter-codex), [adapter-hermes](/reference/packages/adapter-hermes), [adapter-native](/reference/packages/adapter-native), [adapter-openclaw](/reference/packages/adapter-openclaw)
 - Registries & sources, [agent-registry](/reference/packages/agent-registry), [capability-registry](/reference/packages/capability-registry), [scheduler](/reference/packages/scheduler)
 - Core substrate, [executor](/reference/packages/executor), [db](/reference/packages/db), [events](/reference/packages/events), [protocol](/reference/packages/protocol), [config](/reference/packages/config)
-- Gateway, [gateway-client](/reference/packages/gateway-client), [gateway-proxy](/reference/packages/gateway-proxy)
-- Pure primitives, [compaction](/reference/packages/compaction), [governance](/reference/packages/governance), [obs](/reference/packages/obs), [worktrees](/reference/packages/worktrees)
+- Orchestration, [team-orchestration](/reference/packages/team-orchestration)
+- Gateway & clients, [gateway-client](/reference/packages/gateway-client), [gateway-proxy](/reference/packages/gateway-proxy), [control-client](/reference/packages/control-client)
+- Pure primitives, [compaction](/reference/packages/compaction), [governance](/reference/packages/governance), [model-catalog](/reference/packages/model-catalog), [obs](/reference/packages/obs), [worktrees](/reference/packages/worktrees)
 - MCP & evals, [mcp](/reference/packages/mcp), [evals](/reference/packages/evals)
 - UI & shared, [ui](/reference/packages/ui), [boo-avatar](/reference/packages/boo-avatar), [logger](/reference/packages/logger), [tsconfig](/reference/packages/tsconfig)
 

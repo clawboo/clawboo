@@ -3,9 +3,8 @@
 // (b) validating raw recursive-CTE results at runtime (clawboo rule: never trust
 // TS generics over raw-SQL output).
 
+import { TASK_STATUSES, type TaskStatus } from '@clawboo/board-core'
 import { z } from 'zod'
-
-import { TASK_STATUSES, type TaskStatus } from './state-machine'
 
 // Cast to a non-empty tuple of TaskStatus so `z.infer` yields the union (not
 // `string`) — callers get a typed status without re-casting.

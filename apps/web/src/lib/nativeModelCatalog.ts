@@ -1,6 +1,6 @@
 // Native model catalog — the model list the native (clawboo-native) pickers show.
 //
-// DISTINCT from the OpenClaw `MODEL_GROUPS` (lib/modelCatalog.ts): those use the
+// DISTINCT from the OpenClaw `MODEL_GROUPS` (@clawboo/model-catalog): those use the
 // OpenClaw ROUTING id shape (`anthropic/claude-haiku-4-5`, `openrouter/anthropic/…`),
 // but the native harness passes the model straight to the provider SDK, so it needs
 // the PROVIDER-NATIVE id (Anthropic bare `claude-sonnet-4-6`; OpenRouter `vendor/model`
@@ -117,5 +117,9 @@ export function nativeModelExec(
 ): { primaryProvider: string; primaryModel: string; envVar: string } | null {
   const provider = MODEL_TO_PROVIDER[id] ?? (id.includes('/') ? 'openrouter' : undefined)
   if (!provider) return null
-  return { primaryProvider: provider, primaryModel: id, envVar: PROVIDER_ENV_VAR[provider] ?? 'OLLAMA_BASE_URL' }
+  return {
+    primaryProvider: provider,
+    primaryModel: id,
+    envVar: PROVIDER_ENV_VAR[provider] ?? 'OLLAMA_BASE_URL',
+  }
 }

@@ -136,6 +136,10 @@ In production mode the server serves the SPA from `CLAWBOO_UI_DIR` (default: the
 | `CLAWBOO_UI_DIR`      | Path to the Vite build output to serve. Default: `<server.js dir>/ui`.                                          |
 | `CLAWBOO_SERVER_PATH` | Used by the **CLI** to locate the monorepo root for its dev-mode fallback spawn. Not read by the server itself. |
 
+<Warning>
+The catch-all serves `index.html` as a path **relative to a `root`**, never as one absolute path. Given an absolute path with no `root`, Express's `send` splits the entire path into segments and 404s if any segment starts with a dot (its default `dotfiles: 'ignore'`). Because `npx` installs under `~/.npm/_npx/…`, that `.npm` segment made every deep route and browser refresh 404 for real users while `/` kept working, since `express.static` already passes a `root`. If you ever rewrite this handler, keep the `{ root }` form; `serveSpa.test.ts` covers both a plain and a dot-containing install path.
+</Warning>
+
 ## Behind a reverse proxy / on a remote box
 
 By default the server binds `127.0.0.1`, so it is unreachable off-host. To expose it (a remote box, a container, behind nginx/Caddy), set `HOST`:

@@ -8,6 +8,14 @@ concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default, matching ci.yml and evals.yml. Without it the `check`
+# job below, which only runs `find`, would inherit whatever the repository-wide
+# default happens to be — on the one workflow that holds NPM_TOKEN and the OIDC
+# token that signs npm provenance. The `publish` job opts back up to the writes
+# it genuinely needs.
+permissions:
+  contents: read
+
 jobs:
   check:
     name: Check for changesets
@@ -15,7 +23,7 @@ jobs:
     outputs:
       has_changesets: ${{ steps.count.outputs.has_changesets }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Count changeset files
         id: count
@@ -37,13 +45,13 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
