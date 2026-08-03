@@ -288,9 +288,14 @@ export function RuntimesPanel() {
       return
     }
     if (!diagId) return
+    // `recheckRuntime` reads the SAME GET /api/runtimes as `refresh`, narrowed to one id
+    // client-side — it is not a stronger forced probe. So it takes a read token like any
+    // other read: if a refresh (or a later recheck) has since applied a newer answer from
+    // that endpoint, this one is older and merging it would revert the fresher value.
+    const read = reads.beginRead()
     const s = await recheckRuntime(diagId as RuntimeId)
-    if (s) {
-      reads.commitLocalWrite() // a refresh already in flight carries this runtime's OLD health
+    if (s && read.isCurrent()) {
+      reads.commitLocalWrite() // upholds the invariant: every local write to `statuses` fences
       setStatuses((prev) => prev.map((x) => (x.id === s.id ? s : x)))
       useRuntimeProbeStore
         .getState()
