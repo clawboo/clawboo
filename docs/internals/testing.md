@@ -5,7 +5,7 @@ description: 'How Clawboo verifies itself: the two Vitest projects, sandboxed Pl
 
 Clawboo is a team-first orchestrator: many agents write one SQLite file, five [runtimes](/appendices/glossary) execute heterogeneous work, and the whole thing ships as a single bundled CLI that has to boot on a stranger's machine. Each of those facts has a matching test layer. This page explains the layers, why each exists, and the invariants the standing guard tests freeze in place; so you can extend the suite without re-learning the same lessons the suite was written to encode.
 
-The full gate is six commands, all green: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm verify:ingest`, and `pnpm assemble && pnpm test:clean-install`. Every one of them runs as a parallel CI job (`pnpm build` is a seventh job); the last is the clean-install simulation, run on both Ubuntu and Windows. The strategy described below is deliberately phrased in terms of _suites and intent_, not exact test counts; counts change every session, and a doc that pins them goes stale on the next commit.
+The full gate is six commands, all green: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm verify:ingest`, and `pnpm assemble && pnpm test:clean-install`. Every one of them runs as a parallel CI job (`pnpm build` is a seventh job); the last is the clean-install simulation, run on Ubuntu, Windows, and macOS. The strategy described below is deliberately phrased in terms of _suites and intent_, not exact test counts; counts change every session, and a doc that pins them goes stale on the next commit.
 
 ## The model
 
@@ -14,7 +14,7 @@ flowchart TD
     A["pnpm test (Vitest)"] --> A1["node project<br/>.test.ts<br/>(logic + server integration:<br/>real temp-git + real sqlite)"]
     A --> A2["jsdom project<br/>.test.tsx<br/>(RTL components + msw + jest-axe)"]
     B["pnpm e2e (Playwright)"] --> B1["mock WS gateway<br/>+ sandboxed HOME isolation"]
-    C["pnpm test:clean-install"] --> C1["boots the bundled CLI<br/>like npx clawboo"]
+    C["pnpm test:clean-install"] --> C1["packs + installs the tarball,<br/>then boots it like npx clawboo"]
     D["@clawboo/evals"] --> D1["pnpm test: deterministic SMOKE subset"]
     D --> D2["evals.yml: full suite + ablation"]
     E["standing guards (run inside pnpm test)"] --> E1["schemaSource · packagePosture · repoHygiene"]
@@ -24,7 +24,7 @@ Each layer answers a question the others can't:
 
 - **Vitest (two projects)**: does the _logic_ hold, and do the server's stateful subsystems behave against real git and real SQLite?
 - **Playwright e2e**: does the _assembled product_ render and round-trip in a browser, without ever touching the developer's real state?
-- **The clean-install smoke**: does a freshly bundled `npx clawboo` actually reach a working dashboard, including the stdio MCP bins?
+- **The clean-install smoke**: does a packed-and-installed `npx clawboo` actually reach a working dashboard, including the stdio MCP bins and a real agent run?
 - **The eval harness**: does the _orchestrator itself_ still satisfy its load-bearing guarantees, measured as an outcome rather than a narration?
 - **The standing guards**: do the repo's structural invariants (schema source-of-truth, publish posture, source hygiene) still hold?
 
@@ -68,20 +68,43 @@ The specs cover the surfaces a smoke pass cares about: connection and auto-conne
 
 ## The clean-install smoke: does `npx clawboo` actually work
 
-`pnpm test:clean-install` runs `scripts/test-clean-install.mjs`, which simulates `npx clawboo` on a stranger's machine and asserts the bundled CLI reaches a working dashboard. It exists because Clawboo shipped two releases broken in ways every other test passed: a release where the bundled server returned `Cannot GET /` because the Express 5 SPA catch-all pattern didn't match the bare `/`, and a release where the CLI's port discovery did a TCP-only probe and mistook a foreign listener on an adjacent port for Clawboo, routing the browser to an "Unauthorized" page.
+`pnpm test:clean-install` runs `scripts/test-clean-install.mjs`, which simulates `npx clawboo` on a stranger's machine and asserts the **published artifact** reaches a working dashboard. It exists because Clawboo shipped two releases broken in ways every other test passed: a release where the bundled server returned `Cannot GET /` because the Express 5 SPA catch-all pattern didn't match the bare `/`, and a release where the CLI's port discovery did a TCP-only probe and mistook a foreign listener on an adjacent port for Clawboo, routing the browser to an "Unauthorized" page.
 
 A third bug of the same family is covered by a unit test rather than this script, because the script structurally cannot see it: `res.sendFile()` was called with an absolute path and no `root`, so `send` split the whole path into segments and 404'd on any segment beginning with a dot. `npx` installs under `~/.npm/_npx/…`, so the `.npm` segment broke every deep route for real users while `/` still worked. CI never reproduces it, since runners check out to a dot-free path, so `apps/web/server/lib/__tests__/serveSpa.test.ts` runs the real `mountSpa` against both a plain and a dot-containing install path.
 
-The script reproduces the exact condition the second bug shipped under. It binds port `18791` with a fake service that returns `401 Unauthorized` (mimicking the OpenClaw Gateway's auxiliary-port behavior), spawns the bundled CLI in an isolated state dir with an isolated `$HOME` and no env-var pins, and then asserts:
+### It runs against a real install, not the repo build
 
+The script starts by `pnpm pack`ing `apps/cli` and `npm install`ing the resulting tarball into a throwaway directory under the OS temp dir. Everything after that runs against **that** install. This is the load-bearing detail: running the repo's `apps/cli/dist/index.js` in place lets Node's module resolution walk up into the monorepo's `node_modules`, so a module the bundle still loads at runtime resolves in the repo and is `ERR_MODULE_NOT_FOUND` on a user's machine. Installing a packed tarball outside the workspace removes that escape hatch, so the published `files` whitelist and the published `dependencies` closure are what get exercised.
+
+`pnpm pack` (not `npm pack`) because `pnpm changeset publish` is what publishes: pnpm rewrites `workspace:` specifiers into concrete versions in the packed manifest, so the tarball under test is the one users download. `npm install` (not `pnpm add`) because npm's hoisted layout is what an `npx clawboo` user resolves through.
+
+Before packing, the script refuses to run if anything already answers with the Clawboo signature in the `18790-18809` discovery window — the CLI would (correctly) attach to that dashboard and every assertion below would silently test the wrong server. After boot it re-proves the point structurally: the server writes its port to `<clawboo home>/api-port.txt`, and the run's isolated `$HOME` must be the home that file lives under.
+
+### What it asserts
+
+The script reproduces the exact condition the port-collision bug shipped under. It binds port `18791` with a fake service that returns `401 Unauthorized` (mimicking the OpenClaw Gateway's auxiliary-port behavior), spawns the **installed** CLI in an isolated state dir with an isolated `$HOME` and no env-var pins, and then asserts:
+
+- every `bin` the published manifest declares exists in the tarball and got a `node_modules/.bin` shim, and the UI + third-party notices shipped;
+- every module the installed bundles still load from `node_modules` is a declared dependency, a Node builtin, or a documented optional external (see below);
 - the CLI announces a dashboard URL that is **not** `:18791`; its HTTP-signature probe must reject the fake listener and let Clawboo's own server pick `18790`;
 - `GET /` returns the SPA HTML (`<div id="root"></div>`);
 - a deep SPA route (`/some/spa/route`) falls through to the same SPA HTML (the catch-all works);
 - `GET /api/settings` returns Clawboo-shaped JSON (`gatewayUrl` string + `hasToken` boolean);
 - `GET /api/system/status` returns the expected shape;
-- a bundled **stdio MCP bin** (`dist/bin/tasks.js`) can be spawned and driven through a raw JSON-RPC handshake (`initialize` → `notifications/initialized` → `tools/list`), and its tool list includes `list_tasks`.
+- an installed **stdio MCP bin** (`dist/bin/tasks.js`) can be spawned and driven through a raw JSON-RPC handshake (`initialize` → `notifications/initialized` → `tools/list`), and its tool list includes `list_tasks`;
+- **an agent run can start**: the script creates a native agent and a board task, then drives a real `POST /api/runtimes/clawboo-native/run` to a terminal `done`, and checks the report-up summary carries the provider's reply and the task moved to `done` on the board.
 
-That last assertion is what proves an external runtime can spawn a packaged MCP bin straight from a clean install. Because the smoke test boots the _assembled_ artifact, it depends on `pnpm assemble` having run first, which is exactly what the `prepublish:check` alias (`pnpm assemble && pnpm test:clean-install`) and the CI `smoke-test-bundle` job do. The CI job runs it on a matrix of Ubuntu and Windows, because the Windows leg is the regression gate for the Windows-compat fixes (`.cmd` shim resolution, `which`→`where`, netstat-based process discovery) that a Unix-only run would never exercise.
+The MCP assertion is what proves an external runtime can spawn a packaged MCP bin straight from a clean install. The dispatch assertion covers the product's main path — assign a task and it runs — so it can never be a publish-time unknown. It needs no API key and no network: the native runtime's keyless `ollama` provider rides the shared OpenAI-compatible client with a base-URL override, so the script points `OLLAMA_BASE_URL` at a local stub that streams one canned reply. `kind: 'research'` keeps isolation at `none`, so no git repo or worktree is involved.
+
+### The externals-vs-dependencies check
+
+`scripts/check-bundle-externals.mjs` (also runnable on its own as `pnpm test:bundle-externals`) statically extracts every `require(...)` / `import(...)` left in `dist/index.js`, `dist/server.js`, and `dist/bin/*.js`, and asserts the set is a subset of the package's `dependencies` + Node builtins + a small documented-optional allowlist. It catches what booting can't: a **lazy** import only fails when that feature is first used, which on a fresh install is long after CI went green.
+
+The extractor is a small hand-rolled JS scanner rather than a regex, because a regex produces false positives — the inlined `ajv` source contains the literal string `'require("ajv/dist/runtime/equal").default'` (its standalone-codegen template) and esbuild writes module paths into comments. The scanner tracks strings, template literals with `${}` nesting, comments, and regex literals so it only ever matches a call in code position, and it runs its own fixtures (including those adversarial cases) at the start of every check, since `scripts/` has no CI-wired Vitest project. Its output was validated against esbuild's own metafile for all six bundles.
+
+The allowlist lives in `scripts/lib/bundle-externals.mjs` and is a product decision, not a build detail: an entry means "a clean install cannot do X until the user installs this themselves". Today it holds `@opentelemetry/*` (lazy, degrades to event-log-only) and [`@anthropic-ai/claude-agent-sdk`](/runtimes/claude-code) (declaring it would add ~210 MB of platform binary to every install).
+
+Because the smoke test packs the _assembled_ artifact, it depends on `pnpm assemble` having run first, which is exactly what the `prepublish:check` alias (`pnpm assemble && pnpm test:clean-install`) and the CI `smoke-test-bundle` job do. The CI job runs it on a matrix of Ubuntu, Windows, and macOS: the Windows leg is the regression gate for the Windows-compat fixes (`.cmd` shim resolution, `which`→`where`, netstat-based process discovery) that a Unix-only run would never exercise, and macOS is a primary user OS.
 
 ## The eval harness: grading the orchestrator's own guarantees
 
@@ -132,7 +155,7 @@ The release pipeline that consumes these gates, Changesets, the publish workflow
 
 ## Design rationale and trade-offs
 
-The shape of this suite follows directly from what Clawboo _is_. Because the product is a bundled CLI that boots on a stranger's machine, a unit suite isn't enough; the clean-install smoke boots the real artifact, on Windows too, and that's where the worst regressions hid. Because the orchestrator coordinates real concurrent writers against one SQLite file, the server integration tests use real git and real SQLite rather than mocks; a mock can't surface a lock convoy or a stale-claim race. Because the orchestrator's guarantees are behavioral and cross-subsystem, the eval harness grades the _outcome_ on the board, not the transcript's claim of success, and the deterministic `executorRunner` integration test exercises the real verifier and structured-state across subsystems (the package-level ablation over its own flags is a harness self-test). And because a stray `pnpm e2e` run must never be able to touch real state, the e2e isolation is three independent layers, with `assertSandboxed` as the one that catches the case the other two can't.
+The shape of this suite follows directly from what Clawboo _is_. Because the product is a bundled CLI that boots on a stranger's machine, a unit suite isn't enough; the clean-install smoke installs and boots the real tarball, on Windows and macOS too, and that's where the worst regressions hid. Because the orchestrator coordinates real concurrent writers against one SQLite file, the server integration tests use real git and real SQLite rather than mocks; a mock can't surface a lock convoy or a stale-claim race. Because the orchestrator's guarantees are behavioral and cross-subsystem, the eval harness grades the _outcome_ on the board, not the transcript's claim of success, and the deterministic `executorRunner` integration test exercises the real verifier and structured-state across subsystems (the package-level ablation over its own flags is a harness self-test). And because a stray `pnpm e2e` run must never be able to touch real state, the e2e isolation is three independent layers, with `assertSandboxed` as the one that catches the case the other two can't.
 
 The cost is real: the server integration and e2e tests are slow (hence the widened timeouts and the 180-second build window), the eval harness is a whole extra package, and the standing guards add maintenance friction whenever a structural choice genuinely changes. The trade is deliberate; the guards are cheap insurance against exactly the class of regression that ships green and breaks users.
 

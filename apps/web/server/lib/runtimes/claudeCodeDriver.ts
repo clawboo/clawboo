@@ -2,7 +2,8 @@
 // recommended TS substrate: it reuses Claude Code's own loop/permissions and
 // uses the logged-in CLI's auth, BYO-key as fallback). The SDK is imported
 // LAZILY inside `run()` so the shipped server never requires it at boot — the
-// default install carries no Claude Code dependency. The driver
+// default install carries no Claude Code dependency, and an install that lacks
+// the SDK gets an actionable message, not a resolver error (see `loadAgentSdk`). The driver
 // translates SDK messages → the adapter's `ClaudeNativeEvent` union; the pure
 // `mapClaudeEvent` (in @clawboo/adapter-claude-code) turns those into the
 // normalized RuntimeEvent stream. Claude Code reports a real `total_cost_usd`,
@@ -44,6 +45,47 @@ interface SdkMessage {
 }
 interface SdkModule {
   query(params: { prompt: string; options?: Record<string, unknown> }): AsyncIterable<SdkMessage>
+}
+
+/** The optional runtime dependency this driver needs — named once for the
+ *  remediation message. The `import()` below keeps the literal so the bundler
+ *  (and the clean-install externals check) can still see the edge. */
+const AGENT_SDK = '@anthropic-ai/claude-agent-sdk'
+
+/** True when `err` is Node reporting that OUR specifier could not be resolved
+ *  (not a missing transitive dep inside the SDK, which is a different problem
+ *  and must not be reported as "install the SDK"). Exported for tests — the
+ *  workspace always resolves the SDK, so the miss can't be provoked here. */
+export function isAgentSdkMissing(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code
+  if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'MODULE_NOT_FOUND') return false
+  return err instanceof Error && err.message.includes(AGENT_SDK)
+}
+
+/**
+ * Lazy-load the Claude Agent SDK.
+ *
+ * It is deliberately NOT a dependency of the published `clawboo` package: its
+ * per-platform optional dependency is a ~210 MB `claude` binary and npm installs
+ * optional dependencies by default, so declaring it would add that to EVERY
+ * install for a runtime most users never touch (the clean-install gate treats it
+ * as a documented optional external for the same reason). The cost is that a
+ * packaged install has to be told once — so turn Node's bare `Cannot find
+ * package` into the instruction that fixes it, instead of surfacing a resolver
+ * error as the run's failure summary.
+ */
+async function loadAgentSdk(): Promise<SdkModule> {
+  try {
+    return (await import('@anthropic-ai/claude-agent-sdk')) as unknown as SdkModule
+  } catch (err) {
+    if (!isAgentSdkMissing(err)) throw err
+    throw new Error(
+      `The Claude Code runtime needs ${AGENT_SDK}, which this clawboo install does not ship ` +
+        '(it would add ~210 MB of platform binary to every install). Install it alongside ' +
+        `clawboo — \`npm install -g ${AGENT_SDK}\` when clawboo itself is installed globally — ` +
+        'then re-run the task. See https://docs.claw.boo/runtimes/claude-code',
+    )
+  }
 }
 
 function blocksOf(msg: SdkMessage): SdkContentBlock[] {
@@ -169,7 +211,7 @@ export function createClaudeCodeDriver(opts: StartOpts, ctx: RuntimeRunContext):
 
   async function run(): Promise<void> {
     try {
-      const mod = (await import('@anthropic-ai/claude-agent-sdk')) as unknown as SdkModule
+      const mod = await loadAgentSdk()
       const prompt = opts.context ? `${opts.context}\n\n${opts.message}` : opts.message
       const options: Record<string, unknown> = {
         abortController: abort,

@@ -69,11 +69,15 @@ jobs:
 
       - run: bash scripts/assemble-cli.sh
 
-      # Smoke-test the bundled CLI before publishing. Catches the class of
-      # bug that v0.1.1 (Cannot GET /) and v0.1.2 (Unauthorized via port
-      # collision) shipped broken on. Belt-and-suspenders even if the same
-      # test ran on the PR — race conditions or upstream-changed lockfiles
-      # could cause divergence.
+      # Smoke-test the artifact before publishing. This packs apps/cli and
+      # installs the tarball into a throwaway dir with a real `npm install`, so
+      # the very thing `changeset publish` is about to upload is what boots:
+      # the `files` whitelist, the published dependency closure, the packaged
+      # bins, the SPA, a stdio MCP handshake, and one real runtime dispatch.
+      # Catches the class of bug that v0.1.1 (Cannot GET /) and v0.1.2
+      # (Unauthorized via port collision) shipped broken on. Belt-and-suspenders
+      # even if the same test ran on the PR — race conditions or
+      # upstream-changed lockfiles could cause divergence.
       - run: pnpm test:clean-install
 
       - name: Create Release PR or Publish
