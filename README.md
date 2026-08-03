@@ -64,6 +64,8 @@ Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard:
 
 The dashboard opens at the port written to `~/.clawboo/api-port.txt` (default `http://localhost:18790`, auto-fallback through `18809` if busy). No flags, no external CLI, no cloud account.
 
+The server keeps running after the CLI exits, so `clawboo stop` and `clawboo restart` are how you reach it again, and `clawboo backup` takes a single-file snapshot of the database while it runs. Re-running `clawboo` also compares the running server's version against its own and offers to restart an older one, so an upgrade actually takes effect. See the [CLI reference](https://docs.claw.boo/reference/cli).
+
 > Prefer a different runtime? Connect Claude Code, Codex, Hermes, or a local OpenClaw Gateway from the **Runtimes** panel at any time.
 
 ---

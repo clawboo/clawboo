@@ -217,6 +217,7 @@
               "reference/packages/logger",
               "reference/packages/mcp",
               "reference/packages/obs",
+              "reference/packages/process-lookup",
               "reference/packages/protocol",
               "reference/packages/scheduler",
               "reference/packages/team-orchestration",

@@ -87,13 +87,18 @@ Both are normal SQLite artifacts. They matter for backups (below).
 
 Everything recoverable lives in `~/.clawboo`. A copy of the whole directory is a complete backup, and the simplest one.
 
+<Note>
+Every "stop the server first" step on this page is `clawboo stop`. The launcher starts the dashboard server **detached**, so there is usually no terminal holding it and no Ctrl-C to press. `clawboo stop` finds the running instance through `~/.clawboo/api-port.txt` and terminates it; `clawboo restart` does the stop and the start in one step, reclaiming the same port so an open browser tab reconnects. See the [CLI reference](/reference/cli#clawboo-stop).
+</Note>
+
 ### Quick backup (whole state dir)
 
 Stop the server first so writes are quiesced, then copy the directory:
 
 ```bash
-# stop the running Clawboo server (Ctrl-C in its terminal), then:
+clawboo stop
 cp -a ~/.clawboo ~/clawboo-backup-$(date +%Y%m%d)
+clawboo            # bring the dashboard back up
 ```
 
 This captures the database, settings, the encrypted vault (and its master key), the device identity, and any worktrees.
@@ -104,13 +109,14 @@ To back up just the data tables, copy the database **plus its WAL sidecars**. Wi
 
 ```bash
 # stop the server first, then copy all three:
+clawboo stop
 cp ~/.clawboo/clawboo.db     ~/clawboo.db.bak
 cp ~/.clawboo/clawboo.db-wal ~/clawboo.db-wal.bak 2>/dev/null || true
 cp ~/.clawboo/clawboo.db-shm ~/clawboo.db-shm.bak 2>/dev/null || true
 ```
 
 <Tip>
-The easiest single-file backup is the built-in `clawboo backup` command, which runs an online, checkpoint-consistent copy via better-sqlite3's `.backup()`. It's safe to run while the server is live and produces one file with no separate WAL sidecars:
+The easiest single-file backup is the built-in [`clawboo backup`](/reference/cli#clawboo-backup) command, which runs an online, checkpoint-consistent copy via better-sqlite3's `.backup()`. It's safe to run while the server is live and produces one file with no separate WAL sidecars:
 
 ```bash
 # write ./clawboo-backup-<timestamp>.db in the current directory
@@ -132,7 +138,7 @@ The vault is useless without its master key, and the master key is useless witho
 
 ### Restore
 
-Restore by copying the files back into `~/.clawboo` (with the server stopped). If you restore a database-only backup, restore the WAL sidecars too, or delete a stale `clawboo.db-wal` / `clawboo.db-shm` so SQLite re-creates them clean against the restored main file.
+Restore by copying the files back into `~/.clawboo` with the server stopped (`clawboo stop`), then bring it back with `clawboo`. If you restore a database-only backup, restore the WAL sidecars too, or delete a stale `clawboo.db-wal` / `clawboo.db-shm` so SQLite re-creates them clean against the restored main file.
 
 ## Hard reset
 
@@ -142,7 +148,9 @@ There is no schema migration step. A schema change in Clawboo is a hard reset of
 
 ```bash
 # stop the server first, then delete the DB and its WAL sidecars:
+clawboo stop
 rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm
+clawboo
 ```
 
 The next time the server starts, `createDb()` recreates an empty, fully-bootstrapped schema. Your `settings.json` and the secrets vault are untouched.
@@ -152,9 +160,14 @@ The next time the server starts, `createDb()` recreates an empty, fully-bootstra
 The clean-slate remedy, also what the boot probe recommends after a fatal failure, is to remove the whole state directory and re-run onboarding:
 
 ```bash
+clawboo stop
 rm -rf ~/.clawboo
 clawboo
 ```
+
+<Note>
+Stop the server **before** deleting the directory. A running server keeps writing to the deleted files through their open handles and re-creates `api-port.txt` and a fresh database underneath you, so the reset looks like it didn't take.
+</Note>
 
 <Warning>
 A full reset deletes your saved provider keys (the vault and its master key), the proxy device identity, all teams/agents/board/chat/memory data, and any task worktrees. This is safe for a pre-1.0 single-user install but is **destructive**; back up first if any of it matters.
@@ -196,6 +209,7 @@ Because a fatal boot failure means a broken install (a corrupt DB, or an unwrita
 
 ## See also
 
+- [CLI reference](/reference/cli): `clawboo backup`, `clawboo stop`, `clawboo restart`
 - [Configuration](/reference/configuration): `settings.json`, file and directory locations
 - [Environment variables](/reference/environment-variables): `CLAWBOO_HOME`, `CLAWBOO_DB_PATH`, `CLAWBOO_SECRETS_MASTER_KEY`, `OPENCLAW_STATE_DIR`
 - [Database schema](/reference/database-schema): the 27 tables and ERD

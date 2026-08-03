@@ -38,6 +38,7 @@
     "@clawboo/logger": "workspace:*",
     "@clawboo/mcp": "workspace:*",
     "@clawboo/obs": "workspace:^",
+    "@clawboo/process-lookup": "workspace:*",
     "@clawboo/protocol": "workspace:*",
     "@clawboo/scheduler": "workspace:*",
     "@clawboo/team-orchestration": "workspace:*",

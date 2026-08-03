@@ -31,6 +31,7 @@ There are **27 packages** (22 top-level + 5 nested adapters under `packages/adap
 | `@clawboo/logger`              | 0.1.0   | browser-safe  | pino wrapper + display-layer secret redaction                                        | [logger](/reference/packages/logger)                           |
 | `@clawboo/mcp`                 | 0.1.0   | server-only   | Tasks/Memory/Tools/TeamChat MCP servers + stdio bins                                 | [mcp](/reference/packages/mcp)                                 |
 | `@clawboo/obs`                 | 0.1.0   | browser-safe  | Orchestration-event schema + error taxonomy + graph projection + judge               | [obs](/reference/packages/obs)                                 |
+| `@clawboo/process-lookup`      | 0.1.0   | server-only   | Port → listening PID via `lsof`/`netstat`, shared by CLI stop and Gateway control    | [process-lookup](/reference/packages/process-lookup)           |
 | `@clawboo/protocol`            | 0.1.0   | pure zero-dep | Gateway message parser + transcript types + agent-file defs                          | [protocol](/reference/packages/protocol)                       |
 | `@clawboo/scheduler`           | 0.1.0   | browser-safe  | Cron parsing + occurrence math + `ScheduleSource` trait + multiplexer                | [scheduler](/reference/packages/scheduler)                     |
 | `@clawboo/team-orchestration`  | 0.1.0   | browser-safe  | The pure team-chat orchestration engine + `BoardClient` + nudge queue + `./contract` | [team-orchestration](/reference/packages/team-orchestration)   |
