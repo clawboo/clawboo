@@ -10,8 +10,8 @@ import {
   removeGatewayPid,
   isProcessAlive,
   probeGatewayPort,
-  findProcessByPort,
 } from '../lib/processManager'
+import { findListenerPid } from '@clawboo/process-lookup'
 import { getModelsFromCli } from '../lib/modelCache'
 import { isWindows, resolveShimName } from '../lib/platform'
 import {
@@ -250,7 +250,7 @@ async function stopGateway(port: number): Promise<{ stopped: boolean; message?: 
   }
 
   if (!targetPid) {
-    targetPid = findProcessByPort(port)
+    targetPid = findListenerPid(port)
   }
 
   if (!targetPid) {

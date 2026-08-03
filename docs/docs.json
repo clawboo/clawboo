@@ -219,6 +219,7 @@
               "reference/packages/mcp",
               "reference/packages/model-catalog",
               "reference/packages/obs",
+              "reference/packages/process-lookup",
               "reference/packages/protocol",
               "reference/packages/scheduler",
               "reference/packages/team-orchestration",

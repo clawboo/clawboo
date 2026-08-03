@@ -21,7 +21,7 @@ import { getRegistry } from './lib/agentSource'
 import {
   resolveApiPort,
   writeApiPortFile,
-  removeApiPortFile,
+  removeApiPortFileIfOwned,
   waitForPortFree,
 } from './lib/portUtils'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
@@ -416,7 +416,10 @@ async function main() {
   // recovered on the next open — so a checkpoint failure is logged and
   // never blocks shutdown or changes the exit code.
   const cleanup = () => {
-    removeApiPortFile()
+    // Only if the file still names OUR port: a second instance (auto-scan
+    // fallback, or a restart successor that has already rebound) may have
+    // rewritten it, and deleting that would strand a server that is still up.
+    removeApiPortFileIfOwned(port)
     try {
       const db = createDb(getDbPath())
       db.$client.pragma('wal_checkpoint(TRUNCATE)')

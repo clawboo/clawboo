@@ -1,0 +1,47 @@
+{
+  "name": "@clawboo/process-lookup",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Resolve a TCP port to the PID listening on it, cross-platform: shared by the clawboo CLI's stop/restart and the server's managed-Gateway control",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/process-lookup"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/process-lookup",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "process",
+    "port",
+    "pid",
+    "lsof",
+    "netstat"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

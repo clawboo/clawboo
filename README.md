@@ -55,7 +55,7 @@ npm install -g clawboo
 clawboo
 ```
 
-The global install gives you a persistent `clawboo` command and one-click in-app updates. Just trying it out? `npx clawboo` runs the latest with no install.
+The global install gives you a persistent `clawboo` command and one-click in-app updates. Just trying it out? `npx clawboo@latest` runs the current release with no install (the `@latest` matters: a bare `npx clawboo` can reuse a build already in npm's `_npx` cache).
 
 Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard:
 
@@ -64,6 +64,8 @@ Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard:
 3. Clawboo seeds a starter team and drops you into the dashboard. Your team is ready in about a minute.
 
 The dashboard opens at the port written to `~/.clawboo/api-port.txt` (default `http://localhost:18790`, auto-fallback through `18809` if busy). No flags, no external CLI, no cloud account.
+
+The server keeps running after the CLI exits, so `clawboo stop` and `clawboo restart` are how you reach it again, and `clawboo backup` takes a single-file snapshot of the database while it runs. Re-running `clawboo` also compares the running server's version against its own and offers to restart an older one, so an upgrade actually takes effect. See the [CLI reference](https://docs.claw.boo/reference/cli).
 
 > Prefer a different runtime? Connect Claude Code, Codex, Hermes, or a local OpenClaw Gateway from the **Runtimes** panel at any time.
 

@@ -27,7 +27,7 @@ The default bind is **loopback only** (`127.0.0.1`). A fresh install is never re
 
 ## Bundled mode: `clawboo`
 
-`clawboo` is a thin launcher. It probes for an already-running dashboard, starts one if needed, then opens your browser at the resolved URL.
+Run bare, `clawboo` is a thin launcher. It probes for an already-running dashboard, starts one if needed, then opens your browser at the resolved URL. `clawboo stop` and `clawboo restart` reach that server afterwards; see the [CLI reference](/reference/cli).
 
 ```bash
 npm install -g clawboo
@@ -39,13 +39,13 @@ Or run `npx clawboo` to try it without installing.
 What the launcher does, in order:
 
 1. **Informational Gateway probe**: TCP-probes `localhost:18789` (the OpenClaw Gateway). This is a hint only; it never blocks startup.
-2. **Find a running dashboard**: `findRunningDashboard()` checks, in priority order: the `CLAWBOO_API_PORT` env var, then the runtime port file (`~/.clawboo/api-port.txt`), then a scan of ports `18790`–`18809`. Each candidate is validated with an HTTP `GET /api/settings` that must return a Clawboo-shaped JSON body (both `gatewayUrl: string` and `hasToken: boolean`), so an unrelated listener in that range (Gateway aux ports, Chrome's `--remote-debugging-port`) is never mistaken for Clawboo.
+2. **Find a running dashboard**: `findRunningDashboard()` checks, in priority order: the `CLAWBOO_API_PORT` env var, then the runtime port file (`~/.clawboo/api-port.txt`), then a scan of ports `18790`–`18809`. Each candidate is validated with an HTTP `GET /api/settings` that must return a Clawboo-shaped JSON body (both `gatewayUrl: string` and `hasToken: boolean`), so an unrelated listener in that range (Gateway aux ports, Chrome's `--remote-debugging-port`) is never mistaken for Clawboo. When one is found, the launcher then reads `GET /api/system/self-version` from it and compares that server's version against its own before attaching.
 3. **Start a server if none is found**: the CLI forks the bundled `dist/server.js` (located next to the CLI entry) with `NODE_ENV=production`, detached and `unref`'d. If the bundled server isn't present, it falls back to a dev-mode `npx tsx apps/web/server/index.ts` after locating the monorepo root.
 4. **Poll for readiness**: it re-runs discovery every 500 ms for up to 45 seconds (a cold Windows first-boot of the bundled CJS plus the `better-sqlite3` native binding can take 20–30 s).
 5. **Open the browser** at `http://localhost:<port>`.
 
 <Tip>
-If a Clawboo dashboard is already running, `clawboo` skips the spawn and just opens the browser to the existing instance. Run it again any time to re-open the tab.
+If a Clawboo dashboard is already running, `clawboo` skips the spawn and just opens the browser to the existing instance. Run it again any time to re-open the tab. The exception is a server running an **older** build than the launcher you invoked: it says so and offers to restart into the newer one, since the server is detached and would otherwise stay bound to the port indefinitely. `--no-version-check` skips that comparison.
 </Tip>
 
 ### What the bundle contains
@@ -112,7 +112,7 @@ Clawboo owns one state directory, default `~/.clawboo`, overridable with `CLAWBO
 | `~/.clawboo/proxy-device-identity.json` | The Ed25519 device key the proxy signs Gateway connects with.                                                     |
 
 <Info>
-There is **no migration ladder**. The schema is the inline `CREATE TABLE IF NOT EXISTS` DDL in `createDb`; a schema change is a hard reset of the local DB. To wipe state, stop the server and delete `~/.clawboo` (or just `~/.clawboo/clawboo.db`), then re-run onboarding.
+There is **no migration ladder**. The schema is the inline `CREATE TABLE IF NOT EXISTS` DDL in `createDb`; a schema change is a hard reset of the local DB. To wipe state, run `clawboo stop`, delete `~/.clawboo` (or just `~/.clawboo/clawboo.db`), then re-run onboarding.
 </Info>
 
 OpenClaw's own state dir (`~/.openclaw`, set by `OPENCLAW_STATE_DIR`) is **read-only interop**; Clawboo reads the Gateway config and a provider-key fallback from it but never writes there.
@@ -213,5 +213,5 @@ Bind Clawboo to loopback and let the proxy be the only network-facing surface, *
 - [Security](/operating/security), access gate, device auth, the vault, redaction, safe exposure
 - [MCP servers](/operating/mcp-servers), attaching the bundled MCP bins
 - [Environment variables](/reference/environment-variables), `CLAWBOO_API_PORT`, `CLAWBOO_HOME`, `CLAWBOO_UI_DIR`, `HOST`, `STUDIO_ACCESS_TOKEN`, and the rest
-- [`clawboo` CLI reference](/reference/cli), the single command and the MCP bins
+- [`clawboo` CLI reference](/reference/cli), the `clawboo` command, its subcommands, and the MCP bins
 - [Configuration](/reference/configuration), `settings.json` and file locations

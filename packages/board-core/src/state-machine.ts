@@ -13,13 +13,7 @@
 // the source guard in __tests__/state-machine.test.ts.
 
 export type TaskStatus =
-  | 'backlog'
-  | 'todo'
-  | 'in_progress'
-  | 'in_review'
-  | 'blocked'
-  | 'done'
-  | 'cancelled'
+  'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
 
 export const TASK_STATUSES: readonly TaskStatus[] = [
   'backlog',

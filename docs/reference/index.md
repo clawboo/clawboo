@@ -43,7 +43,7 @@ Base URL, loopback posture, the shared `{ error: string }` envelope, and the rou
 
 ## CLI & configuration
 
-- [CLI reference](/reference/cli), the single `clawboo` entry point plus the `clawboo-mcp-{tasks,memory,tools,teamchat}` stdio bins.
+- [CLI reference](/reference/cli), the `clawboo` entry point, its `backup` / `stop` / `restart` subcommands, and the `clawboo-mcp-{tasks,memory,tools,teamchat}` stdio bins.
 - [Configuration](/reference/configuration), `settings.json`, the `~/.clawboo` state directory, and the file/dir locations Clawboo owns.
 - [Environment variables](/reference/environment-variables), every `CLAWBOO_*`, `OPENCLAW_*`, and provider key Clawboo reads, sourced only from `@clawboo/config`, the runtime descriptor, and the secrets vault.
 
