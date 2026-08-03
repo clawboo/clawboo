@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto'
 
+import { canTransition, isTerminal, type TaskStatus } from '@clawboo/board-core'
 import { isVerdictPromotable } from '@clawboo/governance'
 import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
 
@@ -23,7 +24,6 @@ import {
 } from '../schema'
 import { immediateWrite, withWriteRetry } from './contention'
 import { ancestorRowsSchema, type AncestorRow } from './schemas'
-import { canTransition, isTerminal, type TaskStatus } from './state-machine'
 
 export interface Scope {
   tenantId?: string | null

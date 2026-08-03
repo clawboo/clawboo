@@ -39,6 +39,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@clawboo/board-core": "workspace:*",
     "@clawboo/compaction": "workspace:*",
     "@clawboo/governance": "workspace:*",
     "@clawboo/obs": "workspace:*",

@@ -1,22 +1,22 @@
 {
-  "name": "@clawboo/team-orchestration",
+  "name": "@clawboo/board-core",
   "version": "0.1.0",
   "private": true,
-  "description": "Pure, runtime-agnostic team-chat orchestration engine (delegate/plan/workstream → durable board), shared by the browser binding and the server orchestrator",
+  "description": "The pure task state machine shared by the durable board, the orchestration engine, and the browser UI",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/clawboo/clawboo.git",
-    "directory": "packages/team-orchestration"
+    "directory": "packages/board-core"
   },
-  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/team-orchestration",
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/board-core",
   "bugs": "https://github.com/clawboo/clawboo/issues",
   "keywords": [
     "clawboo",
-    "orchestration",
     "board",
-    "delegation",
-    "team-chat"
+    "kanban",
+    "state-machine",
+    "task-status"
   ],
   "files": [
     "dist"
@@ -29,23 +29,13 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
-    },
-    "./contract": {
-      "types": "./dist/contract.d.ts",
-      "import": "./dist/contract.mjs",
-      "require": "./dist/contract.js"
     }
   },
   "scripts": {
     "build": "tsup",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run"
-  },
-  "dependencies": {
-    "@clawboo/board-core": "workspace:*",
-    "@clawboo/executor": "workspace:*",
-    "@clawboo/governance": "workspace:*"
   },
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",

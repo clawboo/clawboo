@@ -24,6 +24,7 @@
     "@clawboo/adapter-native": "workspace:*",
     "@clawboo/adapter-openclaw": "workspace:*",
     "@clawboo/agent-registry": "workspace:*",
+    "@clawboo/board-core": "workspace:*",
     "@clawboo/capability-registry": "workspace:*",
     "@clawboo/compaction": "workspace:*",
     "@clawboo/config": "workspace:*",
