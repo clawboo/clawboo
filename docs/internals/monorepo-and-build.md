@@ -11,7 +11,7 @@ If you want the per-package API surface and the dependency graph in detail, read
 
 The repo is a **single workspace** of many small packages, not a polyrepo with version pins. Every `@clawboo/*` library is consumed via `workspace:*` (or `workspace:^`) protocol from the two apps, so there is no internal npm publish-then-install loop; Turbo builds a package's `dist/` and the app that depends on it picks it up directly.
 
-It is **not** a "publish every package" monorepo. Despite 25 scoped packages, **all of them are `private: true`**; none publishes to npm. The **only** published artifact is the `clawboo` CLI in `apps/cli`, and it does not depend on its sibling packages at runtime the way the web app does. Instead, the build _inlines_ the libraries it needs into the CLI's shipped bundle. See [What publishes](#what-publishes).
+It is **not** a "publish every package" monorepo. Despite 28 scoped packages, **all of them are `private: true`**; none publishes to npm. The **only** published artifact is the `clawboo` CLI in `apps/cli`, and it does not depend on its sibling packages at runtime the way the web app does. Instead, the build _inlines_ the libraries it needs into the CLI's shipped bundle. See [What publishes](#what-publishes).
 
 ## The workspace layout
 
@@ -25,14 +25,28 @@ packages:
   - 'docs'
 ```
 
-The second glob is load-bearing. The five runtime adapters live one level deeper, `packages/adapters/{native,openclaw,claude-code,codex,hermes}`, so without `packages/adapters/*` pnpm would not discover them and `workspace:*` resolution would fail. The result is **27 packages** (22 top-level under `packages/*` plus 5 nested adapters), two apps, and the `docs/` Mintlify site (hand-edited Markdown, deployed as-is).
+The second glob is load-bearing. The five runtime adapters live one level deeper, `packages/adapters/{native,openclaw,claude-code,codex,hermes}`, so without `packages/adapters/*` pnpm would not discover them and `workspace:*` resolution would fail. The result is **28 packages** (23 top-level under `packages/*` plus 5 nested adapters), two apps, and the `docs/` Mintlify site (hand-edited Markdown, deployed as-is).
 
 `@clawboo/tsconfig` is the shared TypeScript-config root, `base.json`, `react.json`, `node.json`. It is a devDependency everywhere and has no runtime edge, so it doesn't appear in the dependency graph that drives the build order.
+
+### Layer boundaries (lint-enforced)
+
+`apps/web` is two build targets in one workspace package: `server/` is bundled for Node by tsup, `src/` is bundled for the browser by Vite. Together with the one-way apps → packages rule, that gives three boundaries, all enforced in `eslint.config.mjs` rather than by reviewer vigilance:
+
+| Rule                                                  | Why                                                                                                                             |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/server/**` may not import `apps/web/src/**` | Keeps the server portable (it is the basis of the planned thin clients) and stops browser code drifting into the server bundle. |
+| `apps/web/src/**` may not import `apps/web/server/**` | The load-bearing direction: server modules pull in `node:*` and native deps that would be dragged into the browser bundle.      |
+| `packages/**` may not import `apps/**`                | Dependencies flow one way; a package reaching back into an app would invert the build graph.                                    |
+
+Anything two layers genuinely share is extracted into a `@clawboo/*` package instead. `@clawboo/model-catalog` is the worked example: the static model catalog used to live in SPA source and the server reached across for it, which was the only such import in the tree.
+
+The rules use relative-only patterns on purpose, so a legitimate bare specifier such as `react-dom/server` is not mistaken for a layer crossing, and they pair `no-restricted-imports` with a `no-restricted-syntax` selector because the former does not visit dynamic `import()`. `apps/web`'s `lint` script must cover `server/` as well as `src/` for the server-side rule to run at all; [`importBoundary.test.ts`](/internals/testing#the-standing-guards) asserts exactly that.
 
 ```mermaid
 graph TD
   root["pnpm-workspace.yaml"]
-  root --> p["packages/*<br/>(22 top-level libs)"]
+  root --> p["packages/*<br/>(23 top-level libs)"]
   root --> a["packages/adapters/*<br/>(5 runtime adapters)"]
   root --> apps["apps/*<br/>(web + cli)"]
   p -. "@clawboo/* scope" .- a
@@ -89,6 +103,7 @@ graph TD
   subgraph t4["4 · pure + adapters + db deps"]
     executor["executor"]
     compaction["compaction"]
+    modelcatalog["model-catalog"]
     scheduler["scheduler"]
     worktrees["worktrees"]
     governance["governance"]
@@ -107,7 +122,7 @@ graph TD
     mcp["mcp → db"]
   end
   subgraph t7["7 · apps"]
-    web["apps/web → 23 runtime packages (direct)"]
+    web["apps/web → 26 runtime packages (direct)"]
     cli["apps/cli → config"]
   end
 
@@ -117,10 +132,10 @@ graph TD
 1. **`tsconfig` + `logger`**: the shared TS-config root and the base logger. `logger` has no `@clawboo/*` runtime edge.
 2. **`config` · `gateway-client` · `protocol` · `agent-registry`**: `gateway-client` depends on `logger`; the rest are pure/zero-dep.
 3. **`events` · `gateway-proxy`**: `events` → `gateway-client`/`logger`/`protocol`; `gateway-proxy` → `config`.
-4. **`executor` · `adapters/*` · `worktrees` · `compaction` · `scheduler` · `governance` · `obs`**: `executor` is pure (`.` + `./contract` + `./tiers` subpath exports); the five adapters depend only on `executor` (`adapter-openclaw` also on `events`/`gateway-client`/`logger`/`protocol`). `compaction`/`governance`/`obs` are the dependencies `db` pulls in, so `db` (and `evals`, which needs `db`/`executor`/`governance`/`obs`) sequence after this tier.
+4. **`executor` · `adapters/*` · `worktrees` · `compaction` · `model-catalog` · `scheduler` · `governance` · `obs`**: `executor` is pure (`.` + `./contract` + `./tiers` subpath exports); the five adapters depend only on `executor` (`adapter-openclaw` also on `events`/`gateway-client`/`logger`/`protocol`). `compaction`/`governance`/`obs` are the dependencies `db` pulls in, so `db` (and `evals`, which needs `db`/`executor`/`governance`/`obs`) sequence after this tier. `model-catalog` is a zero-dep leaf both `apps/web` layers read, extracted so the server never imports SPA source.
 5. **`boo-avatar` + `ui`**: `ui` → `boo-avatar`.
 6. **`mcp`**: depends on `db`; its build also produces the stdio bins.
-7. **`apps/web` → `apps/cli`**: the web app directly depends on 23 of the `@clawboo/*` runtime packages (`boo-avatar` reaches it transitively via `ui`, so all 24 are consumed); the CLI's only `@clawboo/*` dependency is `config`.
+7. **`apps/web` → `apps/cli`**: the web app directly depends on 26 of the `@clawboo/*` runtime packages (`boo-avatar` reaches it transitively via `ui`, so all 27 are consumed); the CLI's only `@clawboo/*` dependency is `config`.
 
 ## What publishes
 
