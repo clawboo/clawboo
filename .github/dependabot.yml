@@ -1,0 +1,83 @@
+version: 2
+
+# Automated dependency-update PRs. Three ecosystems, because the repo holds two
+# independent pnpm roots plus the workflow files themselves.
+#
+# Everything is grouped and weekly on purpose. A pnpm lockfile regenerates
+# wholesale, so N ungrouped PRs would mean N mutually-conflicting `pnpm-lock.yaml`
+# diffs and N full CI runs; one grouped PR per week is a single review and a
+# single lockfile rebase. Major bumps stay OUT of the groups so a breaking change
+# never arrives buried in a list of thirty patch bumps.
+updates:
+  # The root pnpm workspace: apps/*, packages/*, packages/adapters/*, docs.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      npm-minor-and-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+        # better-sqlite3 and ws are the only exact-pinned dependencies in the
+        # repo (apps/cli/package.json; everything else uses a caret range). They
+        # are deliberately kept OUT of the CLI's tsup bundle, so npm resolves
+        # them on the user's machine at install time, better-sqlite3 as a native
+        # binding compiled per platform. Excluding them from the group means each
+        # one arrives as its own PR, where the clean-install smoke gate
+        # (test:clean-install, run on ubuntu + windows) is read against a single
+        # dependency change instead of a pile of them.
+        exclude-patterns:
+          - better-sqlite3
+          - ws
+
+  # website/ declares its own pnpm root (website/pnpm-workspace.yaml) so that
+  # Cloudflare Pages can build the subdirectory alone. It therefore has a second,
+  # entirely separate pnpm-lock.yaml that the root scan never descends into.
+  - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      website-minor-and-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+
+  # Keeps the action majors current across ci.yml / evals.yml / publish.yml /
+  # codeql.yml. Majors are grouped here (unlike npm above) because an action
+  # major bump is usually just a runner-Node upgrade, and reviewing them one at a
+  # time across four workflows is churn with no added signal.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - '*'

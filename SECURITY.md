@@ -15,6 +15,30 @@ privately to the maintainers and lets us coordinate a fix and disclosure with yo
 
 Please include: the affected version, a description, and a minimal reproduction or proof of concept.
 
+## Automated security tooling
+
+Three automations run alongside human review. None of them replaces a report: they cover the classes of
+problem a machine is good at, and the interesting bugs in a tool like this are still the ones a person finds.
+
+- **Code scanning.** [CodeQL](https://codeql.github.com/) analyses every pull request, every push to `main`,
+  and re-scans weekly, covering both the TypeScript sources and the GitHub Actions workflows themselves
+  (`.github/workflows/codeql.yml`). Findings appear in the **Security** tab, the same tab you report through.
+- **Dependency updates.** Dependabot opens grouped update pull requests weekly for the root pnpm workspace,
+  the standalone `website/` project, and the pinned action versions (`.github/dependabot.yml`), and raises
+  alerts for known advisories in anything we depend on. Alerts are triaged privately by the maintainers;
+  please don't file a public issue for one.
+- **Publish provenance.** Releases are published with
+  [npm provenance](https://docs.npmjs.com/generating-provenance-statements), so a published tarball is
+  cryptographically attested to have been built from this repository by the `publish.yml` workflow. Anyone
+  can verify their install:
+
+  ```bash
+  npm audit signatures
+  ```
+
+  This matters more than usual for a tool installed via `npx` that then runs coding-agent runtimes on your
+  machine: it lets you confirm the code you're about to execute is the code in this repository.
+
 ## Scope notes
 
 Clawboo is a **local-first** tool: by default the dashboard binds to loopback (`127.0.0.1`) so it is not
