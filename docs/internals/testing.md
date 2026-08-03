@@ -5,7 +5,7 @@ description: 'How Clawboo verifies itself: the two Vitest projects, sandboxed Pl
 
 Clawboo is a team-first orchestrator: many agents write one SQLite file, five [runtimes](/appendices/glossary) execute heterogeneous work, and the whole thing ships as a single bundled CLI that has to boot on a stranger's machine. Each of those facts has a matching test layer. This page explains the layers, why each exists, and the invariants the standing guard tests freeze in place; so you can extend the suite without re-learning the same lessons the suite was written to encode.
 
-The full gate is six commands, all green: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm verify:ingest`, and `pnpm assemble && pnpm test:clean-install`. The first five run as parallel CI jobs; the last is the clean-install simulation, run on both Ubuntu and Windows. The strategy described below is deliberately phrased in terms of _suites and intent_, not exact test counts; counts change every session, and a doc that pins them goes stale on the next commit.
+The full gate is six commands, all green: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm verify:ingest`, and `pnpm assemble && pnpm test:clean-install`. The first five run as parallel CI jobs (including Playwright e2e); the last is the clean-install simulation, run on both Ubuntu and Windows. The strategy described below is deliberately phrased in terms of _suites and intent_, not exact test counts; counts change every session, and a doc that pins them goes stale on the next commit.
 
 ## The model
 
@@ -120,7 +120,7 @@ The schema parity check compares only `{table → set(column names)}`. Column *t
 
 ## How CI wires it together
 
-The CI workflow (`.github/workflows/ci.yml`) runs `lint`, `typecheck`, `test`, `build`, and `verify-ingest` as independent parallel jobs, each on Node 22 with a frozen lockfile, plus the `smoke-test-bundle` job that runs `pnpm assemble && pnpm test:clean-install` on the Ubuntu + Windows matrix. The Turbo task graph makes `test`, `lint`, and `typecheck` depend on `^build` so every package's workspace dependencies are built first. Playwright e2e is not a default CI job; it builds the UI and boots a real server, which is heavier; it runs locally and on demand. The manual eval workflow (`evals.yml`) is `workflow_dispatch`-only.
+The CI workflow (`.github/workflows/ci.yml`) runs `lint`, `typecheck`, `test`, `build`, `verify-ingest`, and `e2e` (Playwright) as independent parallel jobs, each on Node 22 with a frozen lockfile, plus the `smoke-test-bundle` job that runs `pnpm assemble && pnpm test:clean-install` on the Ubuntu + Windows matrix. The Turbo task graph makes `test`, `lint`, and `typecheck` depend on `^build` so every package's workspace dependencies are built first. The Playwright job installs Chromium with OS deps, runs `pnpm e2e`, and uploads the HTML report / traces as an artifact when the job fails or is cancelled. The config already branches on `process.env.CI` (`forbidOnly`, retries, `reuseExistingServer`). The manual eval workflow (`evals.yml`) is `workflow_dispatch`-only.
 
 The release pipeline that consumes these gates, Changesets, the publish workflow, and the clean-install gate's role on a Version-PR merge, is documented separately.
 
@@ -133,7 +133,7 @@ The cost is real: the server integration and e2e tests are slow (hence the widen
 ## Boundaries and non-goals
 
 - **No coverage threshold is enforced.** The suite is intent-driven (does this guarantee hold?), not line-coverage-driven. There is no `--coverage` gate.
-- **Playwright is not in the default CI matrix.** It runs locally and on demand because it builds the UI and boots a real server; the clean-install smoke is the CI-gated "assembled artifact works" check.
+- **Playwright e2e runs in the default CI matrix** on every PR and push to `main` (Chromium only, 15-minute timeout, report uploaded on failure). Prefer that gate for onboarding / board round-trip regressions; the clean-install smoke remains the "assembled artifact works" check across Ubuntu and Windows.
 - **Live-model evals never gate a PR.** Only the deterministic smoke subset runs in `pnpm test`. The manual `evals.yml` workflow (`workflow_dispatch`) re-runs that same deterministic suite plus the ablation self-test; the live-model graders are defined but not yet wired into any task, so no provider-key path is active today.
 - **The schema parity guard is name-level, not shape-level.** It catches added/removed tables and columns, not type or constraint drift, by design, until a real schema change warrants the deeper check.
 
