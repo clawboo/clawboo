@@ -81,7 +81,7 @@ What each one guards:
 - **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI and boots it as a clean install to catch first-run regressions. This is the same gate the release workflow runs: see [Release process](/internals/release-process).
 
 <Tip>
-Running the full gate locally avoids review back-and-forth. At minimum, every PR must pass `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`. CI also runs `pnpm e2e` and CodeQL code scanning on every PR, so keep those green too; `pnpm e2e` needs a built workspace and a Chromium download (`pnpm build`, then `pnpm exec playwright install chromium`).
+Running the full gate locally avoids review back-and-forth. Every PR must pass CI: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a red check is a red check. Note `pnpm e2e` needs a built workspace and a Chromium download (`pnpm build`, then `pnpm exec playwright install chromium`).
 </Tip>
 
 ### 5. Add a changeset for user-facing changes

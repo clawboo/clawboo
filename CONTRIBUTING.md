@@ -68,11 +68,11 @@ Run them locally before pushing to avoid back-and-forth. Every one of them runs 
 
 Keep PRs focused. Split unrelated changes into separate PRs.
 
-Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines, you are on a different pnpm than the pinned `9.15.0`: run `corepack enable`, then `pnpm install`, and commit only the intended lockfile change. (Dependency bumps mostly arrive on their own: Dependabot opens one grouped PR a week, so you rarely need to touch the lockfile by hand.)
+Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines, you are on a different pnpm than the pinned `9.15.0`: run `corepack enable`, then `pnpm install`, and commit only the intended lockfile change. (Dependency bumps mostly arrive on their own: Dependabot runs weekly with three grouped entries, one for the root workspace, one for `website/`, and one for the GitHub Actions pins, so you rarely need to touch the lockfile by hand. Major bumps, plus `better-sqlite3` and `ws`, deliberately come as their own PRs.)
 
 ### 2. Pass CI before requesting review
 
-Every PR must pass `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`. CI also runs `pnpm e2e` and CodeQL code scanning on every PR; new surfaces should keep both green.
+Every PR must pass CI: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a red check is a red check: fix it, or say in the PR why it is unrelated.
 
 ### 3. Add a changeset for user-facing changes
 

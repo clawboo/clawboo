@@ -206,3 +206,6 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+          # test-results/ only exists when a test retried or failed, and the
+          # default `warn` would flag its absence on every green run.
+          if-no-files-found: ignore
