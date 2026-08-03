@@ -54,7 +54,7 @@ npm install -g clawboo
 clawboo
 ```
 
-The global install gives you a persistent `clawboo` command and one-click in-app updates. Just trying it out? `npx clawboo` runs the latest with no install.
+The global install gives you a persistent `clawboo` command and one-click in-app updates. Just trying it out? `npx clawboo@latest` runs the current release with no install (the `@latest` matters: a bare `npx clawboo` can reuse a build already in npm's `_npx` cache).
 
 Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard:
 

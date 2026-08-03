@@ -88,7 +88,7 @@ Both are normal SQLite artifacts. They matter for backups (below).
 Everything recoverable lives in `~/.clawboo`. A copy of the whole directory is a complete backup, and the simplest one.
 
 <Note>
-Every "stop the server first" step on this page is `clawboo stop`. The launcher starts the dashboard server **detached**, so there is usually no terminal holding it and no Ctrl-C to press. `clawboo stop` finds the running instance through `~/.clawboo/api-port.txt` and terminates it; `clawboo restart` does the stop and the start in one step, reclaiming the same port so an open browser tab reconnects. See the [CLI reference](/reference/cli#clawboo-stop).
+Every "stop the server first" step on this page is `clawboo stop`. Paths below are written as `~/.clawboo`; if you set `CLAWBOO_HOME`, substitute that directory. The launcher starts the dashboard server **detached**, so there is usually no terminal holding it and no Ctrl-C to press. `clawboo stop` finds the running instance through `~/.clawboo/api-port.txt` and terminates it; `clawboo restart` does the stop and the start in one step, reclaiming the same port when it is free after the stop (so an open browser tab reconnects); if something else has taken it, the successor falls back to normal port resolution. See the [CLI reference](/reference/cli#clawboo-stop).
 </Note>
 
 ### Quick backup (whole state dir)

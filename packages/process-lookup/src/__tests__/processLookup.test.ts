@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseLsofPids, parseNetstatPid } from '../index'
+import { findListenerPid, parseLsofPids, parseNetstatPid } from '../index'
 
 describe('parseLsofPids', () => {
   it('parses one PID per line', () => {
@@ -121,5 +121,45 @@ describe('parseNetstatPid', () => {
   it('returns null when nothing is listening on the port', () => {
     expect(parseNetstatPid(REALISTIC, 18799)).toBeNull()
     expect(parseNetstatPid('', 18790)).toBeNull()
+  })
+})
+
+describe('findListenerPid', () => {
+  const LSOF = ['lsof', ['-nP', '-iTCP:18789', '-sTCP:LISTEN', '-t']]
+
+  it('asks lsof with the listen-only filter on POSIX', () => {
+    const calls: Array<[string, string[]]> = []
+    const pid = findListenerPid(18789, {
+      platform: 'darwin',
+      run: (c, a) => {
+        calls.push([c, a])
+        return '4242\n'
+      },
+    })
+    expect(pid).toBe(4242)
+    // -sTCP:LISTEN is what stops a connected browser socket being returned.
+    expect(calls).toEqual([LSOF])
+  })
+
+  it('asks netstat on Windows', () => {
+    const calls: Array<[string, string[]]> = []
+    const pid = findListenerPid(18789, {
+      platform: 'win32',
+      run: (c, a) => {
+        calls.push([c, a])
+        return '  TCP    127.0.0.1:18789        0.0.0.0:0              LISTENING       4242'
+      },
+    })
+    expect(pid).toBe(4242)
+    expect(calls).toEqual([['netstat', ['-ano']]])
+  })
+
+  it('returns null when the tool is absent or exits non-zero', () => {
+    const enoent = () => {
+      throw Object.assign(new Error('spawn lsof ENOENT'), { code: 'ENOENT' })
+    }
+    expect(findListenerPid(18789, { platform: 'linux', run: enoent })).toBeNull()
+    // lsof exits 1 with no output when nothing matches.
+    expect(findListenerPid(18789, { platform: 'linux', run: () => '' })).toBeNull()
   })
 })

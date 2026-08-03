@@ -42,6 +42,15 @@ afterEach(() => {
 })
 
 describe('probeDashboard', () => {
+  // A corrupt api-port.txt holding `18790.5` used to reach createConnection,
+  // which throws ERR_SOCKET_BAD_PORT synchronously inside the promise executor.
+  // That rejected out of probeDashboard past its try block, and neither
+  // discoverDashboard nor stopDashboard caught it.
+  it('resolves rather than rejecting on a malformed port', async () => {
+    await expect(probeDashboard('localhost', 18790.5, 50)).resolves.toBe('none')
+    await expect(probeDashboard('localhost', 0, 50)).resolves.toBe('none')
+  })
+
   it('reports none when nothing is listening', async () => {
     // Nothing is bound on this port in the test process, so the TCP probe fails.
     expect(await probeDashboard('localhost', 1, 50)).toBe('none')

@@ -146,15 +146,27 @@ describe('stopDashboard', () => {
     expect(unlinkPortFile).not.toHaveBeenCalled()
   })
 
+  // These identified a listener and then declined to signal it, which is a
+  // different thing to tell the user than "nothing was found" — the message on
+  // this path ends in a manual-kill hint.
   it.each([
     ['init', 1],
     ['ourselves', process.pid],
     ['our parent', process.ppid],
     ['a mis-parsed zero', 0],
     ['a negative PID', -5],
-  ])('refuses to signal %s', async (_label, pid) => {
+    ['a non-integer PID', 12.5],
+  ])('refuses to signal %s, and says so distinctly', async (_label, pid) => {
     const kill = vi.fn()
     const outcome = await stopDashboard(PORT, deps({ findListenerPid: () => pid, kill }))
+
+    expect(outcome).toEqual({ status: 'could-not-identify', port: PORT, reason: 'unsafe-pid' })
+    expect(kill).not.toHaveBeenCalled()
+  })
+
+  it('still reports no-listener when nothing was identified at all', async () => {
+    const kill = vi.fn()
+    const outcome = await stopDashboard(PORT, deps({ findListenerPid: () => null, kill }))
 
     expect(outcome).toEqual({ status: 'could-not-identify', port: PORT, reason: 'no-listener' })
     expect(kill).not.toHaveBeenCalled()

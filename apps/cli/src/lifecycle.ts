@@ -31,7 +31,15 @@ import { findListenerPid } from '@clawboo/process-lookup'
 /** Quick TCP probe to check if a port is accepting connections. */
 export function probePort(host: string, port: number, timeoutMs = 2_000): Promise<boolean> {
   return new Promise((resolve) => {
-    const sock = createConnection({ host, port })
+    let sock: ReturnType<typeof createConnection>
+    try {
+      sock = createConnection({ host, port })
+    } catch {
+      // e.g. ERR_SOCKET_BAD_PORT from a malformed port. "Unreachable", not a throw:
+      // every caller treats this as a boolean and none of them catch.
+      resolve(false)
+      return
+    }
     const timer = setTimeout(() => {
       sock.destroy()
       resolve(false)
@@ -83,12 +91,9 @@ export async function probeDashboard(
   // Cheap TCP probe first — skip the HTTP cost on closed ports.
   if (!(await probePort(host, port, Math.min(timeoutMs, 1_000)))) return 'none'
   try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
     const res = await fetch(`http://${host}:${port}/api/settings`, {
-      signal: controller.signal,
+      signal: AbortSignal.timeout(timeoutMs),
     })
-    clearTimeout(timer)
     const ct = res.headers.get('content-type') ?? ''
     if (!ct.includes('application/json')) return 'none'
     const body = (await res.json()) as Record<string, unknown>
@@ -163,7 +168,9 @@ export function readRuntimePort(): number | null {
   try {
     const raw = fs.readFileSync(getRuntimePortFilePath(), 'utf8').trim()
     const port = Number(raw)
-    if (!Number.isFinite(port) || port <= 0 || port > 65535) return null
+    // isInteger, not isFinite: a corrupt file holding `18790.5` would otherwise
+    // reach createConnection, which throws ERR_SOCKET_BAD_PORT synchronously.
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) return null
     return port
   } catch {
     return null
@@ -411,13 +418,32 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
     // never speak IPC to the server; unref the channel so the launcher can exit
     // while the detached server keeps running.
     child.channel?.unref()
+    child.on('error', () => {})
   } else {
-    const child = spawn('npx', ['tsx', devServerPath!], {
-      cwd: monorepoRoot!,
-      env: { ...process.env, NODE_ENV: 'production', CLAWBOO_VERSION: VERSION, ...pinned },
-      detached: true,
-      stdio: 'ignore',
-    })
+    // On Windows `npx` resolves to `npx.cmd`, which Node 18.20.2+/20.12.2+/22+
+    // refuse to spawn without a shell (the CVE-2024-27980 mitigation). The only
+    // interpolated value is a path we derived ourselves from the monorepo root,
+    // never user input, and it is quoted for the shell that will re-split it.
+    const onWindows = process.platform === 'win32'
+    const child = onWindows
+      ? spawn(`npx tsx "${devServerPath!}"`, {
+          cwd: monorepoRoot!,
+          env: { ...process.env, NODE_ENV: 'production', CLAWBOO_VERSION: VERSION, ...pinned },
+          detached: true,
+          stdio: 'ignore',
+          shell: true,
+          windowsHide: true,
+        })
+      : spawn('npx', ['tsx', devServerPath!], {
+          cwd: monorepoRoot!,
+          env: { ...process.env, NODE_ENV: 'production', CLAWBOO_VERSION: VERSION, ...pinned },
+          detached: true,
+          stdio: 'ignore',
+        })
+    // Without a listener a failed spawn emits an unhandled 'error' event, which
+    // takes the launcher down with an opaque stack instead of the readiness
+    // poll's actionable timeout message. Swallow it and let the poll report.
+    child.on('error', () => {})
     child.unref()
   }
 
@@ -462,7 +488,17 @@ export interface StopDeps {
 export type StopOutcome =
   | { status: 'stopped'; port: number; pid: number; forced: boolean }
   | { status: 'not-running'; port: number }
-  | { status: 'could-not-identify'; port: number; reason: 'no-listener' | 'permission-denied' }
+  | {
+      status: 'could-not-identify'
+      port: number
+      /**
+       * `no-listener` — nothing answered, or the tool to ask is missing.
+       * `permission-denied` — the process is another user's.
+       * `unsafe-pid` — we DID identify a listener and refused to signal it
+       * (init, ourselves, our parent, or a mis-parsed non-positive value).
+       */
+      reason: 'no-listener' | 'permission-denied' | 'unsafe-pid'
+    }
   | { status: 'still-alive'; port: number; pid: number }
 
 const TERM_POLL_MS = 100
@@ -520,13 +556,15 @@ export async function stopDashboard(port: number, deps: StopDeps = {}): Promise<
 
   // 2. PID. The only route is port → owning process; see processLookup.ts.
   const pid = lookup(port)
-  if (pid === null || !Number.isInteger(pid) || pid <= 0) {
+  if (pid === null) {
     return { status: 'could-not-identify', port, reason: 'no-listener' }
   }
-  // Cheap insurance against a mis-parsed column: pid 1 is init, and signalling
-  // ourselves or our parent would be a self-inflicted wound.
-  if (pid === 1 || pid === process.pid || pid === process.ppid) {
-    return { status: 'could-not-identify', port, reason: 'no-listener' }
+  // A mis-parsed column can yield a non-positive value; pid 1 is init, and
+  // signalling ourselves or our parent would be a self-inflicted wound. These
+  // are NOT "nothing found" — a listener was identified and deliberately spared,
+  // which is a different thing to tell the user.
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid || pid === process.ppid) {
+    return { status: 'could-not-identify', port, reason: 'unsafe-pid' }
   }
 
   // 3. SIGTERM the single PID — never `process.kill(-pid, …)`. The bundled server

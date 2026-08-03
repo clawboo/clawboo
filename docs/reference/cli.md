@@ -118,7 +118,17 @@ Setting `STUDIO_ACCESS_TOKEN` turns on the [access gate](/operating/security), a
 
 The gate answers with a Clawboo-specific JSON error rather than a bare 401, so the launcher can still tell that a Clawboo dashboard is there. It says so and stops, instead of concluding nothing is running and starting a second server onto the same database. `clawboo stop` and `clawboo restart` report the same thing and print the manual command; they deliberately do not terminate a process on a port they could not positively identify.
 
-To use the dashboard, open `http://localhost:<port>/?access_token=<token>` once to set the cookie. To use the CLI against it, unset `STUDIO_ACCESS_TOKEN` and restart the server.
+To use the dashboard, open `http://localhost:<port>/?access_token=<token>` once to set the cookie.
+
+To restart a gated server without unsetting the token, stop it by hand and start a fresh one:
+
+```bash
+# POSIX; on Windows use netstat -ano | findstr :<port> then taskkill /PID <pid> /F
+lsof -nP -iTCP:<port> -sTCP:LISTEN -t | xargs kill
+clawboo
+```
+
+Or unset `STUDIO_ACCESS_TOKEN` and use `clawboo restart` normally.
 
 ## `clawboo backup`
 

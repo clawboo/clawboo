@@ -129,6 +129,9 @@ function describeStopFailure(outcome: StopOutcome): string {
   if (outcome.status === 'could-not-identify' && outcome.reason === 'permission-denied') {
     return `The process on port ${outcome.port} belongs to another user.`
   }
+  if (outcome.status === 'could-not-identify' && outcome.reason === 'unsafe-pid') {
+    return `Port ${outcome.port} is held by a process this launcher refuses to signal.`
+  }
   return `Could not identify the process listening on port ${outcome.port}.`
 }
 
@@ -151,6 +154,23 @@ function printGatedNotice(port: number): void {
     chalk.gray('Open ') +
       chalk.cyan.underline(`http://localhost:${port}/?access_token=<token>`) +
       chalk.gray(' once to set it in your browser, or unset the variable and restart the server.'),
+  )
+}
+
+/**
+ * We stopped a server that was working and could not put one back. Say so
+ * explicitly: `startAndReport`'s own messages ("Could not find the Clawboo
+ * server", "taking too long to start") read as if nothing had been running.
+ */
+function printStoppedNotReplaced(port: number): void {
+  p.log.warn(
+    chalk.yellow('The previous server was stopped and could not be replaced. ') +
+      chalk.white('Nothing is running now.'),
+  )
+  p.log.info(
+    chalk.gray('Start one with ') +
+      chalk.white('clawboo') +
+      chalk.gray(`, on port ${port} if it is still free.`),
   )
 }
 
@@ -249,7 +269,9 @@ async function reconcileServerVersion(port: number, opts: LaunchOptions): Promis
   // from us and let the server resolve its own port (an auto-scan — or the
   // user's own CLAWBOO_API_PORT, if they have one exported).
   const free = !(await probePort('localhost', port, 500))
-  return startAndReport({ port: free ? port : undefined, verb: 'Restarting' })
+  const restarted = await startAndReport({ port: free ? port : undefined, verb: 'Restarting' })
+  if (restarted === null) printStoppedNotReplaced(port)
+  return restarted
 }
 
 async function run(opts: LaunchOptions): Promise<void> {
@@ -426,7 +448,12 @@ async function runRestart(opts: { open: boolean }): Promise<void> {
   }
 
   const started = await startAndReport({ port: pinned, verb: 'Restarting' })
-  if (started === null) process.exit(1)
+  if (started === null) {
+    // Only when a stop actually ran — with nothing running beforehand this is a
+    // plain start failure and the existing message is already accurate.
+    if (port !== null) printStoppedNotReplaced(port)
+    process.exit(1)
+  }
 
   const url = `http://localhost:${started}`
   if (opts.open) {

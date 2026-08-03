@@ -78,6 +78,8 @@ There is no schema migration ladder; a schema change is a hard reset of the loca
 - **Reset just the data** (keep keys + settings): `clawboo stop`, then `rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm`.
 - **Full reset** (everything, including provider keys): `clawboo stop`, then `rm -rf ~/.clawboo`, then `clawboo`.
 
+If you set `CLAWBOO_HOME`, substitute that directory for `~/.clawboo` in both commands — every path below resolves through it.
+
 The full reset is destructive; it removes the vault, the proxy device identity, and all teams/board/chat/memory data. Back up `~/.clawboo` first if any of it matters. Full instructions and the WAL-sidecar caveat are in [data and state → hard reset](/operating/data-and-state#hard-reset).
 
 ## What's the difference between Atlas and the Ghost Graph?

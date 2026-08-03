@@ -94,27 +94,41 @@ export function parseNetstatPid(stdout: string, port: number): number | null {
  * listening, or the socket belongs to another user and is invisible to us.
  * Never throws; the caller reports "could not identify" rather than guessing.
  */
-export function findListenerPid(port: number): number | null {
+/** Test seam: the two impure things this function does. */
+export interface LookupDeps {
+  /** Run a command and return stdout. Throws exactly like `execFileSync`. */
+  run?: (command: string, args: string[]) => string
+  platform?: NodeJS.Platform
+}
+
+function defaultRun(command: string, args: string[]): string {
+  return execFileSync(command, args, {
+    encoding: 'utf8',
+    windowsHide: true,
+    // See note 2: Node's 1 MB default throws ENOBUFS on a busy host.
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 5_000,
+    // lsof warns loudly about other users' processes; keep stderr off our stdio.
+    stdio: ['ignore', 'pipe', 'ignore'],
+  })
+}
+
+/**
+ * The PID listening on `port`, or null when it cannot be determined — the tool
+ * is missing (`lsof` is absent from Alpine and some hardened images), nothing is
+ * listening, or the socket belongs to another user and is invisible to us.
+ * Never throws; the caller reports "could not identify" rather than guessing.
+ */
+export function findListenerPid(port: number, deps: LookupDeps = {}): number | null {
+  const run = deps.run ?? defaultRun
+  const platform = deps.platform ?? process.platform
   try {
-    if (process.platform === 'win32') {
-      const output = execFileSync('netstat', ['-ano'], {
-        encoding: 'utf8',
-        windowsHide: true,
-        timeout: 5_000,
-        // See note 2 in the file header.
-        maxBuffer: 16 * 1024 * 1024,
-      })
-      return parseNetstatPid(output, port)
+    if (platform === 'win32') {
+      return parseNetstatPid(run('netstat', ['-ano']), port)
     }
     // -n / -P skip DNS and /etc/services lookups (a stalled resolver would block
-    // this synchronous call); -sTCP:LISTEN is note 1 in the file header; stderr
-    // is discarded because lsof warns loudly about other users' processes.
-    const output = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {
-      encoding: 'utf8',
-      timeout: 3_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    })
-    return parseLsofPids(output)[0] ?? null
+    // this synchronous call); -sTCP:LISTEN is note 1 in the file header.
+    return parseLsofPids(run('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t']))[0] ?? null
   } catch {
     // lsof exits 1 when nothing matches, and both tools throw ENOENT when absent.
     // Both are "no answer", not errors.
