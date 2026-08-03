@@ -25,7 +25,7 @@ import { providerStatus } from '../lib/providerKeys'
 import { resolveRuntimeKey } from '../lib/secretsVault'
 import { getRegistry } from '../lib/agentSource'
 import { detectOpenClaw, invalidateOpenClawCache } from '../lib/openclawDetect'
-import { MODEL_GROUPS as STATIC_MODEL_GROUPS, providerSlug } from '../../src/lib/modelCatalog'
+import { MODEL_GROUPS as STATIC_MODEL_GROUPS, providerSlug } from '@clawboo/model-catalog'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

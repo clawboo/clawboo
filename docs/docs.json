@@ -216,6 +216,7 @@
               "reference/packages/governance",
               "reference/packages/logger",
               "reference/packages/mcp",
+              "reference/packages/model-catalog",
               "reference/packages/obs",
               "reference/packages/protocol",
               "reference/packages/scheduler",
