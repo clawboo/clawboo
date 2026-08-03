@@ -15,6 +15,7 @@ import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { Spinner } from '@/features/shared/Spinner'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 
 import { fetchHealth, recheckHealth, type BootCheck, type BootReport } from './healthClient'
 
@@ -63,10 +64,7 @@ function SectionCard({ title, children }: { title: string; children: ReactNode }
   return (
     <section className="mb-6">
       <div className={`${SECTION_LABEL} mb-2.5 text-foreground/45`}>{title}</div>
-      <div
-        className="rounded-2xl border border-border bg-surface px-4"
-        style={cardStyle}
-      >
+      <div className="rounded-2xl border border-border bg-surface px-4" style={cardStyle}>
         {children}
       </div>
     </section>
@@ -88,18 +86,30 @@ export function SystemHealthPanel() {
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
 
-  const load = useCallback(async (recheck: boolean) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const r = recheck ? await recheckHealth() : await fetchHealth()
-      if (mountedRef.current) setReport(r)
-    } catch (err) {
-      if (mountedRef.current) setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (mountedRef.current) setLoading(false)
-    }
-  }, [])
+  // The 30s poll and the manual Recheck share this one loader, so reads are sequenced
+  // last-write-wins: a poll already in flight when Recheck resolves would otherwise land
+  // afterwards with the PRE-recheck report and silently undo what the user just asked for.
+  const reads = useReadSequencer()
+
+  const load = useCallback(
+    async (recheck: boolean) => {
+      const read = reads.beginRead()
+      setLoading(true)
+      setError(null)
+      try {
+        const r = recheck ? await recheckHealth() : await fetchHealth()
+        if (mountedRef.current && read.isCurrent()) setReport(r)
+      } catch (err) {
+        if (mountedRef.current && read.isCurrent())
+          setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        // Chrome, not data: only the newest read may clear the spinner, or an older one
+        // finishing first would drop it while the newer read is still running.
+        if (mountedRef.current && read.isNewestRead()) setLoading(false)
+      }
+    },
+    [reads],
+  )
 
   useEffect(() => {
     mountedRef.current = true
@@ -170,9 +180,8 @@ export function SystemHealthPanel() {
               {fatalCount > 0 ? (
                 <>
                   <strong>The install has a fatal problem.</strong> clawboo has no upgrade/repair
-                  path — reset{' '}
-                  <code className="font-data text-[11px]">~/.clawboo</code>{' '}
-                  and re-run onboarding to start clean.
+                  path — reset <code className="font-data text-[11px]">~/.clawboo</code> and re-run
+                  onboarding to start clean.
                 </>
               ) : (
                 <>
@@ -195,10 +204,7 @@ export function SystemHealthPanel() {
               <Spinner size={13} /> Running boot probe…
             </div>
           ) : (
-            <div
-              className="rounded-2xl border border-border bg-surface px-4"
-              style={cardStyle}
-            >
+            <div className="rounded-2xl border border-border bg-surface px-4" style={cardStyle}>
               {report?.checks.map((check, i) => {
                 const tone = toneFor(report, check)
                 const meta = TONE_META[tone]

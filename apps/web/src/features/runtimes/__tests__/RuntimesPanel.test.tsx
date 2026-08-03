@@ -177,6 +177,64 @@ describe('RuntimesPanel', () => {
     expect(await screen.findByTestId('runtime-clawboo-native-details')).toBeInTheDocument()
   })
 
+  it('drops a drawer recheck whose answer is older than an applied refresh', async () => {
+    // `recheckRuntime` narrows the SAME GET /api/runtimes the 8s poll reads, so the two
+    // overlap and the later-issued answer must win. Here the recheck is issued first but
+    // resolves last: merging it would revert the runtime to the pre-refresh state that the
+    // user is staring at in the diagnostics drawer.
+    let calls = 0
+    let releaseRecheck: (() => void) | undefined
+    let recheckAnswered = false
+    const runtime = (connectionState: string) => ({
+      runtimes: [{ id: 'clawboo-native', connectionState, capabilities: {}, health: { ok: true } }],
+      available: [],
+    })
+    server.use(
+      http.get('/api/runtimes', async () => {
+        calls += 1
+        // Call 2 is the drawer recheck: parked, and answers with the PRE-refresh state.
+        if (calls === 2) {
+          await new Promise<void>((resolve) => {
+            releaseRecheck = resolve
+          })
+          recheckAnswered = true
+          return HttpResponse.json(runtime('ready'))
+        }
+        // Call 1 is the mount refresh; call 3+ is the header Refresh, which has newer news.
+        return HttpResponse.json(runtime(calls === 1 ? 'ready' : 'needs-login'))
+      }),
+    )
+    const user = userEvent.setup()
+    render(<RuntimesPanel />)
+
+    await user.click(await screen.findByTestId('runtime-clawboo-native-details'))
+    const drawer = await screen.findByTestId('runtime-diagnostics-drawer')
+    expect(drawer).toHaveTextContent('Connected')
+
+    // Start the recheck (parks), then let a refresh land with the newer state.
+    await user.click(screen.getByTestId('runtime-diagnostics-recheck'))
+    await waitFor(() => expect(calls).toBe(2))
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('runtime-diagnostics-drawer')).toHaveTextContent('Needs login'),
+    )
+
+    // The stale recheck now answers 'ready'.
+    releaseRecheck?.()
+    await waitFor(() => expect(recheckAnswered).toBe(true))
+    // `recheckAnswered` only proves the SERVER replied — asserting here could run before the
+    // client finished the fetch → json → setStatuses chain, so a regressed guard would slip
+    // through. The drawer re-enables Re-check only after `await onRecheck()` returns, which
+    // is causally downstream of that whole chain: wait for that instead of a fixed delay.
+    await waitFor(() => expect(screen.getByTestId('runtime-diagnostics-recheck')).toBeEnabled(), {
+      timeout: 3000,
+    })
+
+    // It is discarded — the drawer keeps the fresher state.
+    expect(screen.getByTestId('runtime-diagnostics-drawer')).toHaveTextContent('Needs login')
+    expect(screen.getByTestId('runtime-diagnostics-drawer')).not.toHaveTextContent('Connected')
+  })
+
   it('the disconnected OpenClaw row carries Set up + the MCP attach config', async () => {
     useConnectionStore.setState({ status: 'disconnected', client: null })
     server.use(http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })))
