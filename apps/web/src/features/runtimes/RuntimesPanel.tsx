@@ -4,6 +4,7 @@ import { Cpu, RefreshCw, ChevronDown } from 'lucide-react'
 
 import { useConnectionStore } from '@/stores/connection'
 import { useSettingsModalStore } from '@/stores/settingsModal'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
 import { PanelHeader } from '@/features/shared/PanelHeader'
@@ -157,6 +158,7 @@ export function RuntimesPanel() {
   // The standalone OpenClaw setup flow (detect → install → configure → start),
   // launched from the OpenClaw tab's "Set up OpenClaw" CTA when not connected.
   const [setupOpen, setSetupOpen] = useState(false)
+  const reads = useReadSequencer()
 
   // A one-shot intent from elsewhere (a disabled OpenClaw option in CreateTeamModal)
   // lands the user here directly in the OpenClaw Gateway setup flow.
@@ -175,7 +177,13 @@ export function RuntimesPanel() {
   // Each 8s poll appends a sample to the per-runtime probe ring buffer so the
   // diagnostics drawer can render a "last N checks" timeline (no server store).
   const refresh = useCallback(async () => {
+    // Three sequential round trips on an 8s interval, so refreshes genuinely overlap —
+    // and the drawer's Recheck merges a single runtime straight into `statuses`. Sequenced
+    // last-write-wins so an older refresh can neither flap the connection badges back nor
+    // overwrite a just-rechecked runtime with its pre-recheck health.
+    const read = reads.beginRead()
     const next = await fetchRuntimes()
+    if (!read.isCurrent()) return
     setStatuses(next)
     setLoaded(true)
     const record = useRuntimeProbeStore.getState().record
@@ -185,6 +193,7 @@ export function RuntimesPanel() {
     // The server's OpenClaw operator connection — the thin-client signal (no
     // browser Gateway WS needed). Defensive: disconnected on any error.
     const health = await fetchRegistryHealth()
+    if (!read.isCurrent()) return // re-checked per hop: each await is its own staleness window
     const srvConn = health.connection === 'connected'
     setServerOpenclawConnected(srvConn)
     // OpenClaw's own ChatGPT-subscription oauth profile (defensive: false on any
@@ -193,6 +202,7 @@ export function RuntimesPanel() {
     const cfg = (await fetch('/api/system/openclaw-config')
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null)) as { config?: unknown; codexAuth?: { profile?: boolean } } | null
+    if (!read.isCurrent()) return
     setOpenclawSubConnected(!!cfg?.codexAuth?.profile)
     // `config` is the parsed openclaw.json (null when never set up) — the "was
     // configured" signal, independent of whether the gateway is currently up.
@@ -204,7 +214,7 @@ export function RuntimesPanel() {
       ok: ocOk,
       message: ocOk ? 'connected' : conn.status === 'connected' ? 'not connected' : conn.status,
     })
-  }, [])
+  }, [reads])
 
   useEffect(() => {
     void refresh()
@@ -280,6 +290,7 @@ export function RuntimesPanel() {
     if (!diagId) return
     const s = await recheckRuntime(diagId as RuntimeId)
     if (s) {
+      reads.commitLocalWrite() // a refresh already in flight carries this runtime's OLD health
       setStatuses((prev) => prev.map((x) => (x.id === s.id ? s : x)))
       useRuntimeProbeStore
         .getState()

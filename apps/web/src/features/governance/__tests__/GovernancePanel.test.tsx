@@ -3,7 +3,7 @@
 // embedded <ToolApprovalQueue/> now always polls /api/tools/approvals, so every
 // test stubs that endpoint (msw onUnhandledRequest:'error' would fail otherwise).
 
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -62,6 +62,58 @@ describe('GovernancePanel', () => {
     expect(await screen.findByTestId('audit-row')).toBeInTheDocument()
     // A healthy under-limit budget shows no "will re-pause" badge.
     expect(screen.queryByTestId('budget-will-repause')).toBeNull()
+  })
+
+  it('ignores an audit response for an earlier filter prefix that lands late', async () => {
+    // The agent-id filter is an undebounced input, so every keystroke fires its own
+    // /api/governance/audit read. Applied by arrival order, the response for the shorter
+    // prefix can land last and leave the table showing rows the filter excludes.
+    let releaseShortPrefix: (() => void) | undefined
+    let shortPrefixAnswered = false
+    server.use(
+      http.get('/api/governance/budgets', () => HttpResponse.json({ budgets: [] })),
+      http.get('/api/governance/audit', async ({ request }) => {
+        const agentId = new URL(request.url).searchParams.get('agentId')
+        const row = (id: string, summary: string) => ({
+          id,
+          eventType: 'budget',
+          agentId,
+          taskId: null,
+          teamId: null,
+          tenantId: null,
+          summary,
+          createdAt: 0,
+        })
+        // Hold the one-character prefix open so it resolves AFTER the full filter's read.
+        if (agentId === 'a') {
+          await new Promise<void>((resolve) => {
+            releaseShortPrefix = resolve
+          })
+          shortPrefixAnswered = true
+          return HttpResponse.json({ audit: [row('stale', '{"prefix":"a"}')] })
+        }
+        return HttpResponse.json({ audit: [row('fresh', '{"prefix":"ab"}')] })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<GovernancePanel />)
+    await screen.findByTestId('governance-panel')
+
+    // Two keystrokes → a read for 'a' (parked) and a read for 'ab' (resolves).
+    await user.type(screen.getByPlaceholderText('agent id'), 'ab')
+    await waitFor(() => expect(screen.getByTestId('audit-row')).toHaveTextContent('prefix'))
+    await waitFor(() => expect(screen.getByTestId('audit-row')).toHaveTextContent('ab'))
+
+    // The earlier prefix's response now lands.
+    releaseShortPrefix?.()
+    await waitFor(() => expect(shortPrefixAnswered).toBe(true))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0)) // flush fetch → json → setState
+    })
+
+    // The table still matches what is in the filter box.
+    expect(screen.getByTestId('audit-row')).toHaveTextContent('ab')
+    expect(screen.getByPlaceholderText('agent id')).toHaveValue('ab')
   })
 
   it('shows a "will re-pause" badge for a cap budget resumed while over its limit', async () => {

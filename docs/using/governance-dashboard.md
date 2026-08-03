@@ -122,7 +122,7 @@ The budget routes accept fields the panel does not surface directly:
 
 - **A new/raised budget** appears (or updates) in the Budgets list within the 5-second poll; its `spent / cap` line, percentage, and mode/status pills reflect the change. You can confirm directly with `curl http://localhost:18790/api/governance/budgets` (use your resolved API port).
 - **A resumed scope** flips its status pill from `paused` (red) back to `active` (mint). If it shows `will re-pause`, raise the cap.
-- **A resolved approval** disappears from the Approval queue on the next 3-second refetch.
+- **A resolved approval** disappears from the Approval queue immediately, and stays gone: a refetch that was already in flight when you decided still lists it, and is discarded rather than briefly restoring the card.
 - **An audit entry** for the action lands in the Audit log, e.g. setting/raising a `cap`-mode budget that later crosses produces `budget` events; a cap hit produces `cap_hit`; a verification produces `verification`.
 
 ## Troubleshooting
