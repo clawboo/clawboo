@@ -5,7 +5,7 @@ description: 'The board data-access layer: the atomic claim, the transactional s
 
 [The board](/concepts/the-board) is Clawboo's durable task-coordination substrate. This page is the implementation deep-dive for people working _on_ it: the single data-access layer that owns every board write, the conditional-UPDATE claim that makes single-assignee work race-free, the state machine that enforces legal transitions inside a write transaction, the SQLite contention recipe that keeps many concurrent writers honest, the recursive CTEs that walk the dependency and parent graphs, and the two reconciliation passes that recover stuck work.
 
-Everything here lives in `packages/db/src/board/`: four modules: `repository.ts` (the data access), `state-machine.ts` (the pure transition rules), `contention.ts` (the write recipe), and `schemas.ts` (the zod shapes for REST bodies and raw-CTE results). The connection-level pragmas they depend on are set in `packages/db/src/db.ts`. If you want the _why_ behind the board's existence, narration-vs-authority, the worktree linkage, read [the concept page](/concepts/the-board) first; this page assumes it.
+Everything here lives in `packages/db/src/board/`: three modules: `repository.ts` (the data access), `contention.ts` (the write recipe), and `schemas.ts` (the zod shapes for REST bodies and raw-CTE results). The pure transition rules sit one package over, in [`@clawboo/board-core`](/reference/packages/board-core), and are re-exported through `@clawboo/db` unchanged. The connection-level pragmas they depend on are set in `packages/db/src/db.ts`. If you want the _why_ behind the board's existence, narration-vs-authority, the worktree linkage, read [the concept page](/concepts/the-board) first; this page assumes it.
 
 ## What it is, and what it isn't
 
@@ -19,7 +19,9 @@ The repository imports one cross-package symbol: `isVerdictPromotable` from `@cl
 
 ## The state machine
 
-`state-machine.ts` is pure: a `TaskStatus` union of seven values, a `LEGAL` transition map, and three predicates. There is no I/O here; it is the rulebook the repository consults inside a transaction.
+`@clawboo/board-core`'s `state-machine.ts` is pure: a `TaskStatus` union of seven values, a `LEGAL` transition map, and the accessors over it. There is no I/O here — and no imports at all, which is what lets the browser bundle the same file the server enforces.
+
+It lives outside `@clawboo/db` deliberately. Three layers need these rules and only one of them can touch a database: the repository enforces them inside the write transaction, `@clawboo/team-orchestration` types its `BoardClient` with `TaskStatus`, and the board UI derives its columns and its status editor from `TASK_STATUSES` + `legalTargets`. When each declared its own copy they agreed, but nothing linked them: a newly-legal transition on the server would have left the UI hiding a move it now accepts, with green CI.
 
 ```ts
 const LEGAL: Record<TaskStatus, readonly TaskStatus[]> = {
@@ -33,7 +35,7 @@ const LEGAL: Record<TaskStatus, readonly TaskStatus[]> = {
 }
 ```
 
-`canTransition(from, to)` returns `true` when `from === to` (same-status is an idempotent no-op, so re-emitting a transition is harmless) and otherwise checks membership in `LEGAL[from]`. `done` and `cancelled` have empty target lists; they are terminal. `isLocked(status)` returns `true` for `in_progress` and `in_review` (a locked task is actively owned and must not have its assignee reassigned). `isTerminal(status)` returns `true` for `done` and `cancelled`.
+`canTransition(from, to)` returns `true` when `from === to` (same-status is an idempotent no-op, so re-emitting a transition is harmless) and otherwise checks membership in `LEGAL[from]`. `legalTargets(from)` returns that row as a fresh array, which is how a UI enumerates the moves it may offer without copying the table. `done` and `cancelled` have empty target lists; they are terminal (a test pins `isTerminal(s)` ⇔ `legalTargets(s).length === 0`, so the two can never disagree). `isLocked(status)` returns `true` for `in_progress` and `in_review` (a locked task is actively owned and must not have its assignee reassigned). `isTerminal(status)` returns `true` for `done` and `cancelled`.
 
 The enforcement happens in `updateStatus` in the repository, not in the REST layer:
 

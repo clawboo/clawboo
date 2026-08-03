@@ -153,6 +153,9 @@ importers:
       '@clawboo/agent-registry':
         specifier: workspace:*
         version: link:../../packages/agent-registry
+      '@clawboo/board-core':
+        specifier: workspace:*
+        version: link:../../packages/board-core
       '@clawboo/capability-registry':
         specifier: workspace:*
         version: link:../../packages/capability-registry
@@ -486,6 +489,24 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.11)(jiti@2.6.1)(jsdom@25.0.1)(lightningcss@1.31.1)(msw@2.12.10(@types/node@22.19.11)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.2)
 
+  packages/board-core:
+    devDependencies:
+      '@clawboo/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.11
+      tsup:
+        specifier: ^8.4.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.11)(jiti@2.6.1)(jsdom@25.0.1)(lightningcss@1.31.1)(msw@2.12.10(@types/node@22.19.11)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.2)
+
   packages/boo-avatar:
     devDependencies:
       '@clawboo/tsconfig':
@@ -564,6 +585,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@clawboo/board-core':
+        specifier: workspace:*
+        version: link:../board-core
       '@clawboo/compaction':
         specifier: workspace:*
         version: link:../compaction
@@ -859,6 +883,9 @@ importers:
 
   packages/team-orchestration:
     dependencies:
+      '@clawboo/board-core':
+        specifier: workspace:*
+        version: link:../board-core
       '@clawboo/executor':
         specifier: workspace:*
         version: link:../executor
