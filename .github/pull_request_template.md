@@ -28,4 +28,5 @@
 - [ ] `pnpm typecheck` passes
 - [ ] `pnpm lint` passes
 - [ ] `pnpm test` passes
+- [ ] `pnpm e2e` passes (or n/a — CI runs it on every PR either way)
 - [ ] Self-reviewed the diff

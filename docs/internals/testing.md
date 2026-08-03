@@ -5,7 +5,7 @@ description: 'How Clawboo verifies itself: the two Vitest projects, sandboxed Pl
 
 Clawboo is a team-first orchestrator: many agents write one SQLite file, five [runtimes](/appendices/glossary) execute heterogeneous work, and the whole thing ships as a single bundled CLI that has to boot on a stranger's machine. Each of those facts has a matching test layer. This page explains the layers, why each exists, and the invariants the standing guard tests freeze in place; so you can extend the suite without re-learning the same lessons the suite was written to encode.
 
-The full gate is six commands, all green: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm verify:ingest`, and `pnpm assemble && pnpm test:clean-install`. The first five run as parallel CI jobs; the last is the clean-install simulation, run on both Ubuntu and Windows. The strategy described below is deliberately phrased in terms of _suites and intent_, not exact test counts; counts change every session, and a doc that pins them goes stale on the next commit.
+The full gate is six commands, all green: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm verify:ingest`, and `pnpm assemble && pnpm test:clean-install`. Every one of them runs as a parallel CI job (`pnpm build` is a seventh job); the last is the clean-install simulation, run on both Ubuntu and Windows. The strategy described below is deliberately phrased in terms of _suites and intent_, not exact test counts; counts change every session, and a doc that pins them goes stale on the next commit.
 
 ## The model
 
@@ -120,7 +120,11 @@ The schema parity check compares only `{table → set(column names)}`. Column *t
 
 ## How CI wires it together
 
-The CI workflow (`.github/workflows/ci.yml`) runs `lint`, `typecheck`, `test`, `build`, and `verify-ingest` as independent parallel jobs, each on Node 22 with a frozen lockfile, plus the `smoke-test-bundle` job that runs `pnpm assemble && pnpm test:clean-install` on the Ubuntu + Windows matrix. The Turbo task graph makes `test`, `lint`, and `typecheck` depend on `^build` so every package's workspace dependencies are built first. Playwright e2e is not a default CI job; it builds the UI and boots a real server, which is heavier; it runs locally and on demand. The manual eval workflow (`evals.yml`) is `workflow_dispatch`-only.
+The CI workflow (`.github/workflows/ci.yml`) runs `lint`, `typecheck`, `test`, `build`, and `verify-ingest` as independent parallel jobs, each on Node 22 with a frozen lockfile, plus the `smoke-test-bundle` job that runs `pnpm assemble && pnpm test:clean-install` on the Ubuntu + Windows matrix. The Turbo task graph makes `test`, `lint`, and `typecheck` depend on `^build` so every package's workspace dependencies are built first.
+
+The seventh job is `e2e`. It is Ubuntu-only, because the `webServer` command is POSIX shell syntax that `cmd.exe` cannot parse, and it does three things the other jobs don't: it downloads Chromium (`playwright install --with-deps chromium`), it runs a full `pnpm build` first, and it uploads `playwright-report/` plus `test-results/` as an artifact so a failure is readable without reproducing it. The build step is not an optimization: every `@clawboo/*` package resolves through its gitignored `dist/`, nothing builds those during install, and both halves of the `webServer` command import them, so the suite would die before its first test without it. A green run is under 4 minutes on a hosted runner; the job's timeout is 15, leaving headroom for a cold cache and the two CI retries.
+
+Two more workflows sit alongside it. `codeql.yml` runs GitHub code scanning over the TypeScript sources and over the workflow files themselves, on pull requests, on pushes to `main`, and weekly; its `.github/codeql/codeql-config.yml` excludes only the codegen'd marketplace catalog, which is ~41% of the repo's TypeScript by volume and contains no executable logic. The manual eval workflow (`evals.yml`) is `workflow_dispatch`-only.
 
 The release pipeline that consumes these gates, Changesets, the publish workflow, and the clean-install gate's role on a Version-PR merge, is documented separately.
 
@@ -133,7 +137,7 @@ The cost is real: the server integration and e2e tests are slow (hence the widen
 ## Boundaries and non-goals
 
 - **No coverage threshold is enforced.** The suite is intent-driven (does this guarantee hold?), not line-coverage-driven. There is no `--coverage` gate.
-- **Playwright is not in the default CI matrix.** It runs locally and on demand because it builds the UI and boots a real server; the clean-install smoke is the CI-gated "assembled artifact works" check.
+- **Whether Playwright blocks a merge is a ruleset setting, not a workflow property.** The `e2e` job runs on every pull request and every push to `main`, so a break is visible immediately either way; whether a red run also blocks the merge button is decided by the `main` branch ruleset's required-checks list in the repository settings, not by anything in `ci.yml`. It shipped non-required so a flake could not wedge merges before the job had a run history. The clean-install smoke remains the gate on "the assembled artifact works".
 - **Live-model evals never gate a PR.** Only the deterministic smoke subset runs in `pnpm test`. The manual `evals.yml` workflow (`workflow_dispatch`) re-runs that same deterministic suite plus the ablation self-test; the live-model graders are defined but not yet wired into any task, so no provider-key path is active today.
 - **The schema parity guard is name-level, not shape-level.** It catches added/removed tables and columns, not type or constraint drift, by design, until a real schema change warrants the deeper check.
 
