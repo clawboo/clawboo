@@ -151,9 +151,11 @@ jobs:
     # (`VAR=value cmd && VAR=value cmd`), which cmd.exe cannot parse; running
     # the suite on Windows would need a cross-env wrapper first.
     runs-on: ubuntu-latest
-    # A green run is roughly 12-18 minutes. The headroom is for `retries: 2`,
-    # which playwright.config.ts turns on under CI.
-    timeout-minutes: 30
+    # Measured on this job's first green runs: under 4 minutes end to end
+    # (install ~4s warm, chromium ~23s, build ~76s, the suite itself ~111s).
+    # The margin on top covers a cold pnpm store and the two retries
+    # playwright.config.ts turns on under CI.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
