@@ -100,6 +100,48 @@ describe('the lazy report-up fetch', () => {
     expect(await screen.findByText('Already in the projection.')).toBeInTheDocument()
     expect(calls.n).toBe(0)
   })
+
+  it('re-fetches the NEW failure reason after a retry fails again (blocked → in_progress → blocked)', async () => {
+    // Each failure writes a fresh reason comment; the card must not pin the first.
+    let call = 0
+    server.use(
+      http.get('/api/board/t1', () => {
+        call += 1
+        return HttpResponse.json({
+          task: { id: 't1', title: 'Summarise the changelog' },
+          comments: [
+            {
+              body:
+                call === 1 ? 'First failure: ran out of context.' : 'Second failure: lint errors.',
+              authorType: 'system',
+            },
+          ],
+          ancestors: [],
+        })
+      }),
+    )
+    const view = render(task({ status: 'blocked' }))
+    expect(await screen.findByText(/First failure/)).toBeInTheDocument()
+
+    // The task is re-claimed for another attempt — the stale reason must clear,
+    // both so it isn't displayed mid-retry and so the next settle re-fetches.
+    view.rerender(
+      <ThemeProvider>
+        <BoardTaskCard task={task({ status: 'in_progress' })} />
+      </ThemeProvider>,
+    )
+    await waitFor(() => expect(screen.queryByText(/First failure/)).not.toBeInTheDocument())
+
+    // The retry fails too, with a NEW reason comment.
+    view.rerender(
+      <ThemeProvider>
+        <BoardTaskCard task={task({ status: 'blocked' })} />
+      </ThemeProvider>,
+    )
+    expect(await screen.findByText(/Second failure/)).toBeInTheDocument()
+    expect(screen.queryByText(/First failure/)).not.toBeInTheDocument()
+    expect(call).toBe(2)
+  })
 })
 
 describe('the status pill', () => {

@@ -1,15 +1,15 @@
-// Rulebook invariants + the purity guard that makes this module shareable.
+// Rulebook invariants. The repository-level behaviour (updateStatus enforcing
+// the machine inside a write transaction, completedAt stamping, the `→ todo`
+// release) is covered by packages/db/src/board/__tests__/board.test.ts against a
+// real SQLite file. What is tested HERE is the table itself: that the derived
+// accessors agree with each other and that the table is internally well-formed.
 //
-// The repository-level behaviour (updateStatus enforcing the machine inside a
-// write transaction, completedAt stamping, the `→ todo` release) is covered by
-// packages/db/src/board/__tests__/board.test.ts against a real SQLite file. What
-// is tested HERE is the table itself: that the derived accessors agree with each
-// other, that the table is internally well-formed, and that the module stays
-// import-free so it can ship into the browser bundle.
-
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+// The PURITY guards (state-machine.ts declares no imports/re-exports; the built
+// artifact carries zero bare specifiers) live in
+// apps/web/src/__tests__/browserBundlePurity.test.ts, next to the consumer they
+// protect. Keeping them out of this suite lets tsconfig.json exclude tests and
+// pin `"types": []`, so a node global (`process`, `Buffer`) in the SOURCE is a
+// typecheck failure — a guard no source-text scan provides.
 
 import { describe, expect, it } from 'vitest'
 
@@ -111,26 +111,5 @@ describe('legalTargets returns a defensive copy', () => {
     expect(legalTargets('todo')).toEqual(snapshot)
     // And the mutation must not have leaked into the predicate either.
     expect(canTransition('todo', 'done')).toBe(false)
-  })
-})
-
-describe('purity: state-machine.ts is import-free so it can ship to the browser', () => {
-  // Read the SOURCE, not the build output: a package's own `test` task only gets
-  // turbo's `^build` (its DEPENDENCIES' builds), so dist/ may not exist here.
-  const source = readFileSync(
-    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'state-machine.ts'),
-    'utf8',
-  )
-  // Strip line + block comments so prose mentioning "import" can't trip the guard.
-  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
-
-  it('declares no imports', () => {
-    expect(code).not.toMatch(/^\s*import\s/m)
-    expect(code).not.toMatch(/\bimport\s*\(/)
-    expect(code).not.toMatch(/\brequire\s*\(/)
-  })
-
-  it('references no node builtin', () => {
-    expect(code).not.toMatch(/['"]node:/)
   })
 })

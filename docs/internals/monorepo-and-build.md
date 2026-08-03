@@ -11,7 +11,7 @@ If you want the per-package API surface and the dependency graph in detail, read
 
 The repo is a **single workspace** of many small packages, not a polyrepo with version pins. Every `@clawboo/*` library is consumed via `workspace:*` (or `workspace:^`) protocol from the two apps, so there is no internal npm publish-then-install loop; Turbo builds a package's `dist/` and the app that depends on it picks it up directly.
 
-It is **not** a "publish every package" monorepo. Despite 28 scoped packages, **all of them are `private: true`**; none publishes to npm. The **only** published artifact is the `clawboo` CLI in `apps/cli`, and it does not depend on its sibling packages at runtime the way the web app does. Instead, the build _inlines_ the libraries it needs into the CLI's shipped bundle. See [What publishes](#what-publishes).
+It is **not** a "publish every package" monorepo. Despite 29 scoped packages, **all of them are `private: true`**; none publishes to npm. The **only** published artifact is the `clawboo` CLI in `apps/cli`, and it does not depend on its sibling packages at runtime the way the web app does. Instead, the build _inlines_ the libraries it needs into the CLI's shipped bundle. See [What publishes](#what-publishes).
 
 ## The workspace layout
 

@@ -139,4 +139,44 @@ describe('@clawboo/board-core ships with no dependencies of its own', () => {
     expect(bareSpecifiers(esm)).toEqual([])
     expect(bareSpecifiers(cjs)).toEqual([])
   })
+
+  // Belt to the artifact check's suspenders: the SOURCE stays dependency-free too,
+  // so the guarantee doesn't hinge on a fresh build. Lives here rather than in
+  // board-core's own suite so that package's tsconfig can pin `"types": []` (its
+  // tests then need no node imports, and a node global in its source is a
+  // typecheck failure). `from`-clause matching covers plain imports AND re-exports
+  // (`export * from`, `export { x } from`, `export * as ns from`) — a re-export
+  // adds a dependency without any `import` statement.
+  describe('the state-machine SOURCE is import-free', () => {
+    const source = readFileSync(
+      path.join(path.dirname(cjs), '..', 'src', 'state-machine.ts'),
+      'utf8',
+    )
+    // Strip comments so prose mentioning "import" or "from" can't trip the guard.
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+
+    it('has no import, re-export, require, or dynamic import', () => {
+      expect(code).not.toMatch(/\bfrom\s*['"]/)
+      expect(code).not.toMatch(/^\s*import\s/m)
+      expect(code).not.toMatch(/\bimport\s*\(/)
+      expect(code).not.toMatch(/\brequire\s*\(/)
+    })
+
+    it('references no node builtin', () => {
+      expect(code).not.toMatch(/['"]node:/)
+    })
+
+    it('the from-clause check would catch a re-export (scanner self-test)', () => {
+      // Built via interpolation so this file's own text never contains a
+      // `from '<specifier>'` sequence the sweep above would flag.
+      for (const bad of [
+        `export * from '${SPECIFIER}'`,
+        `export { createDb } from '${SPECIFIER}'`,
+        `export * as db from '${SPECIFIER}'`,
+        `export type { DbTask } from '${SPECIFIER}'`,
+      ]) {
+        expect(bad).toMatch(/\bfrom\s*['"]/)
+      }
+    })
+  })
 })

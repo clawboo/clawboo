@@ -100,8 +100,16 @@ export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: Board
     task.status === 'done' || task.status === 'blocked' || task.status === 'cancelled'
   const [output, setOutput] = useState<string | null>(task.summary)
   useEffect(() => {
-    if (task.summary) setOutput(task.summary)
-  }, [task.summary])
+    if (task.summary) {
+      setOutput(task.summary)
+    } else if (!hasSettledOutput) {
+      // Leaving a settled status invalidates a previously-fetched report-up:
+      // `blocked → in_progress → blocked` is a legal retry path and each failure
+      // writes a NEW reason comment, so a kept `output` would both display the
+      // stale reason mid-retry and block the re-fetch when the task settles again.
+      setOutput(null)
+    }
+  }, [task.summary, hasSettledOutput])
   useEffect(() => {
     if (!hasSettledOutput || output) return
     let cancelled = false
