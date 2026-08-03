@@ -22,6 +22,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -39,10 +40,27 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   return out
 }
 
-/** Drop block comments and whole-line `//` comments so prose about an import can't
- *  trip the scanner. Mid-line `//` is left alone (it would eat `https://` URLs). */
+// Drop comment trivia the LEXER way, so prose about an import can't trip the
+// scanner. Regex stripping is not enough here: a string literal that merely
+// CONTAINS a comment opener (an unpaired "slash-star", or any `src/**` glob
+// pattern) would open a phantom block comment and swallow the executable code
+// after it — hiding a real import. The TypeScript scanner tokenizes strings as
+// strings and comments as trivia, so only genuine comments are removed; a URL's
+// `//` inside a string survives untouched for the same reason.
 function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest,
+    /* skipTrivia */ false,
+    ts.LanguageVariant.Standard,
+    source,
+  )
+  let out = ''
+  for (let t = scanner.scan(); t !== ts.SyntaxKind.EndOfFileToken; t = scanner.scan()) {
+    if (t !== ts.SyntaxKind.SingleLineCommentTrivia && t !== ts.SyntaxKind.MultiLineCommentTrivia) {
+      out += scanner.getTokenText()
+    }
+  }
+  return out
 }
 
 const SPECIFIER = '@clawboo/db'
@@ -90,6 +108,25 @@ describe('no browser source value-imports @clawboo/db', () => {
       valueImportsOfDb(`import { a } from './a'\nimport type { B } from '${SPECIFIER}'`),
     ).toEqual([])
     expect(valueImportsOfDb(`// import { createDb } from '${SPECIFIER}'`)).toEqual([])
+  })
+
+  it('cannot be blinded by comment markers inside string literals', () => {
+    // Regex-based stripping treated everything between these two strings as one
+    // block comment and swallowed the import — the lexer must not.
+    const open = '/' + '*'
+    const close = '*' + '/'
+    const trap = [
+      `const a = '${open}'`,
+      `import { createDb } from '${SPECIFIER}'`,
+      `const b = '${close}'`,
+    ].join('\n')
+    expect(valueImportsOfDb(trap)).toHaveLength(1)
+    // …while a genuine block comment still hides nothing worth flagging, and a
+    // string containing `//` (a URL) survives stripping intact.
+    expect(valueImportsOfDb(`/* import { createDb } from '${SPECIFIER}' */`)).toEqual([])
+    expect(stripComments(`const u = 'https://claw.boo' // trailing note`)).toContain(
+      'https://claw.boo',
+    )
   })
 
   it('has no value import anywhere under apps/web/src', () => {
@@ -152,8 +189,8 @@ describe('@clawboo/board-core ships with no dependencies of its own', () => {
       path.join(path.dirname(cjs), '..', 'src', 'state-machine.ts'),
       'utf8',
     )
-    // Strip comments so prose mentioning "import" or "from" can't trip the guard.
-    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+    // Same lexer-grade stripping as the sweep above — see stripComments.
+    const code = stripComments(source)
 
     it('has no import, re-export, require, or dynamic import', () => {
       expect(code).not.toMatch(/\bfrom\s*['"]/)
