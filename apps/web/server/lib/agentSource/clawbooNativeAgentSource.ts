@@ -206,7 +206,10 @@ export class ClawbooNativeAgentSource implements AgentSource {
       input.execConfig && typeof input.execConfig === 'object'
         ? (input.execConfig as Record<string, unknown>)
         : {}
-    const { modelTier, ...execConfig } = rawExec as { modelTier?: unknown } & Record<string, unknown>
+    const { modelTier, ...execConfig } = rawExec as { modelTier?: unknown } & Record<
+      string,
+      unknown
+    >
     const hasExplicitProvider =
       typeof execConfig['primaryProvider'] === 'string' && execConfig['primaryProvider'].length > 0
     const resolvedProvider = hasExplicitProvider

@@ -2,34 +2,41 @@
 title: Changelog
 description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.3.0.
 ---
+
 Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a monorepo of 25 `@clawboo/*` workspace packages, but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
 
 Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which gates on the bundled-CLI clean-install smoke test and then runs `pnpm changeset publish`. The full mechanics are in [Release process](/internals/release-process).
 
 <Note>
-The current npm `latest` is **`clawboo@0.3.0`**, the version these docs describe, so `npx clawboo` installs v0.3.0.
+  The current npm `latest` is **`clawboo@0.3.0`**, the version these docs describe, so `npx clawboo`
+  installs v0.3.0.
 </Note>
 
 <Warning>
-Every `0.1.x` release (0.1.0 through 0.1.9) is **deprecated** on npm. The 0.1.x line is OpenClaw-only and predates the v0.2.0 native-first multi-runtime rewrite, so it no longer works reliably against current OpenClaw. Install the supported release with `npm install -g clawboo@latest`, or run `npx clawboo@latest`. The `@latest` is load-bearing here: a bare `npx clawboo` can re-serve a deprecated build already sitting in npm's `_npx` cache, which is the exact situation this warning is about.
+  Every `0.1.x` release (0.1.0 through 0.1.9) is **deprecated** on npm. The 0.1.x line is
+  OpenClaw-only and predates the v0.2.0 native-first multi-runtime rewrite, so it no longer works
+  reliably against current OpenClaw. Install the supported release with `npm install -g
+  clawboo@latest`, or run `npx clawboo@latest`. The `@latest` is load-bearing here: a bare `npx
+  clawboo` can re-serve a deprecated build already sitting in npm's `_npx` cache, which is the exact
+  situation this warning is about.
 </Warning>
 
 ## At a glance
 
-| Version | Tag | npm | Theme |
-|---|---|---|---|
-| 0.3.0 | `clawboo@0.3.0` | published | Native-first: run Gateway-free on one provider key, mixed-runtime teams, live native team chat |
-| 0.2.0 | `clawboo@0.2.0` | published | The liberated cut, full multi-runtime orchestrator |
-| 0.1.9 | `clawboo@0.1.9` | deprecated | Welcome redesign, lighter install, team colors |
-| 0.1.8 | `clawboo@0.1.8` | deprecated | Light/dark theme + design-system pass |
-| 0.1.7 | `clawboo@0.1.7` | deprecated | Device pairing in the wizard + Windows hardening |
-| 0.1.6 | `clawboo@0.1.6` | deprecated | Bootstrap: verify install state, don't trust localStorage |
-| 0.1.5 | `clawboo@0.1.5` | deprecated | In-dashboard device pairing (OpenClaw 2026.5+) |
-| 0.1.4 | `clawboo@0.1.4` | deprecated | OpenClaw protocol-4 + Windows install support |
-| 0.1.3 | `clawboo@0.1.3` | deprecated | CLI port discovery: HTTP-verify Clawboo identity |
-| 0.1.2 | `clawboo@0.1.2` | deprecated | SPA root-path fix (`Cannot GET /`) |
-| 0.1.1 | `clawboo@0.1.1` | deprecated | First real release (v0.1.0 marketplace milestone) |
-| 0.1.0 | `clawboo@0.1.0` | deprecated | Initial package scaffold |
+| Version | Tag             | npm        | Theme                                                                                          |
+| ------- | --------------- | ---------- | ---------------------------------------------------------------------------------------------- |
+| 0.3.0   | `clawboo@0.3.0` | published  | Native-first: run Gateway-free on one provider key, mixed-runtime teams, live native team chat |
+| 0.2.0   | `clawboo@0.2.0` | published  | The liberated cut, full multi-runtime orchestrator                                             |
+| 0.1.9   | `clawboo@0.1.9` | deprecated | Welcome redesign, lighter install, team colors                                                 |
+| 0.1.8   | `clawboo@0.1.8` | deprecated | Light/dark theme + design-system pass                                                          |
+| 0.1.7   | `clawboo@0.1.7` | deprecated | Device pairing in the wizard + Windows hardening                                               |
+| 0.1.6   | `clawboo@0.1.6` | deprecated | Bootstrap: verify install state, don't trust localStorage                                      |
+| 0.1.5   | `clawboo@0.1.5` | deprecated | In-dashboard device pairing (OpenClaw 2026.5+)                                                 |
+| 0.1.4   | `clawboo@0.1.4` | deprecated | OpenClaw protocol-4 + Windows install support                                                  |
+| 0.1.3   | `clawboo@0.1.3` | deprecated | CLI port discovery: HTTP-verify Clawboo identity                                               |
+| 0.1.2   | `clawboo@0.1.2` | deprecated | SPA root-path fix (`Cannot GET /`)                                                             |
+| 0.1.1   | `clawboo@0.1.1` | deprecated | First real release (v0.1.0 marketplace milestone)                                              |
+| 0.1.0   | `clawboo@0.1.0` | deprecated | Initial package scaffold                                                                       |
 
 The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap that made Clawboo runtime-agnostic, and 0.3.0 is the product that leap made possible: native-first, so the first run needs one provider key and nothing else.
 
@@ -86,7 +93,9 @@ What this cut brings over the 0.1.x line:
 - **Per-runtime native homes** under `~/.clawboo/runtimes/<runtime>/<agentId>/`, an **encrypted credential vault** under `~/.clawboo/secrets/`, the **team-task scheduler** (Routines), and a release-cut security audit (case-folded access gate, loopback-exempt `/api/mcp/*`, default loopback bind).
 
 <Info>
-Schema model: there is **no migration ladder**. The `createDb` inline `CREATE TABLE IF NOT EXISTS` DDL is the sole schema source; a schema change is a hard reset, and there is no in-place upgrade from a 0.1.x database to 0.2.0. See [Data & state](/operating/data-and-state).
+  Schema model: there is **no migration ladder**. The `createDb` inline `CREATE TABLE IF NOT EXISTS`
+  DDL is the sole schema source; a schema change is a hard reset, and there is no in-place upgrade
+  from a 0.1.x database to 0.2.0. See [Data & state](/operating/data-and-state).
 </Info>
 
 ---
@@ -149,7 +158,11 @@ First real release, replaces the v0.0.0 / v0.1.0 placeholder builds (changeset `
 - Local-DB ghost cleanup and per-agent KV cleanup on agent delete.
 
 <Note>
-The 0.1.1 orchestration model, prose/regex chat-relay with DelegationCards/PlanCards/WorkstreamCards, was superseded in v0.2.0 by board-driven orchestration over structured lifecycle events. The marketplace catalog (304 agents, 82 teams) carries forward and is still codegen'd by `scripts/ingest-marketplace-content.ts`, gated by `verify:ingest`. See [Codegen & ingestion](/internals/codegen-and-ingestion).
+  The 0.1.1 orchestration model, prose/regex chat-relay with
+  DelegationCards/PlanCards/WorkstreamCards, was superseded in v0.2.0 by board-driven orchestration
+  over structured lifecycle events. The marketplace catalog (304 agents, 82 teams) carries forward
+  and is still codegen'd by `scripts/ingest-marketplace-content.ts`, gated by `verify:ingest`. See
+  [Codegen & ingestion](/internals/codegen-and-ingestion).
 </Note>
 
 ## 0.1.0

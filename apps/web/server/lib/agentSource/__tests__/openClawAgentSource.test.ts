@@ -329,9 +329,7 @@ describe('OpenClawAgentSource', () => {
     expect(servers['clawboo-tasks']?.url).toContain('/api/mcp/tasks')
     // Anti-sub-agent enforcement: the sub-agent-spawning tools are denied at the
     // runtime level so a spawn-happy model can't bypass the team via sessions_spawn.
-    expect(merged.tools?.deny).toEqual(
-      expect.arrayContaining(['sessions_spawn', 'sessions_yield']),
-    )
+    expect(merged.tools?.deny).toEqual(expect.arrayContaining(['sessions_spawn', 'sessions_yield']))
     // TeamChat is DELIBERATELY NOT registered for OpenClaw (anti-spoof): a
     // process-wide URL can't carry a per-run author binding, so an unbound
     // team_chat_post tool would let an agent post as any author. OpenClaw's room

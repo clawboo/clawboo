@@ -61,8 +61,7 @@ export function registerScheduledRun(
   return immediateWrite(db, (tx) => {
     if (input.teamTaskId) {
       const task = tx.select().from(tasks).where(eq(tasks.id, input.teamTaskId)).get() as
-        | DbTask
-        | undefined
+        DbTask | undefined
       if (!task) return { ok: false as const, reason: 'task_not_found' as const }
       if (task.scheduledBy !== 'manual' && task.scheduledBy !== owner) {
         return {
@@ -101,8 +100,7 @@ export function registerScheduledRun(
 export function getScheduledRun(db: ClawbooDb, id: string): DbScheduledRun | null {
   return (
     (db.select().from(scheduledRuns).where(eq(scheduledRuns.id, id)).get() as
-      | DbScheduledRun
-      | undefined) ?? null
+      DbScheduledRun | undefined) ?? null
   )
 }
 
@@ -240,8 +238,7 @@ export function recordRunOutcome(
 // ─── User-driven transitions (pause / resume / force-fire) ──────────────────
 
 export type SetStatusResult =
-  | { ok: true; run: DbScheduledRun }
-  | { ok: false; reason: 'not_found' | 'illegal_transition' }
+  { ok: true; run: DbScheduledRun } | { ok: false; reason: 'not_found' | 'illegal_transition' }
 
 /** pause / resume with the state machine enforced inside BEGIN IMMEDIATE. */
 export function setScheduledRunStatus(
@@ -253,8 +250,7 @@ export function setScheduledRunStatus(
   const now = Date.now()
   return immediateWrite(db, (tx) => {
     const row = tx.select().from(scheduledRuns).where(eq(scheduledRuns.id, id)).get() as
-      | DbScheduledRun
-      | undefined
+      DbScheduledRun | undefined
     if (!row) return { ok: false as const, reason: 'not_found' as const }
     if (!canRoutineTransition(row.status as ScheduledRunStatus, to)) {
       return { ok: false as const, reason: 'illegal_transition' as const }

@@ -10,13 +10,7 @@ import type {
  *  @clawboo/protocol's AGENT_FILE_NAMES (kept as a local literal so this package
  *  stays dependency-free / browser-safe). */
 export type AgentFileName =
-  | 'AGENTS.md'
-  | 'SOUL.md'
-  | 'IDENTITY.md'
-  | 'USER.md'
-  | 'TOOLS.md'
-  | 'HEARTBEAT.md'
-  | 'MEMORY.md'
+  'AGENTS.md' | 'SOUL.md' | 'IDENTITY.md' | 'USER.md' | 'TOOLS.md' | 'HEARTBEAT.md' | 'MEMORY.md'
 
 export const AGENT_FILE_NAMES: readonly AgentFileName[] = [
   'AGENTS.md',

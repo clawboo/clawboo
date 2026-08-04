@@ -179,80 +179,79 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
             transition={{ duration: 0.15 }}
             className="mt-4 overflow-hidden"
           >
-              <div
-                role="alert"
-                className="rounded-lg border border-destructive/20 bg-destructive/8 px-3 py-2.5 text-[12px] leading-snug text-destructive"
-              >
-                <p className="font-semibold mb-1.5">{errorMessage}</p>
-                <button
-                  type="button"
-                  onClick={() => setShowPermFix((v) => !v)}
-                  className="flex items-center gap-1 text-[11px] text-destructive/70 underline underline-offset-2"
-                >
-                  How to fix
-                  <ChevronDown
-                    className={[
-                      'h-3 w-3 transition-transform',
-                      showPermFix ? 'rotate-180' : '',
-                    ].join(' ')}
-                  />
-                </button>
-                <AnimatePresence initial={false}>
-                  {showPermFix && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.15 }}
-                      className="overflow-hidden"
-                    >
-                      <ul className="mt-2 flex flex-col gap-1.5 text-[11px] text-destructive/60">
-                        <li>
-                          <strong>nvm / fnm:</strong> Global installs should work without sudo. Try
-                          closing and reopening your terminal.
-                        </li>
-                        <li>
-                          <strong>Homebrew:</strong> Run{' '}
-                          <code className="rounded bg-foreground/5 px-1 py-0.5 font-mono text-[10px]">
-                            brew postinstall node
-                          </code>
-                        </li>
-                        <li>
-                          <strong>Otherwise:</strong> Run{' '}
-                          <code className="rounded bg-foreground/5 px-1 py-0.5 font-mono text-[10px]">
-                            sudo npm install -g openclaw@latest
-                          </code>{' '}
-                          in your terminal
-                        </li>
-                      </ul>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Generic error panel ────────────────────────────── */}
-        <AnimatePresence initial={false}>
-          {installStatus === 'error' && !isEacces && (
-            <motion.div
-              key="generic-error"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.15 }}
-              className="mt-4 overflow-hidden"
+            <div
+              role="alert"
+              className="rounded-lg border border-destructive/20 bg-destructive/8 px-3 py-2.5 text-[12px] leading-snug text-destructive"
             >
-              <div
-                role="alert"
-                className="rounded-xl border border-destructive/20 bg-destructive/8 px-4 py-3 text-[13px] leading-snug text-destructive"
+              <p className="font-semibold mb-1.5">{errorMessage}</p>
+              <button
+                type="button"
+                onClick={() => setShowPermFix((v) => !v)}
+                className="flex items-center gap-1 text-[11px] text-destructive/70 underline underline-offset-2"
               >
-                {errorMessage}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                How to fix
+                <ChevronDown
+                  className={['h-3 w-3 transition-transform', showPermFix ? 'rotate-180' : ''].join(
+                    ' ',
+                  )}
+                />
+              </button>
+              <AnimatePresence initial={false}>
+                {showPermFix && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="overflow-hidden"
+                  >
+                    <ul className="mt-2 flex flex-col gap-1.5 text-[11px] text-destructive/60">
+                      <li>
+                        <strong>nvm / fnm:</strong> Global installs should work without sudo. Try
+                        closing and reopening your terminal.
+                      </li>
+                      <li>
+                        <strong>Homebrew:</strong> Run{' '}
+                        <code className="rounded bg-foreground/5 px-1 py-0.5 font-mono text-[10px]">
+                          brew postinstall node
+                        </code>
+                      </li>
+                      <li>
+                        <strong>Otherwise:</strong> Run{' '}
+                        <code className="rounded bg-foreground/5 px-1 py-0.5 font-mono text-[10px]">
+                          sudo npm install -g openclaw@latest
+                        </code>{' '}
+                        in your terminal
+                      </li>
+                    </ul>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Generic error panel ────────────────────────────── */}
+      <AnimatePresence initial={false}>
+        {installStatus === 'error' && !isEacces && (
+          <motion.div
+            key="generic-error"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="mt-4 overflow-hidden"
+          >
+            <div
+              role="alert"
+              className="rounded-xl border border-destructive/20 bg-destructive/8 px-4 py-3 text-[13px] leading-snug text-destructive"
+            >
+              {errorMessage}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </OnboardingScreen>
   )
 }

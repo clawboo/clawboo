@@ -10,13 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type RuntimeEventKind =
-  | 'text-delta'
-  | 'tool-call'
-  | 'tool-result'
-  | 'status'
-  | 'cost'
-  | 'done'
-  | 'error'
+  'text-delta' | 'tool-call' | 'tool-result' | 'status' | 'cost' | 'done' | 'error'
 
 /** Token usage for a run (USD is carried separately on the `cost` event). */
 export interface Usage {

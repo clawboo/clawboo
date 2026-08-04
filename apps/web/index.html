@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -18,7 +18,10 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="clawboo" />
     <meta property="og:url" content="https://www.claw.boo" />
-    <meta property="og:title" content="clawboo: deploy a team of AI agents and watch them collaborate live" />
+    <meta
+      property="og:title"
+      content="clawboo: deploy a team of AI agents and watch them collaborate live"
+    />
     <meta
       property="og:description"
       content="Open-source AI agent studio with a multi-agent harness. Local-first, MIT, on your machine."
@@ -26,11 +29,17 @@
     <meta property="og:image" content="https://www.claw.boo/og-card.jpg" />
     <meta property="og:image:width" content="1280" />
     <meta property="og:image:height" content="600" />
-    <meta property="og:image:alt" content="clawboo: a team of ghost-lobster Boo agents on a calm day sky" />
+    <meta
+      property="og:image:alt"
+      content="clawboo: a team of ghost-lobster Boo agents on a calm day sky"
+    />
 
     <!-- Twitter / X card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="clawboo: deploy a team of AI agents and watch them collaborate live" />
+    <meta
+      name="twitter:title"
+      content="clawboo: deploy a team of AI agents and watch them collaborate live"
+    />
     <meta
       name="twitter:description"
       content="Open-source AI agent studio with a multi-agent harness. Local-first, MIT, on your machine."
@@ -52,24 +61,24 @@
          picks a preference (light/dark/system) it's respected.
          Mirror of the resolver inside features/theme/ThemeProvider.tsx. -->
     <script>
-      (function () {
+      ;(function () {
         try {
-          var stored = window.localStorage.getItem('clawboo.theme');
+          var stored = window.localStorage.getItem('clawboo.theme')
           var pref =
-            stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'light';
+            stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'light'
           var resolved =
             pref === 'system'
               ? window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
                 ? 'dark'
                 : 'light'
-              : pref;
-          var root = document.documentElement;
-          if (resolved === 'dark') root.classList.add('dark');
-          else root.classList.remove('dark');
+              : pref
+          var root = document.documentElement
+          if (resolved === 'dark') root.classList.add('dark')
+          else root.classList.remove('dark')
         } catch (_e) {
           /* fall back to default (no class) — light theme renders */
         }
-      })();
+      })()
     </script>
   </head>
   <body>

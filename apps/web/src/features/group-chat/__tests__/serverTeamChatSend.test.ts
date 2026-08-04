@@ -38,7 +38,12 @@ describe('sendServerTeamMessage', () => {
     // Optimistic bubble under the target key.
     const entries = useChatStore.getState().transcripts.get(sk)
     expect(entries).toHaveLength(1)
-    expect(entries![0]).toMatchObject({ role: 'user', kind: 'user', text: 'fix the bug', sessionKey: sk })
+    expect(entries![0]).toMatchObject({
+      role: 'user',
+      kind: 'user',
+      text: 'fix the bug',
+      sessionKey: sk,
+    })
     const optimisticEntryId = entries![0]!.entryId
 
     // POST body carries the SAME entryId (deterministic dedup with the SSE replay).
@@ -47,13 +52,22 @@ describe('sendServerTeamMessage', () => {
     expect(url).toBe('/api/teams/t1/chat')
     expect(init.method).toBe('POST')
     const body = JSON.parse(init.body as string)
-    expect(body).toEqual({ message: 'fix the bug', targetAgentId: 'a2', entryId: optimisticEntryId })
+    expect(body).toEqual({
+      message: 'fix the bug',
+      targetAgentId: 'a2',
+      entryId: optimisticEntryId,
+    })
   })
 
   it('keeps the optimistic bubble even when the POST fails (intent preserved)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
     const sk = 'agent:a2:team:t1'
-    await sendServerTeamMessage({ teamId: 't1', targetAgentId: 'a2', targetSessionKey: sk, message: 'hi' })
+    await sendServerTeamMessage({
+      teamId: 't1',
+      targetAgentId: 'a2',
+      targetSessionKey: sk,
+      message: 'hi',
+    })
     expect(useChatStore.getState().transcripts.get(sk)).toHaveLength(1)
   })
 })

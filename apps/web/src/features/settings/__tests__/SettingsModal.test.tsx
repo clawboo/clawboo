@@ -10,9 +10,7 @@ vi.mock('@/features/layout/navPanels', () => ({
   NAV_PANELS: new Proxy(
     {},
     {
-      get:
-        (_t, view: string) =>
-        () => <div data-testid={`stub-panel-${view}`}>panel:{view}</div>,
+      get: (_t, view: string) => () => <div data-testid={`stub-panel-${view}`}>panel:{view}</div>,
     },
   ),
 }))

@@ -79,8 +79,12 @@ describe('buildCandidates', () => {
       envVar: 'GROQ_API_KEY',
       fallbacks: [],
     }
-    const candidates = buildCandidates(cfg, undefined, (v) => (v === 'GROQ_API_KEY' ? 'gsk-x' : null))
-    expect(candidates).toEqual([{ provider: 'groq', model: 'llama-3.3-70b-versatile', key: 'gsk-x' }])
+    const candidates = buildCandidates(cfg, undefined, (v) =>
+      v === 'GROQ_API_KEY' ? 'gsk-x' : null,
+    )
+    expect(candidates).toEqual([
+      { provider: 'groq', model: 'llama-3.3-70b-versatile', key: 'gsk-x' },
+    ])
   })
 })
 

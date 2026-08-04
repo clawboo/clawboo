@@ -35,12 +35,18 @@ export function InlineApprovalTray({ agentId, teamId }: InlineApprovalTrayProps)
 
   const items = useMemo<TrayItem[]>(() => {
     const merged: TrayItem[] = [
-      ...exec.map(
-        (a): TrayItem => ({ key: `exec-${a.id}`, ts: a.createdAtMs, kind: 'exec', exec: a }),
-      ),
-      ...tool.map(
-        (a): TrayItem => ({ key: `tool-${a.id}`, ts: a.createdAt, kind: 'tool', tool: a }),
-      ),
+      ...exec.map((a): TrayItem => ({
+        key: `exec-${a.id}`,
+        ts: a.createdAtMs,
+        kind: 'exec',
+        exec: a,
+      })),
+      ...tool.map((a): TrayItem => ({
+        key: `tool-${a.id}`,
+        ts: a.createdAt,
+        kind: 'tool',
+        tool: a,
+      })),
     ]
     return merged.sort((a, b) => a.ts - b.ts)
   }, [exec, tool])

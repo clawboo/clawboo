@@ -55,10 +55,14 @@ export async function sendServerTeamMessage(params: SendServerTeamMessageParams)
       body: JSON.stringify({ message, targetAgentId, entryId }),
     })
     if (!res.ok) {
-      useToastStore.getState().addToast({ message: 'Could not reach the team. Try again?', type: 'error' })
+      useToastStore
+        .getState()
+        .addToast({ message: 'Could not reach the team. Try again?', type: 'error' })
     }
   } catch {
-    useToastStore.getState().addToast({ message: 'Could not reach the team. Try again?', type: 'error' })
+    useToastStore
+      .getState()
+      .addToast({ message: 'Could not reach the team. Try again?', type: 'error' })
   }
 }
 

@@ -98,8 +98,7 @@ function resolveLeaderId(db: ClawbooDb, teamId: string): string | null {
   const bz = booZeroForTeam(db, teamId)
   if (bz) return bz.id
   const team = db.select().from(teams).where(eq(teams.id, teamId)).get() as
-    | { leaderAgentId?: string | null }
-    | undefined
+    { leaderAgentId?: string | null } | undefined
   const members = activeTeamAgents(db, teamId)
   if (team?.leaderAgentId && members.some((a) => a.id === team.leaderAgentId))
     return team.leaderAgentId

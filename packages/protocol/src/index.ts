@@ -72,11 +72,7 @@ export type TranscriptEntryKind = 'meta' | 'user' | 'assistant' | 'thinking' | '
 export type TranscriptEntryRole = 'user' | 'assistant' | 'tool' | 'system' | 'other'
 
 export type TranscriptEntrySource =
-  | 'local-send'
-  | 'runtime-chat'
-  | 'runtime-agent'
-  | 'history'
-  | 'legacy'
+  'local-send' | 'runtime-chat' | 'runtime-agent' | 'history' | 'legacy'
 
 export type TranscriptEntry = {
   entryId: string

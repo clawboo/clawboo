@@ -112,8 +112,7 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
   const sessionKey = nativeChatSessionKey(agentId)
 
   const row = db.select().from(agents).where(eq(agents.id, agentId)).get() as
-    | { id: string; runtime?: string | null }
-    | undefined
+    { id: string; runtime?: string | null } | undefined
   const runtime = row?.runtime ?? null
 
   let adapter: RuntimeAdapter

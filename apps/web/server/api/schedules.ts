@@ -120,12 +120,10 @@ export async function schedulesUpdatePATCH(req: Request, res: Response): Promise
       res.json({ schedule })
       return
     }
-    res
-      .status(400)
-      .json({
-        error: "body needs { action: 'pause' | 'resume' } or { patch }",
-        code: 'invalid_body',
-      })
+    res.status(400).json({
+      error: "body needs { action: 'pause' | 'resume' } or { patch }",
+      code: 'invalid_body',
+    })
   } catch (err) {
     mapScheduleError(err, res)
   }

@@ -39,7 +39,15 @@ describe('resolveServerOrchestrated', () => {
   function team(id: string, leaderAgentId: string | null = null): void {
     const now = Date.now()
     db.insert(teams)
-      .values({ id, name: id, icon: '👻', color: '#fff', leaderAgentId, createdAt: now, updatedAt: now })
+      .values({
+        id,
+        name: id,
+        icon: '👻',
+        color: '#fff',
+        leaderAgentId,
+        createdAt: now,
+        updatedAt: now,
+      })
       .run()
   }
   function agent(id: string, teamId: string, runtime: string): void {

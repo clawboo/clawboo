@@ -104,9 +104,7 @@ Reconstructs one trace, every event sharing the `traceId`, ordered `seq` ASC (ca
 ```ts
 {
   traceId: string
-  events: Array<{
-    /* same redacted row shape as GET /api/obs/events */
-  }>
+  events: Array<{/* same redacted row shape as GET /api/obs/events */}>
   metrics: {
     totalCostUsd: number
     inputTokens: number
@@ -433,9 +431,7 @@ Both inputs are floored and clamped so the route can never be turned into a load
       taskId: string
       passed: boolean
       score: number
-      graders: Array<{
-        /* GraderResult */
-      }>
+      graders: Array<{/* GraderResult */}>
     }>
     passAt1: number // per-trial success rate = empirical pass@1
     passPowK: number // probability all k trials pass = passAt1^k

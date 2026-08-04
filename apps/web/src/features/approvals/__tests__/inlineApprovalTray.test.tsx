@@ -71,7 +71,9 @@ describe('InlineApprovalTray', () => {
     useBooZeroStore.setState({ booZeroAgentId: 'bz' })
     server.use(
       http.get('/api/tools/approvals', () =>
-        HttpResponse.json({ approvals: [{ ...toolApproval, toolName: 'delegate', agentId: 'bz' }] }),
+        HttpResponse.json({
+          approvals: [{ ...toolApproval, toolName: 'delegate', agentId: 'bz' }],
+        }),
       ),
     )
     render(<InlineApprovalTray teamId="t1" />)
