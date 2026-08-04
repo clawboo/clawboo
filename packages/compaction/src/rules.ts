@@ -105,7 +105,7 @@ export function dedupAndElide(
   // 1) Collapse consecutive identical lines into "<line>  (×N)".
   const lines = output.split('\n')
   const deduped: string[] = []
-  for (let i = 0; i < lines.length; ) {
+  for (let i = 0; i < lines.length;) {
     let j = i + 1
     while (j < lines.length && lines[j] === lines[i]) j++
     const run = j - i

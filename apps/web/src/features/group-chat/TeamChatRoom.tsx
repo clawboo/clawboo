@@ -6,11 +6,11 @@
 // /api/team-chat read on an 8s cadence (matching the rest of the dashboard).
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
 import { MessagesSquare, X } from 'lucide-react'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { IconButton } from '@/features/shared/Button'
+import { Modal } from '@/features/shared/Modal'
 import { formatRelative } from '@/lib/formatRelative'
 import { fetchTeamChat, type TeamChatPost } from '@/lib/teamChatClient'
 import { useFleetStore } from '@/stores/fleet'
@@ -109,93 +109,107 @@ export function TeamChatRoom({ teamId, onClose }: { teamId: string; onClose: () 
     if (el) el.scrollTop = el.scrollHeight
   }, [posts.length])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // ── A11y: announce peer posts that arrive while the room is open ──────────
+  // The room polls every 8 s, so "new" means "seq beyond the last poll" — never
+  // the backlog present on first load, which would read the whole room aloud.
+  const [announcement, setAnnouncement] = useState<{ key: string; text: string } | null>(null)
+  const seenSeqRef = useRef<number | null>(null)
 
+  useEffect(() => {
+    // Baseline on the FIRST COMPLETED POLL, not on the first non-empty render.
+    // A room that opens empty has no posts to baseline against, so keying off
+    // `posts` would spend the first real message establishing the baseline and
+    // announce nothing — silencing exactly the case this effect exists for.
+    if (!loaded) return
+    const newest = posts[posts.length - 1]
+    const seen = seenSeqRef.current
+    if (seen === null) {
+      // First poll: adopt the backlog silently (announcing it would read the
+      // whole room aloud). An empty room baselines at 0, so the next post wins.
+      seenSeqRef.current = newest?.seq ?? 0
+      return
+    }
+    if (!newest) return
+    seenSeqRef.current = newest.seq
+    if (newest.seq <= seen) return
+    const fresh = posts.filter((p) => p.seq > seen)
+    const author = newest.kind === 'user' ? 'You' : nameFor(newest.authorAgentId)
+    setAnnouncement({
+      key: String(newest.seq),
+      text:
+        fresh.length > 1
+          ? `${fresh.length} new messages in the team room.`
+          : newest.kind === 'system'
+            ? newest.body
+            : `${author}: ${newest.body}`,
+    })
+  }, [posts, nameFor])
+
+  // Dialog semantics (it had role + label but no aria-modal and no focus trap),
+  // Escape, and focus-return all come from Modal now.
   return (
-    <>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
+    <Modal
+      open
+      variant="drawer"
+      layer={60}
+      label="Team room"
+      onClose={onClose}
+      data-testid="team-chat-room"
+      panelClassName="flex flex-col"
+      panelStyle={{
+        width: 'min(420px, 92vw)',
+        background: 'var(--surface)',
+        borderLeft: '1px solid rgb(var(--foreground-rgb) / 0.08)',
+      }}
+    >
+      <div
         style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'var(--overlay-scrim, rgb(0 0 0 / 0.5))',
-          zIndex: 60,
-        }}
-      />
-      <motion.div
-        data-testid="team-chat-room"
-        role="dialog"
-        aria-label="Team room"
-        initial={{ x: '100%' }}
-        animate={{ x: 0 }}
-        exit={{ x: '100%' }}
-        transition={{ type: 'spring', stiffness: 320, damping: 32 }}
-        style={{
-          position: 'fixed',
-          top: 0,
-          right: 0,
-          bottom: 0,
-          width: 'min(420px, 92vw)',
-          background: 'var(--surface)',
-          borderLeft: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-          zIndex: 61,
+          flexShrink: 0,
           display: 'flex',
-          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 9,
+          padding: '12px 14px',
+          borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.08)',
         }}
       >
-        <div
-          style={{
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 9,
-            padding: '12px 14px',
-            borderBottom: '1px solid rgb(var(--foreground-rgb) / 0.08)',
-          }}
-        >
-          <MessagesSquare size={16} style={{ color: 'var(--mint)' }} />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)' }}>
-              Team room
-            </div>
-            <div style={{ fontSize: 10.5, color: muted(0.5) }}>
-              Every runtime posts as a named peer — any runtime can lead.
-            </div>
+        <MessagesSquare size={16} style={{ color: 'var(--mint)' }} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)' }}>Team room</div>
+          <div style={{ fontSize: 10.5, color: muted(0.5) }}>
+            Every runtime posts as a named peer — any runtime can lead.
           </div>
-          <IconButton variant="ghost" size="sm" label="Close" onClick={onClose}>
-            <X size={16} />
-          </IconButton>
         </div>
+        <IconButton variant="ghost" size="sm" label="Close" onClick={onClose}>
+          <X size={16} />
+        </IconButton>
+      </div>
 
-        <div
-          ref={scrollRef}
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '14px 14px 24px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-          }}
-        >
-          {posts.length === 0 ? (
-            <div style={{ fontSize: 11.5, color: muted(0.4), textAlign: 'center', marginTop: 24 }}>
-              {loaded
-                ? 'No peer messages yet. Teammates post here as they coordinate.'
-                : 'Loading…'}
-            </div>
-          ) : (
-            posts.map((p) => <PeerPost key={p.id} post={p} authorName={nameFor(p.authorAgentId)} />)
-          )}
-        </div>
-      </motion.div>
-    </>
+      {/* Polite announcement of posts that land while the room is open. The
+          inner key remounts the text node so two identical consecutive posts
+          still register as a mutation. */}
+      <span role="status" aria-live="polite" className="sr-only" data-testid="team-chat-announcer">
+        {announcement && <span key={announcement.key}>{announcement.text}</span>}
+      </span>
+
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '14px 14px 24px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+        }}
+      >
+        {posts.length === 0 ? (
+          <div style={{ fontSize: 11.5, color: muted(0.4), textAlign: 'center', marginTop: 24 }}>
+            {loaded ? 'No peer messages yet. Teammates post here as they coordinate.' : 'Loading…'}
+          </div>
+        ) : (
+          posts.map((p) => <PeerPost key={p.id} post={p} authorName={nameFor(p.authorAgentId)} />)
+        )}
+      </div>
+    </Modal>
   )
 }

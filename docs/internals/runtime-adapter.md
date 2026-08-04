@@ -119,13 +119,7 @@ Every adapter normalizes its runtime's native signals into one `RuntimeEvent` un
 
 ```ts
 type RuntimeEventKind =
-  | 'text-delta'
-  | 'tool-call'
-  | 'tool-result'
-  | 'status'
-  | 'cost'
-  | 'done'
-  | 'error'
+  'text-delta' | 'tool-call' | 'tool-result' | 'status' | 'cost' | 'done' | 'error'
 ```
 
 Each event carries a common envelope, `RuntimeEventBase`:

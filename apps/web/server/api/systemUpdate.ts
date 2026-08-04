@@ -27,8 +27,13 @@ function sendEvent(res: Response, data: Record<string, unknown>): void {
   res.write(`data: ${JSON.stringify(data)}\n\n`)
 }
 
-export async function selfVersionGET(_req: Request, res: Response): Promise<void> {
-  const info = await computeSelfVersion()
+export async function selfVersionGET(req: Request, res: Response): Promise<void> {
+  // `?local=1` — the `clawboo` launcher reads this on every attach to compare the
+  // running server against its own version, and only needs `current`. Skipping
+  // the registry probe keeps that check local-only and instant; servers that
+  // predate the param just return the full payload, which the launcher also
+  // accepts.
+  const info = await computeSelfVersion({ skipRegistry: req.query['local'] === '1' })
   res.json(info)
 }
 

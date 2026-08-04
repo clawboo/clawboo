@@ -6,12 +6,12 @@
 // injected into every team-agent preamble + every Boo Zero turn in this
 // team).
 
-import { useCallback, useEffect, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { useCallback, useId, useState } from 'react'
 import { X } from 'lucide-react'
 import type { Team } from '@/stores/team'
 import { useTeamStore } from '@/stores/team'
 import { IconButton } from '@/features/shared/Button'
+import { Modal } from '@/features/shared/Modal'
 import { DEFAULT_COLLECTION_ID, type CollectionId } from '@/lib/teamPalettes'
 import { TeamColorCollectionPicker } from '@/features/teams/TeamColorCollectionPicker'
 import { TeamAccentPicker } from '@/features/teams/TeamAccentPicker'
@@ -72,121 +72,93 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
     [persist],
   )
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  const onBackdropClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (e.target === e.currentTarget) onClose()
-    },
-    [onClose],
-  )
+  // Dialog semantics, focus trap, Escape and focus-return all come from Modal.
+  const headingId = useId()
 
   return (
-    <AnimatePresence>
-      <motion.div
-        key="team-settings-backdrop"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
-        onClick={onBackdropClick}
-        data-testid="team-settings-backdrop"
-        className="fixed inset-0 z-[60] flex items-center justify-center p-6 backdrop-blur-sm"
-        style={{ background: 'var(--overlay-scrim)' }}
-      >
-        <motion.div
-          key="team-settings-panel"
-          initial={{ opacity: 0, y: 8, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 8, scale: 0.98 }}
-          transition={{ duration: 0.18 }}
-          data-testid="team-settings-sheet"
-          className="flex max-h-[85vh] w-[min(720px,100%)] flex-col overflow-hidden rounded-2xl border border-border bg-surface"
-          style={{ boxShadow: 'var(--shadow-overlay)' }}
+    <Modal
+      open
+      layer={60}
+      labelledBy={headingId}
+      onClose={onClose}
+      scrimClassName="p-6 backdrop-blur-sm"
+      scrimTestId="team-settings-backdrop"
+      data-testid="team-settings-sheet"
+      panelClassName="flex max-h-[85vh] w-[min(720px,100%)] flex-col overflow-hidden rounded-2xl border border-border bg-surface"
+      panelStyle={{ boxShadow: 'var(--shadow-overlay)' }}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3 border-b border-border px-6 py-4">
+        <span
+          className="inline-flex h-8 w-8 items-center justify-center rounded-xl text-[16px]"
+          style={{ background: `${accentColor}22` }}
         >
-          {/* Header */}
-          <div className="flex items-center gap-3 border-b border-border px-6 py-4">
-            <span
-              className="inline-flex h-8 w-8 items-center justify-center rounded-xl text-[16px]"
-              style={{ background: `${accentColor}22` }}
-            >
-              {icon}
-            </span>
-            <div className="min-w-0 flex-1">
-              <h2
-                className="m-0 text-[15px] font-semibold text-foreground"
-                style={{ letterSpacing: '-0.01em' }}
-              >
-                {team.name} — Settings
-              </h2>
-              <p className="m-0 mt-0.5 text-[12px] text-foreground/45">
-                Brief + rules read on every turn by team agents and Boo Zero.
-              </p>
-            </div>
-            <IconButton
-              size="sm"
-              label="Close team settings"
-              data-testid="team-settings-close"
-              onClick={onClose}
-            >
-              <X size={16} strokeWidth={2} />
-            </IconButton>
+          {icon}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2
+            id={headingId}
+            className="m-0 text-[15px] font-semibold text-foreground"
+            style={{ letterSpacing: '-0.01em' }}
+          >
+            {team.name} — Settings
+          </h2>
+          <p className="m-0 mt-0.5 text-[12px] text-foreground/45">
+            Brief + rules read on every turn by team agents and Boo Zero.
+          </p>
+        </div>
+        <IconButton
+          size="sm"
+          label="Close team settings"
+          data-testid="team-settings-close"
+          onClick={onClose}
+        >
+          <X size={16} strokeWidth={2} />
+        </IconButton>
+      </div>
+
+      {/* Body — scrollable */}
+      <div className="flex flex-1 flex-col gap-8 overflow-y-auto px-6 py-5">
+        <section className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+              Icon
+            </h3>
+            <TeamIconPicker value={icon} onChange={handleIconChange} accentColor={accentColor} />
           </div>
-
-          {/* Body — scrollable */}
-          <div className="flex flex-1 flex-col gap-8 overflow-y-auto px-6 py-5">
-            <section className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
-                  Icon
-                </h3>
-                <TeamIconPicker
-                  value={icon}
-                  onChange={handleIconChange}
-                  accentColor={accentColor}
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
-                  Accent color
-                </h3>
-                <TeamAccentPicker value={accentColor} onChange={handleAccentChange} />
-              </div>
-              <div className="flex flex-col gap-2">
-                <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
-                  Color collection
-                </h3>
-                <TeamColorCollectionPicker value={collectionId} onChange={handleCollectionChange} />
-              </div>
-            </section>
-
-            <section className="flex flex-col gap-2">
-              <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
-                Brief
-              </h3>
-              <TeamBriefForm
-                teamId={team.id}
-                teamName={team.name}
-                teamIcon={team.icon}
-                templateId={team.templateId ?? null}
-              />
-            </section>
-
-            <section className="flex flex-col gap-2">
-              <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
-                Rules
-              </h3>
-              <TeamRulesEditor teamId={team.id} />
-            </section>
+          <div className="flex flex-col gap-2">
+            <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+              Accent color
+            </h3>
+            <TeamAccentPicker value={accentColor} onChange={handleAccentChange} />
           </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+          <div className="flex flex-col gap-2">
+            <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+              Color collection
+            </h3>
+            <TeamColorCollectionPicker value={collectionId} onChange={handleCollectionChange} />
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            Brief
+          </h3>
+          <TeamBriefForm
+            teamId={team.id}
+            teamName={team.name}
+            teamIcon={team.icon}
+            templateId={team.templateId ?? null}
+          />
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            Rules
+          </h3>
+          <TeamRulesEditor teamId={team.id} />
+        </section>
+      </div>
+    </Modal>
   )
 }

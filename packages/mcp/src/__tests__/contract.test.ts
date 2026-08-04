@@ -59,9 +59,9 @@ describe('Tasks MCP', () => {
 
   it('returns a tool error when a dependency link would create a cycle', async () => {
     const client = await connectInMemory(createTasksServer(db))
-    const first = JSON.parse(
-      (await callText(client, 'create_task', { title: 'First' })).text,
-    ) as { id: string }
+    const first = JSON.parse((await callText(client, 'create_task', { title: 'First' })).text) as {
+      id: string
+    }
     const second = JSON.parse(
       (await callText(client, 'create_task', { title: 'Second' })).text,
     ) as { id: string }

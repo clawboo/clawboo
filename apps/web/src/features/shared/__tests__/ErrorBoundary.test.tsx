@@ -24,7 +24,7 @@
 
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { axe } from 'jest-axe'
+import { axe } from '@/__vitest__/axe'
 import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -280,17 +280,13 @@ describe('ErrorBoundary', () => {
         <Boom message="a11y sweep" />
       </ErrorBoundary>,
     )
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
 
     rerender(
       <ErrorBoundary variant="compact" label="the team sidebar">
         <Boom message="a11y sweep" />
       </ErrorBoundary>,
     )
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

@@ -1,11 +1,12 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { server } from '../../../__vitest__/mswServer'
 import { FirstRunNudge } from '../FirstRunNudge'
+
+import { axe } from '@/__vitest__/axe'
 
 afterEach(() => cleanup())
 
@@ -65,8 +66,6 @@ describe('FirstRunNudge', () => {
   it('has no level-A/AA a11y violations', async () => {
     const { container } = render(<FirstRunNudge />)
     await screen.findByTestId('first-run-nudge')
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

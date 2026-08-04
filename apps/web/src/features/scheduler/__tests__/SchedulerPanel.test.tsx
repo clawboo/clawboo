@@ -1,12 +1,13 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { server } from '../../../__vitest__/mswServer'
 import { confirm } from '@/stores/confirm'
 import { SchedulerPanel } from '../SchedulerPanel'
+
+import { axe } from '@/__vitest__/axe'
 
 // The design-system confirm() (replaces window.confirm) is mocked so the delete
 // test drives the flow without rendering the app-root <ConfirmDialog>.
@@ -208,8 +209,6 @@ describe('SchedulerPanel', () => {
   it('has no level-A/AA a11y violations', async () => {
     const { container } = render(<SchedulerPanel />)
     await screen.findByText('Team work')
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

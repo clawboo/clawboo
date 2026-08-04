@@ -51,14 +51,18 @@ function RedirectLink({
       className={[
         'group flex items-center gap-3.5 rounded-2xl border border-border bg-surface p-4 text-left',
         'transition-[transform,border-color,box-shadow] duration-150',
-        disabled ? 'cursor-default opacity-55' : 'cursor-pointer hover:-translate-y-px hover:border-border-strong',
+        disabled
+          ? 'cursor-default opacity-55'
+          : 'cursor-pointer hover:-translate-y-px hover:border-border-strong',
       ].join(' ')}
       style={{ boxShadow: 'var(--shadow-raised)' }}
     >
       <span
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
         style={{
-          background: iconTinted ? 'rgb(var(--primary-rgb) / 0.12)' : 'rgb(var(--foreground-rgb) / 0.05)',
+          background: iconTinted
+            ? 'rgb(var(--primary-rgb) / 0.12)'
+            : 'rgb(var(--foreground-rgb) / 0.05)',
           color: iconTinted ? 'var(--primary)' : 'var(--foreground)',
         }}
       >

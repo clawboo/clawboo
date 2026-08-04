@@ -16,7 +16,7 @@
 
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { axe } from 'jest-axe'
+import { axe } from '@/__vitest__/axe'
 import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -130,8 +130,6 @@ describe('NavPanel', () => {
     })
     const { container } = renderQuiet(<NavPanel view="governance" />)
     await screen.findByTestId('panel-error-boundary')
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

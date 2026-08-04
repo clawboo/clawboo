@@ -33,7 +33,7 @@ export function buildDelegateTool(): NativeLocalTool {
       properties: {
         assignee: {
           type: 'string',
-          description: "The teammate's name to hand the task to (e.g. \"Coder\").",
+          description: 'The teammate\'s name to hand the task to (e.g. "Coder").',
         },
         task: {
           type: 'string',
@@ -45,7 +45,8 @@ export function buildDelegateTool(): NativeLocalTool {
     async run(args): Promise<NativeToolOutcome> {
       const assignee = typeof args['assignee'] === 'string' ? args['assignee'].trim() : ''
       const task = typeof args['task'] === 'string' ? args['task'].trim() : ''
-      if (!assignee || !task) return err('delegate requires both an assignee (teammate name) and a task')
+      if (!assignee || !task)
+        return err('delegate requires both an assignee (teammate name) and a task')
       // Signal-only: acknowledge and return. The orchestrator observes this
       // tool-call and creates + delivers the board task.
       return {

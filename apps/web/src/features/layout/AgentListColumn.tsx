@@ -184,7 +184,7 @@ function AgentRow({
             {agent.status !== 'running' &&
               verb !== 'Just done' &&
               formatLastSeen(agent.lastSeenAt) && (
-                <span className="text-[9px] tabular-nums text-secondary/40">
+                <span className="text-[9px] tabular-nums text-muted-foreground">
                   {formatLastSeen(agent.lastSeenAt)}
                 </span>
               )}
@@ -199,7 +199,9 @@ function AgentRow({
           e.stopPropagation()
           onDelete()
         }}
-        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive group-hover:opacity-100"
+        // See FleetSidebar's twin: revealing the icon is not enough on its own,
+        // `text-secondary/40` stays under the contrast floor once focused.
+        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive focus-visible:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
       >
         <Trash2 className="h-3 w-3" strokeWidth={2} />
       </button>
@@ -272,10 +274,10 @@ function NavButton({
       />
       <span className="truncate">{NAV_VIEW_LABELS[item.id]}</span>
       {item.subtitle ? (
-        <span className="text-[11px] font-normal text-foreground/40">{item.subtitle}</span>
+        <span className="text-[11px] font-normal text-muted-foreground">{item.subtitle}</span>
       ) : null}
       {badge ? (
-        <span className="ml-auto flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+        <span className="ml-auto flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary-solid px-1 text-[10px] font-bold text-primary-foreground">
           {badge}
         </span>
       ) : null}
@@ -558,7 +560,7 @@ export function AgentListColumn() {
     >
       {/* Team header */}
       <div className="flex items-center justify-between px-3.5 pb-2.5 pt-4">
-        <h2 className="truncate font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+        <h2 className="truncate font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           {selectedTeam ? selectedTeam.name : 'All Agents'}
           {filtered.length > 0 && (
             <span className="ml-1.5 tabular-nums text-foreground/30">{filtered.length}</span>

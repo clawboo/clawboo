@@ -1,15 +1,15 @@
 ---
 title: System API
-description: 'REST reference for /api/system/*: OpenClaw status, install, configure, gateway lifecycle, config, device pairing, and models.'
+description: 'REST reference for /api/system/*: OpenClaw status, install, configure, gateway lifecycle, config, device pairing, models, plus Clawboo self-version and self-update.'
 ---
 
-REST surface for the OpenClaw side of the host: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. These routes are how the onboarding wizard and the System maintenance panel drive OpenClaw from the dashboard.
+REST surface for the host itself. Most of it is the OpenClaw side: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. These routes are how the onboarding wizard and the System maintenance panel drive OpenClaw from the dashboard. The last two, `self-version` and `self-update`, are about **Clawboo itself** rather than OpenClaw: which release this server is running, and applying a newer one.
 
 <Note>
-This group is OpenClaw-specific. OpenClaw is a connected substrate driven over a Gateway process this server manages, so its lifecycle lives here, not under [`/api/runtimes`](/reference/rest-api/runtimes), which covers the four CLI/SDK runtimes you install and key. The agent registry is at [Agents API](/reference/rest-api/agents).
+Everything here except the two `self-*` routes is OpenClaw-specific. OpenClaw is a connected substrate driven over a Gateway process this server manages, so its lifecycle lives here, not under [`/api/runtimes`](/reference/rest-api/runtimes), which covers the four CLI/SDK runtimes you install and key. The agent registry is at [Agents API](/reference/rest-api/agents).
 </Note>
 
-Two of these routes stream **Server-Sent Events** rather than returning a JSON body: `POST /api/system/install-openclaw` always, and `POST /api/system/gateway` for the `start` and `restart` actions. Each is documented below with an event-stream catalog (event `type` → payload), not a response body. All POST/PATCH routes read a JSON body parsed by `express.json({ limit: '2mb' })`.
+Three of these routes stream **Server-Sent Events** rather than returning a JSON body: `POST /api/system/install-openclaw` and `POST /api/system/self-update` always, and `POST /api/system/gateway` for the `start` and `restart` actions. Each is documented below with an event-stream catalog (event `type` → payload), not a response body. All POST/PATCH routes read a JSON body parsed by `express.json({ limit: '2mb' })`.
 
 <Info>
 Every child process this group spawns (`openclaw`, `npm`) is launched with `shell: isWindows` + `windowsHide: isWindows`. On Windows the OpenClaw/npm binaries resolve to `.cmd` shims, which Node 18.20.2+ / 20.12.2+ / 22+ refuse to spawn without `shell: true` (the CVE-2024-27980 fix); the option is a no-op on Unix, and `windowsHide` suppresses the `cmd.exe` console window that would otherwise flash over the dashboard.
@@ -27,6 +27,8 @@ Every child process this group spawns (`openclaw`, `npm`) is launched with `shel
 | PATCH  | `/api/system/openclaw-config`    | Read-modify-write `openclaw.json` (model, port, keys, exec, a2a) | No                        |
 | POST   | `/api/system/approve-device`     | Approve the latest pending device-pairing request                | No                        |
 | GET    | `/api/system/models`             | Model catalog (CLI-backed, falls back to static)                 | No                        |
+| GET    | `/api/system/self-version`       | Which Clawboo this server is, and whether a newer one exists     | No                        |
+| POST   | `/api/system/self-update`        | Install `clawboo@latest` globally, then restart into it          | SSE                       |
 
 ---
 
@@ -481,6 +483,90 @@ This route never returns an error status. Any failure is caught and answered wit
 
 ```bash
 curl http://localhost:18790/api/system/models
+```
+
+---
+
+## `GET /api/system/self-version`
+
+Which Clawboo this server is running, how it was installed, and whether a newer release is published. Backs the dashboard's "update available" chip and the `clawboo` launcher's [version-aware attach](/reference/cli#what-clawboo-does).
+
+### Query parameters
+
+| Param   | Values | Effect                                                                                                                    |
+| ------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `local` | `1`    | Skip the npm-registry probe. `latest` and `checkedAt` come back `null` and `updateAvailable` `false`, i.e. "not checked". |
+
+`?local=1` exists for the CLI. The launcher reads this route on every attach purely to compare the running server against its own version, and never needs `latest`; the registry probe is capped at 5 s and deliberately does not cache failures, so without the opt-out an offline machine would pay that on every launch. Servers that predate the parameter ignore it and return the full payload, which the launcher also accepts.
+
+### Responses
+
+`200` always. Every failure is absorbed: an unreachable registry is a `null` latest, never an error status.
+
+| Field             | Type                         | Notes                                                                                                                  |
+| ----------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `current`         | `string`                     | The running version. `CLAWBOO_VERSION` if set (the CLI injects it), else the shipped `package.json`, else `0.0.0-dev`. |
+| `latest`          | `string \| null`             | npm's `latest` for `clawboo`. `null` when unreachable or skipped. Cached ~6 h.                                         |
+| `updateAvailable` | `boolean`                    | True only for a real (non-`0.0.0*`) `current` with a strictly greater `latest`.                                        |
+| `updateCommand`   | `string`                     | `npx clawboo@latest` for an npx run, `npm install -g clawboo@latest` otherwise.                                        |
+| `installMethod`   | `'global' \| 'npx' \| 'dev'` | Derived from the running entry path.                                                                                   |
+| `applyable`       | `boolean`                    | Whether `POST /api/system/self-update` can succeed here, i.e. `installMethod === 'global'`.                            |
+| `isDeprecated`    | `boolean`                    | `current` is on the npm-deprecated `0.1.x` line.                                                                       |
+| `checkedAt`       | `number \| null`             | Epoch ms of the last registry fetch, `null` when `latest` is `null`.                                                   |
+
+<Note>
+A dev checkout reports `current: "0.0.0-dev"` and is never told an update is available. Both the chip and the CLI treat a `0.0.0*` version as "don't nag" — and the launcher additionally refuses to offer to restart such a server, so a contributor's `pnpm dev` process is never a target.
+</Note>
+
+### Example
+
+```bash
+# Full payload, including the registry check
+curl http://localhost:18790/api/system/self-version
+
+# Just this server's identity, no outbound network call
+curl 'http://localhost:18790/api/system/self-version?local=1'
+```
+
+---
+
+## `POST /api/system/self-update`
+
+Installs `clawboo@latest` globally and restarts the server into it. Streams **Server-Sent Events**; takes no request body.
+
+Only a `global` install can succeed: an `npx` run lives in npm's version-hashed `_npx` cache, so a global install lands somewhere the running process cannot reach, and a dev checkout must never self-update. Both get an `unsupported` event and the copy-paste command instead. That is defense in depth; the chip already hides its button in those cases.
+
+### Event stream
+
+| `type`                | When                                                                            | Payload fields                  |
+| --------------------- | ------------------------------------------------------------------------------- | ------------------------------- |
+| `unsupported`         | `installMethod` is not `global`                                                 | `method`, `command`, `message`  |
+| `progress`            | Install start                                                                   | `step: 'installing'`, `message` |
+| `output`              | Per non-empty stdout/stderr line from npm                                       | `line`                          |
+| `error`               | EACCES detected, spawn throws, child errors, or a non-zero exit                 | `code`, `message`               |
+| `installed-elsewhere` | npm exited 0 but the on-disk version did not change, or the API port is unknown | `version`, `message`            |
+| `installed`           | npm exited 0 and the on-disk version changed                                    | `version`                       |
+| `restarting`          | Immediately before the successor is launched                                    | `port`, `version`               |
+
+| `code`        | Meaning                                                         |
+| ------------- | --------------------------------------------------------------- |
+| `EACCES`      | stderr matched `EACCES` / "permission denied" — needs elevation |
+| `SPAWN_THROW` | The `spawn` call threw synchronously                            |
+| `SPAWN_ERROR` | The child emitted an `error` event                              |
+| `EXIT_<code>` | Non-zero npm exit (e.g. `EXIT_1`)                               |
+
+After `restarting`, the server launches a successor pinned to the same port (`CLAWBOO_API_PORT`) and told to wait for that port to free (`CLAWBOO_AWAIT_PORT`), then exits so the successor can bind. The successor is started with `CLAWBOO_VERSION` deliberately **removed** so it recomputes its version from the freshly-installed manifest rather than inheriting the pre-update value. The browser is already polling the same origin and reloads once the successor answers.
+
+<Note>
+The `installed-elsewhere` event is the guard against a hot-swap into stale bytes: if the global install landed somewhere this running copy does not point at, restarting would just re-run the old code, so the server stays up and asks you to restart manually instead.
+</Note>
+
+The equivalent from a terminal, which works for every install shape, is `npm install -g clawboo@latest && clawboo restart` — see the [CLI reference](/reference/cli#clawboo-restart).
+
+### Example
+
+```bash
+curl -N -X POST http://localhost:18790/api/system/self-update
 ```
 
 ---

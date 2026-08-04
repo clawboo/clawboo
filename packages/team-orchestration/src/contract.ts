@@ -146,8 +146,10 @@ interface HarnessOpts {
 type Delivered = { sessionKey: string; agentId: string; task: string }
 const reflections = (delivered: Delivered[]): Delivered[] =>
   delivered.filter((d) => d.task.startsWith('[Task Update]'))
-const deliveredTo = (delivered: Array<{ agentId: string; task: string }>, agentId: string): string[] =>
-  delivered.filter((d) => d.agentId === agentId).map((d) => d.task)
+const deliveredTo = (
+  delivered: Array<{ agentId: string; task: string }>,
+  agentId: string,
+): string[] => delivered.filter((d) => d.agentId === agentId).map((d) => d.task)
 const idsOf = (board: CascadeBoard): string[] => board.created.map((t) => t.id)
 
 // ─── The contract ─────────────────────────────────────────────────────────────
@@ -246,7 +248,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
           isRiskyDelegation: () => true,
           requestDelegationApproval: async () => resolution,
         })
-        await orchestrator.onEvent(sk('leader'), doneEvent('rX', '<delegate to="@Bug Boo">x</delegate>'))
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('rX', '<delegate to="@Bug Boo">x</delegate>'),
+        )
         expect(board.taskCount()).toBe(0)
         expect(delivered).toEqual([])
       }
@@ -257,7 +262,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         isRiskyDelegation: () => true,
         requestDelegationApproval: async () => 'allow_once',
       })
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">deploy</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">deploy</delegate>'),
+      )
       expect(board.taskCount()).toBe(1)
       expect(delivered).toHaveLength(1)
     })
@@ -271,7 +279,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
           return 'deny'
         },
       })
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">summarize</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">summarize</delegate>'),
+      )
       expect(asked).toBe(0)
       expect(board.taskCount()).toBe(1)
       expect(delivered).toHaveLength(1)
@@ -282,7 +293,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
   describe('createBoardOrchestrator — derive', () => {
     it('turns a leader delegation into a claimed board task + delivery', async () => {
       const { board, delivered, orchestrator } = makeHarness()
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'),
+      )
       expect(board.taskCount()).toBe(1)
       expect(board.claims).toHaveLength(1)
       expect(board.execCount).toBe(1)
@@ -293,7 +307,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const { board, delivered, orchestrator } = makeHarness()
       // The leader emits a `delegate` TOOL-CALL mid-turn (the native signal), NOT a
       // <delegate> tag — the engine must observe it exactly like sessions_send.
-      await orchestrator.onEvent(sk('leader'), toolCallEvent('r1', 'delegate', { assignee: 'Bug Boo', task: 'fix it' }))
+      await orchestrator.onEvent(
+        sk('leader'),
+        toolCallEvent('r1', 'delegate', { assignee: 'Bug Boo', task: 'fix it' }),
+      )
       expect(board.taskCount()).toBe(1)
       expect(board.claims).toHaveLength(1)
       expect(board.execCount).toBe(1)
@@ -325,7 +342,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const { board, delivered, orchestrator } = makeHarness()
       await orchestrator.onEvent(
         sk('leader'),
-        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate><delegate to="@Design Boo">b</delegate>'),
+        doneEvent(
+          'r1',
+          '<delegate to="@Bug Boo">a</delegate><delegate to="@Design Boo">b</delegate>',
+        ),
       )
       expect(board.taskCount()).toBe(2)
       expect(delivered.map((d) => d.agentId).sort()).toEqual(['a2', 'a3'])
@@ -334,7 +354,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     it('does not retry a claim conflict (409) — no execution, no delivery', async () => {
       const { board, delivered, orchestrator } = makeHarness()
       board.forceClaimConflict = true
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">x</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">x</delegate>'),
+      )
       expect(board.claims).toHaveLength(1)
       expect(board.execCount).toBe(0)
       expect(delivered).toEqual([])
@@ -342,9 +365,18 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
 
     it(`enforces MAX_SPAWN_DEPTH (${MAX_SPAWN_DEPTH}) via the board ancestor chain`, async () => {
       const { board, delivered, orchestrator } = makeHarness()
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">t1</delegate>'))
-      await orchestrator.onEvent(sk('a2'), doneEvent('r2', '<delegate to="@Design Boo">t2</delegate>'))
-      await orchestrator.onEvent(sk('a3'), doneEvent('r3', '<delegate to="@Test Boo">t3</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">t1</delegate>'),
+      )
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', '<delegate to="@Design Boo">t2</delegate>'),
+      )
+      await orchestrator.onEvent(
+        sk('a3'),
+        doneEvent('r3', '<delegate to="@Test Boo">t3</delegate>'),
+      )
       await orchestrator.onEvent(sk('a4'), doneEvent('r4', '<delegate to="@Bug Boo">t4</delegate>'))
 
       expect(board.taskCount()).toBe(3)
@@ -367,7 +399,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       board.onCreate = () => {
         gen += 1
       }
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">x</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">x</delegate>'),
+      )
       expect(board.taskCount()).toBe(1)
       expect(delivered).toEqual([])
     })
@@ -377,7 +412,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
   describe('createBoardOrchestrator — round-trip', () => {
     it('marks a task done + records the summary as a report-up comment on child completion', async () => {
       const { board, orchestrator } = makeHarness()
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'),
+      )
       await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Fixed it — patched auth.ts.'))
       const t1 = idsOf(board)[0]!
       expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'done' })
@@ -388,9 +426,14 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
 
     it('emits board changes for the projection store (created → claimed → done)', async () => {
       const { changes, orchestrator } = makeHarness()
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">fix</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix</delegate>'),
+      )
       expect(changes.some((c) => c.status === 'todo')).toBe(true)
-      expect(changes.some((c) => c.status === 'in_progress' && c.assigneeAgentId === 'a2')).toBe(true)
+      expect(changes.some((c) => c.status === 'in_progress' && c.assigneeAgentId === 'a2')).toBe(
+        true,
+      )
       await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'done summary'))
       expect(changes.some((c) => c.status === 'done' && c.summary === 'done summary')).toBe(true)
     })
@@ -402,7 +445,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const { delivered, narrations, orchestrator } = makeHarness()
       await orchestrator.onEvent(
         sk('leader'),
-        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate><delegate to="@Design Boo">b</delegate>'),
+        doneEvent(
+          'r1',
+          '<delegate to="@Bug Boo">a</delegate><delegate to="@Design Boo">b</delegate>',
+        ),
       )
       await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'A is done'))
       await orchestrator.onEvent(sk('a3'), doneEvent('r3', 'B is done'))
@@ -430,14 +476,22 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
 
   // ─── failure feedback: the "leader left standing" fix ───────────────────────
   describe('createBoardOrchestrator — failure feedback', () => {
-    async function delegate(h: ReturnType<typeof makeHarness>): Promise<ReturnType<typeof makeHarness>> {
-      await h.orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'))
+    async function delegate(
+      h: ReturnType<typeof makeHarness>,
+    ): Promise<ReturnType<typeof makeHarness>> {
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'),
+      )
       return h
     }
 
     it('an errored child done blocks the task, fails the execution, and reflects a FAILURE to the leader', async () => {
       const { board, delivered, orchestrator } = await delegate(makeHarness())
-      await orchestrator.onEvent(sk('a2'), failedDoneEvent('r2', 'error', 'TypeError: cannot read x'))
+      await orchestrator.onEvent(
+        sk('a2'),
+        failedDoneEvent('r2', 'error', 'TypeError: cannot read x'),
+      )
       const t1 = idsOf(board)[0]!
       expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
       expect(board.completed).toHaveLength(1)
@@ -548,7 +602,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const { board, delivered, orchestrator } = makeHarness({
         sessionKeyForAgent: (id) => (id === 'a3' ? null : sk(id)),
       })
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Design Boo">do it</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Design Boo">do it</delegate>'),
+      )
       expect(board.taskCount()).toBe(0)
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       const refl = reflections(delivered)
@@ -578,7 +635,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
 
     it('reports a sub-task result to its IMMEDIATE parent (reduce-point), not only the leader', async () => {
       const { delivered, orchestrator } = makeHarness()
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">top task</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top task</delegate>'),
+      )
       await orchestrator.onEvent(
         sk('a2'),
         doneEvent('r2', 'top done. <delegate to="@Design Boo">sub task</delegate>'),
@@ -596,7 +656,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const { board, delivered, orchestrator } = makeHarness()
       await orchestrator.onEvent(
         sk('leader'),
-        doneEvent('rp', '<plan><step to="@Bug Boo">s1</step><step to="@Design Boo">s2</step></plan>'),
+        doneEvent(
+          'rp',
+          '<plan><step to="@Bug Boo">s1</step><step to="@Design Boo">s2</step></plan>',
+        ),
       )
       expect(board.taskCount()).toBe(2)
       const [t1, t2] = idsOf(board)
@@ -620,14 +683,20 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       await orchestrator.onEvent(sk('a2'), malformed)
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       expect(reflections(delivered)).toHaveLength(1)
-      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Trying again <delegate to="@Bug Boo">still broken'))
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', 'Trying again <delegate to="@Bug Boo">still broken'),
+      )
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       expect(reflections(delivered)).toHaveLength(2)
     })
 
     it('fails the task immediately when delivery is rejected (no 8-minute wait)', async () => {
       const { board, delivered, orchestrator } = makeHarness({ deliverRejectsFor: new Set(['a2']) })
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">do it</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">do it</delegate>'),
+      )
       const t1 = idsOf(board)[0]!
       expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
       expect(delivered.filter((d) => d.agentId === 'a2')).toHaveLength(0)
@@ -639,17 +708,25 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const { delivered, orchestrator } = makeHarness({ caps: { maxFanout: 1 } })
       await orchestrator.onEvent(
         sk('leader'),
-        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate><delegate to="@Design Boo">b</delegate>'),
+        doneEvent(
+          'r1',
+          '<delegate to="@Bug Boo">a</delegate><delegate to="@Design Boo">b</delegate>',
+        ),
       )
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       expect(
-        reflections(delivered).some((r) => r.sessionKey === sk('leader') && /not started|cap/i.test(r.task)),
+        reflections(delivered).some(
+          (r) => r.sessionKey === sk('leader') && /not started|cap/i.test(r.task),
+        ),
       ).toBe(true)
     })
 
     it('a successful completion emits a visible "✓ completed" narration (done ≠ stuck)', async () => {
       const { narrations, orchestrator } = makeHarness()
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'),
+      )
       await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'fixed'))
       expect(narrations.some((n) => /✓.*completed/.test(n.text))).toBe(true)
     })
@@ -661,7 +738,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const { board, delivered, orchestrator } = makeHarness()
       await orchestrator.onEvent(
         sk('leader'),
-        doneEvent('rp', '<plan><step to="@Bug Boo">s1</step><step to="@Design Boo">s2</step></plan>'),
+        doneEvent(
+          'rp',
+          '<plan><step to="@Bug Boo">s1</step><step to="@Design Boo">s2</step></plan>',
+        ),
       )
       expect(board.taskCount()).toBe(2)
       const [t1, t2] = idsOf(board)
@@ -681,7 +761,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const { board, delivered, orchestrator } = makeHarness()
       await orchestrator.onEvent(
         sk('leader'),
-        doneEvent('r1', '<delegate to="@Bug Boo">task A</delegate><delegate to="@Bug Boo">task B</delegate>'),
+        doneEvent(
+          'r1',
+          '<delegate to="@Bug Boo">task A</delegate><delegate to="@Bug Boo">task B</delegate>',
+        ),
       )
       expect(board.taskCount()).toBe(2)
       expect(deliveredTo(delivered, 'a2')).toEqual(['task A'])
@@ -695,7 +778,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
 
     it('does NOT fake-complete a task released out from under it (server stale-sweep race)', async () => {
       const { board, delivered, orchestrator } = makeHarness()
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">long task</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">long task</delegate>'),
+      )
       const t1 = idsOf(board)[0]!
       board.forceRelease(t1)
       await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'finally done'))
@@ -713,7 +799,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const { board, delivered, orchestrator } = makeHarness({ stopGen: () => gen })
       await orchestrator.onEvent(
         sk('leader'),
-        doneEvent('rp', '<plan><step to="@Bug Boo">s1</step><step to="@Design Boo">s2</step></plan>'),
+        doneEvent(
+          'rp',
+          '<plan><step to="@Bug Boo">s1</step><step to="@Design Boo">s2</step></plan>',
+        ),
       )
       expect(board.taskCount()).toBe(2)
       const [t1, t2] = idsOf(board)
@@ -728,7 +817,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
 
     it('a genuine abort (no Stop) still blocks + reflects', async () => {
       const { board, delivered, orchestrator } = makeHarness()
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'),
+      )
       await orchestrator.onEvent(sk('a2'), failedDoneEvent('r2', 'aborted', ''))
       const t1 = idsOf(board)[0]!
       expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
@@ -740,24 +832,36 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       let clock = 1_000
       const h = makeHarness({ now: () => clock })
       const { board, orchestrator } = h
-      await orchestrator.onEvent(sk('leader'), doneEvent('r1', '<delegate to="@Bug Boo">task</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">task</delegate>'),
+      )
       expect(board.taskCount()).toBe(1)
       const t1 = idsOf(board)[0]!
       clock += DELEGATION_IDLE_TIMEOUT_MS + 1
       await orchestrator.sweepStaleSessions()
       expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
-      await orchestrator.onEvent(sk('a2'), doneEvent('rLate', 'Sorry. <delegate to="@Design Boo">orphan</delegate>'))
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('rLate', 'Sorry. <delegate to="@Design Boo">orphan</delegate>'),
+      )
       expect(board.taskCount()).toBe(1)
     })
 
     it('refuses to re-delegate after MAX_DELEGATION_FAILURES and tells the leader once', async () => {
       const { board, delivered, orchestrator } = makeHarness()
       for (let i = 0; i < MAX_DELEGATION_FAILURES; i++) {
-        await orchestrator.onEvent(sk('leader'), doneEvent(`r${i}`, '<delegate to="@Bug Boo">flaky task</delegate>'))
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent(`r${i}`, '<delegate to="@Bug Boo">flaky task</delegate>'),
+        )
         await orchestrator.onEvent(sk('a2'), failedDoneEvent(`rc${i}`, 'error', 'boom'))
       }
       const tasksAfterMax = board.taskCount()
-      await orchestrator.onEvent(sk('leader'), doneEvent('rFinal', '<delegate to="@Bug Boo">flaky task</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('rFinal', '<delegate to="@Bug Boo">flaky task</delegate>'),
+      )
       expect(board.taskCount()).toBe(tasksAfterMax)
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       expect(
@@ -770,13 +874,22 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     it('a successful completion RESETS the loop breaker for that (agent, task)', async () => {
       const { board, orchestrator } = makeHarness()
       for (let i = 0; i < 2; i++) {
-        await orchestrator.onEvent(sk('leader'), doneEvent(`rf${i}`, '<delegate to="@Bug Boo">retry me</delegate>'))
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent(`rf${i}`, '<delegate to="@Bug Boo">retry me</delegate>'),
+        )
         await orchestrator.onEvent(sk('a2'), failedDoneEvent(`rcf${i}`, 'error', 'boom'))
       }
-      await orchestrator.onEvent(sk('leader'), doneEvent('rok', '<delegate to="@Bug Boo">retry me</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('rok', '<delegate to="@Bug Boo">retry me</delegate>'),
+      )
       await orchestrator.onEvent(sk('a2'), doneEvent('rcok', 'done at last'))
       const sizeBefore = board.taskCount()
-      await orchestrator.onEvent(sk('leader'), doneEvent('ragain', '<delegate to="@Bug Boo">retry me</delegate>'))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('ragain', '<delegate to="@Bug Boo">retry me</delegate>'),
+      )
       expect(board.taskCount()).toBe(sizeBefore + 1)
     })
 
@@ -785,7 +898,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const { board, delivered, orchestrator } = makeHarness({ stopGen: () => gen })
       await orchestrator.onEvent(
         sk('leader'),
-        doneEvent('rp', '<plan><step to="@Bug Boo">s1</step><step to="@Design Boo">s2</step></plan>'),
+        doneEvent(
+          'rp',
+          '<plan><step to="@Bug Boo">s1</step><step to="@Design Boo">s2</step></plan>',
+        ),
       )
       const [, t2] = idsOf(board)
       board.onClaim = () => {

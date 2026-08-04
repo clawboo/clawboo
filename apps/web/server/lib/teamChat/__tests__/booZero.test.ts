@@ -25,7 +25,12 @@ import {
   SETTING_NATIVE_LEADER_MODEL,
 } from '../booZero'
 
-const NATIVE_KEY_VARS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'OLLAMA_BASE_URL']
+const NATIVE_KEY_VARS = [
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'OPENROUTER_API_KEY',
+  'OLLAMA_BASE_URL',
+]
 
 describe('booZero', () => {
   let home: string
@@ -62,7 +67,15 @@ describe('booZero', () => {
   function team(id: string, leaderAgentId: string | null = null): void {
     const now = Date.now()
     db.insert(teams)
-      .values({ id, name: id, icon: '👻', color: '#fff', leaderAgentId, createdAt: now, updatedAt: now })
+      .values({
+        id,
+        name: id,
+        icon: '👻',
+        color: '#fff',
+        leaderAgentId,
+        createdAt: now,
+        updatedAt: now,
+      })
       .run()
   }
   function agent(id: string, teamId: string | null, runtime: string): void {

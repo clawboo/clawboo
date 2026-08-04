@@ -6,7 +6,7 @@ description: 'The pure team-chat orchestration engine: one createBoardOrchestrat
 - **Version** `0.1.0`
 - **Purity** pure, browser-safe (no `node:*`, no I/O; every side effect arrives through injected deps)
 - **Purpose** The single engine that turns structured delegation signals into durable board mutations, plus the small pure utilities it needs. Extracted so **one** engine drives every team with no fork.
-- **Workspace deps** `@clawboo/executor` (types), `@clawboo/governance` (`checkFanoutCap`)
+- **Workspace deps** `@clawboo/board-core` (`TaskStatus`), `@clawboo/executor` (types), `@clawboo/governance` (`checkFanoutCap`)
 - **External deps** none
 - **Subpath exports** `.` and `./contract`
 

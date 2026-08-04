@@ -1,31 +1,36 @@
-// Canonical board-status metadata for the web UI: the ordered status list, the
-// human labels the board renders, and the legal-transition table the manual
-// status editor offers.
+// Board-status metadata for the web UI: the human labels the board renders, plus
+// the string-tolerant helpers the columns and the manual status editor consume.
 //
-// This is a deliberate BROWSER-SIDE MIRROR of the server state machine in
-// packages/db/src/board/state-machine.ts. The server remains the source of truth
-// (it re-checks every transition inside the write transaction and 409s an illegal
-// one), so this table is purely for ergonomics — it lets the UI offer only the
-// moves the server will accept instead of surfacing options that always fail.
-// Importing @clawboo/db here would drag the sqlite/server graph into the browser
-// bundle, so we mirror the 7 statuses locally (as BoardPanel already did for its
-// columns). KEEP THIS IN SYNC with state-machine.ts if the transitions change.
+// The status list and the legal-transition table are NOT declared here. They come
+// from @clawboo/board-core — the same pure, zero-dep rulebook @clawboo/db enforces
+// inside its write transaction — so the UI can only ever offer moves the server
+// will accept, and a server-side change to the machine cannot silently drift the
+// board. board-core has no imports at all, so nothing of the sqlite/server graph
+// reaches the browser bundle (guarded by src/__tests__/browserBundlePurity.test.ts).
+//
+// The server remains the authority: it re-checks every transition inside the write
+// and 409s an illegal one. This module is ergonomics — it stops the UI from
+// surfacing options that would always fail.
+//
+// DX note: the SPA reads these tables from packages/board-core/dist, so editing the
+// state machine mid-`pnpm dev` needs a package rebuild to reach the browser (true of
+// every @clawboo/* package the SPA consumes; `turbo dev` covers first start).
 
-/** The 7 task statuses, in lifecycle order (matches the board's column order). */
-export const TASK_STATUSES = [
-  'backlog',
-  'todo',
-  'in_progress',
-  'in_review',
-  'blocked',
-  'done',
-  'cancelled',
-] as const
+import {
+  TASK_STATUSES,
+  canTransition as canTransitionStrict,
+  isTaskStatus,
+  isTerminal,
+  legalTargets,
+  type TaskStatus,
+} from '@clawboo/board-core'
 
-export type TaskStatus = (typeof TASK_STATUSES)[number]
+export { TASK_STATUSES, isTaskStatus }
+export type { TaskStatus }
 
 /** Human labels for each status — the single source the columns and the status
- *  editor both read, so a rename happens in one place. */
+ *  editor both read, so a rename happens in one place. Typed against the shared
+ *  union, so a new server status is a typecheck failure here, not a silent gap. */
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: 'Backlog',
   todo: 'To do',
@@ -36,38 +41,24 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   cancelled: 'Cancelled',
 }
 
-// Legal forward transitions, mirroring state-machine.ts. `done` / `cancelled` are
-// terminal. Same-status is always an allowed no-op (handled by the helpers below).
-const LEGAL_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
-  backlog: ['todo', 'blocked', 'cancelled'],
-  todo: ['in_progress', 'blocked', 'backlog', 'cancelled'],
-  in_progress: ['in_review', 'done', 'blocked', 'todo', 'cancelled'],
-  in_review: ['done', 'in_progress', 'blocked', 'cancelled'],
-  blocked: ['todo', 'in_progress', 'backlog', 'cancelled'],
-  done: [],
-  cancelled: [],
-}
-
-export function isTaskStatus(value: unknown): value is TaskStatus {
-  return typeof value === 'string' && (TASK_STATUSES as readonly string[]).includes(value)
-}
-
 /**
  * Whether the server would accept a `from → to` status change. Same-status is an
  * idempotent no-op (allowed), matching the server's `canTransition`. Off-list
- * statuses have no legal moves. Used by the drag-and-drop handler to reject an
- * illegal move client-side (no wasted PATCH), exactly as the drawer's status
- * editor only offers legal targets.
+ * statuses have no legal moves — the guard runs BEFORE the same-status check, so
+ * an unknown status is never reported as movable, not even onto itself. Used by
+ * the drag-and-drop handler to reject an illegal move client-side (no wasted
+ * PATCH), exactly as the drawer's status editor only offers legal targets.
+ *
+ * Takes plain strings because a task's status arrives from the API untyped.
  */
 export function canTransition(from: string, to: string): boolean {
   if (!isTaskStatus(from) || !isTaskStatus(to)) return false
-  if (from === to) return true
-  return LEGAL_TRANSITIONS[from].includes(to)
+  return canTransitionStrict(from, to)
 }
 
 /** Terminal statuses have no outgoing transitions — the editor locks on them. */
 export function isTerminalStatus(status: string): boolean {
-  return status === 'done' || status === 'cancelled'
+  return isTaskStatus(status) && isTerminal(status)
 }
 
 /** A human label for any status string (off-list statuses fall back to raw). */
@@ -78,12 +69,13 @@ export function statusLabel(status: string): string {
 /**
  * The statuses the manual editor should offer for a task currently in `from`:
  * the current status (so it renders as the selected value) plus every legal
- * target, in canonical order. An unknown/off-list current status yields just
- * itself, so the editor degrades to a locked, read-only display rather than
- * offering moves the server would reject.
+ * target, in canonical lifecycle order — NOT transition-table order, because the
+ * dropdown reads as the board's column order. An unknown/off-list current status
+ * yields an EMPTY list, which is what makes the editor degrade to a locked,
+ * read-only display rather than offering moves the server would reject.
  */
 export function statusOptions(from: string): TaskStatus[] {
   if (!isTaskStatus(from)) return []
-  const reachable = new Set<TaskStatus>([from, ...LEGAL_TRANSITIONS[from]])
+  const reachable = new Set<TaskStatus>([from, ...legalTargets(from)])
   return TASK_STATUSES.filter((s) => reachable.has(s))
 }

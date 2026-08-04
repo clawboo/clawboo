@@ -51,7 +51,8 @@ function ScopeBadge({ agentId, teamId }: { agentId: string | null; teamId: strin
   return <StatusPill tone="idle" label={label} style={{ flexShrink: 0 }} />
 }
 
-const KICKER = 'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
+const KICKER =
+  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div className={KICKER}>{children}</div>
@@ -156,11 +157,7 @@ export function MemoryPanel() {
         }
       />
 
-      <div
-        data-testid="memory-panel"
-        style={{ flex: 1, overflow: 'auto' }}
-        className="px-6 py-5"
-      >
+      <div data-testid="memory-panel" style={{ flex: 1, overflow: 'auto' }} className="px-6 py-5">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 760 }}>
           {/* Browse-load failure — distinct from a genuinely-empty store. */}
           {!browseOk && (

@@ -13,7 +13,7 @@ import { EmptyState } from '@/features/shared/EmptyState'
 import { ToolApprovalCard } from './ToolApprovalCard'
 import { useToolApprovals } from './usePendingApprovals'
 
-const KICKER = 'font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45'
+const KICKER = 'font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground'
 
 /** Pending approval queue. `showEmpty` renders a "no approvals" line when the
  *  queue is empty (the Governance dashboard wants that; a caller that appends it

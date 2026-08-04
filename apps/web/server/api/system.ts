@@ -10,8 +10,8 @@ import {
   removeGatewayPid,
   isProcessAlive,
   probeGatewayPort,
-  findProcessByPort,
 } from '../lib/processManager'
+import { findListenerPid } from '@clawboo/process-lookup'
 import { getModelsFromCli } from '../lib/modelCache'
 import { isWindows, resolveShimName } from '../lib/platform'
 import {
@@ -25,7 +25,7 @@ import { providerStatus } from '../lib/providerKeys'
 import { resolveRuntimeKey } from '../lib/secretsVault'
 import { getRegistry } from '../lib/agentSource'
 import { detectOpenClaw, invalidateOpenClawCache } from '../lib/openclawDetect'
-import { MODEL_GROUPS as STATIC_MODEL_GROUPS, providerSlug } from '../../src/lib/modelCatalog'
+import { MODEL_GROUPS as STATIC_MODEL_GROUPS, providerSlug } from '@clawboo/model-catalog'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -250,7 +250,7 @@ async function stopGateway(port: number): Promise<{ stopped: boolean; message?: 
   }
 
   if (!targetPid) {
-    targetPid = findProcessByPort(port)
+    targetPid = findListenerPid(port)
   }
 
   if (!targetPid) {

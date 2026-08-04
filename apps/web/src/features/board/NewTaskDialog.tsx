@@ -17,7 +17,7 @@ import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
 import { Button } from '@/features/shared/Button'
 import { Select } from '@/features/shared/Select'
-import { useFocusTrap } from '@/features/onboarding/useFocusTrap'
+import { useFocusTrap } from '@/features/shared/useFocusTrap'
 
 import { STATUS_LABEL, type TaskStatus } from './boardStatus'
 

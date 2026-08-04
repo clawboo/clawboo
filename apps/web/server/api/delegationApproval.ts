@@ -26,11 +26,7 @@ import {
 import { getDbPath } from '../lib/db'
 
 export type DelegationApprovalResolution =
-  | 'allow_once'
-  | 'allow_always'
-  | 'deny'
-  | 'expired'
-  | 'timeout'
+  'allow_once' | 'allow_always' | 'deny' | 'expired' | 'timeout'
 
 export interface ResolveDelegationApprovalInput {
   leaderAgentId: string

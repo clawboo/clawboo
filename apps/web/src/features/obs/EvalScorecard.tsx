@@ -51,7 +51,7 @@ function AblationFlag({ on }: { on: boolean }) {
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <span className="flex items-baseline gap-1.5">
-      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </span>
       <span
@@ -137,7 +137,7 @@ export function EvalScorecard() {
           </div>
           <div className="-mx-1 overflow-x-auto px-1">
             <div className="flex min-w-[320px] flex-col">
-              <div className="flex gap-2.5 border-b border-border pb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+              <div className="flex gap-2.5 border-b border-border pb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                 <span className="min-w-0 flex-[2]">task</span>
                 <span className="min-w-0 flex-1">suite</span>
                 <span className="min-w-0 flex-1">kind</span>
@@ -193,7 +193,7 @@ export function EvalScorecard() {
             headers keep clear separation (never collide) in a narrow pane. */}
         <div className="-mx-1 overflow-x-auto px-1">
           <div className="flex min-w-[300px] flex-col">
-            <div className="flex gap-2.5 border-b border-border pb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+            <div className="flex gap-2.5 border-b border-border pb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
               <span className="min-w-0 flex-1">variant</span>
               <span className="w-16 shrink-0 text-center">verify</span>
               <span className="w-20 shrink-0 text-center">structured</span>
@@ -222,7 +222,7 @@ export function EvalScorecard() {
 
         {/* Marginal contributions (Δ pass@1) — verifier / structured-state. */}
         <div className="flex flex-col">
-          <span className="mb-1 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+          <span className="mb-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
             marginal contribution (Δ pass@1)
           </span>
           {ABLATION_CONTRIBUTIONS.map((c) => (

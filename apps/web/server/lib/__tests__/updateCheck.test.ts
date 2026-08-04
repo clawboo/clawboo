@@ -159,4 +159,36 @@ describe('computeSelfVersion', () => {
     expect(info.isDeprecated).toBe(true)
     expect(info.updateAvailable).toBe(true)
   })
+
+  // The `clawboo` launcher hits this on every attach (via `?local=1`) to compare
+  // the running server against its own version. It must never reach the network:
+  // a registry probe is capped at 5s and never caches a failure, so an offline
+  // machine would pay that on every launch.
+  it('skipRegistry: reports `current` without touching the registry', async () => {
+    const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => ({ version: '9.9.9' }) }))
+    vi.stubGlobal('fetch', fetchSpy)
+    process.env['CLAWBOO_VERSION'] = '0.3.0'
+    const info = await computeSelfVersion({ skipRegistry: true })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(info.current).toBe('0.3.0')
+    expect(info.installMethod).toBeDefined()
+    // "not checked" reads exactly like the offline case.
+    expect(info.latest).toBeNull()
+    expect(info.updateAvailable).toBe(false)
+    expect(info.checkedAt).toBeNull()
+  })
+
+  it('skipRegistry: reports null checkedAt even with a warm cache', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ version: '9.9.9' }) })),
+    )
+    process.env['CLAWBOO_VERSION'] = '0.3.0'
+    // Warm the module-level cache.
+    expect(await fetchLatestClawbooVersion()).toBe('9.9.9')
+    const info = await computeSelfVersion({ skipRegistry: true })
+    expect(info.latest).toBeNull()
+    // `checkedAt` describes when `latest` was fetched; we aren't returning one.
+    expect(info.checkedAt).toBeNull()
+  })
 })

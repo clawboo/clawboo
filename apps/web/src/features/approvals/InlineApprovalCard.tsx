@@ -40,9 +40,11 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <StatusPill tone="warning" pulse label="Exec Approval" />
-            {showAgentName && <span className="text-[10px] text-foreground/40">{agentName}</span>}
+            {showAgentName && (
+              <span className="text-[10px] text-muted-foreground">{agentName}</span>
+            )}
           </div>
-          <span className="font-data text-[10px] text-foreground/30">expires {expiresIn}s</span>
+          <span className="font-data text-[10px] text-muted-foreground">expires {expiresIn}s</span>
         </div>
 
         {/* Row 2: Command preview */}

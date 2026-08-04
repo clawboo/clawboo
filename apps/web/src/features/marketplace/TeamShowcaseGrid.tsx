@@ -102,7 +102,10 @@ export function TeamShowcaseGrid({
   }
 
   return (
-    <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+    <div
+      className="grid gap-4"
+      style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}
+    >
       <HeroTile
         gradient="var(--grad-violet)"
         icon={Users}
@@ -113,22 +116,22 @@ export function TeamShowcaseGrid({
       {/* Start from scratch — the blank-team path, sitting in the one canonical
           team showcase (shown in both the Marketplace and the first-run modal). */}
       {showStartFromScratch && (
-      <button
-        type="button"
-        data-testid="team-start-from-scratch"
-        onClick={onStartFromScratch}
-        className="group flex min-h-[132px] flex-col items-start justify-center gap-3 rounded-2xl border border-dashed border-border-strong bg-transparent p-5 text-left transition-all duration-150 hover:border-primary hover:bg-primary/[0.04]"
-      >
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-foreground/[0.06] text-foreground/70 transition-colors duration-150 group-hover:bg-primary/10 group-hover:text-primary">
-          <Plus size={18} strokeWidth={2} />
-        </span>
-        <div>
-          <div className="text-[14px] font-semibold text-foreground">Start from scratch</div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-foreground/55">
-            Build a custom team and add your own agents.
+        <button
+          type="button"
+          data-testid="team-start-from-scratch"
+          onClick={onStartFromScratch}
+          className="group flex min-h-[132px] flex-col items-start justify-center gap-3 rounded-2xl border border-dashed border-border-strong bg-transparent p-5 text-left transition-all duration-150 hover:border-primary hover:bg-primary/[0.04]"
+        >
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-foreground/[0.06] text-foreground/70 transition-colors duration-150 group-hover:bg-primary/10 group-hover:text-primary">
+            <Plus size={18} strokeWidth={2} />
+          </span>
+          <div>
+            <div className="text-[14px] font-semibold text-foreground">Start from scratch</div>
+            <div className="mt-0.5 text-[12px] leading-relaxed text-foreground/55">
+              Build a custom team and add your own agents.
+            </div>
           </div>
-        </div>
-      </button>
+        </button>
       )}
       {teams.map((profile) => (
         <TeamTemplateCard

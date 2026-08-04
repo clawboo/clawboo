@@ -49,7 +49,9 @@ export async function sendNativeAgentMessage({
   if (!trimmed) return
   const shownText = displayText.trim() || trimmed
   const entryId = crypto.randomUUID()
-  useChatStore.getState().appendTranscript(sessionKey, [makeUserEntry(sessionKey, shownText, entryId)])
+  useChatStore
+    .getState()
+    .appendTranscript(sessionKey, [makeUserEntry(sessionKey, shownText, entryId)])
 
   try {
     const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/chat`, {
@@ -60,10 +62,14 @@ export async function sendNativeAgentMessage({
     if (!res.ok) throw new Error(`ingest ${res.status}`)
   } catch (err) {
     const errText = err instanceof Error ? err.message : 'send failed'
-    const errEntry = makeUserEntry(sessionKey, `Error: could not reach the agent (${errText}).`, crypto.randomUUID())
-    useChatStore.getState().appendTranscript(sessionKey, [
-      { ...errEntry, kind: 'meta', role: 'system' },
-    ])
+    const errEntry = makeUserEntry(
+      sessionKey,
+      `Error: could not reach the agent (${errText}).`,
+      crypto.randomUUID(),
+    )
+    useChatStore
+      .getState()
+      .appendTranscript(sessionKey, [{ ...errEntry, kind: 'meta', role: 'system' }])
   }
 }
 

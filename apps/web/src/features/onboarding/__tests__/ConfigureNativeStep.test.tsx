@@ -7,12 +7,13 @@
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { server } from '../../../__vitest__/mswServer'
 import { ConfigureNativeStep } from '../steps/ConfigureNativeStep'
+
+import { axe } from '@/__vitest__/axe'
 
 afterEach(() => cleanup())
 
@@ -120,9 +121,7 @@ describe('ConfigureNativeStep', () => {
   it('has no level-A/AA a11y violations', async () => {
     const { container } = render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
     await screen.findByTestId('configure-native-step')
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 
   it('Ollama card hides the key field and connects keyless', async () => {

@@ -1,10 +1,11 @@
 import { cleanup, render, screen, within } from '@testing-library/react'
-import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { server } from '../../../__vitest__/mswServer'
 import { FleetHealth } from '../FleetHealth'
+
+import { axe } from '@/__vitest__/axe'
 
 afterEach(() => cleanup())
 
@@ -75,8 +76,6 @@ describe('FleetHealth', () => {
   it('has no level-A/AA a11y violations', async () => {
     const { container } = render(<FleetHealth />)
     await screen.findByText('6 agents')
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

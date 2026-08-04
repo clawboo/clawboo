@@ -66,7 +66,9 @@ describe('enterGatewayMode', () => {
 
     await enterGatewayMode(next, 'ws://localhost:18789')
 
-    expect((prev as unknown as { disconnect: ReturnType<typeof vi.fn> }).disconnect).toHaveBeenCalled()
+    expect(
+      (prev as unknown as { disconnect: ReturnType<typeof vi.fn> }).disconnect,
+    ).toHaveBeenCalled()
     expect(useConnectionStore.getState().client).toBe(next)
   })
 

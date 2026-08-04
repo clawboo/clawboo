@@ -94,7 +94,8 @@ export function resolveModelProvider(
   runtime?: string | null,
 ): ResolvedModelProvider {
   if (!model) return { providerId: null, label: 'Default model' }
-  const label = findNativeModelLabel(model) ?? findModelLabel(model) ?? (model.split('/').pop() || model)
+  const label =
+    findNativeModelLabel(model) ?? findModelLabel(model) ?? (model.split('/').pop() || model)
 
   let providerId: ProviderId | null = null
   if (runtime === 'clawboo-native') {

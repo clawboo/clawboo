@@ -10,7 +10,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { MODEL_DEFAULTS, resolveConnectedNativeDefaults } from '../nativeProviderDefaults'
 
-const PROVIDER_ENV = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'OLLAMA_BASE_URL']
+const PROVIDER_ENV = [
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'OPENROUTER_API_KEY',
+  'OLLAMA_BASE_URL',
+]
 
 describe('resolveConnectedNativeDefaults', () => {
   let home: string

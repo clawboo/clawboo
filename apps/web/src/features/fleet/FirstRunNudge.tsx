@@ -154,7 +154,11 @@ export function FirstRunNudge() {
                 }}
                 className="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-[filter,transform] active:scale-[0.98]"
                 style={{
-                  background: 'var(--primary)',
+                  // `--primary-solid`, not `--primary`: this is a filled button
+                  // carrying `--primary-foreground`, and in dark mode the plain
+                  // token is the lighter TEXT red, which leaves a white label at
+                  // 3.79:1.
+                  background: 'var(--primary-solid)',
                   color: 'var(--primary-foreground)',
                   border: 'none',
                   cursor: 'pointer',

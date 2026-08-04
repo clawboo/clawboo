@@ -257,7 +257,11 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
     })
     // The returned record AND the raw agents row both carry the tenant.
     expect(a.tenantId).toBe('acme')
-    const row = db.select({ tenantId: agents.tenantId }).from(agents).where(eq(agents.id, a.id)).get()
+    const row = db
+      .select({ tenantId: agents.tenantId })
+      .from(agents)
+      .where(eq(agents.id, a.id))
+      .get()
     expect(row?.tenantId).toBe('acme')
     // The co-written AgentConfig blob + the minted budget row carry it too.
     expect(loadAgentConfig(db, a.id)?.tenantId).toBe('acme')
@@ -267,7 +271,11 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
   it('defaults tenantId to null when unspecified (byte-identical single-tenant no-op)', async () => {
     const a = await source.createAgent({ name: 'No Tenant Boo', execConfig: { budgetUsd: 2 } })
     expect(a.tenantId).toBeNull()
-    const row = db.select({ tenantId: agents.tenantId }).from(agents).where(eq(agents.id, a.id)).get()
+    const row = db
+      .select({ tenantId: agents.tenantId })
+      .from(agents)
+      .where(eq(agents.id, a.id))
+      .get()
     expect(row?.tenantId).toBeNull()
     expect(loadAgentConfig(db, a.id)?.tenantId).toBeNull()
     expect(getBudget(db, 'agent', a.id)?.tenantId).toBeNull()

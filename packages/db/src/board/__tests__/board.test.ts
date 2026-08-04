@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+import { canTransition, isLocked, isTerminal } from '@clawboo/board-core'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -28,7 +29,6 @@ import {
   updateStatus,
   updateTaskFields,
 } from '../repository'
-import { canTransition, isLocked, isTerminal } from '../state-machine'
 
 let dir: string
 let dbPath: string

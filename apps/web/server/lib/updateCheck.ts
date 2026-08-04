@@ -194,9 +194,23 @@ export interface SelfVersionInfo {
   checkedAt: number | null
 }
 
-export async function computeSelfVersion(): Promise<SelfVersionInfo> {
+export interface SelfVersionOptions {
+  /**
+   * Skip the npm-registry probe entirely: `latest` comes back null and
+   * `updateAvailable` false, i.e. "not checked" — the same shape an offline
+   * server already returns.
+   *
+   * The `clawboo` launcher reads this endpoint on every attach to compare the
+   * running server against its own version, and only needs `current`. The
+   * registry probe is capped at 5 s and deliberately never caches a failure, so
+   * without this a cold-cache offline machine would pay that on every launch.
+   */
+  skipRegistry?: boolean
+}
+
+export async function computeSelfVersion(opts: SelfVersionOptions = {}): Promise<SelfVersionInfo> {
   const current = getCurrentVersion()
-  const latest = await fetchLatestClawbooVersion()
+  const latest = opts.skipRegistry ? null : await fetchLatestClawbooVersion()
   const method = detectInstallMethod()
   // A dev checkout reads as "0.0.0*"; never nag a developer about updates.
   const isRealVersion = !current.startsWith('0.0.0')
@@ -209,6 +223,8 @@ export async function computeSelfVersion(): Promise<SelfVersionInfo> {
     installMethod: method,
     applyable: method === 'global',
     isDeprecated: /^0\.1\./.test(current),
-    checkedAt: latestCache?.fetchedAt ?? null,
+    // `checkedAt` describes when `latest` was fetched, so a skipped (or failed)
+    // probe reports null rather than a timestamp for a value we aren't returning.
+    checkedAt: latest === null ? null : (latestCache?.fetchedAt ?? null),
   }
 }

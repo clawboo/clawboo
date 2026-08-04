@@ -1,33 +1,39 @@
 import { describe, it, expect } from 'vitest'
 
-import { formatProviderName } from '../modelCatalog'
+import {
+  MODEL_GROUPS,
+  findModelLabel,
+  findProviderForModel,
+  formatProviderName,
+  providerSlug,
+  type ModelGroup,
+  type ModelOption,
+} from '../modelCatalog'
 
-describe('formatProviderName', () => {
-  it('maps live CLI lowercase provider ids back to the catalog casing', () => {
-    // The OpenClaw CLI emits bare-lowercase ids; the catalog is the source of truth.
+// The catalog itself is tested in @clawboo/model-catalog. What matters HERE is
+// that the re-export shim keeps the full public surface intact: ~14 SPA call
+// sites import through this path, and narrowing the shim (e.g. swapping the
+// `export *` for a hand-listed set) would break them at build time only.
+describe('modelCatalog shim', () => {
+  it('re-exports every value the SPA call sites use', () => {
+    expect(Array.isArray(MODEL_GROUPS)).toBe(true)
+    expect(MODEL_GROUPS.length).toBeGreaterThan(0)
+    expect(typeof findModelLabel).toBe('function')
+    expect(typeof findProviderForModel).toBe('function')
+    expect(typeof formatProviderName).toBe('function')
+    expect(typeof providerSlug).toBe('function')
+  })
+
+  it('re-exports the types the SPA call sites import', () => {
+    // Type-only assertion: `pnpm typecheck` fails if either type stops
+    // resolving through the shim. The runtime expectation is incidental.
+    const option: ModelOption = { id: 'anthropic/claude-opus-4-6', label: 'Claude Opus 4.6' }
+    const group: ModelGroup = { provider: 'Anthropic', models: [option] }
+    expect(group.models[0]?.id).toBe(option.id)
+  })
+
+  it('resolves through to the real catalog', () => {
     expect(formatProviderName('huggingface')).toBe('Hugging Face')
-    expect(formatProviderName('minimax')).toBe('MiniMax')
-    expect(formatProviderName('openrouter')).toBe('OpenRouter')
-    expect(formatProviderName('openai')).toBe('OpenAI')
-    expect(formatProviderName('nvidia')).toBe('NVIDIA')
-    expect(formatProviderName('xai')).toBe('xAI')
-  })
-
-  it('is idempotent on already-canonical names', () => {
-    expect(formatProviderName('Hugging Face')).toBe('Hugging Face')
-    expect(formatProviderName('OpenRouter')).toBe('OpenRouter')
-    expect(formatProviderName('Anthropic')).toBe('Anthropic')
-  })
-
-  it('is space/case/punctuation-insensitive when matching', () => {
-    expect(formatProviderName('HUGGING_FACE')).toBe('Hugging Face')
-    expect(formatProviderName('Hugging-Face')).toBe('Hugging Face')
-    expect(formatProviderName('z.ai')).toBe('Z.AI')
-  })
-
-  it('title-cases unknown providers, preserving all-caps tokens', () => {
-    expect(formatProviderName('acme')).toBe('Acme')
-    expect(formatProviderName('some_new-provider')).toBe('Some New Provider')
-    expect(formatProviderName('ACME AI')).toBe('ACME AI')
+    expect(findModelLabel('anthropic/claude-opus-4-6')).toBe('Claude Opus 4.6')
   })
 })
