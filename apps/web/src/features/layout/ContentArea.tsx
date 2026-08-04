@@ -147,7 +147,12 @@ export function ContentArea() {
       viewContent = <AgentDetailView agentId={viewMode.agentId} />
       break
     case 'booZero':
-      viewKey = 'booZero'
+      // Keyed by the agent, not just the view: `identifyBooZero` swaps
+      // `booZeroAgentId` in place when the current Boo Zero is deleted (edge
+      // case 7d above) without leaving this view. A constant key would re-render
+      // the subtree with a new agentId instead of remounting it — stranding the
+      // deleted agent's error card, and its chat state, on the replacement.
+      viewKey = `booZero-${booZeroAgentId ?? 'none'}`
       viewLabel = 'this agent'
       viewContent = booZeroAgentId ? <AgentDetailView agentId={booZeroAgentId} /> : <WelcomeState />
       break

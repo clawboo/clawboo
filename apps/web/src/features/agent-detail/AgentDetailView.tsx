@@ -142,7 +142,15 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
           <Panel defaultSize={55} minSize={25}>
             <Group orientation="vertical" id="agent-detail-v">
               <Panel defaultSize={55} minSize={15}>
+                {/* Keyed by agentId so a pane that failed for ONE agent can't
+                    show its stale card for the next one. The `booZero` view is
+                    why this is load-bearing: its viewKey does not change when
+                    `booZeroAgentId` is re-identified after a delete, so the
+                    subtree is re-rendered with a new agentId rather than
+                    remounted, and a boundary keyed only on `attempt` would keep
+                    the previous agent's fallback on screen. */}
                 <LazyBoundary
+                  key={agentId}
                   source={miniGraphSource}
                   label="the agent graph"
                   suspenseFallback={<PaneFallback />}
@@ -155,6 +163,7 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
 
               <Panel defaultSize={45} minSize={15}>
                 <LazyBoundary
+                  key={agentId}
                   source={inlineEditorSource}
                   label="the file editor"
                   suspenseFallback={<PaneFallback />}

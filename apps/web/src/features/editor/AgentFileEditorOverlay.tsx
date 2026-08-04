@@ -3,7 +3,11 @@ import { AlertTriangle } from 'lucide-react'
 import { useEditorStore } from '@/stores/editor'
 import { Button } from '@/features/shared/Button'
 import { LazyBoundary } from '@/features/shared/LazyBoundary'
+import { Modal } from '@/features/shared/Modal'
 import { createRetryableLazy } from '@/lib/lazyRetry'
+
+/** Only one editor overlay can be mounted at a time, so a fixed id is safe. */
+const EDITOR_ERROR_TITLE_ID = 'agent-file-editor-error-title'
 
 // The editor pulls in the whole CodeMirror stack. This overlay is mounted
 // eagerly by ContentArea but renders nothing until the user opens a file, so
@@ -38,42 +42,51 @@ export function AgentFileEditorOverlay() {
           )}
           logContext={{ surface: 'agent-file-editor', agentId }}
           // A bespoke fallback: the default panel card would tile the whole
-          // content area behind this overlay. A small floating card that can be
-          // dismissed puts the user straight back on a working dashboard.
+          // content area behind this overlay. This one goes through `Modal` —
+          // the failure surface dims the app exactly like the editor it replaces,
+          // so it owes the same contract: `role="alertdialog"` + `aria-modal`, an
+          // accessible name, initial focus on the recovery action, a Tab trap,
+          // and focus return to whatever opened the editor. Hand-rolling the
+          // scrim (as this first did) gave a keyboard or screen-reader user a
+          // full-screen overlay they could tab straight out of.
           fallback={({ error, retry }) => (
-            <div
-              role="alert"
+            <Modal
+              open
+              onClose={closeEditor}
+              role="alertdialog"
+              labelledBy={EDITOR_ERROR_TITLE_ID}
+              layer={50}
+              panelClassName="surface-overlay-tier w-full max-w-[380px] rounded-2xl p-6 text-center"
               data-testid="editor-error-boundary"
-              className="fixed inset-0 z-50 flex items-center justify-center p-6"
-              style={{ background: 'var(--overlay-scrim)' }}
             >
-              <div className="surface-overlay-tier w-full max-w-[380px] rounded-2xl p-6 text-center">
-                <AlertTriangle
-                  size={22}
-                  strokeWidth={1.75}
-                  color="var(--amber)"
-                  aria-hidden
-                  style={{ margin: '0 auto' }}
-                />
-                <h1
-                  className="mt-3 font-display text-[15px] font-bold text-foreground"
-                  style={{ letterSpacing: '-0.01em' }}
-                >
-                  Couldn’t load the file editor.
-                </h1>
-                <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
-                  {error.message || error.name}
-                </p>
-                <div className="mt-4 flex items-center justify-center gap-2">
-                  <Button variant="primary" size="sm" onClick={retry}>
-                    Try again
-                  </Button>
-                  <Button variant="secondary" size="sm" onClick={closeEditor}>
-                    Close
-                  </Button>
-                </div>
+              <AlertTriangle
+                size={22}
+                strokeWidth={1.75}
+                color="var(--amber)"
+                aria-hidden
+                style={{ margin: '0 auto' }}
+              />
+              <h1
+                id={EDITOR_ERROR_TITLE_ID}
+                className="mt-3 font-display text-[15px] font-bold text-foreground"
+                style={{ letterSpacing: '-0.01em' }}
+              >
+                Couldn’t load the file editor.
+              </h1>
+              <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
+                {error.message || error.name}
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                {/* First focusable in the panel, so the trap lands here on open —
+                    recovery is the action we want under the user's hands. */}
+                <Button variant="primary" size="sm" onClick={retry}>
+                  Try again
+                </Button>
+                <Button variant="secondary" size="sm" onClick={closeEditor}>
+                  Close
+                </Button>
               </div>
-            </div>
+            </Modal>
           )}
         />
       )}
