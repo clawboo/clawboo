@@ -41,8 +41,7 @@ export function settingsGET(_req: Request, res: Response): void {
 export function settingsPOST(req: Request, res: Response): void {
   try {
     const body = req.body as
-      | { gatewayUrl?: string; gatewayToken?: string; firstRunDismissedAt?: number }
-      | undefined
+      { gatewayUrl?: string; gatewayToken?: string; firstRunDismissedAt?: number } | undefined
     if (!body || typeof body !== 'object') {
       res.status(400).json({ error: 'JSON body required' })
       return

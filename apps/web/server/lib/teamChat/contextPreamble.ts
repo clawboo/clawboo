@@ -60,8 +60,7 @@ function buildRosterLine(db: ClawbooDb, teamId: string, selfAgentId: string): st
 /** The runtime of the recipient agent (drives the OpenClaw coordination block). */
 function readAgentRuntime(db: ClawbooDb, agentId: string): string | null {
   const row = db.select().from(agents).where(eq(agents.id, agentId)).get() as
-    | { runtime?: string | null }
-    | undefined
+    { runtime?: string | null } | undefined
   return row?.runtime ?? null
 }
 

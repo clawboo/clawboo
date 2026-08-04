@@ -10,6 +10,7 @@
     "e2e": "playwright test",
     "assemble": "pnpm build && bash scripts/assemble-cli.sh",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "prepare": "husky",
     "ingest:marketplace": "tsx scripts/ingest-marketplace-content.ts",
     "verify:ingest": "tsx scripts/verify-ingest.ts",

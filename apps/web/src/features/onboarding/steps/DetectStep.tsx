@@ -203,114 +203,114 @@ export function DetectStep({
               {/* Icon */}
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground/5">
                 <AnimatePresence mode="wait">
-                    {showLoader ? (
-                      <motion.div
-                        key="loader"
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.8 }}
-                        transition={{ duration: 0.15 }}
-                      >
-                        <Loader2
-                          className="h-3.5 w-3.5 animate-spin text-secondary/40"
-                          strokeWidth={2.5}
-                        />
-                      </motion.div>
-                    ) : item.status === 'pass' ? (
-                      <motion.div
-                        key="check"
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{
-                          type: 'spring',
-                          stiffness: 400,
-                          damping: 20,
-                        }}
-                      >
-                        <Check className="h-3.5 w-3.5 text-mint" strokeWidth={2.5} />
-                      </motion.div>
-                    ) : item.status === 'fail' ? (
-                      <motion.div
-                        key="fail"
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{
-                          type: 'spring',
-                          stiffness: 400,
-                          damping: 20,
-                        }}
-                      >
-                        <X className="h-3.5 w-3.5 text-destructive" strokeWidth={2.5} />
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="warn"
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{
-                          type: 'spring',
-                          stiffness: 400,
-                          damping: 20,
-                        }}
-                      >
-                        <div className="h-2 w-2 rounded-full bg-amber" />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                  {showLoader ? (
+                    <motion.div
+                      key="loader"
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <Loader2
+                        className="h-3.5 w-3.5 animate-spin text-secondary/40"
+                        strokeWidth={2.5}
+                      />
+                    </motion.div>
+                  ) : item.status === 'pass' ? (
+                    <motion.div
+                      key="check"
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{
+                        type: 'spring',
+                        stiffness: 400,
+                        damping: 20,
+                      }}
+                    >
+                      <Check className="h-3.5 w-3.5 text-mint" strokeWidth={2.5} />
+                    </motion.div>
+                  ) : item.status === 'fail' ? (
+                    <motion.div
+                      key="fail"
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{
+                        type: 'spring',
+                        stiffness: 400,
+                        damping: 20,
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5 text-destructive" strokeWidth={2.5} />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="warn"
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{
+                        type: 'spring',
+                        stiffness: 400,
+                        damping: 20,
+                      }}
+                    >
+                      <div className="h-2 w-2 rounded-full bg-amber" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
 
-                {/* Label + detail */}
-                <div className="flex flex-1 items-baseline justify-between gap-2">
-                  <span className="text-[13px] font-medium text-text">{item.label}</span>
-                  <span
-                    className={[
-                      'font-mono text-[11px]',
-                      item.status === 'pass'
-                        ? 'text-mint/70'
-                        : item.status === 'fail'
-                          ? 'text-destructive/80'
-                          : item.status === 'warn'
-                            ? 'text-amber/70'
-                            : 'text-secondary/30',
-                    ].join(' ')}
-                  >
-                    {revealed ? item.detail : ''}
-                  </span>
-                </div>
-              </motion.div>
-            )
-          })}
-        </div>
-
-        {/* ── Node.js version error ──────────────────────────── */}
-        <AnimatePresence initial={false}>
-          {info && !info.node.sufficient && revealCount >= 1 && (
-            <motion.div
-              key="node-error"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.15 }}
-              className="mt-4 overflow-hidden"
-            >
-              <div
-                role="alert"
-                className="rounded-xl border border-destructive/20 bg-destructive/8 px-4 py-3 text-[13px] leading-snug text-destructive"
-              >
-                Node.js 22 or later is required.{' '}
-                <a
-                  href="https://nodejs.org"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 underline underline-offset-2"
+              {/* Label + detail */}
+              <div className="flex flex-1 items-baseline justify-between gap-2">
+                <span className="text-[13px] font-medium text-text">{item.label}</span>
+                <span
+                  className={[
+                    'font-mono text-[11px]',
+                    item.status === 'pass'
+                      ? 'text-mint/70'
+                      : item.status === 'fail'
+                        ? 'text-destructive/80'
+                        : item.status === 'warn'
+                          ? 'text-amber/70'
+                          : 'text-secondary/30',
+                  ].join(' ')}
                 >
-                  Download Node.js
-                  <ExternalLink className="h-3 w-3" />
-                </a>
+                  {revealed ? item.detail : ''}
+                </span>
               </div>
             </motion.div>
-          )}
-        </AnimatePresence>
+          )
+        })}
+      </div>
+
+      {/* ── Node.js version error ──────────────────────────── */}
+      <AnimatePresence initial={false}>
+        {info && !info.node.sufficient && revealCount >= 1 && (
+          <motion.div
+            key="node-error"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="mt-4 overflow-hidden"
+          >
+            <div
+              role="alert"
+              className="rounded-xl border border-destructive/20 bg-destructive/8 px-4 py-3 text-[13px] leading-snug text-destructive"
+            >
+              Node.js 22 or later is required.{' '}
+              <a
+                href="https://nodejs.org"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 underline underline-offset-2"
+              >
+                Download Node.js
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </OnboardingScreen>
   )
 }

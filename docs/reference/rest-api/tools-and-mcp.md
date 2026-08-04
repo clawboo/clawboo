@@ -138,9 +138,7 @@ Resolves a still-pending approval. The decision is validated by a Zod schema; an
 ```json
 {
   "error": "invalid body",
-  "details": {
-    /* zod flatten() */
-  }
+  "details": {/* zod flatten() */}
 }
 ```
 

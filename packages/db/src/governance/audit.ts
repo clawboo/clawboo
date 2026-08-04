@@ -15,13 +15,7 @@ import { governanceAudit, type DbGovernanceAudit } from '../schema'
 import { scrubSecrets } from '../tools/scrub'
 
 export type GovernanceEventType =
-  | 'install'
-  | 'approval'
-  | 'tool_call'
-  | 'budget'
-  | 'cap_hit'
-  | 'verification'
-  | 'circuit_break'
+  'install' | 'approval' | 'tool_call' | 'budget' | 'cap_hit' | 'verification' | 'circuit_break'
 
 export interface AppendAuditInput {
   eventType: GovernanceEventType

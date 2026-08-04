@@ -51,7 +51,9 @@ describe('mergeOpenRouterGroup', () => {
   })
 
   it('returns the base unchanged when there is no live group (null)', () => {
-    const base: ModelGroup[] = [{ provider: 'OpenRouter', models: [{ id: 'openrouter/old', label: 'Old' }] }]
+    const base: ModelGroup[] = [
+      { provider: 'OpenRouter', models: [{ id: 'openrouter/old', label: 'Old' }] },
+    ]
     expect(mergeOpenRouterGroup(base, null)).toBe(base)
   })
 })

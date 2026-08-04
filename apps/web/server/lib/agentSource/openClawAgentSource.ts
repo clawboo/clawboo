@@ -254,7 +254,9 @@ export class OpenClawAgentSource implements AgentSource {
       // is a top-level id array under `tools` (deny-wins). Re-asserted as the union
       // with any user-set deny entries so we never drop the user's own denials.
       const rawDeny = (snapshot.config?.tools?.deny ?? snapshot.tools?.deny) as unknown
-      const currentDeny = Array.isArray(rawDeny) ? rawDeny.filter((x): x is string => typeof x === 'string') : []
+      const currentDeny = Array.isArray(rawDeny)
+        ? rawDeny.filter((x): x is string => typeof x === 'string')
+        : []
       const desiredDeny = Array.from(new Set([...currentDeny, ...SUBAGENT_SPAWN_TOOLS]))
       const denyOk = SUBAGENT_SPAWN_TOOLS.every((t) => currentDeny.includes(t))
       const entry = (server: 'memory' | 'tasks') => ({

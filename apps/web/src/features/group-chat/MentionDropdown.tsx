@@ -67,9 +67,7 @@ export const MentionDropdown = memo(function MentionDropdown({
           }}
           className={[
             'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-popover-foreground transition',
-            i === selectedIndex
-              ? 'bg-primary/10 text-primary'
-              : 'hover:bg-foreground/[0.05]',
+            i === selectedIndex ? 'bg-primary/10 text-primary' : 'hover:bg-foreground/[0.05]',
           ].join(' ')}
         >
           <AgentBooAvatar agentId={agent.id} size={22} />

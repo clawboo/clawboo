@@ -51,8 +51,8 @@ export async function fetchOpenRouterModels(): Promise<ModelOption[] | null> {
     const body = (await res.json()) as { data?: OpenRouterApiModel[] }
     const data = Array.isArray(body.data) ? body.data : []
     const models = data
-      .filter((m): m is OpenRouterApiModel & { id: string } =>
-        typeof m.id === 'string' && isTextModel(m),
+      .filter(
+        (m): m is OpenRouterApiModel & { id: string } => typeof m.id === 'string' && isTextModel(m),
       )
       .map((m) => ({ id: m.id, label: m.name?.trim() || m.id }))
       .sort((a, b) => a.label.localeCompare(b.label))

@@ -144,7 +144,12 @@ describe('onboarding client', () => {
 
   it('fetchOnboardingState maps the four booleans', async () => {
     stubFetch(async () =>
-      jsonResponse({ configured: false, hasNative: true, hasTeam: true, hasConnectedRuntime: false }),
+      jsonResponse({
+        configured: false,
+        hasNative: true,
+        hasTeam: true,
+        hasConnectedRuntime: false,
+      }),
     )
     expect(await fetchOnboardingState()).toEqual({
       configured: false,
