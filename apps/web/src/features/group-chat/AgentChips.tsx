@@ -16,7 +16,7 @@ export const AgentChips = memo(function AgentChips({ agents, onTag }: AgentChips
       className="flex items-center gap-1.5 overflow-x-auto px-4 py-2.5"
       style={{ scrollbarWidth: 'none' }}
     >
-      <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+      <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
         Tag
       </span>
       {agents.map((agent) => (

@@ -274,7 +274,7 @@ export function GatewayConnectScreen({
                   )}
                 </button>
               </div>
-              <p className="font-mono text-[10px] text-secondary/40">
+              <p className="font-mono text-[10px] text-muted-foreground">
                 Leave empty for unauthenticated local gateways.
               </p>
             </div>
@@ -307,7 +307,7 @@ export function GatewayConnectScreen({
               onClick={() => void handleConnect()}
               disabled={connectDisabled}
               data-testid="gateway-connect-button"
-              className="mt-1 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-1 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary-solid font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {connecting ? (
                 <>
@@ -322,18 +322,20 @@ export function GatewayConnectScreen({
         )}
 
         {/* ── Footer hint ── */}
-        <p className="mt-6 text-center font-mono text-[10px] text-secondary/30">
+        <p className="mt-6 text-center font-mono text-[10px] text-muted-foreground">
           Default:{' '}
           <button
             type="button"
-            className="text-secondary/50 underline underline-offset-2 hover:text-secondary transition"
+            // A link must not read DIMMER than the label around it — its parent
+            // hint is `text-muted-foreground`, so it matches and brightens on hover.
+            className="text-muted-foreground underline underline-offset-2 transition hover:text-foreground"
             onClick={() => setUrl(DEFAULT_URL)}
             tabIndex={-1}
           >
             ws://localhost:18789
           </button>
         </p>
-        <p className="mt-3 text-center text-[11px] text-secondary/25">
+        <p className="mt-3 text-center text-[11px] text-muted-foreground">
           {"Don't have OpenClaw? "}
           <a
             href="https://docs.openclaw.ai/start/getting-started"

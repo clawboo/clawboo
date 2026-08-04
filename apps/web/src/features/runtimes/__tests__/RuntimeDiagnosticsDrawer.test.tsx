@@ -1,5 +1,4 @@
 import { cleanup, render, screen } from '@testing-library/react'
-import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -9,6 +8,8 @@ import {
   RuntimeDiagnosticsDrawer,
   type RuntimeDiagnosticsTarget,
 } from '../RuntimeDiagnosticsDrawer'
+
+import { axe } from '@/__vitest__/axe'
 
 // The design-system confirm() (replaces window.confirm) is mocked so these unit
 // tests drive the disconnect flow without rendering the app-root <ConfirmDialog>.
@@ -174,8 +175,6 @@ describe('RuntimeDiagnosticsDrawer', () => {
       />,
     )
     await screen.findByTestId('runtime-diagnostics-drawer')
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

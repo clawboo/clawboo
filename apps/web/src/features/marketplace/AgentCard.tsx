@@ -90,7 +90,9 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
         >
           {formatDomain(agent.domain)}
         </span>
-        <span className="text-[10px] text-foreground/35">{getCategoryLabel(agent.category)}</span>
+        <span className="text-[10px] text-muted-foreground">
+          {getCategoryLabel(agent.category)}
+        </span>
       </div>
 
       {/* Description */}
@@ -108,7 +110,7 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
       </div>
 
       {/* Stats row */}
-      <div className="font-data flex gap-2.5 text-[11px] text-foreground/40">
+      <div className="font-data flex gap-2.5 text-[11px] text-muted-foreground">
         <span>
           {skillCount} skill{skillCount === 1 ? '' : 's'}
         </span>

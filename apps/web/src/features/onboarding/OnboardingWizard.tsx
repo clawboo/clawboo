@@ -42,7 +42,7 @@ import {
 } from './steps'
 import { NATIVE_STEPS } from './StepIndicator'
 import { OnboardingPrimary, OnboardingScreen } from './OnboardingScreen'
-import { useFocusTrap } from './useFocusTrap'
+import { isTopmostTrap, useFocusTrap } from '@/features/shared/useFocusTrap'
 import { SkyAtmosphere } from '@/features/atmosphere'
 import { connectGatewayFromSettings } from '@/lib/gatewayConnect'
 
@@ -197,7 +197,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
           onClick={onContinue}
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.97 }}
-          className="welcome-cta flex items-center gap-2.5 h-[52px] px-9 rounded-xl bg-accent font-semibold text-[15px] text-primary-foreground shadow-[0_0_36px_rgb(var(--primary-rgb) / 0.45)] transition hover:brightness-110 active:scale-[0.98]"
+          className="welcome-cta flex items-center gap-2.5 h-[52px] px-9 rounded-xl bg-primary-solid font-semibold text-[15px] text-primary-foreground shadow-[0_0_36px_rgb(var(--primary-rgb) / 0.45)] transition hover:brightness-110 active:scale-[0.98]"
         >
           Get Started
           <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
@@ -555,10 +555,15 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
   // The wizard is a mandatory full-screen modal. Trap + restore focus, and let
   // Escape retreat one step (never dismiss — there is no app behind it).
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useFocusTrap(dialogRef, step)
+  const trapToken = useFocusTrap(dialogRef, step)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      // A dialog opened ON TOP of the wizard (SelectTeamStep mounts
+      // CreateTeamModal) owns Escape — otherwise one press would both close that
+      // dialog and retreat a wizard step. stopPropagation can't arbitrate: both
+      // listeners sit on `window` in the bubble phase.
+      if (!isTopmostTrap(trapToken.current)) return
       const back = BACK_STEP[step]
       if (!back) return
       // Retreating out of the OpenClaw detour (back to addRuntimes) abandons it —
@@ -568,7 +573,7 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [step, goTo, resetGatewayClient])
+  }, [step, goTo, resetGatewayClient, trapToken])
 
   // Animate direction based on step progression
   const isForward = STEP_INDEX[step] >= STEP_INDEX[prevStep]

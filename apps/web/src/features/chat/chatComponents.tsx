@@ -499,7 +499,7 @@ export const UserMessageCard = memo(function UserMessageCard({
             {targetAgentName ? `You → ${targetAgentName}` : 'You'}
           </span>
           {entry.timestampMs && (
-            <time className="font-data text-[10px] text-foreground/45">
+            <time className="font-data text-[10px] text-muted-foreground">
               {formatTimestamp(entry.timestampMs)}
             </time>
           )}
@@ -680,7 +680,7 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
             )}
           </div>
           {block.timestampMs && (
-            <time className="font-data text-[10px] text-foreground/45">
+            <time className="font-data text-[10px] text-muted-foreground">
               {formatTimestamp(block.timestampMs)}
             </time>
           )}
@@ -727,7 +727,7 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
 
       {/* Token usage (real from Gateway) or estimated from char count */}
       {!streaming && hasText && (
-        <p className="font-data text-[10px] text-foreground/40">
+        <p className="font-data text-[10px] text-muted-foreground">
           {tokenUsage
             ? `${tokenUsage.inputTokens.toLocaleString()} in · ${tokenUsage.outputTokens.toLocaleString()} out${costUsd !== null ? ` · ${formatCost(costUsd)}` : ''}`
             : `~${Math.ceil(charCount / 4).toLocaleString()} tokens`}
@@ -955,7 +955,7 @@ export function JumpToLatestButton({
         className={[
           'flex items-center gap-1.5 rounded-full shadow-floating',
           hasNew
-            ? 'bg-primary py-1.5 pl-3.5 pr-3 text-[12px] font-semibold text-primary-foreground'
+            ? 'bg-primary-solid py-1.5 pl-3.5 pr-3 text-[12px] font-semibold text-primary-foreground'
             : 'surface-floating-tier h-9 w-9 justify-center text-foreground/70 hover:text-foreground',
         ].join(' ')}
       >

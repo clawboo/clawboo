@@ -321,7 +321,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
                 onValueCommit={(vals) => handleCommit(dim.key, vals[0] ?? 50)}
               />
 
-              <div className="flex justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/40">
+              <div className="flex justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                 <span>{labels.left}</span>
                 <span>{labels.right}</span>
               </div>
@@ -357,7 +357,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
         </Button>
 
         {customMode && (
-          <p className="mt-2 mb-2 text-[11px] leading-snug text-foreground/40">
+          <p className="mt-2 mb-2 text-[11px] leading-snug text-muted-foreground">
             Write free-form personality instructions. This overrides the slider-generated
             personality in SOUL.md.
           </p>
@@ -392,7 +392,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
             className="w-full resize-y rounded-xl border border-border bg-surface px-3 py-2.5 font-mono text-[12px] leading-relaxed text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
             style={{ minHeight: 120 }}
           />
-          <p className="mt-1.5 font-mono text-[10px] text-foreground/30">
+          <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
             Saves on blur or {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+S
           </p>
         </div>

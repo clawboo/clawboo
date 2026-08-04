@@ -82,7 +82,10 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
           <ShieldCheck className="h-4 w-4 text-primary" strokeWidth={2.25} />
         </div>
         <div className="flex flex-col gap-1">
-          <h2 className="text-[15px] font-semibold text-foreground" style={{ letterSpacing: '-0.01em' }}>
+          <h2
+            className="text-[15px] font-semibold text-foreground"
+            style={{ letterSpacing: '-0.01em' }}
+          >
             Approve this device
           </h2>
           <p className="text-[12px] leading-snug text-foreground/50">
@@ -148,7 +151,7 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
       </div>
 
       {/* Footer hint — how to do it manually */}
-      <p className="font-mono text-[10px] leading-relaxed text-foreground/40">
+      <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">
         Or from your terminal:{' '}
         <code className="rounded bg-foreground/[0.05] px-1 py-0.5 text-foreground/60">
           openclaw devices approve --latest

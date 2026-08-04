@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Archive, RotateCw, Trash2, Upload, type LucideIcon } from 'lucide-react'
 
+import { useMenuKeyboard, type MenuItemProps } from '@/features/shared/useMenuKeyboard'
+
 interface TeamContextMenuProps {
   x: number
   y: number
@@ -14,20 +16,26 @@ interface TeamContextMenuProps {
   onDeleteWithAgents: () => void
 }
 
-interface MenuItemProps {
+interface MenuEntryProps {
   icon: LucideIcon
   label: string
   onClick: () => void
   /** When true, label + icon render in the destructive (primary-red) tone. */
   destructive?: boolean
+  /** Roving-tabindex wiring from `useMenuKeyboard`. */
+  item: MenuItemProps
 }
 
-function MenuItem({ icon: Icon, label, onClick, destructive }: MenuItemProps) {
+function MenuItem({ icon: Icon, label, onClick, destructive, item }: MenuEntryProps) {
   return (
     <button
       type="button"
+      role="menuitem"
+      {...item}
       onClick={onClick}
-      className={`flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors duration-150 hover:bg-foreground/[0.06] ${
+      // The menu is `overflow-hidden`, which would clip a positive
+      // outline-offset, so the ring is inset and paired with a row highlight.
+      className={`flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors duration-150 hover:bg-foreground/[0.06] focus-visible:bg-foreground/[0.08] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--primary)] ${
         destructive ? 'text-destructive' : 'text-foreground'
       }`}
     >
@@ -36,6 +44,8 @@ function MenuItem({ icon: Icon, label, onClick, destructive }: MenuItemProps) {
     </button>
   )
 }
+
+const ITEM_COUNT = 4
 
 export function TeamContextMenu({
   x,
@@ -49,6 +59,7 @@ export function TeamContextMenu({
   onDeleteWithAgents,
 }: TeamContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const { itemProps, menuKeyDown } = useMenuKeyboard(ITEM_COUNT, onClose)
 
   useEffect(() => {
     function handleMouseDown(e: MouseEvent) {
@@ -70,6 +81,9 @@ export function TeamContextMenu({
   return (
     <motion.div
       ref={ref}
+      role="menu"
+      aria-label={`Actions for ${teamName}`}
+      onKeyDown={menuKeyDown}
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.12, ease: 'easeOut' }}
@@ -77,25 +91,43 @@ export function TeamContextMenu({
       style={{ left: x, top: y, boxShadow: 'var(--shadow-floating)' }}
     >
       {/* Team name header — mono uppercase microlabel matches the rest of the
-          app's section-header rhythm. */}
-      <div className="border-b border-border px-3.5 pb-1.5 pt-1.5 font-mono text-[10px] uppercase tracking-wider text-foreground/45">
+          app's section-header rhythm. `role="none"`, because a role=menu may only
+          contain menuitem / group / presentation children; the name itself
+          already reaches assistive tech through the menu's aria-label. */}
+      <div
+        role="none"
+        className="border-b border-border px-3.5 pb-1.5 pt-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground"
+      >
         {teamName}
       </div>
 
-      <div className="py-0.5">
+      <div role="none" className="py-0.5">
         <MenuItem
           icon={isArchived ? Upload : Archive}
           label={isArchived ? 'Unarchive' : 'Archive'}
           onClick={onArchive}
+          item={itemProps(0)}
         />
-        <MenuItem icon={RotateCw} label="Refresh Protocol" onClick={onRefreshProtocol} />
-        <div className="my-1 mx-3.5 border-t border-border" />
-        <MenuItem icon={Trash2} label="Delete team only" onClick={onDelete} destructive />
+        <MenuItem
+          icon={RotateCw}
+          label="Refresh Protocol"
+          onClick={onRefreshProtocol}
+          item={itemProps(1)}
+        />
+        <div role="none" className="my-1 mx-3.5 border-t border-border" />
+        <MenuItem
+          icon={Trash2}
+          label="Delete team only"
+          onClick={onDelete}
+          destructive
+          item={itemProps(2)}
+        />
         <MenuItem
           icon={Trash2}
           label="Delete with agents"
           onClick={onDeleteWithAgents}
           destructive
+          item={itemProps(3)}
         />
       </div>
     </motion.div>

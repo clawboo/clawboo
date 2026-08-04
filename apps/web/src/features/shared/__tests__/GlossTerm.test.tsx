@@ -4,10 +4,11 @@
 // so the description resolves even before hover.
 
 import { cleanup, render, screen } from '@testing-library/react'
-import { axe } from 'jest-axe'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { GlossTerm } from '../GlossTerm'
+
+import { axe } from '@/__vitest__/axe'
 
 afterEach(() => cleanup())
 
@@ -36,8 +37,6 @@ describe('GlossTerm', () => {
     const { container } = render(
       <GlossTerm term="runtime" definition="An engine that runs agents." />,
     )
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

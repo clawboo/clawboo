@@ -226,7 +226,7 @@ export function SettingsModal() {
               <nav aria-label="Settings sections" className="flex-1 overflow-y-auto px-2 pb-3">
                 {filteredGroups.map((g) => (
                   <div key={g.label} className="mb-1 mt-2 first:mt-0">
-                    <div className="px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-foreground/40">
+                    <div className="px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
                       {g.label}
                     </div>
                     {g.items.map((it) => {

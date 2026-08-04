@@ -31,6 +31,7 @@ import {
 import { AgentChips } from './AgentChips'
 import { BoardTaskCard } from './BoardTaskCard'
 import { stripDelegationBlocks, stripPlanBlocks } from './delegationTags'
+import { blockKey, blockTimestamp, describeBlock } from './announceBlock'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 import { Sparkles, X } from 'lucide-react'
@@ -251,6 +252,49 @@ export function GroupChatPanel({
       }),
     [blocks],
   )
+
+  // ── A11y: announce COMMITTED messages only ────────────────────────────────
+  // The transcript is a log, not a live region. Marking the scroll container
+  // aria-live would fire on every token of an in-flight stream (StreamingCard
+  // re-renders per delta) and re-read whole turns as blocks regroup — a
+  // screen-reader firehose. Instead: one sr-only sentence, recomputed only when
+  // a NEW committed block lands at the END of `topLevelBlocks`.
+  const nameFor = useCallback(
+    (agentId: string | null) => (agentId ? (agentLookup.get(agentId)?.name ?? 'Agent') : 'Agent'),
+    [agentLookup],
+  )
+  const [announcement, setAnnouncement] = useState<{ key: string; text: string } | null>(null)
+  const announceRef = useRef<{ count: number; key: string }>({ count: 0, key: '' })
+  const openedAtRef = useRef(Date.now())
+
+  // A team switch swaps the whole timeline. Re-baseline instead of reading out
+  // the last message of the room we just walked into. Declared BEFORE the
+  // announce effect so it runs first within the same commit.
+  useEffect(() => {
+    announceRef.current = { count: 0, key: '' }
+    openedAtRef.current = Date.now()
+    setAnnouncement(null)
+  }, [teamId])
+
+  useEffect(() => {
+    const n = topLevelBlocks.length
+    const prev = announceRef.current
+    const last = n > 0 ? topLevelBlocks[n - 1] : null
+    const key = last ? blockKey(last) : ''
+    // Nothing about the tail moved — a fleet status patch, a scroll, a board
+    // tick. Bail before touching state so an unrelated re-render can't
+    // re-announce the same message.
+    if (n === prev.count && key === prev.key) return
+    announceRef.current = { count: n, key }
+    if (!last) return
+    // Persisted history and the SSE connect-replay both arrive as a bulk jump,
+    // and either way their entries predate the panel opening. Both gates,
+    // because a reconnect can replay recent turns with timestamps after mount.
+    if (n - prev.count > 1) return
+    if (blockTimestamp(last) < openedAtRef.current) return
+    const text = describeBlock(last, nameFor, agentIdFromSessionKey)
+    if (text) setAnnouncement({ key, text })
+  }, [topLevelBlocks, nameFor, teamId])
 
   // ── Load persisted history for all participants (team-scoped sessionKeys) ──
   // Populates the merged transcript view on team-open. (The SSE stream also
@@ -572,6 +616,13 @@ export function GroupChatPanel({
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div data-testid="group-chat-panel" className="flex h-full flex-col">
+      {/* Polite announcement of each COMMITTED message — never the live stream
+          (see the derivation above). The inner key remounts the text node so two
+          identical consecutive messages still register as a mutation. */}
+      <span role="status" aria-live="polite" className="sr-only" data-testid="group-chat-announcer">
+        {announcement && <span key={announcement.key}>{announcement.text}</span>}
+      </span>
+
       {/* Header is owned by `GroupChatViewHeader` when embedded. */}
       {!embedded && (
         <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-3">
@@ -587,7 +638,7 @@ export function GroupChatPanel({
             <h2 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-foreground">
               {team?.name ?? 'Group Chat'}
             </h2>
-            <p className="font-data text-[10px] text-foreground/45">
+            <p className="font-data text-[10px] text-muted-foreground">
               {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''}
             </p>
           </div>

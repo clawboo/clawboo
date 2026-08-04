@@ -284,4 +284,31 @@ describe('buildGraphElements — orbital tile type-coding + install gating', () 
     expect(connector.serviceKind).toBe('memory')
     expect(connector.enabled).toBe(true)
   })
+
+  // React Flow reads `node.ariaLabel` as each node's accessible name and makes
+  // every node a Tab stop. This guards the trailing labelling pass so a new node
+  // kind can't ship announcing a bare "group, node". Team-root junctions are the
+  // one exception — they are 1px, invisible, and marked `focusable: false`.
+  it('gives every focusable node an accessible name', () => {
+    const agent = makeAgent({ id: 'a1', name: 'Agent 1' })
+    const files = new Map([
+      [
+        'a1',
+        {
+          capabilities: [
+            makeCap({ id: 'c1', name: 'web_search', kind: 'tool', status: 'ready' }),
+            makeCap({ id: 'c2', name: 'clawboo-memory', kind: 'connector', status: 'ready' }),
+          ],
+          agentsMd: null,
+        },
+      ],
+    ])
+    const { rawNodes } = buildGraphElements([agent], files, [makeTeam({ id: 't1' })])
+
+    expect(rawNodes.length).toBeGreaterThan(1)
+    for (const node of rawNodes) {
+      if (node.type === 'team-root') expect(node.ariaLabel).toBeUndefined()
+      else expect(node.ariaLabel).toBeTruthy()
+    }
+  })
 })

@@ -98,7 +98,7 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
             </span>
           ) : (
             <span
-              className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45"
+              className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
               aria-label={`Connection: ${connectionStatus}`}
             >
               <span

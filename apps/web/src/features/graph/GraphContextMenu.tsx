@@ -9,10 +9,12 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { useMenuKeyboard } from '@/features/shared/useMenuKeyboard'
+
 interface GraphContextMenuProps {
   x: number
   y: number
-  agentId: string
+  /** Names the menu for assistive tech ("Actions for Scout"). */
   agentName: string
   onClose: () => void
   onChat: () => void
@@ -45,6 +47,7 @@ const items: MenuItemConfig[] = [
 export function GraphContextMenu({
   x,
   y,
+  agentName,
   onClose,
   onChat,
   onEditPersonality,
@@ -53,6 +56,7 @@ export function GraphContextMenu({
   onDelete,
 }: GraphContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const { itemProps, menuKeyDown } = useMenuKeyboard(items.length, onClose)
 
   useEffect(() => {
     function handleMouseDown(e: MouseEvent) {
@@ -82,6 +86,9 @@ export function GraphContextMenu({
   return (
     <motion.div
       ref={ref}
+      role="menu"
+      aria-label={`Actions for ${agentName}`}
+      onKeyDown={menuKeyDown}
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.12, ease: 'easeOut' }}
@@ -93,12 +100,20 @@ export function GraphContextMenu({
         const isDestructive = item.action === 'delete'
         const showDivider = isDestructive && index > 0
         return (
-          <div key={item.action}>
-            {showDivider && <div className="my-1 mx-3.5 border-t border-border" />}
+          // role="none" — a role=menu may only contain menuitem / group /
+          // presentation children, so these layout wrappers must not break the
+          // required parent-child relationship (axe: aria-required-children).
+          <div key={item.action} role="none">
+            {showDivider && <div role="none" className="my-1 mx-3.5 border-t border-border" />}
             <button
               type="button"
+              role="menuitem"
+              {...itemProps(index)}
               onClick={() => handlers[item.action]()}
-              className={`flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors duration-150 hover:bg-foreground/[0.06] ${
+              // The menu is `overflow-hidden`, which would clip a positive
+              // outline-offset, so the ring is inset and paired with a row
+              // highlight (the conventional menu focus treatment).
+              className={`flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors duration-150 hover:bg-foreground/[0.06] focus-visible:bg-foreground/[0.08] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--primary)] ${
                 isDestructive ? 'text-destructive' : 'text-foreground'
               }`}
             >

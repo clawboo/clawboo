@@ -5,7 +5,7 @@
 ## Quick start
 
 ```bash
-npx clawboo
+npx clawboo@latest
 ```
 
 That's it. The first run opens an onboarding wizard:
@@ -38,6 +38,17 @@ Everything stays on your machine, under `~/.clawboo/`:
 - `~/.clawboo/api-port.txt`: the dashboard port.
 
 The npm package ships only the dashboard and the agent catalog. Nothing you do at runtime touches the package.
+
+## Commands
+
+| Command                 | What it does                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| `clawboo`               | Find or start the dashboard server and open it in your browser                       |
+| `clawboo stop`          | Stop the running dashboard server                                                    |
+| `clawboo restart`       | Stop it and start a fresh one on the same port                                       |
+| `clawboo backup [dest]` | Copy the database to a single checkpoint-consistent file, safe while the server runs |
+
+The server keeps running after the CLI exits, so `stop` and `restart` are how you reach it again, and `restart` is what makes a fresh `npm install -g clawboo@latest` actually take effect. `clawboo` also compares the version of any server it finds against its own, and offers to restart an older one rather than silently attaching to it. Run `clawboo --help` for the full list, or see the [CLI reference](https://docs.claw.boo/reference/cli).
 
 ## Full docs
 

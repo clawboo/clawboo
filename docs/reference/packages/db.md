@@ -5,7 +5,7 @@ description: 'SQLite + Drizzle ORM data layer: schema, board, memory, tools, gov
 
 **Version** 0.1.0 · **Purity** server-only (`better-sqlite3` native binding) · **Purpose** the single SQLite + Drizzle data layer: schema, connection, and every domain repository (board, memory, tools broker, governance, event log, sessions, routines, team-chat). It is the cross-process bus: the Express server and the MCP stdio bins open the same file.
 
-**Workspace deps** `@clawboo/compaction`, `@clawboo/governance`, `@clawboo/obs`
+**Workspace deps** `@clawboo/board-core`, `@clawboo/compaction`, `@clawboo/governance`, `@clawboo/obs`
 **External deps** `better-sqlite3`, `drizzle-orm`, `zod`, `@noble/ed25519`
 
 <Note>
@@ -13,6 +13,8 @@ This is the registry of record. The 27 Drizzle-typed tables + the inline `CREATE
 </Note>
 
 The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schema`, `db`, and nine domain sub-modules (`board`, `capabilities`, `memory`, `tools`, `governance`, `events`, `sessions`, `routines`, `teamChat`) via `export *`. There are no `package.json` subpath `exports`; everything is reachable from `@clawboo/db`.
+
+One of those re-exports crosses a package boundary: the board **state machine** lives in the pure, zero-dep [`@clawboo/board-core`](/reference/packages/board-core), so the browser UI and the orchestration engine can read the same transition table without pulling this package's sqlite graph. `@clawboo/db` re-exports it by name, so the symbols below are reachable from `@clawboo/db` exactly as before.
 
 ## Public API
 
@@ -56,14 +58,17 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 | `reconcileOrphans`                                                                                                    | `(db) => ReconcileResult`                                            | Boot: a `running` exec orphaned by a crash → `failed` + task released (tombstoned, idempotent).                                                                       |
 | `reconcileStaleInProgress`                                                                                            | `(db, olderThanMs) => ReconcileResult`                               | TTL backstop: time out + release a stale `in_progress` task.                                                                                                          |
 
-**Board, state machine (`board/state-machine.ts`)**
+**Board, state machine** (re-exported from [`@clawboo/board-core`](/reference/packages/board-core))
 
-| Export          | Signature                                       | Contract                                                  |
-| --------------- | ----------------------------------------------- | --------------------------------------------------------- |
-| `canTransition` | `(from: TaskStatus, to: TaskStatus) => boolean` | Legal-transition predicate (`done`/`cancelled` terminal). |
-| `isLocked`      | `(status) => boolean`                           | True for `in_progress`/`in_review`.                       |
-| `isTerminal`    | `(status) => boolean`                           | True for `done`/`cancelled`.                              |
-| `isTaskStatus`  | `(value: unknown) => value is TaskStatus`       | Type guard.                                               |
+| Export          | Signature                                       | Contract                                                                                                                              |
+| --------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `TaskStatus`    | `'backlog' \| … \| 'cancelled'`                 | The 7-status union.                                                                                                                   |
+| `TASK_STATUSES` | `readonly TaskStatus[]`                         | The 7 statuses in lifecycle order (also the board's column order).                                                                    |
+| `canTransition` | `(from: TaskStatus, to: TaskStatus) => boolean` | Legal-transition predicate (`done`/`cancelled` terminal). Same-status is an allowed no-op.                                            |
+| `legalTargets`  | `(from: TaskStatus) => TaskStatus[]`            | Every legal target for `from`, as a fresh array. Empty for a terminal status. Lets a UI enumerate moves instead of copying the table. |
+| `isLocked`      | `(status) => boolean`                           | True for `in_progress`/`in_review`.                                                                                                   |
+| `isTerminal`    | `(status) => boolean`                           | True for `done`/`cancelled`.                                                                                                          |
+| `isTaskStatus`  | `(value: unknown) => value is TaskStatus`       | Type guard.                                                                                                                           |
 
 **Board, contention (`board/contention.ts`)**
 
@@ -198,7 +203,7 @@ The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schem
 
 ## Used by
 
-- **`apps/web`**, the Express server (`server/`, `server/api/`, `server/lib/**`) and three browser sites (`src/stores`, `src/features/approvals`, `src/features/connection`).
+- **`apps/web`**, the Express server (`server/`, `server/api/`, `server/lib/**`) and three browser sites (`src/stores`, `src/features/approvals`, `src/features/connection`) — all three **type-only**, since a value import would drag the sqlite graph into the SPA. The board UI reads its status rules from `@clawboo/board-core` directly for the same reason.
 - **`@clawboo/mcp`**, the Tasks / Memory / Tools / TeamChat MCP servers + the stdio bins.
 - **`@clawboo/evals`**, the eval harness graders/tasks (throwaway boards).
 

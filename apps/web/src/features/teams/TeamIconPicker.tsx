@@ -215,7 +215,7 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
               ) : (
                 EMOJI_CATEGORIES.map((cat) => (
                   <div key={cat.id} style={{ marginBottom: 8 }}>
-                    <div className="mb-1 px-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+                    <div className="mb-1 px-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                       {cat.label}
                     </div>
                     <EmojiGrid emojis={cat.emojis} value={value} onPick={choose} />
@@ -229,7 +229,7 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
               className="flex items-center gap-2"
               style={{ padding: 8, borderTop: '1px solid var(--border)' }}
             >
-              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
+              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                 Custom
               </span>
               <input

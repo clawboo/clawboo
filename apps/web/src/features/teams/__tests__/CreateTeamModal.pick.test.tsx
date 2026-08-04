@@ -24,12 +24,13 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
-function renderPick() {
-  return render(
+function renderPick(onClose = vi.fn()) {
+  const utils = render(
     <ThemeProvider>
-      <CreateTeamModal isOpen onClose={vi.fn()} onCreated={vi.fn()} />
+      <CreateTeamModal isOpen onClose={onClose} onCreated={vi.fn()} />
     </ThemeProvider>,
   )
+  return { ...utils, onClose }
 }
 
 describe('CreateTeamModal pick step (shared team showcase)', () => {
@@ -49,9 +50,7 @@ describe('CreateTeamModal pick step (shared team showcase)', () => {
     renderPick()
     await user.click(screen.getByTestId('team-start-from-scratch'))
     // Customize step for a blank team — the name field defaults to "New Team".
-    await waitFor(() =>
-      expect(screen.getByDisplayValue('New Team')).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(screen.getByDisplayValue('New Team')).toBeInTheDocument())
     // The pick showcase is gone.
     expect(screen.queryByTestId('team-start-from-scratch')).not.toBeInTheDocument()
   })
@@ -65,5 +64,48 @@ describe('CreateTeamModal pick step (shared team showcase)', () => {
     // pick showcase behind.
     await waitFor(() => expect(screen.getByText('Customize team')).toBeInTheDocument())
     expect(screen.queryByTestId('team-start-from-scratch')).not.toBeInTheDocument()
+  })
+})
+
+// The modal had NO dialog semantics and no Escape handler at all before it
+// adopted the shared <Modal>. The nesting cases matter because it renders the
+// TeamTemplateDetail sheet on top of itself: with both traps bound to `window`,
+// a naive implementation would close both dialogs on one Escape press.
+describe('CreateTeamModal dialog semantics', () => {
+  it('is a modal dialog whose name tracks the current step', async () => {
+    const user = userEvent.setup()
+    renderPick()
+
+    const dialog = screen.getByRole('dialog', { name: 'Create a team' })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+
+    await user.click(screen.getAllByRole('button', { name: 'Deploy' })[0] as HTMLElement)
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: 'Customize team' })).toBeInTheDocument(),
+    )
+  })
+
+  it('closes on Escape', async () => {
+    const user = userEvent.setup()
+    const { onClose } = renderPick()
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('Escape closes only the nested detail sheet, then the modal', async () => {
+    const user = userEvent.setup()
+    const { onClose } = renderPick()
+
+    await user.click(screen.getAllByRole('button', { name: 'Details' })[0] as HTMLElement)
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(2))
+
+    // First press: the detail sheet only — the modal behind it stays open.
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1))
+    expect(onClose).not.toHaveBeenCalled()
+
+    // Second press: now the modal.
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

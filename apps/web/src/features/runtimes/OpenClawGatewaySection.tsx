@@ -15,6 +15,7 @@ import { consumeApiSSE } from '@clawboo/control-client'
 import { Button } from '@/features/shared/Button'
 import { StatusPill } from '@/features/shared/StatusPill'
 import { useToastStore } from '@/stores/toast'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -45,16 +46,21 @@ export function OpenClawGatewaySection({
   const [busy, setBusy] = useState<null | 'start' | 'restart'>(null)
   const sseRef = useRef<AbortController | null>(null)
 
+  const reads = useReadSequencer()
+
   const refresh = useCallback(async () => {
+    // Start / restart reconcile through this read, so it must not be overwritten by a 10s
+    // poll that was already in flight and still reports the pre-action gateway state.
+    const read = reads.beginRead()
     try {
       const data = (await fetch('/api/system/status').then((r) => r.json())) as {
         gateway?: GatewayState
       }
-      if (data.gateway) setGw(data.gateway)
+      if (data.gateway && read.isCurrent()) setGw(data.gateway)
     } catch {
       // non-fatal — the row's own status chip is the primary signal
     }
-  }, [])
+  }, [reads])
 
   useEffect(() => {
     void refresh()

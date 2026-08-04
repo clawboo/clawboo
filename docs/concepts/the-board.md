@@ -53,7 +53,7 @@ stateDiagram-v2
     cancelled --> [*]
 ```
 
-The transition table is the single authority on what is legal:
+The transition table is the single authority on what is legal. It is declared exactly once in code, in [`@clawboo/board-core`](/reference/packages/board-core) — the server enforces it inside the write transaction and the board UI derives its status editor from the same module, so the two cannot drift:
 
 | From          | Legal `to` states                                   |
 | ------------- | --------------------------------------------------- |
