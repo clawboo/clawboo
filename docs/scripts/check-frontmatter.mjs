@@ -48,8 +48,22 @@ const FRONTMATTER = /^---\n([\s\S]*?)^---[ \t]*(?:\n|$)/m
 
 const HEADING = /^#{1,6}\s/
 const FENCE = /^\s*(```|~~~)/
-// A `%` is only safe in a heading when it reads as percent-encoding (`%20`).
-const BARE_PERCENT = /%(?![0-9A-Fa-f]{2})/
+
+// Mintlify URI-decodes a heading to build its anchor slug, so run the same
+// operation rather than approximating it with a regex: whatever
+// decodeURIComponent rejects is exactly what raises `URIError: URI malformed`
+// at build time. A "looks like valid hex" check is not enough — `%C3` and
+// `%F0%9F` are well-formed percent-encoding but incomplete UTF-8, so they still
+// throw, while `%20` decodes fine and must be left alone.
+function decodesCleanly(heading) {
+  if (!heading.includes('%')) return true
+  try {
+    decodeURIComponent(heading)
+    return true
+  } catch {
+    return false
+  }
+}
 
 function collectPages(dir, found = []) {
   const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
@@ -76,7 +90,7 @@ function checkHeadings(label, body, firstBodyLine) {
       inFence = !inFence
       return
     }
-    if (inFence || !HEADING.test(line) || !BARE_PERCENT.test(line)) return
+    if (inFence || !HEADING.test(line) || decodesCleanly(line)) return
     problems.push(
       `${label}:${firstBodyLine + index}: bare \`%\` in a heading breaks ` +
         '`mint broken-links` with `URIError: URI malformed`',

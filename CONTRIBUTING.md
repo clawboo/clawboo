@@ -39,7 +39,7 @@ New to the codebase? The [Internals map](https://docs.claw.boo/internals) is a g
 
 The docs live in `docs/`, and that directory **is** the site: hand-edited Mintlify Markdown with no build step. Merging to `main` redeploys [docs.claw.boo](https://docs.claw.boo) as-is, so the files in your PR are exactly what ships.
 
-**Frontmatter is parsed as YAML, so quote any `title` or `description` value that contains a colon, or that starts with `@` or a backtick.** An unquoted `: ` parses as a nested mapping and Mintlify serves the page as a 404 instead of rendering it. Preview with `mint dev` (the Mintlify CLI, `npx mint dev` if you have not installed it) before opening a docs PR: a full build is what surfaces this, whereas `check-links` only validates links. `pnpm check:docs` catches it too, and runs as part of `pnpm lint` and CI.
+**Frontmatter is parsed as YAML, so quote any `title` or `description` value that contains a colon, or that starts with `@` or a backtick.** An unquoted `:` followed by a space parses as a nested mapping and Mintlify serves the page as a 404 instead of rendering it. Preview with `mint dev` (the Mintlify CLI, `npx mint dev` if you have not installed it) before opening a docs PR: a full build is what surfaces this, whereas `check-links` only validates links. `pnpm check:docs` catches it too, and runs as part of `pnpm lint` and CI.
 
 Either quote style is valid YAML; Prettier normalizes them to single quotes when the pre-commit hook formats your page. One sibling rule, same class of breakage: **never put a bare `%` in a body heading** — Mintlify URI-decodes headings into anchor slugs and fails the page on invalid percent-encoding. A `%` in prose is fine. `pnpm check:docs` enforces both.
 
@@ -59,7 +59,7 @@ We use [GitHub Flow](https://docs.github.com/en/get-started/using-git/github-flo
 ```bash
 pnpm build                              # build all packages and apps
 pnpm typecheck                          # tsc --noEmit across the monorepo
-pnpm lint                               # ESLint flat config across all packages, plus the docs frontmatter check
+pnpm lint                               # ESLint flat config across all packages, plus the docs frontmatter + heading checks
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright end-to-end tests (incl. board round-trip + eval smoke)
 pnpm verify:ingest                      # marketplace codegen drift gate

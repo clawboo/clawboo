@@ -158,14 +158,14 @@ These run from the repo root. The Turbo-fronted ones fan out across the workspac
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm build`                 | `turbo build`, builds every package + app `dist/`, dependency-ordered, cached.                                                           |
 | `pnpm dev`                   | `turbo dev --concurrency=20`, runs each package/app dev task. For `apps/web` this is the dev orchestrator (below).                       |
-| `pnpm lint`                  | `turbo lint`, ESLint across the workspace, plus the docs frontmatter check (the `docs` package's `lint` script).                         |
+| `pnpm lint`                  | `turbo lint`, ESLint across the workspace, plus the docs frontmatter + heading checks (the `docs` package's `lint` script).              |
 | `pnpm typecheck`             | `turbo typecheck`, `tsc --noEmit` across the workspace.                                                                                  |
 | `pnpm test`                  | `turbo test`, per-package Vitest (the real path; each package has its own config).                                                       |
 | `pnpm e2e`                   | `playwright test`, the Playwright end-to-end suite (sandboxed; see [Testing](#testing-strategy-pointer)).                                |
 | `pnpm assemble`              | `pnpm build && bash scripts/assemble-cli.sh`, full build, then copy the server bundle + UI + MCP bins into `apps/cli/dist/`.             |
 | `pnpm verify:ingest`         | `tsx scripts/verify-ingest.ts`, fails if the committed marketplace catalog drifts from a fresh codegen.                                  |
 | `pnpm ingest:marketplace`    | `tsx scripts/ingest-marketplace-content.ts`, regenerates that catalog from the pinned upstream SHAs.                                     |
-| `pnpm check:docs`            | `docs/scripts/check-frontmatter.mjs`, fails if any docs page's YAML frontmatter is invalid (the 404 class of bug).                       |
+| `pnpm check:docs`            | `docs/scripts/check-frontmatter.mjs`, fails on invalid YAML frontmatter or a bare `%` in a heading (the 404 class of bug).               |
 | `pnpm test:clean-install`    | `node scripts/test-clean-install.mjs`, packs + installs the CLI tarball and asserts the install works (see below).                       |
 | `pnpm test:bundle-externals` | `node scripts/check-bundle-externals.mjs`, fails if a shipped bundle loads a module that isn't declared / builtin / documented-optional. |
 | `pnpm prepublish:check`      | `pnpm assemble && pnpm test:clean-install`, the local reproduction of the release gate.                                                  |

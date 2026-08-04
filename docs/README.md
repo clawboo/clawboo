@@ -11,7 +11,7 @@ truth, exactly what ships to [docs.claw.boo](https://docs.claw.boo).
   `<Danger>`), and root-relative links such as `/concepts/the-board`. Almost every page is `.md`;
   a couple are `.mdx` where a page genuinely needs MDX/JSX. **Frontmatter must be valid YAML: wrap any
   `title` / `description` value containing a colon (or a leading `@`, backtick, or other YAML-special
-  character) in quotes.** An unquoted `: ` is parsed as a nested mapping, so the page fails to
+  character) in quotes.** An unquoted `:` followed by a space is parsed as a nested mapping, so the page fails to
   build and Mintlify serves it as a 404. Single and double quotes are both valid YAML, and Prettier
   normalizes them to single quotes when the pre-commit hook formats the page. `mint broken-links` does
   NOT catch this (it only checks links); only a full build does, so verify with `mint dev` before
