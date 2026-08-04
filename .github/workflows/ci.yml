@@ -37,6 +37,13 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Runs before `pnpm lint` because it takes seconds and needs no build,
+      # whereas `turbo lint` first builds every workspace dependency. Formatting
+      # is otherwise only applied by the lint-staged pre-commit hook, on staged
+      # files, so drift accumulates silently in anything nobody has touched.
+      # Fix a failure with `pnpm format`.
+      - run: pnpm format:check
+
       - run: pnpm lint
 
   typecheck:
