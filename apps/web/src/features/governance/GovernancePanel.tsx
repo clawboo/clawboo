@@ -89,9 +89,7 @@ const STATUS_PILL: Record<Budget['status'], StatusTone> = {
 const SECTION_LABEL = 'font-mono text-[11px] font-semibold uppercase tracking-[0.14em]'
 
 function SectionKicker({ children }: { children: ReactNode }) {
-  return (
-    <div className={`${SECTION_LABEL} text-foreground/45`}>{children}</div>
-  )
+  return <div className={`${SECTION_LABEL} text-foreground/45`}>{children}</div>
 }
 
 // Card shell — the shared premium surface (rounded-2xl, hairline border, raised
@@ -130,14 +128,11 @@ function BudgetRow({ b, onChanged }: { b: Budget; onChanged: () => void }) {
           <span className="font-data rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] text-foreground/60">
             {b.scope}
           </span>
-          <span
-            className="font-data truncate text-[13px] text-foreground"
-            title={b.scopeId}
-          >
+          <span className="font-data truncate text-[13px] text-foreground" title={b.scopeId}>
             {b.scopeId}
           </span>
           {b.tenantId && (
-            <span className="font-data text-[11px] text-foreground/40">
+            <span className="font-data text-[11px] text-muted-foreground">
               · tenant {b.tenantId}
             </span>
           )}
@@ -180,14 +175,9 @@ function BudgetRow({ b, onChanged }: { b: Budget; onChanged: () => void }) {
             / {dollars(b.limitUsdCents)}
           </span>
         </span>
-        <span className="font-data text-[12px] text-foreground/50">
-          {pct.toFixed(0)}%
-        </span>
+        <span className="font-data text-[12px] text-foreground/50">{pct.toFixed(0)}%</span>
       </div>
-      <div
-        className="overflow-hidden rounded-full bg-foreground/[0.08]"
-        style={{ height: 6 }}
-      >
+      <div className="overflow-hidden rounded-full bg-foreground/[0.08]" style={{ height: 6 }}>
         <div style={{ width: `${pct}%`, height: '100%', background: STATUS_TONE[b.status] }} />
       </div>
 
@@ -371,10 +361,7 @@ export function GovernancePanel() {
                 </FormattedAlert>
               </div>
             ) : budgets.length === 0 ? (
-              <div
-                className="rounded-2xl border border-border bg-surface"
-                style={cardStyle}
-              >
+              <div className="rounded-2xl border border-border bg-surface" style={cardStyle}>
                 <EmptyState
                   icon={Wallet}
                   title="No budgets yet"
@@ -477,10 +464,7 @@ export function GovernancePanel() {
           {/* Approval queue (shared with the Approvals panel) */}
           <section className="flex flex-col gap-3">
             <SectionKicker>Approval queue</SectionKicker>
-            <div
-              className="rounded-2xl border border-border bg-surface p-2"
-              style={cardStyle}
-            >
+            <div className="rounded-2xl border border-border bg-surface p-2" style={cardStyle}>
               <ToolApprovalQueue showEmpty />
             </div>
           </section>
@@ -557,9 +541,7 @@ export function GovernancePanel() {
                         {a.agentId.slice(0, 10)}
                       </span>
                     )}
-                    <span className="truncate text-foreground/60">
-                      {summarize(a.summary)}
-                    </span>
+                    <span className="truncate text-foreground/60">{summarize(a.summary)}</span>
                     {a.tenantId && (
                       <span className="font-data whitespace-nowrap text-foreground/35">
                         · {a.tenantId}

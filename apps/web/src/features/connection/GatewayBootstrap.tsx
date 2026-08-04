@@ -1233,7 +1233,7 @@ export function GatewayBootstrap() {
                 <button
                   type="button"
                   onClick={() => setGatewayOffline(false)}
-                  className="font-mono text-[11px] text-secondary/35 underline underline-offset-2 transition hover:text-secondary"
+                  className="font-mono text-[11px] text-muted-foreground underline underline-offset-2 transition hover:text-secondary"
                 >
                   Connect manually
                 </button>

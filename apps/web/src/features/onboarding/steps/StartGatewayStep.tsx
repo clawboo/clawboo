@@ -274,7 +274,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
           <button
             type="button"
             onClick={() => setShowLog((v) => !v)}
-            className="mt-4 flex items-center gap-1 font-mono text-[10px] text-secondary/30 transition hover:text-secondary/60"
+            className="mt-4 flex items-center gap-1 font-mono text-[10px] text-muted-foreground transition hover:text-secondary/60"
           >
             {showLog ? 'Hide' : 'Show'} log
             <ChevronDown

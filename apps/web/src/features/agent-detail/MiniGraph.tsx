@@ -32,6 +32,7 @@ import { AgentModelControl } from './AgentModelControl'
 import { useMiniGraphData } from './useMiniGraphData'
 import { useHermesModelGroups, useNativeModelGroups } from '@/lib/useOpenRouterModels'
 import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
+import { prefersReducedMotion } from '@/lib/prefersReducedMotion'
 import { setAgentModel } from '@clawboo/control-client'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData } from '@/features/graph/types'
 
@@ -358,7 +359,11 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
   }, [stopPhysics])
 
   const startPhysics = useCallback(() => {
-    if (physicsActiveRef.current) return
+    // Same reduced-motion contract as the shared graphPhysics singleton: the ELK
+    // / orbital positions are already a complete layout, so skipping the
+    // relaxation loop costs only the settling animation. Without this, the
+    // agent-detail panel would keep animating after the graph panel stopped.
+    if (physicsActiveRef.current || prefersReducedMotion()) return
     physicsActiveRef.current = true
     lastFrameTimeRef.current = 0
 

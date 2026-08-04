@@ -67,6 +67,9 @@ export function TeamRulesEditor({ teamId }: { teamId: string }) {
       ) : (
         <>
           <textarea
+            // The visible "Rules" heading lives in the parent sheet, so the
+            // control carries its own name rather than borrowing one.
+            aria-label="Team rules"
             value={content}
             onChange={(e) => setContent(e.target.value)}
             disabled={saving}

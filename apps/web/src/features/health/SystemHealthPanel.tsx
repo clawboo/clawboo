@@ -63,10 +63,7 @@ function SectionCard({ title, children }: { title: string; children: ReactNode }
   return (
     <section className="mb-6">
       <div className={`${SECTION_LABEL} mb-2.5 text-foreground/45`}>{title}</div>
-      <div
-        className="rounded-2xl border border-border bg-surface px-4"
-        style={cardStyle}
-      >
+      <div className="rounded-2xl border border-border bg-surface px-4" style={cardStyle}>
         {children}
       </div>
     </section>
@@ -170,9 +167,8 @@ export function SystemHealthPanel() {
               {fatalCount > 0 ? (
                 <>
                   <strong>The install has a fatal problem.</strong> clawboo has no upgrade/repair
-                  path — reset{' '}
-                  <code className="font-data text-[11px]">~/.clawboo</code>{' '}
-                  and re-run onboarding to start clean.
+                  path — reset <code className="font-data text-[11px]">~/.clawboo</code> and re-run
+                  onboarding to start clean.
                 </>
               ) : (
                 <>
@@ -195,10 +191,7 @@ export function SystemHealthPanel() {
               <Spinner size={13} /> Running boot probe…
             </div>
           ) : (
-            <div
-              className="rounded-2xl border border-border bg-surface px-4"
-              style={cardStyle}
-            >
+            <div className="rounded-2xl border border-border bg-surface px-4" style={cardStyle}>
               {report?.checks.map((check, i) => {
                 const tone = toneFor(report, check)
                 const meta = TONE_META[tone]
@@ -219,7 +212,7 @@ export function SystemHealthPanel() {
                           {humanizeCheckId(check.id)}
                         </span>
                         <StatusPill tone={meta.pill} label={meta.pillLabel} />
-                        <span className="font-data text-[11px] text-foreground/40">
+                        <span className="font-data text-[11px] text-muted-foreground">
                           {check.durationMs}ms
                         </span>
                       </div>
@@ -227,7 +220,7 @@ export function SystemHealthPanel() {
                         {check.message}
                       </div>
                       {!check.ok && check.detail && (
-                        <div className="font-data mt-1 break-all text-[11px] text-foreground/45">
+                        <div className="font-data mt-1 break-all text-[11px] text-muted-foreground">
                           {check.detail}
                         </div>
                       )}

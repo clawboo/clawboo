@@ -17,13 +17,21 @@ import { BoardPanel } from '../BoardPanel'
 // dnd-kit's real pointer drag can't run in jsdom (no layout/rects), so we capture
 // the REAL onDragEnd handler by passing through DndContext (keeping the real provider
 // so useDraggable/useDroppable still work) and invoke it with synthetic drag events.
-const dnd = vi.hoisted(() => ({ onDragEnd: undefined as undefined | ((e: unknown) => void) }))
+// The same passthrough also captures the `accessibility.announcements` object,
+// so the screen-reader wiring can be asserted without a real drag (the callbacks
+// are pure `(args) => string`; their exact copy is covered in
+// `boardAnnouncements.test.ts`).
+const dnd = vi.hoisted(() => ({
+  onDragEnd: undefined as undefined | ((e: unknown) => void),
+  announcements: undefined as undefined | Record<string, (args: never) => string | undefined>,
+}))
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>()
   return {
     ...actual,
     DndContext: (props: React.ComponentProps<typeof actual.DndContext>) => {
       dnd.onDragEnd = props.onDragEnd as (e: unknown) => void
+      dnd.announcements = props.accessibility?.announcements as typeof dnd.announcements
       return <actual.DndContext {...props} />
     },
   }
@@ -441,5 +449,34 @@ describe('BoardPanel', () => {
     expect(
       within(screen.getByTestId('board-column-done')).getByTestId('board-card'),
     ).toBeInTheDocument()
+  })
+
+  // dnd-kit's `defaultAnnouncements` read raw ids at a screen-reader user
+  // ("Picked up draggable item 9f3c8a1e-…"). This asserts the WIRING — that the
+  // custom announcements reach DndContext and that the grip carries the payload
+  // they read. The copy itself is covered in boardAnnouncements.test.ts.
+  it('announces drags by task title and column label, not by raw ids', async () => {
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Ship it', status: 'in_progress' }] }),
+      ),
+    )
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    // The grip handle is dnd-kit's drag activator; it carries the instructions
+    // a keyboard user hears before pickup.
+    const grip = screen.getByRole('button', { name: /Drag to move “Ship it”/ })
+    expect(grip).toHaveAttribute('aria-describedby')
+
+    const a = dnd.announcements
+    expect(a).toBeDefined()
+    const active = { id: 't1', data: { current: { fromStatus: 'in_progress', title: 'Ship it' } } }
+
+    expect(a?.onDragStart?.({ active } as never)).toBe('Picked up “Ship it” from In progress.')
+    const dropped = a?.onDragEnd?.({ active, over: { id: 'done' } } as never)
+    expect(dropped).toContain('Ship it')
+    expect(dropped).toContain('Done')
+    expect(dropped).not.toMatch(/t1|in_progress/)
   })
 })

@@ -42,7 +42,7 @@ import {
 } from './steps'
 import { NATIVE_STEPS } from './StepIndicator'
 import { OnboardingPrimary, OnboardingScreen } from './OnboardingScreen'
-import { useFocusTrap } from './useFocusTrap'
+import { isTopmostTrap, useFocusTrap } from '@/features/shared/useFocusTrap'
 import { SkyAtmosphere } from '@/features/atmosphere'
 import { connectGatewayFromSettings } from '@/lib/gatewayConnect'
 
@@ -555,10 +555,15 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
   // The wizard is a mandatory full-screen modal. Trap + restore focus, and let
   // Escape retreat one step (never dismiss — there is no app behind it).
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useFocusTrap(dialogRef, step)
+  const trapToken = useFocusTrap(dialogRef, step)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      // A dialog opened ON TOP of the wizard (SelectTeamStep mounts
+      // CreateTeamModal) owns Escape — otherwise one press would both close that
+      // dialog and retreat a wizard step. stopPropagation can't arbitrate: both
+      // listeners sit on `window` in the bubble phase.
+      if (!isTopmostTrap(trapToken.current)) return
       const back = BACK_STEP[step]
       if (!back) return
       // Retreating out of the OpenClaw detour (back to addRuntimes) abandons it —
@@ -568,7 +573,7 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [step, goTo, resetGatewayClient])
+  }, [step, goTo, resetGatewayClient, trapToken])
 
   // Animate direction based on step progression
   const isForward = STEP_INDEX[step] >= STEP_INDEX[prevStep]

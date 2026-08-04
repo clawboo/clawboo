@@ -128,7 +128,7 @@ function Row({
         <span
           data-testid="capability-observe-only"
           title={`Managed by ${RUNTIME_LABEL[rec.runtime] ?? rec.runtime}`}
-          className="flex shrink-0 items-center gap-1.5 text-[11px] text-foreground/40"
+          className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
         >
           {rec.source === 'runtime-builtin' ? <Lock size={12} /> : <EyeOff size={12} />}
           built-in, managed by {RUNTIME_LABEL[rec.runtime] ?? rec.runtime}
@@ -152,10 +152,7 @@ function Row({
             >
               {a.label}
               {a.hint && a.disabled ? (
-                <span className="font-normal text-foreground/45">
-                  {' '}
-                  · {a.hint}
-                </span>
+                <span className="font-normal text-foreground/45"> · {a.hint}</span>
               ) : null}
             </Button>
           )

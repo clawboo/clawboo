@@ -15,7 +15,7 @@ import { useTeamStore } from '@/stores/team'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useTourStore } from '@/stores/tour'
 import { CAPABILITY_TOUR_FLAG, hasSeenFlag, markSeenFlag } from '@/lib/oneTimeFlag'
-import { useFocusTrap } from './useFocusTrap'
+import { useFocusTrap } from '@/features/shared/useFocusTrap'
 
 // ─── Step model ──────────────────────────────────────────────────────────────
 //
@@ -124,7 +124,7 @@ const STEPS: Step[] = [
     key: 'finish',
     variant: 'finish',
     title: "You're all set",
-    body: "Open Group Chat and tell Boo Zero what you need. It delegates to the right Boos and coordinates the work for you.",
+    body: 'Open Group Chat and tell Boo Zero what you need. It delegates to the right Boos and coordinates the work for you.',
   },
 ]
 

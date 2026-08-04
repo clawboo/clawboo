@@ -296,7 +296,7 @@ export function ChatPanel({
               aria-hidden
             />
             <span
-              className={`font-mono text-[10px] uppercase tracking-[0.1em] ${nativeKeyless ? 'text-amber/90' : 'text-foreground/45'}`}
+              className={`font-mono text-[10px] uppercase tracking-[0.1em] ${nativeKeyless ? 'text-amber/90' : 'text-muted-foreground'}`}
             >
               {nativeKeyless
                 ? 'Disconnected'

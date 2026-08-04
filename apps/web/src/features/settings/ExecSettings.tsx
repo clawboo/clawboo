@@ -117,7 +117,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
         <span className="text-[12px] font-semibold text-foreground">Execution Permissions</span>
       </div>
 
-      <p className="mb-3.5 text-[11px] leading-relaxed text-foreground/45">
+      <p className="mb-3.5 text-[11px] leading-relaxed text-muted-foreground">
         Controls whether this agent needs your approval before running shell commands. Changes take
         effect on the next message.
       </p>
@@ -126,7 +126,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
         className="rounded-2xl border border-border bg-surface p-4"
         style={{ boxShadow: 'var(--shadow-raised)' }}
       >
-        <label className="mb-2 block font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
+        <label className="mb-2 block font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
           Command Execution
         </label>
         <Select
@@ -135,7 +135,9 @@ export function ExecSettings({ agentId }: { agentId: string }) {
           options={EXEC_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
           style={{ width: '100%' }}
         />
-        <p className="mt-2 text-[11px] leading-relaxed text-foreground/40">{selected.description}</p>
+        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+          {selected.description}
+        </p>
       </div>
     </div>
   )

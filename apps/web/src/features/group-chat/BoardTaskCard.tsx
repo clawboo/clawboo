@@ -65,7 +65,8 @@ export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: Board
   const isBooZero = task.assigneeAgentId !== null && task.assigneeAgentId === booZeroAgentId
   const teamTint = useTeamBooColor(task.assigneeAgentId ?? '', isBooZero)
   const tint =
-    teamTint ?? (task.assigneeAgentId ? resolveBooTint(task.assigneeAgentId, isBooZero) : 'var(--mint)')
+    teamTint ??
+    (task.assigneeAgentId ? resolveBooTint(task.assigneeAgentId, isBooZero) : 'var(--mint)')
 
   // Color is carried by the avatar + the semantic status pill; the tint appears
   // only as a whisper — a small dot by the assignee name. The raw avatar tint is
@@ -151,7 +152,7 @@ export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: Board
                 {assigneeName ?? 'Unassigned'}
               </span>
             </span>
-            <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-foreground/40">
+            <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
               <span className="font-semibold">Task</span>
               <span aria-hidden className="text-foreground/25">
                 ·
@@ -175,7 +176,7 @@ export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: Board
         {showOutput && (
           <div className="mt-3.5">
             <div className="mb-2 flex items-center gap-2.5">
-              <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-foreground/35">
+              <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                 {task.status === 'done' ? 'Output' : 'Reason'}
               </span>
               <div className="h-px flex-1 bg-border" />

@@ -15,7 +15,7 @@ import type { ApprovalRequest } from '@/stores/approvals'
 // time-sensitive gates without a horizontal scroll.
 
 const SECTION_LABEL =
-  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
+  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'
 
 type Item =
   | { key: string; ts: number; kind: 'exec'; exec: ApprovalRequest }
@@ -75,7 +75,7 @@ export function ApprovalsColumn({ teamFilter }: { teamFilter: string }) {
           </span>
         )}
         <span
-          className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/40"
+          className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
           style={{ writingMode: 'vertical-rl' }}
         >
           Needs approval

@@ -132,7 +132,11 @@
   --primary-rgb: 220 42 72;
 
   --muted: #f1f5f9;
-  --muted-foreground: #64748b;
+  /* AA-safe muted text (>= 4.5:1 on background / surface / card / muted).
+     Deliberately NOT a duplicate of --secondary any more: this is the token that
+     low-opacity micro-type (`text-foreground/35` and friends) migrates to.
+     Guarded by src/app/__tests__/tokenContrast.test.ts. */
+  --muted-foreground: #5b6b7f;
 
   /* Hairline border — a touch softer than before for the premium reference feel. */
   --border: rgb(15 23 42 / 0.08);
@@ -241,7 +245,9 @@
   --foreground: #e8e8e8;
   --foreground-rgb: 232 232 232;
   --surface-rgb: 17 24 39;
-  --secondary: #6b7280;
+  /* slate-400. #6b7280 (gray-500) measured 3.67:1 on --surface — below AA for
+     the ~50 `text-secondary*` call sites. See tokenContrast.test.ts. */
+  --secondary: #94a3b8;
 
   --card: #111827;
   --card-foreground: #e8e8e8;
@@ -253,7 +259,8 @@
   --primary-rgb: 233 69 96;
 
   --muted: #1f2937;
-  --muted-foreground: #6b7280;
+  /* The dark half of the AA-safe muted-text token (see the :root note). */
+  --muted-foreground: #8b95a5;
 
   --border: rgb(255 255 255 / 0.08);
   --border-strong: rgb(255 255 255 / 0.16);
@@ -541,6 +548,41 @@ samp {
 .cm-editor :focus-visible,
 .cm-editor *:focus-visible {
   outline: none;
+}
+
+/* …except a graph NODE, which really is a keyboard stop: React Flow gives every
+   node tabIndex=0 plus its own Enter/Space/arrow handling, so the blanket rule
+   above left keyboard users navigating the graph completely blind. Restore the
+   ring for the node wrapper only — the pane, handles, minimap and CodeMirror
+   keep the suppression. An explicit radius is safe here (unlike the global rule,
+   which must not set one) because this targets one known wrapper.
+
+   The `.react-flow .react-flow__node.selectable` variant is REQUIRED, not
+   belt-and-braces: React Flow's own stylesheet ships
+   `.react-flow__node.selectable:focus-visible { outline: none }`, which both
+   outranks a bare `.react-flow__node:focus-visible` (0-3-0 vs 0-2-0) AND loads
+   after globals.css. Every node is `.selectable` while the canvas is unlocked,
+   so without the higher-specificity selector this ring never paints. */
+.react-flow__node:focus-visible,
+.react-flow .react-flow__node.selectable:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+  border-radius: 12px;
+}
+
+/* Boo nodes are a 280 x 280 transparent envelope (BOO_FOOTPRINT in
+   nodes/BooNode.tsx) around a ~124px circle or a 280 x 170 card, so a ring on
+   the wrapper would float ~80px away from anything visible. Paint it on the
+   inner `.group` instead — the same element that re-enables pointer events
+   above — and let the outline follow that element's own border-radius. */
+.react-flow__node-boo:focus-visible,
+.react-flow .react-flow__node-boo.selectable:focus-visible {
+  outline: none;
+}
+.react-flow__node-boo:focus-visible .group,
+.react-flow .react-flow__node-boo.selectable:focus-visible .group {
+  outline: 2px solid var(--primary);
+  outline-offset: 6px;
 }
 
 /* The onboarding welcome CTA is a large, unmistakable primary button with

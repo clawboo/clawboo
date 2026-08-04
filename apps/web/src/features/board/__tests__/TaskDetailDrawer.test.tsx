@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { axe } from '@/__vitest__/axe'
 import { useToastStore } from '@/stores/toast'
 
 import { server } from '../../../__vitest__/mswServer'
@@ -380,5 +381,69 @@ describe('TaskDetailDrawer', () => {
     expect(
       await screen.findByText(/Reviewed by claude-code · claude-haiku-4-5/),
     ).toBeInTheDocument()
+  })
+
+  // The drawer had no dialog semantics and no focus trap before it adopted the
+  // shared <Modal>; screen-reader and keyboard users could Tab straight out of
+  // it into the board behind the scrim.
+  describe('dialog semantics', () => {
+    it('is a modal dialog named after the task', async () => {
+      server.use(...detailHandlers())
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+      const dialog = await screen.findByRole('dialog', { name: 'Ship it' })
+      expect(dialog).toHaveAttribute('aria-modal', 'true')
+    })
+
+    it('moves focus into the drawer on open', async () => {
+      server.use(...detailHandlers())
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+      await screen.findByText('Ship it')
+      await waitFor(() =>
+        expect(screen.getByTestId('task-detail-drawer').contains(document.activeElement)).toBe(
+          true,
+        ),
+      )
+    })
+
+    it('closes on Escape', async () => {
+      server.use(...detailHandlers())
+      const onClose = vi.fn()
+      const user = userEvent.setup()
+      render(<TaskDetailDrawer taskId="t1" onClose={onClose} />)
+
+      await screen.findByText('Ship it')
+      await user.keyboard('{Escape}')
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    // The regression this drawer's Escape handler could easily reintroduce:
+    // Select stops Escape in the CAPTURE phase to close its own popover, so the
+    // dialog's window-BUBBLE listener must never see it. Mirrors the equivalent
+    // guard for NewTaskDialog in BoardPanel.test.tsx.
+    it('lets Escape dismiss the open status dropdown without closing the drawer', async () => {
+      server.use(...detailHandlers())
+      const onClose = vi.fn()
+      const user = userEvent.setup()
+      render(<TaskDetailDrawer taskId="t1" onClose={onClose} />)
+
+      await screen.findByText('Ship it')
+      await user.click(screen.getByTestId('task-status-select'))
+      expect(await screen.findByRole('option', { name: 'Done' })).toBeInTheDocument()
+
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(screen.queryByRole('option', { name: 'Done' })).toBeNull())
+      expect(onClose).not.toHaveBeenCalled()
+      expect(screen.getByTestId('task-detail-drawer')).toBeInTheDocument()
+    })
+
+    it('has no level-A/AA a11y violations', async () => {
+      server.use(...detailHandlers())
+      const { container } = render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+      await screen.findByText('Ship it')
+      expect(await axe(container)).toHaveNoViolations()
+    })
   })
 })

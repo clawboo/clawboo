@@ -5,6 +5,7 @@ import { useTeamStore } from '@/stores/team'
 import { useBooZeroStore, isBooZeroEligibleForTeam } from '@/stores/booZero'
 import type { Team } from '@/stores/team'
 import { useGraphStore } from './store'
+import { graphNodeAriaLabel } from './nodeAriaLabel'
 import { parseAgentsMd } from './parsers/parseAgentsMd'
 import { computeSpanningTree } from './computeSpanningTree'
 import { resolveTeamInternalLead } from '@/lib/resolveTeamLeader'
@@ -389,14 +390,19 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
       const data = node.data as BooNodeData
       const agent = agentMap.get(data.agentId)
       if (!agent) return node
-      return {
+      const next = {
         ...node,
         data: {
           ...data,
           status: agent.status ?? 'idle',
           isStreaming: agent.status === 'running',
         } as BooNodeData,
-      }
+      } as GraphNode
+      // The accessible name embeds the status, and `buildGraphElements` does NOT
+      // re-run on a status-only change — without this, a Boo that goes idle →
+      // running would keep announcing "idle" forever.
+      next.ariaLabel = graphNodeAriaLabel(next)
+      return next
     })
 
     store.setNodes(patched as GraphNode[])
@@ -1100,8 +1106,12 @@ export function buildGraphElements(
     ;(node.data as BooNodeData).edgeCount = edgeCounts.get(node.id) ?? 0
   }
 
-  return {
-    rawNodes: [...booNodes, ...teamRootNodes, ...skillNodes, ...resourceNodes],
-    rawEdges: allEdges,
-  }
+  const rawNodes: GraphNode[] = [...booNodes, ...teamRootNodes, ...skillNodes, ...resourceNodes]
+  // React Flow reads `node.ariaLabel` as each node's accessible name, and every
+  // node is a Tab stop by default. One trailing pass rather than seven
+  // construction sites, so a future node kind can't ship unlabelled — and so
+  // `edgeCount` (stamped just above) is already on the data.
+  for (const node of rawNodes) node.ariaLabel = graphNodeAriaLabel(node)
+
+  return { rawNodes, rawEdges: allEdges }
 }
