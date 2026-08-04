@@ -116,9 +116,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 8
+    # The gate now packs a tarball and does a real `npm install` of it (which
+    # downloads/builds better-sqlite3's native binding) before booting the CLI,
+    # so the budget covers a cold registry and a cold Windows runner.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -133,20 +136,25 @@ jobs:
 
       - run: pnpm assemble
 
-      # Simulates `npx clawboo` end-to-end against an isolated state dir,
-      # with a fake non-Clawboo listener on port 18791 (mimicking the
-      # OpenClaw Gateway auxiliary port that broke v0.1.2). Asserts the
-      # CLI's port-discovery correctly skips 18791, the SPA renders, the
-      # deep-route catch-all works, and /api/settings returns JSON.
+      # Simulates `npx clawboo` end-to-end: `pnpm pack`s apps/cli, installs the
+      # tarball into a throwaway temp dir with a real `npm install` (no
+      # workspace symlinks, so the published `files` whitelist and dependency
+      # closure are actually exercised), then runs every assertion against THAT
+      # install — the packaged bins, the externals-vs-dependencies static check,
+      # port discovery skipping a fake non-Clawboo listener on 18791 (the
+      # OpenClaw Gateway auxiliary port that broke v0.1.2), the SPA and its
+      # deep-route catch-all, /api/settings, a stdio MCP `tools/list` handshake,
+      # and one real runtime dispatch driven to `done`.
       #
-      # Runs on both ubuntu-latest and windows-latest. The Windows run is
-      # the regression gate for v0.1.4's Windows-compat fixes (npm.cmd
-      # resolution, which→where shim, netstat-based findProcessByPort).
+      # Runs on ubuntu-latest, windows-latest and macos-latest. Windows is the
+      # regression gate for v0.1.4's Windows-compat fixes (npm.cmd resolution,
+      # which→where shim, netstat-based findProcessByPort); macOS is a primary
+      # user OS that CI did not cover before.
       - run: pnpm test:clean-install
 
   e2e:
     name: E2E (Playwright)
-    # ubuntu only, unlike smoke-test-bundle's two-OS matrix. The webServer
+    # ubuntu only, unlike smoke-test-bundle's three-OS matrix. The webServer
     # command in playwright.config.ts is POSIX shell syntax
     # (`VAR=value cmd && VAR=value cmd`), which cmd.exe cannot parse; running
     # the suite on Windows would need a cross-env wrapper first.

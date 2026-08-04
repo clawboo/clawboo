@@ -10,7 +10,7 @@ Claude Code is one of the four non-OpenClaw [runtimes](/appendices/glossary). Li
 ## Prerequisites
 
 <Note>
-Node 22+ and `npm` (bundled with Node); Claude Code installs via `npm install -g`. An Anthropic API key, **or** an existing local `claude` login (the SDK falls back to the logged-in CLI's own auth when no key is in the vault).
+Node 22+ and `npm` (bundled with Node); Claude Code installs via `npm install -g`. An Anthropic API key, **or** an existing local `claude` login (the SDK falls back to the logged-in CLI's own auth when no key is in the vault). On an install from npm you also need `@anthropic-ai/claude-agent-sdk` installed alongside Clawboo — see [step 3](#3-install-the-agent-sdk-published-installs).
 </Note>
 
 - The Clawboo dashboard running (`clawboo`).
@@ -66,7 +66,23 @@ curl -X POST http://localhost:18790/api/runtimes/claude-code/connect \
 You can skip the explicit Connect if a credential already resolves. At run time the key is resolved by `resolveRuntimeKey('ANTHROPIC_API_KEY')` in priority order: `process.env.ANTHROPIC_API_KEY` → the encrypted vault → OpenClaw's `~/.openclaw/.env`. If any of those holds the key, the card reads `ready` without a paste.
 </Tip>
 
-### 3. Run a board task on it
+### 3. Install the Agent SDK (published installs)
+
+Clawboo drives Claude Code through the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk), which is a **separate package** from the `claude` CLI installed in step 1. If you are running Clawboo from source (the monorepo), it is already there and you can skip this. If you installed Clawboo from npm, it is not: the published tarball deliberately does not declare it, because the SDK's per-platform optional dependency is a ~210 MB `claude` binary that every install would otherwise download for a runtime most users never touch.
+
+Install it alongside Clawboo so Node can resolve it from the server bundle:
+
+```bash
+npm install -g clawboo @anthropic-ai/claude-agent-sdk
+```
+
+<Warning>
+The SDK has to sit **next to** Clawboo in the same `node_modules` tree, which is why a global Clawboo pairs with a global SDK. A one-off `npx clawboo` runs out of npm's throwaway cache directory, so there is nowhere to add the SDK — install Clawboo globally (or as a project dependency) if you want to use the Claude Code runtime.
+</Warning>
+
+Without it, the runtime card still reads `ready` (that reflects the `claude` binary plus your key), but a run fails immediately with a message naming the missing package and the command above.
+
+### 4. Run a board task on it
 
 With the runtime `ready`, dispatch a board task:
 
@@ -82,15 +98,17 @@ The server-side executor runner claims the task, provisions a worktree from `rep
 
 The pure adapter lives in `@clawboo/adapter-claude-code`; the real driver that talks to the SDK lives server-side in `claudeCodeDriver.ts`. They are split deliberately so the adapter stays dependency-light (its only dependency is `@clawboo/executor`) and contract-testable against an in-memory fake.
 
-### The SDK is lazy-imported
+### The SDK is lazy-imported, and optional
 
-`@anthropic-ai/claude-agent-sdk` is **not** bundled into the shipped server and **not** required at boot. The driver imports it lazily, inside the run:
+`@anthropic-ai/claude-agent-sdk` is **not** bundled into the shipped server and **not** required at boot. The driver imports it lazily, inside the run, through a helper that turns a resolution failure into the remediation above rather than a raw resolver error:
 
 ```ts
-const mod = (await import('@anthropic-ai/claude-agent-sdk')) as unknown as SdkModule
+const mod = await loadAgentSdk() // wraps: await import('@anthropic-ai/claude-agent-sdk')
 ```
 
 A default Clawboo install therefore carries no Claude Code dependency in its boot graph; the SDK is loaded only when a Claude Code run actually starts. The driver's structural types are deliberately decoupled from the SDK's deep generated types (which reference a different zod major).
+
+It is also not a declared dependency of the published `clawboo` package, so **an install from npm does not ship it** — see [Install the Agent SDK](#3-install-the-agent-sdk-published-installs) above. The reason is size: the SDK's per-platform optional dependency is a ~210 MB `claude` binary, and npm installs optional dependencies by default, so declaring it would add that to every install for a runtime most users never touch. The clean-install gate treats it as a **documented optional external** for the same reason (`OPTIONAL_EXTERNALS` in `scripts/lib/bundle-externals.mjs`), and the driver turns Node's bare `Cannot find package` into the instruction that fixes it rather than surfacing a resolver error as the run's failure summary.
 
 ### Message translation
 
@@ -128,6 +146,10 @@ The run is a headless worker, so the driver sets `permissionMode: 'bypassPermiss
 - After a `POST /api/runtimes/claude-code/run`, the task advances on the board, the worktree carries the file changes plus an `AGENT_HANDOFF.json`, and the run's report-up summary lands as a board comment.
 
 ## Troubleshooting
+
+<Warning>
+**The run fails immediately saying `@anthropic-ai/claude-agent-sdk` is missing.** The card reads `ready` because that reflects the `claude` binary plus your key, but the Agent SDK is a separate, deliberately-not-shipped package. Install it alongside Clawboo (`npm install -g @anthropic-ai/claude-agent-sdk` for a global Clawboo) and re-run the task — see [step 3](#3-install-the-agent-sdk-published-installs).
+</Warning>
 
 <Warning>
 **The run starts but cannot authenticate.** With no key in the vault, the SDK falls back to the logged-in `claude` CLI's auth, which lives under your real `HOME`/Keychain. If the Clawboo server runs with an isolated `HOME` (a sandboxed dev/e2e environment), that login is invisible. Set `ANTHROPIC_API_KEY` (env or vault) for deterministic API-key auth, or run the server at your normal `HOME`.

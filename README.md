@@ -163,6 +163,8 @@ Everything is local-first: the board persists in SQLite at `~/.clawboo/clawboo.d
 
 Every runtime executes board tasks behind one interface, isolated in its own git worktree, with a structured handoff artifact so work can move between runtimes.
 
+> **Claude Code on an npm install:** the published tarball deliberately does not bundle `@anthropic-ai/claude-agent-sdk` (its per-platform binary would add ~210 MB to every install). Install it alongside Clawboo — `npm i -g clawboo @anthropic-ai/claude-agent-sdk` — or run Clawboo from source. [Details](https://docs.claw.boo/runtimes/claude-code)
+
 ---
 
 ## Configuration
