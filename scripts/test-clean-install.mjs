@@ -164,6 +164,11 @@ async function cleanup() {
   }
   for (const server of [fakeService, stubProvider]) {
     if (server) {
+      // `close()` waits for open sockets, and the stub provider answers with
+      // `Connection: keep-alive` — a socket the detached server still holds
+      // would otherwise keep this pending long enough to eat the whole cleanup
+      // budget, so the temp dirs below never get removed.
+      server.closeAllConnections?.()
       await new Promise((resolve) => server.close(() => resolve()))
     }
   }
@@ -211,6 +216,17 @@ async function listenersOn(port) {
   }
 }
 
+/**
+ * SIGTERM whatever listens on `port`, escalating to SIGKILL only when we own it.
+ *
+ * `escalateMs: 0` means "ask, don't insist" — used on the fake-listener bind
+ * path, where the holder is *probably* a leftover from an aborted run but could
+ * be an unrelated local service the developer cares about. SIGKILLing a
+ * stranger's process to free a test port is not a trade this gate gets to make;
+ * if the port stays busy we simply try the next candidate and, failing that,
+ * name the holders in the error. The cleanup path DOES escalate, because there
+ * the target is the server this run spawned.
+ */
 async function killByPort(port, escalateMs = 3_000) {
   // On Windows there's no `lsof`, so this is a no-op there — CI runners are
   // ephemeral, and on a dev box a stranded server is caught by the "a Clawboo
@@ -225,6 +241,7 @@ async function killByPort(port, escalateMs = 3_000) {
       /* already gone */
     }
   }
+  if (escalateMs <= 0) return
   // Escalate: a server that ignores SIGTERM (or dies slowly) would otherwise
   // outlive the run and block the next one at the preflight.
   const deadline = Date.now() + escalateMs
@@ -284,7 +301,15 @@ function runTool(cmd, args, { cwd, timeoutMs = 120_000 } = {}) {
     let stderr = ''
     const timer = setTimeout(() => {
       try {
-        child.kill('SIGKILL')
+        // On Windows `shell: true` means `child` is cmd.exe, not npm/pnpm —
+        // killing it would leave the real process tree running, still writing
+        // into the temp dir that cleanup is about to remove. taskkill /T takes
+        // the whole tree.
+        if (IS_WINDOWS && child.pid) {
+          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+        } else {
+          child.kill('SIGKILL')
+        }
       } catch {
         /* ignore */
       }
@@ -358,9 +383,10 @@ async function bindFakeService() {
         if (err?.code !== 'EADDRINUSE') throw err
         lastErr = err
         busy.add(port)
-        // Short escalation window here: four candidates share the bind budget,
-        // and the usual holder (a dying e2e server) releases in milliseconds.
-        await killByPort(port, 1_000)
+        // SIGTERM only — see killByPort. The usual holder is a dying e2e server
+        // that releases in milliseconds; anything that survives a SIGTERM might
+        // not be ours to kill, so we move to the next candidate instead.
+        await killByPort(port, 0)
       }
     }
     if (Date.now() >= deadline) break
@@ -643,6 +669,13 @@ async function assertInstalledTree(packageDir) {
 
   // `bin` is either a map or a bare path (which npm names after the package).
   const bins = typeof pkg.bin === 'string' ? { [pkg.name]: pkg.bin } : (pkg.bin ?? {})
+  // Guard the loop's own premise: with no `bin` at all it would iterate zero
+  // times and report success, so a manifest that lost its `bin` map (no `npx
+  // clawboo`, no MCP commands) would sail through this check.
+  if (Object.keys(bins).length === 0) {
+    fail('the published manifest declares no "bin" entries — `npx clawboo` would not exist')
+    return false
+  }
   for (const [binName, relPath] of Object.entries(bins)) {
     const target = path.join(packageDir, relPath)
     if (!(await pathExists(target))) {

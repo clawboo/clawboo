@@ -52,14 +52,29 @@ interface SdkModule {
  *  (and the clean-install externals check) can still see the edge. */
 const AGENT_SDK = '@anthropic-ai/claude-agent-sdk'
 
+/** The specifier Node names as unresolvable, read out of the resolver message.
+ *  ESM: `Cannot find package 'x' imported from <importer>` · CJS: `Cannot find
+ *  module 'x'`. Null when the message doesn't match that shape. */
+function unresolvedSpecifierOf(message: string): string | null {
+  return message.match(/Cannot find (?:package|module) '([^']+)'/)?.[1] ?? null
+}
+
 /** True when `err` is Node reporting that OUR specifier could not be resolved
  *  (not a missing transitive dep inside the SDK, which is a different problem
  *  and must not be reported as "install the SDK"). Exported for tests — the
- *  workspace always resolves the SDK, so the miss can't be provoked here. */
+ *  workspace always resolves the SDK, so the miss can't be provoked here.
+ *
+ *  The specifier is READ OUT of the message rather than searched for anywhere in
+ *  it: the ESM resolver appends `imported from <importer>`, and when a
+ *  transitive dependency OF the SDK is the missing one, that importer path sits
+ *  inside the SDK's own package dir — so a substring test would confidently hand
+ *  the user the wrong instruction. An unparseable message returns false; a raw
+ *  resolver error beats a misleading remediation. */
 export function isAgentSdkMissing(err: unknown): boolean {
   const code = (err as { code?: unknown } | null)?.code
   if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'MODULE_NOT_FOUND') return false
-  return err instanceof Error && err.message.includes(AGENT_SDK)
+  if (!(err instanceof Error)) return false
+  return unresolvedSpecifierOf(err.message) === AGENT_SDK
 }
 
 /**

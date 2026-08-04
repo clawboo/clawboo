@@ -154,7 +154,7 @@ jobs:
 
   e2e:
     name: E2E (Playwright)
-    # ubuntu only, unlike smoke-test-bundle's two-OS matrix. The webServer
+    # ubuntu only, unlike smoke-test-bundle's three-OS matrix. The webServer
     # command in playwright.config.ts is POSIX shell syntax
     # (`VAR=value cmd && VAR=value cmd`), which cmd.exe cannot parse; running
     # the suite on Windows would need a cross-env wrapper first.

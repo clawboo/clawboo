@@ -80,7 +80,21 @@ export async function checkBundleExternals({ packageDir, log = () => {} }) {
   log('extractor self-check passed')
 
   const pkgPath = path.join(packageDir, 'package.json')
-  const pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'))
+  let pkg
+  try {
+    pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'))
+  } catch (err) {
+    // Everything else here reports through { ok, errors }; a throw would surface
+    // as a bare stack from the smoke test's outer catch, which is the opposite
+    // of what a gate whose job is naming packaging defects should do.
+    return {
+      ok: false,
+      errors: [
+        ...errors,
+        `cannot read ${pkgPath}: ${err instanceof Error ? err.message : String(err)}`,
+      ],
+    }
+  }
   const dependencies = Object.keys(pkg.dependencies ?? {})
   log(`analyzing ${pkg.name}@${pkg.version} at ${packageDir}`)
 
@@ -121,7 +135,18 @@ export async function checkBundleExternals({ packageDir, log = () => {} }) {
   for (const rel of result.relative) {
     const from = path.dirname(path.join(packageDir, rel.file))
     const target = path.resolve(from, rel.specifier)
-    const candidates = [target, `${target}.js`, `${target}.json`, path.join(target, 'index.js')]
+    // Cover every extension Node would try for a sibling the bundle loads. A
+    // missing candidate here fabricates a failure against a file that shipped,
+    // which is the one direction this tooling must never fail in.
+    const candidates = [
+      target,
+      `${target}.js`,
+      `${target}.cjs`,
+      `${target}.mjs`,
+      `${target}.json`,
+      `${target}.node`,
+      path.join(target, 'index.js'),
+    ]
     let exists = false
     for (const candidate of candidates) {
       try {

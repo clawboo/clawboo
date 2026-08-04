@@ -54,7 +54,7 @@ pnpm test                               # Vitest unit tests (node + jsdom projec
 pnpm e2e                                # Playwright end-to-end tests (incl. board round-trip + eval smoke)
 pnpm verify:ingest                      # marketplace codegen drift gate
 pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the tarball, and smoke-test it
-pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared
+pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
 ```
 
 Run them locally before pushing to avoid back-and-forth. Every one of them runs as a CI job too.
