@@ -26,11 +26,11 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -43,11 +43,11 @@ jobs:
     name: Typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -60,11 +60,11 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -77,11 +77,11 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -94,11 +94,11 @@ jobs:
     name: Verify marketplace ingest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -116,15 +116,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 8
+    # The gate now packs a tarball and does a real `npm install` of it (which
+    # downloads/builds better-sqlite3's native binding) before booting the CLI,
+    # so the budget covers a cold registry and a cold Windows runner.
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -133,13 +136,86 @@ jobs:
 
       - run: pnpm assemble
 
-      # Simulates `npx clawboo` end-to-end against an isolated state dir,
-      # with a fake non-Clawboo listener on port 18791 (mimicking the
-      # OpenClaw Gateway auxiliary port that broke v0.1.2). Asserts the
-      # CLI's port-discovery correctly skips 18791, the SPA renders, the
-      # deep-route catch-all works, and /api/settings returns JSON.
+      # Simulates `npx clawboo` end-to-end: `pnpm pack`s apps/cli, installs the
+      # tarball into a throwaway temp dir with a real `npm install` (no
+      # workspace symlinks, so the published `files` whitelist and dependency
+      # closure are actually exercised), then runs every assertion against THAT
+      # install — the packaged bins, the externals-vs-dependencies static check,
+      # port discovery skipping a fake non-Clawboo listener on 18791 (the
+      # OpenClaw Gateway auxiliary port that broke v0.1.2), the SPA and its
+      # deep-route catch-all, /api/settings, a stdio MCP `tools/list` handshake,
+      # and one real runtime dispatch driven to `done`.
       #
-      # Runs on both ubuntu-latest and windows-latest. The Windows run is
-      # the regression gate for v0.1.4's Windows-compat fixes (npm.cmd
-      # resolution, which→where shim, netstat-based findProcessByPort).
+      # Runs on ubuntu-latest, windows-latest and macos-latest. Windows is the
+      # regression gate for v0.1.4's Windows-compat fixes (npm.cmd resolution,
+      # which→where shim, netstat-based findProcessByPort); macOS is a primary
+      # user OS that CI did not cover before.
       - run: pnpm test:clean-install
+
+  e2e:
+    name: E2E (Playwright)
+    # ubuntu only, unlike smoke-test-bundle's three-OS matrix. The webServer
+    # command in playwright.config.ts is POSIX shell syntax
+    # (`VAR=value cmd && VAR=value cmd`), which cmd.exe cannot parse; running
+    # the suite on Windows would need a cross-env wrapper first.
+    runs-on: ubuntu-latest
+    # Measured on this job's first green runs: under 4 minutes end to end
+    # (install ~4s warm, chromium ~23s, build ~76s, the suite itself ~111s).
+    # The margin on top covers a cold pnpm store and the two retries
+    # playwright.config.ts turns on under CI.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # chromium only: playwright.config.ts defines exactly one project.
+      # --with-deps is the part that matters on a bare runner — it installs the
+      # OS shared libraries headless Chromium needs, which no npm package does.
+      - run: pnpm exec playwright install --with-deps chromium
+
+      # Required, not an optimization. Every @clawboo/* package resolves only
+      # through its dist/ (there is no src export condition and no path alias to
+      # source), dist/ is gitignored, and nothing builds it during install —
+      # there is no postinstall anywhere in the workspace. Both halves of the
+      # Playwright webServer command, the Vite UI build and the tsx server boot,
+      # import those packages, so without this step the suite dies in webServer
+      # before the first test runs.
+      #
+      # This does mean `vite build` runs twice: once here as part of the web
+      # app's build, once inside webServer. Accepted — using the same `pnpm
+      # build` the Build job runs keeps the two jobs honest about the same
+      # graph, and the duplicate costs ~1-2 minutes.
+      - run: pnpm build
+
+      # 20 tests across 12 specs, single worker, in file order. The suite shares
+      # one server and one SQLite file, and 13-onboarding-codex deliberately
+      # reads state that specs 01-06 leave behind, so do not shard this or raise
+      # `workers`. No secrets and no provider keys: the gateway is a mock ws
+      # server, and every live-CLI probe is either route-mocked or bounded by an
+      # execFile timeout.
+      - run: pnpm e2e
+
+      # The HTML report plus any on-retry traces. Uploaded on success too, not
+      # just on failure: with `retries: 2` a test can fail and then pass, which
+      # leaves the job green while the report is the only record that it was
+      # flaky. `!cancelled()` rather than `always()` so a superseded run that
+      # got cancelled does not upload a half-written report.
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          # test-results/ only exists when a test retried or failed, and the
+          # default `warn` would flag its absence on every green run.
+          if-no-files-found: ignore

@@ -1,0 +1,28 @@
+name: 'Clawboo CodeQL config'
+
+# Shared by both languages in .github/workflows/codeql.yml.
+#
+# The only exclusions are the codegen'd half of the marketplace catalog. Those
+# files are written by scripts/ingest-marketplace-content.ts from pinned upstream
+# SHAs and drift-gated by `pnpm verify:ingest`; they are roughly 4.3 MB of agent
+# prompt text held in string literals, about 41% of the repository's TypeScript
+# by volume in 29 files, with no executable logic in them at all. Skipping them
+# keeps the scan fast without giving up any real coverage.
+#
+# Their hand-written siblings are deliberately NOT excluded, so a genuine problem
+# introduced by hand is still caught: verify-ingest.ts names agents/clawboo/**,
+# agents/index.ts, teams/clawboo-builtin.ts, and teams/index.ts as the files it
+# does not verify because they are maintained by hand.
+#
+# Nothing else is excluded. In particular apps/web/server/ stays in scope: it is
+# where the Express API, the runtime spawning, and the git-worktree handling
+# live, so it is the natural home of the taint-flow bugs (path traversal, SSRF,
+# command injection) CodeQL is actually good at. ESLint now covers that tree too
+# (`eslint src/ server/`, pinned by importBoundary.test.ts), but the two tools
+# answer different questions — style and layering versus data flow.
+paths-ignore:
+  - apps/web/src/features/marketplace/agents/agency
+  - apps/web/src/features/marketplace/agents/awesome-openclaw
+  - apps/web/src/features/marketplace/teams/agency-workflows.ts
+  - apps/web/src/features/marketplace/teams/awesome-openclaw.ts
+  - apps/web/src/features/marketplace/teams/synthetic.ts

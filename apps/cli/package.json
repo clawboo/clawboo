@@ -34,7 +34,8 @@
   "scripts": {
     "build": "tsup",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -51,6 +52,7 @@
   },
   "devDependencies": {
     "@clawboo/config": "workspace:*",
+    "@clawboo/process-lookup": "workspace:*",
     "@clawboo/tsconfig": "workspace:*",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",

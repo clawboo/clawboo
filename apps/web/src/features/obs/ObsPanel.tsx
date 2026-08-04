@@ -23,6 +23,7 @@ import { EmptyState } from '@/features/shared/EmptyState'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 
 import { EvalScorecard } from './EvalScorecard'
 
@@ -143,14 +144,20 @@ export function ObsPanel() {
   const [selectedTrace, setSelectedTrace] = useState<string | null>(null)
   const selRef = useRef<string | null>(null)
   selRef.current = selectedTrace
+  const reads = useReadSequencer()
 
   const refresh = useCallback(async () => {
+    // Four parallel reads plus a fifth sequential one on a 5s interval, raced by the
+    // Refresh button — so refreshes overlap and are sequenced last-write-wins, or an older
+    // one lands last and flaps every tile back to a staler snapshot.
+    const read = reads.beginRead()
     const [h, ev, er, g] = await Promise.all([
       getJson<{ agents: FleetAgent[] }>('/api/obs/health'),
       getJson<{ events: ObsEvent[] }>('/api/obs/events?order=desc&limit=300'),
       getJson<{ errors: ObsError[]; harnessBugCount: number }>('/api/obs/errors'),
       getJson<ProjectedGraph>('/api/obs/graph'),
     ])
+    if (!read.isCurrent()) return
     if (h) setHealth(h.agents)
     if (ev) setRecent(ev.events)
     if (er) {
@@ -161,9 +168,11 @@ export function ObsPanel() {
     const sel = selRef.current
     if (sel) {
       const t = await getJson<TraceResult>(`/api/obs/traces/${sel}`)
-      if (t) setTrace(t)
+      // Also re-check the SELECTION: picking another trace mid-flight must not be
+      // overwritten by the previous one's response arriving late.
+      if (t && read.isCurrent() && selRef.current === sel) setTrace(t)
     }
-  }, [])
+  }, [reads])
 
   useEffect(() => {
     void refresh()
@@ -197,8 +206,11 @@ export function ObsPanel() {
 
   const openTrace = useCallback(async (traceId: string) => {
     setSelectedTrace(traceId)
+    selRef.current = traceId // eagerly, so the check below sees this click, not the last render
     const t = await getJson<TraceResult>(`/api/obs/traces/${traceId}`)
-    setTrace(t)
+    // Clicking a second trace before this one resolved must win: the later selection is
+    // what the user is looking at, so an earlier trace arriving late is dropped.
+    if (selRef.current === traceId) setTrace(t)
   }, [])
 
   const depths = useMemo(

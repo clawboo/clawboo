@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 
 import { ToolApprovalQueue } from '@/features/approvals/ToolApprovalQueue'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 import { useToastStore } from '@/stores/toast'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
@@ -274,30 +275,45 @@ export function GovernancePanel() {
   // Default posture is track-and-warn (a hard cap is the explicit opt-in).
   const [newMode, setNewMode] = useState<BudgetMode>('warn')
 
+  // Budgets and the audit log are independent polls over independent state, so each gets
+  // its own sequencer — a budget write must not invalidate an in-flight audit read.
+  const budgetReads = useReadSequencer()
+  const auditReads = useReadSequencer()
+
   const refreshBudgets = useCallback(async () => {
+    const read = budgetReads.beginRead()
     const r = await listBudgets()
-    if (r.ok) {
-      setBudgets(r.budgets)
-      setBudgetsOk(true)
-    } else if (!budgetsLoadedRef.current) {
-      // Initial-load failure → error/retry. A transient poll failure after a
-      // good load keeps the last good snapshot (no blank-to-error flicker).
-      setBudgets([])
-      setBudgetsOk(false)
+    // Every budget write (create, raise cap, resume) reconciles through this read. A poll
+    // already in flight when one lands answers with the PRE-write rows, so applying it
+    // would show the old cap for up to 5s right after a success toast.
+    if (read.isCurrent()) {
+      if (r.ok) {
+        setBudgets(r.budgets)
+        setBudgetsOk(true)
+      } else if (!budgetsLoadedRef.current) {
+        // Initial-load failure → error/retry. A transient poll failure after a
+        // good load keeps the last good snapshot (no blank-to-error flicker).
+        setBudgets([])
+        setBudgetsOk(false)
+      }
     }
-    budgetsLoadedRef.current = true
-  }, [])
+    if (read.isNewestRead()) budgetsLoadedRef.current = true
+  }, [budgetReads])
 
   const refreshAudit = useCallback(async () => {
-    setAudit(
-      await listAudit({
-        agentId: auditAgent.trim() || undefined,
-        eventType: auditType || undefined,
-        since: auditSince ? Date.now() - auditSince : undefined,
-        limit: 200,
-      }),
-    )
-  }, [auditAgent, auditType, auditSince])
+    const read = auditReads.beginRead()
+    const rows = await listAudit({
+      agentId: auditAgent.trim() || undefined,
+      eventType: auditType || undefined,
+      since: auditSince ? Date.now() - auditSince : undefined,
+      limit: 200,
+    })
+    // The agent filter is an undebounced text input, so every keystroke fires a read.
+    // Applied by arrival order, the response for an earlier prefix can land last and
+    // leave the table showing rows that contradict the filter box.
+    if (!read.isCurrent()) return
+    setAudit(rows)
+  }, [auditAgent, auditType, auditSince, auditReads])
 
   useEffect(() => {
     void refreshBudgets()

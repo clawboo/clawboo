@@ -374,6 +374,185 @@ describe('BoardPanel', () => {
     expect(within(screen.getByTestId('board-column-done')).queryByTestId('board-card')).toBeNull()
   })
 
+  it('ignores a board response that was already in flight when a drag committed', async () => {
+    // Regression (#105): reads overlap by design (the 5s poll, Refresh/Retry, the
+    // post-create reconcile), so a GET issued BEFORE a drag commits can resolve
+    // AFTER it, carrying the PRE-drag status. Applied unconditionally it snapped the
+    // card back to its old column until the next poll healed it. `refresh()` is
+    // sequenced against local commits, so the stale snapshot is dropped instead.
+    let calls = 0
+    let releaseStale: (() => void) | undefined
+    let staleAnswered = false
+    server.use(
+      http.get('/api/board', async () => {
+        calls += 1
+        // Hold the 2nd read open until the test releases it. Every read answers with
+        // the pre-drag snapshot, so the released one is genuinely stale.
+        if (calls === 2) {
+          await new Promise<void>((resolve) => {
+            releaseStale = resolve
+          })
+          staleAnswered = true
+        }
+        return HttpResponse.json({ tasks: [{ id: 't1', title: 'Ship it', status: 'in_progress' }] })
+      }),
+      http.patch('/api/board/t1', () =>
+        HttpResponse.json({ ok: true, task: { id: 't1', status: 'done' } }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    // Start the slow read, then commit the drag while it is still in flight.
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(calls).toBe(2))
+    await act(async () => {
+      dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'done' } }) // in_progress → done (legal)
+    })
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('board-column-done')).queryByTestId('board-card'),
+      ).not.toBeNull(),
+    )
+
+    // The stale read now lands, reporting the task still In progress.
+    releaseStale?.()
+    await waitFor(() => expect(staleAnswered).toBe(true))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0)) // flush fetch → json → setState
+    })
+
+    // The committed move survives — no snap-back to In progress.
+    expect(
+      within(screen.getByTestId('board-column-done')).getByTestId('board-card'),
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('board-column-in_progress')).queryByTestId('board-card'),
+    ).toBeNull()
+  })
+
+  it('ignores a board response that was already in flight when a task was created', async () => {
+    // Regression (#105), the create half: the composer prepends the new task
+    // optimistically and kicks a reconcile read. A read issued BEFORE the POST
+    // landed answers WITHOUT the new task, so applying it blanked the just-created
+    // card until the next poll. Only the newest read may write to the board.
+    const EXISTING = [{ id: 't1', title: 'Existing', status: 'todo' }]
+    let calls = 0
+    let releaseStale: (() => void) | undefined
+    let staleAnswered = false
+    let created = false
+    server.use(
+      http.get('/api/board', async () => {
+        calls += 1
+        // Read 2 is held open and answers with the pre-create snapshot; read 3 is
+        // handleCreated's reconcile, which sees the new task.
+        if (calls === 2) {
+          await new Promise<void>((resolve) => {
+            releaseStale = resolve
+          })
+          staleAnswered = true
+          return HttpResponse.json({ tasks: EXISTING })
+        }
+        return HttpResponse.json({
+          tasks: created
+            ? [...EXISTING, { id: 'new1', title: 'Draft the changelog', status: 'todo' }]
+            : EXISTING,
+        })
+      }),
+      http.post('/api/board', async ({ request }) => {
+        const body = (await request.json()) as { title: string; status?: string }
+        created = true
+        return HttpResponse.json({
+          task: { id: 'new1', title: body.title, status: body.status ?? 'todo' },
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    // Start the slow read, then create a task while it is still in flight.
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(calls).toBe(2))
+
+    await user.click(screen.getByRole('button', { name: /New task/i }))
+    const dialog = await screen.findByTestId('new-task-dialog')
+    await user.type(within(dialog).getByLabelText('Title'), 'Draft the changelog')
+    await user.click(within(dialog).getByRole('button', { name: /Create task/i }))
+    expect(await screen.findByText('Draft the changelog')).toBeInTheDocument()
+
+    // The stale read now lands, reporting a board without the new task.
+    releaseStale?.()
+    await waitFor(() => expect(staleAnswered).toBe(true))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0)) // flush fetch → json → setState
+    })
+
+    // The created card survives — it isn't blanked by the pre-create snapshot.
+    expect(screen.getByText('Draft the changelog')).toBeInTheDocument()
+  })
+
+  it('discards an in-flight response for the previous team filter', async () => {
+    // Same ordering hazard on the filter path: switching teams re-enters the loading
+    // state, but a read for the PREVIOUS filter can still resolve afterwards. Applied
+    // it would both write the wrong team's tasks and dismiss the skeleton over them.
+    useTeamStore.setState({
+      teams: [
+        {
+          id: 'team-1',
+          name: 'Alpha',
+          icon: '🐙',
+          color: '#e94560',
+          colorCollectionId: null,
+          templateId: null,
+          agentCount: 1,
+          leaderAgentId: null,
+          isArchived: false,
+          serverOrchestrated: false,
+        },
+      ],
+      selectedTeamId: null, // teamFilter starts at 'all' → the first read has no ?teamId
+    })
+    let releaseStale: (() => void) | undefined
+    let staleAnswered = false
+    server.use(
+      http.get('/api/board', async ({ request }) => {
+        const teamId = new URL(request.url).searchParams.get('teamId')
+        if (teamId === null) {
+          // The all-teams read from mount, held open past the filter switch.
+          await new Promise<void>((resolve) => {
+            releaseStale = resolve
+          })
+          staleAnswered = true
+          return HttpResponse.json({
+            tasks: [{ id: 'a1', title: 'All-teams task', status: 'todo' }],
+          })
+        }
+        return HttpResponse.json({ tasks: [{ id: 'b1', title: 'Alpha task', status: 'todo' }] })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    // The first read hasn't resolved, so the board is still skeletons.
+    expect(screen.getByTestId('board-skeleton')).toBeInTheDocument()
+
+    // Switch to the team filter; its read resolves normally.
+    await user.click(screen.getByLabelText('Filter by team'))
+    await user.click(await screen.findByRole('option', { name: /Alpha/ }))
+    expect(await screen.findByText('Alpha task')).toBeInTheDocument()
+
+    // The all-teams read now lands, after the filter already moved on.
+    releaseStale?.()
+    await waitFor(() => expect(staleAnswered).toBe(true))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0)) // flush fetch → json → setState
+    })
+
+    expect(screen.getByText('Alpha task')).toBeInTheDocument()
+    expect(screen.queryByText('All-teams task')).toBeNull()
+  })
+
   it('confirms before a drag that unassigns a running agent (→ To do)', async () => {
     let patched: { status?: string } | null = null
     server.use(

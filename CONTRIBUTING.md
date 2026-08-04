@@ -52,10 +52,16 @@ pnpm typecheck                          # tsc --noEmit across the monorepo
 pnpm lint                               # ESLint flat config across all packages
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright end-to-end tests (incl. board round-trip + eval smoke)
-pnpm assemble && pnpm test:clean-install  # bundle the CLI and smoke-test a clean install
+pnpm verify:ingest                      # marketplace codegen drift gate
+pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the tarball, and smoke-test it
+pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
 ```
 
-Run them locally before pushing to avoid back-and-forth.
+Run them locally before pushing to avoid back-and-forth. Every one of them runs as a CI job too.
+
+`pnpm e2e` needs a built workspace (`pnpm build` first) and a Chromium download (`pnpm exec playwright install chromium`). It sandboxes itself into a throwaway `$HOME`, so it never touches your real `~/.clawboo`.
+
+`pnpm test:clean-install` packs `apps/cli` and installs the tarball into a throwaway temp dir, so it needs network access for the `npm install`. It also refuses to run while another Clawboo dashboard is listening on `18790`–`18809` (it would attach to that one instead of the tarball) — stop your `pnpm dev` server first.
 
 ---
 
@@ -65,11 +71,11 @@ Run them locally before pushing to avoid back-and-forth.
 
 Keep PRs focused. Split unrelated changes into separate PRs.
 
-Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines, you are on a different pnpm than the pinned `9.15.0`: run `corepack enable`, then `pnpm install`, and commit only the intended lockfile change.
+Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines, you are on a different pnpm than the pinned `9.15.0`: run `corepack enable`, then `pnpm install`, and commit only the intended lockfile change. (Dependency bumps mostly arrive on their own: Dependabot runs weekly with three grouped entries, one for the root workspace, one for `website/`, and one for the GitHub Actions pins, so you rarely need to touch the lockfile by hand. Major bumps, plus `better-sqlite3` and `ws`, deliberately come as their own PRs.)
 
 ### 2. Pass CI before requesting review
 
-Every PR must pass `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`. New surfaces should also pass `pnpm e2e`.
+Every PR must pass CI: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a red check is a red check: fix it, or say in the PR why it is unrelated.
 
 ### 3. Add a changeset for user-facing changes
 

@@ -21,6 +21,7 @@ import { ChevronDown } from 'lucide-react'
 import { resolveBooTint } from '@clawboo/ui'
 
 import { AgentBooAvatar, useTeamBooColor } from '@/components/AgentBooAvatar'
+import { isTaskStatus, statusLabel, type TaskStatus } from '@/features/board/boardStatus'
 import { formatTimestamp, MD_COMPONENTS } from '@/features/chat/chatComponents'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { boardClient } from '@/lib/boardClient'
@@ -28,21 +29,28 @@ import type { BoardTaskView } from '@/stores/board'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
 
+// Compact pill vocabulary for the chat timeline. Deliberately SHORTER than the
+// board's STATUS_LABEL ("Working", not "In progress") because this pill sits in a
+// narrow card beside an avatar and a timestamp; `todo` and `backlog` both read as
+// "Queued" since triage position is board detail, not chat signal.
+//
+// Typed as a TOTAL Record over the shared TaskStatus union, so adding an eighth
+// status to @clawboo/board-core fails the typecheck here instead of silently
+// rendering the new status as idle "Queued" work.
+const PILL: Record<TaskStatus, { tone: StatusTone; label: string }> = {
+  backlog: { tone: 'idle', label: 'Queued' },
+  todo: { tone: 'idle', label: 'Queued' },
+  in_progress: { tone: 'working', label: 'Working' },
+  in_review: { tone: 'warning', label: 'Review' },
+  blocked: { tone: 'error', label: 'Blocked' },
+  done: { tone: 'done', label: 'Done' },
+  cancelled: { tone: 'error', label: 'Cancelled' },
+}
+
 function toneFor(status: string): { tone: StatusTone; label: string } {
-  switch (status) {
-    case 'done':
-      return { tone: 'done', label: 'Done' }
-    case 'in_progress':
-      return { tone: 'working', label: 'Working' }
-    case 'in_review':
-      return { tone: 'warning', label: 'Review' }
-    case 'blocked':
-      return { tone: 'error', label: 'Blocked' }
-    case 'cancelled':
-      return { tone: 'error', label: 'Cancelled' }
-    default:
-      return { tone: 'idle', label: 'Queued' } // todo / backlog
-  }
+  // An off-list status (the board parks these in its catch-all "Other" column)
+  // shows its raw name rather than being mislabelled as queued work.
+  return isTaskStatus(status) ? PILL[status] : { tone: 'idle', label: statusLabel(status) }
 }
 
 // Collapsed output height (~6 rendered lines at 12.5px / 1.6, with headroom for
@@ -78,16 +86,32 @@ export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: Board
 
   // The report-up output is a board COMMENT, not a task-row field — so a task
   // reloaded after a refresh has `summary: null` in the projection. Fetch it lazily
-  // for a terminal task: the agent's deliverable on `done`, or the failure reason
-  // on `blocked` / `cancelled` (so an error is visible on the card, not hidden).
-  const isTerminal =
+  // once the task has settled somewhere that carries one: the agent's deliverable
+  // on `done`, or the failure reason on `blocked` / `cancelled`.
+  //
+  // This is deliberately NOT the state machine's `isTerminal` (`done`/`cancelled`),
+  // and must not be "corrected" to it. A failed run is parked on **`blocked`**, and
+  // that is exactly where the orchestrator writes the reason comment — see
+  // packages/team-orchestration/src/boardOrchestration.ts (`updateStatus(taskId,
+  // 'blocked')` immediately followed by `addComment(...)`). Narrowing this to the
+  // terminal pair would hide every failure reason from the chat card, which is the
+  // opposite of the point: an error should be visible here, not buried in the drawer.
+  const hasSettledOutput =
     task.status === 'done' || task.status === 'blocked' || task.status === 'cancelled'
   const [output, setOutput] = useState<string | null>(task.summary)
   useEffect(() => {
-    if (task.summary) setOutput(task.summary)
-  }, [task.summary])
+    if (task.summary) {
+      setOutput(task.summary)
+    } else if (!hasSettledOutput) {
+      // Leaving a settled status invalidates a previously-fetched report-up:
+      // `blocked → in_progress → blocked` is a legal retry path and each failure
+      // writes a NEW reason comment, so a kept `output` would both display the
+      // stale reason mid-retry and block the re-fetch when the task settles again.
+      setOutput(null)
+    }
+  }, [task.summary, hasSettledOutput])
   useEffect(() => {
-    if (!isTerminal || output) return
+    if (!hasSettledOutput || output) return
     let cancelled = false
     void boardClient.getTask(task.id).then((detail) => {
       if (cancelled || !detail) return
@@ -105,7 +129,7 @@ export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: Board
     return () => {
       cancelled = true
     }
-  }, [task.id, isTerminal, output])
+  }, [task.id, hasSettledOutput, output])
 
   const { tone, label } = toneFor(task.status)
   const showOutput = Boolean(output && output.trim().length > 0)

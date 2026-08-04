@@ -70,7 +70,8 @@ pnpm lint                               # ESLint flat config across all packages
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright e2e (incl. board round-trip + eval smoke)
 pnpm verify:ingest                      # marketplace codegen drift gate
-pnpm assemble && pnpm test:clean-install  # bundle the CLI and smoke-test a clean install
+pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the tarball, smoke-test it
+pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
 ```
 
 What each one guards:
@@ -78,10 +79,10 @@ What each one guards:
 - **`pnpm test`** runs two Vitest projects: a node project for pure logic (`*.test.ts`) and a jsdom project for React components (`*.test.tsx`, RTL + MSW + jest-dom + jest-axe). See [Testing](/internals/testing).
 - **`pnpm e2e`** runs Playwright end-to-end, including the durable-board round-trip and the eval smoke suite.
 - **`pnpm verify:ingest`** re-derives the codegen'd marketplace catalog (304 agents, 82 teams) and fails on any drift from the committed files. If you touched ingestion, regenerate with `pnpm ingest:marketplace` first. See [Codegen and ingestion](/internals/codegen-and-ingestion).
-- **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI and boots it as a clean install to catch first-run regressions. This is the same gate the release workflow runs: see [Release process](/internals/release-process).
+- **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI, packs it, installs the tarball into a throwaway temp dir, and boots _that_ install to catch first-run regressions — right through one real agent run. It needs network access for the `npm install`, and it refuses to run while another Clawboo dashboard holds `18790`–`18809` (stop your `pnpm dev` server first). This is the same gate the release workflow runs: see [Release process](/internals/release-process).
 
 <Tip>
-Running the full gate locally avoids review back-and-forth. At minimum, every PR must pass `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`; new surfaces should also pass `pnpm e2e`.
+Running the full gate locally avoids review back-and-forth. Every PR must pass CI: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a red check is a red check. Note `pnpm e2e` needs a built workspace and a Chromium download (`pnpm build`, then `pnpm exec playwright install chromium`).
 </Tip>
 
 ### 5. Add a changeset for user-facing changes

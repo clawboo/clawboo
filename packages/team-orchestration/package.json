@@ -43,6 +43,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@clawboo/board-core": "workspace:*",
     "@clawboo/executor": "workspace:*",
     "@clawboo/governance": "workspace:*"
   },

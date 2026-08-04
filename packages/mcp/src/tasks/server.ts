@@ -17,6 +17,7 @@ import {
   listTasks,
   releaseTask,
   TaskDependencyCycleError,
+  taskStatusSchema,
   unblockTask,
   updateStatus,
   type ClawbooDb,
@@ -26,15 +27,10 @@ import { z } from 'zod'
 
 import { buildServer, jsonResult, textResult, type Server, type ToolDef } from '../shared'
 
-const STATUS = z.enum([
-  'backlog',
-  'todo',
-  'in_progress',
-  'in_review',
-  'blocked',
-  'done',
-  'cancelled',
-])
+// The tool schemas advertise exactly the statuses the board accepts. Derived from
+// the shared state machine (@clawboo/board-core, re-exported by @clawboo/db) rather
+// than hand-listed, so a status added server-side reaches MCP clients automatically.
+const STATUS = taskStatusSchema
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 const optStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)

@@ -12,6 +12,7 @@
   <a href="https://www.npmjs.com/package/clawboo"><img src="https://img.shields.io/npm/v/clawboo?color=E94560&label=clawboo&style=flat-square" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/clawboo"><img src="https://img.shields.io/npm/dm/clawboo?color=E94560&style=flat-square&label=downloads" alt="npm downloads" /></a>
   <a href="https://github.com/clawboo/clawboo/actions/workflows/ci.yml"><img src="https://github.com/clawboo/clawboo/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/clawboo/clawboo/actions/workflows/codeql.yml"><img src="https://github.com/clawboo/clawboo/actions/workflows/codeql.yml/badge.svg" alt="CodeQL" /></a>
   <a href="https://github.com/clawboo/clawboo/stargazers"><img src="https://img.shields.io/github/stars/clawboo/clawboo?style=flat-square&color=FBBF24" alt="GitHub Stars" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-34D399?style=flat-square" alt="License: MIT" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" /></a>
@@ -54,7 +55,7 @@ npm install -g clawboo
 clawboo
 ```
 
-The global install gives you a persistent `clawboo` command and one-click in-app updates. Just trying it out? `npx clawboo` runs the latest with no install.
+The global install gives you a persistent `clawboo` command and one-click in-app updates. Just trying it out? `npx clawboo@latest` runs the current release with no install (the `@latest` matters: a bare `npx clawboo` can reuse a build already in npm's `_npx` cache).
 
 Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard:
 
@@ -63,6 +64,8 @@ Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard:
 3. Clawboo seeds a starter team and drops you into the dashboard. Your team is ready in about a minute.
 
 The dashboard opens at the port written to `~/.clawboo/api-port.txt` (default `http://localhost:18790`, auto-fallback through `18809` if busy). No flags, no external CLI, no cloud account.
+
+The server keeps running after the CLI exits, so `clawboo stop` and `clawboo restart` are how you reach it again, and `clawboo backup` takes a single-file snapshot of the database while it runs. Re-running `clawboo` also compares the running server's version against its own and offers to restart an older one, so an upgrade actually takes effect. See the [CLI reference](https://docs.claw.boo/reference/cli).
 
 > Prefer a different runtime? Connect Claude Code, Codex, Hermes, or a local OpenClaw Gateway from the **Runtimes** panel at any time.
 
@@ -160,6 +163,8 @@ Everything is local-first: the board persists in SQLite at `~/.clawboo/clawboo.d
 
 Every runtime executes board tasks behind one interface, isolated in its own git worktree, with a structured handoff artifact so work can move between runtimes.
 
+> **Claude Code on an npm install:** the published tarball deliberately does not bundle `@anthropic-ai/claude-agent-sdk` (its per-platform binary would add ~210 MB to every install). Install it alongside Clawboo — `npm i -g clawboo @anthropic-ai/claude-agent-sdk` — or run Clawboo from source. [Details](https://docs.claw.boo/runtimes/claude-code)
+
 ---
 
 ## Configuration
@@ -225,6 +230,7 @@ After that:
 - Ask questions or share team templates in [Discussions](https://github.com/clawboo/clawboo/discussions).
 - File [issues](https://github.com/clawboo/clawboo/issues) for bugs, repros, and regressions. macOS, Linux, and Windows are all first-class.
 - Send a PR. Small fixes very welcome, see [CONTRIBUTING.md](./CONTRIBUTING.md).
+- Found a security issue? Report it privately, not as an issue, see [SECURITY.md](./SECURITY.md).
 
 <br/>
 

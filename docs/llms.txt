@@ -81,7 +81,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 ## Reference
 
 - [Reference](reference/index.md): Index of Clawboo's factual reference — REST API, CLI, configuration, env vars, database schema, MCP tools, marketplace catalog, events, and packages.
-- [CLI reference](reference/cli.md): The single npx clawboo launcher (only --version/--help) plus the four bundled MCP stdio bins.
+- [CLI reference](reference/cli.md): The clawboo launcher (find-or-start, version-aware attach) and its backup/stop/restart subcommands, plus the four bundled MCP stdio bins.
 - [Configuration reference](reference/configuration.md): settings.json schema, the ~/.clawboo state directory, every file Clawboo owns, and OpenClaw interop reads.
 - [Database schema reference](reference/database-schema.md): The 27 SQLite tables Clawboo persists, their columns, indexes, and how the schema is bootstrapped without a migration ladder.
 - [Environment variables](reference/environment-variables.md): Every environment variable Clawboo reads — state paths, ports, secrets, runtime keys, OpenClaw interop, logging, and operational tuning.

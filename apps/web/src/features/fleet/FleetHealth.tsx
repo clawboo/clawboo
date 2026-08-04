@@ -12,6 +12,7 @@ import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { formatRelative } from '@/lib/formatRelative'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 import {
   fetchFleetSummary,
   fetchRecentIssues,
@@ -112,12 +113,19 @@ export function FleetHealth() {
   const [issues, setIssues] = useState<FleetIssue[]>([])
   const [loaded, setLoaded] = useState(false)
 
+  const reads = useReadSequencer()
+
   const refresh = useCallback(async () => {
+    // The Refresh button races the 8s poll; sequenced so an older read can't land last and
+    // replace what the user just pulled with staler numbers.
+    const read = reads.beginRead()
     const [s, i] = await Promise.all([fetchFleetSummary(), fetchRecentIssues()])
-    setSummary(s)
-    setIssues(i)
-    setLoaded(true)
-  }, [])
+    if (read.isCurrent()) {
+      setSummary(s)
+      setIssues(i)
+    }
+    if (read.isNewestRead()) setLoaded(true)
+  }, [reads])
 
   useEffect(() => {
     void refresh()
