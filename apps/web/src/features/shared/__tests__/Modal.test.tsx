@@ -94,7 +94,11 @@ describe('Modal', () => {
 
       await user.keyboard('{Escape}')
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-      expect(trigger).toHaveFocus()
+      // The focus restore lives in a passive-effect cleanup, which React
+      // flushes after the dialog's DOM is removed — so restoration lands
+      // observably later than the unmount asserted above. Poll for it, or
+      // under CI load this reads <body> mid-window and flakes.
+      await waitFor(() => expect(trigger).toHaveFocus())
     })
 
     it('honours initialFocusRef', async () => {

@@ -1,10 +1,11 @@
-import { useEffect, Suspense, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { NAV_PANELS } from './navPanels'
+import { NavPanel } from './navPanels'
 import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
 import { AgentDetailView } from '@/features/agent-detail'
 import { GroupChatView } from '@/features/group-chat/GroupChatView'
-import { Spinner } from '@/features/shared/Spinner'
+import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
+import { NAV_VIEW_LABELS } from '@/lib/navLabels'
 import { WelcomeState } from './WelcomeState'
 import { useViewStore } from '@/stores/view'
 import { useEditorStore } from '@/stores/editor'
@@ -127,46 +128,48 @@ export function ContentArea() {
   }, [viewMode])
 
   // ── Compute view key + content ─────────────────────────────────────────────
+  // `viewLabel` is computed alongside `viewKey` so the per-view error boundary
+  // below names the surface that failed ("Couldn't load the team space.") without
+  // needing a second switch.
   let viewKey: string
+  let viewLabel: string
   let viewContent: ReactNode
 
   switch (viewMode.type) {
     case 'welcome':
       viewKey = 'welcome'
+      viewLabel = 'the welcome screen'
       viewContent = <WelcomeState />
       break
     case 'agent':
       viewKey = `agent-${viewMode.agentId}`
+      viewLabel = 'this agent'
       viewContent = <AgentDetailView agentId={viewMode.agentId} />
       break
     case 'booZero':
-      viewKey = 'booZero'
+      // Keyed by the agent, not just the view: `identifyBooZero` swaps
+      // `booZeroAgentId` in place when the current Boo Zero is deleted (edge
+      // case 7d above) without leaving this view. A constant key would re-render
+      // the subtree with a new agentId instead of remounting it — stranding the
+      // deleted agent's error card, and its chat state, on the replacement.
+      viewKey = `booZero-${booZeroAgentId ?? 'none'}`
+      viewLabel = 'this agent'
       viewContent = booZeroAgentId ? <AgentDetailView agentId={booZeroAgentId} /> : <WelcomeState />
       break
     case 'groupChat':
       viewKey = `group-chat-${viewMode.teamId}`
+      viewLabel = 'the team space'
       viewContent = <GroupChatView teamId={viewMode.teamId} />
       break
     case 'nav':
       viewKey = `nav-${viewMode.view}`
-      viewContent = (
-        <Suspense
-          fallback={
-            <div
-              role="status"
-              style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Spinner size={20} />
-              <span className="sr-only">Loading…</span>
-            </div>
-          }
-        >
-          {NAV_PANELS[viewMode.view]()}
-        </Suspense>
-      )
+      viewLabel = NAV_VIEW_LABELS[viewMode.view]
+      // NavPanel owns the per-panel boundary + Suspense + retry-that-re-imports.
+      viewContent = <NavPanel view={viewMode.view} />
       break
     default:
       viewKey = 'welcome'
+      viewLabel = 'the welcome screen'
       viewContent = <WelcomeState />
       break
   }
@@ -192,7 +195,22 @@ export function ContentArea() {
           transition={VIEW_TRANSITION}
           style={VIEW_STYLE}
         >
-          {viewContent}
+          {/* One boundary per VIEW, INSIDE the motion.div. Inside, so (a) the
+              sidebars and top bar stay mounted and interactive when a view
+              crashes, and (b) `key={viewKey}` remounts it on navigation — a
+              broken view heals itself the moment the user goes elsewhere and
+              back. It must NOT wrap the motion.div: that would make the boundary
+              AnimatePresence's direct child, hiding the `key` and killing every
+              exit animation. For `nav` this is the outer net; NavPanel's own
+              boundary catches first and is the one with the re-import retry. */}
+          <ErrorBoundary
+            variant="panel"
+            label={viewLabel}
+            resetKeys={[viewKey]}
+            logContext={{ viewKey }}
+          >
+            {viewContent}
+          </ErrorBoundary>
         </motion.div>
       </AnimatePresence>
     </div>
