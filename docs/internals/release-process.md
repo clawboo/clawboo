@@ -75,7 +75,7 @@ Every push to `main` and every pull request runs `.github/workflows/ci.yml`. It 
 
 | Job                 | Command                                     | What it guards                                             |
 | ------------------- | ------------------------------------------- | ---------------------------------------------------------- |
-| `lint`              | `pnpm lint`                                 | ESLint across the workspace.                               |
+| `lint`              | `pnpm lint`                                 | ESLint across the workspace + the docs frontmatter check.  |
 | `typecheck`         | `pnpm typecheck`                            | `tsc --noEmit` across the workspace.                       |
 | `test`              | `pnpm test`                                 | Per-package Vitest suites (`turbo test`).                  |
 | `build`             | `pnpm build`                                | Every package + app `dist/` builds, dependency-ordered.    |

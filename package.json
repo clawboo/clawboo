@@ -13,6 +13,7 @@
     "prepare": "husky",
     "ingest:marketplace": "tsx scripts/ingest-marketplace-content.ts",
     "verify:ingest": "tsx scripts/verify-ingest.ts",
+    "check:docs": "pnpm --filter @clawboo/docs check-frontmatter",
     "test:clean-install": "node scripts/test-clean-install.mjs",
     "test:bundle-externals": "node scripts/check-bundle-externals.mjs",
     "prepublish:check": "pnpm assemble && pnpm test:clean-install"

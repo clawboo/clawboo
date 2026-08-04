@@ -197,7 +197,7 @@ pnpm dev          # Express API on :18790 (auto-fallback) + Vite SPA on :5173
 | ------------------------------------------ | --------------------------------------------- |
 | `pnpm build`                               | Build all packages + apps (Turbo)             |
 | `pnpm typecheck`                           | `tsc --noEmit` across the workspace           |
-| `pnpm lint`                                | ESLint flat config across all packages        |
+| `pnpm lint`                                | ESLint across all packages + docs frontmatter |
 | `pnpm test`                                | Vitest unit tests (node + jsdom projects)     |
 | `pnpm e2e`                                 | Playwright end-to-end tests                   |
 | `pnpm assemble && pnpm test:clean-install` | Bundle the CLI and smoke-test a clean install |
