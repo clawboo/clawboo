@@ -198,7 +198,9 @@ function AgentRow({
           e.stopPropagation()
           onDelete()
         }}
-        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+        // See FleetSidebar's twin: revealing the icon is not enough on its own,
+        // `text-secondary/40` stays under the contrast floor once focused.
+        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive focus-visible:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
       >
         <Trash2 className="h-3 w-3" strokeWidth={2} />
       </button>

@@ -131,6 +131,30 @@ describe('useFocusTrap', () => {
     expect(screen.getByRole('button', { name: 'outer first' })).toHaveFocus()
   })
 
+  it('parks focus on the dialog root when nothing inside is tabbable', async () => {
+    const user = userEvent.setup()
+    function Empty() {
+      const ref = useRef<HTMLDivElement | null>(null)
+      useFocusTrap(ref, 0)
+      return (
+        <div ref={ref} tabIndex={-1} data-testid="dialog-empty">
+          <p>Nothing focusable here.</p>
+        </div>
+      )
+    }
+    render(<Empty />)
+    const root = screen.getByTestId('dialog-empty')
+    await waitFor(() => expect(root).toHaveFocus())
+
+    // Focus escaping to <body> then Tab must land back on the root, not be
+    // silently swallowed — otherwise the user is stranded outside an
+    // aria-modal dialog with no keyboard route back in.
+    ;(document.activeElement as HTMLElement).blur()
+    expect(document.activeElement).toBe(document.body)
+    await user.tab()
+    expect(root).toHaveFocus()
+  })
+
   it('restores focus to the trigger on unmount', async () => {
     const user = userEvent.setup()
     render(<TriggerAndDialog />)

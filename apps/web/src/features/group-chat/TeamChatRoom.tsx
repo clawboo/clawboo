@@ -116,11 +116,22 @@ export function TeamChatRoom({ teamId, onClose }: { teamId: string; onClose: () 
   const seenSeqRef = useRef<number | null>(null)
 
   useEffect(() => {
+    // Baseline on the FIRST COMPLETED POLL, not on the first non-empty render.
+    // A room that opens empty has no posts to baseline against, so keying off
+    // `posts` would spend the first real message establishing the baseline and
+    // announce nothing — silencing exactly the case this effect exists for.
+    if (!loaded) return
     const newest = posts[posts.length - 1]
-    if (!newest) return
     const seen = seenSeqRef.current
+    if (seen === null) {
+      // First poll: adopt the backlog silently (announcing it would read the
+      // whole room aloud). An empty room baselines at 0, so the next post wins.
+      seenSeqRef.current = newest?.seq ?? 0
+      return
+    }
+    if (!newest) return
     seenSeqRef.current = newest.seq
-    if (seen === null || newest.seq <= seen) return
+    if (newest.seq <= seen) return
     const fresh = posts.filter((p) => p.seq > seen)
     const author = newest.kind === 'user' ? 'You' : nameFor(newest.authorAgentId)
     setAnnouncement({

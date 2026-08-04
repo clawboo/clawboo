@@ -79,13 +79,14 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
           {template.emoji}
         </div>
         <div className="min-w-0 flex-1">
-          <div
+          {/* A heading element, not a div — see AgentTemplateDetail. */}
+          <h2
             id={headingId}
             className="font-display text-[18px] font-bold text-foreground"
-            style={{ letterSpacing: '-0.01em' }}
+            style={{ letterSpacing: '-0.01em', margin: 0 }}
           >
             {template.name}
-          </div>
+          </h2>
           <div className="mt-1 flex items-center gap-1.5">
             <span
               className="rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"

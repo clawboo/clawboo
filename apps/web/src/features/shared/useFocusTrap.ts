@@ -118,7 +118,13 @@ export function useFocusTrap(
       if (!root) return
       const focusables = focusableWithin(root)
       if (focusables.length === 0) {
+        // Nothing tabbable inside, so Tab must not escape — but swallowing the
+        // key while focus sits on <body> would leave the user focused outside an
+        // aria-modal dialog with no way back in. Park focus on the root, which
+        // Modal (and the wizard) make focusable with tabIndex={-1} for exactly
+        // this fallback.
         e.preventDefault()
+        root.focus?.()
         return
       }
       const first = focusables[0]

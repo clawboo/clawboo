@@ -1257,8 +1257,15 @@ export function CreateTeamModal({
           </div>
         )}
 
-        {/* ─── Step: Deploy ───────────────────────────────────── */}
-        {step === 'deploy' && progress && (
+        {/* ─── Step: Deploy ─────────────────────────────────────
+            Gated on `step` alone, NOT on `progress`. The dialog's accessible
+            name comes from the one `headingId` heading rendered per step, and
+            the close control is hidden here — so a deploy step with no progress
+            yet would render an empty, unnamed dialog. Today `setStep('deploy')`
+            and the first `setProgress` batch into one render, but that holds
+            only while no `await` sits between them and the loop runs at least
+            once. The progress-dependent parts gate on `progress` individually. */}
+        {step === 'deploy' && (
           <div className="flex flex-col items-center px-6 py-10">
             <motion.div
               animate={{ rotate: [0, 10, -10, 0] }}
@@ -1274,23 +1281,27 @@ export function CreateTeamModal({
             >
               Deploying {teamName}
             </h2>
-            <p className="mb-6 text-[13px] text-foreground/55">Creating {progress.label}…</p>
+            {progress && (
+              <>
+                <p className="mb-6 text-[13px] text-foreground/55">Creating {progress.label}…</p>
 
-            {/* Progress bar */}
-            <div className="mb-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-foreground/10">
-              <motion.div
-                className="h-full rounded-full"
-                style={{ backgroundColor: teamColor }}
-                initial={{ width: '0%' }}
-                animate={{
-                  width: `${((progress.current + 1) / (progress.total + 1)) * 100}%`,
-                }}
-                transition={{ duration: 0.3, ease: 'easeOut' }}
-              />
-            </div>
-            <p className="font-data text-[11px] text-foreground/50">
-              {progress.current}/{progress.total} agents
-            </p>
+                {/* Progress bar */}
+                <div className="mb-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-foreground/10">
+                  <motion.div
+                    className="h-full rounded-full"
+                    style={{ backgroundColor: teamColor }}
+                    initial={{ width: '0%' }}
+                    animate={{
+                      width: `${((progress.current + 1) / (progress.total + 1)) * 100}%`,
+                    }}
+                    transition={{ duration: 0.3, ease: 'easeOut' }}
+                  />
+                </div>
+                <p className="font-data text-[11px] text-foreground/50">
+                  {progress.current}/{progress.total} agents
+                </p>
+              </>
+            )}
 
             {/* Safety-net error display (catch should reset to customize, but just in case) */}
             {error && (

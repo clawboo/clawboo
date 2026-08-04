@@ -94,7 +94,10 @@ afterEach(() => {
   localStorage.clear()
   useTeamStore.setState({ teams: [], selectedTeamId: null })
   useFleetStore.setState({ agents: [], selectedAgentId: null })
-  useChatStore.setState({ transcripts: new Map() })
+  // `streamingText` too, not just `transcripts` — the firehose test populates it,
+  // and leaving it set lets a later test render stale stream content, which makes
+  // the suite order-dependent.
+  useChatStore.setState({ transcripts: new Map(), streamingText: new Map() })
 })
 
 describe('GroupChatPanel live region', () => {

@@ -172,7 +172,11 @@ function AgentRow({
           e.stopPropagation()
           onDelete()
         }}
-        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+        // `focus-visible:text-destructive` matches the hover tone: revealing the
+        // icon at `text-secondary/40` would clear the opacity gate but leave it
+        // under the contrast floor for the keyboard user who just focused it.
+        // The 2px ring comes from the global `:focus-visible` rule in globals.css.
+        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive focus-visible:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
       >
         <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
       </button>

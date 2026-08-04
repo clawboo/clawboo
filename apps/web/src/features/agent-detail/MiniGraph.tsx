@@ -32,7 +32,7 @@ import { AgentModelControl } from './AgentModelControl'
 import { useMiniGraphData } from './useMiniGraphData'
 import { useHermesModelGroups, useNativeModelGroups } from '@/lib/useOpenRouterModels'
 import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
-import { prefersReducedMotion } from '@/lib/prefersReducedMotion'
+import { onReducedMotionChange, prefersReducedMotion } from '@/lib/prefersReducedMotion'
 import { setAgentModel } from '@clawboo/control-client'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData } from '@/features/graph/types'
 
@@ -384,6 +384,17 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
     }
     rafIdRef.current = requestAnimationFrame(tick)
   }, [stepPhysics])
+
+  // Turning reduced motion ON mid-simulation has to stop the loop that is
+  // already running — the guard in `startPhysics` only covers loops that have
+  // not started yet, so without this the panel keeps relaxing until it settles.
+  // Mirrors the subscription `graphPhysics.initialize` registers for the shared
+  // singleton. Every step is a valid state, so nodes simply freeze in place.
+  useEffect(() => {
+    return onReducedMotionChange((reduced) => {
+      if (reduced) stopPhysics()
+    })
+  }, [stopPhysics])
 
   // Cleanup on unmount
   useEffect(() => {

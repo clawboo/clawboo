@@ -104,6 +104,12 @@ export function CreateBooModal({
       open={isOpen}
       layer={50}
       labelledBy={headingId}
+      // Cancel is already disabled while the create is in flight; without this
+      // Escape and a scrim click would still call onClose, dismissing the dialog
+      // while createAgent + the personality/team POSTs keep running — the user
+      // would see the dialog vanish and the agent appear anyway. Mirrors
+      // CreateTeamModal's `dismissible={step !== 'deploy'}`.
+      dismissible={!creating}
       onClose={onClose}
       scrimClassName="backdrop-blur-sm"
       panelClassName="w-full max-w-md rounded-2xl border border-border bg-surface p-6"

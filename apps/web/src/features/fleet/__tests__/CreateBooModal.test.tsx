@@ -13,10 +13,20 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { axe } from '@/__vitest__/axe'
+import { useConnectionStore } from '@/stores/connection'
 
 import { CreateBooModal } from '../CreateBooModal'
 
-afterEach(() => cleanup())
+// The create path is stubbed so a test can hold it in flight; the dialog's
+// dismissal contract is what's under test, not agent creation.
+const { createAgentMock } = vi.hoisted(() => ({ createAgentMock: vi.fn() }))
+vi.mock('@/lib/createAgent', () => ({ createAgent: createAgentMock }))
+
+afterEach(() => {
+  cleanup()
+  createAgentMock.mockReset()
+  useConnectionStore.setState({ status: 'disconnected', client: null, gatewayUrl: '' })
+})
 
 const noop = () => {}
 
@@ -61,6 +71,26 @@ describe('CreateBooModal', () => {
 
     await user.click(container.querySelector('[role="presentation"]') as HTMLElement)
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  // Cancel is disabled while the write runs, which states the intent. Escape and
+  // the scrim have to honour it too, or the dialog vanishes while createAgent and
+  // the follow-up POSTs keep going and the agent appears anyway.
+  it('ignores Escape and the scrim while a create is in flight', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    // Never resolves, so `creating` stays true for the duration of the test.
+    createAgentMock.mockImplementation(() => new Promise<string>(() => {}))
+    useConnectionStore.setState({ status: 'connected', client: {} as never, gatewayUrl: '' })
+
+    const { container } = render(<CreateBooModal isOpen onClose={onClose} onCreated={noop} />)
+    await user.type(screen.getByLabelText('Name'), 'Scout')
+    await user.click(screen.getByRole('button', { name: 'Create Boo' }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalled())
+
+    await user.keyboard('{Escape}')
+    await user.click(container.querySelector('[role="presentation"]') as HTMLElement)
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('has no level-A/AA a11y violations', async () => {

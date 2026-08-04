@@ -117,6 +117,53 @@ describe('TeamChatRoom', () => {
     vi.useRealTimers()
   })
 
+  // The room that opens EMPTY is the case the announcer exists for, and it used
+  // to be the one case it missed: with no posts to baseline against, the first
+  // arriving message was spent establishing the baseline and never spoken.
+  it('announces the first post when the room opened empty', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    server.use(
+      http.get('/api/team-chat', () =>
+        HttpResponse.json({ roomId: 'team:t1', posts: [], nextSeq: 0 }),
+      ),
+    )
+    renderRoom(<TeamChatRoom teamId="t1" onClose={noop} />)
+    await screen.findByTestId('team-chat-room')
+    await waitFor(() => expect(screen.getByTestId('team-chat-announcer')).toBeEmptyDOMElement())
+
+    server.use(
+      http.get('/api/team-chat', () =>
+        HttpResponse.json({
+          roomId: 'team:t1',
+          nextSeq: 2,
+          posts: [
+            {
+              id: 'p1',
+              roomId: 'team:t1',
+              teamId: 't1',
+              authorAgentId: 'a1',
+              body: 'First words in the room',
+              kind: 'peer',
+              createdAt: 1,
+              seq: 1,
+            },
+          ],
+        }),
+      ),
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000)
+    })
+
+    await waitFor(() =>
+      expect(screen.getByTestId('team-chat-announcer')).toHaveTextContent(
+        /First words in the room/,
+      ),
+    )
+    vi.useRealTimers()
+  })
+
   it('has no level-A/AA a11y violations', async () => {
     const { container } = renderRoom(<TeamChatRoom teamId="t1" onClose={noop} />)
     await screen.findByTestId('team-chat-room')

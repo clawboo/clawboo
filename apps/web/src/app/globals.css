@@ -510,10 +510,11 @@ samp {
   }
 
   /* Global motion-safe fallback — neutralize CSS-level animations and
-     transitions for users with `prefers-reduced-motion: reduce`. Per-
-     component Framer Motion still runs but most state-change motion is
-     reduced to opacity/instant via Framer's own respect for this media
-     query. */
+     transitions for users with `prefers-reduced-motion: reduce`. This reaches
+     CSS only. Framer Motion is handled separately by the
+     `<MotionConfig reducedMotion="user">` at the app root (it does NOT respect
+     this media query by default), and the graph's raw requestAnimationFrame
+     loops by `lib/prefersReducedMotion.ts`. */
   *,
   *::before,
   *::after {
