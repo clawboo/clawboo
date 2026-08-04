@@ -84,7 +84,8 @@ Before packing, the script refuses to run if anything already answers with the C
 
 The script reproduces the exact condition the port-collision bug shipped under. It binds port `18791` with a fake service that returns `401 Unauthorized` (mimicking the OpenClaw Gateway's auxiliary-port behavior), spawns the **installed** CLI in an isolated state dir with an isolated `$HOME` and no env-var pins, and then asserts:
 
-- every `bin` the published manifest declares exists in the tarball and got a `node_modules/.bin` shim, and the UI + third-party notices shipped;
+- the manifest still declares all five commands by name (`clawboo` plus the four `clawboo-mcp-*`), each one's target exists in the tarball and got a `node_modules/.bin` shim, and the UI + third-party notices shipped;
+- `clawboo --version` **runs through that npm shim** and reports the packed version — the same indirection `npx clawboo` uses, so a shim that exists but cannot execute (lost exec bit, a broken `.cmd`, a mangled shebang) fails here rather than on a user's first run;
 - every module the installed bundles still load from `node_modules` is a declared dependency, a Node builtin, or a documented optional external (see below);
 - the CLI announces a dashboard URL that is **not** `:18791`; its HTTP-signature probe must reject the fake listener and let Clawboo's own server pick `18790`;
 - `GET /` returns the SPA HTML (`<div id="root"></div>`);
@@ -94,7 +95,7 @@ The script reproduces the exact condition the port-collision bug shipped under. 
 - an installed **stdio MCP bin** (`dist/bin/tasks.js`) can be spawned and driven through a raw JSON-RPC handshake (`initialize` → `notifications/initialized` → `tools/list`), and its tool list includes `list_tasks`;
 - **an agent run can start**: the script creates a native agent and a board task, then drives a real `POST /api/runtimes/clawboo-native/run` to a terminal `done`, and checks the report-up summary carries the provider's reply and the task moved to `done` on the board.
 
-The MCP assertion is what proves an external runtime can spawn a packaged MCP bin straight from a clean install. The dispatch assertion covers the product's main path — assign a task and it runs — so it can never be a publish-time unknown. It needs no API key and no network: the native runtime's keyless `ollama` provider rides the shared OpenAI-compatible client with a base-URL override, so the script points `OLLAMA_BASE_URL` at a local stub that streams one canned reply. `kind: 'research'` keeps isolation at `none`, so no git repo or worktree is involved.
+The MCP assertion is what proves an external runtime can spawn a packaged MCP bin straight from a clean install. Note the split of responsibility on the command interface: `clawboo --version` is the one thing executed _through_ the npm shim (it is the only side-effect-free subcommand — no server, no state dir, no port), while the dashboard boot and the MCP handshake run the entry files directly with `node`. Going through a shim for those would put `cmd.exe` between the harness and the child's stdio on Windows, which is exactly the pipe the URL parsing and the JSON-RPC handshake depend on. The dispatch assertion covers the product's main path — assign a task and it runs — so it can never be a publish-time unknown. It needs no API key and no network: the native runtime's keyless `ollama` provider rides the shared OpenAI-compatible client with a base-URL override, so the script points `OLLAMA_BASE_URL` at a local stub that streams one canned reply. `kind: 'research'` keeps isolation at `none`, so no git repo or worktree is involved.
 
 ### The externals-vs-dependencies check
 

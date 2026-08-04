@@ -35,7 +35,8 @@
  *       18790-18809 discovery window — the CLI would attach to it and every
  *       assertion below would silently test that server, not the tarball.
  *   2.  `pnpm pack` apps/cli, then `npm install <tarball>` into a fresh temp dir.
- *   3.  Assert the installed tree (bins + their npm shims, UI, notices).
+ *   3.  Assert the installed tree (every promised command + its npm shim, and
+ *       that `clawboo --version` actually RUNS through that shim; UI; notices).
  *   4.  Assert every external the installed bundles load is declared / builtin /
  *       documented-optional.
  *   5.  Bind a fake service that returns 401 "Unauthorized" on 18791 (with
@@ -121,6 +122,15 @@ const DISPATCH_TIMEOUT_MS = 90_000
 // must carry it, which proves the text came from the provider round-trip and
 // not from some default.
 const DISPATCH_MARKER = 'CLAWBOO_CLEAN_INSTALL_DISPATCH_OK'
+// The commands the published manifest promises. Named explicitly so dropping
+// one is a failure rather than a shorter loop.
+const REQUIRED_BIN_COMMANDS = [
+  'clawboo',
+  'clawboo-mcp-tasks',
+  'clawboo-mcp-memory',
+  'clawboo-mcp-tools',
+  'clawboo-mcp-teamchat',
+]
 
 // ─── Tiny logger ─────────────────────────────────────────────────────────────
 
@@ -669,13 +679,17 @@ async function assertInstalledTree(packageDir) {
 
   // `bin` is either a map or a bare path (which npm names after the package).
   const bins = typeof pkg.bin === 'string' ? { [pkg.name]: pkg.bin } : (pkg.bin ?? {})
-  // Guard the loop's own premise: with no `bin` at all it would iterate zero
-  // times and report success, so a manifest that lost its `bin` map (no `npx
-  // clawboo`, no MCP commands) would sail through this check.
-  if (Object.keys(bins).length === 0) {
-    fail('the published manifest declares no "bin" entries — `npx clawboo` would not exist')
-    return false
+  // Name the commands rather than just iterating whatever `bin` happens to hold:
+  // a loop over an emptied map iterates zero times and reports success, so a
+  // manifest that silently dropped `clawboo` (no `npx clawboo`) or one of the
+  // MCP commands (no external runtime attach) would sail through this check.
+  for (const required of REQUIRED_BIN_COMMANDS) {
+    if (!bins[required]) {
+      fail(`the published manifest no longer declares the '${required}' command in "bin"`)
+      ok = false
+    }
   }
+  if (!ok) return false
   for (const [binName, relPath] of Object.entries(bins)) {
     const target = path.join(packageDir, relPath)
     if (!(await pathExists(target))) {
@@ -691,6 +705,34 @@ async function assertInstalledTree(packageDir) {
       fail(`npm did not create a node_modules/.bin shim for '${binName}'`)
       ok = false
     }
+  }
+
+  // Existence is not executability. Run the CLI THROUGH its npm shim — the same
+  // indirection `npx clawboo` goes through — so a shim that exists but cannot
+  // execute (lost exec bit, a `.cmd` that lost its node invocation, a mangled
+  // shebang) fails here instead of on a user's first run. `--version` is the
+  // one subcommand that is side-effect free: no server, no state dir, no port.
+  const shimPath = path.join(
+    installDir,
+    'node_modules',
+    '.bin',
+    IS_WINDOWS ? 'clawboo.cmd' : 'clawboo',
+  )
+  const version = await runTool(shimPath, ['--version'], { cwd: installDir, timeoutMs: 60_000 })
+  if (version.code !== 0) {
+    fail(
+      `\`clawboo --version\` through the installed npm shim exited ${version.code}\n` +
+        `${version.stderr || version.stdout}`,
+    )
+    ok = false
+  } else if (version.stdout.trim() !== pkg.version) {
+    fail(
+      `the installed \`clawboo\` command reported version ${JSON.stringify(version.stdout.trim())}, ` +
+        `expected ${pkg.version}`,
+    )
+    ok = false
+  } else {
+    log(`✓ \`clawboo --version\` runs through the npm shim and reports ${pkg.version}`)
   }
 
   for (const rel of ['dist/ui/index.html', 'dist/THIRD_PARTY_NOTICES.md']) {
