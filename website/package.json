@@ -14,7 +14,7 @@
     "check": "astro check"
   },
   "dependencies": {
-    "@astrojs/react": "^4.2.0",
+    "@astrojs/react": "^6.0.2",
     "@astrojs/sitemap": "^3.2.1",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^5.2.0",
