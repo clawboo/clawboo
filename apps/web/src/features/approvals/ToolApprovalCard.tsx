@@ -56,7 +56,7 @@ export function ToolApprovalCard({
             {approval.toolName}
           </span>
         </span>
-        <span className="font-data text-[10px] text-foreground/40">
+        <span className="font-data text-[10px] text-muted-foreground">
           {showAgentName && agentName ? `${agentName} · ` : ''}expires {expiresIn}s
         </span>
       </div>
@@ -98,12 +98,7 @@ export function ToolApprovalCard({
           <Star size={12} strokeWidth={2} />
           Always
         </Button>
-        <Button
-          variant="danger"
-          size="sm"
-          fullWidth
-          onClick={() => onResolve(approval.id, 'deny')}
-        >
+        <Button variant="danger" size="sm" fullWidth onClick={() => onResolve(approval.id, 'deny')}>
           <Ban size={12} strokeWidth={2} />
           Deny
         </Button>

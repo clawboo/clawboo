@@ -25,7 +25,7 @@ import { RUNTIME_CATALOG, type RuntimeId } from '../runtimes/runtimeCatalog'
 import { RuntimeDepthBadge, RuntimeGlyph } from '../runtimes/runtimeDepth'
 
 const SECTION_LABEL =
-  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
+  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'
 const CARD = 'rounded-2xl border border-border bg-surface'
 const CARD_SHADOW = { boxShadow: 'var(--shadow-raised)' } as const
 

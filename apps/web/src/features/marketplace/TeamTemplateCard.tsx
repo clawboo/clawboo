@@ -52,7 +52,7 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
           >
             {profile.name}
           </div>
-          <div className="font-data text-[11px] text-foreground/45">
+          <div className="font-data text-[11px] text-muted-foreground">
             {resolved.length} agent{resolved.length !== 1 ? 's' : ''}
           </div>
         </div>
@@ -84,7 +84,7 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
               Synthetic
             </span>
           )}
-          <span className="text-[10px] text-foreground/35">
+          <span className="text-[10px] text-muted-foreground">
             {getCategoryLabel(profile.category)}
           </span>
         </div>
@@ -105,7 +105,7 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
       </div>
 
       {/* Agent roles */}
-      <div className="truncate text-[11px] text-foreground/40">
+      <div className="truncate text-[11px] text-muted-foreground">
         {resolved.map((a) => a.role || a.name).join(', ')}
       </div>
 
@@ -117,7 +117,7 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
             {profile.tags.slice(0, 3).map((tag) => (
               <span
                 key={tag}
-                className="whitespace-nowrap rounded-full border border-border bg-foreground/[0.03] px-2 py-0.5 text-[9px] text-foreground/40"
+                className="whitespace-nowrap rounded-full border border-border bg-foreground/[0.03] px-2 py-0.5 text-[9px] text-muted-foreground"
               >
                 {tag}
               </span>

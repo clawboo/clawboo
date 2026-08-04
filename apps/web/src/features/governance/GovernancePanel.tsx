@@ -133,7 +133,9 @@ function BudgetRow({ b, onChanged }: { b: Budget; onChanged: () => void }) {
             {b.scopeId}
           </span>
           {b.tenantId && (
-            <span className="font-data text-[11px] text-foreground/40">· tenant {b.tenantId}</span>
+            <span className="font-data text-[11px] text-muted-foreground">
+              · tenant {b.tenantId}
+            </span>
           )}
         </span>
         <span className="flex items-center gap-1.5">

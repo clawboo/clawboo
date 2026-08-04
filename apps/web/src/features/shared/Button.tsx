@@ -34,7 +34,7 @@ const BASE =
 function variantClasses(variant: ButtonVariant): string {
   switch (variant) {
     case 'primary':
-      return 'bg-primary text-primary-foreground font-semibold shadow-[0_1px_2px_rgb(var(--primary-rgb)/0.3),0_6px_16px_rgb(var(--primary-rgb)/0.2)] hover:brightness-[1.06]'
+      return 'bg-primary-solid text-primary-foreground font-semibold shadow-[0_1px_2px_rgb(var(--primary-rgb)/0.3),0_6px_16px_rgb(var(--primary-rgb)/0.2)] hover:brightness-[1.06]'
     case 'solid':
       return 'bg-foreground text-background font-semibold shadow-[var(--shadow-raised)] hover:brightness-110 dark:hover:brightness-95'
     case 'secondary':
@@ -44,7 +44,7 @@ function variantClasses(variant: ButtonVariant): string {
     case 'ghost':
       return 'text-foreground/70 hover:text-foreground hover:bg-foreground/[0.06]'
     case 'danger':
-      return 'bg-destructive text-destructive-foreground font-semibold shadow-[var(--shadow-raised)] hover:brightness-105'
+      return 'bg-destructive-solid text-destructive-foreground font-semibold shadow-[var(--shadow-raised)] hover:brightness-105'
   }
 }
 

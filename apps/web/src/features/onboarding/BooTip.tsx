@@ -51,7 +51,9 @@ export function BooTip({ onDismiss }: BooTipProps) {
         <p className="text-[12.5px] font-medium text-text leading-tight">
           Click a Boo to start chatting
         </p>
-        <p className="text-[10px] text-secondary/45 mt-0.5 font-mono">Click anywhere to dismiss</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+          Click anywhere to dismiss
+        </p>
       </div>
     </motion.button>
   )

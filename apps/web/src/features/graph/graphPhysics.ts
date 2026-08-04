@@ -1,3 +1,5 @@
+import { onReducedMotionChange, prefersReducedMotion } from '@/lib/prefersReducedMotion'
+
 import { useGraphStore } from './store'
 import type { GraphNode, GraphEdge } from './types'
 
@@ -60,11 +62,26 @@ let particleMap = new Map<string, Particle>()
 let rafId: number | null = null
 let lastFrameTime = 0
 let active = false
+let reducedMotionUnsub: (() => void) | null = null
 
 // ─── RAF loop ────────────────────────────────────────────────────────────────
 
 function startLoop(): void {
   if (active) return
+  // Reduced motion: never start the relaxation loop. Deliberately the SINGLE
+  // choke point — `wake()`, `unpinNode()` and any future caller are all covered
+  // by this one check.
+  //
+  // "Never run" rather than "snap to settled" because there is no closed-form
+  // settled state: `initialize` seeds particles FROM the ELK / orbital output
+  // with v = 0, and only iteration discovers the rest. Crucially that output is
+  // already a complete, non-overlapping layout — physics is post-hoc relaxation,
+  // not the thing that positions nodes — so under reduced motion the graph is
+  // still correct; only the settling animation and post-drag re-relaxation go.
+  //
+  // Safe in the node test env: prefersReducedMotion() returns false when
+  // window/matchMedia are absent, so graphPhysics.test.ts is unaffected.
+  if (prefersReducedMotion()) return
   active = true
   lastFrameTime = 0
   rafId = requestAnimationFrame(tick)
@@ -252,6 +269,17 @@ function stepPhysics(): void {
 
 function initialize(nodes: GraphNode[], edges: GraphEdge[]): void {
   stopLoop()
+  // Flipping the OS setting must take effect without a reload: turning reduced
+  // motion ON stops a loop that is mid-simulation (every step is itself a valid
+  // state, so nodes just freeze where they are), and turning it OFF lets the
+  // next wake()/unpinNode() start it again. Registered lazily HERE rather than
+  // at module scope so importing this file stays side-effect-free — the node
+  // test project imports it directly. No-op when matchMedia is unavailable.
+  if (!reducedMotionUnsub) {
+    reducedMotionUnsub = onReducedMotionChange((reduced) => {
+      if (reduced) stopLoop()
+    })
+  }
   particles = []
   particleMap = new Map()
 
@@ -364,6 +392,8 @@ function restart(): void {
 
 function dispose(): void {
   stopLoop()
+  reducedMotionUnsub?.()
+  reducedMotionUnsub = null
   particles = []
   particleMap = new Map()
 }

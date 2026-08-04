@@ -131,6 +131,9 @@ export function TeamBriefForm({
         regenerate from the current team roster.
       </p>
       <textarea
+        // The visible "Brief" heading lives in the parent sheet, so the control
+        // carries its own name rather than borrowing one.
+        aria-label={`Brief for ${teamName}`}
         value={content}
         onChange={(e) => setContent(e.target.value)}
         disabled={saving}

@@ -345,18 +345,18 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div
-      className="fixed inset-y-0 right-0 z-40 flex flex-col bg-background"
-      style={{ left: 268 }}
-    >
+    <div className="fixed inset-y-0 right-0 z-40 flex flex-col bg-background" style={{ left: 268 }}>
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2.5">
         <div className="flex items-center gap-2.5">
           <AgentBooAvatar agentId={agentId} size={24} />
-          <span className="text-[13px] font-semibold text-foreground" style={{ letterSpacing: '-0.01em' }}>
+          <span
+            className="text-[13px] font-semibold text-foreground"
+            style={{ letterSpacing: '-0.01em' }}
+          >
             {agentName}
           </span>
-          <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+          <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Edit Files
           </span>
         </div>
@@ -428,7 +428,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between border-t border-border bg-surface px-4 py-1.5 font-mono text-[11px] text-foreground/40">
+      <div className="flex items-center justify-between border-t border-border bg-surface px-4 py-1.5 font-mono text-[11px] text-muted-foreground">
         <span>{AGENT_FILE_META[activeTab].hint}</span>
         <span className="font-data">
           {anyDirty ? 'Unsaved changes' : 'All saved'}

@@ -206,7 +206,7 @@ function ScheduleRow({ rec, onChanged }: { rec: ScheduleRecord; onChanged: () =>
           </IconButton>
         </div>
       ) : (
-        <span className="flex-shrink-0 font-mono text-[9.5px] uppercase tracking-[0.14em] text-foreground/40">
+        <span className="flex-shrink-0 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
           read-only
         </span>
       )}
@@ -467,7 +467,7 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-      <label className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+      <label className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </label>
       {children}
@@ -567,7 +567,7 @@ export function SchedulerPanel() {
           {groups.map((g) => (
             <div key={g.domain}>
               <div style={{ marginBottom: 12 }}>
-                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                   {DOMAIN_META[g.domain].title}
                 </span>
                 <span style={{ marginLeft: 10 }} className="text-[11.5px] text-foreground/40">

@@ -43,11 +43,12 @@ import { TaskDetailDrawer } from './TaskDetailDrawer'
 import { ApprovalsColumn } from './ApprovalsColumn'
 import { NewTaskDialog } from './NewTaskDialog'
 import { STATUS_LABEL, TASK_STATUSES, canTransition, statusOptions } from './boardStatus'
+import { BOARD_ACCESSIBILITY, OTHER_COLUMN } from './boardAnnouncements'
 import { useStatusMutation } from './useStatusMutation'
 import { resolveDrop } from './resolveDrop'
 
 const SECTION_LABEL =
-  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
+  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'
 const COUNT_PILL =
   'font-data rounded-full bg-foreground/[0.06] px-2.5 py-0.5 text-[11px] font-semibold text-foreground/55'
 
@@ -59,9 +60,10 @@ const COLUMNS: { id: string; label: string }[] = TASK_STATUSES.map((id) => ({
   label: STATUS_LABEL[id],
 }))
 const COLUMN_IDS = new Set(COLUMNS.map((c) => c.id))
-// A task with a status outside the canonical 7 lands here instead of being
-// silently dropped (counted in the header but rendered nowhere).
-const OTHER_COLUMN = { id: '__other__', label: 'Other' }
+// `OTHER_COLUMN` — the catch-all for a status outside the canonical 7, so such a
+// task isn't silently dropped — lives in `boardAnnouncements` alongside the
+// label mapping the screen-reader announcements read, so the column and its
+// spoken name can't drift apart.
 
 function verdictStatus(task: BoardTask): 'pass' | 'fail' | 'completed_with_debt' | null {
   const v = task['verification']
@@ -120,7 +122,7 @@ function TaskCard({ task, onClick }: { task: BoardTask; onClick: () => void }) {
           <span className="font-data text-[11px] text-foreground/50">{formatCostUsd(cost)}</span>
         )}
         {task['parentTaskId'] ? (
-          <span className="inline-flex items-center gap-1 text-[11px] text-foreground/40">
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
             <CornerDownRight size={11} strokeWidth={2} /> sub
           </span>
         ) : null}
@@ -151,7 +153,10 @@ function DraggableCard({
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.id,
-    data: { fromStatus: task.status },
+    // `title` rides along so the screen-reader announcements can name the card
+    // without reaching back into `effectiveTasks` — see boardAnnouncements.ts
+    // for why a closure over board state is unsafe at announcement time.
+    data: { fromStatus: task.status, title: task.title ?? '(untitled)' },
     disabled,
   })
   return (
@@ -219,7 +224,7 @@ function BoardColumn({
           </motion.div>
         ))}
         {items.length === 0 && (
-          <div className="py-3.5 text-center text-[11px] text-foreground/30">No tasks</div>
+          <div className="py-3.5 text-center text-[11px] text-muted-foreground">No tasks</div>
         )}
       </div>
     </div>
@@ -475,6 +480,10 @@ export function BoardPanel() {
         <DndContext
           sensors={sensors}
           collisionDetection={boardCollision}
+          // Replaces dnd-kit's defaults, which announce raw task uuids and raw
+          // status ids. Module constants → stable identity → the internal
+          // useDndMonitor never re-registers.
+          accessibility={BOARD_ACCESSIBILITY}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onDragCancel={() => setActiveTask(null)}

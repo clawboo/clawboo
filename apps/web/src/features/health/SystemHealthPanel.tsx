@@ -225,7 +225,7 @@ export function SystemHealthPanel() {
                           {humanizeCheckId(check.id)}
                         </span>
                         <StatusPill tone={meta.pill} label={meta.pillLabel} />
-                        <span className="font-data text-[11px] text-foreground/40">
+                        <span className="font-data text-[11px] text-muted-foreground">
                           {check.durationMs}ms
                         </span>
                       </div>
@@ -233,7 +233,7 @@ export function SystemHealthPanel() {
                         {check.message}
                       </div>
                       {!check.ok && check.detail && (
-                        <div className="font-data mt-1 break-all text-[11px] text-foreground/45">
+                        <div className="font-data mt-1 break-all text-[11px] text-muted-foreground">
                           {check.detail}
                         </div>
                       )}

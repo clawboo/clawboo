@@ -48,7 +48,7 @@ function SectionCard({
       style={{ boxShadow: 'var(--shadow-raised)' }}
       {...rest}
     >
-      <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+      <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </h2>
       <div className="mt-4">{children}</div>
@@ -61,7 +61,9 @@ function SectionCard({
 function InfoRow({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="flex items-baseline gap-3">
-      <span className="w-[100px] shrink-0 text-[11px] font-medium text-foreground/40">{label}</span>
+      <span className="w-[100px] shrink-0 text-[11px] font-medium text-muted-foreground">
+        {label}
+      </span>
       <span className="font-data break-all text-[13px] text-foreground">{value ?? '—'}</span>
     </div>
   )

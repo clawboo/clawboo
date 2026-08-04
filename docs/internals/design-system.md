@@ -108,7 +108,20 @@ Motion is theme-invariant and lives in `:root`. Five tokens cover the app's tran
 
 The first three are full `<duration> <easing>` shorthands you drop straight into a `transition` property (`transition: border-color var(--motion-fast)`); the last two are easing curves only, for when you need a custom duration. Framer Motion springs are the runtime side of this, used for state-change choreography that CSS transitions can't express.
 
-Accessibility is built in. A global `@media (prefers-reduced-motion: reduce)` rule neutralizes CSS `animation-duration` / `transition-duration` to `0.001ms` across `*`, freezes the skeleton shimmer to a static tint, and forces `scroll-behavior: auto`. Framer Motion respects `prefers-reduced-motion` at the framework level on top of that. A global `:focus-visible` rule paints a 2px accent ring (`outline: 2px solid var(--primary)`) on every keyboard-focused interactive element, suppressed inside React Flow and CodeMirror, which own their focus visuals.
+Accessibility is built in. A global `@media (prefers-reduced-motion: reduce)` rule neutralizes CSS `animation-duration` / `transition-duration` to `0.001ms` across `*`, freezes the skeleton shimmer to a static tint, and forces `scroll-behavior: auto`. Framer Motion is opted in on top of that by a single `<MotionConfig reducedMotion="user">` at the app root (`app/providers.tsx`) — it does **not** honour the preference on its own, since `MotionConfigContext` defaults to `reducedMotion: "never"`. That CSS rule cannot reach motion written straight to the DOM from a `requestAnimationFrame` loop, so the graph's two raw-RAF loops (`useFloatingMotion`'s idle float and `graphPhysics`' relaxation pass) read the preference themselves through `lib/prefersReducedMotion.ts` and stay parked; they also subscribe to the media query, so toggling the OS setting takes effect without a reload.
+
+A global `:focus-visible` rule paints a 2px accent ring (`outline: 2px solid var(--primary)`) on every keyboard-focused interactive element. It is suppressed inside CodeMirror, which owns its focus visuals, and inside React Flow's pane and handles — but **not** on `.react-flow__node`, which really is a Tab stop (React Flow makes nodes focusable by default), so graph navigation stays visible. Boo nodes paint the ring on their inner `.group` because the node wrapper is a 280px transparent envelope around a much smaller shape.
+
+Muted body text uses `--muted-foreground`, which is held at ≥4.5:1 against every surface token in both themes and is the token to reach for instead of a low-opacity `text-foreground/N`. `apps/web/src/app/__tests__/tokenContrast.test.ts` parses `globals.css` and enforces it: every text token clears 4.5:1 against every surface it is painted on, every status colour clears the 3:1 non-text floor, and both button-label-on-fill pairs clear 4.5:1. Its `KNOWN_DEBT` ratchet is empty, and an addition to it means deliberately shipping text below AA.
+
+Dark mode resolves a conflict worth knowing about, and it is why the brand red is **two** tokens. As text, the red has to be light enough to clear the dark surfaces; under a white button label it has to be dark, because white on that lighter red is only 3.83:1 — which was every primary CTA in the app. Lightening fixes the first and worsens the second, so the roles are split:
+
+| Token             | Role                         | Dark                          | Light               |
+| ----------------- | ---------------------------- | ----------------------------- | ------------------- |
+| `--primary`       | text, accents, focus ring    | `#e94762` (4.52:1 as text)    | `#d82947`           |
+| `--primary-solid` | the fill under a white label | `#c83b53` (4.99:1 with white) | aliases `--primary` |
+
+`--destructive` / `--destructive-solid` follow the same pattern. Light mode has no conflict, so the `-solid` tokens alias their base there. Reach for `bg-primary-solid` / `bg-destructive-solid` whenever a filled button carries `text-primary-foreground` / `text-destructive-foreground`; use plain `bg-primary` for tints, rings and borders. The guard asserts the label pairs against the `-solid` fills, so wiring a label onto the wrong one fails the build.
 
 ## Type scale
 

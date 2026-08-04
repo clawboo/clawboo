@@ -1,6 +1,5 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -9,6 +8,8 @@ import type { CapabilityRecord } from '@clawboo/capability-registry'
 import { server } from '../../../__vitest__/mswServer'
 import { useToastStore } from '@/stores/toast'
 import { CapabilitiesPanel } from '../CapabilitiesPanel'
+
+import { axe } from '@/__vitest__/axe'
 
 afterEach(() => cleanup())
 
@@ -183,9 +184,7 @@ describe('CapabilitiesPanel', () => {
     const { container } = render(<CapabilitiesPanel />)
     await screen.findByTestId('capabilities-panel')
     await screen.findByTestId('capability-group-clawboo-native')
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 
   it('clicking a managed action POSTs /api/capabilities/:action', async () => {
