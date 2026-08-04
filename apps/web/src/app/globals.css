@@ -41,6 +41,10 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  /* The SOLID variant — the fill under a white button label. Split from
+     `--primary` because one value cannot serve both roles in dark mode; see the
+     note on `--primary-solid` in the `.dark` block. */
+  --color-primary-solid: var(--primary-solid);
   --color-accent: var(--primary);
   --color-accent-foreground: var(--primary-foreground);
   --color-muted: var(--muted);
@@ -51,6 +55,7 @@
   --color-ring: var(--ring);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-solid: var(--destructive-solid);
 
   /* ── Surface elevation tiers.
      Tier 1 = `surface` (base). Tier 2+ defined below for cards / popovers /
@@ -127,9 +132,16 @@
   --popover: #ffffff;
   --popover-foreground: #0f172a;
 
-  --primary: #dc2a48;
+  /* Deepened 4 units from #dc2a48, which measured 4.45:1 as text on the dimmest
+     light surface — just under AA. Imperceptible as a hue change; it lifts every
+     `text-primary` / `text-accent` site to 4.64:1 and the white button label to
+     4.85:1. Guarded by src/app/__tests__/tokenContrast.test.ts. */
+  --primary: #d82947;
   --primary-foreground: #ffffff;
-  --primary-rgb: 220 42 72;
+  /* Light mode has no conflict — the brand red is already dark enough that a
+     white label clears 4.85:1 — so the solid fill is simply the brand red. */
+  --primary-solid: var(--primary);
+  --primary-rgb: 216 41 71;
 
   --muted: #f1f5f9;
   /* AA-safe muted text (>= 4.5:1 on background / surface / card / muted).
@@ -142,7 +154,9 @@
   --border: rgb(15 23 42 / 0.08);
   --border-strong: rgb(15 23 42 / 0.14);
   --input: #f1f5f9;
-  --ring: #dc2a48;
+  /* An alias, not a copy: the focus ring IS the brand red, and holding a second
+     hex here is how it silently drifted out of step with --primary. */
+  --ring: var(--primary);
 
   /* Colorful gradient accents — for the "modern" feature/use-case tiles
      (the premium gradient cards). Deep, saturated. */
@@ -155,6 +169,7 @@
 
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
+  --destructive-solid: var(--destructive);
 
   --mint: #059669;
   --mint-rgb: 5 150 105;
@@ -254,9 +269,19 @@
   --popover: #111827;
   --popover-foreground: #e8e8e8;
 
-  --primary: #e94560;
+  /* Dark mode cannot serve both roles from ONE value, which is why there are two.
+     As TEXT the brand red has to be light enough to clear the dark surfaces
+     (#e94560 measured 4.47:1 on --surface-raised); under a WHITE button label it
+     has to be dark (white on #e94560 is only 3.83:1 — that was every primary CTA
+     in the app). Lightening fixes the first and worsens the second.
+     So `--primary` is the TEXT/accent/ring red (4.52:1 on the dimmest surface)
+     and `--primary-solid` is the deeper FILL that carries a white label at
+     4.99:1. Light mode needs no split; there `--primary-solid` aliases
+     `--primary`. Both are guarded by src/app/__tests__/tokenContrast.test.ts. */
+  --primary: #e94762;
   --primary-foreground: #ffffff;
-  --primary-rgb: 233 69 96;
+  --primary-solid: #c83b53;
+  --primary-rgb: 233 71 98;
 
   --muted: #1f2937;
   /* The dark half of the AA-safe muted-text token (see the :root note). */
@@ -265,10 +290,14 @@
   --border: rgb(255 255 255 / 0.08);
   --border-strong: rgb(255 255 255 / 0.16);
   --input: #1f2937;
-  --ring: #e94560;
+  /* Alias — see the :root note. */
+  --ring: var(--primary);
 
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
+  /* Same split as --primary-solid: white on #ef4444 is 3.76:1, on this deeper
+     fill it is 4.89:1. --destructive stays the lighter error TEXT colour. */
+  --destructive-solid: #ce3a3a;
 
   --mint: #34d399;
   --mint-rgb: 52 211 153;

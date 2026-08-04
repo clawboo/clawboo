@@ -1213,7 +1213,7 @@ export function GatewayBootstrap() {
                   type="button"
                   onClick={handleStartGateway}
                   disabled={startingGateway}
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary-solid font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {startingGateway ? (
                     <>
@@ -1269,7 +1269,7 @@ export function GatewayBootstrap() {
                     setFleetError(null)
                     if (client) void hydrateFleet(client)
                   }}
-                  className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-primary-foreground"
+                  className="rounded-lg bg-primary-solid px-4 py-2 text-[13px] font-medium text-primary-foreground"
                 >
                   Retry
                 </button>
@@ -1313,7 +1313,7 @@ export function GatewayBootstrap() {
                       setNativeError('Could not load your workspace. The server may be restarting.')
                   })
                 }}
-                className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-primary-foreground"
+                className="rounded-lg bg-primary-solid px-4 py-2 text-[13px] font-medium text-primary-foreground"
               >
                 Retry
               </button>

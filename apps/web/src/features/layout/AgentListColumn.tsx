@@ -276,7 +276,7 @@ function NavButton({
         <span className="text-[11px] font-normal text-muted-foreground">{item.subtitle}</span>
       ) : null}
       {badge ? (
-        <span className="ml-auto flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+        <span className="ml-auto flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary-solid px-1 text-[10px] font-bold text-primary-foreground">
           {badge}
         </span>
       ) : null}

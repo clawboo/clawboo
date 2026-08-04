@@ -1244,7 +1244,11 @@ export function CreateTeamModal({
                 data-testid="create-team-deploy"
                 onClick={() => void handleConfirmCustomize()}
                 disabled={!teamName.trim()}
-                className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl text-[14px] font-semibold text-primary-foreground transition active:scale-[0.98] hover:brightness-110 disabled:pointer-events-none disabled:opacity-45"
+                // `text-white`, NOT `text-primary-foreground`: this button's fill
+                // is the user's chosen `teamColor`, not a brand token, so it has
+                // no business borrowing the label colour that is paired with
+                // `--primary-solid`. Same rendering, honest coupling.
+                className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl text-[14px] font-semibold text-white transition active:scale-[0.98] hover:brightness-110 disabled:pointer-events-none disabled:opacity-45"
                 style={{ backgroundColor: teamColor, boxShadow: 'var(--shadow-raised)' }}
               >
                 {isSingleAgentMode

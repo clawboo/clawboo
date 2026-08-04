@@ -955,7 +955,7 @@ export function JumpToLatestButton({
         className={[
           'flex items-center gap-1.5 rounded-full shadow-floating',
           hasNew
-            ? 'bg-primary py-1.5 pl-3.5 pr-3 text-[12px] font-semibold text-primary-foreground'
+            ? 'bg-primary-solid py-1.5 pl-3.5 pr-3 text-[12px] font-semibold text-primary-foreground'
             : 'surface-floating-tier h-9 w-9 justify-center text-foreground/70 hover:text-foreground',
         ].join(' ')}
       >

@@ -307,7 +307,7 @@ export function GatewayConnectScreen({
               onClick={() => void handleConnect()}
               disabled={connectDisabled}
               data-testid="gateway-connect-button"
-              className="mt-1 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-1 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary-solid font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {connecting ? (
                 <>

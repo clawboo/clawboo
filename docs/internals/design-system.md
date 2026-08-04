@@ -112,7 +112,16 @@ Accessibility is built in. A global `@media (prefers-reduced-motion: reduce)` ru
 
 A global `:focus-visible` rule paints a 2px accent ring (`outline: 2px solid var(--primary)`) on every keyboard-focused interactive element. It is suppressed inside CodeMirror, which owns its focus visuals, and inside React Flow's pane and handles — but **not** on `.react-flow__node`, which really is a Tab stop (React Flow makes nodes focusable by default), so graph navigation stays visible. Boo nodes paint the ring on their inner `.group` because the node wrapper is a 280px transparent envelope around a much smaller shape.
 
-Muted body text uses `--muted-foreground`, which is held at ≥4.5:1 against every surface token in both themes and is the token to reach for instead of a low-opacity `text-foreground/N`. `apps/web/src/app/__tests__/tokenContrast.test.ts` parses `globals.css` and enforces that, with a `KNOWN_DEBT` ratchet for the pairs that still fall short (notably white-on-`--primary` and white-on-`--destructive` in dark mode, both ~3.8:1, which need a brand decision rather than a token tweak).
+Muted body text uses `--muted-foreground`, which is held at ≥4.5:1 against every surface token in both themes and is the token to reach for instead of a low-opacity `text-foreground/N`. `apps/web/src/app/__tests__/tokenContrast.test.ts` parses `globals.css` and enforces it: every text token clears 4.5:1 against every surface it is painted on, every status colour clears the 3:1 non-text floor, and both button-label-on-fill pairs clear 4.5:1. Its `KNOWN_DEBT` ratchet is empty, and an addition to it means deliberately shipping text below AA.
+
+Dark mode resolves a conflict worth knowing about, and it is why the brand red is **two** tokens. As text, the red has to be light enough to clear the dark surfaces; under a white button label it has to be dark, because white on that lighter red is only 3.83:1 — which was every primary CTA in the app. Lightening fixes the first and worsens the second, so the roles are split:
+
+| Token             | Role                         | Dark                          | Light               |
+| ----------------- | ---------------------------- | ----------------------------- | ------------------- |
+| `--primary`       | text, accents, focus ring    | `#e94762` (4.52:1 as text)    | `#d82947`           |
+| `--primary-solid` | the fill under a white label | `#c83b53` (4.99:1 with white) | aliases `--primary` |
+
+`--destructive` / `--destructive-solid` follow the same pattern. Light mode has no conflict, so the `-solid` tokens alias their base there. Reach for `bg-primary-solid` / `bg-destructive-solid` whenever a filled button carries `text-primary-foreground` / `text-destructive-foreground`; use plain `bg-primary` for tints, rings and borders. The guard asserts the label pairs against the `-solid` fills, so wiring a label onto the wrong one fails the build.
 
 ## Type scale
 

@@ -623,7 +623,7 @@ function CenterBody({
             type="button"
             onClick={onFinish}
             data-testid="tour-open-chat"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-solid px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
           >
             Open Group Chat <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />
           </button>
@@ -632,7 +632,7 @@ function CenterBody({
             type="button"
             onClick={onNext}
             data-testid="tour-next"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-solid px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
           >
             {isLast ? 'Done' : 'Start tour'}
             <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />
@@ -731,7 +731,7 @@ function SpotBody({
             type="button"
             onClick={onNext}
             data-testid="tour-next"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 text-[12.5px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-solid px-3.5 py-1.5 text-[12.5px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
           >
             {isLast ? 'Done' : 'Next'}
             {!isLast && <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />}

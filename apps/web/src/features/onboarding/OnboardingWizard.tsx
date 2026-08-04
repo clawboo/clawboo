@@ -197,7 +197,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
           onClick={onContinue}
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.97 }}
-          className="welcome-cta flex items-center gap-2.5 h-[52px] px-9 rounded-xl bg-accent font-semibold text-[15px] text-primary-foreground shadow-[0_0_36px_rgb(var(--primary-rgb) / 0.45)] transition hover:brightness-110 active:scale-[0.98]"
+          className="welcome-cta flex items-center gap-2.5 h-[52px] px-9 rounded-xl bg-primary-solid font-semibold text-[15px] text-primary-foreground shadow-[0_0_36px_rgb(var(--primary-rgb) / 0.45)] transition hover:brightness-110 active:scale-[0.98]"
         >
           Get Started
           <ArrowRight className="h-4 w-4" strokeWidth={2.5} />

@@ -39,9 +39,23 @@ function ruleBody(selector: string): string {
   throw new Error(`globals.css: unbalanced braces in \`${selector}\``)
 }
 
+/**
+ * Strip `/* … *\/` comments before scanning for declarations.
+ *
+ * Load-bearing, not tidiness. The declaration regex below is a plain
+ * `--name: value;` scan, and later matches overwrite earlier ones — so a COMMENT
+ * that happens to contain `--some-token:` (e.g. prose like "same split as
+ * `--primary-solid`: white on …") parses as a declaration whose value runs to the
+ * next semicolon, silently replacing the real one. That failure mode is worse
+ * than a crash: the guard would go on measuring a colour the app never renders.
+ */
+function stripComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, '')
+}
+
 function customProps(body: string): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const m of body.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) {
+  for (const m of stripComments(body).matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) {
     out[m[1] as string] = (m[2] as string).trim()
   }
   return out
@@ -106,23 +120,26 @@ function contrastRatio(a: Rgb, b: Rgb): number {
 
 // ── the contract ─────────────────────────────────────────────────────────────
 
-/** Surfaces that real text is painted on. `--muted` is included because
- *  `bg-muted` carries 11px text; `--input` is not — it only ever holds
- *  `text-foreground`. */
-const SURFACES = [
-  '--background',
-  '--surface',
-  '--card',
-  '--popover',
-  '--surface-raised',
-  '--muted',
-] as const
+/**
+ * The surfaces arbitrary text is actually painted on. `--input` is excluded: it
+ * only ever holds `text-foreground`.
+ *
+ * `--muted` is deliberately NOT here. It is not a general text surface: `bg-muted`
+ * has exactly one consumer in the app (the avatar-count badge at
+ * AgentListColumn.tsx:407) and it carries `text-foreground/75` and nothing else.
+ * Asserting the full colour ramp against it manufactured five failures for
+ * pairings that do not exist — `--primary`, `--secondary` and `--amber` are never
+ * rendered on it. The one real pairing is asserted directly below instead.
+ */
+const SURFACES = ['--background', '--surface', '--card', '--popover', '--surface-raised'] as const
 
 /** 1.4.3 Contrast (Minimum) — normal-size body text. */
 const AA_TEXT: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['--foreground', SURFACES],
   ['--card-foreground', ['--card']],
   ['--popover-foreground', ['--popover']],
+  // The single real `bg-muted` pairing — see the SURFACES note.
+  ['--foreground', ['--muted']],
   ['--secondary', SURFACES],
   ['--muted-foreground', SURFACES],
   ['--destructive', SURFACES],
@@ -130,10 +147,20 @@ const AA_TEXT: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['--primary', SURFACES],
 ]
 
-/** Label-on-fill pairs (button chrome). */
+/**
+ * Label-on-fill pairs (button chrome).
+ *
+ * The fill is `--primary-solid` / `--destructive-solid`, NOT `--primary` /
+ * `--destructive`. In dark mode those are deliberately different values: the
+ * plain token is the lighter TEXT/accent red (it has to clear the dark surfaces
+ * in AA_TEXT above), and a white label on that lighter red is only 3.83:1. The
+ * `-solid` tokens are the deeper fills that actually sit under a button label.
+ * Asserting against the wrong one here would silently pass while every real CTA
+ * failed.
+ */
 const AA_ON_COLOR: ReadonlyArray<readonly [string, string]> = [
-  ['--primary-foreground', '--primary'],
-  ['--destructive-foreground', '--destructive'],
+  ['--primary-foreground', '--primary-solid'],
+  ['--destructive-foreground', '--destructive-solid'],
 ]
 
 /** 1.4.11 Non-text Contrast — status colours used on badges, icons, pills and
@@ -141,6 +168,10 @@ const AA_ON_COLOR: ReadonlyArray<readonly [string, string]> = [
  *  consumers and its dark value measures 1.42:1, so asserting it would only
  *  freeze a dead token in place. */
 const UI_NON_TEXT: ReadonlyArray<readonly [string, readonly string[]]> = [
+  // The solid button fills as SHAPES against the page — the button has to be
+  // discernible from its background even before its label is read.
+  ['--primary-solid', SURFACES],
+  ['--destructive-solid', SURFACES],
   ['--mint', SURFACES],
   ['--amber', SURFACES],
   ['--violet', SURFACES],
@@ -154,41 +185,16 @@ const AA_MIN = 4.5
 const UI_MIN = 3.0
 
 /**
- * Pairs knowingly below their tier. Each entry RATCHETS: the measured ratio may
- * never drop below the recorded floor, so the debt can shrink but never grow.
- * Delete an entry once the token is fixed and the tier assertion takes over.
- * Adding one is a deliberate, reviewable act.
+ * Pairs knowingly below their tier. Each entry ratchets: the measured ratio may
+ * never drop below the recorded floor, so debt can shrink but never grow.
+ *
+ * EMPTY, and it should stay that way. Every entry that used to live here was
+ * either a real failure (fixed in globals.css — the two brand nudges and the two
+ * dark-mode button labels) or an artefact of asserting `--muted` as a general
+ * text surface, which it is not. Adding an entry back means shipping text below
+ * AA, so it needs an explicit reviewer decision and a written rationale.
  */
-const KNOWN_DEBT: Record<string, { floor: number; why: string }> = {
-  'light --primary on --background': {
-    floor: 4.49,
-    why: '#dc2a48 on #f8fafc = 4.49:1 — 0.01 short. Fixing means moving the brand red; that is a brand decision, not a token tweak.',
-  },
-  'light --primary on --muted': { floor: 4.29, why: 'Same brand red; --muted is dimmer still.' },
-  'dark --primary on --surface-raised': { floor: 4.47, why: '#e94560 on #141b2e.' },
-  'dark --primary on --muted': { floor: 3.83, why: '#e94560 on #1f2937.' },
-  'dark --destructive on --muted': { floor: 3.9, why: '#ef4444 on #1f2937.' },
-  'dark --primary-foreground on --primary': {
-    floor: 3.83,
-    why: 'White label on the dark-mode brand red — i.e. EVERY primary button label in dark mode. Fixing requires darkening --primary, which trades against --primary-as-text. Needs its own issue.',
-  },
-  'dark --destructive-foreground on --destructive': {
-    floor: 3.76,
-    why: 'White label on #ef4444. Same trade-off as --primary-foreground.',
-  },
-  'light --amber on --muted': {
-    floor: 2.91,
-    why: '#d97706 on #f1f5f9. Amber is badge fill + icon only, never body copy.',
-  },
-  'light --secondary on --muted': {
-    floor: 4.34,
-    why: '#64748b on #f1f5f9. --secondary stays a mid-tone label colour; micro-type moved to --muted-foreground, which clears 4.5:1 on every surface.',
-  },
-  'light --destructive on --muted': {
-    floor: 4.41,
-    why: '#dc2626 (red-600) on #f1f5f9 — 0.09 short, and only on the dimmest surface (it clears 4.62 / 4.83 on background / surface). Deepening it would shift every error state in light mode: a brand decision, not a token tweak.',
-  },
-}
+const KNOWN_DEBT: Record<string, { floor: number; why: string }> = {}
 
 const EPSILON = 0.005
 
@@ -225,7 +231,31 @@ describe.each(['light', 'dark'] as const)('design tokens — %s theme', (theme) 
 
 describe('contrast debt', () => {
   it('does not grow without review', () => {
-    expect(Object.keys(KNOWN_DEBT)).toHaveLength(10)
+    expect(Object.keys(KNOWN_DEBT)).toHaveLength(0)
+  })
+
+  // Regression guard for a parser bug that made this whole file lie: prose in a
+  // CSS comment containing `--token:` was scanned as a declaration and, being
+  // later in the block, overwrote the real value. The suite still passed — it was
+  // just measuring a colour the app never renders. These assertions pin the
+  // parsed values to what globals.css actually declares.
+  it('parses the real declarations, not prose from comments', () => {
+    for (const theme of ['light', 'dark'] as const) {
+      for (const token of [
+        '--primary',
+        '--primary-solid',
+        '--destructive',
+        '--destructive-solid',
+      ]) {
+        // A corrupted parse yields prose, which `rgb()` rejects outright.
+        expect(() => rgb(theme, token)).not.toThrow()
+      }
+    }
+    // Dark splits the fill from the text red; light has no conflict and aliases.
+    expect(rgb('dark', '--primary-solid')).not.toEqual(rgb('dark', '--primary'))
+    expect(rgb('dark', '--destructive-solid')).not.toEqual(rgb('dark', '--destructive'))
+    expect(rgb('light', '--primary-solid')).toEqual(rgb('light', '--primary'))
+    expect(rgb('light', '--destructive-solid')).toEqual(rgb('light', '--destructive'))
   })
 
   it('keeps --muted-foreground distinct from --secondary in both themes', () => {
