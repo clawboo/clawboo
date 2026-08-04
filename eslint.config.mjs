@@ -55,10 +55,11 @@ export default tseslint.config(
       globals: nodeGlobals,
     },
   },
-  // ESM scripts in scripts/ (e.g. `scripts/test-clean-install.mjs`) — same
-  // story but ESM-shaped. `.mjs` is implicitly sourceType: module.
+  // ESM scripts in any scripts/ directory (e.g. `scripts/test-clean-install.mjs`,
+  // `docs/scripts/check-frontmatter.mjs`) — same story but ESM-shaped. `.mjs` is
+  // implicitly sourceType: module.
   {
-    files: ['scripts/**/*.{mjs,js}'],
+    files: ['**/scripts/**/*.{mjs,js}'],
     languageOptions: {
       sourceType: 'module',
       globals: nodeGlobals,

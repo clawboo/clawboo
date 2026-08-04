@@ -3,11 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
+    # Skips the matrix for prose-only merges. Note '**.md' already covers every
+    # docs page, so a docs-only merge still short-circuits here; what this list
+    # no longer skips is the docs site's non-Markdown files (docs.json,
+    # style.css, llms.txt). The pull_request trigger below has no paths-ignore
+    # and is the real gate: its Lint job runs the docs frontmatter check.
     paths-ignore:
       - '**.md'
       - 'LICENSE'
       - '.changeset/**'
-      - 'docs/**'
   pull_request:
     branches: [main]
 

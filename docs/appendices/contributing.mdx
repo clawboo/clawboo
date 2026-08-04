@@ -66,7 +66,7 @@ Run the same checks CI runs, in this order. They are all root scripts in `packag
 ```bash
 pnpm build                              # turbo build — all packages and apps
 pnpm typecheck                          # tsc --noEmit across the monorepo
-pnpm lint                               # ESLint flat config across all packages
+pnpm lint                               # ESLint across all packages, plus the docs frontmatter check
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright e2e (incl. board round-trip + eval smoke)
 pnpm verify:ingest                      # marketplace codegen drift gate
@@ -101,6 +101,20 @@ Every `@clawboo/*` library is `private: true`; only the `clawboo` CLI publishes 
 ### 6. Open the pull request
 
 Push your branch and open a PR. The PR template walks the checklist. Keep it to **one concern per PR**; split unrelated changes. Add a test for anything you add (unit logic in Vitest, components in the jsdom project, new end-to-end behavior in Playwright). CI must be green before review, and PRs are squash-merged into `main`.
+
+## Documentation changes
+
+The page you are reading lives in the repo at `docs/`, and that directory **is** this site: hand-edited Mintlify Markdown with no build or generation step. Merging a docs PR to `main` redeploys [docs.claw.boo](https://docs.claw.boo) as-is, so the files in the diff are exactly what ships. See [Monorepo and build](/internals/monorepo-and-build) for where `docs/` sits in the workspace.
+
+<Warning>
+Frontmatter is parsed as YAML, so **quote any `title` or `description` value that contains a colon, or that starts with `@` or a backtick**. An unquoted `: ` parses as a nested mapping, and Mintlify serves the page as a 404 instead of rendering it. Single and double quotes are both valid YAML; Prettier normalizes them to single quotes when the pre-commit hook formats the page.
+
+Same class of breakage, opposite symptom: **never put a bare `%` in a body heading**. Mintlify URI-decodes headings into anchor slugs, so invalid percent-encoding fails the page. A `%` in prose is fine.
+</Warning>
+
+`mint broken-links` only validates links, so it will not catch that; a full `mint dev` build will. `pnpm check:docs` catches it too, without needing the Mintlify CLI: it is the `docs` package's `lint` script, so it also runs under `pnpm lint` and in CI's Lint job on every PR. The repo's [`docs/README.md`](https://github.com/clawboo/clawboo/blob/main/docs/README.md) covers the rest: the directory layout, the hand-maintained `docs.json` navigation, and local preview.
+
+Documentation-only changes do not need a changeset (see the note in step 5).
 
 ## Code guidelines
 

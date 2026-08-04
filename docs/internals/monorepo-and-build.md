@@ -138,19 +138,21 @@ A few runtime deps stay **external** in the server bundle and must be present in
 
 These run from the repo root. The Turbo-fronted ones fan out across the workspace honoring the build order.
 
-| Command                   | What it does                                                                                                                     |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm build`              | `turbo build`, builds every package + app `dist/`, dependency-ordered, cached.                                                   |
-| `pnpm dev`                | `turbo dev --concurrency=20`, runs each package/app dev task. For `apps/web` this is the dev orchestrator (below).               |
-| `pnpm lint`               | `turbo lint`, ESLint across the workspace.                                                                                       |
-| `pnpm typecheck`          | `turbo typecheck`, `tsc --noEmit` across the workspace.                                                                          |
-| `pnpm test`               | `turbo test`, per-package Vitest (the real path; each package has its own config).                                               |
-| `pnpm e2e`                | `playwright test`, the Playwright end-to-end suite (sandboxed; see [Testing](#testing-strategy-pointer)).                        |
-| `pnpm assemble`           | `pnpm build && bash scripts/assemble-cli.sh`, full build, then copy the server bundle + UI + MCP bins into `apps/cli/dist/`.     |
-| `pnpm verify:ingest`      | `tsx scripts/verify-ingest.ts`, fails if the committed marketplace catalog drifts from a fresh codegen.                          |
-| `pnpm ingest:marketplace` | `tsx scripts/ingest-marketplace-content.ts`, regenerates that catalog from the pinned upstream SHAs.                             |
-| `pnpm test:clean-install` | `node scripts/test-clean-install.mjs`, boots the bundled CLI in an isolated `$HOME` and asserts the dashboard works (see below). |
-| `pnpm prepublish:check`   | `pnpm assemble && pnpm test:clean-install`, the local reproduction of the release gate.                                          |
+| Command                      | What it does                                                                                                                             |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm build`                 | `turbo build`, builds every package + app `dist/`, dependency-ordered, cached.                                                           |
+| `pnpm dev`                   | `turbo dev --concurrency=20`, runs each package/app dev task. For `apps/web` this is the dev orchestrator (below).                       |
+| `pnpm lint`                  | `turbo lint`, ESLint across the workspace, plus the docs frontmatter check (the `docs` package's `lint` script).                         |
+| `pnpm typecheck`             | `turbo typecheck`, `tsc --noEmit` across the workspace.                                                                                  |
+| `pnpm test`                  | `turbo test`, per-package Vitest (the real path; each package has its own config).                                                       |
+| `pnpm e2e`                   | `playwright test`, the Playwright end-to-end suite (sandboxed; see [Testing](#testing-strategy-pointer)).                                |
+| `pnpm assemble`              | `pnpm build && bash scripts/assemble-cli.sh`, full build, then copy the server bundle + UI + MCP bins into `apps/cli/dist/`.             |
+| `pnpm verify:ingest`         | `tsx scripts/verify-ingest.ts`, fails if the committed marketplace catalog drifts from a fresh codegen.                                  |
+| `pnpm ingest:marketplace`    | `tsx scripts/ingest-marketplace-content.ts`, regenerates that catalog from the pinned upstream SHAs.                                     |
+| `pnpm check:docs`            | `docs/scripts/check-frontmatter.mjs`, fails if any docs page's YAML frontmatter is invalid (the 404 class of bug).                       |
+| `pnpm test:clean-install`    | `node scripts/test-clean-install.mjs`, packs + installs the CLI tarball and asserts the install works (see below).                       |
+| `pnpm test:bundle-externals` | `node scripts/check-bundle-externals.mjs`, fails if a shipped bundle loads a module that isn't declared / builtin / documented-optional. |
+| `pnpm prepublish:check`      | `pnpm assemble && pnpm test:clean-install`, the local reproduction of the release gate.                                                  |
 
 `pnpm dev` for the web app does **not** start Vite and Express directly. It runs `scripts/dev-orchestrator.cjs`, which picks a free API port first (honoring `CLAWBOO_API_PORT`, else scanning from `CLAWBOO_API_PORT_START`), exports it into the child env, then `concurrently` runs `pnpm dev:api` (`tsx watch server/index.ts`) and `pnpm dev:ui` (`vite`) so both inherit the same port, no race over who binds first.
 
