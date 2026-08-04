@@ -151,6 +151,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR-controlled e2e next; don't keep the default token for later steps.
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v4
 
@@ -170,7 +173,7 @@ jobs:
         run: pnpm e2e
 
       - name: Upload Playwright report
-        if: ${{ !cancelled() }}
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
