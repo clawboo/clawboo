@@ -1,19 +1,17 @@
 // Settings modal: open/close, grouped nav + view switching, keyword filter.
-// NAV_PANELS is stubbed so the modal renders a lightweight placeholder per view
-// instead of pulling the real (fetch-heavy) panels into jsdom.
+// NavPanel is stubbed so the modal renders a lightweight placeholder per view
+// instead of pulling the real (fetch-heavy, lazily-chunked) panels into jsdom.
+// It is a COMPONENT that owns its own Suspense + error boundary, not the old
+// record of render functions — and the stub must declare it, because vitest's
+// mock namespace throws the moment the modal reads an undeclared export.
 
 import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/features/layout/navPanels', () => ({
-  NAV_PANELS: new Proxy(
-    {},
-    {
-      get:
-        (_t, view: string) =>
-        () => <div data-testid={`stub-panel-${view}`}>panel:{view}</div>,
-    },
+  NavPanel: ({ view }: { view: string }) => (
+    <div data-testid={`stub-panel-${view}`}>panel:{view}</div>
   ),
 }))
 

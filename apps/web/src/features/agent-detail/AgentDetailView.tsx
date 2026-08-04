@@ -1,4 +1,3 @@
-import { lazy, Suspense } from 'react'
 import { Group, Panel } from 'react-resizable-panels'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -8,7 +7,9 @@ import { ChatPanel } from '@/features/chat/ChatPanel'
 import { ResizeHandle } from '@/features/shared/ResizeHandle'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { useNativeRuntimeState } from '@/features/runtimes/useNativeRuntimeState'
+import { LazyBoundary } from '@/features/shared/LazyBoundary'
 import { Spinner } from '@/features/shared/Spinner'
+import { createRetryableLazy } from '@/lib/lazyRetry'
 
 // This view is on the eager path (ContentArea imports it statically), so both of
 // its heavy panes are lazy-loaded — otherwise they'd anchor their libraries to
@@ -16,8 +17,17 @@ import { Spinner } from '@/features/shared/Spinner'
 //
 // MiniGraph pulls in React Flow (+ ELK via the shared graph modules); InlineEditor
 // owns one of the two CodeMirror entry points (AgentFileEditorOverlay is the other).
-const MiniGraph = lazy(() => import('./MiniGraph').then((m) => ({ default: m.MiniGraph })))
-const InlineEditor = lazy(() => import('./InlineEditor').then((m) => ({ default: m.InlineEditor })))
+//
+// Both go through `createRetryableLazy` + `LazyBoundary` so a failed chunk (or a
+// crash inside React Flow / CodeMirror) degrades to a card in THAT pane. Before
+// this, either failure threw past both Suspense boundaries and took down the
+// whole agent view — including the chat, which is the part still worth using.
+const miniGraphSource = createRetryableLazy(() =>
+  import('./MiniGraph').then((m) => ({ default: m.MiniGraph })),
+)
+const inlineEditorSource = createRetryableLazy(() =>
+  import('./InlineEditor').then((m) => ({ default: m.InlineEditor })),
+)
 
 // Shared fallback for the two lazy panes — centered spinner, sized to the pane.
 function PaneFallback() {
@@ -132,17 +142,27 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
           <Panel defaultSize={55} minSize={25}>
             <Group orientation="vertical" id="agent-detail-v">
               <Panel defaultSize={55} minSize={15}>
-                <Suspense fallback={<PaneFallback />}>
-                  <MiniGraph agentId={agentId} />
-                </Suspense>
+                <LazyBoundary
+                  source={miniGraphSource}
+                  label="the agent graph"
+                  suspenseFallback={<PaneFallback />}
+                  render={(MiniGraph) => <MiniGraph agentId={agentId} />}
+                  logContext={{ pane: 'mini-graph', agentId }}
+                />
               </Panel>
 
               <ResizeHandle direction="vertical" />
 
               <Panel defaultSize={45} minSize={15}>
-                <Suspense fallback={<PaneFallback />}>
-                  <InlineEditor agentId={agentId} agentName={agent.name} />
-                </Suspense>
+                <LazyBoundary
+                  source={inlineEditorSource}
+                  label="the file editor"
+                  suspenseFallback={<PaneFallback />}
+                  render={(InlineEditor) => (
+                    <InlineEditor agentId={agentId} agentName={agent.name} />
+                  )}
+                  logContext={{ pane: 'inline-editor', agentId }}
+                />
               </Panel>
             </Group>
           </Panel>

@@ -166,10 +166,11 @@ The pattern primitives live in `apps/web/src/features/shared/`. Each one bundles
 | `EmptyState`     | `EmptyState.tsx`     | The branded empty state: a 56px circular icon disc + a Lucide icon @ 26px + a Cabinet-Grotesk title + a DM-Sans helper + an optional CTA. `tone` ∈ `neutral \| mint \| amber \| primary` tints the disc. Never an emoji.                                                                       |
 | `FormattedAlert` | `FormattedAlert.tsx` | A thin in-flow callout strip with a leading semantic Lucide icon. `tone` ∈ `info \| warning \| error`; `role="alert"` for errors, `role="status"` otherwise. Not for toasts (those have their own motion system).                                                                              |
 | `Select`         | `Select.tsx`         | A styled wrapper around the native `<select>`, keeps full keyboard / type-ahead / screen-reader / mobile-picker behavior, layers on token-driven chrome and a custom Lucide chevron. `size` ∈ `sm \| md`; pass `options` or `<option>` children.                                               |
+| `ErrorBoundary`  | `ErrorBoundary.tsx`  | The React error boundary and its `role="alert"` fallback card (heading, message, Try again + Reload). `variant` ∈ `app \| panel \| compact` — full-viewport at the root, inline for one surface, icon-only for a narrow rail. Renders `children` verbatim while healthy, so it adds no DOM.    |
 
 Two principles run through all of them. **They are token-driven**, every color is a CSS variable (`rgb(var(--mint-rgb) / 0.2)`, `var(--primary)`), so a primitive recolors itself when the theme flips with no per-component logic. **They are accessibility-first**; reduced-motion fallbacks, `aria-*` and `role` attributes, and native-element semantics are baked in, so callers get correct behavior for free.
 
-`ResizeHandle.tsx` lives in the same directory but is a layout primitive (the split-panel drag seam) rather than a token-bundling design primitive.
+`ResizeHandle.tsx` and `LazyBoundary.tsx` live in the same directory but are layout / structural primitives (the split-panel drag seam, and the `ErrorBoundary` + `Suspense` + retry seam every lazily-loaded surface renders through) rather than token-bundling design primitives.
 
 ## Design rationale and trade-offs
 
