@@ -33,7 +33,7 @@ A team can mix runtimes, one agent on Native, another on Claude Code, another on
 
 Clawboo is local-first. The server binds to loopback by default, stores everything on your machine, and makes no telemetry or analytics calls. The only outbound network traffic is what a runtime makes to **the model provider you chose**: the native runtime calls `api.anthropic.com`, `api.openai.com`, OpenRouter (`https://openrouter.ai/api/v1`), or your local Ollama, with the key you supplied. That is the same call any agent runtime makes; Clawboo is the orchestrator in front of it, not a relay through a Clawboo-hosted service.
 
-When you paste a provider key into the native "Test connection" affordance, the key is used for exactly one GET to the provider's models endpoint to validate it and is **never persisted** by that endpoint; it is not written to the vault, logged, or echoed back. See [security](/operating/security) and the [runtimes API healthcheck](/reference/rest-api/runtimes).
+Clawboo verifies a provider key before it stores one — on onboarding's **Continue**, on the Providers hub's **Save**, on a runtime's **Connect**, and via the native "Test connection" affordance. Each of those makes exactly one GET to the provider's models endpoint to validate the key, and that key is **never persisted** by the validating endpoint; it is not written to the vault, logged, or echoed back. See [security](/operating/security) and the [runtimes API healthcheck](/reference/rest-api/runtimes).
 
 ## Where is my data stored?
 

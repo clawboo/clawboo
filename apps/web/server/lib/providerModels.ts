@@ -31,7 +31,13 @@ async function timedFetch(url: string, headers: Record<string, string>): Promise
   const ctl = new AbortController()
   const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS)
   try {
-    return await fetch(url, { headers, signal: ctl.signal })
+    // `redirect: 'error'` for the same reason as the healthcheck probe: these are
+    // hard-coded provider `/models` endpoints that never legitimately 3xx, and the
+    // request carries the user's key. `fetch` strips `Authorization` across
+    // origins but NOT Anthropic's custom `x-api-key`, so following a redirect
+    // could hand the key to another host. Failing closed returns null → the
+    // caller serves its last-good list.
+    return await fetch(url, { headers, redirect: 'error', signal: ctl.signal })
   } catch {
     return null
   } finally {

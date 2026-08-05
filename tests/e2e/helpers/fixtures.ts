@@ -136,6 +136,33 @@ export { expect }
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
+ * Stub the native provider healthcheck the onboarding wizard runs before it
+ * stores a pasted key.
+ *
+ * Onboarding is deliberately offline-capable end to end: the connect route only
+ * writes the vault and the team deploy only writes SQLite. The pre-advance
+ * verification is the one step that would otherwise reach a real provider — with
+ * an obviously-fake key, so it would come back 401 and correctly refuse to
+ * advance. Stubbing it keeps these specs hermetic while still exercising the
+ * gate; the returned counter lets a spec assert the gate actually ran.
+ */
+export async function stubNativeHealthcheck(
+  page: Page,
+  ok = true,
+): Promise<{ calls: () => number }> {
+  let calls = 0
+  await page.route('**/api/runtimes/clawboo-native/healthcheck', async (route) => {
+    calls += 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(ok ? { ok: true } : { ok: false, error: 'Invalid API key.' }),
+    })
+  })
+  return { calls: () => calls }
+}
+
+/**
  * Pre-save settings pointing to the mock gateway, then navigate and
  * let auto-connect succeed. This avoids the browser-side connect screen
  * entirely and is the most reliable approach for e2e tests.

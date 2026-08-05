@@ -13,7 +13,7 @@
 // covered by the server unit tests (openclawCodexAuth.test.ts); the wizard
 // ConfigureStep's ChatGPT method is covered by ConfigureStep.test.tsx.
 
-import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
+import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
 
 test.describe('OpenClaw ChatGPT-subscription onboarding', () => {
   test('Add-runtimes OpenClaw setup → ChatGPT-subscription panel → Re-check proceeds keylessly', async ({
@@ -143,6 +143,10 @@ test.describe('OpenClaw ChatGPT-subscription onboarding', () => {
         body: JSON.stringify({ runtimes: [], available: [] }),
       })
     })
+
+    // Continue verifies the key before storing it — stub the probe so this stays
+    // offline (a fake key against the real provider would 401 and block).
+    await stubNativeHealthcheck(page)
 
     await page.goto('/')
 

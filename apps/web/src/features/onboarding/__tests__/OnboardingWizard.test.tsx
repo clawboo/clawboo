@@ -49,9 +49,12 @@ vi.mock('@/features/teams/CreateTeamModal', () => ({
     ) : null,
 }))
 
-// The native connect path: write the vault key + record the leader model.
+// The native connect path: verify the key, write the vault key + record the
+// leader model. The healthcheck is what Continue runs BEFORE it stores anything,
+// so the spine can't advance without a verdict.
 function useNativeConnectHandlers() {
   server.use(
+    http.post('/api/runtimes/clawboo-native/healthcheck', () => HttpResponse.json({ ok: true })),
     http.post('/api/runtimes/clawboo-native/connect', () => HttpResponse.json({ ok: true })),
     http.post('/api/onboarding/native-leader-model', () => HttpResponse.json({ ok: true })),
     http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })),

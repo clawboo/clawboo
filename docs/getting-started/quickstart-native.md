@@ -46,9 +46,14 @@ The next screen is titled **"Connect your AI provider"**; the key you paste here
 
 ![The provider connect step: provider cards, the API key field, and the leader model picker](/images/onboarding-connect-provider.png)
 
-Optionally, click **Test connection** below the field. Clawboo does a single authenticated `GET` against the provider's models endpoint (Anthropic `/v1/models`, OpenAI `/v1/models`, OpenRouter `/v1/models`, or the Ollama `/api/tags` probe) with an 8-second timeout. The key used for this test is never stored, logged, or echoed back.
+You can click **Test connection** below the field to check the key right away, but you don't have to: **Continue** verifies it for you before it stores anything. Either way Clawboo does a single authenticated `GET` against the provider's models endpoint (Anthropic `/v1/models`, OpenAI `/v1/models`, OpenRouter `/v1/models`, an [extra provider's](/runtimes/native) `/models`, or the Ollama `/api/tags` probe) with an 8-second timeout. The key used for this check is never stored, logged, or echoed back.
 
-**Expected result:** if you tested, you see a "Key works" confirmation in green (or an error like "Invalid API key." in red). Either way the **Continue** button is enabled once a key is present (or Ollama is selected). Clicking it stores the key in Clawboo's encrypted, at-rest vault (under the env-var slot for the chosen provider, never a plaintext file, never returned in any response; Ollama is keyless, so nothing is stored) and advances to the optional runtimes step. No team is created yet.
+**Expected result:** the **Continue** button is enabled once a key is present (or Ollama is selected). Clicking it shows **Verifying…**, then:
+
+- **The key works** → it is stored in Clawboo's encrypted, at-rest vault (under the env-var slot for the chosen provider, never a plaintext file, never returned in any response; Ollama is keyless, so nothing is stored) and you advance to the optional runtimes step. No team is created yet. If you already ran **Test connection** on this key and it passed, Continue reuses that result instead of checking twice.
+- **The key doesn't verify** → nothing is stored and you stay on this step, with the reason inline ("Invalid API key.", "Could not reach anthropic.", …) next to the field you can fix. Picking **Ollama** while it isn't running shows a start hint (`ollama serve`) instead. **Continue anyway** appears after any failed check and stores the credential unverified — reach for it when the check is failing because _this machine_ can't reach the provider, not when the key itself is wrong. A genuinely invalid key is better fixed here than discovered in your first chat message.
+
+Catching a bad key here is the point: without it, a typo'd or revoked key would sail through the wizard and only fail on your first chat message, long after this screen is gone.
 
 ### 4. Add more runtimes (optional)
 

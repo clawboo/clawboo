@@ -27,6 +27,17 @@ afterEach(() => {
   cleanup()
 })
 
+// Connect verifies the pasted key against its provider before vaulting it, so
+// every connect test needs a verdict (msw runs with onUnhandledRequest:'error').
+const HEALTHCHECK = '/api/runtimes/clawboo-native/healthcheck'
+
+const hermesNeedsAuth: RuntimeStatus = {
+  id: 'hermes',
+  connectionState: 'needs-auth',
+  authKind: 'api-key',
+  envVar: 'OPENROUTER_API_KEY',
+}
+
 describe('RuntimeConnectionCard', () => {
   it('not-installed → Install streams SSE → onChanged', async () => {
     const onChanged = vi.fn()
@@ -90,25 +101,24 @@ describe('RuntimeConnectionCard', () => {
     expect(screen.getByTestId('runtime-hermes-key')).toBeInTheDocument()
   })
 
-  it('needs-auth → paste key → Connect POSTs the apiKey → onChanged', async () => {
+  it('needs-auth → paste key → Connect verifies it, then POSTs the apiKey → onChanged', async () => {
     const onChanged = vi.fn()
     let captured: unknown = null
+    let health: unknown = null
     server.use(
+      http.post(HEALTHCHECK, async ({ request }) => {
+        health = await request.json()
+        return HttpResponse.json({ ok: true })
+      }),
       http.post('/api/runtimes/hermes/connect', async ({ request }) => {
         captured = await request.json()
         return HttpResponse.json({ ok: true, connectionState: 'ready' })
       }),
     )
-    const status: RuntimeStatus = {
-      id: 'hermes',
-      connectionState: 'needs-auth',
-      authKind: 'api-key',
-      envVar: 'OPENROUTER_API_KEY',
-    }
     render(
       <RuntimeConnectionCard
         entry={RUNTIME_CATALOG['hermes']}
-        status={status}
+        status={hermesNeedsAuth}
         variant="panel"
         onChanged={onChanged}
       />,
@@ -120,7 +130,46 @@ describe('RuntimeConnectionCard', () => {
     await userEvent.type(screen.getByTestId('runtime-hermes-key'), 'sk-or-test')
     await userEvent.click(screen.getByTestId('runtime-hermes-connect'))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    // Hermes's vault slot is OPENROUTER_API_KEY, so that's the provider probed.
+    expect(health).toEqual({ provider: 'openrouter', apiKey: 'sk-or-test' })
     expect(captured).toEqual({ apiKey: 'sk-or-test' })
+  })
+
+  it('a key that does not verify never reaches the vault; "Connect anyway" overrides it', async () => {
+    const onChanged = vi.fn()
+    const connectBodies: unknown[] = []
+    let healthchecks = 0
+    server.use(
+      http.post(HEALTHCHECK, () => {
+        healthchecks += 1
+        return HttpResponse.json({ ok: false, error: 'Invalid API key.' })
+      }),
+      http.post('/api/runtimes/hermes/connect', async ({ request }) => {
+        connectBodies.push(await request.json())
+        return HttpResponse.json({ ok: true, connectionState: 'ready' })
+      }),
+    )
+    render(
+      <RuntimeConnectionCard
+        entry={RUNTIME_CATALOG['hermes']}
+        status={hermesNeedsAuth}
+        variant="panel"
+        onChanged={onChanged}
+      />,
+    )
+    await userEvent.type(screen.getByTestId('runtime-hermes-key'), 'sk-or-bad')
+    await userEvent.click(screen.getByTestId('runtime-hermes-connect'))
+
+    expect(await screen.findByText('Invalid API key.')).toBeInTheDocument()
+    expect(connectBodies).toEqual([]) // nothing stored
+    expect(onChanged).not.toHaveBeenCalled()
+
+    // The override is deliberate and skips the probe — the provider may simply be
+    // unreachable from this machine.
+    await userEvent.click(screen.getByTestId('runtime-hermes-connect-anyway'))
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    expect(connectBodies).toEqual([{ apiKey: 'sk-or-bad' }])
+    expect(healthchecks).toBe(1)
   })
 
   it('needs-auth (hermes): the ChatGPT-subscription option appears ONLY once Codex is detected', async () => {
@@ -356,6 +405,7 @@ describe('RuntimeConnectionCard', () => {
   it('a NON-native api-key runtime keeps the single-envVar body (no provider manager, no provider in the POST)', async () => {
     const posts: unknown[] = []
     server.use(
+      http.post(HEALTHCHECK, () => HttpResponse.json({ ok: true })),
       http.post('/api/runtimes/hermes/connect', async ({ request }) => {
         posts.push(await request.json())
         return HttpResponse.json({ ok: true, connectionState: 'ready' })
@@ -364,12 +414,7 @@ describe('RuntimeConnectionCard', () => {
     render(
       <RuntimeConnectionCard
         entry={RUNTIME_CATALOG['hermes']}
-        status={{
-          id: 'hermes',
-          connectionState: 'needs-auth',
-          authKind: 'api-key',
-          envVar: 'OPENROUTER_API_KEY',
-        }}
+        status={hermesNeedsAuth}
         variant="panel"
       />,
     )
