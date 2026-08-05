@@ -497,11 +497,15 @@ function resolveConnectEnvVar(d: RuntimeDescriptor, providerRaw: unknown): strin
 }
 
 // ─── POST /api/runtimes/clawboo-native/healthcheck ───────────────────────────
-// Body: { provider, apiKey }. A single authenticated GET to the provider's
-// lightweight models/health endpoint, to verify a pasted key BEFORE seeding a
-// team. The key is used for exactly one fetch — NEVER persisted to the vault,
-// NEVER logged, NEVER echoed in the response. Wrapped so a network failure /
-// bad key resolves to { ok: false, error } instead of throwing into the request.
+// Body: { provider, apiKey? }. A single authenticated GET to the provider's
+// lightweight models/health endpoint, to verify a credential BEFORE anything
+// commits to it. `apiKey` is optional: omit it to probe the key already stored
+// for that provider (what the one-click reuse surfaces do), pass one to probe a
+// key the user just typed. Either way it is used for exactly one fetch — NEVER
+// persisted to the vault, NEVER logged, NEVER echoed in the response. Wrapped so
+// a network failure / bad key resolves to { ok: false, error } instead of
+// throwing into the request. The route probes a PROVIDER, not a runtime, so any
+// surface holding a provider key can use it to check that key.
 interface ProviderProbe {
   url: string
   headers: (key: string) => Record<string, string>
@@ -562,10 +566,21 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
     res.status(400).json({ ok: false, error: `unknown provider '${provider}'` })
     return
   }
-  // Ollama is keyless; every other provider needs a key to test.
-  if (provider !== 'ollama' && !apiKey) {
-    res.status(400).json({ ok: false, error: 'apiKey is required' })
-    return
+  // Ollama is keyless. Every other provider needs a key — but not necessarily a
+  // PASTED one: with no `apiKey` in the body, fall back to the key already stored
+  // for that provider, so a surface that reconnects WITHOUT a re-paste (the
+  // Providers manager's one-click "Use") can verify it first. Deliberately the
+  // same unscoped resolve chain the connect route's keyless-REUSE branch uses.
+  // The resolved key is used for the one probe fetch below and, exactly like a
+  // pasted one, is never re-persisted, never logged, and never echoed back.
+  let probeKey = apiKey
+  if (provider !== 'ollama' && !probeKey) {
+    const envVar = envVarForProvider(provider)
+    probeKey = (envVar && resolveRuntimeKey(envVar)) || ''
+    if (!probeKey) {
+      res.status(400).json({ ok: false, error: 'apiKey is required' })
+      return
+    }
   }
 
   const controller = new AbortController()
@@ -573,7 +588,7 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
   try {
     const resp = await fetch(probe.url, {
       method: 'GET',
-      headers: probe.headers(apiKey),
+      headers: probe.headers(probeKey),
       signal: controller.signal,
     })
     if (resp.ok) {

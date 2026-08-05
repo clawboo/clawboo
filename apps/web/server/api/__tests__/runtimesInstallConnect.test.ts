@@ -827,6 +827,47 @@ describe('runtimes install/connect REST', () => {
     vi.unstubAllGlobals()
   })
 
+  it('healthcheck with NO apiKey probes the key already stored for that provider', async () => {
+    // The one-click "Use" reconnect never re-pastes the key, so verifying it has to
+    // read the saved one. The probe must still leave the vault exactly as it found
+    // it and must not echo the key it used.
+    setRuntimeSecret('OPENROUTER_API_KEY', 'sk-or-stored')
+    const seen: { headers?: HeadersInit } = {}
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        seen.headers = init.headers
+        return new Response(null, { status: 200 })
+      }),
+    )
+    const m = mockRes()
+    await runtimesHealthcheckPOST(
+      req({ params: { id: 'clawboo-native' }, body: { provider: 'openrouter' } }),
+      m.res,
+    )
+    expect((m.body() as { ok?: boolean }).ok).toBe(true)
+    // It really used the stored key…
+    expect(JSON.stringify(seen.headers)).toContain('sk-or-stored')
+    // …left it in place, and never echoed it.
+    expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(true)
+    expect(JSON.stringify(m.body())).not.toContain('sk-or-stored')
+    vi.unstubAllGlobals()
+  })
+
+  it('healthcheck with NO apiKey and no stored key still 400s', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const m = mockRes()
+    await runtimesHealthcheckPOST(
+      req({ params: { id: 'clawboo-native' }, body: { provider: 'openrouter' } }),
+      m.res,
+    )
+    expect(m.statusCode()).toBe(400)
+    expect(String((m.body() as { error?: string }).error)).toMatch(/apiKey is required/i)
+    expect(fetchMock).not.toHaveBeenCalled() // nothing to probe with — don't call out
+    vi.unstubAllGlobals()
+  })
+
   it('healthcheck rejects a non-native runtime + an unknown provider', async () => {
     const m1 = mockRes()
     await runtimesHealthcheckPOST(

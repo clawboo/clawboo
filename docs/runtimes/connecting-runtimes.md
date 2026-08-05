@@ -85,18 +85,21 @@ For `clawboo-native` the optional `provider` field routes the key to the right v
 
 The card offers a one-click **Sign in with ChatGPT** (Clawboo's local server runs `codex login` for you; the CLI opens your browser and you approve there — no code to type). The manual `codex login` command remains the fallback: run it in a terminal, then click **Re-check**. A signed-in Codex is detected by the status probe (the token file is never read), and each spawned run gets a managed `CODEX_HOME` seeded with a copy of your `~/.codex/auth.json`; Clawboo does not store a Codex credential in its vault. The subscription's primary home is the Providers page (the **ChatGPT subscription** row) and the onboarding wizard's OpenAI card (see [Codex](/runtimes/codex)); once it is connected, the Hermes and OpenClaw surfaces offer their own optional subscription links.
 
-### 5. Health-check a native provider key (optional)
+### 5. Health-check a provider key
 
-`POST /api/runtimes/clawboo-native/healthcheck` with body `{ provider, apiKey }` verifies a key **before** you commit to it (used by the native onboarding flow before seeding a team). It makes a single authenticated `GET` to the provider's lightweight models/health endpoint:
+`POST /api/runtimes/clawboo-native/healthcheck` with body `{ provider, apiKey? }` verifies a credential **before** anything commits to it. Every clawboo surface that takes or reuses a key runs this first — the onboarding step on **Continue**, the Providers hub on **Save**, the runtime connect card before it writes the vault, and the Providers manager's **Use** before it reconnects on a saved key. A credential that doesn't answer is never stored; each surface shows the reason inline and offers an explicit override, so an unreachable provider can't strand you.
 
-| `provider`   | Endpoint probed                        |
-| ------------ | -------------------------------------- |
-| `anthropic`  | `https://api.anthropic.com/v1/models`  |
-| `openai`     | `https://api.openai.com/v1/models`     |
-| `openrouter` | `https://openrouter.ai/api/v1/models`  |
-| `ollama`     | `<OLLAMA_BASE_URL>/api/tags` (keyless) |
+It makes a single authenticated `GET` to the provider's lightweight models/health endpoint:
 
-It returns `{ ok: true }` on a 2xx, or `{ ok: false, error }` on a bad key (`401`/`403` → "Invalid API key."), an 8-second timeout, or a network failure. **The key is used for exactly that one fetch, never persisted to the vault, never logged, never echoed.** This route is only valid for `clawboo-native`; any other runtime id returns `400`. An unknown provider, or a missing key for a non-Ollama provider, returns `400`.
+| `provider`                                                             | Endpoint probed                        |
+| ---------------------------------------------------------------------- | -------------------------------------- |
+| `anthropic`                                                            | `https://api.anthropic.com/v1/models`  |
+| `openai`                                                               | `https://api.openai.com/v1/models`     |
+| `openrouter`                                                           | `https://openrouter.ai/api/v1/models`  |
+| `google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot` | that provider's `<baseURL>/models`     |
+| `ollama`                                                               | `<OLLAMA_BASE_URL>/api/tags` (keyless) |
+
+It returns `{ ok: true }` on a 2xx, or `{ ok: false, error }` on a bad key (`401`/`403` → "Invalid API key."), an 8-second timeout, or a network failure. **The key is used for exactly that one fetch, never persisted to the vault, never logged, never echoed.** This route is only valid for `clawboo-native`; any other runtime id returns `400`. `apiKey` is optional — omit it to probe the key already stored for that provider; `400` if nothing is stored either. An unknown provider also returns `400`.
 
 ### 6. Disconnect
 

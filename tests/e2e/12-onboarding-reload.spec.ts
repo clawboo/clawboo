@@ -4,7 +4,7 @@
 // the reload is the DEPLOYED native team (GET /api/agents → a clawboo-native
 // agent exists → decideOnboardingView returns 'native'), persisted in SQLite.
 
-import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
+import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
 
 test.describe('Native onboarding — reload stays on the dashboard', () => {
   test('complete native onboarding → dashboard → reload → still dashboard (no wizard)', async ({
@@ -84,6 +84,10 @@ test.describe('Native onboarding — reload stays on the dashboard', () => {
         body: JSON.stringify({ runtimes: [], available: [] }),
       })
     })
+
+    // Continue verifies the key before storing it — stub the probe so this stays
+    // offline (a fake key against the real provider would 401 and block).
+    await stubNativeHealthcheck(page)
 
     await page.goto('/')
 

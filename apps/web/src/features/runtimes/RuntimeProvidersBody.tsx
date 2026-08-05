@@ -11,6 +11,10 @@
 //     provider is connected on the PREVIOUS wizard step, reachable via the
 //     step's Back button.
 //
+// "Connected" here means a key EXISTS, not that it still works, so the native
+// "Use" reconnect verifies the stored key before handing it to the runtime, and
+// offers "Use anyway" when the provider simply can't be reached right now.
+//
 // Per runtime: native filters to its 10 routable providers and carries the
 // default-model pick + the disconnected-state "Use" reconnect; OpenClaw shows
 // every hub provider (any key can power a Gateway model); Hermes shows the three
@@ -28,6 +32,7 @@ import {
   fetchNativeLeaderModel,
   fetchProviderModels,
   fetchProviders,
+  healthcheckNativeKey,
   setNativeLeaderModel,
   type ProviderModelOption,
 } from '@clawboo/control-client'
@@ -122,6 +127,9 @@ export function RuntimeProvidersBody({
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // The provider whose stored key just failed its pre-reconnect check — the one
+  // failure the user can deliberately override.
+  const [verifyFailedId, setVerifyFailedId] = useState<string | null>(null)
   const [modelSaved, setModelSaved] = useState(false)
   // Live per-provider model lists (fetched with the STORED key on expand).
   const [liveModels, setLiveModels] = useState<Record<string, ProviderModelOption[]>>({})
@@ -167,9 +175,22 @@ export function RuntimeProvidersBody({
   }
 
   /** Keyless reconnect with a key the hub already holds (no re-paste). */
-  async function handleUse(p: NativeMoreProvider): Promise<void> {
+  async function handleUse(p: NativeMoreProvider, opts?: { skipVerify?: boolean }): Promise<void> {
     setBusyId(p.id)
     setError(null)
+    setVerifyFailedId(null)
+    // The stored key may have been revoked since it was saved — "Connected" here
+    // means "a key exists", not "a key works". Probe it (keyless: the healthcheck
+    // reads the stored key itself) before handing the runtime a dead credential.
+    if (!opts?.skipVerify) {
+      const h = await healthcheckNativeKey(p.id, '')
+      if (!h.ok) {
+        setBusyId(null)
+        setError(`${p.name}: ${h.error ?? 'could not verify the saved key.'}`)
+        setVerifyFailedId(p.id)
+        return
+      }
+    }
     const r = await connectRuntime('clawboo-native', '', p.id)
     if (!r.ok) {
       setBusyId(null)
@@ -309,16 +330,33 @@ export function RuntimeProvidersBody({
                       </span>
                     </button>
                     {isNative && !nativeReady && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        disabled={busy}
-                        data-testid={`native-provider-use-${p.id}`}
-                        onClick={() => void handleUse(p)}
-                        className="shrink-0"
-                      >
-                        {busy ? 'Connecting…' : 'Use'}
-                      </Button>
+                      <>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          disabled={busy}
+                          data-testid={`native-provider-use-${p.id}`}
+                          onClick={() => void handleUse(p)}
+                          className="shrink-0"
+                        >
+                          {busy ? 'Connecting…' : 'Use'}
+                        </Button>
+                        {/* The saved key didn't answer — offer the deliberate
+                            override, since the provider may just be unreachable
+                            from here right now. */}
+                        {verifyFailedId === p.id && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busy}
+                            data-testid={`native-provider-use-anyway-${p.id}`}
+                            onClick={() => void handleUse(p, { skipVerify: true })}
+                            className="shrink-0"
+                          >
+                            Use anyway
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
 

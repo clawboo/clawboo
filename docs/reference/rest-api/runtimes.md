@@ -19,7 +19,7 @@ The `:id` path segment is validated against the runtime set on every route excep
 | POST   | `/api/runtimes/:id/install`           | Install the runtime CLI                                       | SSE     |
 | POST   | `/api/runtimes/:id/connect`           | Store a provider key in the encrypted vault                   | No      |
 | POST   | `/api/runtimes/:id/disconnect`        | Clear the stored credential                                   | No      |
-| POST   | `/api/runtimes/:id/healthcheck`       | Verify a pasted native provider key (no persistence)          | No      |
+| POST   | `/api/runtimes/:id/healthcheck`       | Verify a pasted or stored provider key (no persistence)       | No      |
 | POST   | `/api/runtimes/:id/run`               | Drive a board task on the runtime end to end                  | No      |
 | GET    | `/api/runtimes/openrouter/models`     | The live OpenRouter catalog (Hermes model picker)             | No      |
 | POST   | `/api/onboarding/seed-native-team`    | Mint a default native leader + specialist team                | No      |
@@ -257,10 +257,12 @@ curl -X POST http://localhost:18790/api/runtimes/hermes/disconnect
 
 ## `POST /api/runtimes/:id/healthcheck`
 
-Verifies a pasted provider key for the native runtime with a single authenticated GET to the provider's models/health endpoint, before seeding a team. The key is used for exactly one fetch; it is never persisted to the vault, never logged, and never echoed. A bad key or unreachable provider resolves to `{ ok: false, error }` (the handler does not throw into the request).
+Verifies a provider credential with a single authenticated GET to the provider's models/health endpoint, before anything commits to it. The key is used for exactly one fetch; it is never persisted to the vault, never logged, and never echoed. A bad key or unreachable provider resolves to `{ ok: false, error }` (the handler does not throw into the request).
+
+Every clawboo surface that accepts or reuses a credential calls this first: the onboarding connect step, the Providers hub, the runtime connect card, and the Providers manager's one-click **Use**.
 
 <Info>
-This route is native-only. Any other `:id` (still a valid runtime) returns **400**.
+This route is native-only. Any other `:id` (still a valid runtime) returns **400**. It probes a **provider**, not a runtime, so a surface holding a key for any other runtime verifies it by naming that key's provider here.
 </Info>
 
 - **Path params**: `id` (runtime id; 404 on unknown; **400** if not `clawboo-native`).
@@ -268,12 +270,16 @@ This route is native-only. Any other `:id` (still a valid runtime) returns **400
 
 ```ts
 {
-  provider?: string   // 'anthropic' | 'openai' | 'openrouter' | 'ollama'
-  apiKey?: string      // required for all providers except ollama
+  provider?: string   // 'anthropic' | 'openai' | 'openrouter' | 'ollama' |
+                      // 'google' | 'xai' | 'groq' | 'mistral' | 'together' |
+                      // 'cerebras' | 'moonshot'
+  apiKey?: string     // optional: omit to probe the key already stored for
+                      // `provider`. Required only when nothing is stored
+                      // (and never needed for keyless ollama).
 }
 ```
 
-Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/models`; `openai` → `https://api.openai.com/v1/models`; `openrouter` → `https://openrouter.ai/api/v1/models`; `ollama` → `<OLLAMA_BASE_URL>/api/tags` (keyless). The fetch is bounded by an 8-second timeout.
+Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/models`; `openai` → `https://api.openai.com/v1/models`; `openrouter` → `https://openrouter.ai/api/v1/models`; the extra OpenAI-compatible providers (`google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`) → that provider's own `<baseURL>/models`; `ollama` → `<OLLAMA_BASE_URL>/api/tags` (keyless). The fetch is bounded by an 8-second timeout.
 
 ### Responses
 
@@ -289,7 +295,7 @@ Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/model
 { "ok": false, "error": "unknown provider '<provider>'" }
 ```
 
-**`400 Bad Request`**: non-ollama provider with a blank `apiKey`:
+**`400 Bad Request`**: non-ollama provider with a blank `apiKey` **and** no key stored for it:
 
 ```json
 { "ok": false, "error": "apiKey is required" }
