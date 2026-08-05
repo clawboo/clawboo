@@ -540,28 +540,6 @@ export function GroupChatPanel({
   }, [topLevelBlocks, activeStreams, boardTaskList])
 
   // ── Bounded render window ─────────────────────────────────────────────────
-  // The window never cuts above an ACTIVE stream. Streams sort by
-  // `streamStartedAt`, so a long-running one is chronologically OLD and would
-  // otherwise be sliced away mid-generation. Clamping beats force-injecting the
-  // cut card at the top: injection would move the live card out of its
-  // chronological slot, and on commit the committed entry (anchored to the same
-  // stream-start) would still be outside the window — so the card would VANISH
-  // rather than be replaced in place.
-  //
-  // KNOWN BOUND: this floor trades window size for never losing the live card.
-  // A stream sorts at its `streamStartedAt`, so a long-running one drifts toward
-  // the head of the timeline and widens the window to `total - firstStreamIdx`;
-  // once the 500-entry cap has evicted every block older than the stream it
-  // reaches 0 and the whole timeline mounts. That is a perf ceiling, not a
-  // correctness bug — the degenerate case is exactly the unwindowed behaviour
-  // this panel had before, and it ends the moment the stream commits. Fixing it
-  // properly means rendering the stream in its own bounded segment with a gap
-  // affordance; tracked separately rather than bolted on here.
-  const firstStreamIdx = useMemo(() => {
-    const i = renderItems.findIndex((it) => it.kind === 'stream')
-    return i === -1 ? Number.POSITIVE_INFINITY : i
-  }, [renderItems])
-
   // `resetKey: teamId` is load-bearing — `TeamSpaceSplit` renders this panel
   // WITHOUT a `key` prop, so a team switch changes props without remounting.
   const { hiddenCount, loadEarlier } = useRenderWindow({
@@ -569,9 +547,39 @@ export function GroupChatPanel({
     resetKey: teamId,
     scrollRef,
     atBottom,
-    floor: firstStreamIdx,
   })
-  const visibleItems = hiddenCount === 0 ? renderItems : renderItems.slice(hiddenCount)
+
+  // An ACTIVE stream must always render — a card that vanished mid-generation
+  // would read as a dropped reply. Streams sort by `streamStartedAt`, so a
+  // long-running one is chronologically OLD and can fall above the window.
+  //
+  // HOISTED, not clamped. Widening the window down to the stream (the previous
+  // `floor:` approach) is unbounded: a stream that has outlived every retained
+  // block sits at index 0 and mounts the entire ~500×participants timeline —
+  // exactly the cost this window exists to avoid. Hoisting keeps the bound
+  // absolute at `limit + <active streams>`.
+  //
+  // Nothing is lost by not clamping. The floor only ever fired when the stream
+  // was MORE than a full window from the end, and in that case its "in place"
+  // slot was already scrolled far out of view — so it bought a 2,000-node render
+  // to position a card the reader could not see. Hoisted, it renders at the top
+  // of the visible region, which IS its correct position relative to every item
+  // on screen.
+  const { visibleItems, hoistedStreams } = useMemo(() => {
+    if (hiddenCount === 0) return { visibleItems: renderItems, hoistedStreams: 0 }
+    const hoisted = renderItems.slice(0, hiddenCount).filter((it) => it.kind === 'stream')
+    return {
+      visibleItems:
+        hoisted.length === 0
+          ? renderItems.slice(hiddenCount)
+          : [...hoisted, ...renderItems.slice(hiddenCount)],
+      hoistedStreams: hoisted.length,
+    }
+  }, [renderItems, hiddenCount])
+
+  // Hoisted streams are ON SCREEN, so they are not "earlier messages" the
+  // affordance can reveal — counting them would overstate what is hidden.
+  const earlierCount = hiddenCount - hoistedStreams
 
   // The composer's busy signal stays the SSE activity window: fleet statuses now DO
   // track server-orchestrated runs (the SSE `status` frames patch them for the
@@ -800,8 +808,8 @@ export function GroupChatPanel({
             </div>
           ) : (
             <div className="flex flex-col pb-2">
-              {hiddenCount > 0 && (
-                <LoadEarlierButton hiddenCount={hiddenCount} onClick={loadEarlier} />
+              {earlierCount > 0 && (
+                <LoadEarlierButton hiddenCount={earlierCount} onClick={loadEarlier} />
               )}
 
               {/* Author grouping, stable keys and margins all come from

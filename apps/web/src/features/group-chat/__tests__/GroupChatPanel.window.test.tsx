@@ -75,7 +75,12 @@ function userEntry(i: number): TranscriptEntry {
   }
 }
 
-function seedTeam(entryCount: number): void {
+/**
+ * @param stream  when set, an in-flight stream anchored at `startedAt`. Passing
+ *   a timestamp older than every entry reproduces a long-running stream, which
+ *   sorts to the HEAD of the merged timeline.
+ */
+function seedTeam(entryCount: number, stream?: { text: string; startedAt: number }): void {
   // Opt out of the one-time guided-first-task prefill.
   localStorage.setItem(FIRST_TASK_FLAG, '1')
   useTeamStore.setState({ teams: [TEAM], selectedTeamId: 't1' })
@@ -86,8 +91,8 @@ function seedTeam(entryCount: number): void {
     transcripts: new Map([
       [TEAM_SESSION_KEY, Array.from({ length: entryCount }, (_, i) => userEntry(i))],
     ]),
-    streamingText: new Map(),
-    streamStartedAt: new Map(),
+    streamingText: stream ? new Map([[TEAM_SESSION_KEY, stream.text]]) : new Map(),
+    streamStartedAt: stream ? new Map([[TEAM_SESSION_KEY, stream.startedAt]]) : new Map(),
     lastTokenUsage: new Map(),
   })
 }
@@ -137,6 +142,47 @@ describe('GroupChatPanel — bounded render window', () => {
 
     expect(screen.getByText('msg-0')).toBeInTheDocument()
     expect(screen.queryByTestId('load-earlier')).toBeNull()
+  })
+
+  // A stream sorts at its `streamStartedAt`, so one that has been running a long
+  // time is chronologically OLD and lands above the window. The panel used to
+  // pass `floor: firstStreamIdx` to keep it mounted, which could only WIDEN the
+  // window — a stream older than every retained block dragged `start` to 0 and
+  // mounted the entire timeline, defeating the window exactly when it matters.
+  // The card is now hoisted into the window instead, so the bound holds.
+  it('stays bounded when a long-running stream sorts above the window', async () => {
+    server.use(
+      http.get('/api/chat-history', () => HttpResponse.json({ entries: [] })),
+      http.get('/api/board', () => HttpResponse.json({ tasks: [] })),
+    )
+    const total = RENDER_WINDOW_INITIAL + 20
+    // Anchored BEFORE entry 0 (whose ts is 1_700_000_000_000), so the stream is
+    // renderItems[0] and the old `floor` would have been 0.
+    seedTeam(total, { text: 'still-writing-marker', startedAt: 1_699_999_999_000 })
+
+    render(
+      <ThemeProvider>
+        <GroupChatPanel teamId="t1" embedded />
+      </ThemeProvider>,
+    )
+
+    // The live card renders despite sitting outside the window — that is the
+    // guarantee the floor used to provide, now met by hoisting.
+    expect(await screen.findByText('still-writing-marker')).toBeInTheDocument()
+
+    // ...and the window still holds. Under the old floor every one of these
+    // would be mounted.
+    expect(screen.queryByText('msg-0')).toBeNull()
+    expect(screen.queryByText('msg-19')).toBeNull()
+    expect(screen.getByText('msg-20')).toBeInTheDocument()
+    expect(screen.getByText(`msg-${total - 1}`)).toBeInTheDocument()
+
+    // 21 items sit above the window (the stream + msg-0..19), but the stream is
+    // on screen, so only the 20 blocks count as hidden.
+    expect(screen.getByTestId('load-earlier')).toHaveAttribute(
+      'aria-label',
+      'Load earlier messages (20 hidden)',
+    )
   })
 
   it('leaves a short team timeline whole, with no affordance', async () => {

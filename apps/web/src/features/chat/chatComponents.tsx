@@ -1010,18 +1010,22 @@ export const RENDER_WINDOW_STEP = 100
  * - `pinnedStart` freezes the top of the window while the user reads history
  *   (see `useRenderWindow`); it only ever holds the window OPEN, never narrows
  *   it, hence the `Math.min` against `natural`.
- * - `floor` is a hard ceiling on the start — the caller uses it to keep an item
- *   that must stay mounted (a live streaming card) inside the window.
+ *
+ * There is deliberately NO "keep this index mounted" escape hatch. An earlier
+ * revision took a `floor` so `GroupChatPanel` could stop the window cutting
+ * above a live stream, but a floor can only widen the window — for a stream that
+ * has been running a long time, unboundedly so. A caller that must always render
+ * some item hoists it into the window instead (see `GroupChatPanel`), which
+ * keeps this bound absolute.
  */
 export function renderWindowStart(
   total: number,
   limit: number,
   pinnedStart: number | null,
-  floor: number,
 ): number {
   const natural = Math.max(0, total - limit)
   const start = pinnedStart === null ? natural : Math.min(pinnedStart, natural)
-  return Math.max(0, Math.min(start, floor))
+  return Math.max(0, start)
 }
 
 export interface RenderWindow {
@@ -1045,13 +1049,11 @@ export function useRenderWindow({
   resetKey,
   scrollRef,
   atBottom,
-  floor = Number.POSITIVE_INFINITY,
 }: {
   total: number
   resetKey: string
   scrollRef: RefObject<HTMLDivElement | null>
   atBottom: boolean
-  floor?: number
 }): RenderWindow {
   const [limit, setLimit] = useState(RENDER_WINDOW_INITIAL)
   const [pinnedStart, setPinnedStart] = useState<number | null>(null)
@@ -1064,7 +1066,7 @@ export function useRenderWindow({
   // Computed during render, never derived by an effect: an effect-derived start
   // would paint the whole list once and only then trim it, which is the exact
   // cost this hook exists to avoid.
-  const start = renderWindowStart(total, limit, pinnedStart, floor)
+  const start = renderWindowStart(total, limit, pinnedStart)
   // Read at effect time without joining the dep list.
   const startRef = useRef(start)
   startRef.current = start
@@ -1174,8 +1176,9 @@ export const MessageList = memo(function MessageList({
   const { scrollRef, bottomRef, handleScroll, atBottom, hasNewBelow, jumpToBottom } =
     useChatAutoScroll(`${blocks.length}|${streamingText ?? ''}`)
 
-  // No `floor` needed here: the live StreamingCard is appended AFTER the mapped
-  // blocks (below), outside the window, so it can never be sliced away.
+  // Nothing needs hoisting into the window here (as `GroupChatPanel` does for a
+  // long-running stream): the live StreamingCard is appended AFTER the mapped
+  // blocks (below), outside the window entirely, so it can never be sliced away.
   const { start, hiddenCount, loadEarlier } = useRenderWindow({
     total: blocks.length,
     resetKey: sessionKey ?? agentId,

@@ -150,7 +150,7 @@ Every team also has a durable **peer-chat room**, where each runtime posts as a 
 </Warning>
 
 <Warning>
-**The top of the chat is missing.** Nothing was deleted. The timeline renders only its most recent ~150 items (messages, task cards, live replies) so a long-running team stays responsive; **Load earlier messages** at the top of the chat reveals the rest, 100 at a time, without moving your reading position. The full transcript also stays on disk — `GET /api/chat-history?sessionKey=…`.
+**The top of the chat is missing.** Nothing was deleted. The timeline renders its most recent ~150 items (messages, task cards, live replies) so a long-running team stays responsive; **Load earlier messages** at the top of the chat reveals the rest, 100 at a time, without moving your reading position. A reply still being written always shows, even when it started long enough ago that its place in the timeline falls outside that window — it appears at the top of what you can see. The full transcript also stays on disk — `GET /api/chat-history?sessionKey=…`.
 </Warning>
 
 <Danger>
