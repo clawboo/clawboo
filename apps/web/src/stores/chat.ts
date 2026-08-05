@@ -102,17 +102,32 @@ export const useChatStore = create<ChatStore>((set) => ({
       //     session keys, so the cross-writer duplicate that the old
       //     timestamp-independent bucket defended against is no longer
       //     producible. That bucket was collapsing genuine re-utterances (#71).
+      //
+      // Returns `null` when the entry cannot be fingerprinted precisely, which today
+      // means only a missing `timestampMs`. Such an entry is never compared and
+      // never recorded, so layer 2 simply does not apply to it — the same
+      // fail-OPEN choice the handler's closed-run guard makes for a frame with
+      // no runId: showing a duplicate beats dropping a real message. Without
+      // this, a `null` timestamp collapses to `''` and two legitimately distinct
+      // entries that happen to share kind/role/text would dedup to one.
+      //
+      // Unreachable from today's producers (every call site stamps a real time,
+      // `chat_messages.timestamp_ms` is NOT NULL, and `/api/chat-history`
+      // coalesces), but `TranscriptEntry.timestampMs` is `number | null`, so the
+      // type permits it and a future producer would hit it silently.
       function frameSig(e: {
         kind?: string
         role?: string
         timestampMs?: number | null
         text?: string
-      }): string {
-        return `${e.kind ?? ''}|${e.role ?? ''}|${e.timestampMs ?? ''}|${e.text ?? ''}`
+      }): string | null {
+        if (e.timestampMs == null) return null
+        return `${e.kind ?? ''}|${e.role ?? ''}|${e.timestampMs}|${e.text ?? ''}`
       }
       const seenSigs = new Set<string>()
       for (let i = Math.max(0, existing.length - DEDUP_SCAN_WINDOW); i < existing.length; i++) {
-        seenSigs.add(frameSig(existing[i]!))
+        const sig = frameSig(existing[i]!)
+        if (sig !== null) seenSigs.add(sig)
       }
 
       const fresh: typeof entries = []
@@ -122,12 +137,12 @@ export const useChatStore = create<ChatStore>((set) => ({
         // Each accepted entry adds its own signature, so dedup WITHIN the
         // incoming batch is complete regardless of the tail window above.
         const sig = frameSig(e)
-        if (seenSigs.has(sig)) {
+        if (sig !== null && seenSigs.has(sig)) {
           droppedByContent.push({ entryId: e.entryId, sig })
           continue
         }
         seenIds.add(e.entryId)
-        seenSigs.add(sig)
+        if (sig !== null) seenSigs.add(sig)
         fresh.push(e)
       }
 

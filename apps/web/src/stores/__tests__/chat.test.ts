@@ -203,6 +203,21 @@ describe('useChatStore', () => {
       expect(useChatStore.getState().transcripts.get(sk)).toHaveLength(2)
     })
 
+    // Layer 2 fails OPEN on an entry it cannot fingerprint. `timestampMs` is
+    // `number | null` on the type, and a null used to stringify to '' — so two
+    // legitimately distinct untimestamped entries sharing kind/role/text
+    // collapsed to one. No producer emits null today; the type allows it.
+    it('does NOT collapse two identical entries with a null timestamp', () => {
+      const sk = 'agent:a1:main'
+      useChatStore
+        .getState()
+        .appendTranscript(sk, [makeEntry({ entryId: 'n1', text: 'same', timestampMs: null })])
+      useChatStore
+        .getState()
+        .appendTranscript(sk, [makeEntry({ entryId: 'n2', text: 'same', timestampMs: null })])
+      expect(useChatStore.getState().transcripts.get(sk)).toHaveLength(2)
+    })
+
     it('does NOT collapse a long identical 1:1 message sent twice over time', () => {
       const soloKey = 'agent:x:main'
       const longText =

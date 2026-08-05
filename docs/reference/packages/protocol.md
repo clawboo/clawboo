@@ -65,7 +65,7 @@ A single flat barrel, no subpath exports. All consumers import from `@clawboo/pr
 - `TranscriptEntryKind`: `'meta' | 'user' | 'assistant' | 'thinking' | 'tool'`.
 - `TranscriptEntryRole`: `'user' | 'assistant' | 'tool' | 'system' | 'other'`.
 - `TranscriptEntrySource`: `'local-send' | 'runtime-chat' | 'runtime-agent' | 'history' | 'legacy'`.
-- `TranscriptEntry`: the canonical transcript row: `{ entryId, role, kind, text, sessionKey, runId, source, timestampMs, sequenceKey, confirmed, fingerprint }`. `fingerprint` is an **opaque per-entry id, not a content hash** — every producer mints a fresh UUID, and nothing derives identity from it. Dedup keys off `entryId`.
+- `TranscriptEntry`: the canonical transcript row: `{ entryId, role, kind, text, sessionKey, runId, source, timestampMs, sequenceKey, confirmed, fingerprint }`. `fingerprint` is an **opaque per-entry id, not a content hash** — every producer mints a fresh UUID, and nothing derives identity from it. Dedup keys off `entryId` first; the web store then applies a second, exact-frame signature (`kind|role|timestampMs|text`), so a re-delivered frame is still collapsed even though it arrives with a fresh `entryId`. A repeated message that differs in any of those four fields is kept.
 - `AgentFileName`: union of the 7 `AGENT_FILE_NAMES` literals.
 - `AgentFileMeta`: `{ title, hint }`.
 

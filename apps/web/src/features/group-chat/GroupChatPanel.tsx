@@ -547,6 +547,16 @@ export function GroupChatPanel({
   // chronological slot, and on commit the committed entry (anchored to the same
   // stream-start) would still be outside the window — so the card would VANISH
   // rather than be replaced in place.
+  //
+  // KNOWN BOUND: this floor trades window size for never losing the live card.
+  // A stream sorts at its `streamStartedAt`, so a long-running one drifts toward
+  // the head of the timeline and widens the window to `total - firstStreamIdx`;
+  // once the 500-entry cap has evicted every block older than the stream it
+  // reaches 0 and the whole timeline mounts. That is a perf ceiling, not a
+  // correctness bug — the degenerate case is exactly the unwindowed behaviour
+  // this panel had before, and it ends the moment the stream commits. Fixing it
+  // properly means rendering the stream in its own bounded segment with a gap
+  // affordance; tracked separately rather than bolted on here.
   const firstStreamIdx = useMemo(() => {
     const i = renderItems.findIndex((it) => it.kind === 'stream')
     return i === -1 ? Number.POSITIVE_INFINITY : i
