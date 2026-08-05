@@ -174,7 +174,7 @@ The native runtime is built in, so it never reaches the `not-installed` state; c
 
 `apiKey` is optional. Omit it to check the key already stored for that provider — that's how the Providers manager's one-click **Use** confirms a saved key still works before reconnecting on it. With no `apiKey` and nothing stored, the route returns `400`.
 
-The UI does not treat this as an opt-in extra: every surface that accepts a credential runs it first. The onboarding step verifies on **Continue** (the **Test connection** button is just an earlier chance to run the same check), the Providers hub verifies on **Save**, and the runtime connect card verifies before it writes the vault. A refused credential is never stored, and each surface offers an explicit override (**Continue anyway** / **Save anyway** / **Connect anyway** / **Use anyway**) so a machine that simply can't reach the provider is never stranded.
+The UI does not treat this as an opt-in extra: every surface that accepts a credential runs it first. The onboarding step verifies on **Continue** (the **Test connection** button is just an earlier chance to run the same check), the Providers hub verifies on **Save**, and the runtime connect card verifies before it writes the vault. A refused credential is not stored on the normal path. The one exception is deliberate and user-driven: each surface offers an explicit override (**Continue anyway** / **Save anyway** / **Connect anyway** / **Use anyway**) which stores the credential unverified, so a machine that simply can't reach the provider is never stranded.
 
 ```bash
 curl -X POST http://localhost:18790/api/runtimes/clawboo-native/healthcheck \

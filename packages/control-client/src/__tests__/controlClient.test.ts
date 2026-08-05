@@ -7,6 +7,7 @@ import {
   fetchOnboardingState,
   fetchRuntimes,
   getApiBase,
+  healthcheckNativeKey,
   listAgents,
   resetControlClient,
   seedNativeTeam,
@@ -108,6 +109,55 @@ describe('runtimes client', () => {
     const res = await connectRuntime('codex', 'k')
     expect(res.ok).toBe(false)
     expect(res.error).toBe('boom')
+  })
+
+  // Every connect surface now gates on this wrapper, so its failure polarity is
+  // load-bearing: unlike connectRuntime (`body.ok !== false`, absent ok = success)
+  // healthcheck demands `body.ok === true`. A credential check must fail closed.
+  it('healthcheckNativeKey POSTs provider + key to the native healthcheck path', async () => {
+    const fetchFn = stubFetch(async () => jsonResponse({ ok: true }))
+    const res = await healthcheckNativeKey('openrouter', 'sk-or-abc')
+    const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/runtimes/clawboo-native/healthcheck')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ provider: 'openrouter', apiKey: 'sk-or-abc' })
+    expect(res).toEqual({ ok: true, error: undefined })
+  })
+
+  it('healthcheckNativeKey sends an empty apiKey verbatim (the stored-key probe)', async () => {
+    // Deliberately NOT connectRuntime's conditional spread: the server reads an
+    // absent/blank key as "probe the key already in the vault".
+    const fetchFn = stubFetch(async () => jsonResponse({ ok: true }))
+    await healthcheckNativeKey('openrouter', '')
+    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ provider: 'openrouter', apiKey: '' })
+  })
+
+  it('healthcheckNativeKey fails closed when ok is absent, false, or the response is non-ok', async () => {
+    stubFetch(async () => jsonResponse({}))
+    expect((await healthcheckNativeKey('anthropic', 'k')).ok).toBe(false) // absent ≠ success
+
+    stubFetch(async () => jsonResponse({ ok: false, error: 'Invalid API key.' }))
+    expect(await healthcheckNativeKey('anthropic', 'k')).toEqual({
+      ok: false,
+      error: 'Invalid API key.',
+    })
+
+    // A 400 with a body still reports the server's reason, not a generic failure.
+    stubFetch(async () =>
+      jsonResponse({ ok: false, error: 'apiKey is required' }, { ok: false, status: 400 }),
+    )
+    expect(await healthcheckNativeKey('anthropic', '')).toEqual({
+      ok: false,
+      error: 'apiKey is required',
+    })
+  })
+
+  it('healthcheckNativeKey never throws on a network error', async () => {
+    stubFetch(async () => {
+      throw new Error('offline')
+    })
+    expect(await healthcheckNativeKey('anthropic', 'k')).toEqual({ ok: false, error: 'offline' })
   })
 })
 

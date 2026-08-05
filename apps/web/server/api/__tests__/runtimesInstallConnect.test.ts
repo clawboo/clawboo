@@ -811,6 +811,54 @@ describe('runtimes install/connect REST', () => {
     vi.unstubAllGlobals()
   })
 
+  it('native healthcheck refuses to FOLLOW a redirect while carrying the key', async () => {
+    // The probe sends a live credential to a hard-coded provider endpoint. Node's
+    // fetch strips `Authorization` across origins but NOT Anthropic's custom
+    // `x-api-key`, so following a 3xx could hand the key to whatever host
+    // answered. Assert the option itself, not just the catch: a test that only
+    // checked the error path would still pass if `redirect` were dropped.
+    // Declare the params so the mock's call tuple is typed — a bare `vi.fn(async
+    // () => …)` infers `[]` and indexing `[1]` is a compile error.
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response(null, { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const m = mockRes()
+    await runtimesHealthcheckPOST(
+      req({
+        params: { id: 'clawboo-native' },
+        body: { provider: 'anthropic', apiKey: 'sk-probe' },
+      }),
+      m.res,
+    )
+    expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe('error')
+    vi.unstubAllGlobals()
+  })
+
+  it('native healthcheck fails closed (never ok) when the provider redirects', async () => {
+    // `redirect: 'error'` makes fetch reject; the handler must degrade to the
+    // friendly unreachable message rather than surfacing a 200.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('unexpected redirect')
+      }),
+    )
+    const m = mockRes()
+    await runtimesHealthcheckPOST(
+      req({
+        params: { id: 'clawboo-native' },
+        body: { provider: 'anthropic', apiKey: 'sk-probe' },
+      }),
+      m.res,
+    )
+    const body = m.body() as { ok?: boolean; error?: string }
+    expect(body.ok).toBe(false)
+    expect(body.error).toMatch(/could not reach/i)
+    expect(JSON.stringify(body)).not.toContain('sk-probe')
+    vi.unstubAllGlobals()
+  })
+
   it('native healthcheck reports a friendly failure on a 401', async () => {
     vi.stubGlobal(
       'fetch',

@@ -187,6 +187,51 @@ describe('ConfigureNativeStep', () => {
     expect(healthchecks).toBe(1)
   })
 
+  it('locks the configuration while verifying, so a mid-flight switch cannot mismatch what gets stored', async () => {
+    // `handleSubmit` captures the provider/key/model before it awaits. Verification
+    // can take up to 8s, so without this lock a user could switch provider mid-probe
+    // and the callback would store + report the OLD provider while the UI showed the
+    // NEW one. Hold the healthcheck open to sit inside that window deliberately.
+    const onConnected = vi.fn()
+    let connectBody: Record<string, unknown> | null = null
+    let release: (() => void) | undefined
+    server.use(
+      http.post(HEALTHCHECK, async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return HttpResponse.json({ ok: true })
+      }),
+      http.post('/api/runtimes/clawboo-native/connect', async ({ request }) => {
+        connectBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ ok: true, connectionState: 'ready' })
+      }),
+      http.post('/api/onboarding/native-leader-model', () => HttpResponse.json({ ok: true })),
+    )
+    render(<ConfigureNativeStep onConnected={onConnected} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-anthropic'))
+    await userEvent.type(screen.getByTestId('native-api-key'), SECRET)
+    await userEvent.click(screen.getByTestId('native-continue'))
+
+    // Mid-verification every configuration control is inert…
+    await waitFor(() => expect(screen.getByTestId('native-provider-openrouter')).toBeDisabled())
+    expect(screen.getByTestId('native-api-key')).toBeDisabled()
+    expect(screen.getByTestId('native-more-providers-toggle')).toBeDisabled()
+
+    // …so a click on another provider changes nothing.
+    await userEvent.click(screen.getByTestId('native-provider-openrouter'))
+    expect(screen.getByTestId('native-provider-anthropic')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('native-provider-openrouter')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    )
+
+    release?.()
+    // What was verified is exactly what is stored and reported.
+    await waitFor(() => expect(onConnected).toHaveBeenCalledWith('anthropic', 'claude-sonnet-5'))
+    expect(connectBody).toEqual({ apiKey: SECRET, provider: 'anthropic' })
+  })
+
   it('an unreachable Ollama shows a start hint instead of advancing', async () => {
     const onConnected = vi.fn()
     let connectCalled = false

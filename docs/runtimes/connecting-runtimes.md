@@ -87,7 +87,7 @@ The card offers a one-click **Sign in with ChatGPT** (Clawboo's local server run
 
 ### 5. Health-check a provider key
 
-`POST /api/runtimes/clawboo-native/healthcheck` with body `{ provider, apiKey? }` verifies a credential **before** anything commits to it. Every clawboo surface that takes or reuses a key runs this first — the onboarding step on **Continue**, the Providers hub on **Save**, the runtime connect card before it writes the vault, and the Providers manager's **Use** before it reconnects on a saved key. A credential that doesn't answer is never stored; each surface shows the reason inline and offers an explicit override, so an unreachable provider can't strand you.
+`POST /api/runtimes/clawboo-native/healthcheck` with body `{ provider, apiKey? }` verifies a credential **before** anything commits to it. Every clawboo surface that takes or reuses a key runs this first — the onboarding step on **Continue**, the Providers hub on **Save**, the runtime connect card before it writes the vault, and the Providers manager's **Use** before it reconnects on a saved key. On the normal path a credential that doesn't answer is not stored: the surface shows the reason inline and stops. Each one also offers an explicit override — **Continue anyway** / **Save anyway** / **Connect anyway** / **Use anyway** — and choosing it deliberately stores the credential unverified, so a provider this machine simply can't reach can't strand you.
 
 It makes a single authenticated `GET` to the provider's lightweight models/health endpoint:
 

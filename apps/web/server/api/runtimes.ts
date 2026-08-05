@@ -589,6 +589,13 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
     const resp = await fetch(probe.url, {
       method: 'GET',
       headers: probe.headers(probeKey),
+      // Fail CLOSED on a redirect rather than following one. Every probe URL
+      // above is a hard-coded provider endpoint that never legitimately 3xxes,
+      // and the request carries a live credential: `fetch` only strips
+      // `Authorization` across origins, so Anthropic's custom `x-api-key` would
+      // ride a redirect to whatever host answered. A 3xx here means something is
+      // wrong, and reporting "couldn't reach" beats leaking the key to find out.
+      redirect: 'error',
       signal: controller.signal,
     })
     if (resp.ok) {

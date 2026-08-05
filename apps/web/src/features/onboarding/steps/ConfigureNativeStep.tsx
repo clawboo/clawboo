@@ -427,15 +427,17 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
               aria-checked={active}
               data-testid={`native-provider-${p.id}`}
               onClick={() => selectProvider(p.id)}
+              disabled={submitting}
               className={[
                 'group flex items-center gap-3 rounded-2xl border p-4 text-left',
                 'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                'disabled:pointer-events-none disabled:opacity-60',
                 active
                   ? ''
                   : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
               ].join(' ')}
               style={{
-                cursor: 'pointer',
+                cursor: submitting ? 'not-allowed' : 'pointer',
                 ...(active
                   ? {
                       borderColor: 'var(--primary)',
@@ -471,8 +473,9 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
           data-testid="native-more-providers-toggle"
           aria-expanded={showMore}
           onClick={() => setShowMore((v) => !v)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-[13px] font-medium transition-colors hover:border-foreground/25"
-          style={{ color: muted(0.6), cursor: 'pointer' }}
+          disabled={submitting}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-[13px] font-medium transition-colors hover:border-foreground/25 disabled:pointer-events-none disabled:opacity-60"
+          style={{ color: muted(0.6), cursor: submitting ? 'not-allowed' : 'pointer' }}
         >
           More providers
           <ChevronDown
@@ -499,15 +502,17 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
                   aria-checked={active}
                   data-testid={`native-provider-${p.id}`}
                   onClick={() => selectProvider(p.id)}
+                  disabled={submitting}
                   className={[
                     'group flex items-center gap-2.5 rounded-xl border p-3 text-left',
                     'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                    'disabled:pointer-events-none disabled:opacity-60',
                     active
                       ? ''
                       : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
                   ].join(' ')}
                   style={{
-                    cursor: 'pointer',
+                    cursor: submitting ? 'not-allowed' : 'pointer',
                     ...(active
                       ? {
                           borderColor: 'var(--primary)',
@@ -569,15 +574,17 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
                 aria-checked={active}
                 data-testid={`native-auth-${m.id}`}
                 onClick={() => setAuthMethod(m.id)}
+                disabled={submitting}
                 className={[
                   'flex flex-col items-start gap-1 rounded-2xl border p-4 text-left',
                   'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                  'disabled:pointer-events-none disabled:opacity-60',
                   active
                     ? ''
                     : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
                 ].join(' ')}
                 style={{
-                  cursor: 'pointer',
+                  cursor: submitting ? 'not-allowed' : 'pointer',
                   ...(active
                     ? {
                         borderColor: 'var(--primary)',
@@ -808,6 +815,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
             value={model}
             onChange={setModel}
             options={modelSelectOptions}
+            disabled={submitting}
             searchable={modelSelectOptions.length > 10}
             searchPlaceholder="Search models…"
           />
