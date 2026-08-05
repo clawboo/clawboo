@@ -52,6 +52,20 @@ export function isTopmostTrap(token: symbol | null): boolean {
 }
 
 /**
+ * True when ANY dialog is open.
+ *
+ * The app-shell keyboard handler (`features/layout/ContentArea.tsx`) needs this
+ * because it listens on `document` in the BUBBLE phase, which fires BEFORE a
+ * `Modal`'s `window`-bubble Escape — so a dialog cannot defer to it, and cannot
+ * suppress it with `stopPropagation` either. Without this check, Escape inside a
+ * dialog opened over an agent / group-chat view ALSO deselects the agent and
+ * jumps the app to Welcome behind the dialog.
+ */
+export function hasOpenTrap(): boolean {
+  return trapStack.length > 0
+}
+
+/**
  * @param ref               the dialog element to trap focus within.
  * @param focusKey          re-run the focus move when this changes (a wizard step).
  * @param initialFocusRef   focus this on entry instead of the root's first focusable.
