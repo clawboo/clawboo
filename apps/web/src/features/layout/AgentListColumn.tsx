@@ -19,7 +19,7 @@ import { EmptyState } from '@/features/shared/EmptyState'
 import { SearchInput } from '@/features/shared/SearchInput'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useTeamStore, type Team } from '@/stores/team'
-import { useConnectionStore } from '@/stores/connection'
+import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useViewStore, type NavView } from '@/stores/view'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { CreateBooModal } from '@/features/fleet/CreateBooModal'
@@ -483,7 +483,10 @@ export function AgentListColumn() {
 
   // Delayed empty state
   const [showEmpty, setShowEmpty] = useState(false)
-  const isEmptyConnected = agents.length === 0 && connectionStatus === 'connected' && !query
+  // Live-session, not strictly 'connected': "we have a session and the fleet is
+  // empty" stays true across a socket drop, so the delayed empty card should not
+  // blink out and restart its 1s timer on every blip.
+  const isEmptyConnected = agents.length === 0 && isSessionLive(connectionStatus) && !query
   useEffect(() => {
     if (!isEmptyConnected) {
       setShowEmpty(false)

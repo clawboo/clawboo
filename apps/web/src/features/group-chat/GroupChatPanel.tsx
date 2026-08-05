@@ -8,6 +8,7 @@ import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useBoardStore } from '@/stores/board'
 import { useBooZeroStore, isBooZeroEligibleForTeam } from '@/stores/booZero'
+import { connectionStatusTone } from '@/features/connection/connectionStatusDisplay'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { parseMention } from './parseMention'
 import { useTeamChatStream } from './useTeamChatStream'
@@ -69,6 +70,7 @@ export function GroupChatPanel({
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
   const agents = useFleetStore((s) => s.agents)
   const connectionStatus = useConnectionStore((s) => s.status)
+  const connectionTone = connectionStatusTone(connectionStatus)
   const transcripts = useChatStore((s) => s.transcripts)
   const streamingTextMap = useChatStore((s) => s.streamingText)
   // Subscribe to stream-start timestamps so live StreamingCards can position
@@ -591,8 +593,22 @@ export function GroupChatPanel({
               {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''}
             </p>
           </div>
+          {/* Shell connection dot. Team chat itself is server-orchestrated (it
+              keeps sending through a Gateway drop), so this only REPORTS the
+              socket — the composer is deliberately not gated on it. */}
           <span
-            className={`h-2 w-2 shrink-0 rounded-full ${connectionStatus === 'connected' ? 'bg-mint' : 'bg-foreground/25'}`}
+            // `role="img"` is load-bearing: aria-label is only honoured on an
+            // element whose role supports naming, and this dot has no text of
+            // its own — on a bare span the label would be dropped entirely.
+            role="img"
+            aria-label={`Connection: ${connectionStatus}`}
+            className={`h-2 w-2 shrink-0 rounded-full ${
+              connectionTone === 'live'
+                ? 'bg-mint'
+                : connectionTone === 'warn'
+                  ? 'bg-amber/80 animate-pulse'
+                  : 'bg-foreground/25'
+            }`}
           />
         </div>
       )}

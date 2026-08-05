@@ -1,4 +1,4 @@
-import type { AgentStatus, ConnectionStatus, EventFrame } from '@clawboo/gateway-client'
+import type { AgentStatus, EventFrame } from '@clawboo/gateway-client'
 import type { Logger } from '@clawboo/logger'
 
 // ── Chat and Agent event payloads ──────────────────────────────────────────
@@ -109,7 +109,6 @@ export type EventIntent =
 
 export type EventHandlerDeps = {
   // State queries
-  getConnectionStatus: () => ConnectionStatus
   getAgentRunId: (agentId: string) => string | null
 
   // Dispatchers (to Zustand stores — injected from apps/web)

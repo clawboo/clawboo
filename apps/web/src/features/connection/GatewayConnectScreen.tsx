@@ -130,6 +130,12 @@ export function GatewayConnectScreen({
       setGatewayUrl(trimmedUrl)
       onConnected(client)
     } catch (err) {
+      // A failed connect rejects from `ws.onclose`, which ALSO arms the client's
+      // own reconnect loop (the close was not a manual disconnect). Dropping the
+      // ref alone would leave that discarded client retrying against the Gateway
+      // forever, so stop it before we let go of it.
+      client.disconnect()
+
       // OpenClaw 2026.5+ requires explicit device-pairing approval before a
       // new client can connect. Detect that specific rejection and surface
       // the in-dashboard approval UI instead of the raw error toast.

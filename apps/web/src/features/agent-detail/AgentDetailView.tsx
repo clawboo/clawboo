@@ -7,6 +7,7 @@ import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { ChatPanel } from '@/features/chat/ChatPanel'
 import { ResizeHandle } from '@/features/shared/ResizeHandle'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { connectionStatusLabel } from '@/features/connection/connectionStatusDisplay'
 import { useNativeRuntimeState } from '@/features/runtimes/useNativeRuntimeState'
 import { Spinner } from '@/features/shared/Spinner'
 
@@ -106,10 +107,14 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
                   'inline-block h-1.5 w-1.5 rounded-full',
                   connectionStatus === 'connected'
                     ? 'bg-mint shadow-[0_0_6px_rgb(var(--mint-rgb)/0.6)]'
-                    : 'bg-amber/70',
+                    : // A retrying socket pulses — it distinguishes "coming back"
+                      // from a flat "not connected".
+                      connectionStatus === 'reconnecting'
+                      ? 'bg-amber/70 animate-pulse'
+                      : 'bg-amber/70',
                 ].join(' ')}
               />
-              {connectionStatus === 'connected' ? 'Connected' : connectionStatus}
+              {connectionStatusLabel(connectionStatus)}
             </span>
           )}
         </div>
