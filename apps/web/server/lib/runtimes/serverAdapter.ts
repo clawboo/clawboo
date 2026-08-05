@@ -15,7 +15,8 @@ import { getRegistry } from '../agentSource'
 /** Build the OpenClaw operator adapter for a server-side connected-substrate run.
  *  Returns null when the paired operator client is unavailable (Gateway down). */
 export function buildOpenClawServerAdapter(
-  getOperatorClient: () => OpenClawGatewayClient | null = () => getRegistry().source.operatorClient(),
+  getOperatorClient: () => OpenClawGatewayClient | null = () =>
+    getRegistry().source.operatorClient(),
 ): RuntimeAdapter | null {
   const client = getOperatorClient()
   return client ? new OpenClawAdapter(client) : null

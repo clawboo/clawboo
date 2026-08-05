@@ -166,6 +166,21 @@ export function removeApiPortFile(): void {
   }
 }
 
+/**
+ * Remove the runtime port file only if it still names `port`.
+ *
+ * The file is a single shared path, but more than one server can be alive at
+ * once: the auto-scan puts a second instance on 18791, and a restart overlaps
+ * an exiting parent with its successor. An unconditional unlink on shutdown
+ * therefore deletes the *other* instance's record while it is still serving,
+ * and every consumer that reads this file — the CLI, the Vite dev proxy, the
+ * boot probe, `/api/health` — loses track of a server that is running fine.
+ */
+export function removeApiPortFileIfOwned(port: number): void {
+  if (readApiPortFile() !== port) return
+  removeApiPortFile()
+}
+
 /** Read the runtime port file. Returns null on any read / parse failure. */
 export function readApiPortFile(): number | null {
   try {

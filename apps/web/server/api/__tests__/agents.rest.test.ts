@@ -242,7 +242,10 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
   // ── Multi-source: a coding-runtime record source (claude-code) ─────────────
   it('POST /api/agents with sourceId claude-code round-trips offline (create → GET → files → DELETE)', async () => {
     const create = mockRes()
-    await agentsCreatePOST(req({ body: { name: 'Coder Peer', sourceId: 'claude-code' } }), create.res)
+    await agentsCreatePOST(
+      req({ body: { name: 'Coder Peer', sourceId: 'claude-code' } }),
+      create.res,
+    )
     expect(create.status()).toBe(201)
     const created = (create.body() as { agent: { id: string; sourceId: string; runtime: string } })
       .agent

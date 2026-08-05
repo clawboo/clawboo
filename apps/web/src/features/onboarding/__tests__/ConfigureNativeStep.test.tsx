@@ -10,12 +10,13 @@
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { server } from '../../../__vitest__/mswServer'
 import { ConfigureNativeStep } from '../steps/ConfigureNativeStep'
+
+import { axe } from '@/__vitest__/axe'
 
 afterEach(() => cleanup())
 

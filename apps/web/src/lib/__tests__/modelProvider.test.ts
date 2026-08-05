@@ -48,7 +48,10 @@ describe('resolveModelProvider', () => {
   })
 
   it('returns Default model with no provider for a null/empty model (codex / claude-code)', () => {
-    expect(resolveModelProvider(null, 'codex')).toEqual({ providerId: null, label: 'Default model' })
+    expect(resolveModelProvider(null, 'codex')).toEqual({
+      providerId: null,
+      label: 'Default model',
+    })
     expect(resolveModelProvider('', 'claude-code')).toEqual({
       providerId: null,
       label: 'Default model',

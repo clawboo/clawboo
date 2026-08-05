@@ -21,7 +21,7 @@
 // in `GroupChatPanel` is gated only by the connection status (so it stays quiet
 // when the Gateway is down).
 
-import { lazy, Suspense, useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { TeamOnboardingGate } from './TeamOnboardingGate'
 import { GroupChatViewHeader } from './GroupChatViewHeader'
@@ -30,12 +30,16 @@ import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
 import { useBooZeroStore } from '@/stores/booZero'
+import { LazyBoundary } from '@/features/shared/LazyBoundary'
+import { createRetryableLazy } from '@/lib/lazyRetry'
 import { buildTeamSessionKey } from '@/lib/sessionUtils'
 
 // The settled team space (TeamSpaceSplit) owns the team-scoped Ghost Graph,
 // which pulls in React Flow + elk.bundled.js. Lazy-load it so those libraries
-// stay off the entry chunk until a user actually opens a team space.
-const TeamSpaceSplit = lazy(() =>
+// stay off the entry chunk until a user actually opens a team space. Retryable,
+// so a failed chunk shows a card with a "Try again" inside the team space rather
+// than throwing past the view's own boundary.
+const teamSpaceSplitSource = createRetryableLazy(() =>
   import('./TeamSpaceSplit').then((m) => ({ default: m.TeamSpaceSplit })),
 )
 
@@ -110,11 +114,17 @@ export function GroupChatView({ teamId }: { teamId: string }) {
           // lazy-loaded (it owns the team-scoped Ghost Graph + React Flow/ELK),
           // so we hold a neutral full-window beat while its chunk resolves —
           // matching the hydrating placeholder above, so there's no flash.
-          <Suspense fallback={<div className="h-full bg-background" />}>
-            <div className="h-full">
-              <TeamSpaceSplit teamId={teamId} animateOpen={sawGateRef.current} />
-            </div>
-          </Suspense>
+          <LazyBoundary
+            source={teamSpaceSplitSource}
+            label="the team space"
+            suspenseFallback={<div className="h-full bg-background" />}
+            render={(TeamSpaceSplit) => (
+              <div className="h-full">
+                <TeamSpaceSplit teamId={teamId} animateOpen={sawGateRef.current} />
+              </div>
+            )}
+            logContext={{ teamId }}
+          />
         )}
       </div>
     </div>

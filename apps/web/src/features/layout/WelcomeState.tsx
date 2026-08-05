@@ -4,7 +4,7 @@ import { BarChart3, Globe, Loader2, ShoppingCart, type LucideIcon } from 'lucide
 import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
 import { useSettingsModalStore } from '@/stores/settingsModal'
-import { useConnectionStore } from '@/stores/connection'
+import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
 import { consumeApiSSE } from '@clawboo/control-client'
 import { SkyAtmosphere } from '@/features/atmosphere'
@@ -123,7 +123,10 @@ function SystemHint({ isConnected }: { isConnected: boolean }) {
 export function WelcomeState() {
   const teams = useTeamStore((s) => s.teams)
   const status = useConnectionStore((s) => s.status)
-  const isConnected = status === 'connected'
+  // Live-session, not strictly 'connected': `SystemHint` renders on the INVERSE
+  // of this, so a mid-session socket drop would otherwise wipe the quick-start
+  // steps and pop a "Start Gateway" panel at a user who is already working.
+  const isConnected = isSessionLive(status)
   const hasTeams = teams.length > 0
   const [showCreateModal, setShowCreateModal] = useState(false)
 

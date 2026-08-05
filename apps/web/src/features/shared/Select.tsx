@@ -97,8 +97,9 @@ function optionsFromChildren(children: ReactNode): NormalizedOption[] {
   const out: NormalizedOption[] = []
   Children.toArray(children).forEach((child) => {
     if (!isValidElement(child) || child.type !== 'option') return
-    const props = (child as ReactElement<{ value?: string; disabled?: boolean; children?: ReactNode }>)
-      .props
+    const props = (
+      child as ReactElement<{ value?: string; disabled?: boolean; children?: ReactNode }>
+    ).props
     out.push({
       value: String(props.value ?? ''),
       label: props.children,
@@ -182,7 +183,9 @@ export function Select({
       left,
       width,
       maxHeight,
-      ...(openUp ? { bottom: window.innerHeight - r.top + MENU_GAP } : { top: r.bottom + MENU_GAP }),
+      ...(openUp
+        ? { bottom: window.innerHeight - r.top + MENU_GAP }
+        : { top: r.bottom + MENU_GAP }),
     })
   }, [normalized.length, menuWidth])
 
@@ -313,10 +316,7 @@ export function Select({
   )
 
   return (
-    <div
-      className={className}
-      style={{ position: 'relative', display: 'inline-block', ...style }}
-    >
+    <div className={className} style={{ position: 'relative', display: 'inline-block', ...style }}>
       <button
         ref={triggerRef}
         type="button"
@@ -457,7 +457,9 @@ export function Select({
                       textAlign: 'left',
                       border: 'none',
                       cursor: opt.disabled ? 'not-allowed' : 'pointer',
-                      color: opt.disabled ? 'rgb(var(--foreground-rgb) / 0.4)' : 'var(--foreground)',
+                      color: opt.disabled
+                        ? 'rgb(var(--foreground-rgb) / 0.4)'
+                        : 'var(--foreground)',
                       background: isSelected
                         ? 'rgb(var(--primary-rgb) / 0.07)'
                         : isActive && !opt.disabled

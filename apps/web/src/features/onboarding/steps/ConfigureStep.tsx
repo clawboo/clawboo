@@ -143,7 +143,7 @@ const ALL_PROVIDERS: ProviderOption[] = [...PRIMARY_PROVIDERS, ...MORE_PROVIDERS
 // ─── Provider → model-catalog mapping ────────────────────────────────────────
 //
 // `ProviderId` values are lowercase tokens used in the API. `MODEL_GROUPS`
-// in `lib/modelCatalog.ts` uses display-case provider names. This bridges
+// in `@clawboo/model-catalog` uses display-case provider names. This bridges
 // the two so the picker can find the right model list for the selected
 // provider card.
 

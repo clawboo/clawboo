@@ -4,23 +4,40 @@
  *
  * Thin launcher: start the dashboard server → open the browser.
  * The web UI handles Gateway detection, onboarding, and team deployment.
+ *
+ * Alongside the default action it carries three subcommands — `backup`, `stop`,
+ * and `restart` — which exist because the server runs DETACHED: copying a live
+ * database, clearing an instance you can no longer Ctrl-C, and rolling a running
+ * instance onto a newer build are all awkward without them.
+ *
+ * This file is presentation + Commander wiring only. The find/start/stop
+ * primitives live in `lifecycle.ts` so they can be unit-tested (importing this
+ * module would run `program.parse()`).
  */
 
 import { Command } from 'commander'
 import chalk from 'chalk'
 import * as p from '@clack/prompts'
-import ora from 'ora'
-import { createConnection } from 'net'
-import { exec, fork, spawn } from 'child_process'
+import ora, { type Ora } from 'ora'
+import { exec } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 
 import { resolveClawbooDir } from '@clawboo/config'
 
-// ─── Version ──────────────────────────────────────────────────────────────────
-
-declare const __CLI_VERSION__: string
-const VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '0.0.0-dev'
+import { VERSION } from './version'
+import { shouldOfferRestart } from './versionCheck'
+import {
+  discoverDashboard,
+  fetchServerVersion,
+  probeClawbooDashboard,
+  probePort,
+  readRuntimePort,
+  removeRuntimePortFile,
+  startDashboard,
+  stopDashboard,
+  type StopOutcome,
+} from './lifecycle'
 
 // ─── ASCII Logo ───────────────────────────────────────────────────────────────
 
@@ -49,186 +66,215 @@ function openBrowser(url: string): Promise<void> {
   })
 }
 
-/** Quick TCP probe to check if a port is accepting connections. */
-function probePort(host: string, port: number, timeoutMs = 2_000): Promise<boolean> {
-  return new Promise((resolve) => {
-    const sock = createConnection({ host, port })
-    const timer = setTimeout(() => {
-      sock.destroy()
-      resolve(false)
-    }, timeoutMs)
-    sock.on('connect', () => {
-      clearTimeout(timer)
-      sock.destroy()
-      resolve(true)
-    })
-    sock.on('error', () => {
-      clearTimeout(timer)
-      resolve(false)
-    })
+/** Shared terminal error path for every command's action handler. */
+function fail(err: unknown): never {
+  console.error(chalk.red('\nError:'), err instanceof Error ? err.message : String(err))
+  process.exit(1)
+}
+
+// ─── Server start / stop reporting ────────────────────────────────────────────
+
+/**
+ * Start a dashboard and narrate it. Returns the port, or null when the user is
+ * left without one — the caller picks the exit code, because the default
+ * launcher and `restart` want different ones.
+ */
+async function startAndReport(opts: {
+  port?: number
+  verb: 'Starting' | 'Restarting'
+}): Promise<number | null> {
+  // Held in an object so the spinner is only created once `startDashboard` has
+  // actually found a server to launch — the "no server anywhere" path must not
+  // print a "Starting Clawboo..." line for something it never started.
+  const ui: { spinner: Ora | undefined } = { spinner: undefined }
+
+  const outcome = await startDashboard({
+    port: opts.port,
+    onLaunch: (mode) => {
+      const suffix = mode === 'dev' ? ' (dev mode)' : ''
+      ui.spinner = ora({ text: `${opts.verb} Clawboo${suffix}...`, color: 'cyan' }).start()
+    },
   })
-}
 
-/**
- * Verify a port is hosting Clawboo's dashboard (not some other service that
- * happens to be TCP-listening on the same port). Cheap TCP-probe first to
- * skip closed ports, then an HTTP GET /api/settings that validates a
- * Clawboo-shaped JSON response. Critical because Clawboo's auto-fallback
- * range (18790-18809) overlaps with the OpenClaw Gateway's auxiliary ports
- * (18791-18792) AND with things like Chrome's --remote-debugging-port
- * (commonly 18800). A naive TCP probe accepts any of those as "Clawboo",
- * routes the browser there, and the user sees an unrelated 401 / empty
- * page / DevTools UI.
- */
-async function probeClawbooDashboard(
-  host: string,
-  port: number,
-  timeoutMs = 1_500,
-): Promise<boolean> {
-  // Cheap TCP probe first — skip the HTTP cost on closed ports.
-  if (!(await probePort(host, port, Math.min(timeoutMs, 1_000)))) return false
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-    const res = await fetch(`http://${host}:${port}/api/settings`, {
-      signal: controller.signal,
-    })
-    clearTimeout(timer)
-    if (!res.ok) return false
-    const ct = res.headers.get('content-type') ?? ''
-    if (!ct.includes('application/json')) return false
-    const body = (await res.json()) as Record<string, unknown>
-    // Clawboo's /api/settings ALWAYS includes these two fields. Gateway's
-    // auxiliary ports return plain "Unauthorized"; Chrome's debug returns
-    // an array of debugger targets — neither matches this shape.
-    return typeof body['gatewayUrl'] === 'string' && typeof body['hasToken'] === 'boolean'
-  } catch {
-    return false
-  }
-}
-
-// ─── Dashboard port discovery ─────────────────────────────────────────────────
-//
-// Mirrors `apps/web/server/lib/portUtils.ts` — kept in lockstep:
-// - DEFAULT_API_PORT 18790 (one above OpenClaw Gateway 18789)
-// - 20-port fallback window (18790-18809)
-// - Runtime port file at ~/.clawboo/api-port.txt (CLAWBOO_HOME override)
-//
-// On every `npx clawboo` launch we figure out where the dashboard is or
-// will be, in this priority order:
-//   1. CLAWBOO_API_PORT / CLAWBOO_API_URL env var (explicit user override)
-//   2. Runtime port file (server already running, wrote its port there)
-//   3. Probe DEFAULT_API_PORT, then scan upward 19 more ports
-//   4. Fall back to DEFAULT_API_PORT (we'll start a server there)
-
-const DEFAULT_API_PORT = 18790
-const MAX_PORT_ATTEMPTS = 20
-
-function readPortEnv(name: string): number | null {
-  const raw = (process.env[name] ?? '').trim()
-  if (!raw) return null
-  const port = Number(raw)
-  if (!Number.isFinite(port) || port <= 0 || port > 65535) return null
-  return port
-}
-
-function getRuntimePortFilePath(): string {
-  // Use the SERVER's exact resolver (bundled into this standalone binary by
-  // tsup) so the CLI and server agree on the home dir at every edge — a relative
-  // CLAWBOO_HOME, an unset HOME, `~` expansion. Re-inlining it drifted at those
-  // edges and broke port discovery (the API server writes api-port.txt there).
-  return path.join(resolveClawbooDir(), 'api-port.txt')
-}
-
-function readRuntimePort(): number | null {
-  try {
-    const raw = fs.readFileSync(getRuntimePortFilePath(), 'utf8').trim()
-    const port = Number(raw)
-    if (!Number.isFinite(port) || port <= 0 || port > 65535) return null
-    return port
-  } catch {
+  if (outcome.status === 'no-server') {
+    // ── No server found ──────────────────────────────────────────────────────
+    console.log()
+    p.log.warn(
+      chalk.yellow('Could not find the Clawboo server. ') +
+        chalk.white('Install with: npm install -g clawboo'),
+    )
     return null
   }
-}
 
-/**
- * Find an already-running Clawboo dashboard. Returns the port if a port in
- * the search space hosts Clawboo (validated via HTTP signature), null
- * otherwise. Tries: env var → runtime file → port-range scan from 18790.
- *
- * Uses `probeClawbooDashboard` (TCP probe + Clawboo-shaped JSON check) so
- * unrelated services that happen to listen in 18790-18809 — Gateway aux
- * ports, Chrome --remote-debugging-port, etc. — are correctly skipped
- * instead of mistaken for Clawboo.
- */
-async function findRunningDashboard(): Promise<number | null> {
-  const explicit = readPortEnv('CLAWBOO_API_PORT')
-  if (explicit !== null) {
-    if (await probeClawbooDashboard('localhost', explicit, 1_500)) return explicit
+  if (outcome.status === 'timeout') {
+    const hint =
+      outcome.mode === 'dev' && outcome.monorepoRoot
+        ? chalk.yellow('Dashboard is taking too long to start. Try: ') +
+          chalk.white(`cd ${outcome.monorepoRoot} && pnpm dev`)
+        : chalk.yellow('Dashboard is taking too long to start.')
+    ui.spinner?.fail(hint)
     return null
   }
-  const fromFile = readRuntimePort()
-  if (fromFile !== null && (await probeClawbooDashboard('localhost', fromFile, 1_500))) {
-    return fromFile
-  }
-  // Scan the standard window — covers the case where the server was started
-  // by `pnpm dev` or another launcher and never wrote the runtime file.
-  for (let i = 0; i < MAX_PORT_ATTEMPTS; i++) {
-    const port = DEFAULT_API_PORT + i
-    if (await probeClawbooDashboard('localhost', port, 800)) return port
-  }
-  return null
+
+  ui.spinner?.succeed(
+    chalk.green(opts.verb === 'Restarting' ? 'Dashboard restarted' : 'Dashboard started'),
+  )
+  return outcome.port
 }
 
-// ─── Monorepo discovery ────────────────────────────────────────────────────────
+function describeStopFailure(outcome: StopOutcome): string {
+  if (outcome.status === 'still-alive') {
+    return `The server on port ${outcome.port} did not exit.`
+  }
+  if (outcome.status === 'could-not-identify' && outcome.reason === 'permission-denied') {
+    return `The process on port ${outcome.port} belongs to another user.`
+  }
+  if (outcome.status === 'could-not-identify' && outcome.reason === 'unsafe-pid') {
+    return `Port ${outcome.port} is held by a process this launcher refuses to signal.`
+  }
+  return `Could not identify the process listening on port ${outcome.port}.`
+}
 
 /**
- * Walk up from __dirname and cwd looking for the Clawboo monorepo root
- * (a package.json with "name": "clawboo").
+ * A Clawboo dashboard is running but its access gate is turned on, so every
+ * `/api/*` call from here 401s. Say so instead of behaving as if nothing were
+ * running — which would fork a second server onto the same database, fail its
+ * readiness poll, and leave the first one orphaned.
  */
-function findMonorepoRoot(): string | null {
-  // Env override
-  if (process.env.CLAWBOO_SERVER_PATH) return process.env.CLAWBOO_SERVER_PATH
+function printGatedNotice(port: number): void {
+  p.log.warn(
+    chalk.yellow(`A Clawboo server is running on port ${port}, but it requires an access token.`),
+  )
+  p.log.info(
+    chalk.gray('This install sets ') +
+      chalk.white('STUDIO_ACCESS_TOKEN') +
+      chalk.gray(', so every /api/* route needs a cookie the launcher does not have.'),
+  )
+  p.log.info(
+    chalk.gray('Open ') +
+      chalk.cyan.underline(`http://localhost:${port}/?access_token=<token>`) +
+      chalk.gray(' once to set it in your browser, or unset the variable and restart the server.'),
+  )
+}
 
-  const candidates: string[] = []
+/**
+ * We stopped a server that was working and could not put one back. Say so
+ * explicitly: `startAndReport`'s own messages ("Could not find the Clawboo
+ * server", "taking too long to start") read as if nothing had been running.
+ */
+function printStoppedNotReplaced(port: number): void {
+  p.log.warn(
+    chalk.yellow('The previous server was stopped and could not be replaced. ') +
+      chalk.white('Nothing is running now.'),
+  )
+  p.log.info(
+    chalk.gray('Start one with ') +
+      chalk.white('clawboo') +
+      chalk.gray(`, on port ${port} if it is still free.`),
+  )
+}
 
-  // Walk up from this file's directory
-  {
-    let dir = __dirname
-    for (let i = 0; i < 10; i++) {
-      candidates.push(dir)
-      const parent = path.dirname(dir)
-      if (parent === dir) break
-      dir = parent
-    }
-  }
-
-  // Walk up from cwd
-  let dir = process.cwd()
-  for (let i = 0; i < 10; i++) {
-    if (!candidates.includes(dir)) candidates.push(dir)
-    const parent = path.dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-
-  for (const candidate of candidates) {
-    try {
-      const pkgPath = path.join(candidate, 'package.json')
-      const raw = fs.readFileSync(pkgPath, 'utf-8')
-      const pkg = JSON.parse(raw) as { name?: string }
-      if (pkg.name === 'clawboo') return candidate
-    } catch {
-      // not found or not parsable — continue
-    }
-  }
-
-  return null
+/** Deliberately not "run `clawboo stop`" — that is what just failed. */
+function printManualStopHint(port: number): void {
+  const cmd =
+    process.platform === 'win32'
+      ? `netstat -ano | findstr :${port}   →   taskkill /PID <pid> /F`
+      : `lsof -nP -iTCP:${port} -sTCP:LISTEN -t | xargs kill`
+  p.log.info(chalk.gray('Stop it manually: ') + chalk.white(cmd))
 }
 
 // ─── Main run ─────────────────────────────────────────────────────────────────
 
-async function run(): Promise<void> {
+export interface LaunchOptions {
+  /** False when `--no-version-check` is passed. */
+  versionCheck: boolean
+  /** True when `-y` / `--yes` is passed. */
+  yes: boolean
+}
+
+/**
+ * The running server is older than this launcher, so offer to restart it rather
+ * than silently attaching to stale code.
+ *
+ * Returns the port to attach to, or null when it stopped the old server and the
+ * replacement never came up. Null is NOT "nothing is running yet": a child has
+ * already been forked and may still be binding, so the caller must bail rather
+ * than fork a second one.
+ *
+ * Every other branch ends with the user at a working dashboard: a declined offer
+ * or a failed stop attaches to the old server rather than leaving them with
+ * nothing.
+ */
+async function reconcileServerVersion(port: number, opts: LaunchOptions): Promise<number | null> {
+  const serverVersion = await fetchServerVersion(port)
+  if (!shouldOfferRestart(VERSION, serverVersion)) return port
+
+  p.log.warn(
+    chalk.yellow(`The Clawboo server on port ${port} is running v${serverVersion}`) +
+      chalk.gray(` — this launcher is v${VERSION}.`),
+  )
+
+  // A prompt needs a real terminal on both ends. @clack/prompts drives stdin
+  // directly: pointed at /dev/null it throws (`uv_tty_init EINVAL`), and pointed
+  // at a pipe it blocks forever. Neither is acceptable on the path whose whole
+  // job is to open a browser, so a non-TTY is never asked.
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY)
+  let restart = opts.yes
+
+  if (!restart && interactive) {
+    let answer: boolean | symbol
+    try {
+      answer = await p.confirm({
+        message: `Restart it on port ${port} to run v${VERSION}?`,
+        initialValue: true,
+      })
+    } catch {
+      // A terminal we couldn't drive. Attaching is always the safe answer.
+      answer = false
+    }
+    // Ctrl-C here means "just take me to the dashboard", not "abort the CLI".
+    if (p.isCancel(answer)) {
+      p.log.info(chalk.gray('Keeping the running server.'))
+      return port
+    }
+    restart = answer
+  }
+
+  if (!restart) {
+    if (!interactive) {
+      p.log.info(
+        chalk.gray('Attaching to it. Run ') +
+          chalk.white('clawboo restart') +
+          chalk.gray(' (or pass ') +
+          chalk.white('-y') +
+          chalk.gray(`) to pick up v${VERSION}.`),
+      )
+    }
+    return port
+  }
+
+  const stopSpinner = ora({ text: `Stopping Clawboo v${serverVersion}...`, color: 'cyan' }).start()
+  const stopped = await stopDashboard(port)
+  if (stopped.status !== 'stopped') {
+    stopSpinner.fail(chalk.yellow(describeStopFailure(stopped)))
+    printManualStopHint(port)
+    p.log.info(chalk.gray(`Continuing with the running v${serverVersion} server.`))
+    return port
+  }
+  stopSpinner.succeed(chalk.green(`Stopped Clawboo v${serverVersion}`))
+
+  // Pin the port only once it is genuinely free: CLAWBOO_API_PORT is an exact
+  // bind and the server THROWS when it is taken, which under `stdio: 'ignore'`
+  // would be a silent death. If something else grabbed it, start without a pin
+  // from us and let the server resolve its own port (an auto-scan — or the
+  // user's own CLAWBOO_API_PORT, if they have one exported).
+  const free = !(await probePort('localhost', port, 500))
+  const restarted = await startAndReport({ port: free ? port : undefined, verb: 'Restarting' })
+  if (restarted === null) printStoppedNotReplaced(port)
+  return restarted
+}
+
+async function run(opts: LaunchOptions): Promise<void> {
   // 1. Print logo
   console.log(chalk.hex('#E94560').bold(LOGO))
   console.log(chalk.hex('#E94560')(TAGLINE))
@@ -245,97 +291,35 @@ async function run(): Promise<void> {
     p.log.info(chalk.gray('No Gateway detected — the dashboard will guide you through setup.'))
   }
 
-  // ── 3. Start dashboard server ──────────────────────────────────────────────
+  // ── 3. Find or start the dashboard server ──────────────────────────────────
 
-  // Discover or start the dashboard. The server picks its own port via the
-  // shared port resolver (default 18790 with auto-fallback up to 18809), so
-  // the CLI doesn't hardcode anything — it queries `findRunningDashboard()`
-  // before AND after spawning to learn the actual port.
-  let dashboardPort = await findRunningDashboard()
-  if (dashboardPort === null) {
-    // Strategy 1: Bundled mode — server.js sits next to this CLI entry
-    const bundledServerPath = path.join(__dirname, 'server.js')
+  // The server picks its own port via the shared port resolver (default 18790
+  // with auto-fallback up to 18809), so the CLI doesn't hardcode anything — it
+  // queries discovery before AND after spawning.
+  const found = await discoverDashboard()
+  if (found.port === null && found.gatedPort !== null) {
+    // Starting another server would put a second one on the same database and
+    // still leave the browser unable to reach either without the cookie.
+    printGatedNotice(found.gatedPort)
+    process.exit(1)
+  }
+  let dashboardPort = found.port
 
-    // Strategy 2: Dev mode — find monorepo root and use tsx
-    const monorepoRoot = findMonorepoRoot()
-    const devServerPath = monorepoRoot ? path.join(monorepoRoot, 'apps/web/server/index.ts') : null
-
-    const launchedFrom: 'bundled' | 'dev' | null = fs.existsSync(bundledServerPath)
-      ? 'bundled'
-      : devServerPath && fs.existsSync(devServerPath)
-        ? 'dev'
-        : null
-
-    if (launchedFrom === null) {
-      // ── No server found ────────────────────────────────────────────────
-      console.log()
-      p.log.warn(
-        chalk.yellow('Could not find the Clawboo server. ') +
-          chalk.white('Install with: npm install -g clawboo'),
-      )
-      process.exit(0)
-    }
-
-    const startSpinner = ora({
-      text: launchedFrom === 'bundled' ? 'Starting Clawboo...' : 'Starting Clawboo (dev mode)...',
-      color: 'cyan',
-    }).start()
-
-    if (launchedFrom === 'bundled') {
-      const child = fork(bundledServerPath, [], {
-        cwd: __dirname,
-        env: {
-          ...process.env,
-          NODE_ENV: 'production',
-          // The running clawboo version, so the server's self-version check
-          // ("update available" chip) knows what it is without a disk read.
-          CLAWBOO_VERSION: VERSION,
-          // Where the bundled MCP stdio bins live (dist/bin next to server.js), so
-          // the server's /api/mcp/config emits the right `node <bin>` attach snippet.
-          CLAWBOO_MCP_BIN_DIR: path.join(__dirname, 'bin'),
-        },
-        detached: true,
-        stdio: 'ignore',
-      })
-      child.unref()
-    } else {
-      const child = spawn('npx', ['tsx', devServerPath!], {
-        cwd: monorepoRoot!,
-        env: { ...process.env, NODE_ENV: 'production', CLAWBOO_VERSION: VERSION },
-        detached: true,
-        stdio: 'ignore',
-      })
-      child.unref()
-    }
-
-    // Poll for the dashboard via port discovery (env / runtime file / scan).
-    // Up to 45 seconds. The server typically binds in ~500ms on a warm
-    // install, but on Windows the FIRST cold boot of the bundled CJS (1.4 MB
-    // + better-sqlite3 native bindings + Express + WS proxy) can take 20-30s
-    // due to Windows Defender real-time scanning of the freshly-extracted
-    // npm package + Node's first-load module compile. 15s timed out on
-    // fresh Windows installs — see v0.1.7 round-2 Windows compat fix.
-    const maxAttempts = 90
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((r) => setTimeout(r, 500))
-      const found = await findRunningDashboard()
-      if (found !== null) {
-        dashboardPort = found
-        break
-      }
-    }
-
-    if (dashboardPort !== null) {
-      startSpinner.succeed(chalk.green('Dashboard started'))
-    } else {
-      const hint =
-        launchedFrom === 'dev'
-          ? chalk.yellow('Dashboard is taking too long to start. Try: ') +
-            chalk.white(`cd ${monorepoRoot!} && pnpm dev`)
-          : chalk.yellow('Dashboard is taking too long to start.')
-      startSpinner.fail(hint)
-      process.exit(0)
-    }
+  // A server started by an earlier install stays bound to its port (it is
+  // spawned detached and unref'd), so attaching blindly can land on a build
+  // older than the package that was just invoked. Ask it what it is first.
+  //
+  // The branches are exclusive on purpose. `reconcileServerVersion` may itself
+  // have stopped a server and forked a replacement; if that replacement is just
+  // slow, falling through to the spawn below would fork a SECOND dashboard onto
+  // the same database. Exit non-zero instead — the user asked for a dashboard
+  // and does not have one either way.
+  if (dashboardPort !== null && opts.versionCheck) {
+    dashboardPort = await reconcileServerVersion(dashboardPort, opts)
+    if (dashboardPort === null) process.exit(1)
+  } else if (dashboardPort === null) {
+    dashboardPort = await startAndReport({ verb: 'Starting' })
+    if (dashboardPort === null) process.exit(1)
   }
 
   const dashboardUrl = `http://localhost:${dashboardPort}`
@@ -372,6 +356,119 @@ async function run(): Promise<void> {
       chalk.yellow('★') +
       chalk.gray(' If Clawboo is useful, please star it: ') +
       chalk.cyan.underline('https://github.com/clawboo/clawboo'),
+  )
+}
+
+// ─── `clawboo stop` ───────────────────────────────────────────────────────────
+
+/**
+ * Stop the instance the launcher would have attached to. Discovery is shared
+ * with `clawboo`, so `CLAWBOO_API_PORT=<n> clawboo stop` targets one explicitly.
+ *
+ * Stopping something already stopped is not an error — this has to be safe to
+ * run twice from a teardown script.
+ */
+async function runStop(): Promise<void> {
+  const { port, gatedPort } = await discoverDashboard()
+  if (port === null && gatedPort !== null) {
+    // It IS running — we just can't confirm it through the gate, and the safety
+    // rule is to never signal a process on a port we haven't positively
+    // identified as Clawboo's. Say that rather than "nothing is running".
+    printGatedNotice(gatedPort)
+    printManualStopHint(gatedPort)
+    process.exit(1)
+  }
+  if (port === null) {
+    // A port file naming a dead server is exactly the stale state this command
+    // exists to clear — but "discovery found nothing" is not the same as "the
+    // recorded port is dead". `CLAWBOO_API_PORT` short-circuits discovery to a
+    // single port, so a live instance on a different one would still be named
+    // by the file. Probe the recorded port before deleting the only record of it.
+    const recorded = readRuntimePort()
+    if (recorded !== null && !(await probeClawbooDashboard('localhost', recorded, 1_500))) {
+      removeRuntimePortFile()
+    }
+    p.log.info(chalk.gray('No Clawboo server is running.'))
+    return
+  }
+
+  const spinner = ora({ text: `Stopping Clawboo on port ${port}...`, color: 'cyan' }).start()
+  const outcome = await stopDashboard(port)
+
+  switch (outcome.status) {
+    case 'stopped':
+      spinner.succeed(
+        chalk.green('Clawboo stopped') +
+          chalk.gray(` (pid ${outcome.pid}${outcome.forced ? ', forced' : ''})`),
+      )
+      return
+    case 'not-running':
+      spinner.info(chalk.gray('No Clawboo server is running.'))
+      return
+    default:
+      spinner.fail(chalk.yellow(describeStopFailure(outcome)))
+      printManualStopHint(port)
+      process.exit(1)
+  }
+}
+
+// ─── `clawboo restart` ────────────────────────────────────────────────────────
+
+/**
+ * Stop the running server and start a fresh one on the same port, so a browser
+ * tab already open on that URL reconnects on its own. With nothing running it
+ * just starts one (the systemd convention).
+ */
+async function runRestart(opts: { open: boolean }): Promise<void> {
+  const { port, gatedPort } = await discoverDashboard()
+  if (port === null && gatedPort !== null) {
+    printGatedNotice(gatedPort)
+    printManualStopHint(gatedPort)
+    process.exit(1)
+  }
+
+  let pinned: number | undefined
+  if (port === null) {
+    p.log.info(chalk.gray('No Clawboo server is running — starting one.'))
+  } else {
+    const spinner = ora({ text: `Stopping Clawboo on port ${port}...`, color: 'cyan' }).start()
+    const outcome = await stopDashboard(port)
+    if (outcome.status === 'could-not-identify' || outcome.status === 'still-alive') {
+      spinner.fail(chalk.yellow(describeStopFailure(outcome)))
+      printManualStopHint(port)
+      // Deliberately do NOT start a replacement: a pinned start would throw on
+      // the taken port, and an unpinned one would leave TWO dashboards running.
+      process.exit(1)
+    }
+    spinner.succeed(chalk.green('Clawboo stopped'))
+    // Pin only if the port really freed — a `pnpm dev` supervisor can respawn
+    // the server on the same port between our stop and our start. Unpinned, the
+    // successor resolves its own port the way any boot does.
+    if (!(await probePort('localhost', port, 500))) pinned = port
+  }
+
+  const started = await startAndReport({ port: pinned, verb: 'Restarting' })
+  if (started === null) {
+    // Only when a stop actually ran — with nothing running beforehand this is a
+    // plain start failure and the existing message is already accurate.
+    if (port !== null) printStoppedNotReplaced(port)
+    process.exit(1)
+  }
+
+  const url = `http://localhost:${started}`
+  if (opts.open) {
+    const browserSpinner = ora({ text: 'Opening Clawboo...', color: 'cyan' }).start()
+    await openBrowser(url)
+    browserSpinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(url))
+  }
+
+  console.log()
+  p.outro(
+    chalk.bold.hex('#E94560')('Clawboo restarted') +
+      chalk.gray(' v' + VERSION) +
+      '\n\n' +
+      chalk.gray('  Clawboo:   ') +
+      chalk.cyan.underline(url),
   )
 }
 
@@ -469,13 +566,34 @@ program
   .name('clawboo')
   .description('The open-source platform for OpenClaw agent teams')
   .version(VERSION)
+  .option('--no-version-check', 'Skip comparing a running server against this launcher.')
+  .option('-y, --yes', 'Restart an older running server without prompting.')
+  .showHelpAfterError()
 
-program.action(() => {
-  run().catch((err: unknown) => {
-    console.error(chalk.red('\nError:'), err instanceof Error ? err.message : String(err))
-    process.exit(1)
-  })
+program.action((opts: LaunchOptions, command: Command) => {
+  // Commander dispatches registered subcommands before reaching here and does
+  // not reject excess operands, so a leftover operand is a subcommand name we
+  // don't have. Without this `clawboo stopp` would quietly launch the dashboard
+  // and open a browser — which is the opposite of what was asked for.
+  const unknown = command.args[0]
+  if (unknown !== undefined) program.error(`error: unknown command '${unknown}'`)
+  run(opts).catch(fail)
 })
+
+program
+  .command('stop')
+  .description('Stop the running Clawboo dashboard server.')
+  .action(() => {
+    runStop().catch(fail)
+  })
+
+program
+  .command('restart')
+  .description('Stop the running Clawboo dashboard server and start a fresh one on the same port.')
+  .option('--no-open', "Don't open the browser after restarting.")
+  .action((opts: { open: boolean }) => {
+    runRestart(opts).catch(fail)
+  })
 
 program
   .command('backup [dest]')
@@ -485,10 +603,7 @@ program
   )
   .option('-f, --force', 'Overwrite the destination file if it already exists.')
   .action((dest: string | undefined, opts: { force: boolean }) => {
-    runBackup(dest, opts).catch((err: unknown) => {
-      console.error(chalk.red('\nError:'), err instanceof Error ? err.message : String(err))
-      process.exit(1)
-    })
+    runBackup(dest, opts).catch(fail)
   })
 
 program.parse()

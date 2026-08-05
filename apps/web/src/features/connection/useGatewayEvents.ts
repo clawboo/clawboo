@@ -12,13 +12,51 @@ import { useApprovalsStore, type ApprovalRequest } from '@/stores/approvals'
 import { parseApprovalRequestPayload } from '@/features/approvals/useApprovalActions'
 import { nextSeq } from '@/lib/sequenceKey'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
+import { nextMirroredStatus } from './socketStatusMirror'
 
 // ─── useGatewayEvents ─────────────────────────────────────────────────────────
 //
-// Wires a live GatewayClient into the Bridge → Policy → Handler pipeline.
+// Wires a live GatewayClient into the Bridge → Policy → Handler pipeline, and
+// mirrors the live socket's status into the connection store.
 // Call this hook once at the top of the app; it is a no-op when client is null.
 
 export function useGatewayEvents(client: GatewayClient | null): void {
+  // ── Live socket status → connection store ────────────────────────────────
+  //
+  // Deliberately its OWN effect rather than a few lines inside the pipeline
+  // effect below. `client.onStatus(h)` invokes `h` synchronously at subscribe
+  // time (it replays the current status), so a throw from this handler inside
+  // the pipeline effect would abort that effect part-way: no event
+  // subscriptions, no approval-expiry interval, and — worst — no cleanup
+  // registered, permanently leaking the patch queue and handler. Same `[client]`
+  // dep, so the lifetime is identical; the blast radius is not.
+  //
+  // Per-client subscription, so native mode (client === null) never arms it.
+  useEffect(() => {
+    if (!client) return
+
+    const unsubStatus = client.onStatus((socketStatus) => {
+      // NOTHING may throw out of here. The client fans handlers out bare from
+      // `updateStatus`, and its 'connected' emission happens inside
+      // `sendConnect()`'s try — a throw there is misread as a connect failure
+      // (device token cleared, socket closed 4008, infinite retry).
+      try {
+        const conn = useConnectionStore.getState()
+        // A superseded client must never stomp its replacement: every connect
+        // flow disconnects the previous client, and that teardown emits.
+        if (conn.client !== client) return
+        const next = nextMirroredStatus(socketStatus, conn.status)
+        if (next) conn.setStatus(next)
+      } catch {
+        // Best-effort mirror — a broken status write must not break the socket.
+      }
+    })
+
+    return () => {
+      unsubStatus()
+    }
+  }, [client])
+
   useEffect(() => {
     if (!client) return
 
@@ -32,12 +70,6 @@ export function useGatewayEvents(client: GatewayClient | null): void {
     // ── Event handler with all deps wired to Zustand stores ────────────────
     const handler = createEventHandler({
       // State queries
-      getConnectionStatus: () => {
-        const s = useConnectionStore.getState().status
-        // Map our local 'error' state → 'disconnected' (handler only knows gateway statuses)
-        return s === 'error' ? 'disconnected' : s
-      },
-
       getAgentRunId: (agentId) =>
         useFleetStore.getState().agents.find((a) => a.id === agentId)?.runId ?? null,
 

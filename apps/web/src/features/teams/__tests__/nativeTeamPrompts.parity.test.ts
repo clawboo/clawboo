@@ -4,6 +4,10 @@
 
 import { describe, expect, it } from 'vitest'
 
+// The one sanctioned src → server import: this guard only works by reading both
+// copies, and it never ships (test-only, node project). See the SPA → server
+// boundary rule in eslint.config.mjs.
+// eslint-disable-next-line no-restricted-imports
 import { LEADER_PROMPT, SPECIALIST_PROMPT } from '../../../../server/api/onboardingSeed'
 import { NATIVE_LEADER_PROMPT, NATIVE_SPECIALIST_PROMPT } from '../nativeTeamPrompts'
 

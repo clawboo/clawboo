@@ -72,11 +72,10 @@ describe('runExchange (bounded ping-pong)', () => {
   })
 
   it('stops with budget_paused when a turn reports it tripped a cap (in-exchange kill-switch)', async () => {
-    const dispatch = vi.fn(
-      async (p: ChatParticipant): Promise<ChatTurnOutcome> =>
-        p.agentId === 'leader'
-          ? { obligations: ['claude', 'hermes'], budgetStopped: 'team' }
-          : { obligations: [] },
+    const dispatch = vi.fn(async (p: ChatParticipant): Promise<ChatTurnOutcome> =>
+      p.agentId === 'leader'
+        ? { obligations: ['claude', 'hermes'], budgetStopped: 'team' }
+        : { obligations: [] },
     )
     const res = await runExchange({
       roomId: 'team:t1',

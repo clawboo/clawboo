@@ -1,14 +1,15 @@
 // The pure-engine side of the cascade CONTRACT: run `runCascadeContract` against an
-// in-memory `FakeBoard` (a deterministic mirror of the @clawboo/db board state
-// machine). The SAME contract runs against the REAL `serverBoardClient` in
-// apps/web/server/lib/teamChat/__tests__/boardOrchestration.contract.test.ts —
-// any divergence between the two board state machines fails one of the two runs.
+// in-memory `FakeBoard` that enforces the REAL transition rules (@clawboo/board-core,
+// the same module @clawboo/db enforces inside its write transaction). The SAME
+// contract runs against the REAL `serverBoardClient` in
+// apps/web/server/lib/teamChat/__tests__/boardOrchestration.contract.test.ts.
 //
 // Board-independent unit tests (extractSignals — structured-only signal parsing)
 // stay here directly; they don't touch a board.
 
 import { describe, expect, it } from 'vitest'
 
+import { canTransition, isTaskStatus } from '@clawboo/board-core'
 import type { RuntimeEvent } from '@clawboo/executor'
 
 import { extractSignals, type KnownAgent } from '../boardOrchestration'
@@ -34,20 +35,12 @@ interface FakeRow {
   assigneeAgentId: string | null
 }
 
-// Mirror of the server state machine (packages/db/src/board/state-machine.ts) so
-// the fake rejects an illegal transition exactly as the real repo's updateStatus
-// does (e.g. a `todo → done` after the task was released out from under a client).
-const LEGAL_TX: Record<string, readonly string[]> = {
-  backlog: ['todo', 'blocked', 'cancelled'],
-  todo: ['in_progress', 'blocked', 'backlog', 'cancelled'],
-  in_progress: ['in_review', 'done', 'blocked', 'todo', 'cancelled'],
-  in_review: ['done', 'in_progress', 'blocked', 'cancelled'],
-  blocked: ['todo', 'in_progress', 'backlog', 'cancelled'],
-  done: [],
-  cancelled: [],
-}
+// The fake rejects an illegal transition exactly as the real repo's updateStatus
+// does (e.g. a `todo → done` after the task was released out from under a client),
+// by consulting the shared rulebook rather than a hand-copied table. `status` is a
+// plain string on the row, so an off-list value is only ever a same-status no-op.
 const canTx = (from: string, to: string): boolean =>
-  from === to || (LEGAL_TX[from] ?? []).includes(to)
+  from === to || (isTaskStatus(from) && isTaskStatus(to) && canTransition(from, to))
 
 class FakeBoard implements CascadeBoard {
   tasks = new Map<string, FakeRow>()

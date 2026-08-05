@@ -12,6 +12,7 @@ import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { formatRelative } from '@/lib/formatRelative'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 import {
   fetchFleetSummary,
   fetchRecentIssues,
@@ -24,7 +25,7 @@ import { RUNTIME_CATALOG, type RuntimeId } from '../runtimes/runtimeCatalog'
 import { RuntimeDepthBadge, RuntimeGlyph } from '../runtimes/runtimeDepth'
 
 const SECTION_LABEL =
-  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
+  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'
 const CARD = 'rounded-2xl border border-border bg-surface'
 const CARD_SHADOW = { boxShadow: 'var(--shadow-raised)' } as const
 
@@ -52,13 +53,10 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
 }
 
 function HealthDot({ ok }: { ok: boolean | null }) {
-  const color = ok === null ? 'rgb(var(--foreground-rgb) / 0.3)' : ok ? 'var(--mint)' : 'var(--primary)'
+  const color =
+    ok === null ? 'rgb(var(--foreground-rgb) / 0.3)' : ok ? 'var(--mint)' : 'var(--primary)'
   return (
-    <span
-      aria-hidden
-      className="h-2 w-2 shrink-0 rounded-full"
-      style={{ background: color }}
-    />
+    <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
   )
 }
 
@@ -115,12 +113,19 @@ export function FleetHealth() {
   const [issues, setIssues] = useState<FleetIssue[]>([])
   const [loaded, setLoaded] = useState(false)
 
+  const reads = useReadSequencer()
+
   const refresh = useCallback(async () => {
+    // The Refresh button races the 8s poll; sequenced so an older read can't land last and
+    // replace what the user just pulled with staler numbers.
+    const read = reads.beginRead()
     const [s, i] = await Promise.all([fetchFleetSummary(), fetchRecentIssues()])
-    setSummary(s)
-    setIssues(i)
-    setLoaded(true)
-  }, [])
+    if (read.isCurrent()) {
+      setSummary(s)
+      setIssues(i)
+    }
+    if (read.isNewestRead()) setLoaded(true)
+  }, [reads])
 
   useEffect(() => {
     void refresh()
@@ -154,7 +159,10 @@ export function FleetHealth() {
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mx-auto flex max-w-[880px] flex-col gap-6">
           {/* Metric strip */}
-          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
+          <div
+            className="grid gap-3"
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}
+          >
             <MetricCard
               label="Agents"
               value={String(summary?.totalAgents ?? 0)}
@@ -237,7 +245,10 @@ export function FleetHealth() {
                       {e.runtime ? (
                         <span className="text-foreground/45"> · {runtimeName(e.runtime)}</span>
                       ) : null}
-                      <span className="text-foreground/40"> · {e.ts ? formatRelative(e.ts) : ''}</span>
+                      <span className="text-foreground/40">
+                        {' '}
+                        · {e.ts ? formatRelative(e.ts) : ''}
+                      </span>
                       {e.message ? (
                         <div className="mt-0.5 text-foreground/60">{e.message}</div>
                       ) : null}

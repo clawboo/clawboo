@@ -42,11 +42,11 @@ The global install gives you a persistent `clawboo` command and one-click in-app
 
 ### 2. Watch the launch sequence
 
-The CLI is a thin launcher. Its job is to get you to a running dashboard and open your browser there. In order, it:
+Run bare, the CLI is a thin launcher. Its job is to get you to a running dashboard and open your browser there. (It also carries `backup`, `stop`, and `restart`; see the [CLI reference](/reference/cli).) In order, it:
 
 1. **Prints the logo and tagline.**
 2. **Does an informational Gateway probe.** It opens a quick TCP connection to `localhost:18789` (the OpenClaw Gateway's default port). This is purely informational; it prints either `OpenClaw Gateway detected` or `No Gateway detected — the dashboard will guide you through setup.` and does not change what happens next. You do **not** need a Gateway running; the native runtime needs none at all.
-3. **Finds or starts the dashboard server.** First it looks for an already-running Clawboo dashboard (see [Port discovery](#port-discovery) below). If none is found, it starts the bundled server.
+3. **Finds or starts the dashboard server.** First it looks for an already-running Clawboo dashboard (see [Port discovery](#port-discovery) below). If it finds one, it asks that server what version it is and offers to restart it when it turns out to be older than the CLI you just ran, since the server is detached and would otherwise stay bound to the port on the old build. If none is found, it starts the bundled server.
 4. **Opens your browser** at the discovered URL.
 
 **Expected result:** you see a spinner that resolves to `Dashboard started`, then `Clawboo opened at http://localhost:18790` (or the next free port in the `18790–18809` range), and a "Clawboo is ready!" summary with next-step hints.
@@ -133,7 +133,7 @@ Deleting `~/.clawboo` permanently removes your teams, board tasks, chat history,
 ## Troubleshooting
 
 <Warning>
-**"Could not find the Clawboo server."** The launcher couldn't locate either the bundled `server.js` or a monorepo checkout. Re-run `npx clawboo` (this re-fetches the package), or install it explicitly with `npm install -g clawboo`.
+**"Could not find the Clawboo server."** The launcher couldn't locate either the bundled `server.js` or a monorepo checkout. Re-run `npx clawboo@latest` (the `@latest` is what forces a re-fetch; a bare `npx clawboo` can reuse whatever is already in npm's `_npx` cache), or install it explicitly with `npm install -g clawboo`.
 </Warning>
 
 <Warning>

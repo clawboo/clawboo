@@ -3,7 +3,7 @@ import type { TranscriptEntry } from '@clawboo/protocol'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
-import { useConnectionStore } from '@/stores/connection'
+import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useTeamStore } from '@/stores/team'
@@ -18,6 +18,10 @@ import {
   MessageComposer,
   type MessageComposerHandle,
 } from './chatComponents'
+import {
+  connectionStatusLabel,
+  connectionStatusTone,
+} from '@/features/connection/connectionStatusDisplay'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 import { parseTeamOrAgentMention } from '@/lib/parseTeamOrAgentMention'
 import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
@@ -109,15 +113,20 @@ export function ChatPanel({
   // null (probe pending/failed) never degrades the UI.
   const nativeState = useNativeRuntimeState(isNativeChat)
   const nativeKeyless = isNativeChat && nativeState === 'needs-auth'
-  // A native chat needs NO Gateway client; an OpenClaw chat does.
-  const canSend = Boolean(
-    (isNativeChat || client) &&
-    connectionStatus === 'connected' &&
-    agent &&
-    sessionKey &&
-    !isRunning &&
-    !nativeKeyless,
-  )
+  // A native chat rides the SERVER's SSE — no Gateway client, and a dropped
+  // Gateway socket is irrelevant to it, so `reconnecting` must not gate it off
+  // (mixed fleets are real: `hydrateFleetFromClient` merges non-OpenClaw agents
+  // into a Gateway-connected fleet). An OpenClaw chat needs BOTH a live client
+  // and a live socket, so a mid-session drop gates its composer until the WS is
+  // back — the send could not land anyway.
+  const transportReady = isNativeChat
+    ? isSessionLive(connectionStatus)
+    : Boolean(client) && connectionStatus === 'connected'
+  const canSend = Boolean(transportReady && agent && sessionKey && !isRunning && !nativeKeyless)
+  // The composer is live but the socket is not: say so, rather than leaving a
+  // silently-dead "Message…" box.
+  const gatewayReconnecting = !isNativeChat && connectionStatus === 'reconnecting'
+  const connectionTone = connectionStatusTone(connectionStatus)
 
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const teams = useTeamStore((s) => s.teams)
@@ -292,17 +301,25 @@ export function ChatPanel({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span
-              className={`h-1.5 w-1.5 rounded-full ${nativeKeyless ? 'bg-amber/80' : connectionStatus === 'connected' ? 'bg-mint' : 'bg-foreground/25'}`}
+              className={`h-1.5 w-1.5 rounded-full ${
+                nativeKeyless
+                  ? 'bg-amber/80'
+                  : connectionTone === 'live'
+                    ? 'bg-mint'
+                    : connectionTone === 'warn'
+                      ? 'bg-amber/80 animate-pulse'
+                      : 'bg-foreground/25'
+              }`}
               aria-hidden
             />
+            {/* The DOT carries the reconnect signal (amber + pulse); the label
+                keeps the standard muted tone. Same split as AgentDetailView, and
+                it keeps `nativeKeyless` — a real error — as the only state that
+                colours the text. */}
             <span
-              className={`font-mono text-[10px] uppercase tracking-[0.1em] ${nativeKeyless ? 'text-amber/90' : 'text-foreground/45'}`}
+              className={`font-mono text-[10px] uppercase tracking-[0.1em] ${nativeKeyless ? 'text-amber/90' : 'text-muted-foreground'}`}
             >
-              {nativeKeyless
-                ? 'Disconnected'
-                : connectionStatus === 'connected'
-                  ? 'Connected'
-                  : connectionStatus}
+              {nativeKeyless ? 'Disconnected' : connectionStatusLabel(connectionStatus)}
             </span>
             {nativeKeyless && (
               <button
@@ -369,15 +386,17 @@ export function ChatPanel({
             ? 'Clawboo Native is disconnected — set it up in Settings → Runtimes…'
             : !isNativeChat && !client
               ? 'Gateway not connected…'
-              : !sessionKey
-                ? 'No active session…'
-                : isRunning
-                  ? isNativeChat
-                    ? 'Thinking…'
-                    : 'Agent is working…'
-                  : isBooZeroChat
-                    ? 'Ask me anything… use @ to tag a team'
-                    : 'Message…'
+              : gatewayReconnecting
+                ? 'Reconnecting to Gateway…'
+                : !sessionKey
+                  ? 'No active session…'
+                  : isRunning
+                    ? isNativeChat
+                      ? 'Thinking…'
+                      : 'Agent is working…'
+                    : isBooZeroChat
+                      ? 'Ask me anything… use @ to tag a team'
+                      : 'Message…'
         }
       />
     </div>

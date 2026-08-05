@@ -31,9 +31,19 @@ New here? Welcome. The friendliest way in:
 2. Comment on the one you want ("I'd like to take this") and we will assign it to you. No need to ask twice.
 3. Follow **Setup** above, make your change on a branch, and open a PR. If you get stuck, say so in the issue. A half-finished PR with a question is completely welcome.
 
-Good starting areas that rarely need core changes: **new marketplace team templates**, **docs pages**, **a provider or runtime icon**, or **a test for an uncovered component**. If you are unsure whether an idea fits, open a [Discussion](https://github.com/clawboo/clawboo/discussions) first, before writing code.
+Good starting areas that rarely need core changes: **new marketplace team templates**, [**docs pages**](#documentation), **a provider or runtime icon**, or **a test for an uncovered component**. If you are unsure whether an idea fits, open a [Discussion](https://github.com/clawboo/clawboo/discussions) first, before writing code.
 
 New to the codebase? The [Internals map](https://docs.claw.boo/internals) is a guided tour of how the pieces fit together, and it flags "caution surfaces": files that encode load-bearing fixes worth reading before you change them.
+
+## Documentation
+
+The docs live in `docs/`, and that directory **is** the site: hand-edited Mintlify Markdown with no build step. Merging to `main` redeploys [docs.claw.boo](https://docs.claw.boo) as-is, so the files in your PR are exactly what ships.
+
+**Frontmatter is parsed as YAML, so quote any `title` or `description` value that contains a colon, or that starts with `@` or a backtick.** An unquoted `:` followed by a space parses as a nested mapping and Mintlify serves the page as a 404 instead of rendering it. Preview with `mint dev` (the Mintlify CLI, `npx mint dev` if you have not installed it) before opening a docs PR: a full build is what surfaces this, whereas `check-links` only validates links. `pnpm check:docs` catches it too, and runs as part of `pnpm lint` and CI.
+
+Either quote style is valid YAML; Prettier normalizes them to single quotes when the pre-commit hook formats your page. One sibling rule, same class of breakage: **never put a bare `%` in a body heading** — Mintlify URI-decodes headings into anchor slugs and fails the page on invalid percent-encoding. A `%` in prose is fine. `pnpm check:docs` enforces both.
+
+See [`docs/README.md`](./docs/README.md) for the rest of the workflow: the directory layout, adding a page to the `docs.json` navigation, previewing locally, and the Mintlify-flavored conventions these pages use.
 
 ## Branching
 
@@ -49,13 +59,19 @@ We use [GitHub Flow](https://docs.github.com/en/get-started/using-git/github-flo
 ```bash
 pnpm build                              # build all packages and apps
 pnpm typecheck                          # tsc --noEmit across the monorepo
-pnpm lint                               # ESLint flat config across all packages
+pnpm lint                               # ESLint flat config across all packages, plus the docs frontmatter + heading checks
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright end-to-end tests (incl. board round-trip + eval smoke)
-pnpm assemble && pnpm test:clean-install  # bundle the CLI and smoke-test a clean install
+pnpm verify:ingest                      # marketplace codegen drift gate
+pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the tarball, and smoke-test it
+pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
 ```
 
-Run them locally before pushing to avoid back-and-forth.
+Run them locally before pushing to avoid back-and-forth. Every one of them runs as a CI job too.
+
+`pnpm e2e` needs a built workspace (`pnpm build` first) and a Chromium download (`pnpm exec playwright install chromium`). It sandboxes itself into a throwaway `$HOME`, so it never touches your real `~/.clawboo`.
+
+`pnpm test:clean-install` packs `apps/cli` and installs the tarball into a throwaway temp dir, so it needs network access for the `npm install`. It also refuses to run while another Clawboo dashboard is listening on `18790`–`18809` (it would attach to that one instead of the tarball) — stop your `pnpm dev` server first.
 
 ---
 
@@ -65,11 +81,11 @@ Run them locally before pushing to avoid back-and-forth.
 
 Keep PRs focused. Split unrelated changes into separate PRs.
 
-Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines, you are on a different pnpm than the pinned `9.15.0`: run `corepack enable`, then `pnpm install`, and commit only the intended lockfile change.
+Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines, you are on a different pnpm than the pinned `9.15.0`: run `corepack enable`, then `pnpm install`, and commit only the intended lockfile change. (Dependency bumps mostly arrive on their own: Dependabot runs weekly with three grouped entries, one for the root workspace, one for `website/`, and one for the GitHub Actions pins, so you rarely need to touch the lockfile by hand. Major bumps, plus `better-sqlite3` and `ws`, deliberately come as their own PRs.)
 
 ### 2. Pass CI before requesting review
 
-Every PR must pass `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`. New surfaces should also pass `pnpm e2e`.
+Every PR must pass CI: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a red check is a red check: fix it, or say in the PR why it is unrelated.
 
 ### 3. Add a changeset for user-facing changes
 

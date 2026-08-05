@@ -20,9 +20,7 @@ There is no `src/index.ts` barrel to enumerate. The "API" of this package is the
 ```json
 {
   "extends": "@clawboo/tsconfig/base.json",
-  "compilerOptions": {
-    /* per-package overrides */
-  }
+  "compilerOptions": {/* per-package overrides */}
 }
 ```
 

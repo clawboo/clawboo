@@ -145,11 +145,7 @@ export function isRuntimeId(id: string): id is NonOpenClawRuntimeId {
 
 /** The runtime's connection state, derived without exposing any secret value. */
 export type RuntimeConnectionState =
-  | 'not-installed'
-  | 'needs-auth'
-  | 'needs-login'
-  | 'ready'
-  | 'unknown'
+  'not-installed' | 'needs-auth' | 'needs-login' | 'ready' | 'unknown'
 
 export function deriveConnectionState(
   d: RuntimeDescriptor,

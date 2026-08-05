@@ -27,6 +27,7 @@ import {
 
 import { useTeamStore } from '@/stores/team'
 import { fetchBoardResult, type BoardTask } from '@/lib/boardClient'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Button } from '@/features/shared/Button'
@@ -42,11 +43,12 @@ import { TaskDetailDrawer } from './TaskDetailDrawer'
 import { ApprovalsColumn } from './ApprovalsColumn'
 import { NewTaskDialog } from './NewTaskDialog'
 import { STATUS_LABEL, TASK_STATUSES, canTransition, statusOptions } from './boardStatus'
+import { BOARD_ACCESSIBILITY, OTHER_COLUMN } from './boardAnnouncements'
 import { useStatusMutation } from './useStatusMutation'
 import { resolveDrop } from './resolveDrop'
 
 const SECTION_LABEL =
-  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45'
+  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'
 const COUNT_PILL =
   'font-data rounded-full bg-foreground/[0.06] px-2.5 py-0.5 text-[11px] font-semibold text-foreground/55'
 
@@ -58,9 +60,10 @@ const COLUMNS: { id: string; label: string }[] = TASK_STATUSES.map((id) => ({
   label: STATUS_LABEL[id],
 }))
 const COLUMN_IDS = new Set(COLUMNS.map((c) => c.id))
-// A task with a status outside the canonical 7 lands here instead of being
-// silently dropped (counted in the header but rendered nowhere).
-const OTHER_COLUMN = { id: '__other__', label: 'Other' }
+// `OTHER_COLUMN` — the catch-all for a status outside the canonical 7, so such a
+// task isn't silently dropped — lives in `boardAnnouncements` alongside the
+// label mapping the screen-reader announcements read, so the column and its
+// spoken name can't drift apart.
 
 function verdictStatus(task: BoardTask): 'pass' | 'fail' | 'completed_with_debt' | null {
   const v = task['verification']
@@ -119,7 +122,7 @@ function TaskCard({ task, onClick }: { task: BoardTask; onClick: () => void }) {
           <span className="font-data text-[11px] text-foreground/50">{formatCostUsd(cost)}</span>
         )}
         {task['parentTaskId'] ? (
-          <span className="inline-flex items-center gap-1 text-[11px] text-foreground/40">
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
             <CornerDownRight size={11} strokeWidth={2} /> sub
           </span>
         ) : null}
@@ -150,7 +153,10 @@ function DraggableCard({
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.id,
-    data: { fromStatus: task.status },
+    // `title` rides along so the screen-reader announcements can name the card
+    // without reaching back into `effectiveTasks` — see boardAnnouncements.ts
+    // for why a closure over board state is unsafe at announcement time.
+    data: { fromStatus: task.status, title: task.title ?? '(untitled)' },
     disabled,
   })
   return (
@@ -218,7 +224,7 @@ function BoardColumn({
           </motion.div>
         ))}
         {items.length === 0 && (
-          <div className="py-3.5 text-center text-[11px] text-foreground/30">No tasks</div>
+          <div className="py-3.5 text-center text-[11px] text-muted-foreground">No tasks</div>
         )}
       </div>
     </div>
@@ -239,6 +245,11 @@ export function BoardPanel() {
   // Mirrors `loaded` for the refresh closure so `refresh` stays dep-stable
   // (`[teamFilter]`) and the 5s poll doesn't re-create the interval each load.
   const loadedRef = useRef(false)
+  // Reads overlap by design here (the 5s poll, Refresh/Retry, the post-create reconcile)
+  // and a local commit can land between a GET being issued and its response arriving, so
+  // the board snapshot is sequenced last-write-wins. See useReadSequencer for the two
+  // staleness rules; the drag path is exactly why a plain generation counter isn't enough.
+  const reads = useReadSequencer()
 
   // Optimistic drag moves: taskId → target status, laid on top of `tasks` so the card
   // sits in its new column while the PATCH is in flight. Short-lived — cleared the
@@ -258,9 +269,16 @@ export function BoardPanel() {
   )
 
   const refresh = useCallback(async () => {
+    // Claimed synchronously, before the await — so `handleCreated`'s optimistic
+    // prepend and its reconcile read invalidate any in-flight read in the same tick.
+    const read = reads.beginRead()
     setRefreshing(true)
     try {
       const res = await fetchBoardResult(teamFilter === 'all' ? undefined : teamFilter)
+      // Superseded by a newer read, or by a local commit made after this read was
+      // issued → a stale snapshot. Drop it rather than reverting newer state; the
+      // next poll (≤5s) reconciles against a response that saw the commit.
+      if (!read.isCurrent()) return
       if (res.ok) {
         setTasks(res.tasks)
         setFetchOk(true)
@@ -272,11 +290,19 @@ export function BoardPanel() {
       // A transient poll failure AFTER a good load keeps the last good snapshot —
       // don't blank a populated, actively-watched board to the error screen.
     } finally {
-      setRefreshing(false)
-      setLoaded(true)
-      loadedRef.current = true
+      // A `return` above still runs this, so the loading chrome needs its own guard:
+      // an older read must neither clear the spinner while a newer read is still
+      // running, nor dismiss the skeleton on a team-filter switch (which would flash
+      // the previous team's tasks). `isNewestRead` (not `isCurrent`) on purpose — see
+      // useReadSequencer. The newest read always resolves (`fetchBoardResult` never
+      // throws), so `loaded` can't get stuck.
+      if (read.isNewestRead()) {
+        setRefreshing(false)
+        setLoaded(true)
+        loadedRef.current = true
+      }
     }
-  }, [teamFilter])
+  }, [teamFilter, reads])
 
   useEffect(() => {
     setLoaded(false) // a team-filter change re-enters the loading state
@@ -293,11 +319,12 @@ export function BoardPanel() {
     (task: BoardTask) => {
       const matchesFilter = teamFilter === 'all' || task.teamId === teamFilter
       if (matchesFilter) {
+        reads.commitLocalWrite() // a read already in flight predates this prepend
         setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [task, ...prev]))
       }
       void refresh()
     },
-    [teamFilter, refresh],
+    [teamFilter, refresh, reads],
   )
 
   // Tasks with any in-flight optimistic drag move applied, so the board (and the 5s
@@ -366,11 +393,16 @@ export function BoardPanel() {
         rollback: () => clearOverride(move.taskId),
       })
       if (ok) {
+        // The override bridged the in-flight PATCH (it layers over `tasks`, so no read
+        // could clobber it). Clearing it hands authority back to `tasks`, so the commit
+        // must also fence off any read issued before this point — otherwise that read
+        // lands with the pre-drag status and snaps the card back to its old column.
+        reads.commitLocalWrite()
         setTasks((prev) => prev.map((t) => (t.id === move.taskId ? { ...t, status: move.to } : t)))
         clearOverride(move.taskId)
       }
     },
-    [effectiveTasks, mutate, clearOverride],
+    [effectiveTasks, mutate, clearOverride, reads],
   )
 
   // Mid-drag, a card may only land on a column it can legally transition to; all other
@@ -448,6 +480,10 @@ export function BoardPanel() {
         <DndContext
           sensors={sensors}
           collisionDetection={boardCollision}
+          // Replaces dnd-kit's defaults, which announce raw task uuids and raw
+          // status ids. Module constants → stable identity → the internal
+          // useDndMonitor never re-registers.
+          accessibility={BOARD_ACCESSIBILITY}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onDragCancel={() => setActiveTask(null)}

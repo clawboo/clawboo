@@ -1,0 +1,16 @@
+{
+  "extends": "@clawboo/tsconfig/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    // Deliberately empty, and tests are excluded so nothing (not even a test
+    // dependency's transitive types) can pull node ambients into this program:
+    // a node global (`process`, `Buffer`) in the source is a typecheck error —
+    // the type-level counterpart of the purity guards in
+    // apps/web/src/__tests__/browserBundlePurity.test.ts. Tests typecheck via
+    // tsconfig.test.json (second half of the `typecheck` script).
+    "types": []
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "src/__tests__"]
+}

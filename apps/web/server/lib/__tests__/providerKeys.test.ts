@@ -39,7 +39,12 @@ describe('providerKeys', () => {
     process.env['CLAWBOO_HOME'] = clawbooHome
     process.env['OPENCLAW_STATE_DIR'] = stateDir
     delete process.env['CLAWBOO_SECRETS_MASTER_KEY']
-    for (const k of ['ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'MISTRAL_API_KEY'])
+    for (const k of [
+      'ANTHROPIC_API_KEY',
+      'OPENROUTER_API_KEY',
+      'GEMINI_API_KEY',
+      'MISTRAL_API_KEY',
+    ])
       delete process.env[k]
   })
   afterEach(() => {

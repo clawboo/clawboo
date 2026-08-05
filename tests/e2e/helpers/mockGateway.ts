@@ -17,6 +17,13 @@ export interface MockGateway {
   port: number
   /** Shut down the server */
   close: () => void
+  /**
+   * Kill every live connection but KEEP listening — simulates a Gateway that
+   * dropped the socket (sleep / restart) and will accept a reconnect. The proxy
+   * mirrors the upstream close onto the browser socket, which is what drives the
+   * browser client into its `reconnecting` state.
+   */
+  dropConnections: () => void
   /** All received frames (for assertions) */
   received: Frame[]
 }
@@ -178,6 +185,9 @@ export async function startMockGateway(): Promise<MockGateway> {
     url: `ws://127.0.0.1:${port}`,
     port,
     close: () => wss.close(),
+    dropConnections: () => {
+      for (const client of wss.clients) client.terminate()
+    },
     received,
   }
 }

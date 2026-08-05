@@ -36,9 +36,10 @@ export function SearchInput({
       <Search
         size={d.icon}
         strokeWidth={2}
-        className={['pointer-events-none absolute top-1/2 -translate-y-1/2 text-foreground/35', d.ipos].join(
-          ' ',
-        )}
+        className={[
+          'pointer-events-none absolute top-1/2 -translate-y-1/2 text-foreground/35',
+          d.ipos,
+        ].join(' ')}
       />
       <input
         type="text"

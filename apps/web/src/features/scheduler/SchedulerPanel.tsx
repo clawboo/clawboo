@@ -33,6 +33,7 @@ import {
 } from '@/lib/schedulesClient'
 import { useToastStore } from '@/stores/toast'
 import { confirm } from '@/stores/confirm'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 
 import { canScheduleOwnLife, formatScheduleLabel } from './scheduleHelpers'
 import { RuntimeGlyph } from '../runtimes/runtimeDepth'
@@ -186,7 +187,9 @@ function ScheduleRow({ rec, onChanged }: { rec: ScheduleRecord; onChanged: () =>
               void (async () => {
                 if (
                   !(await confirm({
-                    title: ownLife ? 'Delete this Gateway cron job?' : 'Delete this scheduled routine?',
+                    title: ownLife
+                      ? 'Delete this Gateway cron job?'
+                      : 'Delete this scheduled routine?',
                     message: ownLife
                       ? "It removes the agent's own scheduled wake on the OpenClaw Gateway."
                       : 'It is removed permanently.',
@@ -203,7 +206,7 @@ function ScheduleRow({ rec, onChanged }: { rec: ScheduleRecord; onChanged: () =>
           </IconButton>
         </div>
       ) : (
-        <span className="flex-shrink-0 font-mono text-[9.5px] uppercase tracking-[0.14em] text-foreground/40">
+        <span className="flex-shrink-0 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
           read-only
         </span>
       )}
@@ -427,12 +430,7 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
         <Field label="Runs">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {CRON_PRESETS.map((p) => (
-              <Chip
-                key={p.cron}
-                active={cron === p.cron}
-                onClick={() => setCron(p.cron)}
-                size="sm"
-              >
+              <Chip key={p.cron} active={cron === p.cron} onClick={() => setCron(p.cron)} size="sm">
                 {p.label}
               </Chip>
             ))}
@@ -469,7 +467,7 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-      <label className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+      <label className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </label>
       {children}
@@ -493,12 +491,20 @@ export function SchedulerPanel() {
   const [loaded, setLoaded] = useState(false)
   const [showDialog, setShowDialog] = useState(false)
 
+  const reads = useReadSequencer()
+
   const refresh = useCallback(async () => {
+    // Every row action (pause / resume / run-now) and the create dialog reconcile through
+    // this read, and the Refresh button races the 8s poll. Sequenced last-write-wins so a
+    // read issued before a toggle can't land after it and show the pre-toggle state.
+    const read = reads.beginRead()
     const view = await fetchSchedules()
-    setSchedules(view.schedules)
-    setSources(view.sources)
-    setLoaded(true)
-  }, [])
+    if (read.isCurrent()) {
+      setSchedules(view.schedules)
+      setSources(view.sources)
+    }
+    if (read.isNewestRead()) setLoaded(true)
+  }, [reads])
 
   useEffect(() => {
     void refresh()
@@ -561,7 +567,7 @@ export function SchedulerPanel() {
           {groups.map((g) => (
             <div key={g.domain}>
               <div style={{ marginBottom: 12 }}>
-                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                   {DOMAIN_META[g.domain].title}
                 </span>
                 <span style={{ marginLeft: 10 }} className="text-[11.5px] text-foreground/40">

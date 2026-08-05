@@ -65,12 +65,20 @@ Yes, with guardrails. **Routines** schedule recurring team-task work on a cron e
 
 Pair Routines with [governance](/concepts/governance) before leaving a fleet unattended: budgets (track-and-warn by default, hard-cap opt-in), tool-loop circuit breakers, depth/fan-out/cost caps, and approval gates are the controls that keep an unsupervised run from running away. Verification ([builder ≠ judge](/concepts/verification)) keeps "done" meaning _verified_ rather than merely claimed.
 
+## How do I stop the Clawboo server?
+
+`clawboo stop`. The launcher starts the dashboard server **detached**, so it outlives the terminal you launched it from and there is usually no Ctrl-C to press. `clawboo stop` finds the running instance through `~/.clawboo/api-port.txt` and terminates it, and it is safe to run when nothing is running.
+
+`clawboo restart` stops it and starts a fresh one on the same port, which is what you want after `npm install -g clawboo@latest`: installing replaces the bytes on disk, not the process already running the old ones. Running `clawboo` also notices this on its own now, and offers to restart an older server rather than attaching to it. See the [CLI reference](/reference/cli#clawboo-stop).
+
 ## How do I reset Clawboo?
 
 There is no schema migration ladder; a schema change is a hard reset of the local database, which `createDb()` re-bootstraps on the next connect. So "reset" means delete the database file.
 
-- **Reset just the data** (keep keys + settings): stop the server, then `rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm`.
-- **Full reset** (everything, including provider keys): `rm -rf ~/.clawboo` then `clawboo` (or `npx clawboo`).
+- **Reset just the data** (keep keys + settings): `clawboo stop`, then `rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm`.
+- **Full reset** (everything, including provider keys): `clawboo stop`, then `rm -rf ~/.clawboo`, then `clawboo`.
+
+If you set `CLAWBOO_HOME`, substitute that directory for `~/.clawboo` in both commands — every path below resolves through it.
 
 The full reset is destructive; it removes the vault, the proxy device identity, and all teams/board/chat/memory data. Back up `~/.clawboo` first if any of it matters. Full instructions and the WAL-sidecar caveat are in [data and state → hard reset](/operating/data-and-state#hard-reset).
 

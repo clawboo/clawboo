@@ -37,6 +37,7 @@ import {
   type GatewayDegradeReason,
   type ReconnectPhase,
 } from './GatewayReconnectBanner'
+import { LiveReconnectBanner } from './LiveReconnectBanner'
 import { classifyReconnectError, type ReconnectErrorKind } from './reconnectError'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import {
@@ -53,7 +54,7 @@ import {
   decideOnboardingView,
 } from '@/lib/onboardingProgress'
 import { useGatewayEvents } from './useGatewayEvents'
-import { useConnectionStore } from '@/stores/connection'
+import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useApprovalsStore } from '@/stores/approvals'
 import { fetchExecConfigMap } from '@/lib/execConfigMap'
@@ -748,7 +749,10 @@ export function GatewayBootstrap() {
     const tryAutoConnect = async () => {
       // Native mode (or any path that already connected) needs no Gateway — the
       // reload native branch sets status='connected' with a null client.
-      if (useConnectionStore.getState().status === 'connected') return
+      // `isSessionLive` also covers 'reconnecting': a live client whose socket
+      // dropped is already retrying on its own backoff, so a second connect here
+      // would race it and leak a duplicate client.
+      if (isSessionLive(useConnectionStore.getState().status)) return
       // A native-mode hydrate FAILURE sets status='error' (+ surfaces the nativeError
       // retry overlay). Don't kick off a pointless Gateway auto-connect round-trip,
       // which would also flash the 'Reconnecting…' spinner on top of the error — the
@@ -817,12 +821,21 @@ export function GatewayBootstrap() {
         // No token here: the same-origin proxy injects the upstream token server-side,
         // so the browser never holds it (GET /api/settings returns only `hasToken`).
         const autoClient = new GatewayClient()
-        await autoClient.connect(resolveProxyGatewayUrl(), {
-          clientName: 'openclaw-control-ui',
-          clientVersion: '0.1.0',
-          authScopeKey: data.gatewayUrl.trim(),
-          disableDeviceAuth: true,
-        })
+        // A failed connect rejects from `ws.onclose` — which ALSO arms the
+        // client's own reconnect loop (the close was not a manual disconnect).
+        // Without this disconnect the discarded client keeps retrying against
+        // the Gateway forever, invisible to the app.
+        try {
+          await autoClient.connect(resolveProxyGatewayUrl(), {
+            clientName: 'openclaw-control-ui',
+            clientVersion: '0.1.0',
+            authScopeKey: data.gatewayUrl.trim(),
+            disableDeviceAuth: true,
+          })
+        } catch (err) {
+          autoClient.disconnect()
+          throw err
+        }
 
         setStatus('connected')
         setGatewayUrl(data.gatewayUrl.trim())
@@ -883,11 +896,18 @@ export function GatewayBootstrap() {
             if (prev) prev.disconnect()
 
             const autoClient = new GatewayClient()
-            await autoClient.connect(resolveProxyGatewayUrl(), {
-              clientName: 'openclaw-control-ui',
-              clientVersion: '0.1.0',
-              disableDeviceAuth: true,
-            })
+            // See the auto-connect path: a rejected connect leaves the client
+            // retrying on its own backoff unless it is explicitly disconnected.
+            try {
+              await autoClient.connect(resolveProxyGatewayUrl(), {
+                clientName: 'openclaw-control-ui',
+                clientVersion: '0.1.0',
+                disableDeviceAuth: true,
+              })
+            } catch (err) {
+              autoClient.disconnect()
+              throw err
+            }
 
             setStatus('connected')
             setGatewayUrl(url)
@@ -961,11 +981,19 @@ export function GatewayBootstrap() {
     const prev = useConnectionStore.getState().client
     if (prev) prev.disconnect()
     const gwClient = new GatewayClient()
-    await gwClient.connect(resolveProxyGatewayUrl(), {
-      clientName: 'openclaw-control-ui',
-      clientVersion: '0.1.0',
-      disableDeviceAuth: true,
-    })
+    // See the auto-connect path: the throw propagates to `failGatewayRecovery`,
+    // which never sees `gwClient` — so stop its reconnect loop here or it retries
+    // against the Gateway forever.
+    try {
+      await gwClient.connect(resolveProxyGatewayUrl(), {
+        clientName: 'openclaw-control-ui',
+        clientVersion: '0.1.0',
+        disableDeviceAuth: true,
+      })
+    } catch (err) {
+      gwClient.disconnect()
+      throw err
+    }
     await enterGatewayMode(gwClient, url)
   }, [])
 
@@ -1043,6 +1071,20 @@ export function GatewayBootstrap() {
     setReconnectErrorKind(null)
   }, [])
 
+  // ── Escape from a live socket that never comes back ────────────────────────
+  // The client retries forever (800ms x 1.7, capped 15s), so a permanently-dead
+  // Gateway would otherwise pin the app on 'reconnecting' with no route back to
+  // the connect form. `disconnect()` sets the client's manual flag, which stops
+  // the backoff loop; nulling the client tears down the event + status
+  // subscriptions; 'disconnected' drops out of the live session so the connect
+  // screen can render.
+  const handleConnectManually = useCallback(() => {
+    const conn = useConnectionStore.getState()
+    conn.client?.disconnect()
+    conn.setClient(null)
+    conn.setStatus('disconnected')
+  }, [])
+
   // Clear the degraded banner the moment a LIVE Gateway client comes up by ANY
   // path — e.g. the user re-pairs via the banner's "Settings" escape → Runtimes →
   // `enterGatewayMode` — not only via the banner's own Reconnect. Gated to
@@ -1084,6 +1126,12 @@ export function GatewayBootstrap() {
       // Wizard run finished — drop the in-progress marker so future refreshes
       // take the returning-user fast path instead of resuming the wizard.
       clearWizardActive()
+      // ...and retire it for THIS page session too (the native branch above does
+      // the same). Without this, `showWizard` stays true for the rest of the
+      // session and the only thing keeping the wizard unmounted is the connected
+      // status — so any later drop back out of a live session would re-open the
+      // full onboarding wizard over a working dashboard.
+      setShowWizard(false)
 
       // Disconnect old client before replacing to avoid leaked WS listeners
       const prev = useConnectionStore.getState().client
@@ -1126,13 +1174,19 @@ export function GatewayBootstrap() {
     [setStatus, setGatewayUrl, setClient, hydrateFleet],
   )
 
-  const isConnected = status === 'connected'
+  // "Inside a live session" — connected, OR connected with the socket transiently
+  // down and the client retrying. Every overlay below gates on this rather than a
+  // strict `=== 'connected'`, so a mid-session drop keeps the workspace up instead
+  // of throwing the connect modal (or the onboarding wizard) over it. Surfaces
+  // that mean "the Gateway is usable RIGHT NOW" stay strict — see the degraded
+  // banner below and the auto-clear effect above.
+  const inSession = isSessionLive(status)
 
   return (
     <>
       <AnimatePresence>
         {/* First-time onboarding wizard */}
-        {!isConnected && showWizard === true && (
+        {!inSession && showWizard === true && (
           <OnboardingWizard
             key="onboarding"
             onComplete={handleOnboardingComplete}
@@ -1140,9 +1194,11 @@ export function GatewayBootstrap() {
           />
         )}
 
-        {/* Auto-connecting spinner — shown while we attempt a silent reconnect.
-            Suppressed during a native-mode error so it never overlays the retry. */}
-        {!isConnected && showWizard === false && autoConnecting && !nativeError && (
+        {/* Auto-connecting spinner — the MOUNT-TIME silent reconnect for a
+            returning user. Distinct from the live-drop banner further down (this
+            one blocks; that one floats). Suppressed during a native-mode error so
+            it never overlays the retry. */}
+        {!inSession && showWizard === false && autoConnecting && !nativeError && (
           <motion.div
             key="auto-connecting"
             initial={{ opacity: 0 }}
@@ -1159,7 +1215,7 @@ export function GatewayBootstrap() {
         )}
 
         {/* Gateway offline — can auto-start */}
-        {!isConnected && showWizard === false && !autoConnecting && gatewayOffline && (
+        {!inSession && showWizard === false && !autoConnecting && gatewayOffline && (
           <motion.div
             key="gateway-offline"
             initial={{ opacity: 0 }}
@@ -1213,7 +1269,7 @@ export function GatewayBootstrap() {
                   type="button"
                   onClick={handleStartGateway}
                   disabled={startingGateway}
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary-solid font-mono text-[13px] font-semibold tracking-wide text-primary-foreground shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {startingGateway ? (
                     <>
@@ -1233,7 +1289,7 @@ export function GatewayBootstrap() {
                 <button
                   type="button"
                   onClick={() => setGatewayOffline(false)}
-                  className="font-mono text-[11px] text-secondary/35 underline underline-offset-2 transition hover:text-secondary"
+                  className="font-mono text-[11px] text-muted-foreground underline underline-offset-2 transition hover:text-secondary"
                 >
                   Connect manually
                 </button>
@@ -1242,8 +1298,11 @@ export function GatewayBootstrap() {
           </motion.div>
         )}
 
-        {/* Returning-user quick reconnect modal — only shown when auto-connect is not in progress */}
-        {!isConnected &&
+        {/* Returning-user quick reconnect modal — only shown when auto-connect is
+            not in progress. Gated on `inSession`, NOT on a strict 'connected', so
+            a live socket drop does not throw this full-screen modal over a
+            working dashboard on every blip. */}
+        {!inSession &&
           showWizard === false &&
           !autoConnecting &&
           !gatewayOffline &&
@@ -1252,7 +1311,7 @@ export function GatewayBootstrap() {
 
       {/* Fleet hydration error overlay */}
       <AnimatePresence>
-        {isConnected && fleetError && (
+        {inSession && fleetError && (
           <motion.div
             key="fleet-error"
             initial={{ opacity: 0 }}
@@ -1269,7 +1328,7 @@ export function GatewayBootstrap() {
                     setFleetError(null)
                     if (client) void hydrateFleet(client)
                   }}
-                  className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-primary-foreground"
+                  className="rounded-lg bg-primary-solid px-4 py-2 text-[13px] font-medium text-primary-foreground"
                 >
                   Retry
                 </button>
@@ -1278,6 +1337,9 @@ export function GatewayBootstrap() {
                   onClick={() => {
                     setFleetError(null)
                     client?.disconnect()
+                    // Drop the dead client too, so its subscriptions tear down
+                    // and nothing downstream reads a disconnected client as live.
+                    setClient(null)
                     setStatus('disconnected')
                   }}
                   className="rounded-lg border border-border px-4 py-2 text-[13px] text-secondary"
@@ -1313,7 +1375,7 @@ export function GatewayBootstrap() {
                       setNativeError('Could not load your workspace. The server may be restarting.')
                   })
                 }}
-                className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-primary-foreground"
+                className="rounded-lg bg-primary-solid px-4 py-2 text-[13px] font-medium text-primary-foreground"
               >
                 Retry
               </button>
@@ -1324,9 +1386,15 @@ export function GatewayBootstrap() {
 
       {/* Non-blocking degraded-Gateway reconnect banner — floats over the loaded
           dashboard for a user with gateway-independent agents, instead of a
-          full-screen block. */}
+          full-screen block.
+
+          Deliberately gated on the STRICT `status === 'connected'`, not
+          `inSession`: it shares its fixed coordinates with the live-drop banner
+          below, and keeping one on 'connected' and the other on 'reconnecting'
+          makes the two mutually exclusive by construction (no overlap, and never
+          two simultaneous aria-live regions). */}
       <AnimatePresence>
-        {isConnected && gatewayDegraded && (
+        {status === 'connected' && gatewayDegraded && (
           <GatewayReconnectBanner
             key="gateway-reconnect"
             reason={gatewayDegraded}
@@ -1341,6 +1409,19 @@ export function GatewayBootstrap() {
         )}
       </AnimatePresence>
 
+      {/* Live socket drop — the client is already retrying on its own backoff, so
+          this is a slim informational banner rather than a block. Its own
+          AnimatePresence: sharing the degraded banner's would cross-fade two
+          elements at identical fixed coordinates. */}
+      <AnimatePresence>
+        {status === 'reconnecting' && (
+          <LiveReconnectBanner
+            key="gateway-live-reconnect"
+            onConnectManually={handleConnectManually}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Post-onboarding "Click a Boo" tip — separate from the wizard stack */}
       <AnimatePresence>
         {showBooTip && <BooTip key="boo-tip" onDismiss={() => setShowBooTip(false)} />}
@@ -1348,7 +1429,7 @@ export function GatewayBootstrap() {
 
       {/* One-time capability tour — auto-opens once the shell is settled (no
           onboarding tip showing) and never again. */}
-      <CapabilityTour show={isConnected && !showBooTip} />
+      <CapabilityTour show={inSession && !showBooTip} />
     </>
   )
 }

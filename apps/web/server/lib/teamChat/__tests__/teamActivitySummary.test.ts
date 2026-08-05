@@ -98,16 +98,40 @@ describe('buildTeamActivitySummary', () => {
     createTask(db, { title: 'Write Zhihu long-form', status: 'in_progress', teamId: TEAM })
     // Saved team memory (team-scoped) + a global fact that must NOT leak in.
     const mem = new SqliteMemoryStore(db)
-    await mem.saveFact({ title: 'Brand voice', content: 'Playful, punchy, culturally fluent.', scope: { teamId: TEAM } })
+    await mem.saveFact({
+      title: 'Brand voice',
+      content: 'Playful, punchy, culturally fluent.',
+      scope: { teamId: TEAM },
+    })
     await mem.saveFact({ title: 'Global note', content: 'unrelated cross-team fact', scope: {} })
 
     const k1 = buildTeamSessionKey('m1', TEAM)
     const k2 = buildTeamSessionKey('m2', TEAM)
-    chat(k1, { kind: 'assistant', role: 'assistant', text: 'Weibo campaign draft is ready.', sessionKey: k1 })
-    chat(k2, { kind: 'meta', role: 'system', text: 'session note — should be dropped', sessionKey: k2 })
-    chat(k1, { kind: 'assistant', role: 'assistant', text: '[Team Update] batched status', sessionKey: k1 })
+    chat(k1, {
+      kind: 'assistant',
+      role: 'assistant',
+      text: 'Weibo campaign draft is ready.',
+      sessionKey: k1,
+    })
+    chat(k2, {
+      kind: 'meta',
+      role: 'system',
+      text: 'session note — should be dropped',
+      sessionKey: k2,
+    })
+    chat(k1, {
+      kind: 'assistant',
+      role: 'assistant',
+      text: '[Team Update] batched status',
+      sessionKey: k1,
+    })
     chat(k2, 'not-json{') // malformed — must be skipped, not sink the summary
-    chat(k2, { kind: 'assistant', role: 'assistant', text: 'Zhihu piece is 80% done.', sessionKey: k2 })
+    chat(k2, {
+      kind: 'assistant',
+      role: 'assistant',
+      text: 'Zhihu piece is 80% done.',
+      sessionKey: k2,
+    })
 
     const out = await buildTeamActivitySummary(db, TEAM)
     expect(out).not.toBeNull()

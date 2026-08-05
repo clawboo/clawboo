@@ -274,12 +274,14 @@ function ChatGptSubscriptionRow({
             {connected && <StatusPill tone="success" label="Connected" />}
           </div>
           {!connected && (
-            <div className="mt-0.5 truncate text-[11px] text-foreground/45">No API key needed</div>
+            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+              No API key needed
+            </div>
           )}
         </div>
 
         {connected ? (
-          <span className="text-[11px] text-foreground/40">Managed by the Codex CLI</span>
+          <span className="text-[11px] text-muted-foreground">Managed by the Codex CLI</span>
         ) : expanded ? (
           <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>
             Cancel

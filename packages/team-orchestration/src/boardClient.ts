@@ -6,18 +6,13 @@
 // failures resolve to a null/false result, never throw) and 409-aware: a claim
 // conflict means "someone else won" and MUST NOT be retried.
 
-// The 7 canonical task statuses. Declared locally (not imported from @clawboo/db)
-// so this host-agnostic interface package stays free of the server/db graph; it is
-// structurally identical to @clawboo/db's `TaskStatus`, so a host binding over the
-// direct-DB client still type-checks.
-export type TaskStatus =
-  | 'backlog'
-  | 'todo'
-  | 'in_progress'
-  | 'in_review'
-  | 'blocked'
-  | 'done'
-  | 'cancelled'
+// The 7 canonical task statuses, from the pure zero-dep rulebook both hosts share.
+// @clawboo/board-core carries no server/db graph, so this host-agnostic interface
+// package stays browser-safe while using the SAME union @clawboo/db enforces — a
+// host binding over the direct-DB client type-checks by identity, not by luck.
+import type { TaskStatus } from '@clawboo/board-core'
+
+export type { TaskStatus }
 
 export interface CreateTaskInput {
   title: string

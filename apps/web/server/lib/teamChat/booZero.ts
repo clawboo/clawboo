@@ -133,11 +133,7 @@ function hasNativeTeamMember(db: ClawbooDb): boolean {
     .select({ id: agents.id })
     .from(agents)
     .where(
-      and(
-        eq(agents.runtime, NATIVE_RUNTIME),
-        isNotNull(agents.teamId),
-        isNull(agents.archivedAt),
-      ),
+      and(eq(agents.runtime, NATIVE_RUNTIME), isNotNull(agents.teamId), isNull(agents.archivedAt)),
     )
     .get()
   return row != null

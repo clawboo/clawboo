@@ -7,12 +7,13 @@
 
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { server } from '../../../__vitest__/mswServer'
 import { NativeReadyStep } from '../steps/NativeReadyStep'
+
+import { axe } from '@/__vitest__/axe'
 
 afterEach(() => cleanup())
 
@@ -99,8 +100,6 @@ describe('NativeReadyStep', () => {
     server.use(http.get('/api/agents', () => HttpResponse.json(AGENTS)))
     const { container } = render(<NativeReadyStep teamId="team-1" onOpenDashboard={vi.fn()} />)
     await screen.findByText('Captain Boo')
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

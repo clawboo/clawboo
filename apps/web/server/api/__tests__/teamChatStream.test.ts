@@ -10,7 +10,14 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { agents, chatMessages, createDb, listChatMessagesSince, teams, type ClawbooDb } from '@clawboo/db'
+import {
+  agents,
+  chatMessages,
+  createDb,
+  listChatMessagesSince,
+  teams,
+  type ClawbooDb,
+} from '@clawboo/db'
 import { buildTeamSessionKey } from '@clawboo/team-orchestration'
 
 import { resolveTeamSessionKeys } from '../teamChatStream'

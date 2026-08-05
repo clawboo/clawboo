@@ -19,7 +19,7 @@ import { EmptyState } from '@/features/shared/EmptyState'
 import { SearchInput } from '@/features/shared/SearchInput'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useTeamStore, type Team } from '@/stores/team'
-import { useConnectionStore } from '@/stores/connection'
+import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useViewStore, type NavView } from '@/stores/view'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { CreateBooModal } from '@/features/fleet/CreateBooModal'
@@ -28,6 +28,7 @@ import { useToastStore } from '@/stores/toast'
 import { confirm } from '@/stores/confirm'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { isHiddenGatewayDefault } from '@/lib/hiddenSystemAgent'
+import { NAV_VIEW_LABELS } from '@/lib/navLabels'
 import { ThemeToggle } from '@/features/theme/ThemeToggle'
 import { aggregateTeamStatus } from '@/lib/teamStatus'
 import { getActivityVerb } from '@/lib/agentActivityVerb'
@@ -183,7 +184,7 @@ function AgentRow({
             {agent.status !== 'running' &&
               verb !== 'Just done' &&
               formatLastSeen(agent.lastSeenAt) && (
-                <span className="text-[9px] tabular-nums text-secondary/40">
+                <span className="text-[9px] tabular-nums text-muted-foreground">
                   {formatLastSeen(agent.lastSeenAt)}
                 </span>
               )}
@@ -198,7 +199,9 @@ function AgentRow({
           e.stopPropagation()
           onDelete()
         }}
-        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive group-hover:opacity-100"
+        // See FleetSidebar's twin: revealing the icon is not enough on its own,
+        // `text-secondary/40` stays under the contrast floor once focused.
+        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive focus-visible:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
       >
         <Trash2 className="h-3 w-3" strokeWidth={2} />
       </button>
@@ -208,9 +211,11 @@ function AgentRow({
 
 // ─── Nav items ───────────────────────────────────────────────────────────────
 
+// Labels come from `lib/navLabels.ts` (the single source of truth shared with the
+// Settings modal and with error-boundary failure copy), so an item is just an id
+// + its icon and optional subtitle.
 interface NavItem {
   id: NavView
-  label: string
   icon: LucideIcon
   /** Optional smaller, dimmer hint rendered beside the main label. */
   subtitle?: string
@@ -222,9 +227,9 @@ const PRIMARY_NAV: NavItem[] = [
   // team-scoped Ghost Graph still lives inside Group Chat; this slot is
   // now specifically the org-wide map. Subtitle clarifies that Atlas is
   // cross-team (vs. the per-team Ghost Graph users see inside Group Chat).
-  { id: 'graph', label: 'Atlas', icon: Globe, subtitle: '(All Teams)' },
-  { id: 'board', label: 'Board', icon: KanbanSquare },
-  { id: 'marketplace', label: 'Marketplace', icon: ShoppingCart },
+  { id: 'graph', icon: Globe, subtitle: '(All Teams)' },
+  { id: 'board', icon: KanbanSquare },
+  { id: 'marketplace', icon: ShoppingCart },
 ]
 
 // Second nav block: Fleet + the Settings gear (rendered after this list). Settings
@@ -233,9 +238,7 @@ const PRIMARY_NAV: NavItem[] = [
 // System Health) so the sidebar stays short.
 // Approvals moved into the Board (a collapsible "Needs approval" column) + inline
 // above the chat composer, so the sidebar no longer carries a separate item.
-const SECONDARY_NAV: NavItem[] = [
-  { id: 'fleet', label: 'Fleet', icon: Gauge, subtitle: '(Overview)' },
-]
+const SECONDARY_NAV: NavItem[] = [{ id: 'fleet', icon: Gauge, subtitle: '(Overview)' }]
 
 // One consistent nav row — neutral active surface + a brand-red active icon
 // (the premium sidebar pattern). Used for both nav sections.
@@ -269,12 +272,12 @@ function NavButton({
         aria-hidden
         style={{ color: active ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.45)' }}
       />
-      <span className="truncate">{item.label}</span>
+      <span className="truncate">{NAV_VIEW_LABELS[item.id]}</span>
       {item.subtitle ? (
-        <span className="text-[11px] font-normal text-foreground/40">{item.subtitle}</span>
+        <span className="text-[11px] font-normal text-muted-foreground">{item.subtitle}</span>
       ) : null}
       {badge ? (
-        <span className="ml-auto flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+        <span className="ml-auto flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary-solid px-1 text-[10px] font-bold text-primary-foreground">
           {badge}
         </span>
       ) : null}
@@ -483,7 +486,10 @@ export function AgentListColumn() {
 
   // Delayed empty state
   const [showEmpty, setShowEmpty] = useState(false)
-  const isEmptyConnected = agents.length === 0 && connectionStatus === 'connected' && !query
+  // Live-session, not strictly 'connected': "we have a session and the fleet is
+  // empty" stays true across a socket drop, so the delayed empty card should not
+  // blink out and restart its 1s timer on every blip.
+  const isEmptyConnected = agents.length === 0 && isSessionLive(connectionStatus) && !query
   useEffect(() => {
     if (!isEmptyConnected) {
       setShowEmpty(false)
@@ -557,7 +563,7 @@ export function AgentListColumn() {
     >
       {/* Team header */}
       <div className="flex items-center justify-between px-3.5 pb-2.5 pt-4">
-        <h2 className="truncate font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+        <h2 className="truncate font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           {selectedTeam ? selectedTeam.name : 'All Agents'}
           {filtered.length > 0 && (
             <span className="ml-1.5 tabular-nums text-foreground/30">{filtered.length}</span>

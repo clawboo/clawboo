@@ -136,6 +136,9 @@ export function GatewayReconnectBanner({
 
       {/* Copy */}
       <div style={{ minWidth: 0, marginRight: 2 }}>
+        {/* See LiveReconnectBanner's twin: no-wrap in a `minWidth: 0` flex item
+            clips rather than wraps. This one's titles are longer still
+            ("OpenClaw Gateway is unreachable"), so it truncates sooner. */}
         <div
           style={{
             fontSize: 13,
@@ -143,15 +146,16 @@ export function GatewayReconnectBanner({
             color: 'var(--foreground)',
             letterSpacing: '-0.01em',
             lineHeight: 1.25,
-            whiteSpace: 'nowrap',
           }}
         >
           {title}
         </div>
         <div
           style={{
+            // See LiveReconnectBanner's twin: a 0.55 foreground alpha composites
+            // to 3.94:1 on a light surface, below the 4.5:1 AA floor.
             fontSize: 11.5,
-            color: 'rgb(var(--foreground-rgb) / 0.55)',
+            color: 'var(--muted-foreground)',
             marginTop: 1,
             lineHeight: 1.35,
           }}

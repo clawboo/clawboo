@@ -44,7 +44,7 @@ export function GhostGraphPanel({
       {!embedded && (
         <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-3">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+            <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               {scope === 'atlas'
                 ? 'Atlas — All Teams'
                 : selectedTeam

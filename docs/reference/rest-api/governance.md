@@ -225,13 +225,7 @@ Reads the append-only forensic audit log: installs, approvals, tool calls, budge
   audit: Array<{
     id: string
     eventType:
-      | 'install'
-      | 'approval'
-      | 'tool_call'
-      | 'budget'
-      | 'cap_hit'
-      | 'verification'
-      | 'circuit_break'
+      'install' | 'approval' | 'tool_call' | 'budget' | 'cap_hit' | 'verification' | 'circuit_break'
     agentId: string | null
     taskId: string | null
     teamId: string | null

@@ -63,8 +63,7 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
     return
   }
   const body = req.body as
-    | { message?: unknown; displayText?: unknown; entryId?: unknown }
-    | undefined
+    { message?: unknown; displayText?: unknown; entryId?: unknown } | undefined
   const message = typeof body?.message === 'string' ? body.message.trim() : ''
   if (!message) {
     res.status(400).json({ error: 'message required' })

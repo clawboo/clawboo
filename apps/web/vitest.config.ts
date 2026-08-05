@@ -11,6 +11,18 @@ const alias = { '@': path.resolve(__dirname, 'src') }
 export default defineConfig({
   test: {
     globals: true,
+    // Bound the TOTAL worker pool. Vitest runs the two projects below
+    // CONCURRENTLY, and each one sizes its own pool to the full CPU count — so
+    // the default is ~2x cores of workers fighting over the machine. The
+    // jsdom project's transforms (framer-motion / React Flow / jest-axe) are
+    // CPU-bound, so that over-subscription starves whole files past their
+    // timeout: on an 8-core box the suite took ~42 min with 18-62 spurious
+    // "Test timed out" failures, and 48 s with ZERO at 50%. The failures were
+    // never real — every one of those files passes on its own.
+    //
+    // This is the actual fix for that starvation; the widened per-project
+    // timeouts below are the older, blunter mitigation for the same cause.
+    maxWorkers: '50%',
     projects: [
       {
         resolve: { alias },

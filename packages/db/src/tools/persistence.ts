@@ -144,8 +144,7 @@ export function createApproval(db: ClawbooDb, input: CreateApprovalInput): DbToo
 export function getApproval(db: ClawbooDb, id: string): DbToolCallApproval | null {
   return (
     (db.select().from(toolCallApprovals).where(eq(toolCallApprovals.id, id)).get() as
-      | DbToolCallApproval
-      | undefined) ?? null
+      DbToolCallApproval | undefined) ?? null
   )
 }
 
@@ -265,8 +264,7 @@ export function persistDescriptorMetadata(db: ClawbooDb, descriptor: ToolDescrip
 export function getDescriptorMetadata(db: ClawbooDb, name: string): DbToolRegistry | null {
   return (
     (db.select().from(toolRegistry).where(eq(toolRegistry.name, name)).get() as
-      | DbToolRegistry
-      | undefined) ?? null
+      DbToolRegistry | undefined) ?? null
   )
 }
 
