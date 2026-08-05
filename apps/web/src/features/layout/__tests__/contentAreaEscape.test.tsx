@@ -90,10 +90,11 @@ describe('ContentArea — Escape arbitration', () => {
     // dialog: Cmd/Ctrl+1..4 call `navigateTo` directly. Containment has to cover
     // every global shortcut, not just the one that surfaced the bug.
     const user = userEvent.setup()
+    const onClose = vi.fn()
     render(
       <>
         <ContentArea />
-        <Modal open onClose={vi.fn()} label="An overlay" data-testid="overlay">
+        <Modal open onClose={onClose} label="An overlay" data-testid="overlay">
           <button type="button">something</button>
         </Modal>
       </>,
@@ -103,6 +104,9 @@ describe('ContentArea — Escape arbitration', () => {
     await user.keyboard('{Meta>}2{/Meta}')
 
     expect(useViewStore.getState().viewMode.type).toBe('groupChat')
+    // The shortcut must be wholly inert, not merely non-navigating: dismissing
+    // the dialog instead would also leave the view on groupChat and pass.
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('ignores the Cmd/Ctrl+number nav shortcuts while Settings is open', async () => {
@@ -118,6 +122,9 @@ describe('ContentArea — Escape arbitration', () => {
     await user.keyboard('{Meta>}2{/Meta}')
 
     expect(useViewStore.getState().viewMode.type).toBe('groupChat')
+    // As above: closing Settings instead of navigating would also leave the view
+    // on groupChat, so assert the overlay itself survived.
+    expect(useSettingsModalStore.getState().open).toBe(true)
   })
 
   it('ignores the Cmd/Ctrl+number nav shortcuts while the file editor is open', async () => {
@@ -133,6 +140,7 @@ describe('ContentArea — Escape arbitration', () => {
     await user.keyboard('{Meta>}2{/Meta}')
 
     expect(useViewStore.getState().viewMode.type).toBe('groupChat')
+    expect(useEditorStore.getState().isOpen).toBe(true)
   })
 
   it('honours the Cmd/Ctrl+number nav shortcuts when no dialog is open', async () => {
