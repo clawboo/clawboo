@@ -1,0 +1,104 @@
+// The pure half of the bounded-timeline change: the window's index math and the
+// stable turn anchor. Both are DOM-free, so they live in the node project — the
+// hook's DOM behaviour is exercised through `MessageList` in the jsdom project,
+// and the pixel-level scroll anchoring is only observable in a real browser
+// (jsdom reports 0 for every scroll metric).
+
+import { describe, it, expect } from 'vitest'
+import type { TranscriptEntry } from '@clawboo/protocol'
+
+import {
+  groupEntriesToBlocks,
+  renderWindowStart,
+  RENDER_WINDOW_INITIAL,
+  RENDER_WINDOW_STEP,
+} from '@/features/chat/chatComponents'
+
+const INF = Number.POSITIVE_INFINITY
+
+describe('renderWindowStart', () => {
+  it('renders everything when the list is shorter than the limit', () => {
+    expect(renderWindowStart(10, 150, null, INF)).toBe(0)
+    expect(renderWindowStart(150, 150, null, INF)).toBe(0)
+  })
+
+  it('renders the tail when the list is longer than the limit', () => {
+    expect(renderWindowStart(170, 150, null, INF)).toBe(20)
+  })
+
+  it('never returns a negative start', () => {
+    expect(renderWindowStart(0, 150, null, INF)).toBe(0)
+    expect(renderWindowStart(0, 150, 40, INF)).toBe(0)
+  })
+
+  it('honours a pinned start that holds the window open', () => {
+    // Frozen at 20 while the user reads history; the list has since grown to 200,
+    // whose natural start would be 50. The frozen value wins.
+    expect(renderWindowStart(200, 150, 20, INF)).toBe(20)
+  })
+
+  it('clamps a pinned start that is no longer reachable', () => {
+    // The pin only ever holds the window OPEN — it can never narrow it below the
+    // natural tail, so a stale larger pin collapses back.
+    expect(renderWindowStart(170, 150, 90, INF)).toBe(20)
+  })
+
+  it('clamps to the floor so a must-render item stays inside the window', () => {
+    expect(renderWindowStart(400, 150, null, 12)).toBe(12)
+    // A floor above the natural start is inert.
+    expect(renderWindowStart(400, 150, null, 900)).toBe(250)
+  })
+
+  it('grows the window by exactly one step', () => {
+    const total = RENDER_WINDOW_INITIAL + 200
+    const before = renderWindowStart(total, RENDER_WINDOW_INITIAL, null, INF)
+    const after = renderWindowStart(total, RENDER_WINDOW_INITIAL + RENDER_WINDOW_STEP, null, INF)
+    expect(before - after).toBe(RENDER_WINDOW_STEP)
+  })
+})
+
+// ── anchorEntryId ────────────────────────────────────────────────────────────
+
+function entry(over: Partial<TranscriptEntry>): TranscriptEntry {
+  return {
+    entryId: 'e1',
+    role: 'assistant',
+    kind: 'assistant',
+    text: 'hello',
+    sessionKey: 'agent:a1:main',
+    runId: 'r1',
+    source: 'runtime-chat',
+    timestampMs: 1_700_000_000_000,
+    sequenceKey: 1,
+    confirmed: true,
+    fingerprint: 'f1',
+    ...over,
+  }
+}
+
+describe('AssistantBlock.anchorEntryId', () => {
+  it('is the first entry the turn absorbed, and does not move as the turn grows', () => {
+    const thinking = entry({ entryId: 'think-1', kind: 'thinking', text: 'hmm' })
+    const tool = entry({ entryId: 'tool-1', kind: 'tool', text: '[[tool]] ls' })
+    const assistant = entry({ entryId: 'assistant-1', text: 'done' })
+
+    // The same turn as it accumulates over the stream. If the key were derived at
+    // render time from `assistant?.entryId ?? thinking[0]?.entryId`, it would flip
+    // at the final step and remount the card exactly when the turn commits.
+    const anchors = [[thinking], [thinking, tool], [thinking, tool, assistant]].map((entries) => {
+      const block = groupEntriesToBlocks(entries)[0]
+      return block?.kind === 'assistant-turn' ? block.anchorEntryId : null
+    })
+
+    expect(anchors).toEqual(['think-1', 'think-1', 'think-1'])
+  })
+
+  it('gives consecutive turns distinct anchors', () => {
+    const blocks = groupEntriesToBlocks([
+      entry({ entryId: 'a-1', text: 'first' }),
+      entry({ entryId: 'a-2', text: 'second' }),
+    ])
+    const anchors = blocks.flatMap((b) => (b.kind === 'assistant-turn' ? [b.anchorEntryId] : []))
+    expect(anchors).toEqual(['a-1', 'a-2'])
+  })
+})

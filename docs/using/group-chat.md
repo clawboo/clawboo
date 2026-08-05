@@ -122,15 +122,16 @@ Every team also has a durable **peer-chat room**, where each runtime posts as a 
 
 ## Options / variations
 
-| Action                      | How                       | What it does                                                                        |
-| --------------------------- | ------------------------- | ----------------------------------------------------------------------------------- |
-| Address the leader          | Send with no `@`          | Routes to Boo Zero (default), then team-internal lead, then first member            |
-| Address one teammate        | `@AgentName your message` | Longest-prefix match at message start; `@mention` stripped before the agent sees it |
-| Address Boo Zero explicitly | `@Boo Zero …`             | Boo Zero is in the mention roster even though it is teamless                        |
-| Add a durable rule          | `/rule <text>`            | Persists to `/api/team-rules/:teamId`; injected on every future turn                |
-| Stop the team               | Click the red Stop button | `POST /api/teams/:id/chat/stop`: aborts in-flight runs, releases tasks to `todo`    |
-| Insert a mention            | Click an agent chip       | Inserts `@AgentName` into the composer                                              |
-| Open the peer-chat room     | Toggle in the team header | A read-only view of the durable room where runtimes post as named peers             |
+| Action                      | How                                                        | What it does                                                                                                |
+| --------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Address the leader          | Send with no `@`                                           | Routes to Boo Zero (default), then team-internal lead, then first member                                    |
+| Address one teammate        | `@AgentName your message`                                  | Longest-prefix match at message start; `@mention` stripped before the agent sees it                         |
+| Address Boo Zero explicitly | `@Boo Zero …`                                              | Boo Zero is in the mention roster even though it is teamless                                                |
+| Add a durable rule          | `/rule <text>`                                             | Persists to `/api/team-rules/:teamId`; injected on every future turn                                        |
+| Stop the team               | Click the red Stop button                                  | `POST /api/teams/:id/chat/stop`: aborts in-flight runs, releases tasks to `todo`                            |
+| Insert a mention            | Click an agent chip                                        | Inserts `@AgentName` into the composer                                                                      |
+| Open the peer-chat room     | Toggle in the team header                                  | A read-only view of the durable room where runtimes post as named peers                                     |
+| Read further back           | Click **Load earlier messages** at the top of the timeline | Reveals 100 more items; the chat renders the most recent ~150 by default so a long session stays responsive |
 
 ## Verify it worked
 
@@ -146,6 +147,10 @@ Every team also has a durable **peer-chat room**, where each runtime posts as a 
 
 <Warning>
 **A response never streams back.** The stream is `GET /api/teams/:id/chat/stream` (SSE). If nothing appears after you send, confirm the runtime the target agent runs on is connected (a native team needs its provider key; an OpenClaw team needs its Gateway) and check the server logs. The message was accepted (202) as soon as you sent it; the work runs server-side regardless of the browser.
+</Warning>
+
+<Warning>
+**The top of the chat is missing.** Nothing was deleted. The timeline renders only its most recent ~150 items (messages, task cards, live replies) so a long-running team stays responsive; **Load earlier messages** at the top of the chat reveals the rest, 100 at a time, without moving your reading position. The full transcript also stays on disk — `GET /api/chat-history?sessionKey=…`.
 </Warning>
 
 <Danger>

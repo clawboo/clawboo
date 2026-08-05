@@ -56,6 +56,7 @@ describe('triple-render — chat store content-signature dedup', () => {
     useChatStore.setState({
       transcripts: new Map(),
       streamingText: new Map(),
+      streamStartedAt: new Map(),
       lastTokenUsage: new Map(),
     })
   })
@@ -156,6 +157,7 @@ describe('triple-render — end-to-end through the store + grouper', () => {
     useChatStore.setState({
       transcripts: new Map(),
       streamingText: new Map(),
+      streamStartedAt: new Map(),
       lastTokenUsage: new Map(),
     })
   })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decideWorkChatEvent, decideWorkAgentEvent } from '../policy/work'
+import { decideWorkChatEvent, decideWorkAgentEvent, deriveChatCost } from '../policy/work'
 import type { ClassifiedEvent, ChatEventPayload, AgentEventPayload } from '../types'
 
 function makeChatEvent(agentId: string | undefined): ClassifiedEvent {
@@ -75,6 +75,10 @@ describe('decideWorkChatEvent', () => {
     if (commit?.kind === 'commitChat') {
       expect(commit.patch.status).toBe('idle')
       expect(commit.patch.runId).toBeNull()
+      // The patch CLOSES the run, so `patch.runId` is null — the intent carries
+      // the incoming frame's runId separately, which is what the Handler's
+      // closed-run guard matches on.
+      expect(commit.runId).toBe('r1')
     }
   })
 
@@ -112,6 +116,7 @@ describe('decideWorkChatEvent', () => {
     const commit = intents.find((i) => i.kind === 'commitChat')
     if (commit?.kind === 'commitChat') {
       expect(commit.patch.status).toBe('idle')
+      expect(commit.runId).toBe('r1')
     }
   })
 
@@ -141,6 +146,7 @@ describe('decideWorkChatEvent', () => {
     if (commit?.kind === 'commitChat') {
       expect(commit.patch.status).toBe('error')
       expect(commit.patch.streamText).toBe('boom')
+      expect(commit.runId).toBe('r1')
     }
   })
 
@@ -168,6 +174,7 @@ describe('decideWorkAgentEvent', () => {
     expect(intents[0].kind).toBe('updateAgentStatus')
     if (intents[0].kind === 'updateAgentStatus') {
       expect(intents[0].patch.status).toBe('running')
+      expect(intents[0].runId).toBe('r1')
     }
   })
 
@@ -182,6 +189,8 @@ describe('decideWorkAgentEvent', () => {
     expect(intents[0].kind).toBe('updateAgentStatus')
     if (intents[0].kind === 'updateAgentStatus') {
       expect(intents[0].patch.status).toBe('idle')
+      // Terminal patches null out `patch.runId`; the guard needs the INCOMING id.
+      expect(intents[0].runId).toBe('r1')
     }
   })
 
@@ -196,6 +205,7 @@ describe('decideWorkAgentEvent', () => {
     expect(intents[0].kind).toBe('updateAgentStatus')
     if (intents[0].kind === 'updateAgentStatus') {
       expect(intents[0].patch.status).toBe('error')
+      expect(intents[0].runId).toBe('r1')
     }
   })
 
@@ -280,5 +290,83 @@ describe('decideWorkAgentEvent', () => {
     }
     const intents = decideWorkAgentEvent(event, payload)
     expect(intents[0].kind).toBe('ignore')
+  })
+})
+
+// ── deriveChatCost ───────────────────────────────────────────────────────────
+//
+// Token spend is derived here, in the pure layer, so it can ride on the
+// `commitChat` intent and inherit the Handler's closed-run guard. It used to be
+// re-parsed from the raw frame by a second subscription in `useGatewayEvents`,
+// which billed a replayed final twice.
+
+describe('deriveChatCost', () => {
+  const base: ChatEventPayload = { runId: 'r1', sessionKey: 'sk1', state: 'final' }
+
+  it('returns null when the frame carries no message', () => {
+    expect(deriveChatCost(base, 'text')).toBeNull()
+    expect(deriveChatCost({ ...base, message: 'not-an-object' }, 'text')).toBeNull()
+  })
+
+  it('prefers real usage reported by the Gateway', () => {
+    const payload: ChatEventPayload = {
+      ...base,
+      message: { model: 'claude-opus-5', usage: { input_tokens: 120, output_tokens: 340 } },
+    }
+    expect(deriveChatCost(payload, 'ignored when usage is present')).toEqual({
+      model: 'claude-opus-5',
+      inputTokens: 120,
+      outputTokens: 340,
+    })
+  })
+
+  it('reads usage nested under metadata', () => {
+    const payload: ChatEventPayload = {
+      ...base,
+      message: { metadata: { usage: { input_tokens: 7, output_tokens: 9 } } },
+    }
+    expect(deriveChatCost(payload, null)).toMatchObject({ inputTokens: 7, outputTokens: 9 })
+  })
+
+  it('estimates output from the response text and defers input to the host', () => {
+    const payload: ChatEventPayload = { ...base, message: { model: 'm' } }
+    // null input == "no usage block; estimate the prompt from the transcript",
+    // which is a store read and therefore not Policy's job.
+    expect(deriveChatCost(payload, '12345678')).toEqual({
+      model: 'm',
+      inputTokens: null,
+      outputTokens: 2,
+    })
+  })
+
+  it('falls back to the payload model, then to "unknown"', () => {
+    expect(deriveChatCost({ ...base, model: 'top-level', message: {} }, null)?.model).toBe(
+      'top-level',
+    )
+    expect(deriveChatCost({ ...base, message: {} }, null)?.model).toBe('unknown')
+  })
+
+  it('treats missing or nonsense usage counts as zero', () => {
+    const payload: ChatEventPayload = {
+      ...base,
+      message: { usage: { input_tokens: 'lots', output_tokens: -5 } },
+    }
+    expect(deriveChatCost(payload, null)).toMatchObject({ inputTokens: 0, outputTokens: 0 })
+  })
+
+  it('is attached to a final commit, and never to aborted/error', () => {
+    const event = makeChatEvent('a1')
+    const message = { usage: { input_tokens: 1, output_tokens: 2 } }
+    for (const [state, expected] of [
+      ['final', true],
+      ['aborted', false],
+      ['error', false],
+    ] as const) {
+      const intents = decideWorkChatEvent(event, { ...base, state, message })
+      const commit = intents.find((i) => i.kind === 'commitChat')
+      if (commit?.kind === 'commitChat') {
+        expect(commit.cost !== null).toBe(expected)
+      }
+    }
   })
 })

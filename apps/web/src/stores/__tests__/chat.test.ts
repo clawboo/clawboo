@@ -5,24 +5,29 @@ import type { TranscriptEntry } from '@clawboo/protocol'
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Factory uses the entryId as part of the text + slightly-staggered timestamps
- * so distinct entries are content-distinct too. The store now dedupes by
- * content signature in addition to entryId (Round 2, Phase A) — tests that
- * relied on multiple `entryId`s with identical text + timestamp were
- * exercising a degenerate case that doesn't occur in production.
+ * Fully-populated `TranscriptEntry` factory — no casts, every field a real
+ * member of its type. Distinct entries are content-distinct (the entryId is
+ * embedded in the text) and land on distinct timestamps, because the store's
+ * layer-2 dedup keys on `kind|role|timestampMs|text`.
  */
 let nextTs = 1_700_000_000_000
 function makeEntry(overrides: Partial<TranscriptEntry> = {}): TranscriptEntry {
   const id = overrides.entryId ?? `e${nextTs}`
+  const ts = nextTs++
   return {
     entryId: id,
+    role: 'assistant',
     kind: 'assistant',
-    source: 'runtime',
     text: `Hello world ${id}`,
-    timestamp: nextTs++,
-    timestampMs: nextTs,
+    sessionKey: 'agent:a1:main',
+    runId: null,
+    source: 'runtime-chat',
+    timestampMs: ts,
+    sequenceKey: ts,
+    confirmed: true,
+    fingerprint: `fp-${id}`,
     ...overrides,
-  } as TranscriptEntry
+  }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -91,39 +96,63 @@ describe('useChatStore', () => {
       expect(useChatStore.getState().transcripts.get('s2')).toHaveLength(1)
     })
 
-    // Regression: an OpenClaw team turn is written by TWO writers — the server
-    // orchestrator (source 'local-send', runId null) AND the browser Gateway
-    // observer (source 'runtime-chat', with runId) — landing in DIFFERENT
-    // 1-second buckets (streamStart vs Date.now()). A LONG byte-identical turn in
-    // a team session must dedup timestamp-independently so the user sees ONE copy.
-    it('dedups a cross-writer duplicate of a long team turn (>1s apart)', () => {
+    // Layer 2 collapses the SAME frame appended twice: byte-identical text on
+    // the same wall-clock instant, with fresh entryIds (each
+    // `appendOutputLines` call mints one via `crypto.randomUUID()`).
+    it('collapses a same-tick duplicate batch (identical timestampMs, fresh entryIds)', () => {
+      const sk = 'agent:a1:main'
+      const ts = 1_700_000_000_000
+      for (const entryId of ['copy-1', 'copy-2', 'copy-3']) {
+        useChatStore
+          .getState()
+          .appendTranscript(sk, [makeEntry({ entryId, text: 'Same frame', timestampMs: ts })])
+      }
+      expect(useChatStore.getState().transcripts.get(sk)).toHaveLength(1)
+    })
+
+    // Replaces the old "cross-writer long team turn" case. That duplicate is no
+    // longer producible: `appendOutputLines` early-returns for team session keys
+    // (`features/connection/useGatewayEvents.ts`), so the browser Gateway
+    // observer never double-writes a turn the server orchestrator persisted. The
+    // timestamp-independent rule that used to collapse it was eating genuine
+    // re-utterances (#71), so the contract is now the inverse.
+    it('preserves a long verbatim re-utterance in a team session', () => {
       const teamKey = 'agent:main:team:t1'
       const longText =
         'I am aware you have a whole Boo squad here and I will coordinate them for you across the sprint.'
-      // Browser copy: runtime-chat, has a runId, timestamp T.
-      useChatStore.getState().appendTranscript(teamKey, [
-        makeEntry({
-          entryId: 'browser-1',
-          source: 'runtime-chat',
-          runId: 'run-1',
-          text: longText,
-          timestampMs: 1_700_000_000_000,
-        }),
-      ])
-      // Server copy: local-send, runId null, timestamp T+5s (a different bucket).
-      useChatStore.getState().appendTranscript(teamKey, [
-        makeEntry({
-          entryId: 'server-1',
-          source: 'local-send',
-          runId: null,
-          text: longText,
-          timestampMs: 1_700_000_005_000,
-        }),
-      ])
-      expect(useChatStore.getState().transcripts.get(teamKey)).toHaveLength(1)
+      useChatStore
+        .getState()
+        .appendTranscript(teamKey, [
+          makeEntry({ entryId: 'turn-1', text: longText, timestampMs: 1_700_000_000_000 }),
+        ])
+      useChatStore
+        .getState()
+        .appendTranscript(teamKey, [
+          makeEntry({ entryId: 'turn-2', text: longText, timestampMs: 1_700_000_005_000 }),
+        ])
+      expect(useChatStore.getState().transcripts.get(teamKey)).toHaveLength(2)
     })
 
-    it('does NOT collapse a short repeated team ack (keeps the 1-second bucket)', () => {
+    // Layer 2 only scans the tail (DEDUP_SCAN_WINDOW), because the signature
+    // carries full text and re-hashing 500 markdown answers per commit would
+    // scale with transcript bytes. A duplicate frame always lands adjacent to
+    // its twin, so the bound is safe — this pins it so nobody silently widens it.
+    it('does not scan beyond the dedup window', () => {
+      const sk = 'agent:a1:main'
+      const ts = 1_700_000_000_000
+      useChatStore
+        .getState()
+        .appendTranscript(sk, [makeEntry({ entryId: 'far-1', text: 'echo', timestampMs: ts })])
+      const filler = Array.from({ length: 60 }, (_, i) => makeEntry({ entryId: `filler-${i}` }))
+      useChatStore.getState().appendTranscript(sk, filler)
+      useChatStore
+        .getState()
+        .appendTranscript(sk, [makeEntry({ entryId: 'far-2', text: 'echo', timestampMs: ts })])
+      const entries = useChatStore.getState().transcripts.get(sk)!
+      expect(entries.filter((e) => e.text === 'echo')).toHaveLength(2)
+    })
+
+    it('does NOT collapse a short repeated team ack', () => {
       const teamKey = 'agent:main:team:t1'
       useChatStore
         .getState()
@@ -135,11 +164,46 @@ describe('useChatStore', () => {
         .appendTranscript(teamKey, [
           makeEntry({ entryId: 'b', text: 'On it.', timestampMs: 1_700_000_030_000 }),
         ])
-      // Short (<80 char) verbatim re-utterance >1s apart is a legitimate repeat.
+      // A verbatim re-utterance later in the conversation is a legitimate repeat.
       expect(useChatStore.getState().transcripts.get(teamKey)).toHaveLength(2)
     })
 
-    it('does NOT collapse a long identical 1:1 message >1s apart (non-team session)', () => {
+    // #71: the old 1-second bucket collapsed these. Two agent acks 300 ms apart
+    // are distinct messages, not a duplicated frame.
+    it('does NOT collapse two identical short messages inside the same second', () => {
+      const teamKey = 'agent:main:team:t1'
+      useChatStore
+        .getState()
+        .appendTranscript(teamKey, [
+          makeEntry({ entryId: 'ack-1', text: 'On it.', timestampMs: 1_700_000_000_100 }),
+        ])
+      useChatStore
+        .getState()
+        .appendTranscript(teamKey, [
+          makeEntry({ entryId: 'ack-2', text: 'On it.', timestampMs: 1_700_000_000_400 }),
+        ])
+      expect(useChatStore.getState().transcripts.get(teamKey)).toHaveLength(2)
+    })
+
+    // The old key truncated text at 160 chars, so two long answers that only
+    // diverged later collapsed into one.
+    it('does NOT collapse two messages that share a 160-character prefix', () => {
+      const sk = 'agent:a1:main'
+      const prefix = 'x'.repeat(200)
+      useChatStore
+        .getState()
+        .appendTranscript(sk, [
+          makeEntry({ entryId: 'p1', text: `${prefix}FIRST`, timestampMs: 1_700_000_000_000 }),
+        ])
+      useChatStore
+        .getState()
+        .appendTranscript(sk, [
+          makeEntry({ entryId: 'p2', text: `${prefix}SECOND`, timestampMs: 1_700_000_000_000 }),
+        ])
+      expect(useChatStore.getState().transcripts.get(sk)).toHaveLength(2)
+    })
+
+    it('does NOT collapse a long identical 1:1 message sent twice over time', () => {
       const soloKey = 'agent:x:main'
       const longText =
         'This is a long message that a user might legitimately paste twice into a one-on-one chat over time.'

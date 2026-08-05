@@ -342,6 +342,7 @@ export function ChatPanel({
         agentId={agent.id}
         agentName={agent.name}
         isRunning={isRunning}
+        sessionKey={sessionKey}
       />
 
       {/* Inline approval cards for this agent */}

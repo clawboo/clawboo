@@ -52,9 +52,11 @@ The Bridge also owns a set of small pure helpers the rest of the pipeline reuses
 
 - `parseChatPayload` / `parseAgentPayload`: shape-validate a raw payload and return `null` on anything malformed (missing `runId`/`sessionKey`, an out-of-range `state`). The Policy router relies on this `null` to turn a junk frame into an `ignore` intent instead of a crash.
 - `isReasoningStream(stream)`: classifies a stream name as a thinking trace, with an explicit deny-list (`assistant`, `tool`, `lifecycle`) checked _before_ the allow-list (`reason`, `think`, `analysis`, `trace`) so an `assistant` stream is never misread as reasoning.
-- `resolveLifecyclePatch`: maps a `start`/`end`/`error` lifecycle phase to a status patch, ignoring a terminal phase whose `runId` doesn't match the currently-tracked run.
-- `mergeRuntimeStream`, `dedupeRunLines`: stream concatenation and per-run line de-duplication.
 - It re-exports `extractText` / `extractThinking` / `extractToolLines` from `@clawboo/protocol` so consumers have one import surface.
+
+<Note>
+There is deliberately **no** per-run line de-duplication in the Bridge. The package once exported `mergeRuntimeStream`, `dedupeRunLines`, and `resolveLifecyclePatch`, but nothing ever called them; they were removed rather than left to imply a de-dup step that does not exist. Duplicate suppression happens once, in the Handler's `closedRuns` guard below.
+</Note>
 
 <Note>
 The Bridge knows nothing about Zustand, `apps/web`, or even what a "store" is. It transforms `EventFrame → ClassifiedEvent` and validates payloads. That is the whole contract.
@@ -94,7 +96,7 @@ The router re-validates each payload with the Bridge's parser before handing it 
 The four deciders map to three logical **planes** (`work`, `agent`, `trust`):
 
 - **`decideAgentEvent`** (`agent.ts`): for `summary-refresh`. It emits one `scheduleSummaryRefresh` intent with a fixed `delayMs: 750`, and sets `includeHeartbeatRefresh` only when the originating frame was a `heartbeat` (vs a `presence`). It does not mutate fleet state directly; it asks the Handler to debounce a reload.
-- **`decideWorkChatEvent`** (`work.ts`): for `runtime-chat`. A `delta` becomes a `queueLivePatch` carrying the extracted streaming text and thinking trace (RAF-batched downstream). A `final` becomes a `clearPendingLivePatch` + a `commitChat` that finalizes the turn with output lines and an `idle` patch, and, if the final message carried _no_ thinking trace, an extra `requestHistoryRefresh` so the full transcript is re-fetched. `aborted` and `error` each become a `clearPendingLivePatch` + `commitChat` with the appropriate terminal status (`idle` / `error`).
+- **`decideWorkChatEvent`** (`work.ts`): for `runtime-chat`. A `delta` becomes a `queueLivePatch` carrying the extracted streaming text and thinking trace (RAF-batched downstream). A `final` becomes a `clearPendingLivePatch` + a `commitChat` that finalizes the turn with output lines, the frame's `runId` (for the Handler's stale-run guard) and an `idle` patch, and, if the final message carried _no_ thinking trace, an extra `requestHistoryRefresh` so the full transcript is re-fetched. `aborted` and `error` each become a `clearPendingLivePatch` + `commitChat` with the appropriate terminal status (`idle` / `error`).
 - **`decideWorkAgentEvent`** (`work.ts`): for `runtime-agent`. The `lifecycle` stream's `start`/`end`/`error` phase becomes an `updateAgentStatus` intent (`running` / `idle` / `error`); the `assistant` and reasoning streams become `queueLivePatch` intents. The `tool` stream is deliberately handed off to the Handler via `appendOutputLines` rather than carrying lines through an intent, so this decider returns an `ignore` for it.
 - **`decideTrustEvent`** (`trust.ts`): for `approval`. It emits `approvalPending` for `exec.approval.pending` / `.requested`, else `approvalResolved`. Missing an `agentId` is an `ignore`, not an error.
 
@@ -120,10 +122,18 @@ export type EventIntent =
       plane: 'work'
       agentId: string
       sessionKey?: string
+      runId: string | null
       patch: AgentStatusPatch
       outputLines: string[]
+      cost: ChatCost | null
     }
-  | { kind: 'updateAgentStatus'; plane: 'agent'; agentId: string; patch: AgentStatusPatch }
+  | {
+      kind: 'updateAgentStatus'
+      plane: 'agent'
+      agentId: string
+      runId: string | null
+      patch: AgentStatusPatch
+    }
   | {
       kind: 'scheduleSummaryRefresh'
       plane: 'agent'
@@ -149,7 +159,9 @@ An intent is a _description of what should happen_, never a call into a store. T
 
 `applyIntents(intents, event)` is a `switch` over `intent.kind`. Most cases are a one-line delegate to a dep. Two of them carry the real intelligence, and they share a guard structure.
 
-**The `closedRuns` stale-run guard.** The Handler keeps a `Map<runId, expiry>` with a 30-second TTL (`CLOSED_RUN_TTL_MS`), capped at 500 entries (`CLOSED_RUNS_MAX_SIZE`, oldest-evicted on overflow). `pruneClosedRuns()` runs at the top of every `applyIntents`. When a `commitChat` or terminal `updateAgentStatus` actually clears the agent's `runId`, that `runId` is added to `closedRuns`. A subsequent terminal `updateAgentStatus` whose run is already in `closedRuns` is dropped. This guards against a duplicate `final` or a late lifecycle `end` flipping a freshly-started run back to idle.
+**The `closedRuns` stale-run guard.** The Handler keeps a `Map<runId, expiry>` with a 30-second TTL (`CLOSED_RUN_TTL_MS`), capped at 500 entries (`CLOSED_RUNS_MAX_SIZE`, oldest-evicted on overflow). `pruneClosedRuns()` runs at the top of every `applyIntents`. When a `commitChat` or terminal `updateAgentStatus` actually clears the agent's `runId`, that `runId` is added to `closedRuns`. Both intent kinds then read it back: a `commitChat` or a terminal `updateAgentStatus` for a run already in the map is dropped. That is what stops a duplicate `final` from minting a second set of transcript entries, and a late lifecycle `end` from flipping a freshly-started run back to idle.
+
+The comparison is against the **incoming frame's** `runId`, which is why both intents carry one. Reading the agent's _current_ `runId` cannot work: by the time a stale frame arrives, the run it names has already been cleared, so the current value is `null` (or the next run's id) and never matches. `patch.runId` is no substitute either, since it is `null` on every terminal patch by construction. A missing `runId` fails open, on the principle that losing a real message is worse than showing a duplicate.
 
 **The pending-approval subtlety.** The Handler captures the agent's `runId` _before_ calling `dispatchIntent`, then re-reads it after. A run is only marked closed if the dispatch actually cleared the `runId`. This matters because when an exec approval is pending, the injected `dispatchIntent` deliberately _skips_ the terminal status patch; the LLM stream ended but the run is still alive, blocked on the approval decision. If the Handler blindly marked the run closed on every `commitChat`, it would then drop the _real_ final event that arrives after the approval resolves. The pre/post `runId` comparison is what threads that needle.
 
@@ -184,9 +196,15 @@ The queue is browser-safe by guard: it only schedules via `requestAnimationFrame
 
 1. Creates a patch queue whose `onFlush` writes each batch into the fleet store (`useFleetStore.patchAgent`).
 2. Constructs the Handler with `deps` backed by the real Zustand stores: `getAgentRunId` reads the fleet store; `dispatchIntent` writes `updateAgentStatus` / `commitChat` / approval intents, applying the pending-approval guard; `queueLivePatch` enqueues to the patch queue; `loadSummarySnapshot` / `refreshHeartbeatLatest` / `requestHistoryRefresh` reload from the server.
-3. Subscribes to `client.onEvent` and runs `processEvent(frame, handler)` for every frame.
+3. Subscribes to `client.onEvent` and runs `processEvent(frame, handler)` for every frame — **one** subscription, so every frame takes exactly one path through the pipeline.
 
 The cleanup return unsubscribes and calls `patchQueue.dispose()` + `handler.dispose()`, so both the RAF frame and the Handler's timers are torn down when the Gateway connection closes or the component unmounts.
+
+<Warning>
+Token accounting rides this same path. `decideWorkChatEvent` derives a `ChatCost` from the frame (real Gateway usage when reported, else an output estimate from the response text) and hangs it on the `commitChat` intent; the hook's `dispatchIntent` fills in the prompt estimate from the transcript and `POST`s `/api/cost-records`.
+
+That indirection is load-bearing. Billing used to run off a **second** `client.onEvent` subscription that re-parsed every `chat:final` itself — outside the pipeline, and therefore outside the `closedRuns` guard, so a replayed frame was charged twice. A new cross-cutting concern belongs on an intent, not on another raw-frame subscriber.
+</Warning>
 
 This split, pure library, browser-only wiring, is what keeps the package's invariant true: the pure stages can be tested without a DOM, and the only file that imports a store is the hook, not the package.
 
@@ -205,7 +223,7 @@ This split, pure library, browser-only wiring, is what keeps the package's invar
 - **OpenClaw-specific.** This pipeline maps OpenClaw WebSocket frames to the live _fleet view_. The other four runtimes (clawboo-native, Claude Code, Codex, Hermes) emit a normalized `RuntimeEvent` union server-side and do **not** flow through `classifyEvent` / `derivePolicy`. See [the agent model](/concepts/agent-model) and [the RuntimeAdapter trait](/internals/runtime-adapter).
 - **Not the team-orchestration engine.** Bridge→Policy→Handler keeps an agent's status, streaming text, and approvals in sync. Turning delegation signals into durable work is the board orchestrator's job, on a different code path. See [delegation and orchestration](/concepts/delegation-and-orchestration).
 - **Not a transport.** The package never opens a socket. It transforms frames the `GatewayClient` already delivered; the socket, reconnect, and the same-origin proxy live in `@clawboo/gateway-client` and `@clawboo/gateway-proxy`. See [Gateway and events](/concepts/gateway-and-events).
-- **Token-count gap is upstream.** Gateway `chat` payloads carry no usage data, so the cost path estimates tokens elsewhere; that is a Gateway limitation, not this pipeline's. See [Known issues](/appendices/known-issues).
+- **Token-count gap is upstream.** Many Gateway `chat` payloads carry no usage block, so `deriveChatCost` falls back to a chars-per-token estimate. That is a Gateway limitation, not this pipeline's — the pipeline records whatever the frame reports. See [Known issues](/appendices/known-issues).
 
 <Note>
 These docs describe Clawboo **v0.3.0**, the current release.
