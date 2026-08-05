@@ -11,7 +11,7 @@ import { SettingsModal } from '@/features/settings/SettingsModal'
 import { ConfirmDialog } from '@/features/shared/ConfirmDialog'
 import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
 import { useViewStore } from '@/stores/view'
-import { useConnectionStore } from '@/stores/connection'
+import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { shouldShowGlobalTopBar } from '@/lib/topBar'
 
@@ -20,8 +20,9 @@ export function App() {
   const isBooZero = viewMode.type === 'booZero'
   const columnCollapsed = useViewStore((s) => s.columnCollapsed)
   // The first-run nudge only belongs on the settled dashboard (status 'connected'
-  // in both gateway and native mode), never over the onboarding wizard.
-  const onDashboard = useConnectionStore((s) => s.status === 'connected')
+  // in both gateway and native mode), never over the onboarding wizard. Uses the
+  // live-session predicate so a transient socket drop does not unmount these.
+  const onDashboard = useConnectionStore((s) => isSessionLive(s.status))
   // While the Settings modal is open, the whole app shell is inert so
   // background controls leave the tab order + AT tree (honouring aria-modal).
   const settingsOpen = useSettingsModalStore((s) => s.open)

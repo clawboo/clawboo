@@ -101,7 +101,10 @@ export class GatewayClient {
 
   onStatus(handler: StatusHandler): () => void {
     this.statusHandlers.add(handler)
-    handler(this._status)
+    // Replay the current status so a late subscriber is never blind. Guarded for
+    // the same reason as the fan-out in `updateStatus`: a subscriber's throw must
+    // not escape into whoever happened to be subscribing.
+    this.notifyStatus(handler, this._status)
     return () => this.statusHandlers.delete(handler)
   }
 
@@ -484,10 +487,29 @@ export class GatewayClient {
     this.rejectConnect = null
   }
 
+  /**
+   * Deliver one status to one handler, absorbing anything it throws.
+   *
+   * Load-bearing: `updateStatus('connected')` fires INSIDE `sendConnect()`'s try
+   * block, so an unguarded subscriber throw would be caught there and misread as
+   * a connect failure — clearing the stored device token, rejecting a connect
+   * that actually succeeded, and closing a healthy socket with 4008 (which then
+   * starts an endless reconnect loop that re-throws each pass). A subscriber's
+   * bug must not be able to do that. Mirrors the event fan-out in
+   * `handleMessage`.
+   */
+  private notifyStatus(handler: StatusHandler, status: ConnectionStatus): void {
+    try {
+      handler(status)
+    } catch (err) {
+      log.error({ err, status }, 'status handler threw')
+    }
+  }
+
   private updateStatus(status: ConnectionStatus): void {
     log.debug({ from: this._status, to: status }, 'status transition')
     this._status = status
-    this.statusHandlers.forEach((h) => h(status))
+    this.statusHandlers.forEach((h) => this.notifyStatus(h, status))
   }
 
   // ── Typed method helpers ────────────────────────────────────────────────────

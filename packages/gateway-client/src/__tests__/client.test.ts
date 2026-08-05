@@ -403,6 +403,64 @@ describe('GatewayClient', () => {
       client.onStatus((s) => statuses.push(s))
       expect(statuses).toContain('disconnected')
     })
+
+    // The SPA mirrors these emissions into its connection store, so the SEQUENCE
+    // a subscriber observes is load-bearing — not just the terminal
+    // `client.status`. In particular a non-manual drop must surface as
+    // 'reconnecting' (never 'disconnected'), because that is the only signal the
+    // dashboard has that a live socket went away.
+    it('emits the full transition sequence across connect then a non-manual drop', async () => {
+      const client = new GatewayClient()
+      const seen: string[] = []
+      client.onStatus((s) => seen.push(s)) // replays 'disconnected'
+
+      const ws = await connectClient(client)
+      expect(seen).toEqual(['disconnected', 'connecting', 'connected'])
+
+      ws.simulateClose(1006, 'dropped')
+      expect(seen).toEqual(['disconnected', 'connecting', 'connected', 'reconnecting'])
+
+      // A manual stop clears the scheduled reconnect and reports 'disconnected'.
+      client.disconnect()
+      expect(seen[seen.length - 1]).toBe('disconnected')
+    })
+
+    it('unsubscribe stops status callbacks', async () => {
+      const client = new GatewayClient()
+      const seen: string[] = []
+      const unsub = client.onStatus((s) => seen.push(s))
+      expect(seen).toEqual(['disconnected'])
+
+      unsub()
+      const ws = await connectClient(client)
+      ws.simulateClose(1006, 'dropped')
+
+      expect(seen).toEqual(['disconnected'])
+      client.disconnect()
+    })
+
+    // Load-bearing: 'connected' is emitted INSIDE `sendConnect()`'s try block, so
+    // an unguarded fan-out would let a subscriber's throw be caught there and
+    // misread as a connect failure — clearing the device token, rejecting a
+    // connect that succeeded, and closing a healthy socket into a retry loop.
+    it('a throwing subscriber cannot break the connect or the other subscribers', async () => {
+      const client = new GatewayClient()
+      const seen: string[] = []
+      // The subscribe-time REPLAY is a status delivery too, so this must not
+      // throw out of `onStatus` either.
+      expect(() =>
+        client.onStatus(() => {
+          throw new Error('subscriber blew up')
+        }),
+      ).not.toThrow()
+      client.onStatus((s) => seen.push(s))
+
+      await expect(connectClient(client)).resolves.toBeDefined()
+
+      expect(client.status).toBe('connected')
+      expect(seen).toContain('connected')
+      client.disconnect()
+    })
   })
 
   describe('call() throws when not connected', () => {

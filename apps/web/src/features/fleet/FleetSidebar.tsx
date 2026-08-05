@@ -14,7 +14,7 @@ import {
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
-import { useConnectionStore } from '@/stores/connection'
+import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useViewStore } from '@/stores/view'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
 import { CreateBooModal } from './CreateBooModal'
@@ -215,7 +215,9 @@ export function FleetSidebar() {
 
   // Delayed empty state — only show after 1s to avoid flash during hydration
   const [showEmpty, setShowEmpty] = useState(false)
-  const isEmptyConnected = agents.length === 0 && connectionStatus === 'connected' && !query
+  // Live-session, not strictly 'connected' — see AgentListColumn: the empty card
+  // should survive a transient socket drop rather than restart its 1s timer.
+  const isEmptyConnected = agents.length === 0 && isSessionLive(connectionStatus) && !query
   useEffect(() => {
     if (!isEmptyConnected) {
       setShowEmpty(false)
