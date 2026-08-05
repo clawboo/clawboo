@@ -33,6 +33,8 @@ const { ContentArea } = await import('../ContentArea')
 const { Modal } = await import('@/features/shared/Modal')
 const { useViewStore } = await import('@/stores/view')
 const { useTeamStore } = await import('@/stores/team')
+const { useSettingsModalStore } = await import('@/stores/settingsModal')
+const { useEditorStore } = await import('@/stores/editor')
 
 beforeEach(() => {
   // The team must exist in the store: ContentArea has a guard effect that sends a
@@ -47,6 +49,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  useSettingsModalStore.getState().close()
+  useEditorStore.getState().closeEditor()
   useTeamStore.setState({ teams: [], selectedTeamId: null })
 })
 
@@ -95,6 +99,36 @@ describe('ContentArea — Escape arbitration', () => {
       </>,
     )
     await screen.findByTestId('overlay')
+
+    await user.keyboard('{Meta>}2{/Meta}')
+
+    expect(useViewStore.getState().viewMode.type).toBe('groupChat')
+  })
+
+  it('ignores the Cmd/Ctrl+number nav shortcuts while Settings is open', async () => {
+    // SettingsModal traps Tab itself instead of going through `useFocusTrap`, so
+    // it never lands on the trap stack — `hasOpenTrap()` alone does not cover it.
+    // Its search field is focused on open, which the input guard above skips, but
+    // Tab to any control in the left rail and the shortcut gets through.
+    const user = userEvent.setup()
+    render(<ContentArea />)
+    await screen.findByTestId('stub-group-chat')
+    useSettingsModalStore.getState().openSettings()
+
+    await user.keyboard('{Meta>}2{/Meta}')
+
+    expect(useViewStore.getState().viewMode.type).toBe('groupChat')
+  })
+
+  it('ignores the Cmd/Ctrl+number nav shortcuts while the file editor is open', async () => {
+    // The editor is `fixed inset-y-0 right-0 left:268` — it covers the whole
+    // content area and does not close on a view change, so navigating behind it
+    // strands the user in an editor over a view they never chose. The Escape
+    // branch already defers to it; the shortcuts have to as well.
+    const user = userEvent.setup()
+    render(<ContentArea />)
+    await screen.findByTestId('stub-group-chat')
+    useEditorStore.getState().openEditor('a1', 'Agent One')
 
     await user.keyboard('{Meta>}2{/Meta}')
 

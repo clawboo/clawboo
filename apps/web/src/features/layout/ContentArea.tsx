@@ -18,6 +18,15 @@ import type { NavView } from '@/stores/view'
 
 // ─── View transition config ─────────────────────────────────────────────────
 
+/**
+ * True when something is layered over the content area and owns the keyboard, so
+ * the app-shell shortcuts must stand down. See the call site for why each of the
+ * three surfaces has to be named individually.
+ */
+function overlayOwnsKeyboard(): boolean {
+  return hasOpenTrap() || useSettingsModalStore.getState().open || useEditorStore.getState().isOpen
+}
+
 const VIEW_TRANSITION = { duration: 0.15, ease: 'easeOut' as const }
 const VIEW_STYLE = {
   display: 'flex' as const,
@@ -116,13 +125,24 @@ export function ContentArea() {
         return
       }
 
-      // Every remaining shortcut moves the view BEHIND a dialog, which is never
-      // what the user meant while one is open: Cmd/Ctrl+1..4 call `navigateTo`
-      // directly, and Cmd/Ctrl+, would stack Settings — whose own Tab trap does
-      // not go through `useFocusTrap` — on top of a dialog that still owns the
-      // keyboard. Escape is handled above because it has its own layering
-      // (Settings first, then the trap stack, then the editor).
-      if (hasOpenTrap()) return
+      // Every remaining shortcut moves the view BEHIND whatever is layered over
+      // the content area, which is never what the user meant: Cmd/Ctrl+1..4 call
+      // `navigateTo` directly, and Cmd/Ctrl+, would stack Settings on top of a
+      // dialog that still owns the keyboard. Escape is handled above instead,
+      // because it has its own layering (Settings closes first, then the trap
+      // stack, then the editor).
+      //
+      // All three surfaces have to be named separately — there is no single
+      // registry:
+      //   • `hasOpenTrap()` covers every `Modal`.
+      //   • SettingsModal traps Tab itself rather than going through
+      //     `useFocusTrap`, so it never reaches the stack.
+      //   • The file editor is `fixed inset-y-0 right-0` over the whole content
+      //     area and does not close on a view change, so navigating behind it
+      //     strands the user in an editor over a view they never chose.
+      // The input guard at the top of this handler masks all three while a text
+      // field holds focus; Tab to any button and the shortcut gets through.
+      if (overlayOwnsKeyboard()) return
 
       // Cmd/Ctrl+, — open the Settings modal (the universal settings shortcut)
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === ',') {
