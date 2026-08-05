@@ -5,6 +5,7 @@ import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay
 import { AgentDetailView } from '@/features/agent-detail'
 import { GroupChatView } from '@/features/group-chat/GroupChatView'
 import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
+import { hasOpenTrap } from '@/features/shared/useFocusTrap'
 import { NAV_VIEW_LABELS } from '@/lib/navLabels'
 import { WelcomeState } from './WelcomeState'
 import { useViewStore } from '@/stores/view'
@@ -91,6 +92,17 @@ export function ContentArea() {
           useSettingsModalStore.getState().close()
           return
         }
+        // A `Modal` is open: it owns Escape and closes itself from its own
+        // window-BUBBLE listener. THIS handler is on document-BUBBLE, which fires
+        // FIRST, so the dialog cannot suppress it with stopPropagation — the trap
+        // stack is the arbitration. Without this, Escape inside a dialog opened
+        // over an agent / group-chat view would ALSO deselect the agent and jump
+        // the app to Welcome behind the still-closing dialog.
+        //
+        // Deliberately AFTER the Settings branch: SettingsModal traps Tab itself
+        // rather than going through `useFocusTrap`, so it never registers on the
+        // stack and its Escape ordering is unchanged.
+        if (hasOpenTrap()) return
         if (useEditorStore.getState().isOpen) return
         if (
           viewMode.type === 'agent' ||

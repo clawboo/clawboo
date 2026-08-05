@@ -1247,6 +1247,14 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         // default <Controls> lock, which is why <Controls> is no longer rendered.
         nodesDraggable={!locked}
         elementsSelectable={!locked}
+        // React Flow's default `deleteKeyCode` is 'Backspace', and its keyboard
+        // a11y binds Enter/Space to select a focused node — so Tab, Enter,
+        // Backspace removes an agent from the canvas. That path runs through
+        // `onNodesChange` → `applyNodeChanges`, which only splices the node out of
+        // the local store: no confirmation, no `deleteAgentOperation`, no server
+        // call. The agent is untouched and silently reappears on reload.
+        // Deletion belongs to the context menu, which does all three.
+        deleteKeyCode={null}
         // The hidden text every node's `aria-describedby` points at. NOTE the key
         // names are inverted in @xyflow/system: with keyboard a11y ON (our case)
         // React Flow renders `node.a11yDescription.keyboardDisabled`, NOT
