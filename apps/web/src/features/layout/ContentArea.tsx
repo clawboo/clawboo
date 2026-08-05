@@ -116,6 +116,14 @@ export function ContentArea() {
         return
       }
 
+      // Every remaining shortcut moves the view BEHIND a dialog, which is never
+      // what the user meant while one is open: Cmd/Ctrl+1..4 call `navigateTo`
+      // directly, and Cmd/Ctrl+, would stack Settings — whose own Tab trap does
+      // not go through `useFocusTrap` — on top of a dialog that still owns the
+      // keyboard. Escape is handled above because it has its own layering
+      // (Settings first, then the trap stack, then the editor).
+      if (hasOpenTrap()) return
+
       // Cmd/Ctrl+, — open the Settings modal (the universal settings shortcut)
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === ',') {
         e.preventDefault()

@@ -81,6 +81,36 @@ describe('ContentArea — Escape arbitration', () => {
     expect(useViewStore.getState().viewMode.type).toBe('groupChat')
   })
 
+  it('ignores the Cmd/Ctrl+number nav shortcuts while a dialog is open', async () => {
+    // Escape is not the only way the shell can move the view out from under a
+    // dialog: Cmd/Ctrl+1..4 call `navigateTo` directly. Containment has to cover
+    // every global shortcut, not just the one that surfaced the bug.
+    const user = userEvent.setup()
+    render(
+      <>
+        <ContentArea />
+        <Modal open onClose={vi.fn()} label="An overlay" data-testid="overlay">
+          <button type="button">something</button>
+        </Modal>
+      </>,
+    )
+    await screen.findByTestId('overlay')
+
+    await user.keyboard('{Meta>}2{/Meta}')
+
+    expect(useViewStore.getState().viewMode.type).toBe('groupChat')
+  })
+
+  it('honours the Cmd/Ctrl+number nav shortcuts when no dialog is open', async () => {
+    const user = userEvent.setup()
+    render(<ContentArea />)
+    await screen.findByTestId('stub-group-chat')
+
+    await user.keyboard('{Meta>}2{/Meta}')
+
+    expect(useViewStore.getState().viewMode).toMatchObject({ type: 'nav', view: 'fleet' })
+  })
+
   it('hands Escape back to the app shell once the dialog closes', async () => {
     const user = userEvent.setup()
     const { rerender } = render(
