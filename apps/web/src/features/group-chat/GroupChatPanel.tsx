@@ -758,6 +758,7 @@ export function GroupChatPanel({
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={scrollRef}
+          data-testid="group-chat-scroll"
           className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
           onScroll={handleScroll}
         >
