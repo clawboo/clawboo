@@ -9,6 +9,7 @@ import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { type StatusTone } from '@/features/shared/StatusPill'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import {
   fetchRegistryHealth,
   fetchRuntimes,
@@ -218,9 +219,9 @@ export function RuntimesPanel() {
 
   useEffect(() => {
     void refresh()
-    const id = setInterval(() => void refresh(), 8000)
-    return () => clearInterval(id)
   }, [refresh])
+
+  useVisiblePolling(() => void refresh(), 8000)
 
   const openclawCaps: Capabilities = {
     streaming: true,

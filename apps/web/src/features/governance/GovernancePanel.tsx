@@ -32,6 +32,7 @@ import { SegmentedControl } from '@/features/shared/SegmentedControl'
 import { Select } from '@/features/shared/Select'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import {
   listAudit,
   listBudgets,
@@ -317,9 +318,9 @@ export function GovernancePanel() {
 
   useEffect(() => {
     void refreshBudgets()
-    const id = setInterval(() => void refreshBudgets(), 5000)
-    return () => clearInterval(id)
   }, [refreshBudgets])
+
+  useVisiblePolling(() => void refreshBudgets(), 5000)
 
   useEffect(() => {
     void refreshAudit()

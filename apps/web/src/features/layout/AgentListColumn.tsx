@@ -32,6 +32,7 @@ import { NAV_VIEW_LABELS } from '@/lib/navLabels'
 import { ThemeToggle } from '@/features/theme/ThemeToggle'
 import { aggregateTeamStatus } from '@/lib/teamStatus'
 import { getActivityVerb } from '@/lib/agentActivityVerb'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { useChatStore } from '@/stores/chat'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
@@ -477,12 +478,10 @@ export function AgentListColumn() {
   const [query, setQuery] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
 
-  // Tick counter for "seen X ago" labels
+  // Tick counter for "seen X ago" labels — paused while the tab is hidden, with
+  // one catch-up tick on return (same rationale as FleetSidebar).
   const [, setTick] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 30_000)
-    return () => clearInterval(id)
-  }, [])
+  useVisiblePolling(() => setTick((n) => n + 1), 30_000)
 
   // Delayed empty state
   const [showEmpty, setShowEmpty] = useState(false)

@@ -147,7 +147,7 @@ There is deliberately no third source. Claude Code, Codex, Hermes, and native ha
 The trait's contract has a load-bearing property: **`read()` never rejects**. A source whose backend is down (a disconnected Gateway) returns a degraded status with whatever records it can; a stale cache, or none, so one dead source can never take the merged view down. The REST `GET /api/schedules` therefore always returns `200`, with per-source degradation reported as data. Writes route by owner: an `observe-only` source refuses with `403`, a `team-task` create into a runtime-own-life source returns `422`, an unknown id returns `404`, an illegal transition or ownership conflict returns `409`, and a write against a disconnected Gateway returns `503`. The `manageability` tier is a structural gate; the UI is a pure function of it and can never offer an action the owning system forbids.
 
 <Note>
-The legacy in-app Scheduler panel still talks to the OpenClaw Gateway's `cron.*` methods over the browser proxy connection directly. The unified `/api/schedules` surface is the durable, multi-domain backend; the panel converges onto it in a future release.
+The Scheduler panel reads and writes exclusively through this unified `/api/schedules` surface. Gateway cron jobs are reached server-side via the `OpenClawGatewayCronScheduleSource`; the browser never speaks the Gateway's `cron.*` RPC directly.
 </Note>
 
 ## Design rationale and trade-offs

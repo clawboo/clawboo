@@ -1,21 +1,7 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MotionConfig } from 'framer-motion'
-import { useState } from 'react'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: 60 * 1000,
-            refetchOnWindowFocus: false,
-          },
-        },
-      }),
-  )
-
   return (
     <ThemeProvider>
       {/* Framer Motion does NOT honour `prefers-reduced-motion` on its own:
@@ -28,9 +14,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           fade-in instead of popping, which is the documented framer behaviour and
           the accessible default. One provider covers every animated surface;
           per-component `useReducedMotion` checks stay valid on top of it. */}
-      <MotionConfig reducedMotion="user">
-        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-      </MotionConfig>
+      <MotionConfig reducedMotion="user">{children}</MotionConfig>
     </ThemeProvider>
   )
 }

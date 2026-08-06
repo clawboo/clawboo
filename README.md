@@ -202,7 +202,7 @@ pnpm dev          # Express API on :18790 (auto-fallback) + Vite SPA on :5173
 | `pnpm e2e`                                 | Playwright end-to-end tests                   |
 | `pnpm assemble && pnpm test:clean-install` | Bundle the CLI and smoke-test a clean install |
 
-Tech stack: Node.js 22+ and TypeScript 5 strict, TurboRepo + pnpm, Vite SPA + React 19 + Express, Tailwind CSS 4, Zustand + TanStack Query, React Flow + ELK.js for the graph, CodeMirror 6, SQLite via better-sqlite3 + Drizzle ORM, the Model Context Protocol SDK, and Vitest + Playwright + MSW for tests. macOS, Linux, and Windows are all first-class.
+Tech stack: Node.js 22+ and TypeScript 5 strict, TurboRepo + pnpm, Vite SPA + React 19 + Express, Tailwind CSS 4, Zustand, React Flow + ELK.js for the graph, CodeMirror 6, SQLite via better-sqlite3 + Drizzle ORM, the Model Context Protocol SDK, and Vitest + Playwright + MSW for tests. macOS, Linux, and Windows are all first-class.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for branching, the PR checklist, and code guidelines.
 

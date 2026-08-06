@@ -30,7 +30,6 @@ aggregated in this file, which ships in the package (`dist/THIRD_PARTY_NOTICES.m
 | `elkjs`                     | EPL-2.0    |
 | `framer-motion`             | MIT        |
 | `zustand`                   | MIT        |
-| `@tanstack/react-query`     | MIT        |
 | `codemirror`                | MIT        |
 | `lucide-react`              | ISC        |
 | `simple-icons`              | CC0-1.0    |

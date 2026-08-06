@@ -11,6 +11,7 @@ import { AlertCircle, CheckCircle2, HeartPulse, RefreshCw, XCircle } from 'lucid
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
 import { PanelHeader } from '@/features/shared/PanelHeader'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { Spinner } from '@/features/shared/Spinner'
@@ -114,12 +115,12 @@ export function SystemHealthPanel() {
   useEffect(() => {
     mountedRef.current = true
     void load(false)
-    const t = setInterval(() => void load(false), 30_000)
     return () => {
       mountedRef.current = false
-      clearInterval(t)
     }
   }, [load])
+
+  useVisiblePolling(() => void load(false), 30_000)
 
   const degradedCount = report?.degraded.length ?? 0
   const fatalCount = report?.fatal.length ?? 0

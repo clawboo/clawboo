@@ -5,7 +5,9 @@
 // STRUCTURAL roster derivation (useGraphData.ts + @mention org chart) is
 // untouched — this only augments.
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 
 export type ObsAgentStatus = 'working' | 'idle' | 'stalled' | 'zombie'
 
@@ -19,43 +21,50 @@ const EMPTY: ObsOverlay = { status: new Map(), cost: new Map(), delegations: [] 
 
 export function useObsGraphOverlay(teamId: string | null): ObsOverlay {
   const [overlay, setOverlay] = useState<ObsOverlay>(EMPTY)
+  // `load` is hoisted out of the mount effect so the poller can share it, which
+  // costs the effect-local `alive` flag its per-teamId scope. A generation
+  // counter replaces it: each call claims a number, and a response is dropped
+  // unless it is still the newest — covering a teamId switch mid-flight, two
+  // overlapping ticks, and unmount alike.
+  const generationRef = useRef(0)
 
-  useEffect(() => {
-    let alive = true
-    const load = async (): Promise<void> => {
-      try {
-        const q = teamId ? `?teamId=${encodeURIComponent(teamId)}` : ''
-        const [hRes, gRes] = await Promise.all([
-          fetch(`/api/obs/health${q}`),
-          fetch(`/api/obs/graph${q}`),
-        ])
-        if (!alive || !hRes.ok || !gRes.ok) return
-        const h = (await hRes.json()) as {
-          agents: { agentId: string; status: ObsAgentStatus; costUsd: number }[]
-        }
-        const g = (await gRes.json()) as { agentEdges: { source: string; target: string }[] }
-        const status = new Map<string, ObsAgentStatus>()
-        const cost = new Map<string, number>()
-        for (const a of h.agents) {
-          status.set(a.agentId, a.status)
-          cost.set(a.agentId, a.costUsd)
-        }
-        setOverlay({
-          status,
-          cost,
-          delegations: g.agentEdges.map((e) => ({ source: e.source, target: e.target })),
-        })
-      } catch {
-        /* best-effort */
+  const load = useCallback(async (): Promise<void> => {
+    const generation = ++generationRef.current
+    try {
+      const q = teamId ? `?teamId=${encodeURIComponent(teamId)}` : ''
+      const [hRes, gRes] = await Promise.all([
+        fetch(`/api/obs/health${q}`),
+        fetch(`/api/obs/graph${q}`),
+      ])
+      if (generationRef.current !== generation || !hRes.ok || !gRes.ok) return
+      const h = (await hRes.json()) as {
+        agents: { agentId: string; status: ObsAgentStatus; costUsd: number }[]
       }
-    }
-    void load()
-    const id = setInterval(() => void load(), 5000)
-    return () => {
-      alive = false
-      clearInterval(id)
+      const g = (await gRes.json()) as { agentEdges: { source: string; target: string }[] }
+      const status = new Map<string, ObsAgentStatus>()
+      const cost = new Map<string, number>()
+      for (const a of h.agents) {
+        status.set(a.agentId, a.status)
+        cost.set(a.agentId, a.costUsd)
+      }
+      setOverlay({
+        status,
+        cost,
+        delegations: g.agentEdges.map((e) => ({ source: e.source, target: e.target })),
+      })
+    } catch {
+      /* best-effort */
     }
   }, [teamId])
+
+  useEffect(() => {
+    void load()
+    return () => {
+      generationRef.current += 1 // invalidate whatever is still in flight
+    }
+  }, [load])
+
+  useVisiblePolling(() => void load(), 5000)
 
   return overlay
 }

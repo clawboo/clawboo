@@ -13,6 +13,7 @@ import { EmptyState } from '@/features/shared/EmptyState'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { formatRelative } from '@/lib/formatRelative'
 import { useReadSequencer } from '@/lib/useReadSequencer'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import {
   fetchFleetSummary,
   fetchRecentIssues,
@@ -129,9 +130,9 @@ export function FleetHealth() {
 
   useEffect(() => {
     void refresh()
-    const id = setInterval(() => void refresh(), 8000)
-    return () => clearInterval(id)
   }, [refresh])
+
+  useVisiblePolling(() => void refresh(), 8000)
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">

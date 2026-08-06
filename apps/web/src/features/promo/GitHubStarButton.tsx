@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Github, Star } from 'lucide-react'
 import { useInSettingsModal } from '@/features/settings/settingsModalContext'
+import { useRefreshOnVisible } from '@/lib/useVisiblePolling'
 
 // GitHub star button — dograh-style outline pill rendered in each view's
 // header. Drives traffic to the repo for stars.
@@ -99,20 +100,7 @@ export function GitHubStarButton() {
   // Refetch when the window regains focus — catches "user just starred on
   // GitHub and came back to the tab". Still cache-gated so rapid tab
   // switching doesn't hit the API repeatedly.
-  useEffect(() => {
-    const onFocus = () => {
-      void fetchStars()
-    }
-    const onVisibilityChange = () => {
-      if (!document.hidden) void fetchStars()
-    }
-    window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    return () => {
-      window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-    }
-  }, [fetchStars])
+  useRefreshOnVisible(() => void fetchStars())
 
   // Click handler: optimistic +1, then forced refetch after the user has
   // had time to click Star on GitHub in the new tab.

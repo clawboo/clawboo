@@ -91,6 +91,9 @@ export function ChatPanel({
     nativeActivityRef.current = Date.now()
     setNativeBusy(true)
   }, [])
+  // Deliberately a bare interval, NOT `useVisiblePolling`: this is a wall-clock
+  // grace window, not a poll. Suspending it in a hidden tab would freeze the
+  // composer on "Stop" until the user came back.
   useEffect(() => {
     if (!nativeBusy) return
     const id = setInterval(() => {

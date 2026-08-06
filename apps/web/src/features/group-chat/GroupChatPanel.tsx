@@ -450,6 +450,10 @@ export function GroupChatPanel({
   // nothing is actively streaming, the cascade has settled → flip Stop back to Send.
   // Each frame refreshes `lastActivityRef` (via `bumpActivity`), so a multi-step
   // cascade keeps the window alive across the gaps between turns.
+  //
+  // Deliberately a bare interval, NOT `useVisiblePolling`: this is a wall-clock
+  // grace window, not a poll. Suspending it in a hidden tab would freeze the
+  // composer on "Stop" until the user came back.
   useEffect(() => {
     if (!serverBusy) return
     const id = setInterval(() => {
