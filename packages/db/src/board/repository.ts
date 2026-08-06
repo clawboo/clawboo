@@ -7,8 +7,14 @@
 import { randomUUID } from 'node:crypto'
 
 import { canTransition, isTerminal, type TaskStatus } from '@clawboo/board-core'
-import { isVerdictPromotable } from '@clawboo/governance'
-import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
+import {
+  checkDepthCap,
+  checkFanoutCap,
+  DEFAULT_MAX_CHILDREN,
+  DEFAULT_MAX_DEPTH,
+  isVerdictPromotable,
+} from '@clawboo/governance'
+import { and, count, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import {
@@ -46,9 +52,14 @@ export interface CreateTaskInput {
   scheduledBy?: string
 }
 
-export function createTask(db: ClawbooDb, input: CreateTaskInput): DbTask {
+/**
+ * The row a create builds. Shared by `createTask` (plain write) and
+ * `createCappedSubtask` (in-transaction write) so a new column can never be added
+ * to one create path and missed by the other.
+ */
+function buildTaskRow(input: CreateTaskInput): DbTask {
   const now = Date.now()
-  const row: DbTask = {
+  return {
     id: randomUUID(),
     title: input.title,
     description: input.description ?? null,
@@ -71,11 +82,18 @@ export function createTask(db: ClawbooDb, input: CreateTaskInput): DbTask {
     updatedAt: now,
     completedAt: null,
   }
+}
+
+export function createTask(db: ClawbooDb, input: CreateTaskInput): DbTask {
+  const row = buildTaskRow(input)
   withWriteRetry(() => db.insert(tasks).values(row).run())
   return row
 }
 
-/** A subtask is a task with `parentTaskId` set; it inherits the parent's team. */
+/** A subtask is a task with `parentTaskId` set; it inherits the parent's team.
+ *  The UNCAPPED primitive — the in-process orchestrator, the REST board, and the
+ *  evals harness create parented tasks through their own already-bounded paths.
+ *  The Tasks MCP boundary uses `createCappedSubtask` below instead. */
 export function createSubtask(
   db: ClawbooDb,
   parentTaskId: string,
@@ -86,6 +104,108 @@ export function createSubtask(
     ...input,
     parentTaskId,
     teamId: input.teamId ?? parent?.teamId ?? null,
+  })
+}
+
+// ─── Capped subtask creation (the Tasks MCP boundary's create path) ──────────
+
+// Re-exported so a caller (the Tasks MCP, its tests, the docs) can name the
+// shipped defaults of `createCappedSubtask` without taking a governance dep.
+export { DEFAULT_MAX_CHILDREN, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
+
+export type CreateSubtaskReason = 'parent_not_found' | 'child_cap' | 'depth_cap'
+
+export interface SubtaskCaps {
+  /** Max LIVE (non-dropped) children one parent may have. Default DEFAULT_MAX_CHILDREN. */
+  maxChildren?: number
+  /** Max ancestor depth the new child's PARENT may sit at. Default DEFAULT_MAX_DEPTH. */
+  maxDepth?: number
+}
+
+export interface CreateSubtaskResult {
+  ok: boolean
+  task?: DbTask
+  reason?: CreateSubtaskReason
+  /** Live children the parent already had — set on `child_cap` only (exact). */
+  childCount?: number
+  /** The ceiling the denial was measured against — set on both cap denials. */
+  max?: number
+}
+
+/**
+ * Create a subtask with the per-parent child-count + nesting-depth caps ENFORCED,
+ * inside ONE `BEGIN IMMEDIATE` transaction. The Tasks MCP ships as a stdio bin —
+ * one OS process per attached runtime, all on the shared DB file — so a
+ * count-then-insert window would let two agents both land the N+1th child.
+ *
+ * Returns a result object and never throws for a policy denial (mirrors
+ * `claimTask` / `updateStatus`). Deliberate: the MCP `buildServer` does not wrap
+ * tool handlers in try/catch, so a throw here would reach the model as a JSON-RPC
+ * protocol error instead of a tool result — exactly the `parent_not_found` bug
+ * this function fixes.
+ */
+export function createCappedSubtask(
+  db: ClawbooDb,
+  parentTaskId: string,
+  input: Omit<CreateTaskInput, 'parentTaskId'>,
+  caps: SubtaskCaps = {},
+): CreateSubtaskResult {
+  const maxChildren = caps.maxChildren ?? DEFAULT_MAX_CHILDREN
+  const maxDepth = caps.maxDepth ?? DEFAULT_MAX_DEPTH
+
+  return immediateWrite(db, (tx) => {
+    const parent = tx.select().from(tasks).where(eq(tasks.id, parentTaskId)).get() as
+      DbTask | undefined
+    // A missing parent would otherwise reach the insert and trip
+    // `PRAGMA foreign_keys = ON` — an exception, not data. Refuse it as data.
+    if (!parent) return { ok: false, reason: 'parent_not_found' }
+
+    // Fan-out: count LIVE siblings only (`dropped = 0`). Soft-delete is the user's
+    // ONLY recovery once a parent is at the cap, so it must actually free a slot.
+    // Terminal (`done`/`cancelled`) children DO count: the cap bounds rows on the
+    // board, so a create → complete → create loop cannot outgrow it.
+    const siblingRow = tx
+      .select({ n: count() })
+      .from(tasks)
+      .where(and(eq(tasks.parentTaskId, parentTaskId), eq(tasks.dropped, 0)))
+      .get() as { n: number } | undefined
+    const siblingCount = siblingRow?.n ?? 0
+    if (!checkFanoutCap({ siblingCount, max: maxChildren }).ok) {
+      return { ok: false, reason: 'child_cap', childCount: siblingCount, max: maxChildren }
+    }
+
+    // Depth: walk the parent chain with a HARD step bound rather than reusing
+    // `getAncestors` — that helper takes a ClawbooDb, not a tx, so it would read
+    // OUTSIDE this transaction. Bounding the walk also keeps a corrupt
+    // `parent_task_id` cycle from spinning while this write lock is held: at most
+    // `maxDepth` primary-key lookups, no matter what the data says. The observed
+    // depth is deliberately not reported — the walk clamps, so the number could
+    // be a lie.
+    let parentDepth = 0
+    let cursor: string | null = parent.parentTaskId
+    while (cursor !== null && parentDepth < maxDepth) {
+      parentDepth += 1
+      const row = tx
+        .select({ parentTaskId: tasks.parentTaskId })
+        .from(tasks)
+        .where(eq(tasks.id, cursor))
+        .get()
+      cursor = row?.parentTaskId ?? null
+    }
+    // `depth >= max` ⇒ the new child would be `depth + 1`, one level too deep. The
+    // same rule the team-chat delegation loop applies to a source task before it
+    // spawns, so nothing an existing path already creates gets tighter.
+    if (!checkDepthCap({ depth: parentDepth, max: maxDepth }).ok) {
+      return { ok: false, reason: 'depth_cap', max: maxDepth }
+    }
+
+    const row = buildTaskRow({
+      ...input,
+      parentTaskId,
+      teamId: input.teamId ?? parent.teamId ?? null, // inherit, like createSubtask
+    })
+    tx.insert(tasks).values(row).run()
+    return { ok: true, task: row }
   })
 }
 
@@ -412,13 +532,25 @@ export function getReadyTasks(db: ClawbooDb, filter: { teamId?: string } & Scope
 /**
  * Walk the parent chain via recursive CTE. Raw SQL → the result is validated
  * with zod (clawboo rule: never trust TS generics over raw-SQL output).
+ *
+ * `UNION` (not `UNION ALL`) so the recursion TERMINATES on a `parent_task_id`
+ * cycle. No code path can create one — the column is written only at INSERT with
+ * a fresh UUID, so a parent is always an older committed row, and `TaskFields`
+ * cannot patch it — but a corrupt or hand-edited DB must not be able to hang a
+ * caller. On acyclic data the two are equivalent (the outer `id IN (…)` already
+ * de-duplicates), and this matches the `UNION` in `linkDep` / `getDependents`.
+ *
+ * DO NOT change this back. Measured on a two-row `a → b → a` cycle: `UNION`
+ * returns in ~0 ms; `UNION ALL` never returns (it is an unbounded spin, not a
+ * fast error). That is also why there is no regression test here — the failure
+ * mode is a hang, so a guard test would stall CI rather than fail it.
  */
 export function getAncestors(db: ClawbooDb, taskId: string): AncestorRow[] {
   const rows = db.all(
     sql`
       WITH RECURSIVE ancestors(id) AS (
         SELECT parent_task_id FROM tasks WHERE id = ${taskId} AND parent_task_id IS NOT NULL
-        UNION ALL
+        UNION
         SELECT t.parent_task_id FROM tasks t JOIN ancestors a ON t.id = a.id WHERE t.parent_task_id IS NOT NULL
       )
       SELECT id, parent_task_id, title, status FROM tasks WHERE id IN (SELECT id FROM ancestors)

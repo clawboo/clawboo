@@ -103,13 +103,13 @@ Stale re-claim of a dead, abandoned `in_progress` task is deliberately _not_ the
 
 ## Dependencies
 
-Tasks form a blocks / blocked-by graph in the `task_deps` table. Linking a dependency means "this task won't become ready to work until that task is `done`." A composite primary key on `(task_id, depends_on_task_id)` prevents duplicate edges, and inserts are conflict-tolerant, so re-linking is harmless.
+Tasks form a blocks / blocked-by graph in the `task_deps` table. Linking a dependency means "this task won't become ready to work until that task is `done`." A composite primary key on `(task_id, depends_on_task_id)` prevents duplicate edges, and inserts are conflict-tolerant, so re-linking is harmless. A link that would close a cycle — directly (`A → B`, then `B → A`) or transitively — is refused at write time, because a cycle can never resolve: readiness requires every dependency to be `done`, so each task in the cycle would sit un-ready forever with nothing surfacing the stall. The reachability check runs in the same transaction as the insert, so concurrent links cannot race one in.
 
 A task is **ready** when it is `todo`, not dropped, and _every_ one of its dependencies is `done`. Plans become dependency chains: each step depends on the prior step, and an orchestration ready-pump fires the next step the moment its blocker completes. Ready tasks are ordered by priority (descending), then by recency.
 
 Dependencies also drive failure recovery. When a blocker fails, moves to `blocked` or otherwise can't reach `done`, its downstream chain can never become ready and would otherwise sit as permanent ghost `todo` cards. The board can cancel the still-pending (`todo` / `backlog`) transitive dependents of a failed task via a recursive walk of the dependency graph, returning the cancelled rows so the orchestrator can report the stalled plan to the team leader. Tasks already `in_progress`, `done`, or `cancelled` are left untouched.
 
-The board similarly walks the _parent_ chain (via the self-referential `parent_task_id`) with a recursive query to compute a task's ancestors, used to enforce delegation depth limits. Both recursive reads validate their raw SQL output with a schema at runtime rather than trusting the type system over a raw query.
+The board similarly walks the _parent_ chain (via the self-referential `parent_task_id`) with a recursive query to compute a task's ancestors, which is how delegation depth is enforced: the orchestrator and the executor runner both refuse to act once a parent's ancestor chain has reached the depth ceiling (default 2), and the board's capped create path applies the same ceiling at creation time. That create path adds a second ceiling of its own, a per-parent live-child count (default 24), so an agent looping on `create_subtask` cannot quietly fill the board with rows. Both recursive reads validate their raw SQL output with a schema at runtime rather than trusting the type system over a raw query.
 
 ## Worktree linkage
 

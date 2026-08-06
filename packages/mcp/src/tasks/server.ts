@@ -7,7 +7,7 @@ import {
   addComment,
   blockTask,
   claimTask,
-  createSubtask,
+  createCappedSubtask,
   createTask,
   getAncestors,
   getComments,
@@ -21,11 +21,20 @@ import {
   unblockTask,
   updateStatus,
   type ClawbooDb,
+  type CreateSubtaskResult,
+  type CreateTaskInput,
   type TaskStatus,
 } from '@clawboo/db'
 import { z } from 'zod'
 
-import { buildServer, jsonResult, textResult, type Server, type ToolDef } from '../shared'
+import {
+  buildServer,
+  jsonResult,
+  textResult,
+  type McpToolResult,
+  type Server,
+  type ToolDef,
+} from '../shared'
 
 // The tool schemas advertise exactly the statuses the board accepts. Derived from
 // the shared state machine (@clawboo/board-core, re-exported by @clawboo/db) rather
@@ -34,6 +43,33 @@ const STATUS = taskStatusSchema
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 const optStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
+
+/**
+ * Turn a capped-create denial into the tool error the model sees. The cap
+ * messages name the recovery so the model can act instead of retrying — the same
+ * spirit as the "never retry a 409" claim conflict.
+ *
+ * The caps bound what an ATTACHED RUNTIME can create through these tools. The
+ * durable repository stays uncapped: the REST board and the in-process team-chat
+ * orchestrator carry their own per-turn fan-out and dispatch-depth limits. Rows
+ * they create still COUNT here, so an agent cannot launder rows in through
+ * another surface to raise its own ceiling.
+ */
+function subtaskDenial(parentTaskId: string, result: CreateSubtaskResult): McpToolResult {
+  if (result.reason === 'child_cap') {
+    return textResult(
+      `subtask rejected: parent ${parentTaskId} already has ${result.childCount} children (max ${result.max}); drop one or attach the new task elsewhere`,
+      true,
+    )
+  }
+  if (result.reason === 'depth_cap') {
+    return textResult(
+      `subtask rejected: parent ${parentTaskId} is at the maximum nesting depth (${result.max}); attach the new task higher in the tree`,
+      true,
+    )
+  }
+  return textResult(`parent not found: ${parentTaskId}`, true)
+}
 
 export function createTasksServer(db: ClawbooDb): Server {
   const claimHandler = (args: Record<string, unknown>) => {
@@ -83,44 +119,53 @@ export function createTasksServer(db: ClawbooDb): Server {
     },
     {
       name: 'create_task',
-      description: 'Create a board task.',
+      description:
+        'Create a board task. With parentTaskId set it is a subtask: the per-parent child-count and nesting-depth caps apply.',
       inputSchema: z.object({
         title: z.string(),
         description: z.string().optional(),
         status: STATUS.optional(),
         priority: z.number().int().optional(),
         teamId: z.string().optional(),
-        parentTaskId: z.string().optional(),
+        // .min(1) so '' is an "invalid args" tool error rather than an empty-string
+        // parent that reaches the FK and throws out of the handler. Wire-invisible:
+        // the zod→JSON-Schema converter emits { type: 'string' } either way.
+        parentTaskId: z.string().min(1).optional(),
         assigneeRuntime: z.string().optional(),
       }),
-      handler: (args) =>
-        jsonResult(
-          createTask(db, {
-            title: str(args['title']),
-            description: optStr(args['description']),
-            status: optStr(args['status']) as TaskStatus | undefined,
-            priority: typeof args['priority'] === 'number' ? args['priority'] : undefined,
-            teamId: optStr(args['teamId']),
-            parentTaskId: optStr(args['parentTaskId']),
-            assigneeRuntime: optStr(args['assigneeRuntime']),
-          }),
-        ),
+      handler: (args) => {
+        const input: Omit<CreateTaskInput, 'parentTaskId'> = {
+          title: str(args['title']),
+          description: optStr(args['description']),
+          status: optStr(args['status']) as TaskStatus | undefined,
+          priority: typeof args['priority'] === 'number' ? args['priority'] : undefined,
+          teamId: optStr(args['teamId']),
+          assigneeRuntime: optStr(args['assigneeRuntime']),
+        }
+        // No parent ⇒ a root task: unchanged hot path, no transaction, no caps.
+        const parentTaskId = optStr(args['parentTaskId'])
+        if (!parentTaskId) return jsonResult(createTask(db, input))
+        const result = createCappedSubtask(db, parentTaskId, input)
+        return result.ok ? jsonResult(result.task) : subtaskDenial(parentTaskId, result)
+      },
     },
     {
       name: 'create_subtask',
-      description: 'Create a subtask under a parent (inherits the parent team).',
+      description:
+        'Create a subtask under a parent (inherits the parent team). Capped per parent (child count) and by nesting depth.',
       inputSchema: z.object({
-        parentTaskId: z.string(),
+        parentTaskId: z.string().min(1),
         title: z.string(),
         description: z.string().optional(),
       }),
-      handler: (args) =>
-        jsonResult(
-          createSubtask(db, str(args['parentTaskId']), {
-            title: str(args['title']),
-            description: optStr(args['description']),
-          }),
-        ),
+      handler: (args) => {
+        const parentTaskId = str(args['parentTaskId'])
+        const result = createCappedSubtask(db, parentTaskId, {
+          title: str(args['title']),
+          description: optStr(args['description']),
+        })
+        return result.ok ? jsonResult(result.task) : subtaskDenial(parentTaskId, result)
+      },
     },
     {
       name: 'claim_task',

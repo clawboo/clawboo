@@ -92,7 +92,7 @@ The depth cap plus report-up-by-default establish a single point where results c
 
 ### The depth cap
 
-A source task at ancestor-depth `MAX_SPAWN_DEPTH` (2) or deeper may not spawn children. Depth is read from the board's ancestor chain (`getTask(...).ancestors.length`), so it is enforced by durable state rather than by trusting the model. A leader/user-initiated turn has no source task, it is depth 0, and may always delegate. Hitting the cap is reported: a system comment lands on the source task and the delegator is told to handle the work directly or report it back.
+A source task at ancestor-depth `MAX_SPAWN_DEPTH` (2) or deeper may not spawn children. Depth is read from the board's ancestor chain (`getTask(...).ancestors.length`), so it is enforced by durable state rather than by trusting the model. A leader/user-initiated turn has no source task, it is depth 0, and may always delegate. Hitting the cap is reported: a system comment lands on the source task and the delegator is told to handle the work directly or report it back. Dispatch is not the only enforcement point. The board's capped create path applies the same ceiling at **creation** time, reached through the [Tasks MCP](/reference/mcp-tools#create_subtask) create tools, plus a per-parent live-child cap (24) — so a raw `create_subtask` loop from an attached runtime is bounded by the same durable state instead of filling the board with rows.
 
 ### Fan-out
 

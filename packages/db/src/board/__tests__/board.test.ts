@@ -12,9 +12,12 @@ import {
   addComment,
   cancelDependents,
   claimTask,
+  createCappedSubtask,
   createExecutionProcess,
   createSubtask,
   createTask,
+  DEFAULT_MAX_CHILDREN,
+  DEFAULT_MAX_DEPTH,
   dropTask,
   getAncestors,
   getComments,
@@ -299,5 +302,84 @@ describe('dependencies, lineage, comments, soft-delete', () => {
     dropTask(db, t.id)
     expect(listTasks(db)).toHaveLength(0)
     expect(listTasks(db, { includeDropped: true })).toHaveLength(1)
+  })
+})
+
+describe('subtask caps (per-parent child count + nesting depth)', () => {
+  const childrenOf = (parentId: string) => listTasks(db).filter((t) => t.parentTaskId === parentId)
+
+  it('pins the shipped ceilings — retune them deliberately, never by accident', () => {
+    expect(DEFAULT_MAX_CHILDREN).toBe(24)
+    expect(DEFAULT_MAX_DEPTH).toBe(2)
+  })
+
+  it('accepts N children then rejects the N+1th, leaving exactly N on the board', () => {
+    const parent = createTask(db, { title: 'parent', teamId: 'team1' })
+    const caps = { maxChildren: 3 }
+    for (let i = 0; i < 3; i += 1) {
+      expect(createCappedSubtask(db, parent.id, { title: `c${i}` }, caps).ok).toBe(true)
+    }
+
+    const denied = createCappedSubtask(db, parent.id, { title: 'c3' }, caps)
+    expect(denied.ok).toBe(false)
+    expect(denied.reason).toBe('child_cap')
+    expect(denied.childCount).toBe(3)
+    expect(denied.max).toBe(3)
+    expect(denied.task).toBeUndefined()
+    expect(childrenOf(parent.id)).toHaveLength(3)
+  })
+
+  it('a dropped child frees a slot — soft-delete is the only recovery from the cap', () => {
+    const parent = createTask(db, { title: 'parent' })
+    const caps = { maxChildren: 2 }
+    const first = createCappedSubtask(db, parent.id, { title: 'a' }, caps).task!
+    createCappedSubtask(db, parent.id, { title: 'b' }, caps)
+    expect(createCappedSubtask(db, parent.id, { title: 'c' }, caps).reason).toBe('child_cap')
+
+    dropTask(db, first.id)
+    expect(createCappedSubtask(db, parent.id, { title: 'c' }, caps).ok).toBe(true)
+  })
+
+  it('a completed child still counts, so a create → complete loop cannot outgrow the cap', () => {
+    const parent = createTask(db, { title: 'parent' })
+    const caps = { maxChildren: 1 }
+    const child = createCappedSubtask(db, parent.id, { title: 'a' }, caps).task!
+    claimTask(db, child.id, 'agent-a')
+    expect(updateStatus(db, child.id, 'done').ok).toBe(true)
+
+    expect(createCappedSubtask(db, parent.id, { title: 'b' }, caps).reason).toBe('child_cap')
+  })
+
+  it('rejects a child whose parent is already at the max nesting depth', () => {
+    const caps = { maxDepth: 2 }
+    const root = createTask(db, { title: 'root' })
+    const child = createCappedSubtask(db, root.id, { title: 'child' }, caps).task! // depth 1
+    const grand = createCappedSubtask(db, child.id, { title: 'grand' }, caps).task! // depth 2
+    expect(getAncestors(db, grand.id)).toHaveLength(2)
+
+    const tooDeep = createCappedSubtask(db, grand.id, { title: 'great' }, caps)
+    expect(tooDeep.ok).toBe(false)
+    expect(tooDeep.reason).toBe('depth_cap')
+    expect(tooDeep.max).toBe(2)
+  })
+
+  it('an unknown parent is parent_not_found DATA, not a foreign-key exception', () => {
+    const before = listTasks(db).length
+    const r = createCappedSubtask(db, 'does-not-exist', { title: 'orphan' })
+    expect(r.ok).toBe(false)
+    expect(r.reason).toBe('parent_not_found')
+    expect(listTasks(db)).toHaveLength(before)
+  })
+
+  it('inherits the parent team and counts children written on another connection', () => {
+    const parent = createTask(db, { title: 'parent', teamId: 'team1' })
+    // A second handle on the SAME file — the two-attached-runtimes shape.
+    const other = createDb(dbPath)
+    const viaOther = createCappedSubtask(other, parent.id, { title: 'a' }, { maxChildren: 1 })
+    expect(viaOther.task?.teamId).toBe('team1')
+
+    expect(createCappedSubtask(db, parent.id, { title: 'b' }, { maxChildren: 1 }).reason).toBe(
+      'child_cap',
+    )
   })
 })

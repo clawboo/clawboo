@@ -89,7 +89,7 @@ These docs describe Clawboo **v0.3.1**, the current release.
 
 **circuit breaker**: a deterministic, cross-runtime backstop that stops a run burning turns or tokens with no progress. It trips on `iteration-cap`, `repeat-failure`, `no-progress`, `token-velocity`, or `repeat-policy-denied`, keyed on typed `RuntimeEvent` fields rather than scraped prose. See [governance](/concepts/governance).
 
-**cap**: a hard ceiling enforced in code: delegation depth (default max 2), per-turn fan-out, and per-node cost. The depth cap is the single-reduce-point + report-up-by-default discipline. See [governance](/concepts/governance).
+**cap**: a hard ceiling enforced in code: delegation depth (default max 2), per-turn fan-out, per-parent live-child count on the board (default 24), and per-node cost. The depth cap is the single-reduce-point + report-up-by-default discipline. See [governance](/concepts/governance).
 
 **approval**: a human gate on a risky tool call or delegation, resolved via the Approvals queue (allow-once / always / deny). It is a Clawboo-native DB-mediated handshake, distinct from OpenClaw's own exec-approval flow. See [approvals](/using/approvals).
 

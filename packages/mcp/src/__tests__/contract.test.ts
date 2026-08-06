@@ -7,7 +7,10 @@
 import {
   createDb,
   defaultAvailabilityContext,
+  DEFAULT_MAX_CHILDREN,
+  DEFAULT_MAX_DEPTH,
   listPendingApprovals,
+  listTasks,
   resolveApproval,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -78,6 +81,107 @@ describe('Tasks MCP', () => {
     })
     expect(cycle.isError).toBe(true)
     expect(cycle.text).toContain('dependency cycle')
+  })
+})
+
+// The caps live at this protocol boundary, where an attached runtime creates rows
+// unsupervised. The repository's own `createSubtask` stays UNCAPPED on purpose —
+// the delegation spawn path and POST /api/board go through it — so these tests
+// drive the caps the way an agent would: over MCP.
+describe('Tasks MCP creation caps', () => {
+  it(`caps children per parent — the ${DEFAULT_MAX_CHILDREN + 1}th subtask is a tool error`, async () => {
+    const client = await connectInMemory(createTasksServer(db))
+    const parent = JSON.parse(
+      (await callText(client, 'create_task', { title: 'Parent' })).text,
+    ) as {
+      id: string
+    }
+
+    for (let i = 0; i < DEFAULT_MAX_CHILDREN; i += 1) {
+      const ok = await callText(client, 'create_subtask', {
+        parentTaskId: parent.id,
+        title: `child ${i}`,
+      })
+      expect(ok.isError).toBe(false)
+    }
+
+    const capped = await callText(client, 'create_subtask', {
+      parentTaskId: parent.id,
+      title: 'one too many',
+    })
+    expect(capped.isError).toBe(true)
+    expect(capped.text).toContain(`already has ${DEFAULT_MAX_CHILDREN} children`)
+
+    // create_task with the same parent is refused identically (one shared path).
+    const viaCreateTask = await callText(client, 'create_task', {
+      title: 'one too many',
+      parentTaskId: parent.id,
+    })
+    expect(viaCreateTask.isError).toBe(true)
+    expect(viaCreateTask.text).toContain('already has')
+
+    // The cap actually held: parent + exactly N children, nothing more.
+    const all = JSON.parse((await callText(client, 'list_tasks', {})).text) as unknown[]
+    expect(all).toHaveLength(DEFAULT_MAX_CHILDREN + 1)
+  })
+
+  it('refuses a subtask once the tree is at the maximum nesting depth', async () => {
+    const client = await connectInMemory(createTasksServer(db))
+    const mk = async (args: Record<string, unknown>, tool = 'create_subtask') => {
+      const res = await callText(client, tool, args)
+      expect(res.isError).toBe(false)
+      return JSON.parse(res.text) as { id: string }
+    }
+    // DEFAULT_MAX_DEPTH levels of children are ACCEPTED — the same ceiling
+    // team-chat delegation already produces, so nothing existing gets tighter.
+    let parentId = (await mk({ title: 'depth 0' }, 'create_task')).id
+    for (let d = 1; d <= DEFAULT_MAX_DEPTH; d += 1) {
+      parentId = (await mk({ parentTaskId: parentId, title: `depth ${d}` })).id
+    }
+
+    const tooDeep = await callText(client, 'create_subtask', {
+      parentTaskId: parentId,
+      title: 'too deep',
+    })
+    expect(tooDeep.isError).toBe(true)
+    expect(tooDeep.text).toContain('maximum nesting depth')
+  })
+
+  it('never caps a top-level create_task, however many roots exist', async () => {
+    const client = await connectInMemory(createTasksServer(db))
+    const roots = DEFAULT_MAX_CHILDREN + 5
+    for (let i = 0; i < roots; i += 1) {
+      const res = await callText(client, 'create_task', { title: `root-${i}` })
+      expect(res.isError).toBe(false)
+    }
+    expect(listTasks(db)).toHaveLength(roots)
+  })
+
+  it('an unknown parent is a tool error, not a failed tool call', async () => {
+    const client = await connectInMemory(createTasksServer(db))
+    // Regression guard: this used to reach PRAGMA foreign_keys and escape the
+    // handler as a JSON-RPC error, so `callTool` REJECTED instead of returning
+    // a result with isError.
+    const viaSubtask = await callText(client, 'create_subtask', {
+      parentTaskId: 'nope',
+      title: 'orphan',
+    })
+    expect(viaSubtask.isError).toBe(true)
+    expect(viaSubtask.text).toBe('parent not found: nope')
+
+    const viaCreate = await callText(client, 'create_task', {
+      title: 'orphan',
+      parentTaskId: 'nope',
+    })
+    expect(viaCreate.isError).toBe(true)
+    expect(viaCreate.text).toBe('parent not found: nope')
+
+    // An EMPTY parent id is caught by the schema, not silently made a root task.
+    const empty = await callText(client, 'create_subtask', { parentTaskId: '', title: 'x' })
+    expect(empty.isError).toBe(true)
+    expect(empty.text).toContain('invalid args')
+
+    expect(listTasks(db)).toHaveLength(0)
   })
 })
 

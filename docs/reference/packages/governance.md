@@ -123,7 +123,8 @@ The barrel re-exports four module groups: `./verify`, `./budget`, `./caps`, `./b
 | `DEFAULT_CRITIC_THRESHOLD`  | `{ files: 5, lines: 300 }`, diff size above which the critic fires.                                                                                                         |
 | `SOFT_CAP_PERCENT`          | `80`, soft-cap threshold percent.                                                                                                                                           |
 | `MICRO_CENTS_PER_CENT`      | `10_000`, ledger micro-cent carry granularity.                                                                                                                              |
-| `DEFAULT_MAX_DEPTH`         | `2`, default delegation-depth cap.                                                                                                                                          |
+| `DEFAULT_MAX_DEPTH`         | `2`, the shared ancestor-chain depth ceiling: enforced by the board's capped create path, and pinned to the same value by the orchestrator/runner `MAX_SPAWN_DEPTH`.        |
+| `DEFAULT_MAX_CHILDREN`      | `24`, default per-parent LIFETIME live-child ceiling for the board's capped create path. Distinct from the per-turn fan-out cap (8).                                        |
 | `BREAKER_DEFAULTS`          | `{ maxToolIterations: 30, repeatFailureThreshold: 3, noProgressThreshold: 6, tokenVelocityCeiling: 200_000, velocityMinWindowMs: 15_000, repeatPolicyDeniedThreshold: 2 }`. |
 | `breakerConfigSchema`       | zod partial object for `BreakerConfigInput`.                                                                                                                                |
 | `breakerTripReasonSchema`   | zod enum for `BreakerTripReason`.                                                                                                                                           |
@@ -137,7 +138,8 @@ None: this package exports only functions, types, and constants.
 - **`@clawboo/db`**, `board/repository.ts`, `board/verification.ts` (state-machine gate via `isVerdictPromotable`), `governance/budgets.ts` (`recordSpend` mirrors `budgetStatusAfter`).
 - **`@clawboo/evals`**, the ±verifier ablation scorecard.
 - **`apps/web` (server)**, `lib/verification/{index,critic,deterministicGate}.ts` (the verify gate), `lib/executorRunner.ts` (budget kill-switch + breaker feed), `lib/routines/openclawDispatch.ts`, `lib/teamChat/dispatchChatTurn.ts`, `lib/worktrees.ts`, `lib/defaults.ts` (`SOFT_CAP_PERCENT`), `api/runtimes.ts` (`breakerConfigSchema` validation).
-- **`apps/web` (SPA)**, `features/group-chat/boardOrchestration.ts` (caps + approval routing).
+- **`@clawboo/team-orchestration`**, `boardOrchestration.ts` (`checkFanoutCap` for the per-turn delegation fan-out cap); the SPA reaches it through the re-export shim at `apps/web/src/features/group-chat/boardOrchestration.ts` and imports nothing from this package directly.
+- **`@clawboo/db`** also uses the cap predicates: `board/repository.ts` calls `checkDepthCap` / `checkFanoutCap` in `createCappedSubtask` and re-exports `DEFAULT_MAX_CHILDREN` / `DEFAULT_MAX_DEPTH` by name, so `@clawboo/mcp` reads them without taking its own dependency on this package.
 
 ## Source
 

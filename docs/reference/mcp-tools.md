@@ -33,7 +33,7 @@ Servers are built with the low-level MCP SDK `Server` + `setRequestHandler` API,
 
 `createTasksServer(db)` → `clawboo-tasks`. A protocol façade over the durable board so any runtime can coordinate on the same kanban board. The atomic claim surfaces a conflict as a tool-error the model must not retry (the "never retry a 409" rule).
 
-A few tools return a tool-error (`isError: true`) rather than throwing: `get_task` on an unknown id, `claim_task` / `assign_task` on a conflict, `update_task_status` / `block_task` / `unblock_task` on an illegal state-machine transition.
+A few tools return a tool-error (`isError: true`) rather than throwing: `get_task` on an unknown id, `claim_task` / `assign_task` on a conflict, `update_task_status` / `block_task` / `unblock_task` on an illegal state-machine transition, `link_task` on a dependency cycle, and `create_task` / `create_subtask` when the parent is unknown or already at its child-count or depth ceiling.
 
 ### `list_tasks`
 
@@ -59,7 +59,7 @@ Get a task with its comments and ancestor chain. Returns `{ task, comments, ance
 
 ### `create_task`
 
-Create a board task.
+Create a board task. A top-level task (no `parentTaskId`) is never capped and takes the plain write path. Setting `parentTaskId` makes this a subtask: the creation caps apply, and it inherits the parent's team unless `teamId` is given.
 
 ```ts
 {
@@ -68,18 +68,32 @@ Create a board task.
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
   priority?: number        // integer
   teamId?: string
-  parentTaskId?: string
+  parentTaskId?: string    // non-empty when present
   assigneeRuntime?: string
 }
 ```
 
 ### `create_subtask`
 
-Create a subtask under a parent (inherits the parent's team).
+Create a subtask under a parent (inherits the parent's team). Same creation caps and tool-errors as a parented `create_task`.
 
 ```ts
 { parentTaskId: string; title: string; description?: string }
 ```
+
+<Note>
+**Creation caps.** A parented create is bounded so a looping agent cannot fill the board: a parent may have at most **24 live (non-dropped) children**, and a task may nest at most **2 levels** deep (`root → child → grandchild`), the same ceiling the delegation depth cap applies at dispatch. Soft-deleting a stale child frees a slot; `done` and `cancelled` children still count, since they are still rows on the board.
+
+Both checks and the insert run inside **one `BEGIN IMMEDIATE` transaction** in the board's `createCappedSubtask`, so two attached runtimes racing the same parent cannot both land the N+1th child. Each refusal is terminal for that call — a retry returns the same answer:
+
+- `parent not found: <id>` — previously this reached the foreign key and failed the tool call with a protocol error instead of returning a tool-error.
+- `subtask rejected: parent <id> is at the maximum nesting depth (2); attach the new task higher in the tree`
+- `subtask rejected: parent <id> already has 24 children (max 24); drop one or attach the new task elsewhere`
+
+An **empty** `parentTaskId` is rejected by the schema (`invalid args`), never silently treated as a root task.
+
+The caps bound this protocol boundary only: the REST board API and the in-process team-chat orchestrator write through the uncapped repository primitive and carry their own per-turn fan-out and dispatch-depth limits. Measurement is global, though — rows those surfaces create still count toward a parent's total, so an agent cannot launder rows in through another surface to raise its own ceiling. A refusal is returned to the calling model and is not recorded in the governance audit log.
+</Note>
 
 ### `claim_task`
 
@@ -153,7 +167,7 @@ Add a comment to a task (report-up summaries, system notes). `authorType` defaul
 
 ### `link_task`
 
-Make `taskId` depend on `dependsOnTaskId`; it stays unready until the dependency is done.
+Make `taskId` depend on `dependsOnTaskId`; it stays unready until the dependency is done. A link that would close a cycle — directly (`A → B`, then `B → A`) or transitively (`A → B → C → A`) — is refused with the tool-error `linking <taskId> to <dependsOnTaskId> would create a dependency cycle`. Re-linking an edge that already exists is still a harmless no-op.
 
 ```ts
 {
@@ -161,6 +175,10 @@ Make `taskId` depend on `dependsOnTaskId`; it stays unready until the dependency
   dependsOnTaskId: string
 }
 ```
+
+<Warning>
+Do not work around the cycle refusal by re-linking in the other direction. A cycle can never resolve: a task is ready only when _every_ dependency is `done`, so both ends sit un-ready forever and nothing surfaces the stall — the ready-pump simply has nothing to fire. That silent deadlock is what the check exists to prevent.
+</Warning>
 
 ---
 

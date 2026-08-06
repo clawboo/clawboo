@@ -28,6 +28,7 @@ import {
   listExecutions,
   listTasks,
   provisionWorkspaceBody,
+  TaskDependencyCycleError,
   updateStatus,
   updateTaskBody,
   updateTaskFields,
@@ -330,7 +331,18 @@ export function boardLinkDepPOST(req: Request, res: Response): void {
       res.status(404).json({ error: 'task not found' })
       return
     }
-    linkDep(db, taskId, parsed.data.dependsOnTaskId)
+    try {
+      linkDep(db, taskId, parsed.data.dependsOnTaskId)
+    } catch (err) {
+      // A cycle is a client mistake, not a server fault: 409 like the claim
+      // conflict, so the caller learns the plan is unworkable instead of seeing a
+      // stringified exception behind a 500.
+      if (err instanceof TaskDependencyCycleError) {
+        res.status(409).json({ ok: false, error: err.code })
+        return
+      }
+      throw err
+    }
     emitEvent(db, {
       kind: 'dep_linked',
       taskId,
