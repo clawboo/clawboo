@@ -9,6 +9,7 @@ import {
   defaultAvailabilityContext,
   DEFAULT_MAX_CHILDREN,
   DEFAULT_MAX_DEPTH,
+  DEFAULT_MAX_ROOT_CREATES,
   listPendingApprovals,
   listTasks,
   resolveApproval,
@@ -147,14 +148,26 @@ describe('Tasks MCP creation caps', () => {
     expect(tooDeep.text).toContain('maximum nesting depth')
   })
 
-  it('never caps a top-level create_task, however many roots exist', async () => {
+  it(`rate-caps root creation — one root past ${DEFAULT_MAX_ROOT_CREATES} in the window is a tool error`, async () => {
     const client = await connectInMemory(createTasksServer(db))
-    const roots = DEFAULT_MAX_CHILDREN + 5
-    for (let i = 0; i < roots; i += 1) {
+    for (let i = 0; i < DEFAULT_MAX_ROOT_CREATES; i += 1) {
       const res = await callText(client, 'create_task', { title: `root-${i}` })
       expect(res.isError).toBe(false)
     }
-    expect(listTasks(db)).toHaveLength(roots)
+
+    const capped = await callText(client, 'create_task', { title: 'one root too many' })
+    expect(capped.isError).toBe(true)
+    expect(capped.text).toContain('root tasks already created')
+    expect(listTasks(db)).toHaveLength(DEFAULT_MAX_ROOT_CREATES)
+
+    // A SUBTASK is not charged against the root rate, so real work still flows
+    // once the board is filing-limited.
+    const roots = JSON.parse((await callText(client, 'list_tasks', {})).text) as { id: string }[]
+    const child = await callText(client, 'create_subtask', {
+      parentTaskId: roots[0]!.id,
+      title: 'still allowed',
+    })
+    expect(child.isError).toBe(false)
   })
 
   it('an unknown parent is a tool error, not a failed tool call', async () => {

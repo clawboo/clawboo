@@ -18,6 +18,16 @@ export const DEFAULT_MAX_DEPTH = 2
  *  mission, not how many siblings a single turn may spawn. */
 export const DEFAULT_MAX_CHILDREN = 24
 
+/** Rolling-window RATE ceiling for ROOT task creation, and its window. A
+ *  per-parent cap has no subject on a root create, so this is the bound that
+ *  stops the other runaway shape: an agent looping `create_task` with no parent.
+ *  A rate rather than a lifetime total on purpose — a lifetime cap on roots would
+ *  permanently jam a long-lived board, while velocity is the actual runaway
+ *  signature and self-clears once the window rolls. 30 per 5 minutes sits far
+ *  above any human or sane-agent filing rate and trips a loop in seconds. */
+export const DEFAULT_MAX_ROOT_CREATES = 30
+export const DEFAULT_ROOT_CREATE_WINDOW_MS = 5 * 60_000
+
 /** Reject once the existing ancestor depth has reached the max (would create depth+1). */
 export function checkDepthCap({ depth, max }: { depth: number; max: number }): CapResult {
   if (depth >= max) return { ok: false, reason: `delegation depth ${depth} >= max ${max}` }

@@ -33,7 +33,7 @@ Servers are built with the low-level MCP SDK `Server` + `setRequestHandler` API,
 
 `createTasksServer(db)` → `clawboo-tasks`. A protocol façade over the durable board so any runtime can coordinate on the same kanban board. The atomic claim surfaces a conflict as a tool-error the model must not retry (the "never retry a 409" rule).
 
-A few tools return a tool-error (`isError: true`) rather than throwing: `get_task` on an unknown id, `claim_task` / `assign_task` on a conflict, `update_task_status` / `block_task` / `unblock_task` on an illegal state-machine transition, `link_task` on a dependency cycle, and `create_task` / `create_subtask` when the parent is unknown or already at its child-count or depth ceiling.
+A few tools return a tool-error (`isError: true`) rather than throwing: `get_task` on an unknown id, `claim_task` / `assign_task` on a conflict, `update_task_status` / `block_task` / `unblock_task` on an illegal state-machine transition, `link_task` on a dependency cycle, and `create_task` / `create_subtask` when the parent is unknown, the parent is already at its child-count or depth ceiling, or the root-creation rate is exhausted.
 
 ### `list_tasks`
 
@@ -59,7 +59,7 @@ Get a task with its comments and ancestor chain. Returns `{ task, comments, ance
 
 ### `create_task`
 
-Create a board task. A top-level task (no `parentTaskId`) is never capped and takes the plain write path. Setting `parentTaskId` makes this a subtask: the creation caps apply, and it inherits the parent's team unless `teamId` is given.
+Create a board task. Setting `parentTaskId` makes this a subtask: the per-parent child-count and nesting-depth caps apply, and it inherits the parent's team unless `teamId` is given. Without one it is a root task, bounded instead by a rolling-window creation rate. Both paths are covered by the caps note under [`create_subtask`](#create_subtask).
 
 ```ts
 {
@@ -84,15 +84,17 @@ Create a subtask under a parent (inherits the parent's team). Same creation caps
 <Note>
 **Creation caps.** A parented create is bounded so a looping agent cannot fill the board: a parent may have at most **24 live (non-dropped) children**, and a task may nest at most **2 levels** deep (`root → child → grandchild`), the same ceiling the delegation depth cap applies at dispatch. Soft-deleting a stale child frees a slot; `done` and `cancelled` children still count, since they are still rows on the board.
 
-Both checks and the insert run inside **one `BEGIN IMMEDIATE` transaction** in the board's `createCappedSubtask`, so two attached runtimes racing the same parent cannot both land the N+1th child. Each refusal is terminal for that call — a retry returns the same answer:
+Both checks and the insert run inside **one `BEGIN IMMEDIATE` transaction** in the board's `createCappedSubtask`, so two attached runtimes racing the same parent cannot both land the N+1th child. Do not automatically retry the unchanged request: while the board state stays as it is, the answer does not change. A retry _after_ remediation can legitimately succeed — dropping a stale child frees a slot, and the root-rate window rolls.
 
 - `parent not found: <id>` — previously this reached the foreign key and failed the tool call with a protocol error instead of returning a tool-error.
 - `subtask rejected: parent <id> is at the maximum nesting depth (2); attach the new task higher in the tree`
 - `subtask rejected: parent <id> already has 24 children (max 24); drop one or attach the new task elsewhere`
 
+A **root** create (no `parentTaskId`) is bounded too, by a rolling-window **rate** rather than a total: at most **30 root tasks per 5 minutes**, counted across every surface. A lifetime ceiling on roots would eventually jam a long-lived board, and counting only open roots would be trivially evadable by an agent that completes-then-creates; velocity is the actual runaway signature and it self-clears. The refusal is `task rejected: <n> root tasks already created in the last 5 min (max 30); …`. A subtask is never charged against it, so decomposition still works while filing is limited.
+
 An **empty** `parentTaskId` is rejected by the schema (`invalid args`), never silently treated as a root task.
 
-The caps bound this protocol boundary only: the REST board API and the in-process team-chat orchestrator write through the uncapped repository primitive and carry their own per-turn fan-out and dispatch-depth limits. Measurement is global, though — rows those surfaces create still count toward a parent's total, so an agent cannot launder rows in through another surface to raise its own ceiling. A refusal is returned to the calling model and is not recorded in the governance audit log.
+The caps bound this protocol boundary only: the REST board API and the in-process team-chat orchestrator write through the uncapped repository primitive and carry their own per-turn fan-out and dispatch-depth limits. Measurement is global, though — rows those surfaces create still count toward a parent's total, so an agent cannot launder rows in through another surface to raise its own ceiling. A refusal is returned to the calling model and is not recorded in the governance audit log. It does ride the typed `_meta.denied` channel with its machine-readable reason (`child_cap`, `depth_cap`, `root_rate_cap`, `parent_not_found`), so an in-process caller classifies it without parsing prose — and an agent that keeps hitting the same wall trips the circuit breaker's repeat-policy-denied rule instead of looping forever.
 </Note>
 
 ### `claim_task`

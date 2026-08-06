@@ -137,7 +137,7 @@ Per-run overrides flow through the run input (`breakerConfig`), validated by a z
 
 ## The caps
 
-The caps are stateless predicates enforced in code below the model, independent of what it asks for. Three run at the orchestrator boundary and refuse a delegation _before_ it becomes a board task and a run; the fourth runs at the Tasks MCP boundary and refuses the board write itself, so a runtime that skips the orchestrator and calls `create_subtask` directly is bounded too.
+The caps are stateless predicates enforced in code below the model, independent of what it asks for. They do not all sit at one boundary: **depth** and **fan-out** are orchestration checks that refuse a delegation _before_ it becomes a board task and a run; **children** and the **root rate** are Tasks MCP creation checks that refuse the board write itself, so a runtime that skips the orchestrator and calls `create_subtask` directly is bounded too; **cost** is runner enforcement, evaluated in the executor's cost loop once a run already exists (see below).
 
 | Cap          | Bounds                                                                                                                  | Default                 | Where it lives                                                             |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------- |
@@ -189,7 +189,7 @@ The trade-off is that the defaults are _coarse_. A breaker tuned conservatively 
 - **Not a privilege boundary.** Budgets and breakers bound spend and effort, not blast radius. A run that stays under budget can still do anything its tools permit inside its worktree; the privilege boundary is the (documented, opt-in) container escalation, not governance.
 - **The OpenClaw path cannot auto-abort mid-run.** OpenClaw emits no incremental cost events (only a final cost on `done`), so there is no per-event crossing signal for the kill-switch to fire on during a run. Its budgets are enforced by a pre-flight gate on the _next_ dispatch, not a mid-run kill; a documented asymmetry with runtimes that stream per-turn cost (like the native runtime, which does abort mid-stream).
 - **Single implicit tenant today.** Budgets and the audit log carry a dormant `tenant_id` column and a reserved `tenant` budget scope, but no per-tenant filtering is active in v0.3.1. Multi-tenant scoping is a future seam, not a shipped feature.
-- **Caps are coarse-grained, not per-tool quotas.** Depth, fan-out, and a per-run cost ceiling are the orchestrator-boundary caps, and a per-parent child count bounds direct board writes; there is no per-tool call quota or per-skill budget, that granularity, if needed, would be a new seam.
+- **Caps are coarse-grained, not per-tool quotas.** Depth, fan-out, and a per-run cost ceiling are the orchestrator-boundary caps, and a per-parent child count plus a root-creation rate bound direct **Tasks MCP** board writes (the REST board route is deliberately uncapped); there is no per-tool call quota or per-skill budget, that granularity, if needed, would be a new seam.
 
 <Note>
 These docs describe Clawboo **v0.3.1**, the current release.

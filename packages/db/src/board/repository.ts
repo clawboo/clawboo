@@ -12,9 +12,11 @@ import {
   checkFanoutCap,
   DEFAULT_MAX_CHILDREN,
   DEFAULT_MAX_DEPTH,
+  DEFAULT_MAX_ROOT_CREATES,
+  DEFAULT_ROOT_CREATE_WINDOW_MS,
   isVerdictPromotable,
 } from '@clawboo/governance'
-import { and, count, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { and, count, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import {
@@ -107,13 +109,18 @@ export function createSubtask(
   })
 }
 
-// ─── Capped subtask creation (the Tasks MCP boundary's create path) ──────────
+// ─── Guarded creation (the Tasks MCP boundary's create path) ─────────────────
 
 // Re-exported so a caller (the Tasks MCP, its tests, the docs) can name the
-// shipped defaults of `createCappedSubtask` without taking a governance dep.
-export { DEFAULT_MAX_CHILDREN, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
+// shipped defaults of the guarded creates without taking a governance dep.
+export {
+  DEFAULT_MAX_CHILDREN,
+  DEFAULT_MAX_DEPTH,
+  DEFAULT_MAX_ROOT_CREATES,
+  DEFAULT_ROOT_CREATE_WINDOW_MS,
+} from '@clawboo/governance'
 
-export type CreateSubtaskReason = 'parent_not_found' | 'child_cap' | 'depth_cap'
+export type CreateGuardReason = 'parent_not_found' | 'child_cap' | 'depth_cap' | 'root_rate_cap'
 
 export interface SubtaskCaps {
   /** Max LIVE (non-dropped) children one parent may have. Default DEFAULT_MAX_CHILDREN. */
@@ -122,15 +129,31 @@ export interface SubtaskCaps {
   maxDepth?: number
 }
 
-export interface CreateSubtaskResult {
-  ok: boolean
-  task?: DbTask
-  reason?: CreateSubtaskReason
-  /** Live children the parent already had — set on `child_cap` only (exact). */
-  childCount?: number
-  /** The ceiling the denial was measured against — set on both cap denials. */
-  max?: number
+export interface RootCreateCaps {
+  /** Max LIVE root tasks created inside the window. Default DEFAULT_MAX_ROOT_CREATES. */
+  maxRootCreates?: number
+  /** The rolling window the count is measured over. Default DEFAULT_ROOT_CREATE_WINDOW_MS. */
+  windowMs?: number
 }
+
+/**
+ * A discriminated union, not `{ ok: boolean; task?: DbTask }` — so `ok: true`
+ * GUARANTEES `task` and `ok: false` guarantees `reason`, and no caller needs a
+ * non-null assertion. (`ClaimResult` / `UpdateStatusResult` predate this and keep
+ * the looser shape; new refusal types should follow this one.)
+ */
+export type GuardedCreateResult =
+  | { ok: true; task: DbTask }
+  | {
+      ok: false
+      reason: CreateGuardReason
+      /** Rows already counted — set on `child_cap` and `root_rate_cap` (exact). */
+      count?: number
+      /** The ceiling the denial was measured against — set on every cap denial. */
+      max?: number
+      /** The rolling window in ms — set on `root_rate_cap` only. */
+      windowMs?: number
+    }
 
 /**
  * Create a subtask with the per-parent child-count + nesting-depth caps ENFORCED,
@@ -149,7 +172,7 @@ export function createCappedSubtask(
   parentTaskId: string,
   input: Omit<CreateTaskInput, 'parentTaskId'>,
   caps: SubtaskCaps = {},
-): CreateSubtaskResult {
+): GuardedCreateResult {
   const maxChildren = caps.maxChildren ?? DEFAULT_MAX_CHILDREN
   const maxDepth = caps.maxDepth ?? DEFAULT_MAX_DEPTH
 
@@ -171,7 +194,7 @@ export function createCappedSubtask(
       .get() as { n: number } | undefined
     const siblingCount = siblingRow?.n ?? 0
     if (!checkFanoutCap({ siblingCount, max: maxChildren }).ok) {
-      return { ok: false, reason: 'child_cap', childCount: siblingCount, max: maxChildren }
+      return { ok: false, reason: 'child_cap', count: siblingCount, max: maxChildren }
     }
 
     // Depth: walk the parent chain with a HARD step bound rather than reusing
@@ -206,6 +229,50 @@ export function createCappedSubtask(
     })
     tx.insert(tasks).values(row).run()
     return { ok: true, task: row }
+  })
+}
+
+/**
+ * Create a ROOT task (no parent) with a rolling-window RATE cap enforced, in the
+ * same one-transaction shape as `createCappedSubtask`.
+ *
+ * Why a rate cap and not a lifetime total: a per-parent ceiling has no subject on
+ * a root create, and a lifetime cap on roots would permanently jam a long-lived
+ * board. Counting only OPEN roots instead would be trivially evadable, because the
+ * same agent holds `update_task_status` and could complete-then-create forever.
+ * A window bounds creation VELOCITY, which is the actual runaway signature, and it
+ * self-clears — so a false positive costs a few minutes, not a wedged board.
+ *
+ * The count is deliberately NOT filtered to MCP-created rows: rows the REST board
+ * or the Routines engine created still count, so an agent cannot launder rows in
+ * through another surface to raise its own ceiling. Dropped rows fall out, which is
+ * the operator's way to free quota early.
+ */
+export function createCappedRootTask(
+  db: ClawbooDb,
+  input: Omit<CreateTaskInput, 'parentTaskId'>,
+  caps: RootCreateCaps = {},
+): GuardedCreateResult {
+  const maxRootCreates = caps.maxRootCreates ?? DEFAULT_MAX_ROOT_CREATES
+  const windowMs = caps.windowMs ?? DEFAULT_ROOT_CREATE_WINDOW_MS
+  const since = Date.now() - windowMs
+
+  return immediateWrite(db, (tx) => {
+    // `idx_tasks_parent` covers the NULL-parent group (SQLite indexes NULLs), so
+    // this is a scan of recent roots rather than the whole table.
+    const row = tx
+      .select({ n: count() })
+      .from(tasks)
+      .where(and(isNull(tasks.parentTaskId), eq(tasks.dropped, 0), gt(tasks.createdAt, since)))
+      .get() as { n: number } | undefined
+    const recent = row?.n ?? 0
+    if (!checkFanoutCap({ siblingCount: recent, max: maxRootCreates }).ok) {
+      return { ok: false, reason: 'root_rate_cap', count: recent, max: maxRootCreates, windowMs }
+    }
+
+    const created = buildTaskRow({ ...input, parentTaskId: null })
+    tx.insert(tasks).values(created).run()
+    return { ok: true, task: created }
   })
 }
 

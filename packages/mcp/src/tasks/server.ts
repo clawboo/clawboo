@@ -7,8 +7,8 @@ import {
   addComment,
   blockTask,
   claimTask,
+  createCappedRootTask,
   createCappedSubtask,
-  createTask,
   getAncestors,
   getComments,
   getReadyTasks,
@@ -21,8 +21,8 @@ import {
   unblockTask,
   updateStatus,
   type ClawbooDb,
-  type CreateSubtaskResult,
   type CreateTaskInput,
+  type GuardedCreateResult,
   type TaskStatus,
 } from '@clawboo/db'
 import { z } from 'zod'
@@ -55,20 +55,35 @@ const optStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : 
  * they create still COUNT here, so an agent cannot launder rows in through
  * another surface to raise its own ceiling.
  */
-function subtaskDenial(parentTaskId: string, result: CreateSubtaskResult): McpToolResult {
+function createDenial(result: GuardedCreateResult, parentTaskId?: string): McpToolResult {
+  if (result.ok) throw new Error('createDenial called on a successful create')
+  // Third arg = the typed `_meta.denied` channel. A cap refusal IS a policy
+  // denial, so an in-process caller (the native harness) classifies it without
+  // scraping prose, and a repeat offender trips the circuit breaker's
+  // repeat-policy-denied rule instead of looping against the wall forever.
   if (result.reason === 'child_cap') {
     return textResult(
-      `subtask rejected: parent ${parentTaskId} already has ${result.childCount} children (max ${result.max}); drop one or attach the new task elsewhere`,
+      `subtask rejected: parent ${parentTaskId} already has ${result.count} children (max ${result.max}); drop one or attach the new task elsewhere`,
       true,
+      result.reason,
     )
   }
   if (result.reason === 'depth_cap') {
     return textResult(
       `subtask rejected: parent ${parentTaskId} is at the maximum nesting depth (${result.max}); attach the new task higher in the tree`,
       true,
+      result.reason,
     )
   }
-  return textResult(`parent not found: ${parentTaskId}`, true)
+  if (result.reason === 'root_rate_cap') {
+    const mins = Math.round((result.windowMs ?? 0) / 60_000)
+    return textResult(
+      `task rejected: ${result.count} root tasks already created in the last ${mins} min (max ${result.max}); attach this work to an existing task with parentTaskId instead of opening another`,
+      true,
+      result.reason,
+    )
+  }
+  return textResult(`parent not found: ${parentTaskId}`, true, result.reason)
 }
 
 export function createTasksServer(db: ClawbooDb): Server {
@@ -120,7 +135,7 @@ export function createTasksServer(db: ClawbooDb): Server {
     {
       name: 'create_task',
       description:
-        'Create a board task. With parentTaskId set it is a subtask: the per-parent child-count and nesting-depth caps apply.',
+        'Create a board task. With parentTaskId set it is a subtask: the per-parent child-count and nesting-depth caps apply. Without one it is a root task, rate-limited per rolling window.',
       inputSchema: z.object({
         title: z.string(),
         description: z.string().optional(),
@@ -142,11 +157,13 @@ export function createTasksServer(db: ClawbooDb): Server {
           teamId: optStr(args['teamId']),
           assigneeRuntime: optStr(args['assigneeRuntime']),
         }
-        // No parent ⇒ a root task: unchanged hot path, no transaction, no caps.
+        // No parent ⇒ a ROOT task, bounded by a rolling-window rate cap instead
+        // (a per-parent ceiling has no subject there).
         const parentTaskId = optStr(args['parentTaskId'])
-        if (!parentTaskId) return jsonResult(createTask(db, input))
-        const result = createCappedSubtask(db, parentTaskId, input)
-        return result.ok ? jsonResult(result.task) : subtaskDenial(parentTaskId, result)
+        const result = parentTaskId
+          ? createCappedSubtask(db, parentTaskId, input)
+          : createCappedRootTask(db, input)
+        return result.ok ? jsonResult(result.task) : createDenial(result, parentTaskId)
       },
     },
     {
@@ -164,7 +181,7 @@ export function createTasksServer(db: ClawbooDb): Server {
           title: str(args['title']),
           description: optStr(args['description']),
         })
-        return result.ok ? jsonResult(result.task) : subtaskDenial(parentTaskId, result)
+        return result.ok ? jsonResult(result.task) : createDenial(result, parentTaskId)
       },
     },
     {
