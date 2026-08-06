@@ -185,11 +185,11 @@ The trade-off is that the defaults are _coarse_. A breaker tuned conservatively 
 
 - **Not a privilege boundary.** Budgets and breakers bound spend and effort, not blast radius. A run that stays under budget can still do anything its tools permit inside its worktree; the privilege boundary is the (documented, opt-in) container escalation, not governance.
 - **The OpenClaw path cannot auto-abort mid-run.** OpenClaw emits no incremental cost events (only a final cost on `done`), so there is no per-event crossing signal for the kill-switch to fire on during a run. Its budgets are enforced by a pre-flight gate on the _next_ dispatch, not a mid-run kill; a documented asymmetry with runtimes that stream per-turn cost (like the native runtime, which does abort mid-stream).
-- **Single implicit tenant today.** Budgets and the audit log carry a dormant `tenant_id` column and a reserved `tenant` budget scope, but no per-tenant filtering is active in v0.3.0. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** Budgets and the audit log carry a dormant `tenant_id` column and a reserved `tenant` budget scope, but no per-tenant filtering is active in v0.3.1. Multi-tenant scoping is a future seam, not a shipped feature.
 - **Caps are coarse-grained, not per-tool quotas.** Depth, fan-out, and a per-run cost ceiling are the orchestrator-boundary caps; there is no per-tool call quota or per-skill budget, that granularity, if needed, would be a new seam.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

@@ -145,6 +145,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The gate loads the installed SPA in headless Chromium. Playwright has no
+      # postinstall hook, so the step above never fetches the browser. Same step
+      # as the e2e job below; --with-deps installs the OS shared libraries that
+      # no npm package provides, and is a supported no-op on Windows and macOS.
+      - run: pnpm exec playwright install --with-deps chromium
+
       - run: pnpm assemble
 
       # Simulates `npx clawboo` end-to-end: `pnpm pack`s apps/cli, installs the
@@ -154,8 +160,9 @@ jobs:
       # install — the packaged bins, the externals-vs-dependencies static check,
       # port discovery skipping a fake non-Clawboo listener on 18791 (the
       # OpenClaw Gateway auxiliary port that broke v0.1.2), the SPA and its
-      # deep-route catch-all, /api/settings, a stdio MCP `tools/list` handshake,
-      # and one real runtime dispatch driven to `done`.
+      # deep-route catch-all, /api/settings, the SPA actually BOOTING in headless
+      # Chromium, a stdio MCP `tools/list` handshake, and one real runtime
+      # dispatch driven to `done`.
       #
       # Runs on ubuntu-latest, windows-latest and macos-latest. Windows is the
       # regression gate for v0.1.4's Windows-compat fixes (npm.cmd resolution,

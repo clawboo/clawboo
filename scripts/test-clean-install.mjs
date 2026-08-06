@@ -30,6 +30,11 @@
  *   4. Dispatching a task to a runtime must actually run: an agent run is the
  *      product's main path, and it should never be a publish-time unknown.
  *
+ *   5. The SPA bundle must actually EXECUTE, not merely be served. Matching the
+ *      served HTML proves only that the shell reached the browser; a bundle that
+ *      throws on boot ships byte-identical HTML and leaves the user on a blank
+ *      page. A headless-Chromium pass closes that gap.
+ *
  * Test scenario:
  *   1.  Refuse to run if a Clawboo dashboard already answers in the CLI's
  *       18790-18809 discovery window — the CLI would attach to it and every
@@ -52,8 +57,11 @@
  *   8.  Curl the printed URL — must return Clawboo SPA HTML.
  *   9.  Curl a deep SPA route — must fall through to index.html.
  *   10. Curl /api/settings + /api/system/status — must return Clawboo JSON.
- *   11. Spawn the installed stdio MCP bin and complete a `tools/list` handshake.
- *   12. Create an agent + a board task and drive a real
+ *   11. Load the printed URL in headless Chromium — React must mount and the
+ *       fresh-install onboarding surface must render, with no uncaught exception
+ *       and no first-party console error.
+ *   12. Spawn the installed stdio MCP bin and complete a `tools/list` handshake.
+ *   13. Create an agent + a board task and drive a real
  *       `POST /api/runtimes/clawboo-native/run` against a local
  *       OpenAI-compatible stub — the "an agent run can start" assertion.
  *
@@ -68,6 +76,13 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+// @playwright/test is already a root devDependency (it backs `pnpm e2e`) and
+// re-exports the browser types, so driving Chromium here adds no dependency.
+// Import it from THIS specifier, not 'playwright-core': .npmrc sets
+// shamefully-hoist=false, so only direct dependencies are linked into the root
+// node_modules and a transitive specifier would not resolve.
+import { chromium } from '@playwright/test'
 
 import { checkBundleExternals } from './check-bundle-externals.mjs'
 
@@ -111,6 +126,10 @@ const READY_TIMEOUT_MS = 90_000
 // cumulative latency exceeded 5 s in practice. 20 s is a generous cap
 // that still fails fast on real hangs.
 const HTTP_TIMEOUT_MS = 20_000
+// Budget for each browser step (navigation, then each selector wait). The
+// onboarding surface is gated on /api/system/status, which itself spends ~2 s
+// probing the Gateway port, so this needs the same headroom as the HTTP cap.
+const BROWSER_TIMEOUT_MS = 20_000
 // A real `npm install` of the tarball resolves the published dependency closure
 // from the registry AND builds/downloads better-sqlite3's native binding. Cold
 // Windows runners are the slow case.
@@ -154,10 +173,21 @@ let shadowBinDir = null
 let packDir = null
 let installDir = null
 let clawbooPort = null
+let browser = null
 let cleanupRunning = false
 
 async function cleanup() {
   cleanupRunning = true
+  // Close Chromium first: it holds sockets against the server killed below, and
+  // an orphaned browser process would outlive this run.
+  if (browser) {
+    try {
+      await browser.close()
+    } catch {
+      /* ignore */
+    }
+    browser = null
+  }
   // Kill the DETACHED server first. Killing the launcher can cascade a SIGTERM
   // back to us on macOS, and if that lands before this line the server survives
   // the run — which the next run's "a Clawboo is already listening" preflight
@@ -526,6 +556,90 @@ async function httpPostJson(url, body, opts = {}) {
     return { ok: res.ok, status: res.status, text, json }
   } finally {
     clearTimeout(timer)
+  }
+}
+
+// Is this URL served by the CLI we just booted (as opposed to the public
+// internet)? Non-http(s) schemes — data:, blob: — are page-generated and
+// therefore ours. An unparseable URL is treated as ours so nothing gets silently
+// excused from the assertions below.
+function isFirstPartyUrl(raw) {
+  try {
+    const u = new URL(raw)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return true
+    return (
+      u.hostname === 'localhost' ||
+      u.hostname === '127.0.0.1' ||
+      u.hostname === '::1' ||
+      u.hostname === '[::1]'
+    )
+  } catch {
+    return true
+  }
+}
+
+// Drive the installed SPA in headless Chromium and report everything that went
+// wrong. The HTTP assertions prove the server SERVES the shell; only executing it
+// proves the bundle BOOTS — a build that throws on import returns byte-identical
+// HTML, which is exactly the blind spot this closes.
+//
+// Two deliberate scoping choices keep the gate hermetic rather than flaky:
+//
+//   1. Every non-first-party request is aborted. A fresh install pulls the Inter
+//      stylesheet from the Google Fonts CDN (index.html) and the star count from
+//      api.github.com (that button mounts under the wizard, and unauthenticated
+//      calls from CI egress are routinely rate-limited). A release gate must not
+//      depend on either being reachable.
+//
+//   2. Console errors count only when they come from a first-party location. The
+//      aborted requests in (1) are precisely what would otherwise show up. A
+//      console error with no location is counted (fail closed).
+//
+// Uncaught exceptions ('pageerror') are always fatal — no filtering.
+async function runBrowserSmoke(url) {
+  const pageErrors = []
+  const consoleErrors = []
+
+  // Keep a local handle as well as the module-level one: a SIGINT mid-check runs
+  // cleanup(), which nulls `browser`, and the finally below must still have
+  // something to close.
+  const instance = await chromium.launch()
+  browser = instance
+  try {
+    const context = await instance.newContext()
+    await context.route('**/*', (route) =>
+      isFirstPartyUrl(route.request().url()) ? route.continue() : route.abort(),
+    )
+
+    const page = await context.newPage()
+    page.on('pageerror', (err) => pageErrors.push(err?.stack ?? String(err)))
+    page.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const from = msg.location()?.url ?? ''
+      if (from && !isFirstPartyUrl(from)) return
+      consoleErrors.push(from ? `${msg.text()} (${from})` : msg.text())
+    })
+
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: BROWSER_TIMEOUT_MS })
+
+    // The shell mounts in React's first commit with no backend state; the wizard
+    // overlays it once /api/system/status resolves and the fresh-install decision
+    // lands. Waiting for BOTH separates "React never mounted" from "mounted but
+    // the onboarding surface never appeared".
+    //
+    // `state: 'attached'`, NOT the default 'visible'. The question this gate asks
+    // is "did React commit this to the DOM", and 'visible' additionally demands a
+    // non-empty bounding box — which would make a release hostage to layout and
+    // entry-animation timing rather than to whether the bundle ran.
+    const waitFor = (sel) =>
+      page.waitForSelector(sel, { state: 'attached', timeout: BROWSER_TIMEOUT_MS })
+    await waitFor('[data-testid="team-sidebar"]')
+    await waitFor('[data-testid="onboarding-wizard"]')
+
+    return { pageErrors, consoleErrors }
+  } finally {
+    await instance.close().catch(() => {})
+    if (browser === instance) browser = null
   }
 }
 
@@ -1130,7 +1244,32 @@ async function main() {
   }
   log('✓ GET /api/system/status returns expected shape')
 
-  // 16. Test 5: spawn the INSTALLED stdio MCP bin and call a tool (CLAWBOO_MCP
+  // 16. Test 5: the SPA actually executes. Every assertion above this line
+  //     passes against a bundle that serves the right HTML and then dies on boot.
+  let browserResult
+  try {
+    browserResult = await runBrowserSmoke(`${openedUrl}/`)
+  } catch (err) {
+    const msg = err?.message ?? String(err)
+    if (/Executable doesn't exist|please run the following command/i.test(msg)) {
+      fail(
+        "headless Chromium is not installed. Run 'pnpm exec playwright install chromium' " +
+          'and re-run — the clean-install gate drives the installed SPA in a real browser.',
+      )
+    } else {
+      fail(`headless browser check failed: ${msg}`)
+    }
+    return
+  }
+  if (browserResult.pageErrors.length || browserResult.consoleErrors.length) {
+    fail('the SPA raised errors in a headless browser — a user would land on a broken dashboard')
+    for (const e of browserResult.pageErrors) console.error(`  uncaught: ${e}`)
+    for (const e of browserResult.consoleErrors) console.error(`  console.error: ${e}`)
+    return
+  }
+  log('✓ SPA mounts and renders the onboarding surface in headless Chromium')
+
+  // 17. Test 6: spawn the INSTALLED stdio MCP bin and call a tool (CLAWBOO_MCP
   //     attach surface) — proves an external runtime can spawn it from the tarball.
   const mcpDbDir = await fs.mkdtemp(path.join(os.tmpdir(), 'clawboo-mcp-bin-'))
   try {
@@ -1147,7 +1286,7 @@ async function main() {
     await fs.rm(mcpDbDir, { recursive: true, force: true }).catch(() => {})
   }
 
-  // 17. Test 6: an agent run can actually start from the installed tarball.
+  // 18. Test 7: an agent run can actually start from the installed tarball.
   if (!(await assertRuntimeDispatch(openedUrl, stub.state))) return
 
   log('All clean-install smoke tests passed.')

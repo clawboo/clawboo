@@ -29,7 +29,7 @@ graph TD
 
 ## Version posture
 
-The CLI is `clawboo@0.3.0` in `apps/cli/package.json` and `CHANGELOG.md`, and v0.3.0 is published: the npm `latest` dist-tag is **`clawboo@0.3.0`** and the `clawboo@0.3.0` git tag exists, so `npx clawboo` installs 0.3.0.
+The CLI is `clawboo@0.3.1` in `apps/cli/package.json` and `CHANGELOG.md`, and v0.3.1 is published: the npm `latest` dist-tag is **`clawboo@0.3.1`** and the `clawboo@0.3.1` git tag exists, so `npx clawboo` installs 0.3.1.
 
 The CLI's runtime version string comes from the build, not from reading `package.json` at runtime: `apps/cli/tsup.config.ts` injects `define: { __CLI_VERSION__: JSON.stringify(pkg.version) }`, and `src/index.ts` reads `__CLI_VERSION__` into `VERSION` (falling back to `'0.0.0-dev'` when the define is absent, e.g. running the TS directly in dev). So `clawboo --version` reports whatever version was set in `package.json` at build time.
 
@@ -83,10 +83,10 @@ Every push to `main` and every pull request runs `.github/workflows/ci.yml`. It 
 | `smoke-test-bundle` | `pnpm assemble` → `pnpm test:clean-install` | The published tarball actually works end-to-end.           |
 | `e2e`               | `pnpm build` → `pnpm e2e`                   | Playwright: the chat → board round-trip and onboarding.    |
 
-The `smoke-test-bundle` job is the one that earns its keep at release time, and it runs on a **`[ubuntu-latest, windows-latest, macos-latest]` matrix**. It first `pnpm assemble`s the CLI bundle, then `pnpm test:clean-install` simulates `npx clawboo` on a real machine. Crucially, it does not run the repo build in place: it `pnpm pack`s `apps/cli` and `npm install`s the tarball into a throwaway directory under the OS temp dir, so nothing resolves through the workspace's `node_modules` and the published `files` whitelist plus the published dependency closure are what get exercised. Against that install it asserts the packaged `bin` entries and their npm shims exist, that every module the bundles still load is declared / builtin / documented-optional, that the CLI's HTTP-signature port probe skips a fake non-Clawboo listener on 18791 (it picks 18790, never 18791), that the SPA renders at `/` and a deep route falls through to `index.html`, that `/api/settings` returns Clawboo-shaped JSON, that an installed MCP stdio bin completes a real JSON-RPC `tools/list` handshake, and that a real `POST /api/runtimes/clawboo-native/run` drives a board task to `done`. This exists because v0.1.1 shipped a `Cannot GET /` SPA-catch-all bug and v0.1.2 shipped a port-collision `Unauthorized` bug; the smoke test catches that whole class before a bundle reaches npm. The Windows leg is the regression gate for the v0.1.4 Windows-compat fixes (`npm.cmd` resolution, the `which`→`where` shim, `netstat`-based process lookup); the macOS leg covers a primary user OS. See [Testing](/internals/testing#the-clean-install-smoke-does-npx-clawboo-actually-work) for the full assertion list.
+The `smoke-test-bundle` job is the one that earns its keep at release time, and it runs on a **`[ubuntu-latest, windows-latest, macos-latest]` matrix**. It first `pnpm assemble`s the CLI bundle, then `pnpm test:clean-install` simulates `npx clawboo` on a real machine. Crucially, it does not run the repo build in place: it `pnpm pack`s `apps/cli` and `npm install`s the tarball into a throwaway directory under the OS temp dir, so nothing resolves through the workspace's `node_modules` and the published `files` whitelist plus the published dependency closure are what get exercised. Against that install it asserts the packaged `bin` entries and their npm shims exist, that every module the bundles still load is declared / builtin / documented-optional, that the CLI's HTTP-signature port probe skips a fake non-Clawboo listener on 18791 (it picks 18790, never 18791), that the SPA renders at `/` and a deep route falls through to `index.html`, that `/api/settings` returns Clawboo-shaped JSON, that the SPA actually boots in headless Chromium rather than merely being served, that an installed MCP stdio bin completes a real JSON-RPC `tools/list` handshake, and that a real `POST /api/runtimes/clawboo-native/run` drives a board task to `done`. This exists because v0.1.1 shipped a `Cannot GET /` SPA-catch-all bug and v0.1.2 shipped a port-collision `Unauthorized` bug; the smoke test catches that whole class before a bundle reaches npm. The Windows leg is the regression gate for the v0.1.4 Windows-compat fixes (`npm.cmd` resolution, the `which`→`where` shim, `netstat`-based process lookup); the macOS leg covers a primary user OS. See [Testing](/internals/testing#the-clean-install-smoke-does-npx-clawboo-actually-work) for the full assertion list.
 
 <Tip>
-You can reproduce the release gate locally before authoring a changeset. `pnpm prepublish:check` is the alias for `pnpm assemble && pnpm test:clean-install`, the exact bundle-and-smoke sequence CI runs. If it fails locally, the release is broken; fix it before opening the PR.
+You can reproduce the release gate locally before authoring a changeset. `pnpm prepublish:check` is the alias for `pnpm assemble && pnpm test:clean-install`, the exact bundle-and-smoke sequence CI runs. If it fails locally, the release is broken; fix it before opening the PR. It drives the SPA in headless Chromium, so run `pnpm exec playwright install chromium` once on a fresh clone; the smoke fails with that exact command in the message if the browser is missing.
 </Tip>
 
 ## The publish flow
@@ -103,19 +103,18 @@ sequenceDiagram
 
     Dev->>Main: merge feature PR (changeset present)
     Main->>Pub: push triggers publish.yml
-    Pub->>Pub: verify:ingest → build → assemble → test:clean-install
+    Pub->>Pub: verify:ingest → build → lint/typecheck/test → assemble → test:clean-install
     Pub->>VPR: changesets/action opens "chore: version packages" PR
     Note over VPR: consumes the .changeset/*.md,<br/>bumps clawboo's version, writes CHANGELOG
     VPR->>Main: merge Version PR (no changeset left)
     Main->>Pub: push triggers publish.yml again
-    Pub->>Pub: verify:ingest → build → assemble → test:clean-install
+    Pub->>Pub: verify:ingest → build → lint/typecheck/test → assemble → test:clean-install
     Pub->>npm: pnpm changeset publish → clawboo@<new>
 ```
 
-The workflow has two jobs:
+The workflow is a single `publish` job, and it runs unconditionally (see the warning below). It checks out with `fetch-depth: 0` (Changesets needs the full git history to compute tags), installs frozen, pulls headless Chromium for the clean-install gate, then re-runs the whole PR gate in order: `pnpm verify:ingest` → `pnpm build` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `bash scripts/assemble-cli.sh` → `pnpm test:clean-install`, _before_ the Changesets action. Finally it runs `changesets/action@v1` with `publish: pnpm changeset publish` and `commit: 'chore: version packages'`.
 
-1. **`check`** counts the `.changeset/*.md` files (excluding `README.md`) and exports a `has_changesets` output. It's a diagnostic; the publish job consumes the count but does not _gate_ on it (see the warning below).
-2. **`publish`** does the real work. It checks out with `fetch-depth: 0` (Changesets needs the full git history to compute tags), installs frozen, then re-runs the gate steps in order: `pnpm verify:ingest` → `pnpm build` → `bash scripts/assemble-cli.sh` → `pnpm test:clean-install`, _before_ the Changesets action. This is belt-and-suspenders: even though the same checks ran on the PR, a race or an upstream-changed lockfile could cause divergence, so the bundle is re-smoke-tested immediately before publish. Finally it runs `changesets/action@v1` with `publish: pnpm changeset publish` and `commit: 'chore: version packages'`.
+Two details in that order are deliberate. `pnpm build` is bundler-only (Vite + tsup, no `tsc`), so a type error survives it — `typecheck` is the step that catches one, and without it a broken type could reach npm even though the build was green. And `lint` / `typecheck` / `test` run _before_ `assemble-cli.sh`, so a failure costs no bundle work and no Turbo task can restore a stale `apps/cli/dist` over the freshly assembled one.
 
 The `changesets/action@v1` step is what gives the flow its two phases, deciding internally based on the repo state:
 
@@ -140,7 +139,9 @@ npm audit signatures
 This matters more here than for a typical library. Clawboo is installed with `npx` and then spawns coding-agent runtimes on the user's machine, so "is the code I'm about to run the code in the public repository?" is a question worth being able to answer without trusting us.
 
 <Warning>
-The `publish` job does **not** gate on `needs.check.outputs.has_changesets`. That is deliberate: re-adding the gate would silently break publishing. An `if: has_changesets == 'true'` gate is correct for the "open a Version PR" run (changesets are present), but it would **block the publish step on the Version-PR-merge run**; at that point Changesets has *already consumed* the `.md` file, so `has_changesets` is `false`, and the gate would skip the very run that's supposed to publish. `changesets/action@v1` handles both phases internally; it just needs the job to run unconditionally. Do not reintroduce the gate.
+The `publish` job has **no changeset gate**, and must not get one. Counting `.changeset/*.md` and adding `if: has_changesets == 'true'` looks right, and is right for the "open a Version PR" run (changesets are present), but it would **block the publish step on the Version-PR-merge run**; at that point Changesets has *already consumed* the `.md` file, so the count is zero and the gate would skip the very run that's supposed to publish. `changesets/action@v1` handles both phases internally; it just needs the job to run unconditionally.
+
+The workflow used to carry a separate `check` job that computed exactly that count. The `if:` was removed once the trap was hit, which left the job wired in by `needs:` but feeding nothing; it has since been deleted so the workflow's intent reads plainly. A comment in `publish.yml` records the same reasoning at the point where someone would be tempted to re-add it.
 </Warning>
 
 ## Releasing, step by step
@@ -150,7 +151,7 @@ The normal path to npm is:
 1. **Author a changeset.** `pnpm changeset` → commit the generated `.changeset/*.md` alongside your change on a feature branch; open a PR.
 2. **Pass CI.** The seven jobs (`lint`, `typecheck`, `test`, `build`, `verify-ingest`, `smoke-test-bundle`, `e2e`) must all be green, as must CodeQL. The bundle smoke test runs on Ubuntu, Windows, and macOS.
 3. **Merge the feature PR.** `publish.yml` runs and `changesets/action` opens a `chore: version packages` Version PR.
-4. **Merge the Version PR.** `publish.yml` runs again: `verify:ingest` → `build` → `assemble-cli.sh` → `test:clean-install` → `pnpm changeset publish`. The CLI publishes, the tag and changelog land.
+4. **Merge the Version PR.** `publish.yml` runs again: `verify:ingest` → `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install` → `pnpm changeset publish`. The CLI publishes, the tag and changelog land.
 5. **Verify.** `npm view clawboo version` should reflect the new version within roughly half a minute.
 
 <Danger>
@@ -163,7 +164,7 @@ If a version is published manually (outside the Changesets flow) before the Chan
 
 **Why inline the libs instead of declaring them as CLI dependencies?** A clean `npx clawboo` install must run with no surprises. Inlining via tsup `noExternal` means a fresh machine needs only the CLI's small set of genuinely-external runtime deps (`better-sqlite3`, `ws`, `pino`, `pino-pretty`, plus the lazily-imported optional ones); everything else, including the provider SDKs and the scheduler's `croner`, is already in `server.js`. The clean-install smoke test is what proves this holds, and `pnpm test:bundle-externals` (also run inside that gate) is the static half: it extracts every `require(...)` / `import(...)` left in the shipped bundles and fails if one is neither declared, a Node builtin, nor on the documented-optional allowlist. That allowlist is deliberately tiny — `@opentelemetry/*` and [`@anthropic-ai/claude-agent-sdk`](/runtimes/claude-code), both lazy-imported and both degrading with an actionable message — because every entry is a thing a clean install cannot do until the user installs it themselves.
 
-**Why re-run the gate inside `publish.yml`?** The PR already ran CI, but a merge race or an upstream-changed lockfile between PR-green and main-merge could ship a bundle that no longer assembles. Re-smoke-testing immediately before `changeset publish` makes a broken bundle impossible to publish even if a PR slipped through, the same belt-and-suspenders reasoning that made the smoke test exist in the first place.
+**Why re-run the gate inside `publish.yml`?** The PR already ran CI, but a merge race or an upstream-changed lockfile between PR-green and main-merge could ship a bundle that no longer assembles, or that assembles from code the PR gate never saw. Re-running lint, typecheck, tests, and the bundle smoke immediately before `changeset publish` makes a broken release impossible even if a PR slipped through, the same belt-and-suspenders reasoning that made the smoke test exist in the first place. The alternative, gating the publish job on the CI workflow via `workflow_run` or a required status check, was not taken: it would couple the release to a second workflow's run history across the Version-PR merge, where inline steps keep the job self-contained and readable in one file.
 
 ## Boundaries and non-goals
 
@@ -172,7 +173,7 @@ If a version is published manually (outside the Changesets flow) before the Chan
 - **No migration step at release.** Clawboo has no database migration ladder; the schema is created by `createDb`'s inline DDL and a schema change is a local reset (the database is per-user state). There is nothing to migrate as part of a release. See [Monorepo and build](/internals/monorepo-and-build#dbstudio-is-the-only-database-script).
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also
@@ -181,5 +182,5 @@ These docs describe Clawboo **v0.3.0**, the current release.
 - [Testing](/internals/testing): the unit / component / e2e / clean-install / evals strategy behind the CI gate
 - [Codegen and ingestion](/internals/codegen-and-ingestion): the `verify:ingest` gate that runs in CI and `publish.yml`
 - [CLI reference](/reference/cli): `npx clawboo` and the bundled MCP bins
-- [Changelog](/appendices/changelog): the release history (0.1.0 → 0.3.0)
+- [Changelog](/appendices/changelog): the release history (0.1.0 → 0.3.1)
 - [Internals overview](/internals/index): the contributor map

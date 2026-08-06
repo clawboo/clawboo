@@ -226,7 +226,7 @@ This split, pure library, browser-only wiring, is what keeps the package's invar
 - **Token-count gap is upstream.** Many Gateway `chat` payloads carry no usage block. `deriveChatCost` then estimates the OUTPUT side from the response text and returns `inputTokens: null`, because pricing the prompt needs a transcript read and Policy stays pure; the host's `recordChatCost` fills it in from the agent's last user message. So a recorded turn is either Gateway-reported or host-estimated, never silently zero. That split is a Gateway limitation, not this pipeline's. See [Known issues](/appendices/known-issues).
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

@@ -6,7 +6,7 @@ description: Install Clawboo with npm i -g clawboo or npx clawboo, launch the da
 By the end of this tutorial you'll have the Clawboo dashboard running locally and open in your browser, ready for the onboarding wizard. Installation is a single command; there is nothing to configure first.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## Prerequisites
@@ -36,9 +36,9 @@ npm install -g clawboo
 clawboo
 ```
 
-The global install gives you a persistent `clawboo` command and one-click in-app updates from the dashboard. Prefer not to install? `npx clawboo` downloads and runs the latest package (currently `0.3.0`) without adding anything to your global `node_modules`.
+The global install gives you a persistent `clawboo` command and one-click in-app updates from the dashboard. Prefer not to install? `npx clawboo` downloads and runs the latest package (currently `0.3.1`) without adding anything to your global `node_modules`.
 
-**Expected result:** the terminal prints the Clawboo ASCII logo and a version line like `Clawboo v0.3.0`, then begins starting the dashboard.
+**Expected result:** the terminal prints the Clawboo ASCII logo and a version line like `Clawboo v0.3.1`, then begins starting the dashboard.
 
 ### 2. Watch the launch sequence
 
