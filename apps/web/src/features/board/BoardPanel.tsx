@@ -28,6 +28,7 @@ import {
 import { useTeamStore } from '@/stores/team'
 import { fetchBoardResult, type BoardTask } from '@/lib/boardClient'
 import { useReadSequencer } from '@/lib/useReadSequencer'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Button } from '@/features/shared/Button'
@@ -308,9 +309,9 @@ export function BoardPanel() {
     setLoaded(false) // a team-filter change re-enters the loading state
     loadedRef.current = false
     void refresh()
-    const id = setInterval(() => void refresh(), 5000)
-    return () => clearInterval(id)
   }, [refresh])
+
+  useVisiblePolling(() => void refresh(), 5000)
 
   // A manually-created task: show it instantly (optimistic prepend) unless the
   // active team filter would exclude it, then reconcile against the server. The

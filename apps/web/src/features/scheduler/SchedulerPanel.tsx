@@ -31,6 +31,7 @@ import {
   type ScheduleRecord,
   type ScheduleSourceReadStatus,
 } from '@/lib/schedulesClient'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { useToastStore } from '@/stores/toast'
 import { confirm } from '@/stores/confirm'
 import { useReadSequencer } from '@/lib/useReadSequencer'
@@ -508,9 +509,9 @@ export function SchedulerPanel() {
 
   useEffect(() => {
     void refresh()
-    const id = setInterval(() => void refresh(), 8000)
-    return () => clearInterval(id)
   }, [refresh])
+
+  useVisiblePolling(() => void refresh(), 8000)
 
   const groups = useMemo(
     () => [

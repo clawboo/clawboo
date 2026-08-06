@@ -16,6 +16,7 @@ import { Button } from '@/features/shared/Button'
 import { StatusPill } from '@/features/shared/StatusPill'
 import { useToastStore } from '@/stores/toast'
 import { useReadSequencer } from '@/lib/useReadSequencer'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -64,12 +65,12 @@ export function OpenClawGatewaySection({
 
   useEffect(() => {
     void refresh()
-    const id = setInterval(() => void refresh(), 10_000)
     return () => {
-      clearInterval(id)
       sseRef.current?.abort()
     }
   }, [refresh])
+
+  useVisiblePolling(() => void refresh(), 10_000)
 
   const run = useCallback(
     (action: 'start' | 'restart') => {

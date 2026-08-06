@@ -49,7 +49,6 @@ The code listed below ships inside the published `clawboo` package. Most of it i
 | `elkjs`                     | EPL-2.0    | Graph layout backend for the Ghost Graph                                   |
 | `framer-motion`             | MIT        | UI animation                                                               |
 | `zustand`                   | MIT        | Client state                                                               |
-| `@tanstack/react-query`     | MIT        | Server-state caching                                                       |
 | `codemirror`                | MIT        | The agent-file editor                                                      |
 | `lucide-react`              | ISC        | Icons                                                                      |
 | `simple-icons`              | CC0-1.0    | Brand marks (provider/runtime logos)                                       |

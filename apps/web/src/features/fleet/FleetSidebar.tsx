@@ -1,4 +1,5 @@
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -198,12 +199,11 @@ export function FleetSidebar() {
   const [personalityOpen, setPersonalityOpen] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
 
-  // Tick counter to re-render "seen X ago" labels every 30s
+  // Tick counter to re-render "seen X ago" labels every 30s. Paused while the
+  // tab is hidden — nobody is reading a stale relative timestamp they can't see,
+  // and the catch-up tick on return brings every label current at once.
   const [, setTick] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 30_000)
-    return () => clearInterval(id)
-  }, [])
+  useVisiblePolling(() => setTick((n) => n + 1), 30_000)
 
   const handleBooCreated = useCallback(async () => {
     try {

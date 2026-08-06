@@ -336,6 +336,11 @@ export function useGatewayEvents(client: GatewayClient | null): void {
     //
     // Strategy: snapshot pending approvals BEFORE removing, find expired ones,
     // inject system messages into chat, then call removeExpired to clean store.
+    //
+    // Deliberately a bare interval, NOT `useVisiblePolling`: this sweep makes no
+    // request (it reads the store), and it is wall-clock correctness — pausing it
+    // in a hidden tab would leave expired approval cards standing and delay the
+    // "timed out" transcript entry until the user came back.
     const expiryTimer = setInterval(() => {
       const pending = useApprovalsStore.getState().pendingApprovals
       if (pending.size === 0) return

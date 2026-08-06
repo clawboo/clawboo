@@ -4,6 +4,7 @@ import { useApprovalsStore, type ApprovalRequest } from '@/stores/approvals'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
 import { useReadSequencer } from '@/lib/useReadSequencer'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 
 // A pending MCP tool-call / delegation approval (from GET /api/tools/approvals).
 // Distinct from the OpenClaw exec `ApprovalRequest` — different fields + a different
@@ -65,9 +66,9 @@ export function useToolApprovals(): {
 
   useEffect(() => {
     void refetch()
-    const id = setInterval(() => void refetch(), POLL_MS)
-    return () => clearInterval(id)
   }, [refetch])
+
+  useVisiblePolling(() => void refetch(), POLL_MS)
 
   const resolveTool = useCallback(
     async (id: string, decision: ToolDecision) => {

@@ -24,6 +24,7 @@ import { PanelHeader } from '@/features/shared/PanelHeader'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
 import { useReadSequencer } from '@/lib/useReadSequencer'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 
 import { EvalScorecard } from './EvalScorecard'
 
@@ -176,9 +177,9 @@ export function ObsPanel() {
 
   useEffect(() => {
     void refresh()
-    const id = setInterval(() => void refresh(), 5000)
-    return () => clearInterval(id)
   }, [refresh])
+
+  useVisiblePolling(() => void refresh(), 5000)
 
   // Distinct recent traces (newest first), with an event count + first label.
   const traces = useMemo(() => {

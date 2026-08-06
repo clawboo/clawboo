@@ -10,6 +10,7 @@ import { Rocket, X } from 'lucide-react'
 
 import { useViewStore } from '@/stores/view'
 import { useTourStore } from '@/stores/tour'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -77,19 +78,20 @@ export function FirstRunNudge() {
     }
   }, [tourActive])
 
-  // Auto-dismiss on the first completed task (poll only while shown).
-  useEffect(() => {
-    if (!show) return
-    const id = setInterval(() => {
+  // Auto-dismiss on the first completed task (poll only while shown, and only
+  // while the tab is visible — nobody is reading the nudge in a background tab).
+  useVisiblePolling(
+    () => {
       void (async () => {
         if ((await countCompletedTasks()) > 0) {
           setShow(false)
           void persistDismiss()
         }
       })()
-    }, 15_000)
-    return () => clearInterval(id)
-  }, [show])
+    },
+    15_000,
+    { enabled: show },
+  )
 
   function dismiss(): void {
     setShow(false)

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { useRefreshOnVisible } from '@/lib/useVisiblePolling'
+
 // useUpdateCheck — polls the server's self-version endpoint and decides whether
 // to surface the "update available" chip. Mirrors GitHubStarButton's
 // fetch+localStorage-cache+focus-refetch pattern so multiple mounts share one
@@ -112,20 +114,7 @@ export function useUpdateCheck(): UseUpdateCheck {
 
   // Refetch when the tab regains focus — catches "a new version shipped while I
   // was away". Cache-gated, so quick tab-switching doesn't hit the endpoint.
-  useEffect(() => {
-    const onFocus = () => {
-      void fetchInfo()
-    }
-    const onVisibilityChange = () => {
-      if (!document.hidden) void fetchInfo()
-    }
-    window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    return () => {
-      window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-    }
-  }, [fetchInfo])
+  useRefreshOnVisible(() => void fetchInfo())
 
   const dismiss = useCallback(() => {
     const v = info?.latest ?? null
