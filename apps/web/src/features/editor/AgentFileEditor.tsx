@@ -268,6 +268,12 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
           },
         ]),
         EditorView.lineWrapping,
+        // CodeMirror's contenteditable is role="textbox" with only an
+        // aria-placeholder, which is NOT an accessible-name source — axe flags
+        // it as aria-input-field-name (WCAG 4.1.2, Level A) and a screen reader
+        // announces an unnamed edit field. A static label is enough: the file
+        // being edited is already announced by the tab bar above.
+        EditorView.contentAttributes.of({ 'aria-label': 'Agent file editor' }),
         comp.of(placeholder(AGENT_FILE_PLACEHOLDERS['SOUL.md'])),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {

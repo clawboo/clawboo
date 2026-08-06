@@ -24,10 +24,15 @@ export const REDACTION_MASK = '••••'
 const SENSITIVE_KEY_RE =
   /(token|secret|password|passwd|api[_-]?key|apikey|authorization|auth|bearer|credential|private[_-]?key|access[_-]?key|cookie)/i
 
-// Keys that CONTAIN a sensitive substring but are known-safe numeric telemetry —
-// token COUNTS, never credentials. Matched case-insensitively against the exact key
-// name, so a real credential under e.g. `accessToken` still redacts. Kept in sync
-// with @clawboo/db's scrub.ts SAFE_COUNT_KEYS so the storage + display layers agree.
+// Keys that CONTAIN a sensitive substring but are known-safe. Two families:
+// token COUNTS (numeric telemetry, never credentials), and `author` — which is
+// only caught because SENSITIVE_KEY_RE matches the `auth` substring, and which
+// is one of the most common field names in event/audit payloads.
+// Matched case-insensitively against the EXACT key name, so a real credential
+// under e.g. `accessToken` or `authorization` still redacts. That exactness also
+// means near-misses like `authorId` are NOT covered — add them here explicitly
+// if they show up. Kept in sync with @clawboo/db's scrub.ts SAFE_COUNT_KEYS so
+// the storage + display layers agree.
 const SAFE_COUNT_KEYS = new Set([
   'tokens',
   'inputtokens',
@@ -38,6 +43,8 @@ const SAFE_COUNT_KEYS = new Set([
   'completiontokens',
   'tokencount',
   'tokensperminute',
+  'author',
+  'authors',
 ])
 
 // Value patterns that look like a credential regardless of the key they sit
@@ -89,18 +96,32 @@ export function redactValue(value: unknown, key?: string): unknown {
   return redactDeep(value, new WeakSet())
 }
 
-function redactDeep(value: unknown, seen: WeakSet<object>): unknown {
+/**
+ * `path` holds the ancestors on the CURRENT recursion path only — entries are
+ * removed on the way back out. That distinction is load-bearing: a "visited-ever"
+ * set would mistake a DAG (the same object referenced twice in one payload, e.g.
+ * a shared agent record on two events) for a cycle and replace the second
+ * occurrence with the '[Circular]' STRING — silently dropping real data from log
+ * records and from API response bodies.
+ */
+function redactDeep(value: unknown, path: WeakSet<object>): unknown {
   if (typeof value === 'string') return maskString(value)
   if (value === null || typeof value !== 'object') return value
   // Guard against circular references (the log path can receive arbitrary objects).
-  if (seen.has(value)) return '[Circular]'
-  seen.add(value)
-  if (Array.isArray(value)) return value.map((v) => redactDeep(v, seen))
-  const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = isSensitiveKey(k) ? REDACTION_MASK : redactDeep(v, seen)
+  if (path.has(value)) return '[Circular]'
+  path.add(value)
+  try {
+    if (Array.isArray(value)) return value.map((v) => redactDeep(v, path))
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = isSensitiveKey(k) ? REDACTION_MASK : redactDeep(v, path)
+    }
+    return out
+  } finally {
+    // `finally` so an unexpected throw mid-branch can't leave a stale ancestor
+    // behind and turn every later sibling into a false '[Circular]'.
+    path.delete(value)
   }
-  return out
 }
 
 /**

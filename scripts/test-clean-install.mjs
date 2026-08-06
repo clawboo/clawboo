@@ -175,6 +175,12 @@ let installDir = null
 let clawbooPort = null
 let browser = null
 let cleanupRunning = false
+// Owned by the reuse check (step 19) — a second CLI spawn against a fake
+// already-running dashboard. Separate handles because step 19 runs while the
+// real server from step 10 is still up.
+let reuseFake = null
+let reuseProc = null
+let reuseTmpDir = null
 
 async function cleanup() {
   cleanupRunning = true
@@ -195,14 +201,16 @@ async function cleanup() {
   if (clawbooPort) {
     await killByPort(clawbooPort)
   }
-  if (cliProc && !cliProc.killed) {
-    try {
-      cliProc.kill('SIGTERM')
-    } catch {
-      /* ignore */
+  for (const proc of [cliProc, reuseProc]) {
+    if (proc && !proc.killed) {
+      try {
+        proc.kill('SIGTERM')
+      } catch {
+        /* ignore */
+      }
     }
   }
-  for (const server of [fakeService, stubProvider]) {
+  for (const server of [fakeService, stubProvider, reuseFake]) {
     if (server) {
       // `close()` waits for open sockets, and the stub provider answers with
       // `Connection: keep-alive` — a socket the detached server still holds
@@ -212,7 +220,7 @@ async function cleanup() {
       await new Promise((resolve) => server.close(() => resolve()))
     }
   }
-  for (const dir of [tmpDir, shadowBinDir, packDir, installDir]) {
+  for (const dir of [tmpDir, shadowBinDir, packDir, installDir, reuseTmpDir]) {
     if (dir) {
       try {
         await fs.rm(dir, { recursive: true, force: true })
@@ -459,6 +467,58 @@ async function bindFakeService() {
  * packed tarball would never boot and the run would go green on nothing. Cheap
  * to detect, so detect it and say so.
  */
+/**
+ * Bind a fake that PASSES the CLI's Clawboo probe: `/api/settings` answers with
+ * the real server's JSON shape, everything else with SPA HTML. Used by the
+ * reuse check to stand in for an already-running dashboard.
+ *
+ * Listens on port 0 so the OS hands back an EPHEMERAL port. That is deliberate:
+ * every mainstream ephemeral range sits outside the 18790-18809 discovery
+ * window, so the real server this run already spawned cannot be mistaken for
+ * it, and the CLI's ascending scan physically cannot reach it — which is what
+ * makes "the CLI reused the running dashboard" a non-vacuous claim rather than
+ * something the port scan could have satisfied by accident.
+ */
+async function bindFakeClawboo() {
+  let settingsHits = 0
+  const srv = createServer((req, res) => {
+    if ((req.url ?? '/').startsWith('/api/settings')) {
+      settingsHits += 1
+      const body = JSON.stringify({
+        gatewayUrl: 'ws://localhost:18789',
+        hasToken: false,
+        firstRunDismissedAt: null,
+      })
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': Buffer.byteLength(body),
+        Connection: 'close',
+      })
+      res.end(body)
+      return
+    }
+    const html = '<!doctype html><html><body><div id="root"></div></body></html>'
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': Buffer.byteLength(html),
+      Connection: 'close',
+    })
+    res.end(html)
+  })
+  // undici pools keep-alive sockets; an idle pooled socket would keep close()
+  // pending long enough to eat the cleanup budget.
+  srv.keepAliveTimeout = 0
+
+  const port = await new Promise((resolve, reject) => {
+    srv.once('error', reject)
+    // 127.0.0.1 matches what the real server binds (resolveHost() returns
+    // LOOPBACK_HOST when HOST is unset), which the CLI already reaches by
+    // probing 'localhost' on all three OS legs of this job.
+    srv.listen(0, '127.0.0.1', () => resolve(srv.address().port))
+  })
+  return { srv, port, settingsHits: () => settingsHits }
+}
+
 async function findExistingClawbooPorts() {
   const ports = Array.from({ length: DISCOVERY_PORT_COUNT }, (_, i) => DISCOVERY_FIRST_PORT + i)
   const hits = await Promise.all(
@@ -1289,7 +1349,149 @@ async function main() {
   // 18. Test 7: an agent run can actually start from the installed tarball.
   if (!(await assertRuntimeDispatch(openedUrl, stub.state))) return
 
+  // 19. Test 8: a SECOND `npx clawboo` against an already-running dashboard must
+  //     REUSE it, not fork another server. A fork here means two servers, two
+  //     SQLite handles on one file, and a browser pointed at whichever won the
+  //     race. Everything above proves the first launch works; nothing above
+  //     proves the second one doesn't duplicate it.
+  //
+  //     Runs last, and against its own ephemeral fake + its own CLAWBOO_HOME, so
+  //     it cannot disturb (or be disturbed by) the real server steps 10-18 left
+  //     running in the 18790-18809 window.
+  if (!(await assertReusesRunningDashboard(cliPath, installDir, cliEnvPath))) return
+
   log('All clean-install smoke tests passed.')
+}
+
+/** Fork-path banners from apps/cli/src/index.ts — their ABSENCE proves reuse. */
+const FORK_MARKERS = [
+  'Starting Clawboo', // covers the bundled and "(dev mode)" spinner texts
+  'Dashboard started',
+  'Dashboard is taking too long to start',
+  'Could not find the Clawboo server',
+]
+
+/**
+ * Spawn the installed CLI a second time with a Clawboo-shaped fake already
+ * listening, and assert it attaches instead of booting a new server.
+ */
+async function assertReusesRunningDashboard(cliPath, cwd, envPath) {
+  reuseTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'clawboo-reuse-'))
+  // Set CLAWBOO_HOME explicitly rather than leaning on HOME → os.homedir() →
+  // resolveClawbooDir: that chain also passes an fs.existsSync guard that falls
+  // back to os.tmpdir() when the home dir is missing, which would put
+  // api-port.txt somewhere we never wrote.
+  const clawbooHome = path.join(reuseTmpDir, '.clawboo')
+  await fs.mkdir(clawbooHome, { recursive: true })
+
+  const fake = await bindFakeClawboo()
+  reuseFake = fake.srv
+
+  if (
+    fake.port >= DISCOVERY_FIRST_PORT &&
+    fake.port < DISCOVERY_FIRST_PORT + DISCOVERY_PORT_COUNT
+  ) {
+    fail(
+      `ephemeral fake port :${fake.port} landed inside the discovery window ` +
+        `(${DISCOVERY_FIRST_PORT}-${DISCOVERY_FIRST_PORT + DISCOVERY_PORT_COUNT - 1}) — ` +
+        `the reuse assertion would be vacuous`,
+    )
+    return false
+  }
+
+  // The runtime port file is the path a real second `npx clawboo` takes: the
+  // running server wrote its port there on bind.
+  await fs.writeFile(path.join(clawbooHome, 'api-port.txt'), String(fake.port), 'utf8')
+  log(`Fake already-running Clawboo on :${fake.port}; api-port.txt written to ${clawbooHome}`)
+
+  reuseProc = spawn('node', [cliPath], {
+    cwd,
+    env: {
+      PATH: envPath,
+      HOME: reuseTmpDir,
+      USERPROFILE: reuseTmpDir,
+      CLAWBOO_HOME: clawbooHome,
+      OPENCLAW_STATE_DIR: path.join(reuseTmpDir, '.openclaw'),
+      STUDIO_ACCESS_TOKEN: '',
+      CLAWBOO_API_PORT: '',
+      NODE_ENV: 'production',
+      LANG: process.env.LANG || 'en_US.UTF-8',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  let out = ''
+  let closed = false
+  reuseProc.stdout.on('data', (d) => {
+    out += d.toString()
+    process.stdout.write(`[cli:reuse] ${d.toString().trimEnd()}\n`)
+  })
+  reuseProc.stderr.on('data', (d) => {
+    out += d.toString()
+    process.stderr.write(`[cli:reuse] ${d.toString().trimEnd()}\n`)
+  })
+  // 'close' (not 'exit') fires only after BOTH stdio streams drain. The reuse
+  // path finishes in well under a second, so giving up on `exitCode` alone
+  // would race the still-pending 'data' event carrying the "opened at" line.
+  reuseProc.once('close', () => {
+    closed = true
+  })
+
+  // eslint-disable-next-line no-control-regex
+  const strip = (s) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+  const urlRe = /opened at\s+(http:\/\/localhost:(\d+))/i
+  const deadline = Date.now() + READY_TIMEOUT_MS
+  let openedPort = null
+  while (Date.now() < deadline) {
+    const m = strip(out).match(urlRe)
+    if (m) {
+      openedPort = Number(m[2])
+      break
+    }
+    if (closed) break
+    await new Promise((r) => setTimeout(r, 200))
+  }
+
+  if (openedPort === null) {
+    fail(
+      closed
+        ? `the second CLI exited (code ${reuseProc.exitCode}) before printing a URL`
+        : `the second CLI did not print "opened at <URL>" within ${READY_TIMEOUT_MS}ms`,
+    )
+    console.error('--- reuse CLI output ---\n' + strip(out))
+    return false
+  }
+
+  if (openedPort !== fake.port) {
+    fail(
+      `second launch opened :${openedPort} but the running dashboard is on :${fake.port} — ` +
+        `it did not reuse the running server`,
+    )
+    return false
+  }
+
+  const forked = FORK_MARKERS.filter((marker) => strip(out).includes(marker))
+  if (forked.length > 0) {
+    fail(
+      `second launch printed fork-path output ${JSON.stringify(forked)} — it started a ` +
+        `second server instead of reusing the one on :${fake.port}`,
+    )
+    return false
+  }
+
+  if (fake.settingsHits() < 1) {
+    fail(
+      `second launch never requested /api/settings on :${fake.port} — it accepted the ` +
+        `recorded port without the Clawboo signature check`,
+    )
+    return false
+  }
+
+  log(
+    `✓ a second launch reused the dashboard on :${fake.port} ` +
+      `(no fork banner, ${fake.settingsHits()} signature probe(s))`,
+  )
+  return true
 }
 
 // Run, ensuring cleanup with a hard timeout

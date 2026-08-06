@@ -84,3 +84,27 @@ describe('removeApiPortFile', () => {
     expect(() => removeApiPortFile()).not.toThrow()
   })
 })
+
+// `apps/cli/src/lifecycle.ts` and this file are documented as kept in lockstep on
+// port parsing. The CLI half moved to `Number.isInteger` because a corrupt
+// `18790.5` reached `createConnection`, which throws ERR_SOCKET_BAD_PORT
+// synchronously — but this half was left on `Number.isFinite`, so the same file
+// the two halves SHARE was rejected by one and accepted by the other.
+describe('readApiPortFile rejects a non-integer port (lockstep with the CLI)', () => {
+  it('returns null for a fractional port rather than handing it to the socket layer', () => {
+    fs.writeFileSync(path.join(home, 'api-port.txt'), '18790.5', 'utf8')
+    expect(readApiPortFile()).toBeNull()
+  })
+
+  it('still accepts a normal integer port', () => {
+    fs.writeFileSync(path.join(home, 'api-port.txt'), '18790', 'utf8')
+    expect(readApiPortFile()).toBe(18790)
+  })
+
+  it('rejects out-of-range and non-numeric values', () => {
+    for (const raw of ['0', '-1', '65536', 'abc', '']) {
+      fs.writeFileSync(path.join(home, 'api-port.txt'), raw, 'utf8')
+      expect(readApiPortFile()).toBeNull()
+    }
+  })
+})
