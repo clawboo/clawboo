@@ -92,8 +92,11 @@ The script reproduces the exact condition the port-collision bug shipped under. 
 - a deep SPA route (`/some/spa/route`) falls through to the same SPA HTML (the catch-all works);
 - `GET /api/settings` returns Clawboo-shaped JSON (`gatewayUrl` string + `hasToken` boolean);
 - `GET /api/system/status` returns the expected shape;
+- loading `/` in **headless Chromium** mounts React (`[data-testid="team-sidebar"]`) and renders the fresh-install onboarding surface (`[data-testid="onboarding-wizard"]`), with no uncaught exception and no first-party console error;
 - an installed **stdio MCP bin** (`dist/bin/tasks.js`) can be spawned and driven through a raw JSON-RPC handshake (`initialize` → `notifications/initialized` → `tools/list`), and its tool list includes `list_tasks`;
 - **an agent run can start**: the script creates a native agent and a board task, then drives a real `POST /api/runtimes/clawboo-native/run` to a terminal `done`, and checks the report-up summary carries the provider's reply and the task moved to `done` on the board.
+
+The browser assertion exists because every HTTP check above it passes against a bundle that serves the right HTML and then dies on execution: matching `<div id="root"></div>` proves the shell was _served_, not that it _booted_. To keep it hermetic the run aborts every non-first-party request (the Google Fonts stylesheet in `index.html`, the `api.github.com` star count that mounts under the wizard) and counts console errors only when they originate first-party, so a rate-limited or unreachable CDN can never fail a release. It needs the browser binary: `pnpm exec playwright install chromium` once per clone, which `ci.yml` and `publish.yml` both do as an explicit step since Playwright has no install script of its own.
 
 The MCP assertion is what proves an external runtime can spawn a packaged MCP bin straight from a clean install. Note the split of responsibility on the command interface: `clawboo --version` is the one thing executed _through_ the npm shim (it is the only side-effect-free subcommand — no server, no state dir, no port), while the dashboard boot and the MCP handshake run the entry files directly with `node`. Going through a shim for those would put `cmd.exe` between the harness and the child's stdio on Windows, which is exactly the pipe the URL parsing and the JSON-RPC handshake depend on. The dispatch assertion covers the product's main path — assign a task and it runs — so it can never be a publish-time unknown. It needs no API key and no network: the native runtime's keyless `ollama` provider rides the shared OpenAI-compatible client with a base-URL override, so the script points `OLLAMA_BASE_URL` at a local stub that streams one canned reply. `kind: 'research'` keeps isolation at `none`, so no git repo or worktree is involved.
 
@@ -148,7 +151,11 @@ The schema parity check compares only `{table → set(column names)}`. Column *t
 
 The CI workflow (`.github/workflows/ci.yml`) runs `lint`, `typecheck`, `test`, `build`, and `verify-ingest` as independent parallel jobs, each on Node 22 with a frozen lockfile, plus the `smoke-test-bundle` job that runs `pnpm assemble && pnpm test:clean-install` on the Ubuntu + Windows + macOS matrix. The Turbo task graph makes `test`, `lint`, and `typecheck` depend on `^build` so every package's workspace dependencies are built first.
 
-The seventh job is `e2e`. It is Ubuntu-only, because the `webServer` command is POSIX shell syntax that `cmd.exe` cannot parse, and it does three things the other jobs don't: it downloads Chromium (`playwright install --with-deps chromium`), it runs a full `pnpm build` first, and it uploads `playwright-report/` plus `test-results/` as an artifact so a failure is readable without reproducing it. The build step is not an optimization: every `@clawboo/*` package resolves through its gitignored `dist/`, nothing builds those during install, and both halves of the `webServer` command import them, so the suite would die before its first test without it. A green run is under 4 minutes on a hosted runner; the job's timeout is 15, leaving headroom for a cold cache and the two CI retries.
+`smoke-test-bundle` also downloads Chromium (`playwright install --with-deps chromium`) before it assembles, for the browser assertion above; Playwright has no postinstall hook, so `pnpm install` alone never fetches the binary.
+
+The seventh job is `e2e`. It is Ubuntu-only, because the `webServer` command is POSIX shell syntax that `cmd.exe` cannot parse, and it does two things the other jobs don't: it runs a full `pnpm build` first, and it uploads `playwright-report/` plus `test-results/` as an artifact so a failure is readable without reproducing it. The build step is not an optimization: every `@clawboo/*` package resolves through its gitignored `dist/`, nothing builds those during install, and both halves of the `webServer` command import them, so the suite would die before its first test without it. A green run is under 4 minutes on a hosted runner; the job's timeout is 15, leaving headroom for a cold cache and the two CI retries.
+
+`publish.yml` re-runs the same gate inline rather than depending on this workflow: `verify:ingest` → `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install`, all before `changeset publish`. That makes the release path a strict superset of the pull-request path, which matters most for `typecheck`, since `pnpm build` never invokes `tsc` and a type error would otherwise sail through the build straight to npm.
 
 Two more workflows sit alongside it. `codeql.yml` runs GitHub code scanning over the TypeScript sources and over the workflow files themselves, on pull requests, on pushes to `main`, and weekly; its `.github/codeql/codeql-config.yml` excludes only the codegen'd marketplace catalog, which is ~41% of the repo's TypeScript by volume and contains no executable logic. The manual eval workflow (`evals.yml`) is `workflow_dispatch`-only.
 
@@ -168,7 +175,7 @@ The cost is real: the server integration and e2e tests are slow (hence the widen
 - **The schema parity guard is name-level, not shape-level.** It catches added/removed tables and columns, not type or constraint drift, by design, until a real schema change warrants the deeper check.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

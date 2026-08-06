@@ -85,7 +85,7 @@ What each one guards:
 - **`pnpm test`** runs two Vitest projects: a node project for pure logic (`*.test.ts`) and a jsdom project for React components (`*.test.tsx`, RTL + MSW + jest-dom + jest-axe). See [Testing](/internals/testing).
 - **`pnpm e2e`** runs Playwright end-to-end, including the durable-board round-trip and the eval smoke suite.
 - **`pnpm verify:ingest`** re-derives the codegen'd marketplace catalog (304 agents, 82 teams) and fails on any drift from the committed files. If you touched ingestion, regenerate with `pnpm ingest:marketplace` first. See [Codegen and ingestion](/internals/codegen-and-ingestion).
-- **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI, packs it, installs the tarball into a throwaway temp dir, and boots _that_ install to catch first-run regressions — right through one real agent run. It needs network access for the `npm install`, and it refuses to run while another Clawboo dashboard holds `18790`–`18809` (stop your `pnpm dev` server first). This is the same gate the release workflow runs: see [Release process](/internals/release-process).
+- **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI, packs it, installs the tarball into a throwaway temp dir, and boots _that_ install to catch first-run regressions — through a headless-Chromium pass that fails on any uncaught exception or first-party console error, right up to one real agent run. It needs network access for the `npm install` and the same `pnpm exec playwright install chromium` download as `pnpm e2e`, and it refuses to run while another Clawboo dashboard holds `18790`–`18809` (stop your `pnpm dev` server first). This is the same gate the release workflow runs: see [Release process](/internals/release-process).
 
 <Tip>
   Running the full gate locally avoids review back-and-forth. Every PR must pass CI: `pnpm build`,
@@ -161,7 +161,7 @@ A change must not break the [seven architecture invariants](/concepts/architectu
 
 ## Release process
 
-Releases are automated and maintainer-only: when changesets land on `main`, the `publish.yml` workflow opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the `clawboo` CLI. No manual `npm publish`. The clean-install gate (`pnpm test:clean-install`) runs in the workflow before publish. See [Release process](/internals/release-process) for the full pipeline.
+Releases are automated and maintainer-only: when changesets land on `main`, the `publish.yml` workflow opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the `clawboo` CLI. No manual `npm publish`. The workflow re-runs the whole PR gate before publishing (`verify:ingest`, `build`, `lint`, `typecheck`, `test`, then `assemble` and the `pnpm test:clean-install` gate), so a release cannot skip a check a pull request had to pass. See [Release process](/internals/release-process) for the full pipeline.
 
 ## License
 

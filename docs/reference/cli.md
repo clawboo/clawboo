@@ -6,7 +6,7 @@ description: The clawboo launcher and its backup, stop, and restart subcommands,
 Clawboo ships one user-facing command and four MCP stdio binaries. Run bare, `clawboo` is a launcher: it finds or starts the bundled dashboard server, checks what version it found, and opens a browser. Three subcommands sit alongside that default action, and each exists because the server runs **detached**: taking a consistent copy of a live database, clearing an instance you can no longer Ctrl-C, and rolling a running instance onto a newer build are all things a detached process makes awkward. Everything else, onboarding, Gateway detection, runtime connection, and team deployment, still happens in the web UI. The MCP bins are not launched by humans; an external agent runtime spawns them to attach Clawboo's board, memory, tools, and team-chat surfaces over stdio.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## At a glance

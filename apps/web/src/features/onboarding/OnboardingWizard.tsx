@@ -592,6 +592,10 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
       role="dialog"
       aria-modal="true"
       aria-label="Set up Clawboo"
+      // On the wizard ROOT, not a step: the clean-install smoke waits for this
+      // to prove a fresh install actually reaches the onboarding surface, and
+      // anchoring it here keeps that gate stable across step redesigns.
+      data-testid="onboarding-wizard"
       // Focusable so the focus-trap's root fallback can land focus inside the
       // dialog on a control-less step (an element without tabindex isn't a
       // valid focus target → focus would stay on <body>).

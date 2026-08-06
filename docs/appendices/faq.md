@@ -6,7 +6,7 @@ description: 'Common questions about Clawboo: runtimes, data location, local-fir
 Short, grounded answers to the questions that come up most. Each answer links to the page that covers the topic in full.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## Do I need OpenClaw to use Clawboo?

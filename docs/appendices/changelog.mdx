@@ -1,15 +1,15 @@
 ---
 title: Changelog
-description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.3.0.
+description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.3.1.
 ---
 
 Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a monorepo of 25 `@clawboo/*` workspace packages, but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
 
-Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which gates on the bundled-CLI clean-install smoke test and then runs `pnpm changeset publish`. The full mechanics are in [Release process](/internals/release-process).
+Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which re-runs the full PR gate (`verify:ingest`, `build`, `lint`, `typecheck`, `test`) plus the bundled-CLI clean-install smoke test, and then runs `pnpm changeset publish`. The full mechanics are in [Release process](/internals/release-process).
 
 <Note>
-  The current npm `latest` is **`clawboo@0.3.0`**, the version these docs describe, so `npx clawboo`
-  installs v0.3.0.
+  The current npm `latest` is **`clawboo@0.3.1`**, the version these docs describe, so `npx clawboo`
+  installs v0.3.1.
 </Note>
 
 <Warning>
@@ -25,6 +25,7 @@ Clawboo follows [Changesets](https://github.com/changesets/changesets). A change
 
 | Version | Tag             | npm        | Theme                                                                                          |
 | ------- | --------------- | ---------- | ---------------------------------------------------------------------------------------------- |
+| 0.3.1   | `clawboo@0.3.1` | published  | Team-chat reliability, live status badges, per-runtime provider manager                        |
 | 0.3.0   | `clawboo@0.3.0` | published  | Native-first: run Gateway-free on one provider key, mixed-runtime teams, live native team chat |
 | 0.2.0   | `clawboo@0.2.0` | published  | The liberated cut, full multi-runtime orchestrator                                             |
 | 0.1.9   | `clawboo@0.1.9` | deprecated | Welcome redesign, lighter install, team colors                                                 |
@@ -38,7 +39,29 @@ Clawboo follows [Changesets](https://github.com/changesets/changesets). A change
 | 0.1.1   | `clawboo@0.1.1` | deprecated | First real release (v0.1.0 marketplace milestone)                                              |
 | 0.1.0   | `clawboo@0.1.0` | deprecated | Initial package scaffold                                                                       |
 
-The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap that made Clawboo runtime-agnostic, and 0.3.0 is the product that leap made possible: native-first, so the first run needs one provider key and nothing else.
+The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap that made Clawboo runtime-agnostic, and 0.3.0 is the product that leap made possible: native-first, so the first run needs one provider key and nothing else. 0.3.1 is the follow-up patch that made the native path trustworthy day to day.
+
+---
+
+## 0.3.1, team-chat reliability and provider UX
+
+A patch release on top of native-first. Nothing architectural moved; the changes are the ones you feel while actually using a native team.
+
+**Team chat**
+
+- **Replies no longer vanish.** Every streamed team-chat reply now commits to the transcript or is cleanly cleared, so a delegating agent's message can't disappear on the next update or on reload. A native 1:1 reply that fails mid-stream is preserved rather than silently dropped.
+- **Live Working / Idle badges.** The sidebar agent and Group Chat status indicators update in real time for native and server-orchestrated team runs and native 1:1 chats, not only for OpenClaw over a live Gateway.
+
+**Providers and models**
+
+- **Runtime provider manager.** The Runtimes panel's Manage view for Clawboo Native, OpenClaw, and Hermes lists the LLM providers you have actually connected (synced with Settings → Providers), each with per-provider connect and disconnect, one-click reconnect using an existing key, and a default-model picker for Native. A native runtime with no key now honestly reads "Disconnected" with a "Set up in Runtimes" shortcut.
+- **Reconnect any provider.** Reconnecting Clawboo Native is no longer Anthropic-only; reconnect with any provider you have already configured.
+- **Two-layer team model picker.** When creating a team you pick a provider first (only the connected ones), then its model. The trigger shows the exact default model that will run instead of an opaque "Recommended", and the panel opens on the provider the current model actually belongs to. See [Teams](/using/teams).
+
+**Onboarding and polish**
+
+- The Add-runtimes step shows connected providers read-only, with a Back button to the provider step where keys are added.
+- The sidebar mascot's hover tooltip appears promptly and reads "Boo Zero", matching what clicking it opens.
 
 ---
 

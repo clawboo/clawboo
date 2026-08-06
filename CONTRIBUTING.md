@@ -71,7 +71,7 @@ Run them locally before pushing to avoid back-and-forth. Every one of them runs 
 
 `pnpm e2e` needs a built workspace (`pnpm build` first) and a Chromium download (`pnpm exec playwright install chromium`). It sandboxes itself into a throwaway `$HOME`, so it never touches your real `~/.clawboo`.
 
-`pnpm test:clean-install` packs `apps/cli` and installs the tarball into a throwaway temp dir, so it needs network access for the `npm install`. It also refuses to run while another Clawboo dashboard is listening on `18790`–`18809` (it would attach to that one instead of the tarball) — stop your `pnpm dev` server first.
+`pnpm test:clean-install` packs `apps/cli` and installs the tarball into a throwaway temp dir, so it needs network access for the `npm install`. It also drives the installed SPA in headless Chromium, so it needs the same `pnpm exec playwright install chromium` download as `pnpm e2e`. And it refuses to run while another Clawboo dashboard is listening on `18790`–`18809` (it would attach to that one instead of the tarball) — stop your `pnpm dev` server first.
 
 ---
 
@@ -122,6 +122,8 @@ Add a test for anything you add. Unit logic goes in Vitest (`*.test.ts` in the n
 ## Release process (maintainers only)
 
 Releases are automated via the `publish.yml` GitHub Actions workflow: when changesets land on `main`, the Changesets action opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the changed packages to npm. No manual `npm publish` needed.
+
+Before it publishes, the workflow re-runs the whole PR gate — `pnpm verify:ingest`, `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, then `bash scripts/assemble-cli.sh` and `pnpm test:clean-install`. `typecheck` matters most there: `pnpm build` is bundler-only and never runs `tsc`, so it is the only step that would stop a type error reaching npm.
 
 ---
 
