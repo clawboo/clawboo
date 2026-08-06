@@ -82,7 +82,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm test
+      # Same suites as `pnpm test`, plus a per-package coverage table in the job
+      # log. No threshold and no uploaded artifact — this is a visibility signal
+      # so uncovered surfaces stay noticeable, not a gate.
+      - run: pnpm test:coverage
 
   build:
     name: Build
@@ -161,8 +164,9 @@ jobs:
       # port discovery skipping a fake non-Clawboo listener on 18791 (the
       # OpenClaw Gateway auxiliary port that broke v0.1.2), the SPA and its
       # deep-route catch-all, /api/settings, the SPA actually BOOTING in headless
-      # Chromium, a stdio MCP `tools/list` handshake, and one real runtime
-      # dispatch driven to `done`.
+      # Chromium, a stdio MCP `tools/list` handshake, one real runtime
+      # dispatch driven to `done`, and a second launch reusing an
+      # already-running dashboard instead of forking another server.
       #
       # Runs on ubuntu-latest, windows-latest and macos-latest. Windows is the
       # regression gate for v0.1.4's Windows-compat fixes (npm.cmd resolution,

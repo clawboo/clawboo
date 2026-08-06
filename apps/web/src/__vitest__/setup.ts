@@ -47,3 +47,43 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
 if (typeof Element.prototype.scrollIntoView !== 'function') {
   Element.prototype.scrollIntoView = function scrollIntoView(): void {}
 }
+
+// jsdom implements the *Element* measurement APIs but not the *Range* ones —
+// `Range.prototype.getClientRects` / `getBoundingClientRect` and
+// `document.elementFromPoint` are all undefined in jsdom 25. CodeMirror 6 runs a
+// measure pass on every mount and every dispatch, reaching them via
+// drawSelection → coordsAtPos → textRange().getClientRects(); without these it
+// catches a TypeError and logs a full stack through `logException` on every
+// tick, drowning the test output. Zero-size rects are the honest answer in a
+// layout-free DOM and are exactly what CodeMirror already treats as
+// "unmeasurable".
+const zeroRect = (): DOMRect =>
+  ({
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: 0,
+    height: 0,
+    toJSON() {
+      return this
+    },
+  }) as DOMRect
+
+if (typeof Range.prototype.getClientRects !== 'function') {
+  Range.prototype.getClientRects = function getClientRects(): DOMRectList {
+    const list = [zeroRect()] as unknown as DOMRect[] & DOMRectList
+    list.item = (i: number) => list[i] ?? null
+    return list
+  }
+}
+
+if (typeof Range.prototype.getBoundingClientRect !== 'function') {
+  Range.prototype.getBoundingClientRect = zeroRect
+}
+
+if (typeof document.elementFromPoint !== 'function') {
+  document.elementFromPoint = () => null
+}

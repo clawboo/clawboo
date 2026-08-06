@@ -6,11 +6,13 @@
 const SECRET_KEY_RE =
   /(token|secret|password|passwd|api[_-]?key|apikey|authorization|auth|bearer|credential|private[_-]?key|access[_-]?key)/i
 
-// Keys that CONTAIN a secret-looking substring (notably "token") but are
-// known-safe numeric telemetry — token COUNTS, never credentials. Without this,
-// `inputTokens` matches /token/ and its count is redacted to "[REDACTED]" (and
-// then summed as a string in the obs metrics). Matched case-insensitively against
-// the exact key name, so a real credential under e.g. `accessToken` still redacts.
+// Keys that CONTAIN a secret-looking substring but are known-safe. Two families:
+// token COUNTS ("token") and `author` ("auth"). Without the first, `inputTokens`
+// matches /token/ and its count is redacted to "[REDACTED]" (and then summed as a
+// string in the obs metrics); without the second, an `author` field is destroyed
+// on its way into the audit trail. Matched case-insensitively against the exact
+// key name, so a real credential under e.g. `accessToken` or `authorization`
+// still redacts. Kept in sync with the display-layer masker in @clawboo/logger.
 const SAFE_COUNT_KEYS = new Set([
   'tokens',
   'inputtokens',
@@ -21,6 +23,8 @@ const SAFE_COUNT_KEYS = new Set([
   'completiontokens',
   'tokencount',
   'tokensperminute',
+  'author',
+  'authors',
 ])
 
 // Value patterns that look like credentials regardless of key name. Kept in sync

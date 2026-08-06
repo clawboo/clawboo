@@ -138,7 +138,11 @@ function readPortEnv(name: string): number | null {
   const raw = process.env[name]?.trim()
   if (!raw) return null
   const port = Number(raw)
-  if (!Number.isFinite(port) || port <= 0 || port > 65535) return null
+  // isInteger, not isFinite — matches `readPortEnv` in apps/cli/src/lifecycle.ts.
+  // A fractional port reaches net.listen/createConnection, which throws
+  // ERR_SOCKET_BAD_PORT synchronously; the CLI half was fixed for exactly that,
+  // and these two are documented as kept in lockstep.
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null
   return port
 }
 
@@ -186,7 +190,10 @@ export function readApiPortFile(): number | null {
   try {
     const raw = fs.readFileSync(getApiPortFilePath(), 'utf8').trim()
     const port = Number(raw)
-    if (!Number.isFinite(port) || port <= 0 || port > 65535) return null
+    // isInteger, not isFinite: a corrupt file holding `18790.5` would otherwise
+    // reach the socket layer, which throws ERR_SOCKET_BAD_PORT synchronously.
+    // Mirrors `readRuntimePort` in apps/cli/src/lifecycle.ts.
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) return null
     return port
   } catch {
     return null
