@@ -31,6 +31,7 @@ import { getDbPath } from '../db'
 import { publishAgentStatus } from './agentStatusBus'
 import { publishBoardChange } from './boardChangeBus'
 import { booZeroForTeam, ensureNativeBooZero } from './booZero'
+import { auditCapHit } from './capHitAudit'
 import { publishChatDelta } from './chatDeltaBus'
 import { persistTeamChatEntry } from './persistTeamChatEntry'
 import { isRiskyDelegation } from './riskyDelegation'
@@ -212,6 +213,10 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     // pass-through-safe, failure-preserving). Mirrors the browser binding.
     compact: (text: string) => compactToolResultMarkdown(text).text,
     caps: { maxFanout: DEFAULT_MAX_FANOUT },
+    // Write the `cap_hit` audit row the Governance dashboard documents. The engine
+    // has fired this callback since the caps shipped; nothing was wired to it, so
+    // `eventType=cap_hit` was always empty in the audit feed.
+    onCapHit: (info) => auditCapHit(db, teamId, info, DEFAULT_MAX_FANOUT),
     // Risky-delegation approval gate (parity with the retired browser binding): a
     // destructive/secret-touching delegation is surfaced on the leader's approval
     // queue (the DB-mediated `tool_call_approvals` handshake) before it runs; on

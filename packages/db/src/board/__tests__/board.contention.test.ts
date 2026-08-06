@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { Worker } from 'node:worker_threads'
@@ -127,4 +127,30 @@ describe.skipIf(!ENABLED)('write contention (real concurrency)', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   }, 60_000)
+})
+
+// The suite above is env-gated, so it does not run under a plain `pnpm test`. That
+// makes its CI step the single thing standing between `createCappedSubtask`'s
+// transaction and a silent regression — drop the step and every other check still
+// passes while the cap becomes overrunnable. This guard runs UNGATED on purpose.
+describe('the concurrency suite is wired into CI', () => {
+  it('CI runs this file with CLAWBOO_CONCURRENCY_TEST enabled', () => {
+    let dir = __dirname
+    let wf: string | null = null
+    for (let i = 0; i < 8; i += 1) {
+      const candidate = path.join(dir, '.github', 'workflows', 'ci.yml')
+      if (existsSync(candidate)) {
+        wf = candidate
+        break
+      }
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+    expect(wf).not.toBeNull()
+    if (!wf) return
+    const yml = readFileSync(wf, 'utf8')
+    expect(yml).toContain('CLAWBOO_CONCURRENCY_TEST')
+    expect(yml).toContain('board.contention.test.ts')
+  })
 })

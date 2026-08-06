@@ -16,7 +16,7 @@
 // used (fan-out = ≥2 structured delegations → N parallel tasks).
 
 import type { RuntimeEvent } from '@clawboo/executor'
-import { checkFanoutCap } from '@clawboo/governance'
+import { checkDepthCap, checkFanoutCap, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
 
 import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
 import { buildTaskUpdateMessage, type TaskUpdateOutcome } from './taskUpdate'
@@ -34,7 +34,7 @@ import {
  * bounds recursion at a finite, small fan-out tree. Leader/user-initiated turns
  * have no source task (depth 0) and may always delegate.
  */
-export const MAX_SPAWN_DEPTH = 2
+export const MAX_SPAWN_DEPTH = DEFAULT_MAX_DEPTH
 
 /** Debounce window for batching board→chat reflections (avoids message storms). */
 export const REFLECT_WINDOW_MS = 3000
@@ -488,7 +488,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
 
     // Bounded depth — enforced via the board ancestor chain, not a prompt.
-    if ((await depthOf(sourceTaskId)) >= MAX_SPAWN_DEPTH) {
+    if (!checkDepthCap({ depth: await depthOf(sourceTaskId), max: MAX_SPAWN_DEPTH }).ok) {
       if (sourceTaskId)
         await deps.board.addComment(
           sourceTaskId,
