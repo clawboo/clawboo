@@ -77,7 +77,7 @@ Every push to `main` and every pull request runs `.github/workflows/ci.yml`. It 
 | ------------------- | ------------------------------------------- | ---------------------------------------------------------- |
 | `lint`              | `pnpm lint`                                 | ESLint across the workspace + the docs frontmatter check.  |
 | `typecheck`         | `pnpm typecheck`                            | `tsc --noEmit` across the workspace.                       |
-| `test`              | `pnpm test`                                 | Per-package Vitest suites (`turbo test`).                  |
+| `test`              | `pnpm test:coverage`                        | Per-package Vitest suites plus a coverage table (no gate). |
 | `build`             | `pnpm build`                                | Every package + app `dist/` builds, dependency-ordered.    |
 | `verify-ingest`     | `pnpm verify:ingest`                        | The committed marketplace catalog matches a fresh codegen. |
 | `smoke-test-bundle` | `pnpm assemble` → `pnpm test:clean-install` | The published tarball actually works end-to-end.           |

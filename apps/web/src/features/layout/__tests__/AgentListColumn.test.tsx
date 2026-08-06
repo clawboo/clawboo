@@ -3,10 +3,8 @@
 //
 // It makes NO network calls on mount: `listAgents()` fires only from
 // CreateBooModal's onCreated callback, and the modal is `{isOpen && …}`-gated.
-// Because msw runs with onUnhandledRequest:'error', registering no handlers here
-// turns "this panel does not fetch on mount" into an assertion rather than a
-// claim — if a fetch is ever added on the mount path, every test in this file
-// fails loudly.
+// That is asserted directly against a spy (see the mock below) rather than left
+// to msw's strict mode, which cannot see a fetch the component swallows.
 //
 // The <ThemeProvider> wrapper is required, not cosmetic: AgentBooAvatar (inside
 // AgentAvatar and GroupChatRow) and ThemeToggle both call useTheme(), which
@@ -16,8 +14,9 @@ import type { ReactElement } from 'react'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { listAgents } from '@clawboo/control-client'
 import type { GatewayClient } from '@clawboo/gateway-client'
 
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
@@ -32,6 +31,15 @@ import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
 
 import { AgentListColumn } from '../AgentListColumn'
+
+// `onUnhandledRequest: 'error'` alone does NOT make "no fetch on mount" a
+// guarantee here: the only caller, `handleBooCreated`, wraps `listAgents()` in a
+// try/catch, so a regression that fetched on mount would swallow msw's error and
+// still go green. Spy on the function itself instead.
+vi.mock('@clawboo/control-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@clawboo/control-client')>()),
+  listAgents: vi.fn(async () => ({ defaultId: null, agents: [] })),
+}))
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,6 +75,7 @@ function team(over: Partial<Team> & { id: string; name: string }): Team {
 const renderColumn = (ui: ReactElement) => render(<ThemeProvider>{ui}</ThemeProvider>)
 
 beforeEach(() => {
+  vi.mocked(listAgents).mockClear()
   useFleetStore.setState({ agents: [], selectedAgentId: null })
   useTeamStore.setState({ teams: [], selectedTeamId: null })
   useBooZeroStore.setState({ booZeroAgentId: null, gatewayMainAgentId: null })
@@ -108,6 +117,9 @@ describe('AgentListColumn', () => {
     expect(heading).toHaveTextContent('2')
     // A team with members gets the group-chat row above the list.
     expect(screen.getByTestId('group-chat-row')).toBeInTheDocument()
+
+    // The panel hydrates from the store, never from the network, on mount.
+    expect(vi.mocked(listAgents)).not.toHaveBeenCalled()
   })
 
   it('hides the OpenClaw Gateway default agent — but only when it is NOT Boo Zero', () => {

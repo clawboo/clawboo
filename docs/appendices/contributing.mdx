@@ -89,9 +89,11 @@ What each one guards:
 
 <Tip>
   Running the full gate locally avoids review back-and-forth. Every PR must pass CI: `pnpm build`,
-  `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, and CodeQL code scanning. Not every one of
-  those blocks the merge button today, but a red check is a red check. Note `pnpm e2e` needs a built
-  workspace and a Chromium download (`pnpm build`, then `pnpm exec playwright install chromium`).
+  `pnpm lint` (which runs `pnpm format:check` first), `pnpm typecheck`, `pnpm test:coverage` (the
+  same suites as `pnpm test`, plus a coverage table in the log — informational, not a threshold),
+  `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a
+  red check is a red check. Note `pnpm e2e` needs a built workspace and a Chromium download (`pnpm
+  build`, then `pnpm exec playwright install chromium`).
 </Tip>
 
 ### 5. Add a changeset for user-facing changes

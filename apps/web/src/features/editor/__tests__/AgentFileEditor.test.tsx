@@ -123,11 +123,16 @@ describe('AgentFileEditor', () => {
   it('switching tabs swaps the CodeMirror document and the footer hint', async () => {
     renderEditor(<AgentFileEditor agentId={AGENT_ID} agentName="Research Boo" onClose={vi.fn()} />)
     await waitForLoaded('Soul body copy')
+    // The footer renders AGENT_FILE_META[activeTab].hint — a stale hint after a
+    // tab switch is exactly the kind of drift this test is named for.
+    expect(screen.getByText('Persona, tone, and boundaries.')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'IDENTITY' }))
 
     await waitForLoaded('Identity body copy')
     expect(cmText()).not.toContain('Soul body copy')
+    expect(screen.getByText('Name, vibe, and emoji.')).toBeInTheDocument()
+    expect(screen.queryByText('Persona, tone, and boundaries.')).not.toBeInTheDocument()
   })
 
   it('closing while clean calls onClose and writes nothing', async () => {
@@ -160,7 +165,11 @@ describe('AgentFileEditor', () => {
 
     await waitFor(() => expect(saved).toHaveLength(1))
     expect(saved[0]?.name).toBe('SOUL.md')
-    expect(saved[0]?.content).toContain('Soul body copy')
+    // The EDITED document, not the clean one. Asserting only that the original
+    // text survives would pass even if the save wrote the pre-edit content —
+    // i.e. if the updateListener → setFiles path silently stopped working.
+    expect(saved[0]?.content).toContain('!')
+    expect(saved[0]?.content).not.toBe(FILES['SOUL.md'])
     // A successful write is announced, not silent.
     await waitFor(() =>
       expect(useToastStore.getState().toasts.some((t) => t.message === 'Saved SOUL.md')).toBe(true),

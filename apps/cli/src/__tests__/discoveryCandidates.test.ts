@@ -221,13 +221,29 @@ describe('the 18790-18809 window', () => {
     expect(tcp.probed).toEqual([18790, 18791, 18792, 18793])
   })
 
-  it('reports nothing when every port in the window is busy or non-Clawboo', async () => {
+  it('reports nothing when every port in the window is CLOSED', async () => {
     // The all-ports-busy fallback: a null port is what tells the launcher to
     // fork its own server rather than attach to something.
     expect(await discoverDashboard()).toEqual({ port: null, gatedPort: null })
     expect(tcp.probed).toEqual(WINDOW)
     expect(tcp.probed).toHaveLength(20)
     expect(tcp.probed.at(-1)).toBe(18809)
+  })
+
+  it('reports nothing when every port is OCCUPIED by something that is not Clawboo', async () => {
+    // The harder half of the same fallback, and the one a regression would slip
+    // through: every port answers TCP, so a probe that stopped at "something is
+    // listening" would return 18790 here. Only the JSON signature check makes
+    // this null.
+    for (const port of WINDOW) tcp.openPorts.add(port)
+    vi.stubGlobal('fetch', async () => ({
+      status: 200,
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ some: 'other service' }),
+    }))
+    expect(await discoverDashboard()).toEqual({ port: null, gatedPort: null })
+    expect(tcp.probed).toEqual(WINDOW)
   })
 
   it('pins the window every doc and comment quotes', () => {
