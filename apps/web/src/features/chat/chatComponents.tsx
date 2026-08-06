@@ -4,11 +4,13 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
   type ChangeEvent,
+  type RefObject,
 } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -105,6 +107,19 @@ export type AssistantBlock = {
   tools: TranscriptEntry[]
   timestampMs: number | null
   thinkingDurationMs?: number
+  /**
+   * entryId of the FIRST entry this turn absorbed — the block's stable React
+   * key. Deliberately NOT derived at render time from
+   * `assistant?.entryId ?? thinking[0]?.entryId ?? …`: while a turn accumulates
+   * the anchor would be `thinking[0]`, then flip to the assistant entry the
+   * moment the turn commits, remounting the card exactly when it lands (entry
+   * animations replay, expanded sections collapse). Fixed at creation instead.
+   *
+   * Required, not optional: `commitTurn` only pushes a block when the turn has
+   * absorbed at least one entry, so TypeScript proves this is always present
+   * and no positional `?? index` fallback can creep back in.
+   */
+  anchorEntryId: string
 }
 export type RenderBlock = MetaBlock | UserBlock | AssistantBlock
 
@@ -116,6 +131,7 @@ export type InProgressTurn = {
   assistant: TranscriptEntry | null
   timestampMs: number | null
   thinkingDurationMs?: number
+  anchorEntryId: string
 }
 
 export function groupEntriesToBlocks(entries: TranscriptEntry[]): RenderBlock[] {
@@ -134,13 +150,21 @@ export function groupEntriesToBlocks(entries: TranscriptEntry[]): RenderBlock[] 
         tools: t.tools,
         timestampMs: t.timestampMs,
         thinkingDurationMs: t.thinkingDurationMs,
+        anchorEntryId: t.anchorEntryId,
       })
     }
   }
 
   const getOrCreateTurn = (entry: TranscriptEntry): InProgressTurn => {
     if (!activeTurn) {
-      activeTurn = { thinking: [], tools: [], assistant: null, timestampMs: entry.timestampMs }
+      activeTurn = {
+        thinking: [],
+        tools: [],
+        assistant: null,
+        timestampMs: entry.timestampMs,
+        // First entry in wins — the anchor must not move as the turn grows.
+        anchorEntryId: entry.entryId,
+      }
     }
     return activeTurn
   }
@@ -966,21 +990,202 @@ export function JumpToLatestButton({
   )
 }
 
+// ─── Bounded timeline: the render window ─────────────────────────────────────
+//
+// A session's transcript is capped at 500 entries (`stores/chat.ts`), and the
+// team view merges EVERY participant's transcript — so a 5-agent room can hold
+// thousands of markdown-rendered blocks, each re-reconciled on every streamed
+// token. The window renders only the tail and offers a "Load earlier" control
+// for the rest, which bounds DOM work without touching the auto-scroll anchor
+// or the streaming card's chronological slot.
+
+export const RENDER_WINDOW_INITIAL = 150
+export const RENDER_WINDOW_STEP = 100
+
+/**
+ * Index of the first rendered item. Split out as a pure function so the
+ * off-by-one surface is unit-testable without a DOM.
+ *
+ * - `natural` is the plain tail: the last `limit` items.
+ * - `pinnedStart` freezes the top of the window while the user reads history
+ *   (see `useRenderWindow`); it only ever holds the window OPEN, never narrows
+ *   it, hence the `Math.min` against `natural`.
+ *
+ * There is deliberately NO "keep this index mounted" escape hatch. An earlier
+ * revision took a `floor` so `GroupChatPanel` could stop the window cutting
+ * above a live stream, but a floor can only widen the window — for a stream that
+ * has been running a long time, unboundedly so. A caller that must always render
+ * some item hoists it into the window instead (see `GroupChatPanel`), which
+ * keeps this bound absolute.
+ */
+export function renderWindowStart(
+  total: number,
+  limit: number,
+  pinnedStart: number | null,
+): number {
+  const natural = Math.max(0, total - limit)
+  const start = pinnedStart === null ? natural : Math.min(pinnedStart, natural)
+  return Math.max(0, start)
+}
+
+export interface RenderWindow {
+  /** First index of the FULL list that is rendered. 0 ⇒ nothing hidden. */
+  start: number
+  /** Items hidden above the window (=== `start`). Drives the affordance. */
+  hiddenCount: number
+  /** Reveal `RENDER_WINDOW_STEP` more, preserving the reading position. */
+  loadEarlier: () => void
+}
+
+/**
+ * Bounds a rendered list to its tail, with a caller-driven "load earlier" step.
+ *
+ * `resetKey` should identify the conversation (a sessionKey / teamId) so a
+ * window the user expanded does not leak into the next one. `atBottom` comes
+ * from `useChatAutoScroll` and gates the freeze described below.
+ */
+export function useRenderWindow({
+  total,
+  resetKey,
+  scrollRef,
+  atBottom,
+}: {
+  total: number
+  resetKey: string
+  scrollRef: RefObject<HTMLDivElement | null>
+  atBottom: boolean
+}): RenderWindow {
+  const [limit, setLimit] = useState(RENDER_WINDOW_INITIAL)
+  const [pinnedStart, setPinnedStart] = useState<number | null>(null)
+  // Distance from the viewport top to the END of the content, captured in the
+  // click handler (pre-update layout) and restored once the taller list has laid
+  // out. Preserving THIS — not `scrollTop` — is what keeps the same message
+  // under the user's eyes when older content is prepended above it.
+  const anchorRef = useRef<number | null>(null)
+
+  // Computed during render, never derived by an effect: an effect-derived start
+  // would paint the whole list once and only then trim it, which is the exact
+  // cost this hook exists to avoid.
+  const start = renderWindowStart(total, limit, pinnedStart)
+  // Read at effect time without joining the dep list.
+  const startRef = useRef(start)
+  startRef.current = start
+
+  // Freeze the top of the window while the user reads history. Without this,
+  // each new message would unmount a block ABOVE their viewport and shift what
+  // they are looking at — behaviour that does not exist today, because nothing
+  // is ever removed from the top. Holding `start` until they return to the
+  // bottom means zero unmounts-above-the-fold while they read.
+  useEffect(() => {
+    if (atBottom) setPinnedStart(null)
+    else setPinnedStart((prev) => (prev === null ? startRef.current : prev))
+  }, [atBottom])
+
+  // Reset on a new conversation. `resetKey` covers an agent/team switch and a
+  // Gateway `/reset` that mints a fresh session key; `total === 0` additionally
+  // covers the native `/reset`, which CLEARS the transcript under the SAME key
+  // (`ChatPanel`), so an expanded window can't survive into the next chat.
+  const isEmpty = total === 0
+  useEffect(() => {
+    setLimit(RENDER_WINDOW_INITIAL)
+    setPinnedStart(null)
+    anchorRef.current = null
+  }, [resetKey, isEmpty])
+
+  const loadEarlier = useCallback(() => {
+    const el = scrollRef.current
+    anchorRef.current = el ? el.scrollHeight - el.scrollTop : null
+    setLimit((prev) => prev + RENDER_WINDOW_STEP)
+    setPinnedStart((prev) => (prev === null ? null : Math.max(0, prev - RENDER_WINDOW_STEP)))
+  }, [scrollRef])
+
+  // Restore the reading position after older blocks are prepended.
+  //
+  // This CANNOT perturb `useChatAutoScroll`. Let H, T, C be scrollHeight,
+  // scrollTop and clientHeight. We captured A = H₀ − T₀ and write T₁ = H₁ − A.
+  // `clientHeight` is fixed by the flex parent, so
+  //     H₁ − T₁ − C = H₁ − (H₁ − A) − C = A − C = H₀ − T₀ − C
+  // — the exact expression `handleScroll` tests. `nearBottom` is therefore
+  // unchanged, `setAtBottom` bails on its identity check, `hasNewBelow` is
+  // untouched, no re-render follows, and so no second write can loop. Separately,
+  // `loadEarlier` changes neither panel's `contentSignature`, so the auto-scroll
+  // effect does not fire at all. All mount animations in the timeline are
+  // opacity/transform only, so `scrollHeight` is final at layout-effect time.
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current
+    if (anchor === null) return
+    // Cleared before use, so StrictMode's second pass is a no-op.
+    anchorRef.current = null
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight - anchor
+  }, [limit, scrollRef])
+
+  return { start, hiddenCount: start, loadEarlier }
+}
+
+/**
+ * "Load earlier messages" control for a windowed timeline. Renders INSIDE the
+ * scroll content as the list's first child — unlike `JumpToLatestButton`, it
+ * must be pushed out of the way by the content it reveals rather than floating
+ * over the oldest message.
+ */
+export function LoadEarlierButton({
+  hiddenCount,
+  onClick,
+}: {
+  hiddenCount: number
+  onClick: () => void
+}) {
+  return (
+    <div className="mb-4 flex justify-center">
+      <button
+        type="button"
+        onClick={onClick}
+        data-testid="load-earlier"
+        aria-label={`Load earlier messages (${hiddenCount} hidden)`}
+        className="surface-floating-tier flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:text-foreground"
+      >
+        <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />
+        Load earlier messages
+        {/* `text-muted-foreground`, not `text-foreground/45`: #123 moved the
+            de-emphasised `font-data` text in this file onto the muted token for
+            contrast, and this badge is part of a control's visible label. */}
+        <span className="font-data text-muted-foreground">{hiddenCount}</span>
+      </button>
+    </div>
+  )
+}
+
 export const MessageList = memo(function MessageList({
   blocks,
   streamingText,
   agentId,
   agentName,
   isRunning,
+  sessionKey,
 }: {
   blocks: RenderBlock[]
   streamingText: string | null
   agentId: string
   agentName: string
   isRunning: boolean
+  /** Identifies the conversation, so the render window resets when it changes. */
+  sessionKey?: string | null
 }) {
   const { scrollRef, bottomRef, handleScroll, atBottom, hasNewBelow, jumpToBottom } =
     useChatAutoScroll(`${blocks.length}|${streamingText ?? ''}`)
+
+  // Nothing needs hoisting into the window here (as `GroupChatPanel` does for a
+  // long-running stream): the live StreamingCard is appended AFTER the mapped
+  // blocks (below), outside the window entirely, so it can never be sliced away.
+  const { start, hiddenCount, loadEarlier } = useRenderWindow({
+    total: blocks.length,
+    resetKey: sessionKey ?? agentId,
+    scrollRef,
+    atBottom,
+  })
+  const visible = start === 0 ? blocks : blocks.slice(start)
 
   const isEmpty = blocks.length === 0 && !streamingText
   const showLive = isRunning && streamingText !== null
@@ -1012,7 +1217,16 @@ export const MessageList = memo(function MessageList({
           </div>
         ) : (
           <div className="flex flex-col pb-2">
-            {blocks.map((block, i) => {
+            {hiddenCount > 0 && (
+              <LoadEarlierButton hiddenCount={hiddenCount} onClick={loadEarlier} />
+            )}
+
+            {visible.map((block, idx) => {
+              // ABSOLUTE index into the FULL array. The first VISIBLE block's
+              // follow-up state is therefore computed against the last HIDDEN
+              // block, so grouping and spacing are identical whether or not the
+              // window is applied.
+              const i = start + idx
               const prev = i > 0 ? (blocks[i - 1] ?? null) : null
               // 1:1 chat: every assistant turn is from the same agent (the
               // `agentId` prop), so the owner check collapses to "is the
@@ -1036,7 +1250,7 @@ export const MessageList = memo(function MessageList({
                 )
               }
               return (
-                <div key={`turn-${i}`} className={margin}>
+                <div key={`turn-${block.anchorEntryId}`} className={margin}>
                   <AssistantTurnCard
                     block={block}
                     agentId={agentId}

@@ -24,7 +24,9 @@ import {
   MetaMessageCard,
   MessageComposer,
   useChatAutoScroll,
+  useRenderWindow,
   JumpToLatestButton,
+  LoadEarlierButton,
   isFollowupBlock,
   blockMarginClass,
   type MessageComposerHandle,
@@ -298,6 +300,45 @@ export function GroupChatPanel({
     if (text) setAnnouncement({ key, text })
   }, [topLevelBlocks, nameFor, teamId])
 
+  // Author-grouping + stable keys, resolved ONCE per transcript change. Streams
+  // and board tasks take no part in the Slack/Discord author-grouping rhythm, so
+  // this is keyed on `topLevelBlocks` ALONE — a streamed token does not re-walk
+  // the transcript. Precomputing here is what lets a WINDOWED slice render
+  // identically to the full list: the render map below becomes a pure per-item
+  // function with no loop-carried state.
+  //
+  // Deliberately resolves only the pure `agentIdFromSessionKey` parse, NOT
+  // `agentLookup.get(...)` — that map reallocates on every fleet status patch
+  // and would drag this walk back onto the per-chat-tick path.
+  const blockMeta = useMemo(() => {
+    const meta: {
+      key: string
+      ownerAgentId: string | null
+      isFollowup: boolean
+      marginClass: string
+    }[] = []
+    let prevBlock: (typeof topLevelBlocks)[number] | null = null
+    let prevOwnerAgentId: string | null = null
+    for (let i = 0; i < topLevelBlocks.length; i++) {
+      const block = topLevelBlocks[i]!
+      let ownerAgentId: string | null = null
+      if (block.kind === 'assistant-turn') {
+        const firstEntry = block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
+        ownerAgentId = firstEntry ? agentIdFromSessionKey(firstEntry.sessionKey) : null
+      }
+      const isFollowup = isFollowupBlock(prevBlock, block, prevOwnerAgentId, ownerAgentId)
+      meta.push({
+        key: block.kind === 'assistant-turn' ? `turn-${block.anchorEntryId}` : block.entry.entryId,
+        ownerAgentId,
+        isFollowup,
+        marginClass: blockMarginClass(i, isFollowup),
+      })
+      prevBlock = block
+      prevOwnerAgentId = ownerAgentId
+    }
+    return meta
+  }, [topLevelBlocks])
+
   // ── Load persisted history for all participants (team-scoped sessionKeys) ──
   // Populates the merged transcript view on team-open. (The SSE stream also
   // full-replays committed turns on connect; this covers the render before the
@@ -450,7 +491,14 @@ export function GroupChatPanel({
     [boardTasksMap],
   )
   type RenderItem =
-    | { kind: 'block'; block: (typeof topLevelBlocks)[number]; ts: number; tieKey: number }
+    | {
+        kind: 'block'
+        block: (typeof topLevelBlocks)[number]
+        /** Index into `topLevelBlocks` / `blockMeta`. Survives windowing. */
+        blockIdx: number
+        ts: number
+        tieKey: number
+      }
     | { kind: 'stream'; stream: (typeof activeStreams)[number]; ts: number; tieKey: number }
     | { kind: 'board-task'; task: (typeof boardTaskList)[number]; ts: number; tieKey: number }
   const renderItems = useMemo<RenderItem[]>(() => {
@@ -464,7 +512,7 @@ export function GroupChatPanel({
     const items: RenderItem[] = []
     for (let i = 0; i < topLevelBlocks.length; i++) {
       const block = topLevelBlocks[i]!
-      items.push({ kind: 'block', block, ts: blockTs(block), tieKey: i })
+      items.push({ kind: 'block', block, blockIdx: i, ts: blockTs(block), tieKey: i })
     }
     for (const stream of activeStreams) {
       // Streams sort AFTER committed blocks with the same timestamp because
@@ -490,6 +538,48 @@ export function GroupChatPanel({
     })
     return items
   }, [topLevelBlocks, activeStreams, boardTaskList])
+
+  // ── Bounded render window ─────────────────────────────────────────────────
+  // `resetKey: teamId` is load-bearing — `TeamSpaceSplit` renders this panel
+  // WITHOUT a `key` prop, so a team switch changes props without remounting.
+  const { hiddenCount, loadEarlier } = useRenderWindow({
+    total: renderItems.length,
+    resetKey: teamId,
+    scrollRef,
+    atBottom,
+  })
+
+  // An ACTIVE stream must always render — a card that vanished mid-generation
+  // would read as a dropped reply. Streams sort by `streamStartedAt`, so a
+  // long-running one is chronologically OLD and can fall above the window.
+  //
+  // HOISTED, not clamped. Widening the window down to the stream (the previous
+  // `floor:` approach) is unbounded: a stream that has outlived every retained
+  // block sits at index 0 and mounts the entire ~500×participants timeline —
+  // exactly the cost this window exists to avoid. Hoisting keeps the bound
+  // absolute at `limit + <active streams>`.
+  //
+  // Nothing is lost by not clamping. The floor only ever fired when the stream
+  // was MORE than a full window from the end, and in that case its "in place"
+  // slot was already scrolled far out of view — so it bought a 2,000-node render
+  // to position a card the reader could not see. Hoisted, it renders at the top
+  // of the visible region, which IS its correct position relative to every item
+  // on screen.
+  const { visibleItems, hoistedStreams } = useMemo(() => {
+    if (hiddenCount === 0) return { visibleItems: renderItems, hoistedStreams: 0 }
+    const hoisted = renderItems.slice(0, hiddenCount).filter((it) => it.kind === 'stream')
+    return {
+      visibleItems:
+        hoisted.length === 0
+          ? renderItems.slice(hiddenCount)
+          : [...hoisted, ...renderItems.slice(hiddenCount)],
+      hoistedStreams: hoisted.length,
+    }
+  }, [renderItems, hiddenCount])
+
+  // Hoisted streams are ON SCREEN, so they are not "earlier messages" the
+  // affordance can reveal — counting them would overstate what is hidden.
+  const earlierCount = hiddenCount - hoistedStreams
 
   // The composer's busy signal stays the SSE activity window: fleet statuses now DO
   // track server-orchestrated runs (the SSE `status` frames patch them for the
@@ -668,6 +758,7 @@ export function GroupChatPanel({
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={scrollRef}
+          data-testid="group-chat-scroll"
           className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
           onScroll={handleScroll}
         >
@@ -718,102 +809,84 @@ export function GroupChatPanel({
             </div>
           ) : (
             <div className="flex flex-col pb-2">
-              {(() => {
-                // Track previous BLOCK across the loop (not previous stream)
-                // so the same-author follow-up grouping survives stream
-                // interruptions. Streams are always rendered with the
-                // "new section" margin — they don't participate in the
-                // Slack/Discord/iMessage author-grouping rhythm.
-                let prevBlock: (typeof topLevelBlocks)[number] | null = null
-                let prevOwnerAgentId: string | null = null
-                let blockIdx = -1
-                const lastBlockSeenIdx = topLevelBlocks.length - 1
+              {earlierCount > 0 && (
+                <LoadEarlierButton hiddenCount={earlierCount} onClick={loadEarlier} />
+              )}
 
-                return renderItems.map((item, i) => {
-                  if (item.kind === 'stream') {
-                    const stream = item.stream
-                    return (
-                      <div
-                        key={`stream-wrap-${stream.agentId}-${stream.sessionKey}`}
-                        className={i === 0 ? '' : 'mt-7'}
-                      >
-                        <StreamingCard
-                          text={stream.text}
-                          agentId={stream.agentId}
-                          agentName={stream.agentName}
-                        />
-                      </div>
-                    )
-                  }
-                  if (item.kind === 'board-task') {
-                    return (
-                      <div key={`board-task-${item.task.id}`} className={i === 0 ? '' : 'mt-3'}>
-                        <BoardTaskCard task={item.task} />
-                      </div>
-                    )
-                  }
-                  blockIdx += 1
-                  const block = item.block
-                  let currentOwnerAgentId: string | null = null
-                  if (block.kind === 'assistant-turn') {
-                    const firstEntry =
-                      block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
-                    currentOwnerAgentId = firstEntry
-                      ? agentIdFromSessionKey(firstEntry.sessionKey)
-                      : null
-                  }
-                  const isFollowup = isFollowupBlock(
-                    prevBlock,
-                    block,
-                    prevOwnerAgentId,
-                    currentOwnerAgentId,
-                  )
-                  // Use `i === 0` (timeline position) for the "first item
-                  // has no top margin" check; `blockIdx` only matters for
-                  // the followup-vs-new-author choice.
-                  const margin = i === 0 ? '' : blockMarginClass(blockIdx, isFollowup)
-                  prevBlock = block
-                  prevOwnerAgentId = currentOwnerAgentId
-
-                  if (block.kind === 'meta') {
-                    return (
-                      <div key={block.entry.entryId} className={margin}>
-                        <MetaMessageCard entry={block.entry} />
-                      </div>
-                    )
-                  }
-                  if (block.kind === 'user') {
-                    const targetId = agentIdFromSessionKey(block.entry.sessionKey)
-                    const targetAgent = targetId ? agentLookup.get(targetId) : null
-                    return (
-                      <div key={block.entry.entryId} className={margin}>
-                        <UserMessageCard
-                          entry={block.entry}
-                          targetAgentName={targetAgent?.name}
-                          knownAgentNames={knownAgentNames}
-                        />
-                      </div>
-                    )
-                  }
-                  const ownerAgent = currentOwnerAgentId
-                    ? agentLookup.get(currentOwnerAgentId)
-                    : null
+              {/* Author grouping, stable keys and margins all come from
+                `blockMeta`, which was resolved over the FULL block list — so a
+                windowed slice renders exactly as the whole timeline would.
+                Streams and board tasks always get the "new section" margin;
+                they don't participate in the author-grouping rhythm. */}
+              {visibleItems.map((item, idx) => {
+                // Slice-local first-item rule: identical to the pre-window
+                // `i === 0` check when nothing is hidden, and the correct top
+                // spacing under the Load-earlier control when something is.
+                if (item.kind === 'stream') {
+                  const stream = item.stream
                   return (
-                    <div key={`turn-${blockIdx}`} className={margin}>
-                      <AssistantTurnCard
-                        block={block}
-                        agentId={ownerAgent?.id ?? 'unknown'}
-                        agentName={ownerAgent?.name ?? 'Agent'}
-                        streaming={
-                          running && blockIdx === lastBlockSeenIdx && activeStreams.length === 0
-                        }
-                        teamId={teamId}
-                        isFollowup={isFollowup}
+                    <div
+                      key={`stream-wrap-${stream.agentId}-${stream.sessionKey}`}
+                      className={idx === 0 ? '' : 'mt-7'}
+                    >
+                      <StreamingCard
+                        text={stream.text}
+                        agentId={stream.agentId}
+                        agentName={stream.agentName}
                       />
                     </div>
                   )
-                })
-              })()}
+                }
+                if (item.kind === 'board-task') {
+                  return (
+                    <div key={`board-task-${item.task.id}`} className={idx === 0 ? '' : 'mt-3'}>
+                      <BoardTaskCard task={item.task} />
+                    </div>
+                  )
+                }
+                const block = item.block
+                const meta = blockMeta[item.blockIdx]
+                if (!meta) return null
+                const margin = idx === 0 ? '' : meta.marginClass
+
+                if (block.kind === 'meta') {
+                  return (
+                    <div key={meta.key} className={margin}>
+                      <MetaMessageCard entry={block.entry} />
+                    </div>
+                  )
+                }
+                if (block.kind === 'user') {
+                  const targetId = agentIdFromSessionKey(block.entry.sessionKey)
+                  const targetAgent = targetId ? agentLookup.get(targetId) : null
+                  return (
+                    <div key={meta.key} className={margin}>
+                      <UserMessageCard
+                        entry={block.entry}
+                        targetAgentName={targetAgent?.name}
+                        knownAgentNames={knownAgentNames}
+                      />
+                    </div>
+                  )
+                }
+                const ownerAgent = meta.ownerAgentId ? agentLookup.get(meta.ownerAgentId) : null
+                return (
+                  <div key={meta.key} className={margin}>
+                    <AssistantTurnCard
+                      block={block}
+                      agentId={ownerAgent?.id ?? 'unknown'}
+                      agentName={ownerAgent?.name ?? 'Agent'}
+                      streaming={
+                        running &&
+                        item.blockIdx === topLevelBlocks.length - 1 &&
+                        activeStreams.length === 0
+                      }
+                      teamId={teamId}
+                      isFollowup={meta.isFollowup}
+                    />
+                  </div>
+                )
+              })}
 
               <div ref={bottomRef} aria-hidden />
             </div>

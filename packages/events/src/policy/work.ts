@@ -2,10 +2,59 @@ import { extractText, extractThinking, extractToolLines, isReasoningStream } fro
 import type {
   AgentEventPayload,
   AgentStatusPatch,
+  ChatCost,
   ChatEventPayload,
   ClassifiedEvent,
   EventIntent,
 } from '../types'
+
+// ── deriveChatCost ─────────────────────────────────────────────────────────
+
+/** Chars-per-token used when the Gateway sends no usage block. */
+const CHARS_PER_TOKEN = 4
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+
+const asCount = (value: unknown): number => (typeof value === 'number' && value > 0 ? value : 0)
+
+/**
+ * Token spend for one committed turn, derived purely from the frame.
+ *
+ * Real usage wins when the Gateway reports it. Otherwise the OUTPUT side is
+ * estimated here (the response text is right there in the frame) and the INPUT
+ * side is left `null` for the host to estimate from the agent's last user
+ * message — that needs a transcript read, which would break Policy's purity.
+ *
+ * Returns `null` when there is no message to price at all.
+ */
+export function deriveChatCost(
+  payload: ChatEventPayload,
+  responseText: string | null,
+): ChatCost | null {
+  const message = asRecord(payload.message)
+  if (!message) return null
+
+  const model =
+    payload.model ?? (typeof message['model'] === 'string' ? message['model'] : 'unknown')
+
+  const usage = asRecord(message['usage']) ?? asRecord(asRecord(message['metadata'])?.['usage'])
+  if (usage) {
+    return {
+      model,
+      inputTokens: asCount(usage['input_tokens']),
+      outputTokens: asCount(usage['output_tokens']),
+    }
+  }
+
+  return {
+    model,
+    inputTokens: null,
+    outputTokens: responseText ? Math.ceil(responseText.length / CHARS_PER_TOKEN) : 0,
+  }
+}
 
 // ── decideWorkChatEvent ────────────────────────────────────────────────────
 
@@ -53,8 +102,10 @@ export function decideWorkChatEvent(
         plane: 'work',
         agentId,
         sessionKey: event.sessionKey,
+        runId,
         patch,
         outputLines,
+        cost: deriveChatCost(payload, streamText),
       },
     ]
     // Request history refresh if no thinking trace was present in the final message
@@ -84,8 +135,12 @@ export function decideWorkChatEvent(
         plane: 'work',
         agentId,
         sessionKey: event.sessionKey,
+        runId,
         patch,
         outputLines: [],
+        // An aborted turn is not billed — parity with the raw-frame subscriber
+        // this replaced, which only ever fired on `state === 'final'`.
+        cost: null,
       },
     ]
   }
@@ -105,8 +160,10 @@ export function decideWorkChatEvent(
         plane: 'work',
         agentId,
         sessionKey: event.sessionKey,
+        runId,
         patch,
         outputLines: [],
+        cost: null,
       },
     ]
   }
@@ -137,7 +194,7 @@ export function decideWorkAgentEvent(
         streamText: null,
         thinkingTrace: null,
       }
-      return [{ kind: 'updateAgentStatus', plane: 'agent', agentId, patch }]
+      return [{ kind: 'updateAgentStatus', plane: 'agent', agentId, runId, patch }]
     }
 
     if (phase === 'end') {
@@ -149,7 +206,7 @@ export function decideWorkAgentEvent(
         thinkingTrace: null,
         lastActivityAt: event.timestamp,
       }
-      return [{ kind: 'updateAgentStatus', plane: 'agent', agentId, patch }]
+      return [{ kind: 'updateAgentStatus', plane: 'agent', agentId, runId, patch }]
     }
 
     if (phase === 'error') {
@@ -161,7 +218,7 @@ export function decideWorkAgentEvent(
         thinkingTrace: null,
         lastActivityAt: event.timestamp,
       }
-      return [{ kind: 'updateAgentStatus', plane: 'agent', agentId, patch }]
+      return [{ kind: 'updateAgentStatus', plane: 'agent', agentId, runId, patch }]
     }
 
     return [{ kind: 'ignore', reason: `unknown lifecycle phase: ${phase}` }]

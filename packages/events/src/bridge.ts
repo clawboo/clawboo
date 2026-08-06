@@ -1,14 +1,7 @@
 import type { EventFrame } from '@clawboo/gateway-client'
 import { extractText, extractThinking, extractToolLines } from '@clawboo/protocol'
 
-import type {
-  AgentEventPayload,
-  AgentStatusPatch,
-  ChatEventPayload,
-  ClassifiedEvent,
-  LifecyclePhase,
-  LifecycleTransition,
-} from './types'
+import type { AgentEventPayload, ChatEventPayload, ClassifiedEvent } from './types'
 
 // ── Session key → agent ID ─────────────────────────────────────────────────
 
@@ -93,6 +86,7 @@ export function parseChatPayload(payload: unknown): ChatEventPayload | null {
     stopReason: typeof p['stopReason'] === 'string' ? p['stopReason'] : undefined,
     message: p['message'],
     errorMessage: typeof p['errorMessage'] === 'string' ? p['errorMessage'] : undefined,
+    model: typeof p['model'] === 'string' ? p['model'] : undefined,
   }
 }
 
@@ -125,68 +119,6 @@ export function isReasoningStream(stream: string): boolean {
   const lower = stream.toLowerCase()
   if (NON_REASONING_TERMS.some((term) => lower.includes(term))) return false
   return REASONING_TERMS.some((term) => lower.includes(term))
-}
-
-// ── resolveLifecyclePatch ──────────────────────────────────────────────────
-
-export function resolveLifecyclePatch(input: {
-  phase: LifecyclePhase
-  incomingRunId: string
-  currentRunId: string | null
-  timestamp: number
-}): LifecycleTransition {
-  const { phase, incomingRunId, currentRunId, timestamp } = input
-
-  if (phase === 'start') {
-    const patch: AgentStatusPatch = {
-      status: 'running',
-      runId: incomingRunId,
-      runStartedAt: timestamp,
-      streamText: null,
-      thinkingTrace: null,
-    }
-    return { kind: 'start', patch, clearRunTracking: false }
-  }
-
-  // 'end' or 'error' — only apply if runId matches (or no current run tracked)
-  if (currentRunId !== null && currentRunId !== incomingRunId) {
-    return { kind: 'ignore' }
-  }
-
-  const patch: AgentStatusPatch = {
-    status: phase === 'error' ? 'error' : 'idle',
-    runId: null,
-    runStartedAt: null,
-    streamText: null,
-    thinkingTrace: null,
-    lastActivityAt: timestamp,
-  }
-  return { kind: 'terminal', patch, clearRunTracking: true }
-}
-
-// ── mergeRuntimeStream ─────────────────────────────────────────────────────
-
-export function mergeRuntimeStream(current: string, incoming: string): string {
-  if (!current) return incoming
-  if (!incoming) return current
-  return current + incoming
-}
-
-// ── dedupeRunLines ─────────────────────────────────────────────────────────
-
-export function dedupeRunLines(
-  seen: Set<string>,
-  lines: string[],
-): { appended: string[]; nextSeen: Set<string> } {
-  const nextSeen = new Set(seen)
-  const appended: string[] = []
-  for (const line of lines) {
-    if (!nextSeen.has(line)) {
-      nextSeen.add(line)
-      appended.push(line)
-    }
-  }
-  return { appended, nextSeen }
 }
 
 // Re-export protocol helpers for consumers

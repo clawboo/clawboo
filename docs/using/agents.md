@@ -34,11 +34,11 @@ The view is a 3-panel resizable layout under one shared 44 px header (the agent'
 └─────────────────────┴──────────────────────────┘
 ```
 
-| Panel                                 | What it is                                                                                              |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Chat** (left, 45%)                  | A 1:1 chat with this Boo. The panel's own header is suppressed; identity lives in the shared row above. |
-| **MiniGraph** (top-right, 55%)        | A compact React Flow canvas of this Boo plus its skills and resources, with drag-to-install.            |
-| **Inline editor** (bottom-right, 45%) | The tabbed editor: personality, permissions, activity, and the agent files.                             |
+| Panel                                 | What it is                                                                                                                                                                                                            |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat** (left, 45%)                  | A 1:1 chat with this Boo. The panel's own header is suppressed; identity lives in the shared row above. The transcript renders its most recent ~150 messages, with **Load earlier messages** at the top for the rest. |
+| **MiniGraph** (top-right, 55%)        | A compact React Flow canvas of this Boo plus its skills and resources, with drag-to-install.                                                                                                                          |
+| **Inline editor** (bottom-right, 45%) | The tabbed editor: personality, permissions, activity, and the agent files.                                                                                                                                           |
 
 The panel split sizes persist to `localStorage` (the `Group` has an `id`), so your layout survives a reload. Drag a `ResizeHandle` to resize.
 

@@ -34,6 +34,11 @@ function assistant(text: string, over: Partial<AssistantBlock> = {}): AssistantB
     thinking: [],
     tools: [],
     timestampMs: 1000,
+    // The block's stable React key, set at turn creation in
+    // `groupEntriesToBlocks`. None of the functions under test read it — it is
+    // deliberately NOT what `blockKey` derives (see the fallback cases below,
+    // where a bare turn keys off its timestamp) — but the type requires it.
+    anchorEntryId: 'e1',
     ...over,
   }
 }

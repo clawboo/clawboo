@@ -1,8 +1,8 @@
 import { useEffect } from 'react'
 import type { GatewayClient } from '@clawboo/gateway-client'
-import type { AgentStatusPatch } from '@clawboo/events'
+import type { AgentStatusPatch, ChatCost } from '@clawboo/events'
 import { createEventHandler, createPatchQueue, processEvent } from '@clawboo/events'
-import { extractText, type TranscriptEntry } from '@clawboo/protocol'
+import type { TranscriptEntry } from '@clawboo/protocol'
 import { isTeamSessionKey } from '@clawboo/team-orchestration'
 import { listAgentSessions } from '@clawboo/control-client'
 import { useChatStore } from '@/stores/chat'
@@ -19,6 +19,60 @@ import { nextMirroredStatus } from './socketStatusMirror'
 // Wires a live GatewayClient into the Bridge → Policy → Handler pipeline, and
 // mirrors the live socket's status into the connection store.
 // Call this hook once at the top of the app; it is a no-op when client is null.
+
+/** Chars-per-token, matching the estimate the Policy layer uses for output. */
+const CHARS_PER_TOKEN = 4
+
+/**
+ * Bill one committed turn. Called from the `commitChat` dispatch, so it sits
+ * BEHIND the Handler's closed-run guard: a replayed `chat:final` never reaches
+ * it. (This used to be a second `client.onEvent` subscription that re-parsed
+ * every raw frame itself — outside the pipeline, and therefore outside the
+ * guard, so a replay was billed twice.)
+ *
+ * Runs BEFORE the pending-approval early-return below on purpose: the tokens
+ * were spent whether or not the status patch is applied.
+ */
+export function recordChatCost(agentId: string, runId: string | null, cost: ChatCost): void {
+  let inputTokens = cost.inputTokens ?? 0
+
+  // `null` input means the Gateway sent no usage block — estimate the prompt
+  // from the agent's last user message (a store read, which is why the pure
+  // Policy layer leaves it to us).
+  if (cost.inputTokens === null) {
+    const mainKey = useFleetStore.getState().agents.find((a) => a.id === agentId)?.sessionKey
+    const transcript = useChatStore.getState().transcripts.get(mainKey ?? '')
+    if (transcript) {
+      for (let i = transcript.length - 1; i >= 0; i--) {
+        if (transcript[i]!.kind === 'user') {
+          inputTokens = Math.ceil(transcript[i]!.text.length / CHARS_PER_TOKEN)
+          break
+        }
+      }
+    }
+  }
+
+  if (inputTokens === 0 && cost.outputTokens === 0) return
+
+  // Real counts for the chat UI's per-turn footer.
+  if (runId) {
+    useChatStore.getState().setLastTokenUsage(runId, inputTokens, cost.outputTokens)
+  }
+
+  void fetch('/api/cost-records', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agentId,
+      model: cost.model,
+      inputTokens,
+      outputTokens: cost.outputTokens,
+      runId,
+    }),
+  }).catch(() => {
+    // best-effort — never throw in event handlers
+  })
+}
 
 export function useGatewayEvents(client: GatewayClient | null): void {
   // ── Live socket status → connection store ────────────────────────────────
@@ -96,6 +150,9 @@ export function useGatewayEvents(client: GatewayClient | null): void {
             break
           }
           case 'commitChat': {
+            // Bill the turn first — the tokens were spent regardless of whether
+            // the status patch below is applied or deferred by an approval.
+            if (intent.cost) recordChatCost(intent.agentId, intent.runId, intent.cost)
             // Don't commit the chat final (idle/error) while an exec approval is
             // pending — the run is still alive waiting for the approval decision.
             const commitPending = useApprovalsStore.getState().pendingApprovals
@@ -179,8 +236,14 @@ export function useGatewayEvents(client: GatewayClient | null): void {
         // (useTeamChatStream). The browser's Gateway connection ALSO sees these
         // broadcast frames — committing + POSTing them here would double-write the
         // turn (a distinct entryId per Gateway final-frame, so the store-level
-        // content-sig dedup misses cross-source / cross-second copies). Skip: the
-        // SSE is the sole source of team chat. 1:1 sessions still commit normally.
+        // dedup misses cross-source / cross-second copies). Skip: the SSE is the
+        // sole source of team chat. 1:1 sessions still commit normally.
+        //
+        // LOAD-BEARING: `stores/chat.ts` no longer backstops this. Its layer-2
+        // dedup was narrowed to exact-frame identity (#71) precisely because the
+        // timestamp-independent team rule it used to carry was collapsing genuine
+        // re-utterances. Reintroducing a browser-side write into a team session
+        // would make the cross-writer duplicate visible again.
         if (isTeamSessionKey(sessionKey)) return
 
         // Anchor the commit batch to when streaming STARTED for this session,
@@ -266,80 +329,6 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       processEvent(frame, handler)
     })
 
-    // ── Token tracking: extract or estimate token usage from final chat events ─
-    const unsubCost = client.onEvent((frame) => {
-      if (frame.event !== 'chat') return
-      const p = frame.payload as Record<string, unknown> | null
-      if (!p || p['state'] !== 'final') return
-
-      // Resolve agentId from session key format "agent:<id>:<session>"
-      const sk = typeof p['sessionKey'] === 'string' ? p['sessionKey'] : ''
-      const agentMatch = sk.match(/^agent:([^:]+):/)
-      const agentId = agentMatch ? agentMatch[1]! : ''
-      if (!agentId) return
-
-      const message = p['message'] as Record<string, unknown> | null | undefined
-      if (!message) return
-
-      // Try real usage from Gateway, fall back to estimation from response text
-      const usage = (() => {
-        const direct = message['usage'] as Record<string, unknown> | null | undefined
-        if (direct) return direct
-        const meta = message['metadata'] as Record<string, unknown> | null | undefined
-        return (meta?.['usage'] as Record<string, unknown> | null | undefined) ?? null
-      })()
-
-      let inputTokens = 0
-      let outputTokens = 0
-      const runId = typeof p['runId'] === 'string' ? p['runId'] : null
-
-      if (usage) {
-        // Real token data from Gateway (when available)
-        inputTokens = typeof usage['input_tokens'] === 'number' ? usage['input_tokens'] : 0
-        outputTokens = typeof usage['output_tokens'] === 'number' ? usage['output_tokens'] : 0
-      } else {
-        // Estimate from response text — same formula as chat UI (~charCount/4)
-        const responseText = extractText(message) ?? ''
-        if (responseText.length > 0) {
-          outputTokens = Math.ceil(responseText.length / 4)
-        }
-
-        // Estimate input from the last user message in this agent's transcript.
-        const mainKey = useFleetStore.getState().agents.find((a) => a.id === agentId)?.sessionKey
-        const transcript = useChatStore.getState().transcripts.get(mainKey ?? '')
-        if (transcript) {
-          for (let i = transcript.length - 1; i >= 0; i--) {
-            if (transcript[i]!.kind === 'user') {
-              inputTokens = Math.ceil(transcript[i]!.text.length / 4)
-              break
-            }
-          }
-        }
-      }
-
-      if (inputTokens === 0 && outputTokens === 0) return
-
-      const model =
-        typeof p['model'] === 'string'
-          ? p['model']
-          : typeof message['model'] === 'string'
-            ? message['model']
-            : 'unknown'
-
-      // Store token usage in chat store so ChatPanel can display real counts
-      if (runId) {
-        useChatStore.getState().setLastTokenUsage(runId, inputTokens, outputTokens)
-      }
-
-      void fetch('/api/cost-records', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentId, model, inputTokens, outputTokens, runId }),
-      }).catch(() => {
-        // best-effort — never throw in event handlers
-      })
-    })
-
     // ── Periodic expiry cleanup for pending approvals ──────────────────────
     // The Gateway does NOT emit exec.approval.resolved when an approval times
     // out — it resolves internally with null. Without this sweep, expired
@@ -394,7 +383,6 @@ export function useGatewayEvents(client: GatewayClient | null): void {
 
     return () => {
       unsub()
-      unsubCost()
       clearInterval(expiryTimer)
       patchQueue.dispose()
       handler.dispose()
