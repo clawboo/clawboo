@@ -124,7 +124,7 @@ Add a test for anything you add. Unit logic goes in Vitest (`*.test.ts` in the n
 
 Releases are automated via the `publish.yml` GitHub Actions workflow: when changesets land on `main`, the Changesets action opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the changed packages to npm. No manual `npm publish` needed.
 
-Before it publishes, the workflow re-runs the whole PR gate — `pnpm verify:ingest`, `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, then `bash scripts/assemble-cli.sh` and `pnpm test:clean-install`. `typecheck` matters most there: `pnpm build` is bundler-only and never runs `tsc`, so it is the only step that would stop a type error reaching npm.
+Before it publishes, the workflow re-runs the whole PR gate — `pnpm verify:catalog`, `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, then `bash scripts/assemble-cli.sh` and `pnpm test:clean-install`. The catalog gate there is the OFFLINE one by design; the live upstream re-derive (`pnpm verify:ingest`) runs in its own `verify-ingest.yml` workflow, off the release path, so an upstream outage cannot hold up a release. `typecheck` matters most there: `pnpm build` is bundler-only and never runs `tsc`, so it is the only step that would stop a type error reaching npm.
 
 ---
 

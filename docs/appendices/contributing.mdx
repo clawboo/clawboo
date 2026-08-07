@@ -165,7 +165,7 @@ A change must not break the [seven architecture invariants](/concepts/architectu
 
 ## Release process
 
-Releases are automated and maintainer-only: when changesets land on `main`, the `publish.yml` workflow opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the `clawboo` CLI. No manual `npm publish`. The workflow re-runs the whole PR gate before publishing (`verify:ingest`, `build`, `lint`, `typecheck`, `test`, then `assemble` and the `pnpm test:clean-install` gate), so a release cannot skip a check a pull request had to pass. See [Release process](/internals/release-process) for the full pipeline.
+Releases are automated and maintainer-only: when changesets land on `main`, the `publish.yml` workflow opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the `clawboo` CLI. No manual `npm publish`. The workflow re-runs the whole PR gate before publishing (`verify:catalog`, `build`, `lint`, `typecheck`, `test`, then `assemble` and the `pnpm test:clean-install` gate), so a release cannot skip a check a pull request had to pass. The catalog gate on that path is the offline one; the live re-derive (`verify:ingest`) runs in its own workflow so an upstream outage cannot block a release. See [Release process](/internals/release-process) for the full pipeline.
 
 ## License
 

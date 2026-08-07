@@ -169,7 +169,7 @@ These run from the repo root. The Turbo-fronted ones fan out across the workspac
 | `pnpm check:docs`            | `docs/scripts/check-frontmatter.mjs`, fails on invalid YAML frontmatter or a bare `%` in a heading (the 404 class of bug).               |
 | `pnpm test:clean-install`    | `node scripts/test-clean-install.mjs`, packs + installs the CLI tarball and asserts the install works (see below).                       |
 | `pnpm test:bundle-externals` | `node scripts/check-bundle-externals.mjs`, fails if a shipped bundle loads a module that isn't declared / builtin / documented-optional. |
-| `pnpm prepublish:check`      | `pnpm verify:catalog && pnpm assemble && pnpm test:clean-install`, the local reproduction of the release gate.                           |
+| `pnpm prepublish:check`      | `pnpm verify:catalog && pnpm assemble && pnpm test:clean-install`, the local catalog-and-artifact release check (not the full gate).     |
 
 `pnpm dev` for the web app does **not** start Vite and Express directly. It runs `scripts/dev-orchestrator.cjs`, which picks a free API port first (honoring `CLAWBOO_API_PORT`, else scanning from `CLAWBOO_API_PORT_START`), exports it into the child env, then `concurrently` runs `pnpm dev:api` (`tsx watch server/index.ts`) and `pnpm dev:ui` (`vite`) so both inherit the same port, no race over who binds first.
 

@@ -40,6 +40,17 @@ if (!statSync(INDEX_HTML, { throwIfNoEntry: false })?.isFile()) {
 }
 
 const html = readFileSync(INDEX_HTML, 'utf8')
+
+// index.html existing does not prove assets/ does — a changed `build.assetsDir` or a
+// half-finished build removes it, and a raw ENOENT stack would replace every
+// actionable message below with a trace.
+if (!statSync(ASSETS_DIR, { throwIfNoEntry: false })?.isDirectory()) {
+  fail(
+    `${path.relative(REPO_ROOT, ASSETS_DIR)} not found — the build emitted no assets\n` +
+      '   directory. Check `build.assetsDir` in apps/web/vite.config.ts, or re-run the build.',
+  )
+}
+
 const assets = readdirSync(ASSETS_DIR)
 
 // 1. The chunk exists — i.e. the manualChunks rule still matches something. If the

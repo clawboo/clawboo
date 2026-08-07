@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   }
   if (extra.length > 0) {
     failures.push(
-      `  ❌ ${extra.length} manifest entr(y|ies) no longer generated:\n` +
+      `  ❌ ${extra.length} manifest ${extra.length === 1 ? 'entry' : 'entries'} no longer generated:\n` +
         extra.map((k) => `      ${k}`).join('\n') +
         `\n    ${REGENERATE}`,
     )

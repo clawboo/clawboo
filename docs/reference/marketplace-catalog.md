@@ -266,7 +266,7 @@ Where they run:
 - **`publish.yml`**: a `pnpm verify:catalog` step before `pnpm build`. Drift blocks releases. Offline by design — an upstream rename or force-push (a non-retryable 404) must never be able to hold up a release.
 - **`verify-ingest.yml`**: `verify:catalog` then `verify:ingest`, on a weekly cron, on `workflow_dispatch`, and on PRs touching the ingest scripts or generated catalog.
 
-Both the ingest renderers and the verifier share the logic in `scripts/lib/ingest-helpers.ts`, so they cannot diverge; `verify-ingest.ts` additionally cross-checks its file list against the `catalogFilePaths()` enumeration the manifest is built from.
+The ingest renderers and the verifier share the logic in `scripts/lib/ingest-helpers.ts`, which removes most of the room for drift — but not all of it: `renderAgentsIndex()` is deliberately duplicated into `verify-ingest.ts` to keep the verifier self-contained, so the two copies _can_ diverge. Running the live check is what detects that, which is why `verify-ingest.yml` triggers on any PR touching the ingest scripts. `verify-ingest.ts` additionally cross-checks its file list against the `catalogFilePaths()` enumeration the manifest is built from.
 
 <Info>
 Generated catalog files carry an `// AUTO-GENERATED — do not edit manually` header. Editing one by hand is caught immediately and offline by `verify:catalog`. To change catalog content, bump the pinned SHA in `scripts/lib/ingest-helpers.ts` and re-run `pnpm ingest:marketplace` — see the [refresh runbook](/internals/codegen-and-ingestion#refreshing-the-catalog).
