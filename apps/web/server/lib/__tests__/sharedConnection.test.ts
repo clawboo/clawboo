@@ -16,13 +16,13 @@
 // Sandboxes CLAWBOO_HOME rather than HOME: `resolveClawbooDir` checks it first
 // and it is portable (os.homedir() reads USERPROFILE on Windows).
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { dbOpenStats, getComments, listTasks, type DbTask } from '@clawboo/db'
+import { dbOpenStats, getComments, listTasks, openDb, type DbTask } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -189,6 +189,52 @@ describe('the shared connection — a request burst opens nothing', () => {
     expect(dbOpenStats().connectionsOpened - before.connectionsOpened).toBe(1)
   })
 })
+
+// ─── Bootstrap-failure hygiene ───────────────────────────────────────────────
+
+// `/dev/fd` is POSIX-only. CI's Test job is ubuntu, but `pnpm test` must not blow
+// up for a contributor on Windows, so this one case is platform-gated.
+const fdCount = (): number => readdirSync('/dev/fd').length
+
+describe.skipIf(process.platform === 'win32')(
+  'the shared connection — a failed bootstrap closes its handle',
+  () => {
+    let home: string
+    let prevHome: string | undefined
+
+    beforeEach(async () => {
+      home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-boot-fail-'))
+      const dir = path.join(home, '.clawboo')
+      mkdirSync(dir, { recursive: true })
+      // A VALID SQLite file that `ensureSchema` cannot bootstrap: `teams` already
+      // exists as a VIEW, so `CREATE TABLE IF NOT EXISTS teams` is skipped while
+      // `CREATE INDEX … ON teams (name)` fails ("views may not be indexed").
+      // So `openDb()` SUCCEEDS and `ensureSchema()` throws — which is the only
+      // window where the handle is open but not yet memoised.
+      const seed = openDb(path.join(dir, 'clawboo.db'))
+      seed.$client.exec('CREATE VIEW teams AS SELECT 1 AS id, 1 AS name')
+      seed.$client.close()
+      prevHome = process.env['CLAWBOO_HOME']
+      process.env['CLAWBOO_HOME'] = dir
+    })
+
+    afterEach(async () => {
+      resetDb()
+      if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
+      else process.env['CLAWBOO_HOME'] = prevHome
+      await rm(home, { recursive: true, force: true }).catch(() => {})
+    })
+
+    it('retrying against an un-bootstrappable database opens no net descriptors', () => {
+      // The failure is deliberately not memoised so it stays retryable; without the
+      // close-on-throw that makes every retry leak a connection + its WAL sidecars.
+      expect(() => getDb()).toThrow()
+      const before = fdCount()
+      for (let i = 0; i < 20; i += 1) expect(() => getDb()).toThrow()
+      expect(fdCount() - before).toBeLessThanOrEqual(1)
+    })
+  },
+)
 
 // ─── Source guard ────────────────────────────────────────────────────────────
 

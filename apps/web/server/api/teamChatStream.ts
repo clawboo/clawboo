@@ -57,6 +57,11 @@ export function teamChatStreamGET(req: Request, res: Response): void {
   let cursor = Number(lastEventId ?? sinceParam)
   if (!Number.isFinite(cursor) || cursor < 0) cursor = 0
 
+  // Resolve the shared connection BEFORE advertising success: a failure here
+  // must surface as a real error response, not a 200 plus a ': connected'
+  // marker the client has already been told to trust.
+  const db = getDb()
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -67,7 +72,6 @@ export function teamChatStreamGET(req: Request, res: Response): void {
   res.flushHeaders?.()
 
   let closed = false
-  const db = getDb()
   const sessionKeys = resolveTeamSessionKeys(db, teamId)
 
   // Tier 1 — committed turns. Tail the durable rows past the id cursor; the `data`

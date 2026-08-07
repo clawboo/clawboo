@@ -46,7 +46,21 @@ export function getDb(): ClawbooDb {
   // probe reports it as a check outcome rather than wedging the server for its
   // whole lifetime.
   const db = openDb(dbPath)
-  ensureSchema(db)
+  try {
+    ensureSchema(db)
+  } catch (err) {
+    // The connection is already OPEN but not yet memoised, so neither `closeDb()`
+    // nor `resetDb()` could ever reach it. Close it here: because the failure is
+    // retryable by design, a caller that keeps retrying against a broken database
+    // (`POST /api/health/recheck` is one) would otherwise leak a connection and an
+    // fd per attempt — the exact thing this module exists to stop.
+    try {
+      db.$client.close()
+    } catch {
+      /* best-effort */
+    }
+    throw err
+  }
   handles.set(dbPath, db)
   return db
 }

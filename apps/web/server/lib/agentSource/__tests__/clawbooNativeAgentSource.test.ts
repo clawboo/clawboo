@@ -13,7 +13,7 @@ import { eq } from 'drizzle-orm'
 
 import { agents, createDb, getBudget, getSetting, type ClawbooDb } from '@clawboo/db'
 
-import { getDb, getDbPath } from '../../db'
+import { getDb, getDbPath, resetDb } from '../../db'
 import {
   loadAgentConfig,
   nativeConfigKey,
@@ -38,6 +38,10 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
     db = createDb(getDbPath())
   })
   afterEach(async () => {
+    // Drop the process-wide memo and this fixture's own handle before the
+    // sandbox is removed — otherwise each test leaves a live SQLite handle
+    // behind (and Windows refuses to rm a dir that still holds an open file).
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']
