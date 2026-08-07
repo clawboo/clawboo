@@ -5,7 +5,7 @@ import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { isSessionLive, useConnectionStore } from '@/stores/connection'
-import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
+import { CreateTeamModalLazy, preloadCreateTeamModal } from '@/features/teams/CreateTeamModalLazy'
 import { consumeApiSSE } from '@clawboo/control-client'
 import { SkyAtmosphere } from '@/features/atmosphere'
 import { Button } from '@/features/shared/Button'
@@ -250,7 +250,14 @@ export function WelcomeState() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, duration: 0.3, ease: 'easeOut' }}
         >
-          <Button variant="primary" size="lg" onClick={() => setShowCreateModal(true)}>
+          {/* Warm the lazy modal chunk on hover/focus so the click feels instant. */}
+          <Button
+            variant="primary"
+            size="lg"
+            onClick={() => setShowCreateModal(true)}
+            onMouseEnter={preloadCreateTeamModal}
+            onFocus={preloadCreateTeamModal}
+          >
             Create your first team
           </Button>
         </motion.div>
@@ -288,7 +295,7 @@ export function WelcomeState() {
         </div>
       )}
 
-      <CreateTeamModal
+      <CreateTeamModalLazy
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onCreated={() => {

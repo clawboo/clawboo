@@ -149,7 +149,7 @@ type DeployProgress = { current: number; total: number; label: string }
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
-interface CreateTeamModalProps {
+export interface CreateTeamModalProps {
   isOpen: boolean
   onClose: () => void
   /** Called after the team is created; carries the new team's id (onboarding

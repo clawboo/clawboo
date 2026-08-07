@@ -7,6 +7,11 @@
 pnpm-lock.yaml
 website/pnpm-lock.yaml
 
+# The marketplace catalog integrity manifest — emitted verbatim by
+# `pnpm ingest:marketplace` / `pnpm ingest:manifest`. Leaving it to Prettier would
+# let `pnpm format` and the generator fight over its formatting on every regen.
+scripts/ingest-manifest.json
+
 # Build output and caches
 dist/
 **/dist/

@@ -15,11 +15,17 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import prettier from 'prettier'
 
-// Write `content` to `outPath` after running it through Prettier with the
-// repo's resolved config. Without this, freshly-generated files would be
-// unformatted (the renderers emit double-quoted, single-line strings) and
-// drift against the existing committed files (which were formatted) — see
+// Write `content` to `outPath` after running it through Prettier. Without this,
+// freshly-generated files would be unformatted (the renderers emit double-quoted,
+// single-line strings) and drift against the existing committed files — see
 // `scripts/verify-ingest.ts`, which mirrors the same Prettier-normalize step.
+//
+// NOTE: `prettier.format({ parser, filepath })` does NOT resolve `.prettierrc`, so
+// this emits Prettier's DEFAULT style, not the repo's. The pre-commit
+// `prettier --write` hook restyles the generated files afterwards, which is
+// expected. Both the verify diff and the integrity manifest compare this same
+// default-option *canonical form* on both sides, so the restyle is invisible to
+// them — see `canonicalize()` in `scripts/lib/ingest-manifest.ts`.
 async function writeFormatted(outPath: string, content: string): Promise<void> {
   const formatted = await prettier.format(content, {
     parser: 'typescript',
@@ -69,6 +75,7 @@ import {
   awesomeOpenclawTeamsPath,
   syntheticTeamsPath,
 } from './lib/ingest-helpers.js'
+import { MANIFEST_PATH, writeManifest } from './lib/ingest-manifest.js'
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -246,6 +253,14 @@ async function main(): Promise<void> {
   await writeFormatted(syntheticTeamsPath(), syntheticContent)
   console.log(
     `  Wrote ${path.relative(process.cwd(), syntheticTeamsPath())} (${syntheticTeams.length} teams)`,
+  )
+
+  // 11. Record the integrity manifest LAST — it hashes every file written above,
+  //     so it has to run after the domain batch and all seven single writes.
+  //     `pnpm verify:catalog` asserts it offline on every PR and at publish time.
+  const hashedCount = await writeManifest()
+  console.log(
+    `  Wrote ${path.relative(process.cwd(), MANIFEST_PATH)} (${hashedCount} file checksums)`,
   )
 
   const grandTotal = total + awesomeAgents.length

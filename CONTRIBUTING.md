@@ -62,7 +62,8 @@ pnpm typecheck                          # tsc --noEmit across the monorepo
 pnpm lint                               # ESLint flat config across all packages, plus the docs frontmatter + heading checks
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright end-to-end tests (incl. board round-trip + eval smoke)
-pnpm verify:ingest                      # marketplace codegen drift gate
+pnpm verify:catalog                     # offline: committed marketplace catalog vs. its integrity manifest
+pnpm verify:ingest                      # live: re-derive the catalog from the pinned upstream commits
 pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the tarball, and smoke-test it
 pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
 ```
@@ -123,7 +124,7 @@ Add a test for anything you add. Unit logic goes in Vitest (`*.test.ts` in the n
 
 Releases are automated via the `publish.yml` GitHub Actions workflow: when changesets land on `main`, the Changesets action opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the changed packages to npm. No manual `npm publish` needed.
 
-Before it publishes, the workflow re-runs the whole PR gate — `pnpm verify:ingest`, `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, then `bash scripts/assemble-cli.sh` and `pnpm test:clean-install`. `typecheck` matters most there: `pnpm build` is bundler-only and never runs `tsc`, so it is the only step that would stop a type error reaching npm.
+Before it publishes, the workflow re-runs the whole PR gate — `pnpm verify:catalog`, `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, then `bash scripts/assemble-cli.sh` and `pnpm test:clean-install`. The catalog gate there is the OFFLINE one by design; the live upstream re-derive (`pnpm verify:ingest`) runs in its own `verify-ingest.yml` workflow, off the release path, so an upstream outage cannot hold up a release. `typecheck` matters most there: `pnpm build` is bundler-only and never runs `tsc`, so it is the only step that would stop a type error reaching npm.
 
 ---
 

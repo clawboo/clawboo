@@ -53,6 +53,8 @@ import {
   agencyWorkflowsTeamPath,
   awesomeOpenclawTeamsPath,
   syntheticTeamsPath,
+  catalogFilePaths,
+  CATALOG_FILE_COUNT,
 } from './lib/ingest-helpers.js'
 
 // ─── agents/index.ts renderer (duplicated from ingest script for shared use) ─
@@ -263,6 +265,31 @@ async function main(): Promise<void> {
     path: syntheticTeamsPath(),
     expected: renderSyntheticTeamsFile(syntheticTeams),
   })
+
+  // Cross-check against `catalogFilePaths()` — the enumeration the offline
+  // `pnpm verify:catalog` gate and the integrity manifest are built from. The two
+  // lists are derived independently (this one from the renderers, that one from the
+  // path helpers), so this is what stops them silently diverging when a generated
+  // file is added or removed.
+  const declared = new Set(catalogFilePaths())
+  const checked = new Set(filesToCheck.map((f) => f.path))
+  const onlyDeclared = [...declared].filter((p) => !checked.has(p)).sort()
+  const onlyChecked = [...checked].filter((p) => !declared.has(p)).sort()
+  if (onlyDeclared.length > 0 || onlyChecked.length > 0 || declared.size !== CATALOG_FILE_COUNT) {
+    console.error('\n❌ Generated-file enumeration mismatch:')
+    for (const p of onlyDeclared) console.error(`   in catalogFilePaths() but not verified: ${p}`)
+    for (const p of onlyChecked) console.error(`   verified but not in catalogFilePaths(): ${p}`)
+    if (declared.size !== CATALOG_FILE_COUNT) {
+      console.error(
+        `   catalogFilePaths() has ${declared.size} paths, CATALOG_FILE_COUNT says ${CATALOG_FILE_COUNT}`,
+      )
+    }
+    console.error(
+      '\n   Adding a generated file means updating this script, `catalogFilePaths()`\n' +
+        '   and `CATALOG_FILE_COUNT` in `scripts/lib/ingest-helpers.ts` together.\n',
+    )
+    process.exit(1)
+  }
 
   // Normalize both sides through Prettier before comparing — the raw
   // generator output is unformatted (double quotes, single-line strings)

@@ -1,0 +1,36 @@
+{
+  "$comment": "AUTO-GENERATED — do not edit manually. Regenerate: pnpm ingest:marketplace. Asserted offline by: pnpm verify:catalog. Hashes are sha256 of each file’s Prettier-canonical form.",
+  "version": 1,
+  "sources": {
+    "agency-agents": {
+      "repo": "msitarzewski/agency-agents",
+      "sha": "64eee9f8e04f69b04e78e150d771a443c64720be"
+    },
+    "awesome-openclaw": {
+      "repo": "hesamsheikh/awesome-openclaw-usecases",
+      "sha": "659895e58e2105c6db8fbef39f446c8a786a480c"
+    }
+  },
+  "files": {
+    "apps/web/src/features/marketplace/agents/agency/academic.ts": "111bba556af96d6bb422dbfe31403e5247643421691c5b75f97c62977cde1c69",
+    "apps/web/src/features/marketplace/agents/agency/design.ts": "eb1f0161209d966eee1f0820d22f36ddcc0bd00a6fc1ceed5f00fa55c61b67e1",
+    "apps/web/src/features/marketplace/agents/agency/engineering.ts": "a3623e9d2b57eb38455bcdfed4948ad4b3a82ce47fcd70097de3f0cc5ac69dae",
+    "apps/web/src/features/marketplace/agents/agency/game-development.ts": "ee718fbc99f62a8099ab2f9569497f789110790152f32cab2a952f6b0938cd66",
+    "apps/web/src/features/marketplace/agents/agency/index.ts": "bbd7aa347dcdb7d2a4fd053b9856117417b9b1cb5885def67d232b589eed41d7",
+    "apps/web/src/features/marketplace/agents/agency/marketing.ts": "dbde5335c5df139cbcfba54c8ad3e4fb27abcaa01abdfbe46ae7b920ed83ef84",
+    "apps/web/src/features/marketplace/agents/agency/paid-media.ts": "3048b44b7945fbb9cfc85b4a4dea7a05f9df7070baba083d904ee1e3fe0ad0f9",
+    "apps/web/src/features/marketplace/agents/agency/product.ts": "ef1d8924503570bf67003eacd8ea28b822ec1708da9e8b822480585d899656a8",
+    "apps/web/src/features/marketplace/agents/agency/project-management.ts": "7654eda196609a725423a6ebffe9963cca88ae0c214814f9198ef7c70b437e25",
+    "apps/web/src/features/marketplace/agents/agency/sales.ts": "ebe7660058d2ac8f60b4b0db433c95b0baa2d743cabe00c787100164f31f494b",
+    "apps/web/src/features/marketplace/agents/agency/spatial-computing.ts": "475220dc9bbc4e009d1abc88325ecf82b0c7feb0151a628e0055cfd967a93f22",
+    "apps/web/src/features/marketplace/agents/agency/specialized.ts": "866fe1a2c2b712381b32491246036d8d2020337a12b262d09d5b82d970782d71",
+    "apps/web/src/features/marketplace/agents/agency/support.ts": "f382e51ad1f3b33f9be00af2ff762290da3acb5c60b8efbaeda8c68dc7c2d47b",
+    "apps/web/src/features/marketplace/agents/agency/testing.ts": "971accd6d7f0ba1382ee95f4a9cff35cc855464efdf09d8ed8da6475dfec2e7a",
+    "apps/web/src/features/marketplace/agents/awesome-openclaw/index.ts": "2058bfc04e24d91f65eb47b72c01c0492f376abdcab01d916340ef8946883193",
+    "apps/web/src/features/marketplace/agents/awesome-openclaw/usecases.ts": "db84ca171da743920e90c75d7da49ed716506561bb9b9b2ea14b87b807bf4f6c",
+    "apps/web/src/features/marketplace/agents/index.ts": "80b43304052414d542077713900089b8f9a5110aae0f78f067ee84781d82ee3c",
+    "apps/web/src/features/marketplace/teams/agency-workflows.ts": "b30b0427fd0f3b137a23e6d4298bc690cb3b75b84ad696f25b883d776531b12f",
+    "apps/web/src/features/marketplace/teams/awesome-openclaw.ts": "2c1cf492e00a8f461150f7653dbc6343269cfcdf442576b96db9088ab499e319",
+    "apps/web/src/features/marketplace/teams/synthetic.ts": "23176f0aa6e442afe8671c80be847e5ca74c1bff10cc5df272363c9fe72357fe"
+  }
+}
