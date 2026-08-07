@@ -22,6 +22,7 @@ import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { ProviderIcon, type ProviderId } from '@/features/onboarding/ProviderIcon'
 import { providerSlug } from '@/lib/modelCatalog'
 import { SearchInput } from '@/features/shared/SearchInput'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 export interface ModelPickerGroup {
   /** Provider display name, e.g. "Anthropic", "OpenAI Codex". */
@@ -234,27 +235,22 @@ export function MemberModelSelect({
     }
   }, [open, seedProvider])
 
+  // Escape and outside-press through the shared layer stack — this popover
+  // outranks the dialog hosting it, so it dismisses alone.
+  useDismissableLayer({
+    active: open,
+    level: 'popover',
+    onEscape: () => setOpen(false),
+    contains: (t) => !!triggerRef.current?.contains(t) || !!menuRef.current?.contains(t),
+    onPressOutside: () => setOpen(false),
+  })
+
   useEffect(() => {
     if (!open) return
-    const onPointerDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return
-      setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        setOpen(false)
-      }
-    }
     const onReflow = () => computePosition()
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKey, true)
     window.addEventListener('resize', onReflow)
     window.addEventListener('scroll', onReflow, true)
     return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKey, true)
       window.removeEventListener('resize', onReflow)
       window.removeEventListener('scroll', onReflow, true)
     }

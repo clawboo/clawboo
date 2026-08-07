@@ -16,6 +16,7 @@ import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useTourStore } from '@/stores/tour'
 import { CAPABILITY_TOUR_FLAG, hasSeenFlag, markSeenFlag } from '@/lib/oneTimeFlag'
 import { useFocusTrap } from '@/features/shared/useFocusTrap'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 // ─── Step model ──────────────────────────────────────────────────────────────
 //
@@ -391,17 +392,8 @@ function TourOverlay({ onClose }: { onClose: () => void }) {
     if (cardRef.current) setCardH(cardRef.current.offsetHeight)
   }, [step, rect, vp])
 
-  // Esc closes the tour.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // Esc closes the tour, through the shared layer stack.
+  useDismissableLayer({ active: true, level: 'dialog', onEscape: onClose })
 
   const goNext = (): void => (isLast ? onClose() : setStep((s) => s + 1))
   const goBack = (): void => setStep((s) => Math.max(0, s - 1))

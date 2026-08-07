@@ -37,6 +37,7 @@ import { useSettingsModalStore } from '@/stores/settingsModal'
 
 import { RuntimeDepthBadge, RuntimeGlyph } from './runtimeDepth'
 import { useRuntimeProbeStore, type ProbeSample } from './runtimeProbeStore'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -175,11 +176,7 @@ export function RuntimeDiagnosticsDrawer({
   // visible; the catch-up tick on return re-reads the clock in one go.
   useVisiblePolling(() => setNow(Date.now()), 15_000)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useDismissableLayer({ active: true, level: 'dialog', onEscape: onClose })
 
   const handleRecheck = useCallback(async () => {
     setBusy(true)

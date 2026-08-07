@@ -9,6 +9,7 @@ import {
 import { useModelCatalog } from '@/lib/useModelCatalog'
 import { Button } from '@/features/shared/Button'
 import { SearchInput } from '@/features/shared/SearchInput'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -52,31 +53,15 @@ export function AgentModelSelector({
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Close on click outside or Escape
-  useEffect(() => {
-    if (!open) return
-
-    const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    const handleEscape = (e: KeyboardEvent) => {
-      // Capture-phase + stopPropagation so Escape closes only this dropdown,
-      // not the surrounding view / Settings modal.
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        e.preventDefault()
-        setOpen(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleEscape, true)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleEscape, true)
-    }
-  }, [open])
+  // Escape and outside-press through the shared layer stack, so this dropdown
+  // closes on its own and the surrounding view / Settings modal is left alone.
+  useDismissableLayer({
+    active: open,
+    level: 'popover',
+    onEscape: () => setOpen(false),
+    contains: (t) => !!containerRef.current?.contains(t),
+    onPressOutside: () => setOpen(false),
+  })
 
   // Reset state when opening
   useEffect(() => {

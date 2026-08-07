@@ -5,6 +5,7 @@ import { Button } from '@/features/shared/Button'
 import { SearchInput } from '@/features/shared/SearchInput'
 import { findModelLabel, formatProviderName, providerSlug } from '@/lib/modelCatalog'
 import { useModelCatalog } from '@/lib/useModelCatalog'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -74,30 +75,22 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
 
   // Close on outside click / Escape; reposition on scroll (capture, to catch the
   // modal's inner scroller) / resize.
+  // Escape and outside-press through the shared layer stack, so Esc closes THIS
+  // dropdown and leaves the parent Settings modal open.
+  useDismissableLayer({
+    active: open,
+    level: 'popover',
+    onEscape: () => setOpen(false),
+    contains: (t) => !!triggerRef.current?.contains(t) || !!menuRef.current?.contains(t),
+    onPressOutside: () => setOpen(false),
+  })
+
   useEffect(() => {
     if (!open) return
-    const handleClickOutside = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return
-      setOpen(false)
-    }
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        // Capture + stopPropagation so Esc closes THIS dropdown, not the parent
-        // Settings modal whose own document-level Esc handler would also fire.
-        e.stopPropagation()
-        e.preventDefault()
-        setOpen(false)
-      }
-    }
     const onReflow = () => computePosition()
-    document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleEscape, true)
     window.addEventListener('resize', onReflow)
     window.addEventListener('scroll', onReflow, true)
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleEscape, true)
       window.removeEventListener('resize', onReflow)
       window.removeEventListener('scroll', onReflow, true)
     }

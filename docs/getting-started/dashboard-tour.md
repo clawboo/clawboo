@@ -104,7 +104,7 @@ The `nav` mode carries a `view` field, one of the 14 `NAV_VIEWS`: `graph` (Atlas
 
 ### Keyboard navigation
 
-- `Escape`: leave an agent / Boo Zero / group-chat view back to the welcome screen (ignored while a file-editor overlay is open or you're typing).
+- `Escape`: leave an agent / Boo Zero / group-chat view back to the welcome screen. Ignored while you're typing, or while any overlay is open — an open dialog, drawer, menu or dropdown takes `Escape` first, innermost one first, so dismissing a dropdown inside a dialog leaves the dialog (and anything you typed into it) alone.
 - `Cmd/Ctrl + 1…4`: jump to a sidebar work surface, in this order: **1** Atlas, **2** Fleet, **3** Marketplace, **4** Board. (The shortcut order is the `NavView` order, which is not the visual order of the nav blocks.)
 - `Cmd/Ctrl + ,`: open the Settings modal (Runtimes, Providers, Memory, Capabilities, Scheduler, Tokens Used, Observability, Governance, System, System Health).
 

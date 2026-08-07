@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 
 import { useMenuKeyboard } from '@/features/shared/useMenuKeyboard'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 interface GraphContextMenuProps {
   x: number
@@ -58,20 +59,19 @@ export function GraphContextMenu({
   const ref = useRef<HTMLDivElement>(null)
   const { itemProps, menuKeyDown } = useMenuKeyboard(items.length, onClose)
 
+  // Escape and outside-press are arbitrated by the shared layer stack: only the
+  // topmost open layer reacts, so this dismisses alone.
+  useDismissableLayer({ active: true, level: 'popover', onEscape: onClose })
+
   useEffect(() => {
     function handleMouseDown(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         onClose()
       }
     }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
     document.addEventListener('mousedown', handleMouseDown)
-    document.addEventListener('keydown', handleKeyDown)
     return () => {
       document.removeEventListener('mousedown', handleMouseDown)
-      document.removeEventListener('keydown', handleKeyDown)
     }
   }, [onClose])
 

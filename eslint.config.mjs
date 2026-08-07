@@ -53,6 +53,25 @@ const DYNAMIC_IMPORT_INTO_SPA =
 const DYNAMIC_IMPORT_INTO_SERVER =
   'ImportExpression > Literal[value=/[.][.][/](.*[/])?server([/]|$)/]'
 
+// ─── Escape arbitration ──────────────────────────────────────────────────────
+// Every overlay dismisses through `features/shared/useDismissableLayer`, which
+// keeps ONE document listener and hands Escape to the topmost open layer. A
+// capture-phase keydown listener re-opens issue #95: capture runs before the
+// stack AND before every React `onKeyDown` (React delegates to #root, below
+// document), so a dropdown and the dialog hosting it both act on one Escape and
+// the dialog discards a half-filled form. `stopPropagation()` cannot prevent it
+// — it does not suppress a sibling on the same target in the same phase.
+//
+// Scoped to the keydown/keyup pair and to capture only: bubble-phase listeners
+// are fine (they run after the stack and are shielded by it), and non-keyboard
+// capture listeners are a different concern.
+const CAPTURE_KEY_LISTENER =
+  "CallExpression[callee.property.name='addEventListener'][arguments.0.value=/^key(down|up)$/][arguments.2.value=true]"
+const CAPTURE_KEY_LISTENER_OBJ =
+  "CallExpression[callee.property.name='addEventListener'][arguments.0.value=/^key(down|up)$/] > ObjectExpression:nth-child(3) > Property[key.name='capture'][value.value=true]"
+const CAPTURE_KEY_LISTENER_MESSAGE =
+  'No capture-phase key listeners in the SPA. Capture runs before both the dismissable-layer stack and every React onKeyDown, so two overlays act on one Escape (issue #95). Register the overlay with useDismissableLayer() instead; if you truly need a raw listener, use the bubble phase.'
+
 const SERVER_TO_SPA_MESSAGE =
   'apps/web/server must not import from apps/web/src. The server and the browser SPA are separate build targets — move anything they share into a @clawboo/* package (see packages/model-catalog).'
 const SPA_TO_SERVER_MESSAGE =
@@ -119,6 +138,10 @@ export default tseslint.config(
     },
   },
   // Boundary: the browser SPA may not reach into the Express server.
+  // NOTE: flat config REPLACES a rule's options rather than merging them, so
+  // every `no-restricted-syntax` selector that applies to apps/web/src has to
+  // live in this one array — a second config object for the same files would
+  // silently win and drop these.
   {
     files: ['apps/web/src/**/*.{ts,tsx}'],
     rules: {
@@ -129,6 +152,8 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         { selector: DYNAMIC_IMPORT_INTO_SERVER, message: SPA_TO_SERVER_MESSAGE },
+        { selector: CAPTURE_KEY_LISTENER, message: CAPTURE_KEY_LISTENER_MESSAGE },
+        { selector: CAPTURE_KEY_LISTENER_OBJ, message: CAPTURE_KEY_LISTENER_MESSAGE },
       ],
     },
   },

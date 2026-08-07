@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
 import { useConfirmStore } from '@/stores/confirm'
+import { useDismissableLayer } from './useDismissableLayer'
 import { Button } from './Button'
 
 // The design-system confirmation dialog (replaces native `window.confirm`). Mounted
@@ -13,20 +14,32 @@ export function ConfirmDialog() {
   const options = useConfirmStore((s) => s.options)
   const settle = useConfirmStore((s) => s.settle)
 
+  // Escape goes through the shared layer stack — this dialog is opened ON TOP of
+  // whatever asked for the confirmation, so it must take Escape from the dialog
+  // behind it. Being the most recently pushed layer is what does that now; it
+  // used to rely on document-capture + stopPropagation, which could not suppress
+  // a same-phase sibling (issue #95).
+  useDismissableLayer({ active: open, level: 'dialog', onEscape: () => settle(false) })
+
+  // Enter keeps a listener of its own: the stack arbitrates dismissal, not
+  // confirmation. preventDefault stops the focused button's native activation
+  // from also firing and settling twice.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation() // don't also close a parent modal behind it
-        settle(false)
-      } else if (e.key === 'Enter') {
-        e.preventDefault()
-        settle(true)
-      }
+      if (e.key !== 'Enter') return
+      // Same two contracts the stack applies to Escape, since this listener now
+      // sits in the same phase: an Enter that commits an IME composition is not
+      // a confirmation, and a handler nearer the target that already consumed it
+      // wins. (`keyCode === 229` is the WebKit spelling that leaves
+      // `isComposing` unset.)
+      if (e.isComposing || e.keyCode === 229) return
+      if (e.defaultPrevented) return
+      e.preventDefault()
+      settle(true)
     }
-    document.addEventListener('keydown', onKey, true)
-    return () => document.removeEventListener('keydown', onKey, true)
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
   }, [open, settle])
 
   const danger = options?.tone === 'danger'
