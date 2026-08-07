@@ -30,6 +30,7 @@ import {
 } from '@/lib/soulPersonality'
 import { clawbooEditorThemeDark, clawbooEditorThemeLight } from './editorTheme'
 import { useTheme } from '@/features/theme/useTheme'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -331,13 +332,21 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
 
   // ─── Escape key to close ──────────────────────────────────────────────────
 
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') void handleClose()
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleClose])
+  // `handleClose` is async (it may await a dirty-file save), so the layer is
+  // still registered while that settles — guard against a second Escape
+  // starting a concurrent close.
+  const closingRef = useRef(false)
+  useDismissableLayer({
+    active: true,
+    level: 'dialog',
+    onEscape: () => {
+      if (closingRef.current) return
+      closingRef.current = true
+      void handleClose().finally(() => {
+        closingRef.current = false
+      })
+    },
+  })
 
   // ─── Derived state ────────────────────────────────────────────────────────
 

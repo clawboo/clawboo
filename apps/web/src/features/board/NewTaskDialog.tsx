@@ -8,7 +8,7 @@
 // useFocusTrap can trap Tab within the dialog and restore focus to the trigger on
 // close — and so the form resets to a clean state on every open by construction.
 
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Plus } from 'lucide-react'
 
@@ -20,6 +20,7 @@ import { Select } from '@/features/shared/Select'
 import { useFocusTrap } from '@/features/shared/useFocusTrap'
 
 import { STATUS_LABEL, type TaskStatus } from './boardStatus'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 // A manual task starts life in triage or ready-to-claim; the later lifecycle
 // states (in_progress … done) belong to an assignee doing the work, so we don't
@@ -82,18 +83,21 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
   const [submitting, setSubmitting] = useState(false)
 
   // Escape closes — unless a request is in flight (don't abandon a pending write).
-  // Bound to window in the BUBBLE phase (not document-capture): the Select popover
-  // stops Escape in the capture phase to close its own menu, so an open Team/Status
-  // dropdown swallows the key here and the dialog stays put. A document-capture
-  // listener would co-fire with Select's (stopPropagation doesn't suppress a
-  // same-node, same-phase sibling) and wrongly discard the whole form.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !submitting) onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [submitting, onClose])
+  // The layer stack arbitrates: an open Team/Status `<Select>` is a popover and
+  // outranks this dialog, so dismissing the dropdown leaves the form intact.
+  // This used to be a window-BUBBLE listener chosen specifically to lose that
+  // race to Select's document-capture handler; the stack makes the ordering
+  // explicit instead of a function of which phase each side guessed (issue #95).
+  //
+  // Escape is consumed even mid-submit — a no-op here is deliberate, so the key
+  // cannot fall through to the app shell and navigate out from under the write.
+  useDismissableLayer({
+    active: true,
+    level: 'dialog',
+    onEscape: () => {
+      if (!submitting) onClose()
+    },
+  })
 
   const trimmedTitle = title.trim()
   const canSubmit = trimmedTitle.length > 0 && !submitting

@@ -9,19 +9,20 @@
 // accessibility behaviour is identical, so splitting them would mean two places
 // to fix the next dialog bug.
 //
-// ── Escape is bound to `window` in the BUBBLE phase, deliberately ────────────
-//  • `Select` (features/shared/Select.tsx) listens on `document` in the CAPTURE
-//    phase and stopPropagation()s Escape to close its popover. A capture-phase
-//    listener here would either fire first (window-capture precedes
-//    document-capture) or co-fire on the same node (stopPropagation does NOT
-//    suppress a same-node, same-phase sibling), and an open dropdown's Escape
-//    would tear down the whole dialog. See BoardPanel.test.tsx "Escape dismisses
-//    an open field dropdown without closing the composer".
-//  • Nested modals are ordered by the focus-trap stack, not by stopPropagation:
-//    only the topmost trap acts, so Escape closes the innermost dialog first.
-//  • ConfirmDialog keeps document-capture + stopPropagation. It sits above every
-//    Modal, and killing the bubble phase is exactly how it takes Escape from the
-//    dialog behind it.
+// ── Escape goes through the shared dismissable-layer stack ───────────────────
+// Not a listener of its own. Every overlay in the app — this Modal, `Select`'s
+// popover, `ConfirmDialog`, the context menus — registers on one stack, and a
+// single listener hands Escape to the TOPMOST layer only. Ordering is explicit
+// (a popover always outranks a dialog, so an open dropdown dismisses alone and
+// leaves the dialog behind it standing) instead of emergent from whichever
+// phase each overlay happened to pick. This replaces the previous arrangement,
+// where this file bound `window` in the bubble phase specifically to lose the
+// race to `Select`'s document-capture `stopPropagation()`; that only held while
+// every participant guessed a compatible phase, and broke outright for the two
+// overlays that both chose document-capture (issue #95).
+//
+// Nested modals still resolve correctly: the trap stack orders traps for focus,
+// and the layer stack orders dismissal, both innermost-first.
 //
 // Deliberately NOT here: a portal (moving content out of RTL's `container` would
 // silently weaken every `axe(container)` assertion in the repo) and a body
@@ -31,13 +32,14 @@
 // itself. `aria-modal` + a working Tab trap covers the failure modes that
 // matter; portalling is the prerequisite for inerting, and is a follow-up.
 
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import type { CSSProperties, ReactNode, RefObject } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { Transition } from 'framer-motion'
 
 import { ENTER_SPRING } from '@/lib/motion'
-import { isTopmostTrap, useFocusTrap } from './useFocusTrap'
+import { useDismissableLayer } from './useDismissableLayer'
+import { useFocusTrap } from './useFocusTrap'
 
 export type ModalVariant = 'center' | 'drawer'
 
@@ -87,6 +89,23 @@ const DRAWER_MOTION = {
 }
 
 export function Modal({ open, ...rest }: ModalProps) {
+  // Registered HERE and not in ModalBody: the body outlives `open` by the length
+  // of its exit animation, and a layer still on the stack during that window
+  // would swallow the next Escape instead of passing it to whatever is behind.
+  //
+  // `active: open` even when `dismissible` is false — a dialog with a write in
+  // flight must still CONSUME Escape rather than let it reach the app shell,
+  // which would navigate the view out from under the pending write. Owning the
+  // layer with a no-op `onEscape` is what does that.
+  const { dismissible = true, onClose } = rest
+  useDismissableLayer({
+    active: open,
+    level: 'dialog',
+    onEscape: () => {
+      if (dismissible) onClose()
+    },
+  })
+
   // The body mounts only while open, so the trap activates + restores focus on
   // the dialog's lifecycle and `children` state resets on every open by
   // construction (the NewTaskDialog pattern).
@@ -111,18 +130,7 @@ function ModalBody({
   children,
 }: Omit<ModalProps, 'open'>) {
   const panelRef = useRef<HTMLDivElement | null>(null)
-  const trapToken = useFocusTrap(panelRef, focusKey, initialFocusRef)
-
-  useEffect(() => {
-    if (!dismissible) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      if (!isTopmostTrap(trapToken.current)) return // an inner dialog owns Escape
-      onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [dismissible, onClose, trapToken])
+  useFocusTrap(panelRef, focusKey, initialFocusRef)
 
   const drawer = variant === 'drawer'
   const m = drawer ? DRAWER_MOTION : CENTER_MOTION

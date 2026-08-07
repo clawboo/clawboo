@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom'
 import { Pencil } from 'lucide-react'
 
 import { EMOJI_CATEGORIES, searchEmojis, type EmojiEntry } from './emojiCatalog'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 interface TeamIconPickerProps {
   value: string
@@ -98,6 +99,10 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
     if (open) computePosition()
   }, [open, computePosition])
 
+  // Escape and outside-press are arbitrated by the shared layer stack: only the
+  // topmost open layer reacts, so this dismisses alone.
+  useDismissableLayer({ active: open, level: 'popover', onEscape: () => setOpen(false) })
+
   useEffect(() => {
     if (!open) {
       setQuery('')
@@ -109,18 +114,13 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
       if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return
       setOpen(false)
     }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
     const onReflow = () => computePosition()
     document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKey)
     window.addEventListener('resize', onReflow)
     window.addEventListener('scroll', onReflow, true)
     return () => {
       window.clearTimeout(focusId)
       document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKey)
       window.removeEventListener('resize', onReflow)
       window.removeEventListener('scroll', onReflow, true)
     }

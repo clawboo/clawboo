@@ -18,6 +18,7 @@ import { EmptyState } from '@/features/shared/EmptyState'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Select } from '@/features/shared/Select'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { listAgents } from '@clawboo/control-client'
 import { formatRelative } from '@/lib/formatRelative'
@@ -268,19 +269,12 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
     if (!isOpenClaw && intent === 'own-life') setIntent('team-task')
   }, [isOpenClaw, intent])
 
-  // Close on Escape — capture phase so it beats the app-shell Esc handler
-  // (which would otherwise close the parent Settings modal instead of this
-  // dialog when the Scheduler panel is opened from Settings).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', onKey, true)
-    return () => document.removeEventListener('keydown', onKey, true)
-  }, [onClose])
+  // Close on Escape, through the shared layer stack. The stack consumes the key
+  // so it never reaches the app shell (which would otherwise close the parent
+  // Settings modal when the Scheduler is opened from Settings), and an open
+  // `<Select>` inside this dialog outranks it — so dismissing the Agent
+  // dropdown leaves the dialog and its typed label alone. Issue #95.
+  useDismissableLayer({ active: true, level: 'dialog', onEscape: onClose })
 
   async function submit(): Promise<void> {
     if (!selected) return

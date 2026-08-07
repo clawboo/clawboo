@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useFleetStore } from '@/stores/fleet'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 interface AgentPickerDropdownProps {
   onSelect: (agentId: string, agentName: string) => void
@@ -12,20 +13,19 @@ export function AgentPickerDropdown({ onSelect, onClose, style }: AgentPickerDro
   const agents = useFleetStore((s) => s.agents)
   const ref = useRef<HTMLDivElement>(null)
 
+  // Escape and outside-press are arbitrated by the shared layer stack: only the
+  // topmost open layer reacts, so this dismisses alone.
+  useDismissableLayer({ active: true, level: 'popover', onEscape: onClose })
+
   useEffect(() => {
     function handleMouseDown(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as globalThis.Node)) {
         onClose()
       }
     }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
     document.addEventListener('mousedown', handleMouseDown)
-    document.addEventListener('keydown', handleKeyDown)
     return () => {
       document.removeEventListener('mousedown', handleMouseDown)
-      document.removeEventListener('keydown', handleKeyDown)
     }
   }, [onClose])
 

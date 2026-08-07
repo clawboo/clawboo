@@ -36,7 +36,14 @@ export function GlossTerm({ term, definition, children, className, style }: Glos
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') setOpen(false)
+          // preventDefault is the veto the dismissable-layer stack honours: it
+          // marks the key as consumed here, so dismissing this tooltip inside a
+          // dialog does not also dismiss the dialog. Only when the tooltip is
+          // actually open — otherwise Escape belongs to whatever is above.
+          if (e.key === 'Escape' && open) {
+            e.preventDefault()
+            setOpen(false)
+          }
         }}
         className={`cursor-help border-0 bg-transparent p-0 font-[inherit] text-[inherit] ${
           className ?? ''

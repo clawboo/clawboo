@@ -5,26 +5,36 @@ import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay
 import { AgentDetailView } from '@/features/agent-detail'
 import { GroupChatView } from '@/features/group-chat/GroupChatView'
 import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
-import { hasOpenTrap } from '@/features/shared/useFocusTrap'
+import { hasOpenLayer } from '@/features/shared/useDismissableLayer'
 import { NAV_VIEW_LABELS } from '@/lib/navLabels'
 import { WelcomeState } from './WelcomeState'
 import { useViewStore } from '@/stores/view'
-import { useEditorStore } from '@/stores/editor'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import type { NavView } from '@/stores/view'
+import { useEditorStore } from '@/stores/editor'
 
 // ─── View transition config ─────────────────────────────────────────────────
 
 /**
  * True when something is layered over the content area and owns the keyboard, so
- * the app-shell shortcuts must stand down. See the call site for why each of the
- * three surfaces has to be named individually.
+ * the app-shell shortcuts must stand down.
+ *
+ * `hasOpenLayer()` is the dismissable-layer stack — every overlay that dismisses
+ * itself registers there, so this no longer enumerates them. Two surfaces are
+ * still named individually, and both for a reason the stack cannot cover:
+ *   • SettingsModal has no Escape handler of its own — THIS handler is its
+ *     Escape, complete with the "skip while typing" guard — so it deliberately
+ *     never joins the stack.
+ *   • The file editor is lazy-loaded: `useEditorStore.isOpen` flips as soon as
+ *     the user opens a file, but `AgentFileEditor` (and therefore its layer)
+ *     only mounts once the CodeMirror chunk resolves. The store flag covers that
+ *     window, during which the overlay is open but nothing is on the stack.
  */
 function overlayOwnsKeyboard(): boolean {
-  return hasOpenTrap() || useSettingsModalStore.getState().open || useEditorStore.getState().isOpen
+  return hasOpenLayer() || useSettingsModalStore.getState().open || useEditorStore.getState().isOpen
 }
 
 const VIEW_TRANSITION = { duration: 0.15, ease: 'easeOut' as const }
@@ -101,17 +111,19 @@ export function ContentArea() {
           useSettingsModalStore.getState().close()
           return
         }
-        // A `Modal` is open: it owns Escape and closes itself from its own
-        // window-BUBBLE listener. THIS handler is on document-BUBBLE, which fires
-        // FIRST, so the dialog cannot suppress it with stopPropagation — the trap
-        // stack is the arbitration. Without this, Escape inside a dialog opened
-        // over an agent / group-chat view would ALSO deselect the agent and jump
-        // the app to Welcome behind the still-closing dialog.
+        // Belt-and-braces. The layer stack's own listener already consumed this
+        // event before it reached here (it registers at module scope, so it is
+        // the first document-bubble listener in the app), which is why an open
+        // dialog cannot also deselect the agent and jump to Welcome behind it.
+        // This guard makes that independent of module-import order rather than a
+        // consequence of it — if this file's effect ever ran first, the check
+        // still holds.
         //
-        // Deliberately AFTER the Settings branch: SettingsModal traps Tab itself
-        // rather than going through `useFocusTrap`, so it never registers on the
-        // stack and its Escape ordering is unchanged.
-        if (hasOpenTrap()) return
+        // Deliberately AFTER the Settings branch: SettingsModal has no Escape
+        // handler of its own, so this one is it.
+        if (hasOpenLayer()) return
+        // Not redundant with the stack: see `overlayOwnsKeyboard` — the editor's
+        // layer does not exist until its lazy chunk mounts.
         if (useEditorStore.getState().isOpen) return
         if (
           viewMode.type === 'agent' ||
@@ -129,19 +141,10 @@ export function ContentArea() {
       // the content area, which is never what the user meant: Cmd/Ctrl+1..4 call
       // `navigateTo` directly, and Cmd/Ctrl+, would stack Settings on top of a
       // dialog that still owns the keyboard. Escape is handled above instead,
-      // because it has its own layering (Settings closes first, then the trap
-      // stack, then the editor).
+      // because it has its own layering (Settings closes first, then the stack).
       //
-      // All three surfaces have to be named separately — there is no single
-      // registry:
-      //   • `hasOpenTrap()` covers every `Modal`.
-      //   • SettingsModal traps Tab itself rather than going through
-      //     `useFocusTrap`, so it never reaches the stack.
-      //   • The file editor is `fixed inset-y-0 right-0` over the whole content
-      //     area and does not close on a view change, so navigating behind it
-      //     strands the user in an editor over a view they never chose.
-      // The input guard at the top of this handler masks all three while a text
-      // field holds focus; Tab to any button and the shortcut gets through.
+      // The input guard at the top of this handler masks this while a text field
+      // holds focus; Tab to any button and the shortcut gets through.
       if (overlayOwnsKeyboard()) return
 
       // Cmd/Ctrl+, — open the Settings modal (the universal settings shortcut)
