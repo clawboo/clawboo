@@ -6,7 +6,7 @@
 // "why did the previous agent stop / errors in the last 30 min" queries are these
 // same endpoints.
 
-import { createDb, listEvents, type DbOrchestrationEvent } from '@clawboo/db'
+import { listEvents, type DbOrchestrationEvent } from '@clawboo/db'
 import {
   projectFleetHealth,
   projectGraph,
@@ -16,7 +16,7 @@ import {
 } from '@clawboo/obs'
 import type { Request, Response } from 'express'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { emitEvent } from '../lib/obs/emit'
 import { redactJsonString, redactObject, redactValue } from '../lib/redact'
 
@@ -68,7 +68,7 @@ export function obsIngestPOST(req: Request, res: Response): void {
   try {
     const body = req.body as { events?: unknown } | undefined
     const raw = Array.isArray(body?.events) ? body.events : []
-    const db = createDb(getDbPath())
+    const db = getDb()
     let count = 0
     for (const e of raw.slice(0, MAX_INGEST_BATCH)) {
       if (!e || typeof e !== 'object') continue
@@ -124,7 +124,7 @@ export function obsStreamGET(req: Request, res: Response): void {
   res.flushHeaders?.()
 
   let closed = false
-  const db = createDb(getDbPath())
+  const db = getDb()
   const poll = (): void => {
     if (closed) return
     try {
@@ -149,13 +149,9 @@ export function obsStreamGET(req: Request, res: Response): void {
     closed = true
     clearInterval(pollTimer)
     clearInterval(keepalive)
-    // Close the per-connection better-sqlite3 handle (createDb opens a FRESH one per
-    // SSE stream) so a long-lived/dropped stream doesn't leak a DB handle until GC.
-    try {
-      db.$client.close()
-    } catch {
-      /* already closed / never opened */
-    }
+    // No DB handle to close: the tail poll reads through the process-wide shared
+    // connection (lib/db.ts getDb). Closing it here would kill SQLite for the
+    // WHOLE server the moment any one browser tab drops its stream.
   }
   req.on('close', cleanup)
   res.on('close', cleanup)
@@ -165,7 +161,7 @@ export function obsStreamGET(req: Request, res: Response): void {
 // Query: teamId?, taskId?, kinds=comma,sep, since?(ms), limit?, order=asc|desc
 export function obsEventsGET(req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const kinds = strParam(req.query['kinds'])
       ?.split(',')
       .map((k) => k.trim())
@@ -199,7 +195,7 @@ export function obsEventsGET(req: Request, res: Response): void {
 export function obsTraceGET(req: Request, res: Response): void {
   try {
     const traceId = (req.params['traceId'] as string | undefined) ?? ''
-    const events = listEvents(createDb(getDbPath()), { traceId, limit: 5000 })
+    const events = listEvents(getDb(), { traceId, limit: 5000 })
     // Metrics are computed from the un-redacted events first, then each event's JSON
     // `data` is redacted for display (numeric cost/token fields survive — see redact.ts).
     const metrics = summarizeMetrics(events.map(toEvent))
@@ -216,7 +212,7 @@ export function obsTraceGET(req: Request, res: Response): void {
 export function obsErrorsGET(req: Request, res: Response): void {
   try {
     const sinceRaw = strParam(req.query['since'])
-    const rows = listEvents(createDb(getDbPath()), {
+    const rows = listEvents(getDb(), {
       kinds: ['error'],
       since: sinceRaw ? Number(sinceRaw) : undefined,
       order: 'desc',
@@ -257,7 +253,7 @@ export function obsErrorsGET(req: Request, res: Response): void {
 // Fleet-health triage (working / idle / stalled / zombie). Query: teamId?
 export function obsHealthGET(req: Request, res: Response): void {
   try {
-    const events = listEvents(createDb(getDbPath()), {
+    const events = listEvents(getDb(), {
       teamId: strParam(req.query['teamId']),
       limit: 5000,
     }).map(toEvent)
@@ -272,7 +268,7 @@ export function obsHealthGET(req: Request, res: Response): void {
 // The event-sourced delegation/status/cost graph projection. Query: teamId?
 export function obsGraphGET(req: Request, res: Response): void {
   try {
-    const events = listEvents(createDb(getDbPath()), {
+    const events = listEvents(getDb(), {
       teamId: strParam(req.query['teamId']),
       limit: 5000,
     }).map(toEvent)

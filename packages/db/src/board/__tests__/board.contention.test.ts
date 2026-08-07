@@ -76,6 +76,7 @@ describe.skipIf(!ENABLED)('write contention (real concurrency)', () => {
       )
       const totalLocked = results.reduce((acc, r) => acc + r.locked, 0)
       expect(totalLocked).toBe(0)
+      db.$client.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -96,6 +97,7 @@ describe.skipIf(!ENABLED)('write contention (real concurrency)', () => {
       expect(winners).toHaveLength(1)
       expect(losers).toHaveLength(WORKERS - 1)
       expect(losers.every((r) => r.reason === 'conflict')).toBe(true)
+      db.$client.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -123,6 +125,7 @@ describe.skipIf(!ENABLED)('write contention (real concurrency)', () => {
       expect(results.filter((r) => r.created)).toHaveLength(MAX)
       expect(results.filter((r) => !r.created).every((r) => r.reason === 'child_cap')).toBe(true)
       expect(listTasks(db).filter((t) => t.parentTaskId === parent.id)).toHaveLength(MAX)
+      db.$client.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

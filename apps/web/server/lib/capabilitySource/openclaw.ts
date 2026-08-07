@@ -18,7 +18,7 @@ import {
   type CapabilitySource,
   type CapabilityWriteAction,
 } from '@clawboo/capability-registry'
-import { appendAudit, createDb, getCapability, type ClawbooDb } from '@clawboo/db'
+import { appendAudit, getCapability, type ClawbooDb } from '@clawboo/db'
 import { encodeConfigPatchParams } from '@clawboo/gateway-client'
 
 import { buildRecord, builtinRollup, degradedStatus, okStatus } from './helpers'
@@ -68,11 +68,11 @@ export class OpenClawCapabilitySource implements CapabilitySource {
   readonly id = 'openclaw' as const
 
   constructor(
-    private readonly deps: { client: OperatorConfigClientLike; getDbPath: () => string },
+    private readonly deps: { client: OperatorConfigClientLike; getDb: () => ClawbooDb },
   ) {}
 
   private db(): ClawbooDb {
-    return createDb(this.deps.getDbPath())
+    return this.deps.getDb()
   }
 
   async read(): Promise<CapabilityReadResult> {

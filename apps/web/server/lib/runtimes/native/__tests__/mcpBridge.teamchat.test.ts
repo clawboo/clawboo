@@ -14,11 +14,10 @@ beforeEach(() => {
 describe('native MCP bridge — TeamChat', () => {
   it('exposes team_chat_post/subscribe bound to the native agent identity', async () => {
     const bridge = await connectMcpBridge({
-      dbPath: ':memory:',
+      db,
       agentId: 'boo-native',
       enable: { tasks: false, memory: false, tools: false, teamchat: true },
       memoryScope: { teamId: 'tm1' },
-      makeDb: () => db,
     })
     expect(bridge).not.toBeNull()
     const names = (await bridge!.listTools()).map((t) => t.name)
@@ -40,9 +39,8 @@ describe('native MCP bridge — TeamChat', () => {
 
   it('does not attach teamchat without an agentId + team (needs a bound identity)', async () => {
     const bridge = await connectMcpBridge({
-      dbPath: ':memory:',
+      db,
       enable: { tasks: false, memory: false, tools: false, teamchat: true },
-      makeDb: () => db,
     })
     // No agentId / no team → nothing to attach → null bridge.
     expect(bridge).toBeNull()

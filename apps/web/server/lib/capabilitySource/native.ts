@@ -19,7 +19,6 @@ import {
   agents,
   appendAudit,
   createBuiltinRegistry,
-  createDb,
   defaultAvailabilityContext,
   getCapability,
   isToolEnabled,
@@ -30,7 +29,7 @@ import {
 } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
-import { getDbPath } from '../db'
+import { getDb } from '../db'
 import { loadAgentConfigOrDefault, saveAgentConfig } from '../runtimes/native/agentConfigStore'
 import { buildRecord, okStatus } from './helpers'
 
@@ -60,10 +59,10 @@ function agentRuntimeMap(db: ClawbooDb): Map<string, AgentMeta> {
 export class NativeCapabilitySource implements CapabilitySource {
   readonly id = 'native' as const
 
-  constructor(private readonly deps: { getDbPath: () => string } = { getDbPath }) {}
+  constructor(private readonly deps: { getDb: () => ClawbooDb } = { getDb }) {}
 
   private db(): ClawbooDb {
-    return createDb(this.deps.getDbPath())
+    return this.deps.getDb()
   }
 
   async read(): Promise<CapabilityReadResult> {

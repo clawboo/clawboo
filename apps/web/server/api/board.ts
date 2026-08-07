@@ -14,7 +14,6 @@ import {
   completeExecutionBody,
   cancelDependents,
   completeExecutionProcess,
-  createDb,
   createExecutionBody,
   createExecutionProcess,
   createTask,
@@ -37,7 +36,7 @@ import {
 } from '@clawboo/db'
 import { agentHandoffSchema } from '@clawboo/worktrees'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { emitEvent } from '../lib/obs'
 import { reflectToRoom } from '../lib/teamChat/reflect'
 import {
@@ -52,7 +51,7 @@ import {
 // Query: teamId?, status?, ready?=true (deps satisfied), includeDropped?=true
 export function boardListGET(req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const teamId = typeof req.query['teamId'] === 'string' ? req.query['teamId'] : undefined
     if (req.query['ready'] === 'true') {
       res.json({ tasks: getReadyTasks(db, teamId ? { teamId } : {}) })
@@ -71,7 +70,7 @@ export function boardListGET(req: Request, res: Response): void {
 // Returns the task plus its comments and ancestor chain.
 export function boardGetGET(req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const task = getTask(db, taskId)
     if (!task) {
@@ -92,7 +91,7 @@ export function boardCreatePOST(req: Request, res: Response): void {
       res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
       return
     }
-    const db = createDb(getDbPath())
+    const db = getDb()
     const task = createTask(db, parsed.data)
     // Observability: emit self-gates → no-op when obs is off.
     emitEvent(db, {
@@ -116,7 +115,7 @@ export function boardClaimPOST(req: Request, res: Response): void {
       res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
       return
     }
-    const db = createDb(getDbPath())
+    const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const result = claimTask(db, taskId, parsed.data.assigneeAgentId, parsed.data.assigneeRuntime)
     if (result.ok) {
@@ -157,7 +156,7 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
       res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
       return
     }
-    const db = createDb(getDbPath())
+    const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const { status, humanOverride, ...fields } = parsed.data
 
@@ -216,7 +215,7 @@ export function boardCommentPOST(req: Request, res: Response): void {
       res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
       return
     }
-    const db = createDb(getDbPath())
+    const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const comment = addComment(
       db,
@@ -259,7 +258,7 @@ export function boardExecutionCreatePOST(req: Request, res: Response): void {
       res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
       return
     }
-    const db = createDb(getDbPath())
+    const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const task = getTask(db, taskId)
     if (!task) {
@@ -290,7 +289,7 @@ export function boardExecutionCompletePATCH(req: Request, res: Response): void {
       res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
       return
     }
-    const db = createDb(getDbPath())
+    const db = getDb()
     const execId = (req.params['execId'] as string | undefined) ?? ''
     completeExecutionProcess(db, execId, parsed.data)
     // taskId/agentId aren't in scope on this REST path (only execId) — the
@@ -322,7 +321,7 @@ export function boardLinkDepPOST(req: Request, res: Response): void {
       res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
       return
     }
-    const db = createDb(getDbPath())
+    const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     // Guard against orphan dep rows: both endpoints of the edge must exist.
     const task = getTask(db, taskId)
@@ -362,7 +361,7 @@ export function boardLinkDepPOST(req: Request, res: Response): void {
 // cancelled tasks so the orchestrator can tell the leader the plan chain stalled.
 export function boardCancelDependentsPOST(req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     if (!getTask(db, taskId)) {
       res.status(404).json({ error: 'task not found' })
@@ -489,7 +488,7 @@ export async function boardWorkspaceActionPATCH(req: Request, res: Response): Pr
 export function boardExecutionsGET(req: Request, res: Response): void {
   try {
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
-    const executions = listExecutions(createDb(getDbPath()), taskId)
+    const executions = listExecutions(getDb(), taskId)
     res.json({ ok: true, executions })
   } catch (err) {
     res.status(500).json({ error: String(err) })

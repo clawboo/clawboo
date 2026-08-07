@@ -15,12 +15,12 @@
 // `/chat` ingest 404s a non-server-orchestrated team); the thin client opens this
 // stream only for server-orchestrated teams.
 
-import { agents, createDb, listChatMessagesSince, type ClawbooDb } from '@clawboo/db'
+import { agents, listChatMessagesSince, type ClawbooDb } from '@clawboo/db'
 import { buildTeamSessionKey } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
 import { subscribeBoardChange } from '../lib/teamChat/boardChangeBus'
 import { booZeroForTeam } from '../lib/teamChat/booZero'
@@ -67,7 +67,7 @@ export function teamChatStreamGET(req: Request, res: Response): void {
   res.flushHeaders?.()
 
   let closed = false
-  const db = createDb(getDbPath())
+  const db = getDb()
   const sessionKeys = resolveTeamSessionKeys(db, teamId)
 
   // Tier 1 — committed turns. Tail the durable rows past the id cursor; the `data`
@@ -132,13 +132,9 @@ export function teamChatStreamGET(req: Request, res: Response): void {
     unsub()
     unsubBoard()
     unsubStatus()
-    // Close the per-connection better-sqlite3 handle (createDb opens a FRESH one per
-    // SSE stream) so a long-lived/dropped stream doesn't leak a DB handle until GC.
-    try {
-      db.$client.close()
-    } catch {
-      /* already closed / never opened */
-    }
+    // No DB handle to close: the tail poll reads through the process-wide shared
+    // connection (lib/db.ts getDb). Closing it here would kill SQLite for the
+    // WHOLE server the moment any one browser tab drops its stream.
   }
   req.on('close', cleanup)
   res.on('close', cleanup)

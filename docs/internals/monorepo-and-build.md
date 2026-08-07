@@ -181,7 +181,7 @@ The repo requires Node `>=22` and pnpm `>=9` (`packageManager` pins `pnpm@9.15.0
 
 `@clawboo/db` exposes exactly one script: `db:studio` (`drizzle-kit studio`, a read-only browser over the dev DB). There is **no `db:migrate` and no `db:generate`**; both were removed.
 
-The reason is the schema model: Clawboo has **no migration ladder**. The schema is created by `createDb`'s inline `CREATE TABLE IF NOT EXISTS` DDL; that DDL is the _sole_ schema-creation source for all 27 tables. `schema.ts` is the Drizzle **type** layer used for typed queries, never to apply migrations. A schema change is a hard reset of the local SQLite file (the database is per-user local state, not a shared server), so there is nothing to generate or migrate.
+The reason is the schema model: Clawboo has **no migration ladder**. The schema is created by `ensureSchema`'s `CREATE TABLE IF NOT EXISTS` DDL (`packages/db/src/schemaBootstrap.ts`); that DDL is the _sole_ schema-creation source for all 27 tables. `schema.ts` is the Drizzle **type** layer used for typed queries, never to apply migrations. A schema change is a hard reset of the local SQLite file (the database is per-user local state, not a shared server), so there is nothing to generate or migrate.
 
 A unit test (`schemaSource.test.ts`) guards this posture two ways: it builds a real in-memory DB via `createDb()` and asserts every `schema.ts` table and its column set matches the live DDL (catching drift between the type layer and the bootstrap), and it asserts the package ships no `db:migrate`/`db:generate` scripts, no `drizzle` entry in `files`, and no migration-ladder directory on disk. `drizzle.config.ts` remains only so `drizzle-kit studio` can find the schema.
 

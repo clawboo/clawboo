@@ -154,7 +154,7 @@ A change must not break the [seven architecture invariants](/concepts/architectu
 - **Packages never import apps.** Dependency flow is one-way (`apps/web` → `packages/**`, `packages/adapters/*` → `@clawboo/executor`). See the [package dependency graph](/reference/packages/index).
 - **A teammate is a [`RuntimeAdapter`](/internals/runtime-adapter).** New runtimes implement the trait and emit the normalized `RuntimeEvent` union rather than special-casing the orchestrator.
 - **The board is canonical for task/coordination state.** Prefer board mutations over prose-scanning heuristics: see [Board internals](/internals/board-internals) and [Delegation and orchestration](/concepts/delegation-and-orchestration).
-- **Schema changes are a hard reset.** There is no migration ladder; `createDb`'s inline `CREATE TABLE IF NOT EXISTS` DDL is the sole source of the schema. Changing it means a fresh `~/.clawboo`, not an in-place migration. See the [database schema reference](/reference/database-schema).
+- **Schema changes are a hard reset.** There is no migration ladder; the `CREATE TABLE IF NOT EXISTS` DDL in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`) is the sole source of the schema. Changing it means a fresh `~/.clawboo`, not an in-place migration. See the [database schema reference](/reference/database-schema).
 
 <Warning>
   The [Internals](/internals/index) pages flag "caution surfaces": files that encode load-bearing

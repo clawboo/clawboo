@@ -13,7 +13,7 @@
 // loop breakers) are UNCHANGED — they live inside the ported engine.
 
 import { compactToolResultMarkdown } from '@clawboo/compaction'
-import { agents, createDb, teams, type ClawbooDb } from '@clawboo/db'
+import { agents, teams, type ClawbooDb } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import {
   agentIdFromSessionKey,
@@ -27,7 +27,7 @@ import { eq } from 'drizzle-orm'
 
 import { resolveDelegationApproval } from '../../api/delegationApproval'
 import { getRegistry } from '../agentSource/registry'
-import { getDbPath } from '../db'
+import { getDb } from '../db'
 import { publishAgentStatus } from './agentStatusBus'
 import { publishBoardChange } from './boardChangeBus'
 import { booZeroForTeam, ensureNativeBooZero } from './booZero'
@@ -123,7 +123,7 @@ function mentionTarget(message: string, roster: KnownAgent[]): string | null {
 }
 
 function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
-  const db = createDb(getDbPath())
+  const db = getDb()
   let serverStopGen = 0
   let lastActivityAt = Date.now()
   const touch = (): void => {

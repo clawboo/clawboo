@@ -47,7 +47,7 @@ beforeEach(() => {
       updatedAt: now,
     })
     .run()
-  source = new ClawbooRoutineScheduleSource({ getDbPath: () => dbPath })
+  source = new ClawbooRoutineScheduleSource({ getDb: () => db })
 })
 
 afterEach(() => {

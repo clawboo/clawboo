@@ -44,6 +44,7 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) 
 | `CLAWBOO_REVIEWER_MODEL`              | Runtime tuning     | (the builder's model)            | executor verification critic            |
 | `LOG_LEVEL`                           | Logging            | `info`                           | `@clawboo/logger`                       |
 | `NODE_ENV`                            | Logging            | (none)                           | `@clawboo/logger` transport selection   |
+| `CLAWBOO_DB_WRITE_BUDGET_MS`          | Operational tuning | `1500` (1.5 s)                   | SQLite write-retry budget               |
 | `CLAWBOO_BOARD_STALE_TTL_MS`          | Operational tuning | `3600000` (60 min)               | board stale-task sweep                  |
 | `CLAWBOO_BOARD_STALE_SWEEP_MS`        | Operational tuning | `300000` (5 min)                 | board stale-task sweep                  |
 | `CLAWBOO_APPROVAL_TTL_MS`             | Operational tuning | `86400000` (24 h)                | approval reaper                         |
@@ -265,6 +266,12 @@ Codex authenticates via interactive ChatGPT OAuth (`codex login`), not a pasted 
 ## Operational tuning
 
 These tune the always-on background services that run at server boot. Each is parsed as a positive number of milliseconds and falls back to its default on a missing or invalid value.
+
+### `CLAWBOO_DB_WRITE_BUDGET_MS`
+
+- **Read by**: the write-contention retry in `packages/db/src/board/contention.ts`.
+- **Purpose**: the wall-clock budget for one outermost write's jittered lock retries. The retry sleep is synchronous (`Atomics.wait`), so in the server it blocks the event loop — this is what bounds how long a single contended write can freeze the process. Worst case is this budget plus one final `busy_timeout` (250 ms). A write that exhausts it throws `WriteBudgetExhaustedError`, which still carries `code = 'SQLITE_BUSY'`.
+- **Default**: `1500` (1.5 seconds).
 
 ### `CLAWBOO_BOARD_STALE_TTL_MS`
 

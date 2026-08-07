@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
-import { createDb, agents } from '@clawboo/db'
+import { agents } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 // ─── GET /api/exec-settings?agentId=xxx ─────────────────────────────────────
 // Returns the stored execution permission values for an agent, or null if none.
@@ -14,7 +14,7 @@ export function execSettingsGET(req: Request, res: Response): void {
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const row = db
       .select({ execConfig: agents.execConfig })
       .from(agents)
@@ -37,7 +37,7 @@ export function execSettingsGET(req: Request, res: Response): void {
 
 export function execSettingsAllGET(_req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const rows = db.select({ id: agents.id, execConfig: agents.execConfig }).from(agents).all() as {
       id: string
       execConfig: string | null
@@ -87,7 +87,7 @@ export function execSettingsPOST(req: Request, res: Response): void {
   const execConfig = JSON.stringify(values)
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     // Ensure agent row exists (may not yet if no other data has been created)
     db.insert(agents)

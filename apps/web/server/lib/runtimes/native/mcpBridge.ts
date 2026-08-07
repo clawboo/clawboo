@@ -10,7 +10,6 @@
 // stays unambiguous.
 
 import {
-  createDb,
   resolveEmbeddingProvider,
   resolveRoomForTeam,
   type ClawbooDb,
@@ -31,7 +30,10 @@ import {
 import type { NativeToolOutcome } from './fileTools'
 
 export interface McpBridgeOptions {
-  dbPath: string
+  /** The connection the in-process servers read/write through. The caller owns
+   *  it — in the server that is the shared process handle (lib/db.ts getDb), so a
+   *  native conversation costs no connection of its own. */
+  db: ClawbooDb
   /** The calling agent (recorded in broker audit + approvals; the TeamChat author). */
   agentId?: string
   /** Which servers to attach. */
@@ -53,8 +55,6 @@ export interface McpBridgeOptions {
    * explicitly to inject a deterministic provider in tests.
    */
   embed?: EmbeddingProvider | null
-  /** Test seam — defaults to the real factories. */
-  makeDb?: (path: string) => ClawbooDb
 }
 
 // Resolve the embedding provider once per process (a reachability probe) and
@@ -79,7 +79,7 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
   const teamchat = enable.teamchat === true
   if (!enable.tasks && !enable.memory && !enable.tools && !teamchat) return null
 
-  const db = (opts.makeDb ?? createDb)(opts.dbPath)
+  const db = opts.db
   const clients: InMemoryMcpClient[] = []
   if (enable.tasks)
     clients.push(await connectInMemoryClient(createTasksServer(db), 'clawboo-native'))

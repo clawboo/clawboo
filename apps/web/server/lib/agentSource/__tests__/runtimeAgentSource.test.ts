@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, getSetting, type ClawbooDb } from '@clawboo/db'
 
-import { getDbPath } from '../../db'
+import { getDb, getDbPath } from '../../db'
 import { runtimeAgentFileKey } from '../runtimeAgentFileStore'
 import { RuntimeAgentSource } from '../runtimeAgentSource'
 
@@ -28,8 +28,8 @@ describe('RuntimeAgentSource (generic coding-runtime record source)', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
-    source = new RuntimeAgentSource({ getDbPath, runtimeId: 'claude-code' })
-    other = new RuntimeAgentSource({ getDbPath, runtimeId: 'hermes' })
+    source = new RuntimeAgentSource({ getDb, runtimeId: 'claude-code' })
+    other = new RuntimeAgentSource({ getDb, runtimeId: 'hermes' })
     db = createDb(getDbPath())
   })
   afterEach(async () => {

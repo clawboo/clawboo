@@ -205,15 +205,15 @@ This invariant has a corollary in the server's ghost-row cleanup. When the brows
 
 This invariant is the one that changed shape the most, so read the current form rather than the legacy one.
 
-The historical rule was "SQLite migrations are forward-only, never edit a committed migration file." There is **no migration ladder at all**. The schema is created by an inline, idempotent `CREATE TABLE IF NOT EXISTS` DDL block in `createDb()`, declared as the sole source of truth:
+The historical rule was "SQLite migrations are forward-only, never edit a committed migration file." There is **no migration ladder at all**. The schema is created by an idempotent `CREATE TABLE IF NOT EXISTS` DDL block in `ensureSchema()`, declared as the sole source of truth:
 
 ```ts
-// packages/db/src/db.ts
-// Bootstrap DDL — the SOLE schema source of truth. There is no migration
-// ladder: a schema change is a hard reset of the local DB, so this
-// block declares every table/column on a fresh DB outright. `schema.ts` is the
-// Drizzle TYPE layer over the same tables (used for typed queries, never to
-// apply migrations); schemaSource.test.ts guards the two against drift.
+// packages/db/src/schemaBootstrap.ts
+// The SOLE schema-creation source. There is no migration ladder: a schema change
+// is a hard reset of the local DB, so this block declares every table, index and
+// trigger on a fresh DB outright. `schema.ts` is the Drizzle TYPE layer over the
+// same tables (used for typed queries, NEVER migrations); schemaSource.test.ts
+// guards the two against drift.
 ```
 
 Two things keep this honest:
@@ -221,7 +221,7 @@ Two things keep this honest:
 - **The unapplied drizzle ladder must not ship or run.** The `@clawboo/db` package's `files` array excludes `drizzle`, and there are no `db:migrate` / `db:generate` scripts (only a read-only `db:studio`). A test pins this posture so a stray migration runner can't be reintroduced.
 - **The type layer and the runtime DDL must agree.** `schemaSource.test.ts` builds a real DB via `createDb(':memory:')` and asserts that every table and column in the Drizzle `schema.ts` type layer matches the live DDL, and vice versa.
 
-So the _spirit_ of "forward-only" holds exactly: the committed schema is never destructively rewritten in place, the DDL is additive and idempotent, and the type layer stays in lockstep. The _mechanism_ changed: instead of a stack of `.sql` files applied in order, a single idempotent DDL block runs on every connection, and a schema change targets a fresh database rather than migrating in place.
+So the _spirit_ of "forward-only" holds exactly: the committed schema is never destructively rewritten in place, the DDL is additive and idempotent, and the type layer stays in lockstep. The _mechanism_ changed: instead of a stack of `.sql` files applied in order, a single idempotent DDL block runs once when a database is opened — once per process for the server, which then holds one connection for its lifetime — and a schema change targets a fresh database rather than migrating in place.
 
 <Danger>
 Because there is no migration ladder, a schema change at this stage is a **hard reset** of the local DB, not an in-place upgrade. In v0.3.1 this is acceptable; it is the part of this invariant most likely to change when real data needs preserving across schema versions.

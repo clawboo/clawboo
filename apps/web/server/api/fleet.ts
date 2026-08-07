@@ -9,12 +9,12 @@
 // The per-runtime tile loop is RuntimeId-agnostic (open-set `runtime` strings) and
 // the response carries a dormant multi-tenant `tenantId` seam.
 
-import { agents, createDb, listBudgets, listTasks } from '@clawboo/db'
+import { agents, listBudgets, listTasks } from '@clawboo/db'
 import { isNull } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
 import { getRegistry } from '../lib/agentSource'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { adapterFactoryFor, enabledRuntimeIds } from '../lib/runtimes'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -38,7 +38,7 @@ function parseVerificationStatus(raw: string): string | null {
 
 export async function fleetSummaryGET(_req: Request, res: Response): Promise<void> {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     // ── agents: count live (non-archived) rows by runtime + status ──
     const rows = db

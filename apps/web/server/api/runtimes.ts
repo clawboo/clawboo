@@ -9,10 +9,9 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import type { Request, Response } from 'express'
 
 import { envVarForProvider } from '@clawboo/adapter-native'
-import { createDb } from '@clawboo/db'
 import { breakerConfigSchema } from '@clawboo/governance'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { runTaskOnRuntime } from '../lib/executorRunner'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { fetchOpenRouterModels } from '../lib/openrouterModels'
@@ -738,7 +737,7 @@ export async function runtimesRunPOST(req: Request, res: Response): Promise<void
 
   try {
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: adapterFactoryFor(id),
       taskId,
       assigneeAgentId,

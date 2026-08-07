@@ -7,7 +7,8 @@
 import { sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 
-import { createDb, listTableNames, type ClawbooDb } from '../db'
+import { createDb, openDb, listTableNames, type ClawbooDb } from '../db'
+import { ensureSchema } from '../schemaBootstrap'
 
 function columns(db: ClawbooDb, table: string): string[] {
   const rows = db.all(sql`PRAGMA table_info(${sql.raw(table)})`) as Array<{ name: string }>
@@ -52,5 +53,30 @@ describe('createDb — CREATE DDL is the complete bootstrap', () => {
     for (const t of ['teams', 'agents', 'sessions', 'budgets', 'tasks', 'tool_call_approvals']) {
       expect(names.has(t)).toBe(true)
     }
+  })
+})
+
+describe('openDb + ensureSchema — the two-phase split', () => {
+  it('openDb yields a usable connection with NO tables until ensureSchema runs', () => {
+    const db = openDb(':memory:')
+    expect(listTableNames(db)).toEqual([])
+
+    ensureSchema(db)
+    expect(new Set(listTableNames(db))).toContain('tasks')
+  })
+
+  it('ensureSchema is idempotent — a re-run against a bootstrapped DB is a no-op', () => {
+    const db = openDb(':memory:')
+    ensureSchema(db)
+    const first = listTableNames(db).sort()
+
+    expect(() => ensureSchema(db)).not.toThrow()
+    expect(listTableNames(db).sort()).toEqual(first)
+  })
+
+  it('createDb is exactly openDb + ensureSchema', () => {
+    const composed = openDb(':memory:')
+    ensureSchema(composed)
+    expect(listTableNames(createDb(':memory:')).sort()).toEqual(listTableNames(composed).sort())
   })
 })

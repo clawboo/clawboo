@@ -6,7 +6,6 @@
 
 import {
   agents,
-  createDb,
   deleteScheduledRun,
   getScheduledRun,
   listScheduledRuns,
@@ -40,7 +39,9 @@ import { inArray } from 'drizzle-orm'
 import { getRoutinesTicker } from '../routines/ticker'
 
 export interface ClawbooRoutineScheduleSourceDeps {
-  getDbPath: () => string
+  /** The shared process connection (a thunk, so a sandbox swap is picked up
+   *  per call — the registries are module singletons built once per test file). */
+  getDb: () => ClawbooDb
 }
 
 export class ClawbooRoutineScheduleSource implements ScheduleSource {
@@ -51,7 +52,7 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
   constructor(private readonly deps: ClawbooRoutineScheduleSourceDeps) {}
 
   private db(): ClawbooDb {
-    return createDb(this.deps.getDbPath())
+    return this.deps.getDb()
   }
 
   private toRecord(row: DbScheduledRun, runtimeByAgent: Map<string, string>): ScheduleRecord {

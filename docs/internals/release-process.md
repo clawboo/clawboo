@@ -170,7 +170,7 @@ If a version is published manually (outside the Changesets flow) before the Chan
 
 - **Not a multi-package release.** Despite the monorepo, there is no scenario where a `@clawboo/*` library publishes independently. If you ever need that, it's a deliberate posture change; start by reading `packagePosture.test.ts`, which will fail the moment a second package goes non-private.
 - **Not a hosted-deployment pipeline.** `publish.yml` ships an npm package; it does not deploy a service. Operating a running Clawboo instance is a separate concern; see [Deployment](/operating/deployment).
-- **No migration step at release.** Clawboo has no database migration ladder; the schema is created by `createDb`'s inline DDL and a schema change is a local reset (the database is per-user state). There is nothing to migrate as part of a release. See [Monorepo and build](/internals/monorepo-and-build#dbstudio-is-the-only-database-script).
+- **No migration step at release.** Clawboo has no database migration ladder; the schema is created by `ensureSchema`'s DDL and a schema change is a local reset (the database is per-user state). There is nothing to migrate as part of a release. See [Monorepo and build](/internals/monorepo-and-build#dbstudio-is-the-only-database-script).
 
 <Note>
 These docs describe Clawboo **v0.3.1**, the current release.

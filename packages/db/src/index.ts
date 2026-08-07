@@ -117,6 +117,7 @@ export * from './chat'
 // ── Database connection + helpers ──────────────────────────────────────────
 export {
   createDb,
+  openDb,
   defaultDbPath,
   getSetting,
   setSetting,
@@ -124,3 +125,5 @@ export {
   listTableNames,
 } from './db'
 export type { ClawbooDb } from './db'
+export { ensureSchema } from './schemaBootstrap'
+export { dbOpenStats } from './openStats'

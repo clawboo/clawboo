@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
-import { createDb, agents } from '@clawboo/db'
+import { agents } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 // ─── Storage format ──────────────────────────────────────────────────────────
 // The personalityConfig column stores JSON as a `{ values, customText }` wrapper:
@@ -41,7 +41,7 @@ export function personalityGET(req: Request, res: Response): void {
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const row = db
       .select({ personalityConfig: agents.personalityConfig })
       .from(agents)
@@ -96,7 +96,7 @@ export function personalityPOST(req: Request, res: Response): void {
   const personalityConfig = JSON.stringify(config)
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     // Ensure agent row exists (may not yet if no cost records have been created)
     db.insert(agents)

@@ -13,7 +13,7 @@ import { eq } from 'drizzle-orm'
 
 import { agents, createDb, getBudget, getSetting, type ClawbooDb } from '@clawboo/db'
 
-import { getDbPath } from '../../db'
+import { getDb, getDbPath } from '../../db'
 import {
   loadAgentConfig,
   nativeConfigKey,
@@ -34,7 +34,7 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
-    source = new ClawbooNativeAgentSource({ getDbPath })
+    source = new ClawbooNativeAgentSource({ getDb })
     db = createDb(getDbPath())
   })
   afterEach(async () => {

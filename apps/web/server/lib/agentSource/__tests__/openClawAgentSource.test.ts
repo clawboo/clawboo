@@ -13,7 +13,7 @@ import { GatewayResponseError } from '@clawboo/gateway-client'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getDbPath } from '../../db'
+import { getDb, getDbPath } from '../../db'
 import {
   OpenClawAgentSource,
   type AgentListEntryLike,
@@ -110,7 +110,7 @@ class FakeGateway implements OpenClawClientLike {
 
 function makeSource(fake: FakeGateway): OpenClawAgentSource {
   return new OpenClawAgentSource({
-    getDbPath,
+    getDb,
     loadSettings: () => ({ gatewayUrl: 'ws://test:18789', gatewayToken: 'tok' }),
     makeClient: () => fake,
     connectOptions: () => ({}),
@@ -296,7 +296,7 @@ describe('OpenClawAgentSource', () => {
   // ── register clawboo's shared MCP servers in the Gateway config ─────────────
   function makeSourceWithMcp(fake: FakeGateway, baseUrl: string | null): OpenClawAgentSource {
     return new OpenClawAgentSource({
-      getDbPath,
+      getDb,
       loadSettings: () => ({ gatewayUrl: 'ws://test:18789', gatewayToken: 'tok' }),
       makeClient: () => fake,
       connectOptions: () => ({}),

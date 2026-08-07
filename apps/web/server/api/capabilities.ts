@@ -10,11 +10,11 @@ import {
   UnsupportedCapabilityWriteError,
   type CapabilityInstallSpec,
 } from '@clawboo/capability-registry'
-import { agents, createDb, getCapability, resolveApproval } from '@clawboo/db'
+import { agents, getCapability, resolveApproval } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { rowToRecord } from '../lib/capabilitySource/mapper'
 import { getCapabilityMultiplexer } from '../lib/capabilitySource/registry'
 import { loadCapabilities, type CapabilityFilter } from '../lib/capabilitySource/service'
@@ -60,7 +60,7 @@ export async function capabilitiesActionPOST(req: Request, res: Response): Promi
   const action = strParam(req.params['action'])
   const body = (req.body ?? {}) as Record<string, unknown>
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     if (action === 'approve') {
       const id = strParam(body['id'])
