@@ -385,6 +385,40 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.comments.some((c) => c.taskId === t3 && /depth limit/i.test(c.body))).toBe(true)
     })
 
+    it(`refuses a whole PLAN from a source already at MAX_SPAWN_DEPTH (${MAX_SPAWN_DEPTH})`, async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      // Walk a chain down to the ceiling with immediate delegations.
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">t1</delegate>'),
+      )
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', '<delegate to="@Design Boo">t2</delegate>'),
+      )
+      await orchestrator.onEvent(
+        sk('a3'),
+        doneEvent('r3', '<delegate to="@Test Boo">t3</delegate>'),
+      )
+      const beforePlan = board.taskCount()
+
+      // A PLAN from the task now AT the ceiling. startPlan does not go through
+      // `spawn`, so without its own preflight every step would be created one level
+      // too deep (the repo create it uses is uncapped) and then be undispatchable
+      // forever.
+      await orchestrator.onEvent(
+        sk('a4'),
+        doneEvent('r3', '<plan><step to="@Test Boo">s1</step><step to="@Bug Boo">s2</step></plan>'),
+      )
+
+      expect(board.taskCount()).toBe(beforePlan) // not one step created
+      expect(delivered).toHaveLength(beforePlan)
+      const deepest = idsOf(board)[beforePlan - 1]!
+      expect(board.comments.some((c) => c.taskId === deepest && /depth limit/i.test(c.body))).toBe(
+        true,
+      )
+    })
+
     it('dedupes the same delegation seen twice (idempotent re-observation)', async () => {
       const { board, orchestrator } = makeHarness()
       const ev = doneEvent('r1', '<delegate to="@Bug Boo">once</delegate>')

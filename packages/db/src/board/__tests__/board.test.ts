@@ -472,7 +472,10 @@ describe('guarded-create index coverage', () => {
 
   it('the per-parent child count is index-backed too (an index prefix)', () => {
     const detail = plan("SELECT count(*) FROM tasks WHERE parent_task_id = 'x' AND dropped = 0")
-    expect(detail).toMatch(/idx_tasks_parent/)
+    // The composite by NAME, not a loose /idx_tasks_parent/ — that substring also
+    // matches the narrower single-column index, so the assertion would still pass
+    // if the planner regressed off the covering path.
+    expect(detail).toContain('idx_tasks_parent_dropped_created')
     expect(detail).not.toMatch(/SCAN tasks/)
   })
 })

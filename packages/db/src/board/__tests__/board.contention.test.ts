@@ -149,8 +149,13 @@ describe('the concurrency suite is wired into CI', () => {
     }
     expect(wf).not.toBeNull()
     if (!wf) return
+    // Both strings must live in the SAME step. Asserting they appear anywhere in
+    // the file would pass even if one job set the variable and a different job ran
+    // this suite — which leaves it gated while the guard reads green.
     const yml = readFileSync(wf, 'utf8')
-    expect(yml).toContain('CLAWBOO_CONCURRENCY_TEST')
-    expect(yml).toContain('board.contention.test.ts')
+    const steps = yml.split(/^ {6}- /m).slice(1)
+    const step = steps.find((s) => s.includes('board.contention.test.ts'))
+    expect(step, 'no CI step invokes board.contention.test.ts').toBeDefined()
+    expect(step).toContain('CLAWBOO_CONCURRENCY_TEST')
   })
 })
