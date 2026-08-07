@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express'
-import { createDb, chatMessages, setSetting } from '@clawboo/db'
+import { chatMessages, setSetting } from '@clawboo/db'
 import { eq, and, asc } from 'drizzle-orm'
 import type { TranscriptEntry } from '@clawboo/protocol'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
 import { nativeTeamSessionSettingKey } from '../lib/teamChat/nativeTeamSession'
 
@@ -20,7 +20,7 @@ export async function chatHistoryGET(req: Request, res: Response): Promise<void>
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     const rows = await db
       .select()
@@ -69,7 +69,7 @@ export async function chatHistoryPOST(req: Request, res: Response): Promise<void
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     for (const entry of entries) {
       if (!entry?.entryId) continue
@@ -102,7 +102,7 @@ export async function chatHistoryDELETE(req: Request, res: Response): Promise<vo
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     await db.delete(chatMessages).where(and(eq(chatMessages.sessionKey, sessionKey)))
     // A native 1:1 chat carries conversation continuity in a resumable harness session
     // (see driveAgentChat). Clearing its history = a fresh conversation, so drop the

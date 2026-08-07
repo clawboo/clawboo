@@ -6,7 +6,7 @@
 import { CapabilityMultiplexer } from '@clawboo/capability-registry'
 
 import { getRegistry } from '../agentSource/registry'
-import { getDbPath } from '../db'
+import { getDb } from '../db'
 import { ClaudeCodeCapabilitySource } from './claudeCode'
 import { CodexCapabilitySource } from './codex'
 import { HermesCapabilitySource } from './hermes'
@@ -18,11 +18,11 @@ let singleton: CapabilityMultiplexer | null = null
 export function getCapabilityMultiplexer(): CapabilityMultiplexer {
   if (singleton) return singleton
   const mux = new CapabilityMultiplexer()
-  mux.register(new NativeCapabilitySource({ getDbPath }))
-  mux.register(new HermesCapabilitySource({ getDbPath }))
+  mux.register(new NativeCapabilitySource({ getDb }))
+  mux.register(new HermesCapabilitySource({ getDb }))
   mux.register(new ClaudeCodeCapabilitySource())
   mux.register(new CodexCapabilitySource())
-  mux.register(new OpenClawCapabilitySource({ client: getRegistry().source, getDbPath }))
+  mux.register(new OpenClawCapabilitySource({ client: getRegistry().source, getDb }))
   singleton = mux
   return mux
 }

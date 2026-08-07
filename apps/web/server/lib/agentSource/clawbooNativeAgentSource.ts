@@ -27,7 +27,6 @@ import {
   agents,
   approvalHistory,
   costRecords,
-  createDb,
   sessions,
   setBudgetLimit,
   settings,
@@ -51,7 +50,9 @@ import { nativeTeamSessionKeysForAgentLike } from '../teamChat/nativeTeamSession
 const SOURCE_ID = 'clawboo-native'
 
 export interface ClawbooNativeAgentSourceDeps {
-  getDbPath: () => string
+  /** The shared process connection (a thunk, so a sandbox swap is picked up
+   *  per call — the registries are module singletons built once per test file). */
+  getDb: () => ClawbooDb
 }
 
 function parseJson(value: string | null): unknown | null {
@@ -81,7 +82,7 @@ export class ClawbooNativeAgentSource implements AgentSource {
   constructor(private readonly deps: ClawbooNativeAgentSourceDeps) {}
 
   private db(): ClawbooDb {
-    return createDb(this.deps.getDbPath())
+    return this.deps.getDb()
   }
 
   private emit(e: AgentEvent): void {

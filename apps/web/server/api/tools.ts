@@ -5,7 +5,6 @@
 
 import {
   createBuiltinRegistry,
-  createDb,
   defaultAvailabilityContext,
   listAudit,
   listPendingApprovals,
@@ -14,7 +13,7 @@ import {
 } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { redactJsonString, redactValue } from '../lib/redact'
 
 // GET /api/tools — every builtin tool + its availability verdict (server-
@@ -40,7 +39,7 @@ export function toolsListGET(_req: Request, res: Response): void {
 // GET /api/tools/approvals?status=pending — the pending tool-approval queue.
 export function toolsApprovalsGET(_req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     // Redact-on-display: the args summary (JSON text) is scrubbed at write time; mask
     // its credential-shaped keys again at the rendering boundary (defense in depth).
     const approvals = listPendingApprovals(db).map((a) => ({
@@ -62,7 +61,7 @@ export function toolsApprovalResolvePOST(req: Request, res: Response): void {
       return
     }
     const id = (req.params['id'] as string | undefined) ?? ''
-    const db = createDb(getDbPath())
+    const db = getDb()
     const updated = resolveApproval(db, id, parsed.data.decision)
     if (!updated) {
       res.status(404).json({ error: 'approval not found' })
@@ -77,7 +76,7 @@ export function toolsApprovalResolvePOST(req: Request, res: Response): void {
 // GET /api/tools/audit?toolName=&limit=
 export function toolsAuditGET(req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const toolName = typeof req.query['toolName'] === 'string' ? req.query['toolName'] : undefined
     const limit = typeof req.query['limit'] === 'string' ? Number(req.query['limit']) : undefined
     // Redact-on-display: tool args/result summaries (JSON text) are scrubbed at write

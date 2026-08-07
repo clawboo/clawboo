@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express'
-import { createDb, agents, costRecords, approvalHistory, settings, getSetting } from '@clawboo/db'
+import { agents, costRecords, approvalHistory, settings, getSetting } from '@clawboo/db'
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
 import { eq, sql, inArray } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { getTenantId } from '../lib/tenant'
 import { getRegistry } from '../lib/agentSource'
 import { runtimeAgentFileKey } from '../lib/agentSource/runtimeAgentFileStore'
@@ -26,7 +26,7 @@ function isDisconnected(err: unknown): boolean {
 // source so its 404 semantics are preserved.
 function sourceForAgent(agentId: string): AgentSource {
   const reg = getRegistry()
-  const row = createDb(getDbPath())
+  const row = getDb()
     .select({ sourceId: agents.sourceId })
     .from(agents)
     .where(eq(agents.id, agentId))
@@ -51,7 +51,7 @@ export async function agentsListGET(req: Request, res: Response): Promise<void> 
         .list()
         .map((s) => s.listAgents({ includeArchived, ...(teamId !== undefined ? { teamId } : {}) })),
     )
-    const db = createDb(getDbPath())
+    const db = getDb()
     const health = await reg.source.health()
     res.json({
       // Runtime-neutral Boo Zero for the client to identify (override → native → OpenClaw).
@@ -120,9 +120,7 @@ export async function agentsCreatePOST(req: Request, res: Response): Promise<voi
     // (the "why is my native team led by OpenClaw?" report). Best-effort, idempotent,
     // and self-gated on a connected native provider.
     if (agent.runtime === 'clawboo-native' && agent.teamId) {
-      void ensureNativeBooZero(createDb(getDbPath()), getRegistry().nativeSource).catch(
-        () => undefined,
-      )
+      void ensureNativeBooZero(getDb(), getRegistry().nativeSource).catch(() => undefined)
     }
     res.status(201).json({ agent })
   } catch (err) {
@@ -215,7 +213,7 @@ export async function agentModelPATCH(req: Request, res: Response): Promise<void
       return
     }
     if (agent.runtime === 'clawboo-native') {
-      const db = createDb(getDbPath())
+      const db = getDb()
       const config = loadAgentConfig(db, agentId)
       if (!config) {
         res.status(404).json({ error: 'native agent config not found' })
@@ -344,7 +342,7 @@ function perAgentSettingKeys(agentId: string): string[] {
 // that inflate per-team `agentCount` and pollute namespace checks.
 
 function deleteLocalAgentRows(agentId: string): void {
-  const db = createDb(getDbPath())
+  const db = getDb()
   // Order matters — children before parent (FK guards).
   db.delete(costRecords).where(eq(costRecords.agentId, agentId)).run()
   db.delete(approvalHistory).where(eq(approvalHistory.agentId, agentId)).run()
@@ -416,7 +414,7 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const liveIds = body.liveAgentIds
 
     // Collect IDs of local agent rows that are NOT in the live set. Scoped to

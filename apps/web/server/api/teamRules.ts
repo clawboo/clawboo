@@ -10,8 +10,8 @@
 // within an hour and agents repeated the same mistakes.
 
 import type { Request, Response } from 'express'
-import { createDb, getSetting, setSetting } from '@clawboo/db'
-import { getDbPath } from '../lib/db'
+import { getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { getDb } from '../lib/db'
 
 interface TeamRules {
   content: string
@@ -24,7 +24,7 @@ function settingsKey(teamId: string): string {
   return `team-rules:${teamId}`
 }
 
-export function readTeamRules(db: ReturnType<typeof createDb>, teamId: string): TeamRules {
+export function readTeamRules(db: ClawbooDb, teamId: string): TeamRules {
   const raw = getSetting(db, settingsKey(teamId))
   if (!raw) return { ...DEFAULT_RULES }
   try {
@@ -46,7 +46,7 @@ export function teamRulesGET(req: Request, res: Response): void {
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const rules = readTeamRules(db, teamId)
     res.json(rules)
   } catch (err) {
@@ -81,7 +81,7 @@ export function teamRulesPUT(req: Request, res: Response): void {
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const next: TeamRules = { content: body.content }
     setSetting(db, settingsKey(teamId), JSON.stringify(next))
     res.json(next)

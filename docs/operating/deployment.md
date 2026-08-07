@@ -112,7 +112,7 @@ Clawboo owns one state directory, default `~/.clawboo`, overridable with `CLAWBO
 | `~/.clawboo/proxy-device-identity.json` | The Ed25519 device key the proxy signs Gateway connects with.                                                     |
 
 <Info>
-There is **no migration ladder**. The schema is the inline `CREATE TABLE IF NOT EXISTS` DDL in `createDb`; a schema change is a hard reset of the local DB. To wipe state, run `clawboo stop`, delete `~/.clawboo` (or just `~/.clawboo/clawboo.db`), then re-run onboarding.
+There is **no migration ladder**. The schema is the `CREATE TABLE IF NOT EXISTS` DDL in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`); a schema change is a hard reset of the local DB. To wipe state, run `clawboo stop`, delete `~/.clawboo` (or just `~/.clawboo/clawboo.db`), then re-run onboarding.
 </Info>
 
 OpenClaw's own state dir (`~/.openclaw`, set by `OPENCLAW_STATE_DIR`) is **read-only interop**; Clawboo reads the Gateway config and a provider-key fallback from it but never writes there.

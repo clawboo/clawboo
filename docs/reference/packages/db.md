@@ -9,7 +9,7 @@ description: 'SQLite + Drizzle ORM data layer: schema, board, memory, tools, gov
 **External deps** `better-sqlite3`, `drizzle-orm`, `zod`, `@noble/ed25519`
 
 <Note>
-This is the registry of record. The 27 Drizzle-typed tables + the inline `CREATE TABLE IF NOT EXISTS` bootstrap in `createDb` make a fresh file immediately usable; the inline DDL is the **sole** schema source; there is no migration ladder (no `db:migrate` / `db:generate` scripts; a schema change is a hard reset of the local DB). SQLite-native columns (team, personality, runtime, capabilities) are never clobbered by a Gateway re-sync.
+This is the registry of record. The 27 Drizzle-typed tables + the idempotent `CREATE TABLE IF NOT EXISTS` bootstrap in `ensureSchema` (`schemaBootstrap.ts`) make a fresh file immediately usable; that DDL is the **sole** schema source; there is no migration ladder (no `db:migrate` / `db:generate` scripts; a schema change is a hard reset of the local DB). SQLite-native columns (team, personality, runtime, capabilities) are never clobbered by a Gateway re-sync.
 </Note>
 
 The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schema`, `db`, and nine domain sub-modules (`board`, `capabilities`, `memory`, `tools`, `governance`, `events`, `sessions`, `routines`, `teamChat`) via `export *`. There are no `package.json` subpath `exports`; everything is reachable from `@clawboo/db`.
@@ -22,14 +22,17 @@ One of those re-exports crosses a package boundary: the board **state machine** 
 
 **Connection (`db.ts`)**
 
-| Export           | Signature                                  | Contract                                                                                                                             |
-| ---------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `createDb`       | `(dbPath: string) => ClawbooDb`            | Open/initialise the SQLite DB; applies WAL + contention pragmas + inline DDL bootstrap so the file works without running migrations. |
-| `defaultDbPath`  | `() => string`                             | Resolve `CLAWBOO_DB_PATH` env, else `~/.openclaw/clawboo/clawboo.db`.                                                                |
-| `getSetting`     | `(db, key: string) => string \| null`      | Read one `settings` KV value.                                                                                                        |
-| `setSetting`     | `(db, key: string, value: string) => void` | Upsert one `settings` KV value.                                                                                                      |
-| `integrityCheck` | `(db) => string`                           | Run `PRAGMA integrity_check` and return its result string.                                                                           |
-| `listTableNames` | `(db) => string[]`                         | List the SQLite table names present.                                                                                                 |
+| Export           | Signature                                       | Contract                                                                                                                                                                     |
+| ---------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createDb`       | `(dbPath: string) => ClawbooDb`                 | `openDb` + `ensureSchema` in one call. For a process that opens one connection and exits (the MCP stdio bins, the eval harness, tests). Not for per-request use in a server. |
+| `openDb`         | `(dbPath: string) => ClawbooDb`                 | Open a connection and apply the WAL + contention pragmas. **No DDL** — pair with `ensureSchema`. The seam a long-lived process uses.                                         |
+| `ensureSchema`   | `(db: ClawbooDb) => void`                       | Apply the bootstrap DDL. Idempotent (every statement is `IF NOT EXISTS`), but not free — 88 statements re-resolved against `sqlite_master` per call.                         |
+| `dbOpenStats`    | `() => { connectionsOpened, schemaBootstraps }` | Monotonic process-lifetime counters. A rising `connectionsOpened` on a steady-state server is the fd-leak signal; also the shared-connection regression seam.                |
+| `defaultDbPath`  | `() => string`                                  | Resolve `CLAWBOO_DB_PATH` env, else `~/.openclaw/clawboo/clawboo.db`.                                                                                                        |
+| `getSetting`     | `(db, key: string) => string \| null`           | Read one `settings` KV value.                                                                                                                                                |
+| `setSetting`     | `(db, key: string, value: string) => void`      | Upsert one `settings` KV value.                                                                                                                                              |
+| `integrityCheck` | `(db) => string`                                | Run `PRAGMA integrity_check` and return its result string.                                                                                                                   |
+| `listTableNames` | `(db) => string[]`                              | List the SQLite table names present.                                                                                                                                         |
 
 **Board, repository (`board/repository.ts`)**
 

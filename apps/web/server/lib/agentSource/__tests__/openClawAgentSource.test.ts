@@ -13,7 +13,7 @@ import { GatewayResponseError } from '@clawboo/gateway-client'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getDbPath } from '../../db'
+import { getDb, getDbPath, resetDb } from '../../db'
 import {
   OpenClawAgentSource,
   type AgentListEntryLike,
@@ -110,7 +110,7 @@ class FakeGateway implements OpenClawClientLike {
 
 function makeSource(fake: FakeGateway): OpenClawAgentSource {
   return new OpenClawAgentSource({
-    getDbPath,
+    getDb,
     loadSettings: () => ({ gatewayUrl: 'ws://test:18789', gatewayToken: 'tok' }),
     makeClient: () => fake,
     connectOptions: () => ({}),
@@ -129,6 +129,10 @@ describe('OpenClawAgentSource', () => {
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
   })
   afterEach(async () => {
+    // Drop the process-wide memo and this fixture's own handle before the
+    // sandbox is removed — otherwise each test leaves a live SQLite handle
+    // behind (and Windows refuses to rm a dir that still holds an open file).
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']
@@ -296,7 +300,7 @@ describe('OpenClawAgentSource', () => {
   // ── register clawboo's shared MCP servers in the Gateway config ─────────────
   function makeSourceWithMcp(fake: FakeGateway, baseUrl: string | null): OpenClawAgentSource {
     return new OpenClawAgentSource({
-      getDbPath,
+      getDb,
       loadSettings: () => ({ gatewayUrl: 'ws://test:18789', gatewayToken: 'tok' }),
       makeClient: () => fake,
       connectOptions: () => ({}),

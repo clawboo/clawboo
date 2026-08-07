@@ -6,7 +6,6 @@
 import {
   SqliteMemoryStore,
   browseMemoryBody,
-  createDb,
   resolveEmbeddingProvider,
   saveMemoryBody,
   searchMemoryBody,
@@ -14,7 +13,7 @@ import {
 } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 // Resolve the embedding provider once (a network probe), then reuse. Null →
 // FTS-only (vector/hybrid gracefully degrade).
@@ -25,7 +24,7 @@ function getEmbedProvider(): Promise<EmbeddingProvider | null> {
 }
 
 function storeFor(): Promise<SqliteMemoryStore> {
-  return getEmbedProvider().then((embed) => new SqliteMemoryStore(createDb(getDbPath()), embed))
+  return getEmbedProvider().then((embed) => new SqliteMemoryStore(getDb(), embed))
 }
 
 // GET /api/memory?query=&mode=&limit=&teamId=&agentId=

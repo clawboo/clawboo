@@ -185,20 +185,24 @@ Each spawned run is an `execution_processes` row, a per-run ledger for any execu
 
 Clawboo is team-first: many agents may write one SQLite file, and out-of-process consumers (the MCP stdio bins an external runtime spawns) open the _same_ file the Express server serves. Without care, concurrent writers hit SQLite's single-writer lock and degrade into a "convoy." The board's answer is a layered recipe: connection-level pragmas plus two application-level pieces.
 
-Every connection `createDb` opens sets these pragmas:
+Every connection sets these pragmas at open (`openDb`, `packages/db/src/db.ts`). The Express server opens exactly one, at boot; each out-of-process MCP stdio bin opens one of its own:
 
-| Pragma               | Value        | Why                                                                                |
-| -------------------- | ------------ | ---------------------------------------------------------------------------------- |
-| `journal_mode`       | `WAL`        | Write-ahead logging lets readers and a single writer proceed concurrently.         |
-| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                 |
-| `synchronous`        | `NORMAL`     | The standard WAL durability/performance balance.                                   |
-| `busy_timeout`       | `1000` (ms)  | Wait up to a second for the write lock before erroring, dodges the convoy effect.  |
-| `wal_autocheckpoint` | `50` (pages) | A native PASSIVE checkpoint keeps the WAL lean without an app-level write counter. |
+| Pragma               | Value        | Why                                                                                                                               |
+| -------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `journal_mode`       | `WAL`        | Write-ahead logging lets readers and a single writer proceed concurrently.                                                        |
+| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                                                                |
+| `synchronous`        | `NORMAL`     | The standard WAL durability/performance balance.                                                                                  |
+| `busy_timeout`       | `250` (ms)   | Wait a quarter-second for the write lock, then hand off to the jittered app-level retry, which is the real anti-convoy mechanism. |
+| `wal_autocheckpoint` | `50` (pages) | A native PASSIVE checkpoint keeps the WAL lean without an app-level write counter.                                                |
 
 On top of those, `contention.ts` adds two application-level mechanisms:
 
-- **`withWriteRetry(fn)`** runs a synchronous write and retries **only** transient lock errors, `SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED` (the set `isBusyError` recognizes), with a jittered backoff (`20–150` ms, at most `15` attempts). A 0-row result, like a lost claim race, is not an exception; it is returned to the caller unretried, which is what lets callers honor the never-retry-a-409 rule. Any non-lock error propagates immediately.
+- **`withWriteRetry(fn)`** runs a synchronous write and retries **only** transient lock errors, `SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED` (the set `isBusyError` recognizes), with a jittered backoff (`20–150` ms) until a **wall-clock budget** expires (`1500` ms by default, tunable with `CLAWBOO_DB_WRITE_BUDGET_MS`, with a `24`-attempt backstop). The budget is a deadline rather than an attempt count because the retry sleep blocks the calling thread, which in the server is the event loop: an attempt count does not bound how long one contended write can freeze the server, a deadline does. Worst case is the budget plus one final `busy_timeout`, about `1.75` s. On exhaustion it throws `WriteBudgetExhaustedError`, which keeps `code = 'SQLITE_BUSY'` so `isBusyError` still recognizes it and existing callers are unaffected. A 0-row result, like a lost claim race, is not an exception; it is returned to the caller unretried, which is what lets callers honor the never-retry-a-409 rule. Any non-lock error propagates immediately.
 - **`immediateWrite(db, cb)`** runs `cb` inside a `db.transaction(cb, { behavior: 'immediate' })`; `BEGIN IMMEDIATE` acquires the write lock up front rather than escalating mid-transaction, avoiding lock-escalation deadlocks. The whole transaction re-runs from scratch on a transient lock error because `immediateWrite` itself is wrapped in `withWriteRetry`. `updateStatus`, `reconcileOrphans`, and `reconcileStaleInProgress` all run through it.
+
+<Warning>
+The budget is per **outermost** write, not per request: a handler doing three writes can block for three times the worst case. It also assumes the repository invariant that an `immediateWrite` body uses the `tx` handle directly and never calls a `withWriteRetry`-wrapped function (every call site complies today) — nest them and the budgets multiply.
+</Warning>
 
 <Note>
 The retry sleep is synchronous and non-busy-spinning: it uses `Atomics.wait` on a throwaway `SharedArrayBuffer`. `better-sqlite3` is fully synchronous, so making every repository method `async` just to `await` a backoff would be a needless cost; the synchronous block on a transient lock is the correct shape.
@@ -222,12 +226,12 @@ The **primary** mechanism is the orchestrator's own idle watchdog: the per-team 
 
 ## The no-migration-ladder model
 
-There is no migration ladder. `createDb`'s inline `CREATE TABLE IF NOT EXISTS` block in `db.ts` is the **sole** schema-creation source: it declares every table and column on a fresh database outright. A schema change is a hard reset of the local DB; there are no users to migrate, so the codebase never carries forward-only `ALTER`s (which would also have to blanket-swallow DDL errors). The package no longer ships `db:migrate` or `db:generate` scripts; only `db:studio` remains, and there is no `drizzle/` directory on disk.
+There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`) is the **sole** schema-creation source: it declares every table and column on a fresh database outright. A schema change is a hard reset of the local DB; there are no users to migrate, so the codebase never carries forward-only `ALTER`s (which would also have to blanket-swallow DDL errors). The package no longer ships `db:migrate` or `db:generate` scripts; only `db:studio` remains, and there is no `drizzle/` directory on disk.
 
 `schema.ts` is the Drizzle **type layer** over the same tables, used for typed queries and `$inferSelect` / `$inferInsert` types, never to apply migrations. Because nothing keeps the two descriptions in sync automatically, `schemaSource.test.ts` is the guard: it builds a database via the real `createDb()`, reads the live `{ table → column-name set }` via `PRAGMA table_info`, and asserts it matches the same map derived from the `schema.ts` type layer (and vice versa). It also pins the posture, asserting the npm `files` array excludes `drizzle`, that no `db:migrate` / `db:generate` scripts exist, and that no migration-ladder directory is present.
 
 <Note>
-`schemaSource.test.ts` compares **column names only**; column type, `NOT NULL`, `DEFAULT`, primary key, foreign key, and index drift are *not* checked, because the Drizzle-column → SQLite-PRAGMA mapping is lossy and would produce false drift. The test catches the drift that matters most (a column or table added to one source but not the other); deeper shape verification is deferred until a real schema change. The FTS5 virtual table and its shadow tables are excluded; they are raw DDL in `db.ts` that Drizzle cannot model.
+`schemaSource.test.ts` compares **column names only**; column type, `NOT NULL`, `DEFAULT`, primary key, foreign key, and index drift are *not* checked, because the Drizzle-column → SQLite-PRAGMA mapping is lossy and would produce false drift. The test catches the drift that matters most (a column or table added to one source but not the other); deeper shape verification is deferred until a real schema change. The FTS5 virtual table and its shadow tables are excluded; they are raw DDL in `schemaBootstrap.ts` that Drizzle cannot model.
 </Note>
 
 ## Design rationale and trade-offs

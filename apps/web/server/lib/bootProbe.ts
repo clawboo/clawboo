@@ -15,12 +15,12 @@
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, statSync } from 'node:fs'
 
 import { resolveClawbooDir, loadSettings } from '@clawboo/config'
-import { createDb, integrityCheck, listTableNames, type ClawbooDb } from '@clawboo/db'
+import { integrityCheck, listTableNames, type ClawbooDb } from '@clawboo/db'
 import { getProxyDeviceIdentityPath } from '@clawboo/gateway-proxy'
 import { MCP_SERVER_NAMES } from '@clawboo/mcp'
 
 import { getRegistry } from './agentSource'
-import { getDbPath } from './db'
+import { getDb, getDbPath } from './db'
 import { DEFAULTS } from './defaults'
 import { probeMcpServer } from './mcpSupervisor'
 import { otlpConfigured } from './obs/obsFlags'
@@ -295,7 +295,7 @@ async function runBootProbeInner(input: { port?: number } = {}): Promise<BootRep
   let db: ClawbooDb | null = null
   let dbOpenError: string | null = null
   try {
-    db = createDb(dbPath)
+    db = getDb()
   } catch (err) {
     dbOpenError = err instanceof Error ? err.message : String(err)
   }

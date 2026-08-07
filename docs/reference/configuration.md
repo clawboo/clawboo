@@ -77,7 +77,7 @@ Resolved by `resolveClawbooDir()`. The override `CLAWBOO_HOME` is `~`-expanded a
 
 | Path                              | Owner / writer                                          | Purpose                                                                                                                                                                                                             |
 | --------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `clawboo.db`                      | `getDbPath()` (Express server)                          | SQLite database: agent registry, board, memory, tools, governance, the event log, and all other tables. WAL mode.                                                                                                   |
+| `clawboo.db`                      | `getDbPath()` (Express server)                          | SQLite database: agent registry, board, memory, tools, governance, the event log, and all other tables. WAL mode. The server opens it once at boot and reuses one connection for the process lifetime.              |
 | `settings.json`                   | `resolveSettingsPath()`                                 | Persisted [settings](#settingsjson).                                                                                                                                                                                |
 | `api-port.txt`                    | `portUtils` (`writeApiPortFile`/`readApiPortFile`)      | Single line: the integer port the API bound to. Written on successful bind, removed on graceful shutdown. Read by the CLI, the Vite dev proxy, and e2e helpers.                                                     |
 | `proxy-device-identity.json`      | `gateway-proxy` (`loadOrCreateProxyDeviceIdentity`)     | The same-origin proxy's persistent Ed25519 keypair (holds the **private** key) for server-side Gateway device auth.                                                                                                 |
@@ -92,8 +92,8 @@ Resolved by `resolveClawbooDir()`. The override `CLAWBOO_HOME` is `~`-expanded a
 
 There are two distinct resolvers for the SQLite path, and they differ:
 
-- **`getDbPath()`** (`apps/web/server/lib/db.ts`): used by the Express server and the worktree/board code. Returns `<resolveClawbooDir()>/clawboo.db` → `~/.clawboo/clawboo.db`. It does **not** read `CLAWBOO_DB_PATH`; it follows `CLAWBOO_HOME`.
-- **`defaultDbPath()`** (`@clawboo/db`): used by out-of-process consumers (the MCP stdio bins spawned by external runtimes). Honors `CLAWBOO_DB_PATH` when set, otherwise returns the legacy `~/.openclaw/clawboo/clawboo.db`.
+- **`getDbPath()`** (`apps/web/server/lib/db.ts`): used by the Express server and the worktree/board code. Returns `<resolveClawbooDir()>/clawboo.db` → `~/.clawboo/clawboo.db`. It does **not** read `CLAWBOO_DB_PATH`; it follows `CLAWBOO_HOME`. Server code reaches the database through `getDb()`, a process-wide memo keyed on this path, rather than opening it per request.
+- **`defaultDbPath()`** (`@clawboo/db`): used by out-of-process consumers (the MCP stdio bins spawned by external runtimes). Honors `CLAWBOO_DB_PATH` when set, otherwise returns the legacy `~/.openclaw/clawboo/clawboo.db`. Each bin opens one connection for its own process lifetime.
 
 <Info>
 The MCP stdio bins must open the same SQLite file the server serves. When `CLAWBOO_HOME` is set to a non-default location (e.g. a sandbox), set `CLAWBOO_DB_PATH` to that same `clawboo.db` so the bins and the server agree. The multi-process WAL recipe is what makes a shared file safe.

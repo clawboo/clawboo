@@ -5,7 +5,7 @@ description: Where Clawboo stores everything, how to back it up, and how the har
 
 Use this page when you need to find Clawboo's data, back it up, move it, or wipe it. Clawboo keeps **all** of its own state under one directory (`~/.clawboo` by default). It also _reads_ OpenClaw's directory (`~/.openclaw`) for interop, but never writes there.
 
-There is no migration ladder. The SQLite schema is bootstrapped from inline `CREATE TABLE IF NOT EXISTS` DDL on every connect, so the reset model is "delete the database file"; see [Hard reset](#hard-reset). This is intentional for the pre-1.0 single-user product.
+There is no migration ladder. The SQLite schema is bootstrapped from an idempotent `CREATE TABLE IF NOT EXISTS` DDL block when a database is opened (once at boot for the server), so the reset model is "delete the database file"; see [Hard reset](#hard-reset). This is intentional for the pre-1.0 single-user product.
 
 ## The state directory
 
@@ -51,13 +51,13 @@ Backing up or resetting `~/.clawboo` never touches OpenClaw's data. The two dire
 
 ## The database
 
-`clawboo.db` is a single SQLite file holding **27 tables**. There is no separate Postgres, no external store, no migration ladder. The schema is applied by `createDb()`, which runs an inline `CREATE TABLE IF NOT EXISTS` block on every connection; that DDL is the _sole_ source of truth for the schema (the Drizzle `schema.ts` is the typed query layer over the same tables, never used to apply migrations). See the [database schema reference](/reference/database-schema) for the full table list and ERD.
+`clawboo.db` is a single SQLite file holding **27 tables**. There is no separate Postgres, no external store, no migration ladder. The schema is applied by `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`), an idempotent `CREATE TABLE IF NOT EXISTS` block that the server runs **once at boot**; `createDb()` is the batteries-included open-and-bootstrap form still used by one-shot processes (the MCP stdio bins, the eval harness, tests). That DDL is the _sole_ source of truth for the schema (the Drizzle `schema.ts` is the typed query layer over the same tables, never used to apply migrations). See the [database schema reference](/reference/database-schema) for the full table list and ERD.
 
 ### The database path
 
 The path you back up is `~/.clawboo/clawboo.db`. Two resolvers exist, for two consumers:
 
-- **`getDbPath()`** (`apps/web/server/lib/db.ts`) → `~/.clawboo/clawboo.db` via `resolveClawbooDir()`. This is the path the **Express server** uses everywhere. It honors `CLAWBOO_HOME`.
+- **`getDbPath()`** (`apps/web/server/lib/db.ts`) → `~/.clawboo/clawboo.db` via `resolveClawbooDir()`. This is the path the **Express server** uses everywhere. It honors `CLAWBOO_HOME`. The server opens it once through `getDb()` and reuses that one connection for the whole process lifetime; `closeDb()` on shutdown is the only thing that closes it.
 - **`defaultDbPath()`** (`@clawboo/db`) → `~/.openclaw/clawboo/clawboo.db`, with a `CLAWBOO_DB_PATH` override. This is used **only** by the MCP stdio bins (`clawboo-mcp-tasks`, `clawboo-mcp-memory`, `clawboo-mcp-tools`, `clawboo-mcp-teamchat`) that an external runtime may spawn out of process.
 
 <Info>
@@ -66,13 +66,13 @@ The two resolvers default to different paths. If an external runtime spawns a Cl
 
 ### WAL files
 
-`createDb()` opens the database in WAL (Write-Ahead Logging) mode with this pragma set:
+Every connection opens in WAL (Write-Ahead Logging) mode with this pragma set:
 
 ```ts
 journal_mode = WAL
 foreign_keys = ON
 synchronous = NORMAL
-busy_timeout = 1000 // wait up to 1s for the write lock
+busy_timeout = 250 // short on purpose — the app-level retry budget does the waiting
 wal_autocheckpoint = 50 // keep the WAL lean (~50-page passive checkpoints)
 ```
 

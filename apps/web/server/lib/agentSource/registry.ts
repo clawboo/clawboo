@@ -18,7 +18,7 @@ import {
   type DeviceIdentity,
 } from '@clawboo/gateway-proxy'
 
-import { getDbPath } from '../db'
+import { getDb } from '../db'
 import { ClawbooNativeAgentSource } from './clawbooNativeAgentSource'
 import { OpenClawAgentSource, type OpenClawClientLike } from './openClawAgentSource'
 import { RuntimeAgentSource } from './runtimeAgentSource'
@@ -69,7 +69,7 @@ class ServerAgentRegistry {
 
   constructor() {
     this.source = new OpenClawAgentSource({
-      getDbPath,
+      getDb,
       loadSettings: () => {
         const s = loadSettings(process.env)
         return { gatewayUrl: s.gatewayUrl, gatewayToken: s.gatewayToken }
@@ -110,12 +110,12 @@ class ServerAgentRegistry {
       log: (level, obj, msg) => this.log?.[level]?.(obj, msg),
     })
     this.registry.register(this.source)
-    this.nativeSource = new ClawbooNativeAgentSource({ getDbPath })
+    this.nativeSource = new ClawbooNativeAgentSource({ getDb })
     this.registry.register(this.nativeSource)
     // The executor-driven coding runtimes as record sources (peers). Their agents
     // hold records here; serverDeliver runs them from the row's runtime + vault key.
     this.runtimeSources = CODING_RUNTIME_SOURCE_IDS.map((runtimeId) => {
-      const src = new RuntimeAgentSource({ getDbPath, runtimeId })
+      const src = new RuntimeAgentSource({ getDb, runtimeId })
       this.registry.register(src)
       return src
     })
@@ -153,7 +153,7 @@ class ServerAgentRegistry {
 
 let singleton: ServerAgentRegistry | null = null
 
-/** Process-wide AgentRegistry singleton (mirrors getDbPath()'s module-singleton). */
+/** Process-wide AgentRegistry singleton (mirrors getDb()'s module-level memo). */
 export function getRegistry(): ServerAgentRegistry {
   singleton ??= new ServerAgentRegistry()
   return singleton

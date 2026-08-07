@@ -61,7 +61,7 @@ describe('NativeCapabilitySource', () => {
       })
       .run()
 
-    const { records, status } = await new NativeCapabilitySource({ getDbPath: () => dbPath }).read()
+    const { records, status } = await new NativeCapabilitySource({ getDb: () => db }).read()
     expect(status.ok).toBe(true)
     expect(
       records.some(
@@ -81,7 +81,7 @@ describe('NativeCapabilitySource', () => {
 
   it('install writes the skills table → the next read surfaces it (the managed-install proof)', async () => {
     seedAgent('a1', 'clawboo-native', 'clawboo-native')
-    const src = new NativeCapabilitySource({ getDbPath: () => dbPath })
+    const src = new NativeCapabilitySource({ getDb: () => db })
     const rec = await src.write({
       kind: 'install',
       spec: {
@@ -103,7 +103,7 @@ describe('NativeCapabilitySource', () => {
 
   it('install is supply-chain scanned — an injection-flagged install is blocked', async () => {
     seedAgent('a1', 'openclaw')
-    const src = new NativeCapabilitySource({ getDbPath: () => dbPath })
+    const src = new NativeCapabilitySource({ getDb: () => db })
     await expect(
       src.write({
         kind: 'install',
@@ -123,7 +123,7 @@ describe('NativeCapabilitySource', () => {
     // The dashboard side of the disable round-trip: the registry must be seeded for
     // setToolEnabled to land a row; then the native read reports it disabled.
     seedBuiltinTools(db)
-    const src = new NativeCapabilitySource({ getDbPath: () => dbPath })
+    const src = new NativeCapabilitySource({ getDb: () => db })
     const before = (await src.read()).records.find(
       (r) => r.source === 'brokered-mcp' && r.sourceKey === 'echo',
     )
@@ -188,7 +188,7 @@ describe('HermesCapabilitySource', () => {
     )
     seedAgent('h-live', 'hermes', 'hermes') // only h-live exists in the registry
 
-    const { records } = await new HermesCapabilitySource({ getDbPath: () => dbPath, env }).read()
+    const { records } = await new HermesCapabilitySource({ getDb: () => db, env }).read()
     const agentIds = new Set(records.filter((r) => r.agentId).map((r) => r.agentId))
     expect(agentIds.has('h-live')).toBe(true)
     expect(agentIds.has('h-dead')).toBe(false)
@@ -260,7 +260,7 @@ describe('OpenClawCapabilitySource', () => {
     const { client } = fakeClient(true, config)
     const { records, status } = await new OpenClawCapabilitySource({
       client,
-      getDbPath: () => dbPath,
+      getDb: () => db,
     }).read()
     expect(status.ok).toBe(true)
     const shell = records.find((r) => r.sourceKey === 'shell')
@@ -292,7 +292,7 @@ describe('OpenClawCapabilitySource', () => {
     const { client } = fakeClient(true, { hash: 'outer-hash', config })
     const { records } = await new OpenClawCapabilitySource({
       client,
-      getDbPath: () => dbPath,
+      getDb: () => db,
     }).read()
     expect(records.find((r) => r.sourceKey === 'mcp:clawboo-memory')).toBeDefined()
     expect(records.find((r) => r.sourceKey === 'mcp:vendor')).toBeDefined()
@@ -304,7 +304,7 @@ describe('OpenClawCapabilitySource', () => {
     const { client } = fakeClient(false, config)
     const { records, status } = await new OpenClawCapabilitySource({
       client,
-      getDbPath: () => dbPath,
+      getDb: () => db,
     }).read()
     expect(records).toEqual([])
     expect(status).toMatchObject({ ok: false, degraded: true, reason: 'gateway_disconnected' })
@@ -312,7 +312,7 @@ describe('OpenClawCapabilitySource', () => {
 
   it('enable drives config.patch (runtime-of-record) with the tool moved into tools.allow', async () => {
     const { client, calls } = fakeClient(true, config)
-    const src = new OpenClawCapabilitySource({ client, getDbPath: () => dbPath })
+    const src = new OpenClawCapabilitySource({ client, getDb: () => db })
     const { records } = await src.read()
     // Persist so the write path can resolve the row by id.
     upsertCapabilities(db, 'openclaw', records.map(recordToInsert))

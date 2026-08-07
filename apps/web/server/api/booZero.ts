@@ -7,9 +7,9 @@
 // `buildTeamBrief` / `buildGlobalBrief` defaults in that case.
 
 import type { Request, Response } from 'express'
-import { createDb, booZeroTeamBriefs, getSetting, setSetting } from '@clawboo/db'
+import { booZeroTeamBriefs, getSetting, setSetting } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 const GLOBAL_BRIEF_KEY = 'boo-zero:global-brief'
 
@@ -44,7 +44,7 @@ export function teamBriefGET(req: Request, res: Response): void {
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const row = db
       .select({ content: booZeroTeamBriefs.content, updatedAt: booZeroTeamBriefs.updatedAt })
       .from(booZeroTeamBriefs)
@@ -75,7 +75,7 @@ export function teamBriefPUT(req: Request, res: Response): void {
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
     db.insert(booZeroTeamBriefs)
       .values({ teamId, content: body.content, updatedAt: now })
@@ -102,7 +102,7 @@ export function teamBriefDELETE(req: Request, res: Response): void {
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     db.delete(booZeroTeamBriefs).where(eq(booZeroTeamBriefs.teamId, teamId)).run()
     res.json({ ok: true })
   } catch (err) {
@@ -114,7 +114,7 @@ export function teamBriefDELETE(req: Request, res: Response): void {
 
 export function globalBriefGET(_req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const raw = getSetting(db, GLOBAL_BRIEF_KEY)
     if (raw === null) {
       res.json({ content: null, updatedAt: null })
@@ -138,7 +138,7 @@ export function globalBriefPUT(req: Request, res: Response): void {
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     setSetting(db, GLOBAL_BRIEF_KEY, body.content)
     res.json({ content: body.content, updatedAt: Date.now() })
   } catch (err) {
@@ -157,7 +157,7 @@ export function displayNameGET(req: Request, res: Response): void {
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const raw = getSetting(db, DISPLAY_NAME_KEY_PREFIX + agentId)
     res.json({ name: raw ?? null })
   } catch (err) {
@@ -184,7 +184,7 @@ export function displayNamePUT(req: Request, res: Response): void {
   }
   const trimmed = body.name.trim().slice(0, DISPLAY_NAME_MAX)
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     setSetting(db, DISPLAY_NAME_KEY_PREFIX + agentId, trimmed)
     res.json({ name: trimmed })
   } catch (err) {

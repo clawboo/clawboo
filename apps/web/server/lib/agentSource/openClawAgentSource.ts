@@ -12,7 +12,6 @@ import {
   agents,
   approvalHistory,
   costRecords,
-  createDb,
   getSetting,
   settings,
   teams,
@@ -78,7 +77,9 @@ export interface AgentListEntryLike {
 }
 
 export interface OpenClawAgentSourceDeps {
-  getDbPath: () => string
+  /** The shared process connection (a thunk, so a sandbox swap is picked up
+   *  per call — the registries are module singletons built once per test file). */
+  getDb: () => ClawbooDb
   loadSettings: () => { gatewayUrl?: string; gatewayToken?: string }
   /** Construct a fresh Gateway client (the registry injects the real one + signer). */
   makeClient: () => OpenClawClientLike
@@ -153,7 +154,7 @@ export class OpenClawAgentSource implements AgentSource {
   constructor(private readonly deps: OpenClawAgentSourceDeps) {}
 
   private db(): ClawbooDb {
-    return createDb(this.deps.getDbPath())
+    return this.deps.getDb()
   }
 
   private log(level: 'info' | 'warn' | 'error', obj: object, msg: string): void {

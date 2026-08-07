@@ -16,11 +16,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import { resolveStateDir } from '@clawboo/config'
-import { agents, createDb, teams } from '@clawboo/db'
+import { agents, teams } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { eq, or } from 'drizzle-orm'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { detectOpenClaw } from '../lib/openclawDetect'
 import { enabledRuntimeIds } from '../lib/runtimes'
 import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
@@ -36,7 +36,7 @@ export async function onboardingStateGET(_req: Request, res: Response): Promise<
     const envExists = fs.existsSync(path.join(stateDir, '.env'))
     const configured = oc.installed && configExists && envExists
 
-    const db = createDb(getDbPath())
+    const db = getDb()
     const hasTeam = db.select({ id: teams.id }).from(teams).limit(1).all().length > 0
     const hasNative =
       db

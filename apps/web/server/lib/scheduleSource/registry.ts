@@ -10,7 +10,7 @@
 import { ScheduleMultiplexer } from '@clawboo/scheduler'
 
 import { getRegistry } from '../agentSource'
-import { getDbPath } from '../db'
+import { getDb } from '../db'
 import { ClawbooRoutineScheduleSource } from './clawbooRoutineScheduleSource'
 import { OpenClawGatewayCronScheduleSource } from './openClawGatewayCronScheduleSource'
 
@@ -19,7 +19,7 @@ let singleton: ScheduleMultiplexer | null = null
 export function getScheduleMultiplexer(): ScheduleMultiplexer {
   if (!singleton) {
     singleton = new ScheduleMultiplexer()
-    singleton.register(new ClawbooRoutineScheduleSource({ getDbPath }))
+    singleton.register(new ClawbooRoutineScheduleSource({ getDb }))
     singleton.register(new OpenClawGatewayCronScheduleSource(getRegistry().source))
   }
   return singleton

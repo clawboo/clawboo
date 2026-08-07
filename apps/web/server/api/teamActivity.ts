@@ -4,10 +4,9 @@
 // `{ content: string | null }` (null = the team has no reportable activity). A pure
 // read; never 500s on an empty/unknown team.
 
-import { createDb } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { buildTeamActivitySummary } from '../lib/teamChat/teamActivitySummary'
 
 export async function teamActivitySummaryGET(req: Request, res: Response): Promise<void> {
@@ -17,7 +16,7 @@ export async function teamActivitySummaryGET(req: Request, res: Response): Promi
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const content = await buildTeamActivitySummary(db, teamId)
     res.json({ content })
   } catch (err) {

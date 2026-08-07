@@ -10,14 +10,13 @@
 
 import {
   appendAudit,
-  createDb,
   expireStaleApprovals,
   getTask,
   unblockTask,
   type ClawbooDb,
 } from '@clawboo/db'
 
-import { getDbPath } from './db'
+import { getDb } from './db'
 import { emitEvent } from './obs'
 
 const DEFAULT_TTL_MS = 24 * 60 * 60_000 // 24h
@@ -82,7 +81,7 @@ export function startApprovalReaper(opts: { log: ReaperLog }): void {
 
   const runOnce = (): void => {
     try {
-      const { expired, unblocked } = reapStaleApprovals(createDb(getDbPath()))
+      const { expired, unblocked } = reapStaleApprovals(getDb())
       if (expired.length > 0 || unblocked.length > 0) {
         opts.log.info(
           { expired: expired.length, unblocked: unblocked.length },

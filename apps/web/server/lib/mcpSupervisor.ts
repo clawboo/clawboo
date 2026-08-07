@@ -7,7 +7,7 @@
 // re-resolves the embedding provider) with capped exponential backoff so a wedged
 // dependency can't thrash. Best-effort, gated, idempotent, `.unref()`'d.
 
-import { createDb, type ClawbooDb } from '@clawboo/db'
+import { type ClawbooDb } from '@clawboo/db'
 import {
   createMemoryServer,
   createTasksServer,
@@ -19,7 +19,7 @@ import {
 } from '@clawboo/mcp'
 
 import { prewarmMcp, resetMcpHandlers } from '../api/mcp'
-import { getDbPath } from './db'
+import { getDb } from './db'
 
 interface SupervisorLog {
   info: (obj: object, msg: string) => void
@@ -45,8 +45,8 @@ function buildProbeServer(db: ClawbooDb, name: McpServerName) {
 }
 
 /** A single in-memory MCP round-trip against a fresh server (tools/list); resolves
- *  to the tool count, throws on any failure. Reuses ONE db handle across probes to
- *  avoid per-probe handle leaks. */
+ *  to the tool count, throws on any failure. The `db` it is handed is the shared
+ *  process connection, so a probe costs no handle at all. */
 export async function probeMcpServer(db: ClawbooDb, name: McpServerName): Promise<number> {
   return probeServer(buildProbeServer(db, name))
 }
@@ -71,7 +71,7 @@ export function startMcpSupervisor(opts: { log: SupervisorLog }): void {
     opts.log.error({ err }, 'MCP supervisor: pre-warm failed (non-fatal)')
   }
 
-  const db = createDb(getDbPath()) // one handle, reused across probes
+  const db = getDb() // the shared process connection — probes are read-only round-trips
   // Derived from MCP_SERVER_NAMES so a new server can't be forgotten here.
   const state = Object.fromEntries(
     MCP_SERVER_NAMES.map((n) => [n, { failures: 0, nextProbeAt: 0 }]),

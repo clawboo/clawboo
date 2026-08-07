@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
-import { createDb, graphLayouts } from '@clawboo/db'
+import { graphLayouts } from '@clawboo/db'
 import { and, eq } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 interface LayoutData {
   positions: Record<string, { x: number; y: number }>
@@ -14,7 +14,7 @@ export async function graphLayoutGET(req: Request, res: Response): Promise<void>
   const gatewayUrl = (req.query['url'] as string | undefined) ?? ''
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const rows = await db
       .select()
       .from(graphLayouts)
@@ -57,7 +57,7 @@ export async function graphLayoutPOST(req: Request, res: Response): Promise<void
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
     const layoutData = JSON.stringify({ positions })
 

@@ -15,7 +15,6 @@ import path from 'node:path'
 import { resolveClawbooDir } from '@clawboo/config'
 import {
   addComment,
-  createDb,
   createWorkspace,
   getTask,
   getWorkspaceForTask,
@@ -54,7 +53,7 @@ import {
   type Worktree,
 } from '@clawboo/worktrees'
 
-import { getDbPath } from './db'
+import { getDb } from './db'
 import type { RuntimeRunContext } from './runtimes'
 import { verifyTask } from './verification'
 
@@ -103,7 +102,7 @@ export async function provisionTaskWorkspace(
   taskId: string,
   input: ProvisionInput,
 ): Promise<ProvisionResult> {
-  const db = createDb(getDbPath())
+  const db = getDb()
   const task = getTask(db, taskId)
   if (!task) return { ok: false, reason: 'not_found' }
 
@@ -168,7 +167,7 @@ export async function resumeTaskWorkspace(
   taskId: string,
   input: { repoPath: string },
 ): Promise<ProvisionResult> {
-  const db = createDb(getDbPath())
+  const db = getDb()
   const ws = getWorkspaceForTask(db, taskId)
   if (!ws || !ws.worktreePath) return { ok: false, reason: 'not_found' }
   const repoPath = ws.repoPath || input.repoPath
@@ -201,7 +200,7 @@ export type WorkspaceView =
 
 /** Read a task's workspace + the cold-resume state reconstructed from its SoR. */
 export async function getTaskWorkspace(taskId: string): Promise<WorkspaceView> {
-  const db = createDb(getDbPath())
+  const db = getDb()
   const ws = getWorkspaceForTask(db, taskId)
   if (!ws || !ws.worktreePath) return { ok: false, reason: 'not_found' }
   let resume: ResumeState | null = null
@@ -233,7 +232,7 @@ export interface WorktreeDetail {
 /** Read-only detail for the task-detail drawer: the SoR file contents + the diff
  *  against the branch-point baseline (excluding the SoR bookkeeping files). */
 export async function readWorktreeDetail(taskId: string): Promise<WorktreeDetail> {
-  const db = createDb(getDbPath())
+  const db = getDb()
   const ws = getWorkspaceForTask(db, taskId)
   if (!ws || !ws.worktreePath) return { ok: false, reason: 'not_found' }
   const wtPath = ws.worktreePath
@@ -263,7 +262,7 @@ export async function writeTaskHandoff(
   taskId: string,
   handoff: AgentHandoffInput,
 ): Promise<{ ok: boolean; reason?: 'not_found' }> {
-  const db = createDb(getDbPath())
+  const db = getDb()
   const ws = getWorkspaceForTask(db, taskId)
   if (!ws || !ws.worktreePath) return { ok: false, reason: 'not_found' }
   await writeHandoff(ws.worktreePath, handoff)
@@ -307,7 +306,7 @@ export async function actOnTaskWorkspace(
   action: 'pause' | 'complete',
   opts: CompleteWorkspaceOpts = {},
 ): Promise<ActionResult> {
-  const db = createDb(getDbPath())
+  const db = getDb()
   const ws = getWorkspaceForTask(db, taskId)
   if (!ws || !ws.worktreePath || !ws.branch) return { ok: false, reason: 'not_found' }
   const rootDir = worktreeRootForRepo(ws.repoPath)
@@ -394,7 +393,7 @@ export interface GcSummary {
 export async function gcTaskWorkspaces(
   opts: { maxAgeMs?: number; maxCount?: number } = {},
 ): Promise<GcSummary> {
-  const db = createDb(getDbPath())
+  const db = getDb()
   const active = listActiveWorkspaces(db).filter((w) => w.worktreePath)
   const byRepo = new Map<string, typeof active>()
   for (const ws of active) {

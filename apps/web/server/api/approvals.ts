@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
-import { createDb, approvalHistory } from '@clawboo/db'
+import { approvalHistory } from '@clawboo/db'
 import { desc, eq } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 // ─── POST /api/approvals — persist a decision ─────────────────────────────────
 
@@ -33,7 +33,7 @@ export async function approvalsPOST(req: Request, res: Response): Promise<void> 
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
 
     const inserted = await db
@@ -61,7 +61,7 @@ export async function approvalsGET(req: Request, res: Response): Promise<void> {
   const limit = Math.min(200, Math.max(1, Number(req.query['limit'] ?? '50')))
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     const rows = agentId
       ? await db

@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
-import { createDb, costRecords, agents } from '@clawboo/db'
+import { costRecords, agents } from '@clawboo/db'
 import { eq, gte, and, desc } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { calculateCostUsd } from '../lib/costUtils'
 
 function periodStart(period: string): number {
@@ -33,7 +33,7 @@ export async function costRecordsGET(req: Request, res: Response): Promise<void>
   const agentId = (req.query['agentId'] as string | undefined) ?? ''
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const since = period ? periodStart(period) : 0
 
     const conditions = []
@@ -81,7 +81,7 @@ export async function costRecordsPOST(req: Request, res: Response): Promise<void
   const now = Date.now()
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     // Ensure agent row exists — FK on costRecords.agentId requires this
     await db

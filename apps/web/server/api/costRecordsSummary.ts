@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
-import { createDb, costRecords, agents } from '@clawboo/db'
+import { costRecords, agents } from '@clawboo/db'
 import { eq, gte, desc } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 function dayStart(daysAgo: number): number {
   const d = new Date()
@@ -41,7 +41,7 @@ interface TokenSummaryResponse {
 
 export async function costRecordsSummaryGET(_req: Request, res: Response): Promise<void> {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const monthStart = dayStart(30)
     const todayStart = dayStart(0)
     const weekStart = dayStart(7)

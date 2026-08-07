@@ -8,7 +8,7 @@ Clawboo persists all of its durable state in one local SQLite file. This page do
 There are **27 tables**. They cluster by subsystem: the agent/team **registry of record**, the durable **board**, the **memory** store, the **tools** broker, **governance**, the **observability** event log, the **capability** inventory, and the **team-chat** room substrate. The `memory_facts_fts` FTS5 virtual table (and its shadow tables) are not in the table count; they are raw DDL in `createDb`, not modellable in `schema.ts`.
 
 <Info>
-There is no migration ladder. The inline `CREATE TABLE IF NOT EXISTS` block in `createDb()` (`packages/db/src/db.ts`) is the **sole** schema-creation source. `schema.ts` is the Drizzle type layer over the same tables, used for typed queries, never to apply migrations. A schema change is a hard reset of the local DB; see [Schema source of truth](#schema-source-of-truth--no-migration-ladder) below.
+There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`) is the **sole** schema-creation source. `schema.ts` is the Drizzle type layer over the same tables, used for typed queries, never to apply migrations. A schema change is a hard reset of the local DB; see [Schema source of truth](#schema-source-of-truth--no-migration-ladder) below.
 </Info>
 
 ## At a glance
@@ -360,7 +360,7 @@ The schema-drift guard (`schemaSource.test.ts`) deliberately excludes `memory_fa
 
 There is **no live migration ladder**. The model is "bootstrap-via-`createDb`":
 
-- **The single source of truth** is the inline `CREATE TABLE IF NOT EXISTS …` block in `createDb()` (`packages/db/src/db.ts`). It declares every table, index, the FTS5 virtual table, and its triggers on a fresh DB outright. Running it twice is a no-op (`IF NOT EXISTS`).
+- **The single source of truth** is the `CREATE TABLE IF NOT EXISTS …` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`). It declares every table, index, the FTS5 virtual table, and its triggers on a fresh DB outright. Running it twice is a no-op (`IF NOT EXISTS`).
 - **`schema.ts` is the Drizzle type layer** over the same tables, used for typed queries (`db.select()…`, the `Db*` / `Db*Insert` inferred types), never to apply migrations.
 - **A schema change is a hard reset** of the local DB. There are no users with persisted data to migrate, so the project carries no forward-only `ALTER` ladder.
 
@@ -375,17 +375,17 @@ Five drizzle migration stubs (`0000`–`0004`) existed before the migration ladd
 
 ## Pragmas and contention
 
-`createDb` opens the file with the multi-writer-safe pragma recipe (many agents may write one DB):
+`openDb` opens the file with the multi-writer-safe pragma recipe (many agents may write one DB); `createDb` is `openDb` followed by `ensureSchema`:
 
 ```sql
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 PRAGMA synchronous = NORMAL;
-PRAGMA busy_timeout = 1000;
+PRAGMA busy_timeout = 250;
 PRAGMA wal_autocheckpoint = 50;
 ```
 
-This pairs with the application-level jittered retry + `BEGIN IMMEDIATE` in the board repository (`packages/db/src/board/contention.ts`), the write-contention recipe behind the board's atomic claim.
+This pairs with the application-level jittered retry + `BEGIN IMMEDIATE` in the board repository (`packages/db/src/board/contention.ts`), the write-contention recipe behind the board's atomic claim. The retry is bounded by a 1.5-second wall-clock budget (`CLAWBOO_DB_WRITE_BUDGET_MS`), which is why `busy_timeout` is deliberately short.
 
 ## Where the file lives
 

@@ -123,21 +123,21 @@ Each spawned run for a task is recorded as an `execution_processes` row, a per-r
 
 ## The contention recipe
 
-Clawboo is team-first: many agents may write one SQLite file. Without care, concurrent writers hit SQLite's single-writer lock and degrade into a "convoy." The board's answer is a layered recipe: three connection-level pragmas plus two application-level pieces.
+Clawboo is team-first: many agents may write one SQLite file. Without care, concurrent writers hit SQLite's single-writer lock and degrade into a "convoy." The board's answer is a layered recipe: five connection-level pragmas plus two application-level pieces.
 
-Every database connection sets:
+Every connection sets, at open:
 
-| Pragma               | Value        | Why                                                                               |
-| -------------------- | ------------ | --------------------------------------------------------------------------------- |
-| `journal_mode`       | `WAL`        | Write-ahead logging lets readers and a writer proceed concurrently.               |
-| `busy_timeout`       | `1000` (ms)  | Wait up to a second for the write lock before erroring, dodges the convoy effect. |
-| `wal_autocheckpoint` | `50` (pages) | A passive checkpoint keeps the WAL lean without an app-level write counter.       |
-| `synchronous`        | `NORMAL`     | Standard WAL durability/performance balance.                                      |
-| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                |
+| Pragma               | Value        | Why                                                                                  |
+| -------------------- | ------------ | ------------------------------------------------------------------------------------ |
+| `journal_mode`       | `WAL`        | Write-ahead logging lets readers and a writer proceed concurrently.                  |
+| `busy_timeout`       | `250` (ms)   | Wait a quarter-second for the write lock, then hand off to the jittered retry below. |
+| `wal_autocheckpoint` | `50` (pages) | A passive checkpoint keeps the WAL lean without an app-level write counter.          |
+| `synchronous`        | `NORMAL`     | Standard WAL durability/performance balance.                                         |
+| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                   |
 
 On top of those, the board's data-access layer adds two application-level mechanisms:
 
-- **Jittered retry.** Writes are wrapped so that _only_ transient lock errors (`SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED`) are retried, with a jittered backoff (20–150 ms, at most 15 attempts). A 0-row result, like a lost claim race, is returned to the caller unretried, which is what lets callers honor the never-retry-a-409 rule. Any other error propagates immediately.
+- **Jittered retry.** Writes are wrapped so that _only_ transient lock errors (`SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED`) are retried, with a jittered backoff (20–150 ms) bounded by a **1.5-second wall-clock budget** rather than an attempt count, because the retry sleep blocks the server's event loop: an attempt count does not bound how long a contended write can freeze the server, a deadline does. A 0-row result, like a lost claim race, is returned to the caller unretried, which is what lets callers honor the never-retry-a-409 rule. Any other error propagates immediately.
 - **`BEGIN IMMEDIATE` transactions.** Multi-step writes (status transitions, reconciliation passes) acquire the write lock up front rather than escalating mid-transaction, which avoids lock-escalation deadlocks. The whole transaction re-runs from scratch on a transient lock error.
 
 <Note>

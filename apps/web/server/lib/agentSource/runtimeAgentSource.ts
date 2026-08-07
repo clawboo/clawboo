@@ -29,7 +29,6 @@ import {
   agents,
   approvalHistory,
   costRecords,
-  createDb,
   sessions,
   settings,
   teams,
@@ -45,7 +44,9 @@ import {
 } from './runtimeAgentFileStore'
 
 export interface RuntimeAgentSourceDeps {
-  getDbPath: () => string
+  /** The shared process connection (a thunk, so a sandbox swap is picked up
+   *  per call — the registries are module singletons built once per test file). */
+  getDb: () => ClawbooDb
   /** The runtime id this source owns (claude-code / codex / hermes). */
   runtimeId: RuntimeId
 }
@@ -79,7 +80,7 @@ export class RuntimeAgentSource implements AgentSource {
   }
 
   private db(): ClawbooDb {
-    return createDb(this.deps.getDbPath())
+    return this.deps.getDb()
   }
 
   private emit(e: AgentEvent): void {
