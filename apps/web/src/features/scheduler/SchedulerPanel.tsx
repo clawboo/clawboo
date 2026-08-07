@@ -7,7 +7,7 @@
 // can be scheduled only for a team task. Run-history + live firing come from the
 // record's nextRunAt/lastRunAt/status, refreshed on the same 8s cadence.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, Clock, Pause, Play, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 
@@ -274,7 +274,21 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
   // Settings modal when the Scheduler is opened from Settings), and an open
   // `<Select>` inside this dialog outranks it — so dismissing the Agent
   // dropdown leaves the dialog and its typed label alone. Issue #95.
-  useDismissableLayer({ active: true, level: 'dialog', onEscape: onClose })
+  // `busy` guards both channels: a dismissal mid-create would unmount the dialog
+  // while the POST is still in flight, and `submit()`'s completion path would then
+  // toast and close against an unmounted tree. Matches NewTaskDialog.
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useDismissableLayer({
+    active: true,
+    level: 'dialog',
+    onEscape: () => {
+      if (!busy) onClose()
+    },
+    contains: (t) => !!dialogRef.current?.contains(t),
+    onPressOutside: () => {
+      if (!busy) onClose()
+    },
+  })
 
   async function submit(): Promise<void> {
     if (!selected) return
@@ -314,7 +328,6 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
   // modal's glass container). z above the settings scrim (z-70).
   return createPortal(
     <div
-      onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -327,10 +340,10 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-label="Create schedule"
         data-testid="schedule-dialog"
-        onClick={(e) => e.stopPropagation()}
         className="rounded-2xl border border-border bg-surface"
         style={{
           width: 'min(440px, 100%)',

@@ -61,6 +61,20 @@ describe('MentionDropdown', () => {
     expect(screen.getByLabelText('composer')).toHaveFocus()
   })
 
+  it('activates from the keyboard, not just the pointer', async () => {
+    // Keyboard and assistive-technology activation dispatches `click`, never
+    // `mousedown` — an option wired only to mousedown is a dead control for
+    // anyone not using a pointer.
+    const onSelect = vi.fn()
+    const user = userEvent.setup()
+    renderUI(
+      <MentionDropdown agents={AGENTS} selectedIndex={0} onSelect={onSelect} onClose={vi.fn()} />,
+    )
+    screen.getByRole('option', { name: /Coder/ }).focus()
+    await user.keyboard('{Enter}')
+    expect(onSelect).toHaveBeenCalledWith('Coder')
+  })
+
   it('closes on a press outside, and only itself', async () => {
     const onClose = vi.fn()
     const user = userEvent.setup()

@@ -101,7 +101,13 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
 
   // Escape and outside-press are arbitrated by the shared layer stack: only the
   // topmost open layer reacts, so this dismisses alone.
-  useDismissableLayer({ active: open, level: 'popover', onEscape: () => setOpen(false) })
+  useDismissableLayer({
+    active: open,
+    level: 'popover',
+    onEscape: () => setOpen(false),
+    contains: (t) => !!triggerRef.current?.contains(t) || !!menuRef.current?.contains(t),
+    onPressOutside: () => setOpen(false),
+  })
 
   useEffect(() => {
     if (!open) {
@@ -109,18 +115,11 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
       return
     }
     const focusId = window.setTimeout(() => searchRef.current?.focus(), 0)
-    const onPointerDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return
-      setOpen(false)
-    }
     const onReflow = () => computePosition()
-    document.addEventListener('mousedown', onPointerDown)
     window.addEventListener('resize', onReflow)
     window.addEventListener('scroll', onReflow, true)
     return () => {
       window.clearTimeout(focusId)
-      document.removeEventListener('mousedown', onPointerDown)
       window.removeEventListener('resize', onReflow)
       window.removeEventListener('scroll', onReflow, true)
     }

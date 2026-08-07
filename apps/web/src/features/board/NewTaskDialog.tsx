@@ -91,10 +91,18 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
   //
   // Escape is consumed even mid-submit — a no-op here is deliberate, so the key
   // cannot fall through to the app shell and navigate out from under the write.
+  //
+  // Outside-press runs through the same stack rather than the scrim's own
+  // handler: the stack does not stop the press, so a local handler would fire
+  // ON TOP of an open Team/Status dropdown's dismissal and close the form too.
   useDismissableLayer({
     active: true,
     level: 'dialog',
     onEscape: () => {
+      if (!submitting) onClose()
+    },
+    contains: (t) => !!dialogRef.current?.contains(t),
+    onPressOutside: () => {
       if (!submitting) onClose()
     },
   })
@@ -133,9 +141,6 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
       exit={{ opacity: 0 }}
       transition={{ duration: 0.15 }}
       role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !submitting) onClose()
-      }}
     >
       <motion.form
         ref={dialogRef}

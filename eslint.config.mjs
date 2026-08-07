@@ -144,8 +144,6 @@ export default tseslint.config(
   // silently win and drop these.
   {
     files: ['apps/web/src/**/*.{ts,tsx}'],
-    // The stack's own module is the one place the listener is legitimately raw.
-    ignores: ['apps/web/src/features/shared/useDismissableLayer.ts'],
     rules: {
       'no-restricted-imports': [
         'error',

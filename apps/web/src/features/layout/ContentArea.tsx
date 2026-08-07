@@ -106,6 +106,13 @@ export function ContentArea() {
       // Escape — close the Settings modal first if it's open, else deselect
       // agent / go to welcome (only if no other overlay is open)
       if (e.key === 'Escape') {
+        // BEFORE the Settings branch, not after: a popover open ON TOP of
+        // Settings (a model picker inside it) owns Escape, and closing Settings
+        // out from under it is the same class of bug this PR fixes. The stack's
+        // own listener normally consumes the key before this handler ever runs;
+        // this ordering is what makes that true regardless of listener order.
+        if (hasOpenLayer()) return
+
         if (useSettingsModalStore.getState().open) {
           e.preventDefault()
           useSettingsModalStore.getState().close()
@@ -119,9 +126,6 @@ export function ContentArea() {
         // consequence of it — if this file's effect ever ran first, the check
         // still holds.
         //
-        // Deliberately AFTER the Settings branch: SettingsModal has no Escape
-        // handler of its own, so this one is it.
-        if (hasOpenLayer()) return
         // Not redundant with the stack: see `overlayOwnsKeyboard` — the editor's
         // layer does not exist until its lazy chunk mounts.
         if (useEditorStore.getState().isOpen) return

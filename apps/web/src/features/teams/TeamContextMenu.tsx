@@ -64,18 +64,16 @@ export function TeamContextMenu({
 
   // Escape and outside-press are arbitrated by the shared layer stack: only the
   // topmost open layer reacts, so this dismisses alone.
-  useDismissableLayer({ active: true, level: 'popover', onEscape: onClose })
+  useDismissableLayer({
+    active: true,
+    level: 'popover',
+    onEscape: onClose,
+    contains: (t) => !!ref.current?.contains(t),
+    onPressOutside: onClose,
+  })
 
   useEffect(() => {
-    function handleMouseDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    return () => {
-      document.removeEventListener('mousedown', handleMouseDown)
-    }
+    return () => {}
   }, [onClose])
 
   return (

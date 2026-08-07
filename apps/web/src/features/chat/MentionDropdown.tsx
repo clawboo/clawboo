@@ -81,12 +81,12 @@ export const MentionDropdown = memo(function MentionDropdown({
           type="button"
           role="option"
           aria-selected={i === selectedIndex}
-          // mousedown + preventDefault rather than onClick: the textarea has to
-          // keep focus so the caret stays put after the mention is spliced in.
-          onMouseDown={(e) => {
-            e.preventDefault()
-            onSelect(agent.name)
-          }}
+          // preventDefault on mousedown keeps the textarea focused so the caret
+          // stays put; selection itself hangs off `click`, which is what keyboard
+          // and assistive-technology activation dispatches (mousedown alone would
+          // leave a focused option inert).
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onSelect(agent.name)}
           className={[
             'flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-popover-foreground transition-colors',
             i === selectedIndex ? 'bg-foreground/[0.08]' : 'hover:bg-foreground/[0.04]',

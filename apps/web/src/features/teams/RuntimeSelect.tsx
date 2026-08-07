@@ -29,17 +29,17 @@ export function RuntimeSelect({ value, options, onChange, onDisabledClick }: Run
 
   // Escape and outside-press are arbitrated by the shared layer stack: only the
   // topmost open layer reacts, so this dismisses alone.
-  useDismissableLayer({ active: open, level: 'popover', onEscape: () => setOpen(false) })
+  useDismissableLayer({
+    active: open,
+    level: 'popover',
+    onEscape: () => setOpen(false),
+    contains: (t) => !!ref.current?.contains(t),
+    onPressOutside: () => setOpen(false),
+  })
 
   useEffect(() => {
     if (!open) return
-    const onDoc = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-    }
+    return () => {}
   }, [open])
 
   const current = options.find((o) => o.sourceId === value) ?? options[0]

@@ -28,6 +28,13 @@ export function ConfirmDialog() {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Enter') return
+      // Same two contracts the stack applies to Escape, since this listener now
+      // sits in the same phase: an Enter that commits an IME composition is not
+      // a confirmation, and a handler nearer the target that already consumed it
+      // wins. (`keyCode === 229` is the WebKit spelling that leaves
+      // `isComposing` unset.)
+      if (e.isComposing || e.keyCode === 229) return
+      if (e.defaultPrevented) return
       e.preventDefault()
       settle(true)
     }

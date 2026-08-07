@@ -97,11 +97,23 @@ export function Modal({ open, ...rest }: ModalProps) {
   // flight must still CONSUME Escape rather than let it reach the app shell,
   // which would navigate the view out from under the pending write. Owning the
   // layer with a no-op `onEscape` is what does that.
+  //
+  // Outside-press goes through the SAME stack, not a scrim handler. The stack
+  // deliberately does not stop the press event (a press inside a dialog must
+  // still activate whatever it landed on), so a local scrim handler would fire
+  // in addition to the popover's dismissal — one press on the scrim would close
+  // an open `<Select>` AND this dialog. Routing both channels through the stack
+  // means the topmost layer, and only it, reacts.
   const { dismissible = true, onClose } = rest
+  const panelRef = useRef<HTMLDivElement | null>(null)
   useDismissableLayer({
     active: open,
     level: 'dialog',
     onEscape: () => {
+      if (dismissible) onClose()
+    },
+    contains: (t) => !!panelRef.current?.contains(t),
+    onPressOutside: () => {
       if (dismissible) onClose()
     },
   })
@@ -109,16 +121,18 @@ export function Modal({ open, ...rest }: ModalProps) {
   // The body mounts only while open, so the trap activates + restores focus on
   // the dialog's lifecycle and `children` state resets on every open by
   // construction (the NewTaskDialog pattern).
-  return <AnimatePresence>{open && <ModalBody key="modal-body" {...rest} />}</AnimatePresence>
+  return (
+    <AnimatePresence>
+      {open && <ModalBody key="modal-body" panelRef={panelRef} {...rest} />}
+    </AnimatePresence>
+  )
 }
 
 function ModalBody({
-  onClose,
   label,
   labelledBy,
   variant = 'center',
   role = 'dialog',
-  dismissible = true,
   layer = 60,
   focusKey = 0,
   initialFocusRef,
@@ -128,8 +142,8 @@ function ModalBody({
   'data-testid': testId,
   scrimTestId,
   children,
-}: Omit<ModalProps, 'open'>) {
-  const panelRef = useRef<HTMLDivElement | null>(null)
+  panelRef,
+}: Omit<ModalProps, 'open'> & { panelRef: RefObject<HTMLDivElement | null> }) {
   useFocusTrap(panelRef, focusKey, initialFocusRef)
 
   const drawer = variant === 'drawer'
@@ -153,11 +167,6 @@ function ModalBody({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.15 }}
-      onMouseDown={(e) => {
-        // mousedown, not click: a text selection that starts inside the panel
-        // and releases over the scrim must not dismiss the dialog.
-        if (dismissible && e.target === e.currentTarget) onClose()
-      }}
     >
       <motion.div
         ref={panelRef}
