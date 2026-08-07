@@ -57,6 +57,43 @@ function TriggerAndDialog() {
 }
 
 /**
+ * A trigger that is DESTROYED and re-created while its dialog is open — the board card
+ * whose task changes column under an open drawer. Flipping `moved` swaps the wrapper
+ * element type, so React cannot reuse the button: the replacement is a genuinely
+ * different DOM node carrying the same `data-focus-restore-id`.
+ */
+function RecreatedTrigger({ tagged = true }: { tagged?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [moved, setMoved] = useState(false)
+  const card = (
+    // `undefined` omits the attribute entirely, so `tagged={false}` is a genuinely
+    // untagged trigger rather than one carrying an empty id.
+    <button
+      type="button"
+      data-focus-restore-id={tagged ? 't1' : undefined}
+      onClick={() => setOpen(true)}
+    >
+      Card
+    </button>
+  )
+  return (
+    <>
+      {moved ? <section>{card}</section> : <div>{card}</div>}
+      {open && (
+        <Dialog name="outer">
+          <button type="button" onClick={() => setMoved(true)}>
+            Move
+          </button>
+          <button type="button" onClick={() => setOpen(false)}>
+            Close
+          </button>
+        </Dialog>
+      )}
+    </>
+  )
+}
+
+/**
  * Two stacked dialogs in the topology the app actually uses: the inner one is a
  * DOM SIBLING of the outer, not a descendant — `CreateTeamModal` renders
  * `TeamTemplateDetail` as a sibling `<Modal>` at a higher layer.
@@ -165,6 +202,52 @@ describe('useFocusTrap', () => {
 
     await user.click(screen.getByRole('button', { name: 'Close' }))
     expect(trigger).toHaveFocus()
+  })
+
+  it('re-finds a trigger that was re-created while the dialog was open', async () => {
+    // `.focus()` on a detached node is a SILENT no-op, so restoring to the captured
+    // reference would strand focus on <body> and send the next Tab to the top of the
+    // document. The trigger's `data-focus-restore-id` is what makes the return survive
+    // its own node being replaced (a board card moving column under an open drawer).
+    const user = userEvent.setup()
+    render(<RecreatedTrigger />)
+    const original = screen.getByRole('button', { name: 'Card' })
+
+    await user.click(original)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'outer first' })).toHaveFocus())
+
+    await user.click(screen.getByRole('button', { name: 'Move' }))
+    expect(original.isConnected).toBe(false) // the captured trigger is gone
+
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    const replacement = screen.getByRole('button', { name: 'Card' })
+    expect(replacement).not.toBe(original)
+    expect(replacement).toHaveFocus()
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('does not re-find a re-created trigger that is untagged', async () => {
+    // The re-find is strictly opt-in: with no `data-focus-restore-id` the trap has no
+    // way to tell the replacement apart from any other button, so it must NOT guess.
+    // Same journey as the test above, minus the tag — the replacement stays unfocused.
+    // This is the boundary of the opt-in, and the reason a consumer has to tag its
+    // trigger to get the behavior at all.
+    const user = userEvent.setup()
+    render(<RecreatedTrigger tagged={false} />)
+    const original = screen.getByRole('button', { name: 'Card' })
+    expect(original.dataset['focusRestoreId']).toBeUndefined()
+
+    await user.click(original)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'outer first' })).toHaveFocus())
+
+    await user.click(screen.getByRole('button', { name: 'Move' }))
+    expect(original.isConnected).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    const replacement = screen.getByRole('button', { name: 'Card' })
+    expect(replacement).not.toBe(original)
+    expect(replacement).not.toHaveFocus()
+    expect(document.activeElement).toBe(document.body)
   })
 
   describe('stacked traps', () => {

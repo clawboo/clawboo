@@ -104,6 +104,10 @@ function TaskCard({ task, onClick }: { task: BoardTask; onClick: () => void }) {
     <button
       type="button"
       data-testid="board-card"
+      // A card is destroyed and re-created whenever its task changes column, so the
+      // drawer it opened cannot return focus to the captured node. This tags the card
+      // with its task id so `useFocusTrap` can re-find it on close (#98).
+      data-focus-restore-id={task.id}
       onClick={onClick}
       className="group block w-full cursor-pointer rounded-2xl border border-border bg-surface p-4 text-left transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong"
       style={{ boxShadow: 'var(--shadow-raised)' }}
@@ -379,6 +383,42 @@ export function BoardPanel() {
     [],
   )
 
+  // Commit a status change into the authoritative `tasks` so the card moves to its new
+  // column at once — shared by the drawer's editor (via onStatusCommitted, issue #98) and
+  // the drag commit below, so the two manual paths behave identically (the same optimistic
+  // local-state patch handleCreated uses for a new card). Mirrors the server AND the
+  // drawer's own setDetail: a →todo release also clears the assignee/runtime/verdict, so
+  // the card never lingers with a stale runtime or a misleading verification pill until the
+  // poll catches up. Drops any in-flight override for the task so the committed status is
+  // authoritative; the next poll then simply agrees (same id, one column) — no flicker,
+  // no duplicate. The PATCH's only DISPLAYED row writes are the status and, on a →todo
+  // release, the three fields cleared above — both mirrored here — so the poll has no field
+  // left to correct. It still re-sorts the row (the server bumps `updatedAt`, which the
+  // board query orders by) and stays authoritative for any concurrent agent change.
+  const commitStatus = useCallback(
+    (taskId: string, newStatus: string) => {
+      // Fence off any read issued before this local write (the 5s poll, Refresh, a
+      // reconcile) so a response that predates the change can't land and snap the card
+      // back to its old column — the same guard handleCreated and the drag commit use.
+      reads.commitLocalWrite()
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId
+            ? {
+                ...t,
+                status: newStatus,
+                ...(newStatus === 'todo'
+                  ? { assigneeAgentId: null, assigneeRuntime: null, verification: null }
+                  : {}),
+              }
+            : t,
+        ),
+      )
+      clearOverride(taskId)
+    },
+    [clearOverride, reads],
+  )
+
   const onDragEnd = useCallback(
     async ({ active, over }: DragEndEvent) => {
       setActiveTask(null)
@@ -393,17 +433,12 @@ export function BoardPanel() {
         applyOptimistic: () => setOverrides((o) => ({ ...o, [move.taskId]: move.to })),
         rollback: () => clearOverride(move.taskId),
       })
-      if (ok) {
-        // The override bridged the in-flight PATCH (it layers over `tasks`, so no read
-        // could clobber it). Clearing it hands authority back to `tasks`, so the commit
-        // must also fence off any read issued before this point — otherwise that read
-        // lands with the pre-drag status and snaps the card back to its old column.
-        reads.commitLocalWrite()
-        setTasks((prev) => prev.map((t) => (t.id === move.taskId ? { ...t, status: move.to } : t)))
-        clearOverride(move.taskId)
-      }
+      // The commit fences off any read issued before this point (via commitStatus →
+      // reads.commitLocalWrite) so a pre-drag snapshot can't snap the card back, then
+      // hands authority from the override back to `tasks`.
+      if (ok) commitStatus(move.taskId, move.to)
     },
-    [effectiveTasks, mutate, clearOverride, reads],
+    [effectiveTasks, mutate, clearOverride, commitStatus],
   )
 
   // Mid-drag, a card may only land on a column it can legally transition to; all other
@@ -573,7 +608,13 @@ export function BoardPanel() {
       </div>
 
       <AnimatePresence>
-        {openTaskId && <TaskDetailDrawer taskId={openTaskId} onClose={() => setOpenTaskId(null)} />}
+        {openTaskId && (
+          <TaskDetailDrawer
+            taskId={openTaskId}
+            onClose={() => setOpenTaskId(null)}
+            onStatusCommitted={commitStatus}
+          />
+        )}
       </AnimatePresence>
 
       <NewTaskDialog
