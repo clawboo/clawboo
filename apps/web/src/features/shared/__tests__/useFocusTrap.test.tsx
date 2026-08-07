@@ -62,11 +62,17 @@ function TriggerAndDialog() {
  * element type, so React cannot reuse the button: the replacement is a genuinely
  * different DOM node carrying the same `data-focus-restore-id`.
  */
-function RecreatedTrigger() {
+function RecreatedTrigger({ tagged = true }: { tagged?: boolean }) {
   const [open, setOpen] = useState(false)
   const [moved, setMoved] = useState(false)
   const card = (
-    <button type="button" data-focus-restore-id="t1" onClick={() => setOpen(true)}>
+    // `undefined` omits the attribute entirely, so `tagged={false}` is a genuinely
+    // untagged trigger rather than one carrying an empty id.
+    <button
+      type="button"
+      data-focus-restore-id={tagged ? 't1' : undefined}
+      onClick={() => setOpen(true)}
+    >
       Card
     </button>
   )
@@ -220,18 +226,28 @@ describe('useFocusTrap', () => {
     expect(document.activeElement).not.toBe(document.body)
   })
 
-  it('leaves focus alone when a re-created trigger is untagged', async () => {
-    // The re-find is opt-in. An untagged trigger keeps the plain node behavior rather
-    // than the trap guessing at a replacement, so this pins the fallback's boundary.
+  it('does not re-find a re-created trigger that is untagged', async () => {
+    // The re-find is strictly opt-in: with no `data-focus-restore-id` the trap has no
+    // way to tell the replacement apart from any other button, so it must NOT guess.
+    // Same journey as the test above, minus the tag — the replacement stays unfocused.
+    // This is the boundary of the opt-in, and the reason a consumer has to tag its
+    // trigger to get the behavior at all.
     const user = userEvent.setup()
-    render(<TriggerAndDialog />)
-    const trigger = screen.getByRole('button', { name: 'Open' })
-    expect(trigger.dataset['focusRestoreId']).toBeUndefined()
+    render(<RecreatedTrigger tagged={false} />)
+    const original = screen.getByRole('button', { name: 'Card' })
+    expect(original.dataset['focusRestoreId']).toBeUndefined()
 
-    await user.click(trigger)
+    await user.click(original)
     await waitFor(() => expect(screen.getByRole('button', { name: 'outer first' })).toHaveFocus())
+
+    await user.click(screen.getByRole('button', { name: 'Move' }))
+    expect(original.isConnected).toBe(false)
+
     await user.click(screen.getByRole('button', { name: 'Close' }))
-    expect(trigger).toHaveFocus()
+    const replacement = screen.getByRole('button', { name: 'Card' })
+    expect(replacement).not.toBe(original)
+    expect(replacement).not.toHaveFocus()
+    expect(document.activeElement).toBe(document.body)
   })
 
   describe('stacked traps', () => {
