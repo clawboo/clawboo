@@ -87,6 +87,23 @@ jobs:
       # so uncovered surfaces stay noticeable, not a gate.
       - run: pnpm test:coverage
 
+      # The real-concurrency suite is env-gated out of `pnpm test` because a
+      # worker thread gets no TS transform, so it needs @clawboo/db's BUILT dist.
+      # `turbo test` builds a package's DEPENDENCIES, not the package itself,
+      # hence the explicit build here.
+      #
+      # Not optional coverage: it is the ONLY guard on the guarded-create
+      # transaction. `createCappedSubtask` counts siblings and inserts inside one
+      # `BEGIN IMMEDIATE` because the Tasks MCP ships as a stdio bin (one OS
+      # process per attached runtime on the shared DB file). Move that count
+      # outside the transaction and this suite lands 20 children against a cap of
+      # 5, while every other check in this workflow still passes.
+      - run: pnpm --filter @clawboo/db build
+      - name: Real-concurrency suite (WAL contention, claim mutex, cap atomicity)
+        run: pnpm --filter @clawboo/db exec vitest run src/board/__tests__/board.contention.test.ts
+        env:
+          CLAWBOO_CONCURRENCY_TEST: '1'
+
   build:
     name: Build
     runs-on: ubuntu-latest

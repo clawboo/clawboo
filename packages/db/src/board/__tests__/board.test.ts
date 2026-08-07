@@ -3,18 +3,24 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { canTransition, isLocked, isTerminal } from '@clawboo/board-core'
-import { eq } from 'drizzle-orm'
+import { eq, sql as dsql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, type ClawbooDb } from '../../db'
-import { executionProcesses } from '../../schema'
+import { executionProcesses, type DbTask } from '../../schema'
 import {
   addComment,
   cancelDependents,
   claimTask,
+  createCappedRootTask,
+  createCappedSubtask,
   createExecutionProcess,
   createSubtask,
   createTask,
+  DEFAULT_MAX_CHILDREN,
+  DEFAULT_MAX_DEPTH,
+  DEFAULT_MAX_ROOT_CREATES,
+  DEFAULT_ROOT_CREATE_WINDOW_MS,
   dropTask,
   getAncestors,
   getComments,
@@ -28,6 +34,7 @@ import {
   TaskDependencyCycleError,
   updateStatus,
   updateTaskFields,
+  type GuardedCreateResult,
 } from '../repository'
 
 let dir: string
@@ -299,5 +306,176 @@ describe('dependencies, lineage, comments, soft-delete', () => {
     dropTask(db, t.id)
     expect(listTasks(db)).toHaveLength(0)
     expect(listTasks(db, { includeDropped: true })).toHaveLength(1)
+  })
+})
+
+describe('guarded creation (per-parent child count, nesting depth, root rate)', () => {
+  const childrenOf = (parentId: string) => listTasks(db).filter((t) => t.parentTaskId === parentId)
+  /** Narrow the union instead of asserting — `ok: true` guarantees `task`. */
+  const created = (r: GuardedCreateResult): DbTask => {
+    if (!r.ok) throw new Error(`expected the create to succeed, got ${r.reason}`)
+    return r.task
+  }
+  const denied = (r: GuardedCreateResult) => (r.ok ? null : r)
+
+  it('pins the shipped ceilings — retune them deliberately, never by accident', () => {
+    expect(DEFAULT_MAX_CHILDREN).toBe(24)
+    expect(DEFAULT_MAX_DEPTH).toBe(2)
+    expect(DEFAULT_MAX_ROOT_CREATES).toBe(30)
+    expect(DEFAULT_ROOT_CREATE_WINDOW_MS).toBe(300_000)
+  })
+
+  it('accepts N children then rejects the N+1th, leaving exactly N on the board', () => {
+    const parent = createTask(db, { title: 'parent', teamId: 'team1' })
+    const caps = { maxChildren: 3 }
+    for (let i = 0; i < 3; i += 1) {
+      expect(createCappedSubtask(db, parent.id, { title: `c${i}` }, caps).ok).toBe(true)
+    }
+
+    const r = denied(createCappedSubtask(db, parent.id, { title: 'c3' }, caps))
+    expect(r?.reason).toBe('child_cap')
+    expect(r?.count).toBe(3)
+    expect(r?.max).toBe(3)
+    expect(childrenOf(parent.id)).toHaveLength(3)
+  })
+
+  it('a dropped child frees a slot — soft-delete is the only recovery from the cap', () => {
+    const parent = createTask(db, { title: 'parent' })
+    const caps = { maxChildren: 2 }
+    const first = created(createCappedSubtask(db, parent.id, { title: 'a' }, caps))
+    createCappedSubtask(db, parent.id, { title: 'b' }, caps)
+    expect(denied(createCappedSubtask(db, parent.id, { title: 'c' }, caps))?.reason).toBe(
+      'child_cap',
+    )
+
+    dropTask(db, first.id)
+    expect(createCappedSubtask(db, parent.id, { title: 'c' }, caps).ok).toBe(true)
+  })
+
+  it('a completed child still counts, so a create → complete loop cannot outgrow the cap', () => {
+    const parent = createTask(db, { title: 'parent' })
+    const caps = { maxChildren: 1 }
+    const child = created(createCappedSubtask(db, parent.id, { title: 'a' }, caps))
+    claimTask(db, child.id, 'agent-a')
+    expect(updateStatus(db, child.id, 'done').ok).toBe(true)
+
+    expect(denied(createCappedSubtask(db, parent.id, { title: 'b' }, caps))?.reason).toBe(
+      'child_cap',
+    )
+  })
+
+  it('rejects a child whose parent is already at the max nesting depth', () => {
+    const caps = { maxDepth: 2 }
+    const root = createTask(db, { title: 'root' })
+    const child = created(createCappedSubtask(db, root.id, { title: 'child' }, caps)) // depth 1
+    const grand = created(createCappedSubtask(db, child.id, { title: 'grand' }, caps)) // depth 2
+    expect(getAncestors(db, grand.id)).toHaveLength(2)
+
+    const r = denied(createCappedSubtask(db, grand.id, { title: 'great' }, caps))
+    expect(r?.reason).toBe('depth_cap')
+    expect(r?.max).toBe(2)
+  })
+
+  it('an unknown parent is parent_not_found DATA, not a foreign-key exception', () => {
+    const before = listTasks(db).length
+    expect(denied(createCappedSubtask(db, 'does-not-exist', { title: 'orphan' }))?.reason).toBe(
+      'parent_not_found',
+    )
+    expect(listTasks(db)).toHaveLength(before)
+  })
+
+  it('inherits the parent team and counts children written on another connection', () => {
+    const parent = createTask(db, { title: 'parent', teamId: 'team1' })
+    // A second handle on the SAME file — the two-attached-runtimes shape.
+    const other = createDb(dbPath)
+    expect(
+      created(createCappedSubtask(other, parent.id, { title: 'a' }, { maxChildren: 1 })).teamId,
+    ).toBe('team1')
+
+    expect(
+      denied(createCappedSubtask(db, parent.id, { title: 'b' }, { maxChildren: 1 }))?.reason,
+    ).toBe('child_cap')
+  })
+
+  it('rate-caps root creation inside the window, then rejects the next one', () => {
+    const caps = { maxRootCreates: 3, windowMs: 300_000 }
+    for (let i = 0; i < 3; i += 1) {
+      expect(createCappedRootTask(db, { title: `r${i}` }, caps).ok).toBe(true)
+    }
+
+    const r = denied(createCappedRootTask(db, { title: 'r3' }, caps))
+    expect(r?.reason).toBe('root_rate_cap')
+    expect(r?.count).toBe(3)
+    expect(r?.max).toBe(3)
+    expect(r?.windowMs).toBe(300_000)
+    expect(listTasks(db)).toHaveLength(3) // the refusal wrote nothing
+  })
+
+  it('a root create outside the window does not count — the rate self-clears', () => {
+    const caps = { maxRootCreates: 1, windowMs: 300_000 }
+    expect(createCappedRootTask(db, { title: 'old' }, caps).ok).toBe(true)
+    expect(denied(createCappedRootTask(db, { title: 'new' }, caps))?.reason).toBe('root_rate_cap')
+
+    // A zero-length window makes every existing row "outside" it, which is the
+    // same arithmetic as waiting for the window to roll — no clock mocking needed.
+    expect(
+      createCappedRootTask(db, { title: 'after' }, { maxRootCreates: 1, windowMs: 0 }).ok,
+    ).toBe(true)
+  })
+
+  it('counts roots created through the UNCAPPED repository too, so rows cannot be laundered in', () => {
+    const caps = { maxRootCreates: 2, windowMs: 300_000 }
+    createTask(db, { title: 'via repo a' }) // the REST/orchestrator path
+    createTask(db, { title: 'via repo b' })
+
+    expect(denied(createCappedRootTask(db, { title: 'via mcp' }, caps))?.reason).toBe(
+      'root_rate_cap',
+    )
+  })
+
+  it('a subtask is never charged against the root rate cap', () => {
+    const root = created(createCappedRootTask(db, { title: 'root' }, { maxRootCreates: 1 }))
+    // The parent already used the single root slot; children must still flow.
+    expect(createCappedSubtask(db, root.id, { title: 'child' }).ok).toBe(true)
+    expect(
+      denied(createCappedRootTask(db, { title: 'second root' }, { maxRootCreates: 1 }))?.reason,
+    ).toBe('root_rate_cap')
+  })
+
+  it('a dropped root frees rate quota early', () => {
+    const caps = { maxRootCreates: 1, windowMs: 300_000 }
+    const first = created(createCappedRootTask(db, { title: 'a' }, caps))
+    expect(denied(createCappedRootTask(db, { title: 'b' }, caps))?.reason).toBe('root_rate_cap')
+
+    dropTask(db, first.id)
+    expect(createCappedRootTask(db, { title: 'b' }, caps).ok).toBe(true)
+  })
+})
+
+describe('guarded-create index coverage', () => {
+  // Both cap counts run INSIDE `immediateWrite`, holding the write lock, so an
+  // unindexed scan there stalls every other task write on the board. Assert the
+  // planner actually USES the composite index rather than just that it exists —
+  // a present-but-unused index is the same stall with extra write cost.
+  const plan = (sql: string): string =>
+    (db.all(dsql.raw(`EXPLAIN QUERY PLAN ${sql}`)) as { detail: string }[])
+      .map((r) => r.detail)
+      .join(' | ')
+
+  it('the root-rate count is index-backed, not a scan', () => {
+    const detail = plan(
+      'SELECT count(*) FROM tasks WHERE parent_task_id IS NULL AND dropped = 0 AND created_at > 0',
+    )
+    expect(detail).toContain('idx_tasks_parent_dropped_created')
+    expect(detail).not.toMatch(/SCAN tasks/)
+  })
+
+  it('the per-parent child count is index-backed too (an index prefix)', () => {
+    const detail = plan("SELECT count(*) FROM tasks WHERE parent_task_id = 'x' AND dropped = 0")
+    // The composite by NAME, not a loose /idx_tasks_parent/ — that substring also
+    // matches the narrower single-column index, so the assertion would still pass
+    // if the planner regressed off the covering path.
+    expect(detail).toContain('idx_tasks_parent_dropped_created')
+    expect(detail).not.toMatch(/SCAN tasks/)
   })
 })

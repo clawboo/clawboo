@@ -125,7 +125,23 @@ Stale re-claim of a dead, abandoned `in_progress` task is deliberately **not** t
 
 ## Dependencies and the recursive CTEs
 
-Tasks form a blocks / blocked-by graph in `task_deps`, with a composite primary key on `(task_id, depends_on_task_id)` that prevents duplicate edges. `linkDep` inserts with `onConflictDoNothing`, so re-linking is a harmless no-op.
+Tasks form a blocks / blocked-by graph in `task_deps`, with a composite primary key on `(task_id, depends_on_task_id)` that prevents duplicate edges. `linkDep` writes the whole edge inside `immediateWrite`: it rejects a self-link outright, then probes reachability with a recursive CTE and throws `TaskDependencyCycleError` when `taskId` is already upstream of `dependsOnTaskId` — that is, when the new edge would close a direct or transitive cycle. Only after the probe does it insert, still with `onConflictDoNothing`, so re-linking an existing edge remains a harmless no-op. Probe and insert share one `BEGIN IMMEDIATE` transaction, so two concurrent links cannot race a cycle into the graph.
+
+```ts
+sql`
+  WITH RECURSIVE dependencies(id) AS (
+    SELECT depends_on_task_id FROM task_deps WHERE task_id = ${dependsOnTaskId}
+    UNION
+    SELECT td.depends_on_task_id FROM task_deps td
+    JOIN dependencies dep ON td.task_id = dep.id
+  )
+  SELECT id FROM dependencies WHERE id = ${taskId} LIMIT 1
+`
+```
+
+<Note>
+A cycle is refused at write time because nothing downstream can recover from one: `getReadyTasks` requires every dependency to be `done`, so every task in a cycle is permanently un-ready and no error surfaces anywhere — the ready-pump simply has nothing to fire. `TaskDependencyCycleError` carries `code: 'task_dependency_cycle'`; the `link_task` MCP tool maps it to a tool-error, and the REST dependency route maps it to a `409` with that code in `error` — a client mistake, not a server fault.
+</Note>
 
 A task is **ready** when it is `todo`, not dropped, and _every_ one of its dependencies is `done`. `getReadyTasks` expresses that with a `NOT EXISTS` subquery and orders the results by priority descending, then `updatedAt` descending:
 
@@ -155,7 +171,9 @@ sql`
 
 This drives failure recovery. When a blocker fails, moves to `blocked` or otherwise can't reach `done`, its downstream chain can never become ready and would otherwise sit forever as ghost `todo` cards. `cancelDependents` walks `getDependents`, cancels only the still-pending (`todo` / `backlog`) members via `updateStatus`, and returns the cancelled rows so the orchestrator can report the stalled plan to the team leader. Tasks already `in_progress`, `done`, or `cancelled` are left untouched.
 
-**`getAncestors`** walks the _parent_ chain via the self-referential `parent_task_id`, returning a minimal `{ id, parent_task_id, title, status }` row per ancestor. It is used to enforce delegation depth limits; an orchestrator reads the ancestor count to refuse spawning past a maximum depth. Its raw rows are parsed with `ancestorRowsSchema` from `schemas.ts` before being returned.
+**`getAncestors`** walks the _parent_ chain via the self-referential `parent_task_id`, returning a minimal `{ id, parent_task_id, title, status }` row per ancestor. Its raw rows are parsed with `ancestorRowsSchema` from `schemas.ts` before being returned. It is the depth cap's counter at two call sites, both reading the same `DEFAULT_MAX_DEPTH`: the team orchestrator refuses to spawn when the SOURCE task is already at the ceiling (`ancestors.length >= max`, so the child would be one past it), and the executor runner refuses to dispatch a task that is itself past it (`ancestors.length > max`). The `>=`/`>` split is what makes the deepest creatable task also dispatchable. The creation-time cap enforces the orchestrator's rule but does not use this helper — see `createCappedSubtask` below.
+
+**`createCappedSubtask`** is the board's own bounded create, and the one the Tasks MCP create tools call. It does the parent lookup, an indexed `COUNT(*)` of the parent's non-dropped children, a step-bounded parent-chain walk, and the insert inside a single `BEGIN IMMEDIATE` transaction, returning `{ ok: false, reason: 'parent_not_found' | 'child_cap' | 'depth_cap' }` rather than throwing. The transaction is the point: the Tasks MCP ships as a stdio bin, one OS process per attached runtime on the shared database file, so a count-then-insert window would let two agents both land the N+1th child. It walks the chain itself instead of calling `getAncestors` because that helper takes a `ClawbooDb` rather than a transaction handle, and because a hard step bound cannot spin on corrupt data while a write lock is held. `createCappedRootTask` is its parentless sibling: same one-transaction shape, but the guard is a rolling-window RATE on root creation rather than a total, because a per-parent ceiling has no subject on a root and a lifetime ceiling would eventually jam a long-lived board. `createSubtask` remains the uncapped primitive for the orchestrator, the REST board, and the evals harness. Every count comes from durable board state, never from the model.
 
 ## Worktree linkage and execution rows
 

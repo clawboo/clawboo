@@ -107,26 +107,29 @@ The barrel re-exports four module groups: `./verify`, `./budget`, `./caps`, `./b
 
 ### Constants
 
-| Name                        | Value / contract                                                                                                                                                            |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `severitySchema`            | zod enum of the 8 `Severity` values.                                                                                                                                        |
-| `findingSchema`             | zod object for `Finding` (terse model output still parses via defaults).                                                                                                    |
-| `deterministicResultSchema` | zod object for `DeterministicResult`.                                                                                                                                       |
-| `criticOutputSchema`        | zod object for `CriticOutput` (`findings` defaults to `[]`).                                                                                                                |
-| `criticVerdictSchema`       | zod object for `CriticVerdict`.                                                                                                                                             |
-| `structuredErrorSchema`     | zod object for `StructuredError`.                                                                                                                                           |
-| `verificationStatusSchema`  | zod enum for `VerificationStatus`.                                                                                                                                          |
-| `verificationAttemptSchema` | zod object for `VerificationAttempt`.                                                                                                                                       |
-| `debtNoteSchema`            | zod object for `DebtNote`.                                                                                                                                                  |
-| `verificationResultSchema`  | zod object for `VerificationResult` (`attempts` min 1).                                                                                                                     |
-| `DEFAULT_MAX_FIX_CYCLES`    | `3`, default verify-fix cycle budget.                                                                                                                                       |
-| `DEFAULT_CRITIC_THRESHOLD`  | `{ files: 5, lines: 300 }`, diff size above which the critic fires.                                                                                                         |
-| `SOFT_CAP_PERCENT`          | `80`, soft-cap threshold percent.                                                                                                                                           |
-| `MICRO_CENTS_PER_CENT`      | `10_000`, ledger micro-cent carry granularity.                                                                                                                              |
-| `DEFAULT_MAX_DEPTH`         | `2`, default delegation-depth cap.                                                                                                                                          |
-| `BREAKER_DEFAULTS`          | `{ maxToolIterations: 30, repeatFailureThreshold: 3, noProgressThreshold: 6, tokenVelocityCeiling: 200_000, velocityMinWindowMs: 15_000, repeatPolicyDeniedThreshold: 2 }`. |
-| `breakerConfigSchema`       | zod partial object for `BreakerConfigInput`.                                                                                                                                |
-| `breakerTripReasonSchema`   | zod enum for `BreakerTripReason`.                                                                                                                                           |
+| Name                            | Value / contract                                                                                                                                                                                                          |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `severitySchema`                | zod enum of the 8 `Severity` values.                                                                                                                                                                                      |
+| `findingSchema`                 | zod object for `Finding` (terse model output still parses via defaults).                                                                                                                                                  |
+| `deterministicResultSchema`     | zod object for `DeterministicResult`.                                                                                                                                                                                     |
+| `criticOutputSchema`            | zod object for `CriticOutput` (`findings` defaults to `[]`).                                                                                                                                                              |
+| `criticVerdictSchema`           | zod object for `CriticVerdict`.                                                                                                                                                                                           |
+| `structuredErrorSchema`         | zod object for `StructuredError`.                                                                                                                                                                                         |
+| `verificationStatusSchema`      | zod enum for `VerificationStatus`.                                                                                                                                                                                        |
+| `verificationAttemptSchema`     | zod object for `VerificationAttempt`.                                                                                                                                                                                     |
+| `debtNoteSchema`                | zod object for `DebtNote`.                                                                                                                                                                                                |
+| `verificationResultSchema`      | zod object for `VerificationResult` (`attempts` min 1).                                                                                                                                                                   |
+| `DEFAULT_MAX_FIX_CYCLES`        | `3`, default verify-fix cycle budget.                                                                                                                                                                                     |
+| `DEFAULT_CRITIC_THRESHOLD`      | `{ files: 5, lines: 300 }`, diff size above which the critic fires.                                                                                                                                                       |
+| `SOFT_CAP_PERCENT`              | `80`, soft-cap threshold percent.                                                                                                                                                                                         |
+| `MICRO_CENTS_PER_CENT`          | `10_000`, ledger micro-cent carry granularity.                                                                                                                                                                            |
+| `DEFAULT_MAX_DEPTH`             | `2`, the SINGLE ancestor-chain depth ceiling. The board's capped create path, the team orchestrator, and the executor runner all derive from it (both `MAX_SPAWN_DEPTH` constants are now aliases), so they cannot drift. |
+| `DEFAULT_MAX_CHILDREN`          | `24`, default per-parent LIFETIME live-child ceiling for the board's capped create path. Distinct from the per-turn fan-out cap (8).                                                                                      |
+| `DEFAULT_MAX_ROOT_CREATES`      | `30`, default root-task creations allowed per rolling window (a RATE, not a total — a lifetime cap on roots would jam a long-lived board).                                                                                |
+| `DEFAULT_ROOT_CREATE_WINDOW_MS` | `300_000` (5 min), the rolling window `DEFAULT_MAX_ROOT_CREATES` is measured over.                                                                                                                                        |
+| `BREAKER_DEFAULTS`              | `{ maxToolIterations: 30, repeatFailureThreshold: 3, noProgressThreshold: 6, tokenVelocityCeiling: 200_000, velocityMinWindowMs: 15_000, repeatPolicyDeniedThreshold: 2 }`.                                               |
+| `breakerConfigSchema`           | zod partial object for `BreakerConfigInput`.                                                                                                                                                                              |
+| `breakerTripReasonSchema`       | zod enum for `BreakerTripReason`.                                                                                                                                                                                         |
 
 ### Classes
 
@@ -137,7 +140,8 @@ None: this package exports only functions, types, and constants.
 - **`@clawboo/db`**, `board/repository.ts`, `board/verification.ts` (state-machine gate via `isVerdictPromotable`), `governance/budgets.ts` (`recordSpend` mirrors `budgetStatusAfter`).
 - **`@clawboo/evals`**, the ±verifier ablation scorecard.
 - **`apps/web` (server)**, `lib/verification/{index,critic,deterministicGate}.ts` (the verify gate), `lib/executorRunner.ts` (budget kill-switch + breaker feed), `lib/routines/openclawDispatch.ts`, `lib/teamChat/dispatchChatTurn.ts`, `lib/worktrees.ts`, `lib/defaults.ts` (`SOFT_CAP_PERCENT`), `api/runtimes.ts` (`breakerConfigSchema` validation).
-- **`apps/web` (SPA)**, `features/group-chat/boardOrchestration.ts` (caps + approval routing).
+- **`@clawboo/team-orchestration`**, `boardOrchestration.ts` (`checkFanoutCap` for the per-turn delegation fan-out cap); the SPA reaches it through the re-export shim at `apps/web/src/features/group-chat/boardOrchestration.ts` and imports nothing from this package directly.
+- **`@clawboo/db`** also uses the cap predicates: `board/repository.ts` calls `checkDepthCap` / `checkFanoutCap` in `createCappedSubtask` and re-exports `DEFAULT_MAX_CHILDREN` / `DEFAULT_MAX_DEPTH` by name, so `@clawboo/mcp` reads them without taking its own dependency on this package.
 
 ## Source
 

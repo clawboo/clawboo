@@ -297,6 +297,14 @@ export const tasks = sqliteTable(
     index('idx_tasks_team_status').on(t.teamId, t.status),
     index('idx_tasks_assignee').on(t.assigneeAgentId),
     index('idx_tasks_parent').on(t.parentTaskId),
+    // Serves BOTH guarded-create counts, which run while the write lock is held:
+    // the per-parent child count (`parent_task_id = ? AND dropped = 0`, an index
+    // prefix) and the root-rate count (`parent_task_id IS NULL AND dropped = 0 AND
+    // created_at > ?`, equality-equality-range, so the range column comes last).
+    // Without it that second count scans every non-dropped root and stalls all task
+    // writes on a board with a long history. `idx_tasks_parent` is kept: dropping it
+    // from this DDL would not drop it from databases that already have it.
+    index('idx_tasks_parent_dropped_created').on(t.parentTaskId, t.dropped, t.createdAt),
   ],
 )
 

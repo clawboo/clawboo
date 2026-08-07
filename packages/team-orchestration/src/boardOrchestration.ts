@@ -16,7 +16,7 @@
 // used (fan-out = ≥2 structured delegations → N parallel tasks).
 
 import type { RuntimeEvent } from '@clawboo/executor'
-import { checkFanoutCap } from '@clawboo/governance'
+import { checkDepthCap, checkFanoutCap, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
 
 import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
 import { buildTaskUpdateMessage, type TaskUpdateOutcome } from './taskUpdate'
@@ -34,7 +34,7 @@ import {
  * bounds recursion at a finite, small fan-out tree. Leader/user-initiated turns
  * have no source task (depth 0) and may always delegate.
  */
-export const MAX_SPAWN_DEPTH = 2
+export const MAX_SPAWN_DEPTH = DEFAULT_MAX_DEPTH
 
 /** Debounce window for batching board→chat reflections (avoids message storms). */
 export const REFLECT_WINDOW_MS = 3000
@@ -365,6 +365,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   const nameOf = (agentId: string | null): string =>
     (agentId && deps.known().find((a) => a.id === agentId)?.name) || 'A teammate'
 
+  /**
+   * The delegation depth gate: may `sourceTaskId` still spawn children? Shared by
+   * immediate delegation AND plan creation — `startPlan` bypasses `spawn` entirely,
+   * so without this the two paths would enforce different ceilings.
+   */
+  async function maySpawnFrom(sourceTaskId: string | null): Promise<boolean> {
+    return checkDepthCap({ depth: await depthOf(sourceTaskId), max: MAX_SPAWN_DEPTH }).ok
+  }
+
   async function depthOf(taskId: string | null): Promise<number> {
     if (!taskId) return 0
     const detail = await deps.board.getTask(taskId)
@@ -488,7 +497,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
 
     // Bounded depth — enforced via the board ancestor chain, not a prompt.
-    if ((await depthOf(sourceTaskId)) >= MAX_SPAWN_DEPTH) {
+    if (!(await maySpawnFrom(sourceTaskId))) {
       if (sourceTaskId)
         await deps.board.addComment(
           sourceTaskId,
@@ -635,6 +644,29 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     delegatorAgentId: string | null,
     runId: string,
   ): Promise<void> {
+    // Depth preflight for the WHOLE plan. `spawn` gates each immediate delegation,
+    // but a plan does not go through `spawn`, so without this every step would be
+    // created as a child of a source task already AT the ceiling — through the
+    // UNCAPPED repository create the server board client uses, so nothing
+    // downstream stops them. They would land one level too deep and the executor
+    // runner would then refuse each one forever as `too_deep`: silent dead cards.
+    // One refusal for the plan, and no steps created.
+    if (!(await maySpawnFrom(sourceTaskId))) {
+      if (sourceTaskId)
+        await deps.board.addComment(
+          sourceTaskId,
+          `Spawn depth limit (${MAX_SPAWN_DEPTH}) reached — not starting a ${steps.length}-step plan.`,
+          'system',
+        )
+      enqueueReflection({
+        toAgentId: delegatorAgentId ?? deps.leaderAgentId(),
+        by: steps[0]?.targetAgentName ?? 'plan',
+        summary: `Plan not started — max delegation depth (${MAX_SPAWN_DEPTH}) reached. Handle the work directly or report it back.`,
+        outcome: 'error',
+      })
+      return
+    }
+
     let prevTaskId: string | null = null
     let index = 0
     for (const step of steps) {

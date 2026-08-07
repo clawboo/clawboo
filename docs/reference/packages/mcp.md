@@ -24,7 +24,7 @@ Everything below is re-exported from the `.` barrel (`src/index.ts`).
 
 | Export                         | Signature                                                                       | Contract                                                                                                                                                                                                                             |
 | ------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `createTasksServer`            | `(db: ClawbooDb) => Server`                                                     | Build the Tasks MCP server (12 tools) over the durable board repository. Atomic claim surfaces a conflict as a tool-error the model must not retry.                                                                                  |
+| `createTasksServer`            | `(db: ClawbooDb) => Server`                                                     | Build the Tasks MCP server (12 tools) over the durable board repository. A claim conflict, a dependency cycle, and the per-parent child / depth creation caps all surface as tool-errors the model must not retry.                   |
 | `createMemoryServer`           | `(db, embed?: EmbeddingProvider \| null, opts?: MemoryServerOptions) => Server` | Build the Memory MCP server (`memory_save` / `memory_search` / `memory_browse`) over `SqliteMemoryStore`. `opts.boundScope` makes the run's scope authoritative (anti-mis-tag).                                                      |
 | `createToolsServer`            | `(db, opts?: ToolsServerOptions) => Server`                                     | Build the Tools MCP broker server. Lists only **available** tools (a hidden tool is absent from `tools/list`); every call routes through the broker (inspector chain → approval → execute → compaction → audit).                     |
 | `createTeamChatServer`         | `(db, opts?: TeamChatServerOptions) => Server`                                  | Build the TeamChat MCP server (`team_chat_post` / `team_chat_subscribe`) over the `team_chat` substrate. `opts.boundIdentity` makes author + room authoritative (anti-spoof).                                                        |
@@ -77,7 +77,7 @@ The `Server` type (`@modelcontextprotocol/sdk/server/index.js`) is re-exported f
 `createTeamChatServer` (name `clawboo-teamchat`): `team_chat_post`, `team_chat_subscribe`.
 
 <Info>
-`claim_task` / `assign_task` return a tool-error on conflict (`claim failed: <reason>`). A conflict means another agent won the atomic claim; the model must **not** retry.
+`claim_task` / `assign_task` return a tool-error on conflict (`claim failed: <reason>`). A conflict means another agent won the atomic claim; the model must **not** retry. Two more refusals sit on the same never-retry footing: `link_task` rejects an edge that would close a dependency cycle, and `create_task` (with `parentTaskId`) / `create_subtask` go through `createCappedSubtask`, so a parented create is refused with `subtask rejected: <reason>` once the parent has 24 live children or the task would nest past depth 2 (`parent not found: <id>` when the parent does not exist).
 </Info>
 
 ## Used by

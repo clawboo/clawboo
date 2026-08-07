@@ -245,7 +245,7 @@ describe('executor runner (real board + real git worktree)', () => {
     expect(run2.startedOpts?.context ?? '').toContain('finish the SSE parser')
   })
 
-  it('refuses a task nested past MAX_SPAWN_DEPTH', async () => {
+  it('refuses a task nested PAST MAX_SPAWN_DEPTH but dispatches one exactly at it', async () => {
     const db = createDb(getDbPath())
     const root = createTask(db, { title: 'root', status: 'todo' })
     const child = createTask(db, { title: 'child', status: 'todo', parentTaskId: root.id })
@@ -254,17 +254,38 @@ describe('executor runner (real board + real git worktree)', () => {
       status: 'todo',
       parentTaskId: child.id,
     })
-    const fake = new FakeRunnerAdapter('claude-code', FULL_CAPS, 'nope')
-    const result = await runTaskOnRuntime({
+    const great = createTask(db, { title: 'great', status: 'todo', parentTaskId: grandchild.id })
+
+    // depth 3 > max 2 → refused, board untouched.
+    const tooDeep = new FakeRunnerAdapter('claude-code', FULL_CAPS, 'nope')
+    expect(
+      await runTaskOnRuntime({
+        db: createDb(getDbPath()),
+        makeAdapter: () => tooDeep,
+        taskId: great.id,
+        assigneeAgentId: 'claude-1',
+        repoPath: repo,
+        maxSpawnDepth: 2,
+      }),
+    ).toEqual({ ok: false, reason: 'too_deep' })
+    expect(tooDeep.startedOpts).toBeNull()
+
+    // depth 2 == max 2 → it MUST dispatch. The orchestrator and the Tasks MCP both
+    // create tasks at exactly this depth; refusing them here (the old `>=`) left
+    // permanently undispatchable cards on the board.
+    const atCeiling = new FakeRunnerAdapter('claude-code', FULL_CAPS, 'nope')
+    const ok = await runTaskOnRuntime({
       db: createDb(getDbPath()),
-      makeAdapter: () => fake,
+      makeAdapter: () => atCeiling,
       taskId: grandchild.id,
-      assigneeAgentId: 'claude-1',
+      assigneeAgentId: 'claude-2',
       repoPath: repo,
       maxSpawnDepth: 2,
     })
-    expect(result).toEqual({ ok: false, reason: 'too_deep' })
-    expect(fake.startedOpts).toBeNull()
+    // Narrow rather than reach into the union: whatever else happens, it must not
+    // be refused for depth, and it must actually have started.
+    if (!ok.ok) expect(ok.reason).not.toBe('too_deep')
+    expect(atCeiling.startedOpts).not.toBeNull()
   })
 
   it('applies capability degradation for a runtime missing resume + approval + streaming', async () => {

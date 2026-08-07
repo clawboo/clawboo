@@ -107,7 +107,7 @@ curl 'http://localhost:18790/api/board?teamId=<team-id>&status=in_progress'
 
 ## `POST /api/board`
 
-Creates a task. `status` defaults to `todo` (immediately claimable); pass `backlog` for triage. A subtask is created by setting `parentTaskId` (the parent chain bounds delegation depth). On success the handler emits a `task_created` observability event (a no-op when obs is off).
+Creates a task. `status` defaults to `todo` (immediately claimable); pass `backlog` for triage. A subtask is created by setting `parentTaskId` (the parent chain bounds delegation depth). This route is **not** capped; the per-parent child-count and depth ceilings are enforced at the [Tasks MCP boundary](/reference/mcp-tools#create_subtask), where an attached model creates rows unsupervised. On success the handler emits a `task_created` observability event (a no-op when obs is off).
 
 - **Path/query params**: none.
 - **Request body** (validated by `createTaskBody`):
@@ -592,6 +592,12 @@ Links a dependency: `taskId` will not become ready until `dependsOnTaskId` is `d
 
 ```json
 { "ok": true }
+```
+
+**`409 Conflict`**: the edge would close a direct or transitive **dependency cycle**. A cycle can never resolve, so the plan is unworkable rather than the server being at fault:
+
+```json
+{ "ok": false, "error": "task_dependency_cycle" }
 ```
 
 **`500 Internal Server Error`**:

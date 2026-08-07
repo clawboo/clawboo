@@ -228,6 +228,7 @@ export function createDb(dbPath: string): ClawbooDb {
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
     CREATE INDEX IF NOT EXISTS idx_tasks_assignee    ON tasks (assignee_agent_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent      ON tasks (parent_task_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_parent_dropped_created ON tasks (parent_task_id, dropped, created_at);
 
     CREATE TABLE IF NOT EXISTS task_deps (
       task_id            TEXT NOT NULL REFERENCES tasks(id),

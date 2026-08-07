@@ -44,6 +44,7 @@ import { assembleTiers } from '@clawboo/executor/tiers'
 import {
   checkCostCap,
   createBreakerState,
+  DEFAULT_MAX_DEPTH,
   isPolicyDenialCode,
   stepBreaker,
   toolSignature,
@@ -86,8 +87,19 @@ import {
   writeTaskHandoff,
 } from './worktrees'
 
-/** Single reduce point + bounded recursion: a task nested this deep is refused. */
-export const MAX_SPAWN_DEPTH = 2
+/**
+ * The DEEPEST legal task depth (a root is depth 0), shared with the creation-side
+ * caps via `@clawboo/governance` so the two can never drift to different numbers.
+ *
+ * Creation and dispatch read the same constant but compare it differently, and the
+ * difference is deliberate: a create is refused when the PARENT is already at the
+ * max (`parentDepth >= max`, so the child would be `max + 1`), while a dispatch is
+ * refused only when the task ITSELF is past it (`depth > max`). They used to both
+ * use `>=`, which meant the orchestrator happily created depth-2 tasks that this
+ * runner then refused forever as `too_deep` — a card that looked workable and could
+ * never run. The invariant now is: anything that can be created can be dispatched.
+ */
+export const MAX_SPAWN_DEPTH = DEFAULT_MAX_DEPTH
 
 // Serializes dispatch per PERSISTENT identity home (keyed on the home path). Two
 // concurrent runs of the same (runtime, agent) would otherwise spawn two
@@ -293,8 +305,10 @@ async function runTaskInner(input: RunTaskInput, span: SpanCtx): Promise<RunTask
   const task = getTask(db, taskId)
   if (!task) return { ok: false, reason: 'not_found' }
 
-  // Bounded recursion via the board ancestor chain (single reduce point).
-  if (getAncestors(db, taskId).length >= maxDepth) return { ok: false, reason: 'too_deep' }
+  // Bounded recursion via the board ancestor chain (single reduce point). `>` not
+  // `>=`: a task sitting exactly AT the ceiling is the deepest legal one, and the
+  // creation caps already guarantee nothing deeper exists. See MAX_SPAWN_DEPTH.
+  if (getAncestors(db, taskId).length > maxDepth) return { ok: false, reason: 'too_deep' }
 
   // Probe static capabilities (no driver is created until start()).
   const probe = input.makeAdapter({})
