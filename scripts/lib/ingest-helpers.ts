@@ -744,6 +744,38 @@ export function syntheticTeamsPath(): string {
   return path.join(TEAMS_DIR, 'synthetic.ts')
 }
 
+/**
+ * Every file the generator writes, in a fixed order. Composed from the path
+ * helpers above so the enumeration can never drift from what
+ * `ingest-marketplace-content.ts` actually writes.
+ *
+ * Consumers: the integrity manifest (`lib/ingest-manifest.ts`, asserted offline
+ * by `pnpm verify:catalog`) and a cross-check in `verify-ingest.ts` that its own
+ * `filesToCheck` list still matches this one.
+ *
+ * Excludes the hand-written files — `agents/clawboo/**`, `teams/clawboo-builtin.ts`,
+ * `teams/index.ts` and `teamCatalog.ts` are authored by hand, not generated.
+ */
+export function catalogFilePaths(): string[] {
+  return [
+    ...TARGET_DOMAINS.map((domain) => domainFilePath(domain)),
+    agencyIndexPath(),
+    awesomeOpenclawFilePath(),
+    awesomeOpenclawIndexPath(),
+    agentsIndexPath(),
+    agencyWorkflowsTeamPath(),
+    awesomeOpenclawTeamsPath(),
+    syntheticTeamsPath(),
+  ]
+}
+
+/**
+ * Tripwire on the size of `catalogFilePaths()` — 13 agency domains + 7 others.
+ * Adding a generated file means updating this count AND both verifiers
+ * (`verify-catalog.ts` re-hashes the list, `verify-ingest.ts` re-derives it).
+ */
+export const CATALOG_FILE_COUNT = 20
+
 // ─── Awesome OpenClaw ingestion ──────────────────────────────────────────────
 
 export interface AwesomeOpenclawAgent {

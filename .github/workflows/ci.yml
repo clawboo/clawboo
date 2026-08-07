@@ -121,8 +121,15 @@ jobs:
 
       - run: pnpm build
 
-  verify-ingest:
-    name: Verify marketplace ingest
+      # Assert on the emitted bundle that the ~4.4 MB marketplace catalog is still a
+      # deferred chunk and not preloaded by the entry. The unit guard
+      # (src/features/layout/__tests__/entryImportGraph.test.ts) checks the source
+      # import graph; this checks what Rollup actually did, which is the half that
+      # catches a named-but-still-eager chunk. Issue #83.
+      - run: node scripts/check-entry-chunk.mjs
+
+  verify-catalog:
+    name: Verify marketplace catalog integrity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -136,11 +143,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Auth the pinned-SHA upstream fetches (raises the GitHub rate limit to
-      # 5000/hr; the fetch helper also retries on a transient 429).
-      - run: pnpm verify:ingest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # OFFLINE: checks the committed catalog against its committed integrity
+      # manifest (scripts/ingest-manifest.json). No token, no upstream fetch — so
+      # an upstream outage or rename can never redden a PR that didn't touch the
+      # catalog. The LIVE re-derive against the pinned upstream commits runs in
+      # `verify-ingest.yml` (weekly + on PRs that touch the ingest scripts).
+      - run: pnpm verify:catalog
 
   smoke-test-bundle:
     name: Smoke test bundled CLI (clean install simulation)

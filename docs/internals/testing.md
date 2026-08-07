@@ -5,7 +5,7 @@ description: 'How Clawboo verifies itself: the two Vitest projects, sandboxed Pl
 
 Clawboo is a team-first orchestrator: many agents write one SQLite file, five [runtimes](/appendices/glossary) execute heterogeneous work, and the whole thing ships as a single bundled CLI that has to boot on a stranger's machine. Each of those facts has a matching test layer. This page explains the layers, why each exists, and the invariants the standing guard tests freeze in place; so you can extend the suite without re-learning the same lessons the suite was written to encode.
 
-The full gate is six commands, all green: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm verify:ingest`, and `pnpm assemble && pnpm test:clean-install`. Every one of them runs as a parallel CI job (`pnpm build` is a seventh job); the last is the clean-install simulation, run on Ubuntu, Windows, and macOS. The strategy described below is deliberately phrased in terms of _suites and intent_, not exact test counts; counts change every session, and a doc that pins them goes stale on the next commit.
+The full gate is six commands, all green: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm verify:catalog`, and `pnpm assemble && pnpm test:clean-install`. Every one of them runs as a parallel CI job (`pnpm build` is a seventh job); the last is the clean-install simulation, run on Ubuntu, Windows, and macOS. The strategy described below is deliberately phrased in terms of _suites and intent_, not exact test counts; counts change every session, and a doc that pins them goes stale on the next commit.
 
 ## The model
 
@@ -109,7 +109,7 @@ The extractor is a small hand-rolled JS scanner rather than a regex, because a r
 
 The allowlist lives in `scripts/lib/bundle-externals.mjs` and is a product decision, not a build detail: an entry means "a clean install cannot do X until the user installs this themselves". Today it holds `@opentelemetry/*` (lazy, degrades to event-log-only) and [`@anthropic-ai/claude-agent-sdk`](/runtimes/claude-code) (declaring it would add ~210 MB of platform binary to every install).
 
-Because the smoke test packs the _assembled_ artifact, it depends on `pnpm assemble` having run first, which is exactly what the `prepublish:check` alias (`pnpm assemble && pnpm test:clean-install`) and the CI `smoke-test-bundle` job do. The CI job runs it on a matrix of Ubuntu, Windows, and macOS: the Windows leg is the regression gate for the Windows-compat fixes (`.cmd` shim resolution, `which`→`where`, netstat-based process discovery) that a Unix-only run would never exercise, and macOS is a primary user OS.
+Because the smoke test packs the _assembled_ artifact, it depends on `pnpm assemble` having run first, which is exactly what the `prepublish:check` alias (`pnpm verify:catalog && pnpm assemble && pnpm test:clean-install`) and the CI `smoke-test-bundle` job do. The CI job runs it on a matrix of Ubuntu, Windows, and macOS: the Windows leg is the regression gate for the Windows-compat fixes (`.cmd` shim resolution, `which`→`where`, netstat-based process discovery) that a Unix-only run would never exercise, and macOS is a primary user OS.
 
 ## The eval harness: grading the orchestrator's own guarantees
 
@@ -150,13 +150,13 @@ The schema parity check compares only `{table → set(column names)}`. Column *t
 
 ## How CI wires it together
 
-The CI workflow (`.github/workflows/ci.yml`) runs `lint`, `typecheck`, `test`, `build`, and `verify-ingest` as independent parallel jobs, each on Node 22 with a frozen lockfile, plus the `smoke-test-bundle` job that runs `pnpm assemble && pnpm test:clean-install` on the Ubuntu + Windows + macOS matrix. The Turbo task graph makes `test`, `lint`, and `typecheck` depend on `^build` so every package's workspace dependencies are built first.
+The CI workflow (`.github/workflows/ci.yml`) runs `lint`, `typecheck`, `test`, `build`, and `verify-catalog` as independent parallel jobs, each on Node 22 with a frozen lockfile, plus the `smoke-test-bundle` job that runs `pnpm assemble && pnpm test:clean-install` on the Ubuntu + Windows + macOS matrix. The `build` job also runs `node scripts/check-entry-chunk.mjs`, a post-build assertion that the ~4.4 MB marketplace catalog is still a deferred chunk and not preloaded by the SPA entry; its source-side twin is the `entryImportGraph` unit guard, which walks the static import graph from `main.tsx` and prints the offending import chain. The live marketplace re-derive (`pnpm verify:ingest`) is its own workflow (`verify-ingest.yml`) on a weekly cron plus ingest-path PRs, deliberately off the release path. The Turbo task graph makes `test`, `lint`, and `typecheck` depend on `^build` so every package's workspace dependencies are built first.
 
 `smoke-test-bundle` also downloads Chromium (`playwright install --with-deps chromium`) before it assembles, for the browser assertion above; Playwright has no postinstall hook, so `pnpm install` alone never fetches the binary.
 
 The seventh job is `e2e`. It is Ubuntu-only, because the `webServer` command is POSIX shell syntax that `cmd.exe` cannot parse, and it does two things the other jobs don't: it runs a full `pnpm build` first, and it uploads `playwright-report/` plus `test-results/` as an artifact so a failure is readable without reproducing it. The build step is not an optimization: every `@clawboo/*` package resolves through its gitignored `dist/`, nothing builds those during install, and both halves of the `webServer` command import them, so the suite would die before its first test without it. A green run is under 4 minutes on a hosted runner; the job's timeout is 15, leaving headroom for a cold cache and the two CI retries.
 
-`publish.yml` re-runs the same gate inline rather than depending on this workflow: `verify:ingest` → `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install`, all before `changeset publish`. That makes the release path a strict superset of the pull-request path, which matters most for `typecheck`, since `pnpm build` never invokes `tsc` and a type error would otherwise sail through the build straight to npm.
+`publish.yml` re-runs the same gate inline rather than depending on this workflow: `verify:catalog` → `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install`, all before `changeset publish`. That makes the release path a strict superset of the pull-request path, which matters most for `typecheck`, since `pnpm build` never invokes `tsc` and a type error would otherwise sail through the build straight to npm.
 
 Two more workflows sit alongside it. `codeql.yml` runs GitHub code scanning over the TypeScript sources and over the workflow files themselves, on pull requests, on pushes to `main`, and weekly; its `.github/codeql/codeql-config.yml` excludes only the codegen'd marketplace catalog, which is ~41% of the repo's TypeScript by volume and contains no executable logic. The manual eval workflow (`evals.yml`) is `workflow_dispatch`-only.
 
@@ -185,6 +185,6 @@ These docs describe Clawboo **v0.3.1**, the current release.
 - [Monorepo and build](/internals/monorepo-and-build): Turbo, pnpm, build order, and the commands these tests depend on
 - [The board](/concepts/the-board): the durable substrate the server integration and eval suites drive
 - [Executor runner](/internals/executor-runner): the claim→run→verify→handoff flow the all-on integration test exercises
-- [Codegen and ingestion](/internals/codegen-and-ingestion): the `verify:ingest` gate that runs beside these suites
+- [Codegen and ingestion](/internals/codegen-and-ingestion): the offline `verify:catalog` gate that runs beside these suites, and the live `verify:ingest` check that runs weekly
 - [Database schema](/reference/database-schema): the 27 tables the schema-source guard pins
 - [Glossary](/appendices/glossary): canonical term definitions

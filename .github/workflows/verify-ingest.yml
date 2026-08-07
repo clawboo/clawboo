@@ -1,0 +1,137 @@
+name: Verify marketplace ingest (live)
+
+# The LIVE marketplace ingest check: re-derives the committed catalog from the two
+# pinned upstream commits and diffs it. It is deliberately OFF the release critical
+# path — a renamed or force-pushed upstream repo returns a non-retryable 404, and
+# that must never be able to hold up a release. `pnpm verify:catalog` (offline,
+# manifest-based) is what gates PRs and `publish.yml`.
+#
+# Runs weekly, on demand, and on any PR that touches the ingest scripts or the
+# generated catalog. That PR trigger is load-bearing, not decorative:
+# `renderAgentsIndex()` is duplicated between `scripts/ingest-marketplace-content.ts`
+# and `scripts/verify-ingest.ts`, and only this live check catches the two copies
+# drifting apart. Without the trigger, that regression could sit for a week.
+#
+# Do NOT add this job to the branch-protection required checks. Its `pull_request`
+# trigger is paths-filtered, so on a PR touching none of those paths the check never
+# reports — and a required check that never reports blocks the PR forever.
+#
+# No untrusted event input is interpolated into any step.
+
+on:
+  schedule:
+    # Mondays 06:17 UTC. Off the hour because on-the-hour crons queue heavily.
+    # Note: GitHub only runs a cron from the DEFAULT branch's copy of this file, and
+    # auto-disables schedules in repos with 60 days of no activity.
+    - cron: '17 6 * * 1'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/ingest-marketplace-content.ts'
+      - 'scripts/verify-ingest.ts'
+      - 'scripts/verify-catalog.ts'
+      - 'scripts/write-ingest-manifest.ts'
+      - 'scripts/lib/ingest-helpers.ts'
+      - 'scripts/lib/ingest-manifest.ts'
+      - 'scripts/ingest-manifest.json'
+      - 'apps/web/src/features/marketplace/agents/**'
+      - 'apps/web/src/features/marketplace/teams/**'
+      - '.github/workflows/verify-ingest.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  # Keyed on the EVENT as well as the ref: a manual dispatch and the weekly cron both
+  # resolve `github.ref` to refs/heads/main, so a ref-only group would let someone
+  # clicking "Run workflow" cancel the scheduled run — and with it the drift issue that
+  # only the scheduled run files.
+  group: verify-ingest-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege default: the verify job only reads the repo. The reporting job
+# opts into `issues: write` on its own, so the job that runs the network code never
+# holds a write token.
+permissions:
+  contents: read
+
+jobs:
+  verify-ingest:
+    name: Re-derive the catalog from the pinned upstream commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Fail fast offline before spending ~180 authenticated API calls: if the
+      # committed catalog doesn't even match its own manifest, the live diff below
+      # has nothing useful to say.
+      - run: pnpm verify:catalog
+
+      # Auth the pinned-SHA upstream fetches (raises the GitHub rate limit to
+      # 5000/hr; the fetch helper also retries on a transient 429, honouring
+      # Retry-After).
+      - run: pnpm verify:ingest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  report:
+    name: File a drift issue
+    needs: [verify-ingest]
+    # Scheduled runs only. A failure on a PR is already visible as a red check, so
+    # filing an issue for it too would just be noise.
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      # Deduplicated: comment on the open issue if there is one, otherwise open it.
+      # Only trusted `github.*` context is used, and every value reaches the shell
+      # through `env:` rather than being spliced into the script text.
+      - name: Open or update the drift issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Deliberately does NOT assert drift: this job fires on ANY failure of the
+          # scheduled run, which includes a stale lockfile breaking the frozen install,
+          # or the offline gate failing. The body lists the possibilities; the run log
+          # says which. (Prose here deliberately avoids the literal install command —
+          # `ci-lockfile.test.ts` greps every workflow line for it, comments included.)
+          TITLE: Weekly marketplace ingest check failed
+        run: |
+          set -euo pipefail
+
+          existing=$(gh issue list --state open --search "in:title weekly marketplace ingest check" \
+            --json number,title --jq '[.[] | select(.title == env.TITLE)] | .[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "The weekly run failed again: $RUN_URL"
+            echo "Commented on existing issue #$existing"
+            exit 0
+          fi
+
+          {
+            printf 'The weekly `verify-ingest` workflow failed: %s\n\n' "$RUN_URL"
+            printf 'Check the run log for which step failed. In rough order of likelihood:\n\n'
+            printf '1. **Upstream drift** — the committed catalog no longer matches a fresh\n'
+            printf '   re-derive from the pinned commits, or an upstream source could not be\n'
+            printf '   fetched (a renamed or force-pushed repo returns a non-retryable 404).\n'
+            printf '2. **Offline gate** — `pnpm verify:catalog` failed, meaning the committed\n'
+            printf '   catalog no longer matches its own integrity manifest.\n'
+            printf '3. **Environment** — e.g. `pnpm install --frozen-lockfile` on a stale lockfile.\n\n'
+            printf 'Releases are **not** blocked by this: `publish.yml` gates on the offline\n'
+            printf '`pnpm verify:catalog` check, which is exactly why the live check lives here.\n\n'
+            printf 'Runbook: `docs/internals/codegen-and-ingestion.md`, "Refreshing the catalog".\n'
+          } > /tmp/drift-body.md
+
+          gh issue create --title "$TITLE" --label 'area: cli-install' \
+            --body-file /tmp/drift-body.md
+          echo 'Opened a new drift issue'

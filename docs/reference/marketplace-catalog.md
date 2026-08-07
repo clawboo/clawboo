@@ -3,27 +3,30 @@ title: Marketplace catalog reference
 description: 'The agent and team catalog: schemas, ID convention, zero-loss invariant, three sources with pinned SHAs, and the codegen/ingestion pipeline.'
 ---
 
-The marketplace ships a static, in-bundle catalog of **304 agents** and **82 teams**. Every entry is a committed TypeScript literal; the catalog is browsed and deployed entirely client-side, with no network fetch at runtime. Two of the agent sources (agency-agents, awesome-openclaw) and three of the team files are **codegen'd** from pinned upstream commits by `scripts/ingest-marketplace-content.ts`; the rest are hand-written. A CI gate (`pnpm verify:ingest`) re-derives the codegen'd files in memory and fails on drift.
+The marketplace ships an in-bundle catalog of **304 agents** and **82 teams**. Every entry is a committed TypeScript literal, and the catalog is browsed and deployed entirely client-side: **no API call, no external service, works fully offline**. It is **code-split** — the ~4.4 MB of catalog data compiles into its own `marketplace-catalog` chunk that the app fetches from its own static assets the first time you open the Marketplace or create a team, so a dashboard load that touches neither never pays for it. Two of the agent sources (agency-agents, awesome-openclaw) and three of the team files are **codegen'd** from pinned upstream commits by `scripts/ingest-marketplace-content.ts`; the rest are hand-written. An offline CI gate (`pnpm verify:catalog`) checks the committed files against a committed integrity manifest, and a live check (`pnpm verify:ingest`) re-derives them from upstream on a weekly schedule.
 
 This page documents the **schemas** (`AgentCatalogEntry`, `TeamTemplate`), the **ID prefix convention**, the **zero-loss `identityTemplate` invariant**, the **three sources + their pinned SHAs**, and the **ingestion mechanism**. It does not enumerate individual entries; browse those in the marketplace UI (the Agents / Teams tabs) or read the committed files under `apps/web/src/features/marketplace/`.
 
 ## At a glance
 
-| Aspect                 | Value                                          | Source of truth                       |
-| ---------------------- | ---------------------------------------------- | ------------------------------------- |
-| Total agents           | 304                                            | `agents/index.ts` → `AGENT_CATALOG`   |
-| ↳ agency-agents        | 179 (across 13 domain files)                   | `agents/agency/`                      |
-| ↳ awesome-openclaw     | 110 (42 operators + 68 named)                  | `agents/awesome-openclaw/usecases.ts` |
-| ↳ clawboo built-ins    | 15 (5 teams × 3 agents, synthesized at import) | `agents/clawboo/builtin.ts`           |
-| Total teams            | 82                                             | `teams/index.ts` → `TEAM_CATALOG`     |
-| ↳ clawboo built-in     | 5                                              | `teams/clawboo-builtin.ts`            |
-| ↳ agency-workflows     | 5                                              | `teams/agency-workflows.ts`           |
-| ↳ awesome-openclaw     | 42 (one per usecase)                           | `teams/awesome-openclaw.ts`           |
-| ↳ synthetic excellence | 30                                             | `teams/synthetic.ts`                  |
-| Codegen entry point    | `scripts/ingest-marketplace-content.ts`        | npm script `ingest:marketplace`       |
-| Drift gate             | `scripts/verify-ingest.ts`                     | npm script `verify:ingest` (CI)       |
-| Agent ID prefixes      | `agency-*`, `awesome-*`, `clawboo-*`           | enforced by `agentCatalog.test.ts`    |
-| Zero-loss invariant    | `identityTemplate.length > 500` per entry      | `agentCatalog.test.ts`                |
+| Aspect                 | Value                                          | Source of truth                                           |
+| ---------------------- | ---------------------------------------------- | --------------------------------------------------------- |
+| Total agents           | 304                                            | `agents/index.ts` → `AGENT_CATALOG`                       |
+| ↳ agency-agents        | 179 (across 13 domain files)                   | `agents/agency/`                                          |
+| ↳ awesome-openclaw     | 110 (42 operators + 68 named)                  | `agents/awesome-openclaw/usecases.ts`                     |
+| ↳ clawboo built-ins    | 15 (5 teams × 3 agents, synthesized at import) | `agents/clawboo/builtin.ts`                               |
+| Total teams            | 82                                             | `teams/index.ts` → `TEAM_CATALOG`                         |
+| ↳ clawboo built-in     | 5                                              | `teams/clawboo-builtin.ts`                                |
+| ↳ agency-workflows     | 5                                              | `teams/agency-workflows.ts`                               |
+| ↳ awesome-openclaw     | 42 (one per usecase)                           | `teams/awesome-openclaw.ts`                               |
+| ↳ synthetic excellence | 30                                             | `teams/synthetic.ts`                                      |
+| Codegen entry point    | `scripts/ingest-marketplace-content.ts`        | npm script `ingest:marketplace`                           |
+| Integrity gate         | `scripts/verify-catalog.ts`                    | npm script `verify:catalog` (offline; every PR + release) |
+| Live drift gate        | `scripts/verify-ingest.ts`                     | npm script `verify:ingest` (weekly + ingest PRs)          |
+| Integrity manifest     | `scripts/ingest-manifest.json`                 | written by `ingest:marketplace`                           |
+| Bundle chunk           | `marketplace-catalog`                          | `apps/web/vite.config.ts` `manualChunks`                  |
+| Agent ID prefixes      | `agency-*`, `awesome-*`, `clawboo-*`           | enforced by `agentCatalog.test.ts`                        |
+| Zero-loss invariant    | `identityTemplate.length > 500` per entry      | `agentCatalog.test.ts`                                    |
 
 <Note>
 The catalog ships 304 agents and 82 teams. The unit tests assert *lower bounds* (`>= 270` agents, `>= 160` agency, `>= 40` awesome, `>= 15` clawboo) rather than exact counts, so an upstream re-ingest can grow the catalog without breaking tests.
@@ -207,7 +210,7 @@ The pinned SHAs are constants in `scripts/lib/ingest-helpers.ts` (`AGENCY_AGENTS
 - synthesizes `identityTemplate` from the full set of fields under headings (so `length > 500` holds), and
 - extracts `skillIds`, filtered against `SKILL_CATALOG` so only real catalog skill ids survive.
 
-The result is exported as `CLAWBOO_BUILTIN_AGENTS` → `CLAWBOO_AGENTS`. This file is hand-written because the source is local TS with path-alias imports the ingest script cannot resolve, so it is **not** covered by `verify:ingest`.
+The result is exported as `CLAWBOO_BUILTIN_AGENTS` → `CLAWBOO_AGENTS`. This file is hand-written because the source is local TS with path-alias imports the ingest script cannot resolve, so it is **not** covered by either gate (`verify:catalog` or `verify:ingest`).
 
 ### Teams (82)
 
@@ -230,8 +233,10 @@ The catalog is **committed codegen**, not a runtime fetch, and not hand-maintain
 flowchart LR
   A["Pinned upstream commits<br/>(agency-agents, awesome-openclaw)"] -->|"GitHub git-tree + raw API<br/>concurrency 10"| B["ingest-marketplace-content.ts"]
   B -->|"parse → render → Prettier"| C["Committed .ts files<br/>(agents/*, teams/*)"]
-  C -->|"import"| D["AGENT_CATALOG · TEAM_CATALOG"]
-  C -->|"verify:ingest re-derives<br/>in memory + diffs"| E["CI gate<br/>(ci.yml + publish.yml)"]
+  C -->|"import (lazy chunk)"| D["AGENT_CATALOG · TEAM_CATALOG"]
+  C -->|"sha256 per file"| M["ingest-manifest.json"]
+  M -->|"verify:catalog (offline)"| E["Every PR + release<br/>(ci.yml + publish.yml)"]
+  C -->|"verify:ingest re-derives<br/>in memory + diffs (live)"| F["Weekly + ingest PRs<br/>(verify-ingest.yml)"]
 ```
 
 ### Regenerate
@@ -240,27 +245,31 @@ flowchart LR
 pnpm ingest:marketplace   # → tsx scripts/ingest-marketplace-content.ts
 ```
 
-The script fetches both repos' git trees at the pinned SHAs, downloads the raw `.md` files (concurrency 10), processes each into entries, and writes **codegen'd files**: 13 agency domain files + `agency/index.ts` + `awesome-openclaw/usecases.ts` + `awesome-openclaw/index.ts` + `agents/index.ts`, plus the three team files (`agency-workflows.ts`, `awesome-openclaw.ts`, `synthetic.ts`). Every write goes through a `writeFormatted()` helper that runs Prettier (`parser: 'typescript'`, repo config) before flushing; without it the raw renderers emit double-quoted single-line strings that would drift against the formatted committed files.
+The script fetches both repos' git trees at the pinned SHAs, downloads the raw `.md` files (concurrency 10), processes each into entries, and writes **codegen'd files**: 13 agency domain files + `agency/index.ts` + `awesome-openclaw/usecases.ts` + `awesome-openclaw/index.ts` + `agents/index.ts`, plus the three team files (`agency-workflows.ts`, `awesome-openclaw.ts`, `synthetic.ts`). Every write goes through a `writeFormatted()` helper that runs Prettier before flushing; without it the raw renderers emit double-quoted single-line strings that would drift against the committed files. As its final step the script writes `scripts/ingest-manifest.json`, recording the two pinned SHAs plus a `sha256` per generated file.
 
 The clawboo built-ins (`agents/clawboo/*`), `teams/clawboo-builtin.ts`, and `teams/index.ts` are **not** part of the ingest pipeline; they are hand-written.
 
-### Verify (the CI gate)
+### Verify (the two gates)
 
 ```bash
-pnpm verify:ingest   # → tsx scripts/verify-ingest.ts
+pnpm verify:catalog   # → tsx scripts/verify-catalog.ts  (offline)
+pnpm verify:ingest    # → tsx scripts/verify-ingest.ts   (live, needs network)
 ```
 
-`verify-ingest.ts` re-runs the same render pipeline in memory, normalizes **both** the freshly-generated content and the committed file through Prettier with the same config, and compares. It exits `1` on any mismatch (printing a short line diff) and `0` when all generated files are current. Hand-written files are skipped.
+`verify-catalog.ts` is **offline**. It re-hashes each committed file and compares against `scripts/ingest-manifest.json`, also asserting that the manifest's recorded SHAs still match the constants in `ingest-helpers.ts` and that it covers exactly the generated file set. Hashes are taken over each file's Prettier _canonical_ form, which makes them invariant to code style and to CRLF line endings.
 
-The gate runs in two places:
+`verify-ingest.ts` is the **live** check. It re-runs the same render pipeline in memory against the pinned upstream commits, normalizes both sides through Prettier, and compares — exiting `1` on any mismatch with a short line diff. Hand-written files are skipped by both.
 
-- **`ci.yml`**: a dedicated `verify-ingest` job, parallel to `lint` / `typecheck` / `test` / `build`. Drift blocks PR merge.
-- **`publish.yml`**: a `pnpm verify:ingest` step before `pnpm build`. Drift blocks releases.
+Where they run:
 
-Both the ingest renderers and the verifier share the logic in `scripts/lib/ingest-helpers.ts`, so they cannot diverge.
+- **`ci.yml`**: a `verify-catalog` job, parallel to `lint` / `typecheck` / `test` / `build`. Drift turns the PR red.
+- **`publish.yml`**: a `pnpm verify:catalog` step before `pnpm build`. Drift blocks releases. Offline by design — an upstream rename or force-push (a non-retryable 404) must never be able to hold up a release.
+- **`verify-ingest.yml`**: `verify:catalog` then `verify:ingest`, on a weekly cron, on `workflow_dispatch`, and on PRs touching the ingest scripts or generated catalog.
+
+Both the ingest renderers and the verifier share the logic in `scripts/lib/ingest-helpers.ts`, so they cannot diverge; `verify-ingest.ts` additionally cross-checks its file list against the `catalogFilePaths()` enumeration the manifest is built from.
 
 <Info>
-Generated catalog files carry an `// AUTO-GENERATED — do not edit manually` header. Editing one by hand will be caught by `verify:ingest`. To change catalog content, bump the pinned SHA in `scripts/lib/ingest-helpers.ts` and re-run `pnpm ingest:marketplace`.
+Generated catalog files carry an `// AUTO-GENERATED — do not edit manually` header. Editing one by hand is caught immediately and offline by `verify:catalog`. To change catalog content, bump the pinned SHA in `scripts/lib/ingest-helpers.ts` and re-run `pnpm ingest:marketplace` — see the [refresh runbook](/internals/codegen-and-ingestion#refreshing-the-catalog).
 </Info>
 
 ## See also
