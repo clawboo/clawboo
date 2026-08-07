@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { canTransition, isLocked, isTerminal } from '@clawboo/board-core'
-import { eq } from 'drizzle-orm'
+import { eq, sql as dsql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, type ClawbooDb } from '../../db'
@@ -449,5 +449,30 @@ describe('guarded creation (per-parent child count, nesting depth, root rate)', 
 
     dropTask(db, first.id)
     expect(createCappedRootTask(db, { title: 'b' }, caps).ok).toBe(true)
+  })
+})
+
+describe('guarded-create index coverage', () => {
+  // Both cap counts run INSIDE `immediateWrite`, holding the write lock, so an
+  // unindexed scan there stalls every other task write on the board. Assert the
+  // planner actually USES the composite index rather than just that it exists —
+  // a present-but-unused index is the same stall with extra write cost.
+  const plan = (sql: string): string =>
+    (db.all(dsql.raw(`EXPLAIN QUERY PLAN ${sql}`)) as { detail: string }[])
+      .map((r) => r.detail)
+      .join(' | ')
+
+  it('the root-rate count is index-backed, not a scan', () => {
+    const detail = plan(
+      'SELECT count(*) FROM tasks WHERE parent_task_id IS NULL AND dropped = 0 AND created_at > 0',
+    )
+    expect(detail).toContain('idx_tasks_parent_dropped_created')
+    expect(detail).not.toMatch(/SCAN tasks/)
+  })
+
+  it('the per-parent child count is index-backed too (an index prefix)', () => {
+    const detail = plan("SELECT count(*) FROM tasks WHERE parent_task_id = 'x' AND dropped = 0")
+    expect(detail).toMatch(/idx_tasks_parent/)
+    expect(detail).not.toMatch(/SCAN tasks/)
   })
 })
