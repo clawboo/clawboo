@@ -5,7 +5,9 @@
  *   - move focus into the dialog on mount and whenever `focusKey` changes
  *     (step entry), but never steal focus from a control that's already inside,
  *   - trap Tab / Shift+Tab within the dialog,
- *   - restore focus to whatever was focused before the trap mounted, on unmount.
+ *   - restore focus to whatever was focused before the trap mounted, on unmount —
+ *     re-finding the trigger by `data-focus-restore-id` when it was re-created
+ *     while the dialog was open (see the restore effect).
  *
  * The dialog is the element referenced by `ref`. This is the interaction-level
  * a11y that jest-axe cannot catch.
@@ -93,18 +95,38 @@ export function useFocusTrap(
   }, [])
 
   // Capture the element that had focus before the dialog opened, restore on close.
+  //
+  // The trigger is not always the same DOM node by the time the dialog closes. A board
+  // card that opened the task drawer is destroyed and re-created the moment its task
+  // changes column — a status commit made inside the drawer, or the 5s poll landing
+  // under it — because React cannot reuse a node across two different parents. The
+  // captured reference is then detached, and `.focus()` on a detached node is a SILENT
+  // no-op: focus stays on <body> and the next Tab restarts at the top of the document,
+  // which for a keyboard or screen-reader user means losing their place entirely.
+  //
+  // So capture the trigger's logical identity alongside the node. A trigger that may be
+  // re-created tags itself `data-focus-restore-id`; on close we re-find it by that when
+  // the original is gone. Triggers without the tag keep the plain node behavior.
   const restoreToRef = useRef<HTMLElement | null>(null)
+  const restoreIdRef = useRef<string | null>(null)
   useEffect(() => {
-    restoreToRef.current = (document.activeElement as HTMLElement | null) ?? null
+    const active = (document.activeElement as HTMLElement | null) ?? null
+    restoreToRef.current = active
+    restoreIdRef.current = active?.dataset['focusRestoreId'] ?? null
     return () => {
-      // Restore focus to the trigger — but only if it's still in the DOM. If the trigger
-      // was unmounted while the dialog was open (e.g. a board card that moved columns under
-      // an open drawer, or a poll re-render swapping the node), the captured reference is
-      // detached, and `.focus()` on a detached node is a silent no-op that leaves focus
-      // stranded on <body>. Guarding it stops the primitive from chasing a stale node; a
-      // live trigger still gets focus back.
       const el = restoreToRef.current
-      if (el?.isConnected) el.focus?.()
+      if (el?.isConnected) {
+        el.focus?.()
+        return
+      }
+      const id = restoreIdRef.current
+      if (!id) return
+      // Matched by attribute VALUE rather than a selector: jsdom ships no `CSS.escape`,
+      // and these ids are opaque server strings that must never be spliced into a query.
+      const replacement = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-focus-restore-id]'),
+      ).find((n) => n.dataset['focusRestoreId'] === id)
+      replacement?.focus?.()
     }
   }, [])
 

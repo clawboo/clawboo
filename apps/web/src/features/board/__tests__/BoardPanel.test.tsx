@@ -745,6 +745,16 @@ describe('BoardPanel', () => {
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByTestId('task-detail-drawer')).toBeNull())
 
+    // Focus comes back to the card, not <body>. Moving columns destroyed the exact node
+    // the drawer was opened from, so the return only works because the card carries
+    // `data-focus-restore-id` for useFocusTrap to re-find it. Without it a keyboard user
+    // closes the drawer and the next Tab restarts at the top of the document.
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('board-column-in_progress')).getByTestId('board-card'),
+      ).toHaveFocus(),
+    )
+
     // The next poll (Refresh runs the identical refresh()) reconciles against the advanced
     // server and keeps the card put — no flicker back to To do, still exactly one card.
     await user.click(screen.getByRole('button', { name: 'Refresh' }))
