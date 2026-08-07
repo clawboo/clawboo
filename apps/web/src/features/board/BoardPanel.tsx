@@ -387,8 +387,9 @@ export function BoardPanel() {
   // the card never lingers with a stale runtime or a misleading verification pill until the
   // poll catches up. Drops any in-flight override for the task so the committed status is
   // authoritative; the next poll then simply agrees (same id, one column) — no flicker,
-  // no duplicate. Other server side effects (e.g. cancelling dependents) reconcile on that
-  // next poll, exactly as they do after a drag.
+  // no duplicate. The PATCH's only row mutations are the status and, on a →todo release,
+  // the three fields cleared above — both mirrored here — so the next poll has nothing to
+  // correct on this row; it just stays authoritative for any concurrent agent change.
   const commitStatus = useCallback(
     (taskId: string, newStatus: string) => {
       // Fence off any read issued before this local write (the 5s poll, Refresh, a

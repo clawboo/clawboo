@@ -97,7 +97,14 @@ export function useFocusTrap(
   useEffect(() => {
     restoreToRef.current = (document.activeElement as HTMLElement | null) ?? null
     return () => {
-      restoreToRef.current?.focus?.()
+      // Restore focus to the trigger — but only if it's still in the DOM. If the trigger
+      // was unmounted while the dialog was open (e.g. a board card that moved columns under
+      // an open drawer, or a poll re-render swapping the node), the captured reference is
+      // detached, and `.focus()` on a detached node is a silent no-op that leaves focus
+      // stranded on <body>. Guarding it stops the primitive from chasing a stale node; a
+      // live trigger still gets focus back.
+      const el = restoreToRef.current
+      if (el?.isConnected) el.focus?.()
     }
   }, [])
 

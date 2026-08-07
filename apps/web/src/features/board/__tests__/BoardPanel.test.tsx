@@ -559,7 +559,14 @@ describe('BoardPanel', () => {
       http.get('/api/board', () =>
         HttpResponse.json({
           tasks: [
-            { id: 't1', title: 'Ship it', status: 'in_progress', assigneeAgentId: 'agent-7' },
+            {
+              id: 't1',
+              title: 'Ship it',
+              status: 'in_progress',
+              assigneeAgentId: 'agent-7',
+              assigneeRuntime: 'claude-code',
+              verification: JSON.stringify({ status: 'fail' }),
+            },
           ],
         }),
       ),
@@ -575,7 +582,10 @@ describe('BoardPanel', () => {
         <ConfirmDialog />
       </>,
     )
-    await screen.findByTestId('board-card')
+    // Sanity: before the move the card carries its runtime + verdict pills.
+    const card = await screen.findByTestId('board-card')
+    expect(within(card).getByText('claude-code')).toBeInTheDocument()
+    expect(within(card).getByText('fail')).toBeInTheDocument()
 
     await act(async () => {
       dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'todo' } }) // in_progress → todo (release)
@@ -586,6 +596,15 @@ describe('BoardPanel', () => {
     expect(patched).toBeNull()
     await user.click(within(dialog).getByTestId('confirm-ok'))
     await waitFor(() => expect(patched).toEqual({ status: 'todo' }))
+
+    // The commit mirrors the server's →todo release: it also clears assignee/runtime/verdict,
+    // so the card in To do no longer shows the stale 'claude-code' runtime or the misleading
+    // 'fail' verdict — the reflection is complete, not just the column. (Deleting the →todo
+    // branch in commitStatus fails this.)
+    const todoCard = () => within(screen.getByTestId('board-column-todo')).getByTestId('board-card')
+    await waitFor(() => expect(within(todoCard()).queryByText('claude-code')).toBeNull())
+    expect(within(todoCard()).queryByText('fail')).toBeNull()
+    expect(within(todoCard()).getByText('openclaw')).toBeInTheDocument()
   })
 
   it('offers "Complete anyway" when a drag to Done hits the verification gate', async () => {
@@ -742,6 +761,7 @@ describe('BoardPanel', () => {
     // no refetch is triggered. Guards against a regression that moves the callback outside
     // the success gate.
     let boardGets = 0
+    let patchCalls = 0
     server.use(
       http.get('/api/board', () => {
         boardGets++
@@ -757,7 +777,10 @@ describe('BoardPanel', () => {
       http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
       http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
       http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
-      http.patch('/api/board/t1', () => new HttpResponse(null, { status: 500 })), // server refuses
+      http.patch('/api/board/t1', () => {
+        patchCalls++
+        return new HttpResponse(null, { status: 500 }) // legal move todo→in_progress, refused
+      }),
     )
     const user = userEvent.setup()
     render(<BoardPanel />)
@@ -770,10 +793,14 @@ describe('BoardPanel', () => {
     const getsBeforeMove = boardGets
     await user.click(option)
 
-    // The rejection is surfaced (error toast) — i.e. the failure path ran to completion.
+    // The failure surfaced as an error toast — the rejection path ran to completion.
     await waitFor(() =>
       expect(useToastStore.getState().toasts.some((t) => t.type === 'error')).toBe(true),
     )
+    // ...driven by a REAL server rejection: the PATCH fired exactly once. This is what
+    // distinguishes a 500 from a client-side illegal-transition refusal that never sends a
+    // request — todo→in_progress is legal, so the request goes out and comes back refused.
+    expect(patchCalls).toBe(1)
     // ...and the board card never moved: still in To do, exactly one card, and no refetch.
     expect(
       within(screen.getByTestId('board-column-todo')).getByTestId('board-card'),
