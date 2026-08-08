@@ -144,18 +144,28 @@ jobs:
 
       # packages/worktrees: the real-git, per-task worktree lifecycle that underpins
       # every file-mutating task. Drives a real `git` binary via its gitHarness.
-      - run: pnpm --filter @clawboo/worktrees exec vitest run
+      # `--fail-if-no-match` so a mistyped filter can't yield a green leg that ran nothing.
+      - run: pnpm --filter @clawboo/worktrees --fail-if-no-match exec vitest run
 
-      # apps/web/server: runtime CLI spawning, process-tree abort, the boot probe,
-      # and path handling — the node-environment server/ suites only (the `server/`
-      # filter excludes the jsdom UI tests). Runs on macOS here; NOT yet on Windows.
-      # The SQLite-backed harness leaks state between tests on Windows — better-sqlite3
-      # holds the DB file open and Windows can't reset an open file between tests, so
-      # fixtures cascade into UNIQUE-constraint errors (~166 failures). Bringing this
-      # suite to Windows is the "platform familiarity" follow-through the issue calls
-      # out; the real-git worktrees suite above already covers the Windows path.
+      # apps/web/server platform surface (Windows leg): npm.cmd resolution, the
+      # which→where shim, and .exe candidate lookup — the DB-free slice of the server
+      # suite that runs green on Windows today, and the exact npm.cmd/shim regression
+      # surface #75 targets. Scoped to the FILE, not the dir: vitest's positional filter
+      # is a substring match, so `server/lib/runtimes/` would also pull in
+      # hermesDriver.test.ts, which fails on Windows.
+      - if: runner.os == 'Windows'
+        run: pnpm --filter @clawboo/web --fail-if-no-match exec vitest run server/lib/__tests__/platform.test.ts
+
+      # apps/web/server (full node server/ suite): macOS only for now — it already covers
+      # the platform test above. On Windows the suite fails two INDEPENDENT ways: (1) the
+      # SQLite-backed harness can't reset an open DB file between tests (better-sqlite3
+      # holds it → EBUSY on unlink), and (2) some suites override HOME but not
+      # USERPROFILE/CLAWBOO_HOME, so they resolve the real home rather than the sandbox
+      # (this PR fixes that class in executorRunner.test.ts; other suites still need it).
+      # Both are the "platform familiarity" follow-through the issue names — both, so the
+      # follow-up isn't mis-scoped as SQLite-only.
       - if: runner.os != 'Windows'
-        run: pnpm --filter @clawboo/web exec vitest run server/
+        run: pnpm --filter @clawboo/web --fail-if-no-match exec vitest run server/
 
   build:
     name: Build
