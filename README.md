@@ -60,7 +60,7 @@ The global install gives you a persistent `clawboo` command and one-click in-app
 Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard:
 
 1. Pick a runtime. **Clawboo Native** is the default: it runs agents in-process and talks to your provider directly.
-2. Paste one provider API key (Anthropic, OpenAI, OpenRouter, or a local Ollama, no key needed).
+2. Paste one provider API key (Anthropic, OpenAI, OpenRouter, or a local Ollama, no key needed), or pick one of seven more under **More providers**.
 3. Clawboo seeds a starter team and drops you into the dashboard. Your team is ready in about a minute.
 
 The dashboard opens at the port written to `~/.clawboo/api-port.txt` (default `http://localhost:18790`, auto-fallback through `18809` if busy). No flags, no external CLI, no cloud account.
@@ -153,15 +153,15 @@ Everything is local-first: the board persists in SQLite at `~/.clawboo/clawboo.d
 
 ## Runtimes
 
-| Runtime            | What it is                                                                                  | How to connect                                                           |
-| ------------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| **Clawboo Native** | Built-in conversational runtime, talks to Anthropic / OpenAI / OpenRouter / Ollama directly | Paste a key in onboarding, no install                                    |
-| **OpenClaw**       | A local OpenClaw Gateway, keeps its own channels and always-on                              | Start a Gateway and connect                                              |
-| **Claude Code**    | Anthropic's coding agent (Claude Agent SDK)                                                 | Install and connect from Runtimes; paste a key or use your logged-in CLI |
-| **Codex**          | OpenAI's coding agent CLI                                                                   | Install and connect; `codex login` once                                  |
-| **Hermes**         | Open-source agent runtime over OpenRouter, keeps its self-improvement and skills            | Install and connect; paste an OpenRouter key                             |
+| Runtime            | What it is                                                                                                                      | How to connect                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Clawboo Native** | Built-in conversational runtime, talks to 11 providers directly: Anthropic / OpenAI / OpenRouter / local Ollama plus seven more | Paste a key in onboarding, no install                                    |
+| **OpenClaw**       | A local OpenClaw Gateway, keeps its own channels and always-on                                                                  | Start a Gateway and connect                                              |
+| **Claude Code**    | Anthropic's coding agent (Claude Agent SDK)                                                                                     | Install and connect from Runtimes; paste a key or use your logged-in CLI |
+| **Codex**          | OpenAI's coding agent CLI                                                                                                       | Install and connect; `codex login` once                                  |
+| **Hermes**         | Open-source agent runtime over OpenRouter, keeps its self-improvement and skills                                                | Install and connect; paste an OpenRouter key                             |
 
-Every runtime executes board tasks behind one interface, isolated in its own git worktree, with a structured handoff artifact so work can move between runtimes.
+Every runtime executes board tasks behind one interface, with a structured handoff artifact so work can move between runtimes. Each file-mutating task runs in its own git worktree, which buys concurrency isolation (no write races), not a sandbox. Read-only research skips the worktree, review runs detached at a commit, and OpenClaw runs on its live Gateway session with no host worktree.
 
 > **Claude Code on an npm install:** the published tarball deliberately does not bundle `@anthropic-ai/claude-agent-sdk` (its per-platform binary would add ~210 MB to every install). Install it alongside Clawboo — `npm i -g clawboo @anthropic-ai/claude-agent-sdk` — or run Clawboo from source. [Details](https://docs.claw.boo/runtimes/claude-code)
 

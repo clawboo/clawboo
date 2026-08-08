@@ -142,7 +142,7 @@ Restore by copying the files back into `~/.clawboo` with the server stopped (`cl
 
 ## Hard reset
 
-There is no schema migration step. A schema change in Clawboo is a hard reset of the local database; `createDb()` re-bootstraps every table on the next connect. So "reset" means **delete the database file**.
+There is no schema migration step. A schema change in Clawboo is a hard reset of the local database; the boot-time `ensureSchema()` bootstrap re-creates every table the next time the server opens the file. So "reset" means **delete the database file**.
 
 ### Reset just the data (keep credentials and settings)
 
@@ -153,7 +153,7 @@ rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm
 clawboo
 ```
 
-The next time the server starts, `createDb()` recreates an empty, fully-bootstrapped schema. Your `settings.json` and the secrets vault are untouched.
+The next time the server starts, `ensureSchema()` recreates an empty, fully-bootstrapped schema. Your `settings.json` and the secrets vault are untouched.
 
 ### Full reset (everything)
 

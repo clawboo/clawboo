@@ -72,6 +72,7 @@ Run the same checks CI runs, in this order. They are all root scripts in `packag
 ```bash
 pnpm build                              # turbo build — all packages and apps
 pnpm typecheck                          # tsc --noEmit across the monorepo
+pnpm format:check                       # prettier --check .; CI runs this before pnpm lint
 pnpm lint                               # ESLint across all packages, plus the docs frontmatter + heading checks
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright e2e (incl. board round-trip + eval smoke)
@@ -91,11 +92,12 @@ What each one guards:
 
 <Tip>
   Running the full gate locally avoids review back-and-forth. Every PR must pass CI: `pnpm build`,
-  `pnpm lint` (which runs `pnpm format:check` first), `pnpm typecheck`, `pnpm test:coverage` (the
-  same suites as `pnpm test`, plus a coverage table in the log — informational, not a threshold),
-  `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a
-  red check is a red check. Note `pnpm e2e` needs a built workspace and a Chromium download (`pnpm
-  build`, then `pnpm exec playwright install chromium`).
+  `pnpm format:check` and `pnpm lint` (two separate steps of CI's Lint job, format check first
+  because it takes seconds while `turbo lint` has to build every workspace dependency), `pnpm
+  typecheck`, `pnpm test:coverage` (the same suites as `pnpm test`, plus a coverage table in the
+  log: informational, not a threshold), `pnpm e2e`, and CodeQL code scanning. Not every one of those
+  blocks the merge button today, but a red check is a red check. Note `pnpm e2e` needs a built
+  workspace and a Chromium download (`pnpm build`, then `pnpm exec playwright install chromium`).
 </Tip>
 
 ### 5. Add a changeset for user-facing changes

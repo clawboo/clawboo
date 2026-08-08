@@ -3,7 +3,7 @@ title: Review and resolve approvals
 description: Use the Approvals panel to allow or deny pending exec approvals and the shared tool/delegation queue, team-scoped.
 ---
 
-Use this page when an agent pauses for your decision: an OpenClaw exec command waiting on a gate, or a brokered tool call / risky delegation queued for a human. Both surface in the **Approvals** panel, where you resolve each with **Allow Once**, **Always Allow**, or **Deny**.
+Use this page when an agent pauses for your decision: an OpenClaw exec command waiting on a gate, or a brokered tool call / risky delegation queued for a human. Both surface in the **Approvals** panel, where you resolve each with **Allow Once**, **Always**, or **Deny**.
 
 The panel renders two distinct surfaces that look alike but are wired differently:
 
@@ -21,7 +21,7 @@ There is **no standalone Approvals nav view**. Approvals surface where they were
 - Approvals appear in two places, both always available:
   - The **Needs approval** column on the [board](/using/board), the first column. It collapses to a thin rail when empty and auto-expands the moment a request arrives.
   - An **inline tray above the composer** in [group chat](/using/group-chat) and 1:1 [agent chat](/using/agents), scoped to that team or agent (capped at three cards, with a "view on the board" link for the rest).
-- For **exec approvals** to appear, the agent's command-execution policy must be set to ask. Open an agent, go to the **Personality** tab → **Execution Permissions**, and set **Command Execution** to **Always Ask** or **Ask for Unknown**. Then ask the agent to run a command. It pauses and the request appears here.
+- For **exec approvals** to appear, the agent's command-execution policy must be set to ask. Open an agent, go to the **Permissions** tab → **Execution Permissions**, and set **Command Execution** to **Always Ask** or **Ask for Unknown**. Then ask the agent to run a command. It pauses and the request appears here.
 - For **tool / delegation approvals**, no extra setup is needed; the broker writes a pending row when a risky or availability-gated tool call needs sign-off, and the governance delegation gate writes one for a risky delegation.
 
 ## Steps
@@ -45,11 +45,11 @@ Each **tool / delegation approval** card (in the queue below) shows:
 
 Click one of the three actions on the card:
 
-| Action           | Exec approval                                        | Tool / delegation approval                             |
-| ---------------- | ---------------------------------------------------- | ------------------------------------------------------ |
-| **Allow Once**   | Permits this single run                              | Permits this single call (`allow_once`)                |
-| **Always Allow** | Allowlists the command pattern so it stops prompting | Records a sticky allow for this scope (`allow_always`) |
-| **Deny**         | Rejects the run                                      | Rejects the call (`deny`)                              |
+| Action         | Exec approval                                        | Tool / delegation approval                             |
+| -------------- | ---------------------------------------------------- | ------------------------------------------------------ |
+| **Allow Once** | Permits this single run                              | Permits this single call (`allow_once`)                |
+| **Always**     | Allowlists the command pattern so it stops prompting | Records a sticky allow for this scope (`allow_always`) |
+| **Deny**       | Rejects the run                                      | Rejects the call (`deny`)                              |
 
 What happens under the hood differs by surface:
 
@@ -95,7 +95,7 @@ Under the queue, the panel lists every broker tool with an **Available** / **Una
 
 ## Verify it worked
 
-- The resolved card disappears. For an exec approval, the count badge on the **Approvals** nav button drops by one and the Boo's amber ring clears in the Ghost Graph.
+- The resolved card disappears from the board's **Needs approval** column (its amber count drops by one, and the column collapses back to a thin rail once the queue empties) and from any in-chat tray. For an exec approval, the Boo's amber ring also clears in the Ghost Graph.
 - For an exec **allow**, the agent resumes and (after the followup) reports the command's output back into the chat transcript.
 - For a tool/delegation approval, the waiting tool call / delegation proceeds (on allow) or is rejected (on deny) within a few seconds.
 - The decision history is queryable: `GET /api/approvals?agentId=<id>` returns the persisted exec-approval decisions for that agent (most recent first).
@@ -111,7 +111,7 @@ Under the queue, the panel lists every broker tool with an **Available** / **Una
 </Warning>
 
 <Danger>
-**Always Allow is sticky.** For an exec approval it allowlists the command pattern so it stops asking; for a tool/delegation it records a sticky allow for that scope. Use **Allow Once** when you want to keep the gate for next time.
+**Always is sticky.** For an exec approval it allowlists the command pattern so it stops asking; for a tool/delegation it records a sticky allow for that scope. Use **Allow Once** when you want to keep the gate for next time.
 </Danger>
 
 ## Related

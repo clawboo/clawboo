@@ -21,7 +21,6 @@ These are the bottom nav buttons in `AgentListColumn`. Each switches the main co
 
 - **[Board](/using/board)**: The durable kanban board, fused with chat. Columns by task status; cards carry runtime, verification, and cost badges.
 - **[Marketplace](/using/marketplace)**: Browse and deploy the 304 first-class agents and 82 workflow teams across a Skills / Agents / Teams tab strip.
-- **[Approvals](/using/approvals)**: The pending-approval queue (Gateway exec approvals plus the brokered tool-approval queue).
 - **[Cost & budgets](/using/cost-and-budgets)**: The **Tokens Used** dashboard: per-agent and per-team token usage and trends, plus USD budgets via the Governance surface.
 - **[Scheduler](/using/scheduler)**: The Routines tab for recurring team-task and runtime-own-life schedules.
 - **[Memory](/using/memory-browser)**: Search, save, and browse the shared Memory-MCP tier (facts and procedures).
@@ -33,6 +32,7 @@ These are the bottom nav buttons in `AgentListColumn`. Each switches the main co
 
 ## App-wide
 
+- **[Approvals](/using/approvals)**: The pending-approval queue (Gateway exec approvals plus the brokered tool-approval queue). Not a nav panel: it renders as the Board's **Needs approval** column and as an inline tray above the group-chat composer.
 - **[Theming](/using/theming)**: The light/dark/system theme toggle in the bottom-left of the sidebar (`ThemeToggle`); fresh installs default to light.
 
 ## Where things live (nav slots)

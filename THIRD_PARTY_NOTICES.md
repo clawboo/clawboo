@@ -22,6 +22,8 @@ aggregated in this file, which ships in the package (`dist/THIRD_PARTY_NOTICES.m
 | `openai`                    | Apache-2.0 |
 | `@modelcontextprotocol/sdk` | MIT        |
 | `croner`                    | MIT        |
+| `express`, `cors`           | MIT        |
+| `@noble/ed25519`            | MIT        |
 | `better-sqlite3`            | MIT        |
 | `drizzle-orm`               | Apache-2.0 |
 | `zod`                       | MIT        |
@@ -31,6 +33,13 @@ aggregated in this file, which ships in the package (`dist/THIRD_PARTY_NOTICES.m
 | `framer-motion`             | MIT        |
 | `zustand`                   | MIT        |
 | `codemirror`                | MIT        |
+| `@dnd-kit/core`             | MIT        |
+| `@radix-ui/react-slider`    | MIT        |
+| `react-resizable-panels`    | MIT        |
+| `recharts`                  | MIT        |
+| `react-markdown`            | MIT        |
+| `remark-gfm`                | MIT        |
+| `culori`                    | MIT        |
 | `lucide-react`              | ISC        |
 | `simple-icons`              | CC0-1.0    |
 | `tailwindcss`               | MIT        |

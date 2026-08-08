@@ -3,7 +3,7 @@ title: Teams API
 description: 'REST reference for teams and their sub-resources: CRUD, agent membership, the Know-Your-Team onboarding gate, team rules, and the peer-chat room.'
 ---
 
-REST surface for [teams](/appendices/glossary) and everything scoped to a team: team CRUD, agent→team membership, the per-team "Know Your Team" onboarding flags, the durable team-rules text, and the mixed-runtime peer-chat room (read + the explicit exchange kickoff).
+REST surface for [teams](/appendices/glossary) and everything scoped to a team: team CRUD, agent→team membership, the per-team "Know Your Team" onboarding flags, the durable team-rules text, the server-orchestrated chat surface (ingest, stop, SSE tail) plus its activity snapshot, and the mixed-runtime peer-chat room (read + the explicit exchange kickoff).
 
 Teams are stored in the SQLite `teams` table; agent membership is the nullable `agents.teamId` FK (one-to-one: an agent belongs to at most one team). Onboarding flags and team rules are NOT tables; they are JSON blobs in the `settings` key/value table under the keys `team-onboarding:<teamId>` and `team-rules:<teamId>`. The peer-chat room is the `team_chat` table (the same one the [TeamChat MCP server](/reference/rest-api/tools-and-mcp) writes).
 
@@ -11,24 +11,28 @@ Teams are stored in the SQLite `teams` table; agent membership is the nullable `
 Deleting a team **orphans** its agents (sets `agents.teamId = null`) rather than deleting them, and cleans up the team-scoped `settings` rows. The agents themselves are managed through the [agents API](/reference/rest-api/agents).
 </Note>
 
-All POST/PATCH/PUT routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Two different path-param names appear in this group: the team CRUD + onboarding routes use `:id`, while the team-rules routes use `:teamId`; both are the team id, the difference is purely the registered param name.
+All POST/PATCH/PUT routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Two different path-param names appear in this group: the team CRUD, onboarding, chat, and activity routes use `:id`, while the team-rules routes use `:teamId`; both are the team id, the difference is purely the registered param name.
 
 ## Routes
 
-| Method | Path                             | Summary                                                      | Stream? |
-| ------ | -------------------------------- | ------------------------------------------------------------ | ------- |
-| GET    | `/api/teams`                     | List teams with `agentCount`, plus agent→team assignments    | No      |
-| POST   | `/api/teams`                     | Create a team (optional client-provided UUID)                | No      |
-| PATCH  | `/api/teams/:id`                 | Update a team (partial)                                      | No      |
-| DELETE | `/api/teams/:id`                 | Delete a team, orphan its agents, clean team-scoped settings | No      |
-| POST   | `/api/teams/:id/agents`          | Assign (upsert) an agent into the team                       | No      |
-| DELETE | `/api/teams/:id/agents/:agentId` | Remove an agent from a team                                  | No      |
-| GET    | `/api/teams/:id/onboarding`      | Read the per-team onboarding flags + user-intro text         | No      |
-| PATCH  | `/api/teams/:id/onboarding`      | Merge-update the onboarding state                            | No      |
-| GET    | `/api/team-rules/:teamId`        | Read the durable team-rules text                             | No      |
-| PUT    | `/api/team-rules/:teamId`        | Replace the team-rules text (4000-char cap)                  | No      |
-| GET    | `/api/team-chat`                 | Cursor-read the team peer-chat room                          | No      |
-| POST   | `/api/team-chat/exchange`        | Kick off ONE bounded peer-chat exchange                      | No      |
+| Method | Path                              | Summary                                                      | Stream? |
+| ------ | --------------------------------- | ------------------------------------------------------------ | ------- |
+| GET    | `/api/teams`                      | List teams with `agentCount`, plus agent→team assignments    | No      |
+| POST   | `/api/teams`                      | Create a team (optional client-provided UUID)                | No      |
+| PATCH  | `/api/teams/:id`                  | Update a team (partial)                                      | No      |
+| DELETE | `/api/teams/:id`                  | Delete a team, orphan its agents, clean team-scoped settings | No      |
+| POST   | `/api/teams/:id/agents`           | Assign (upsert) an agent into the team                       | No      |
+| DELETE | `/api/teams/:id/agents/:agentId`  | Remove an agent from a team                                  | No      |
+| GET    | `/api/teams/:id/onboarding`       | Read the per-team onboarding flags + user-intro text         | No      |
+| PATCH  | `/api/teams/:id/onboarding`       | Merge-update the onboarding state                            | No      |
+| GET    | `/api/teams/:id/activity-summary` | Compact brief + board + memory + chat snapshot               | No      |
+| POST   | `/api/teams/:id/chat`             | Ingest a user message into the server orchestrator (202)     | No      |
+| POST   | `/api/teams/:id/chat/stop`        | User Stop: abort in-flight runs, release claimed tasks       | No      |
+| GET    | `/api/teams/:id/chat/stream`      | SSE live-tail of the team transcript                         | SSE     |
+| GET    | `/api/team-rules/:teamId`         | Read the durable team-rules text                             | No      |
+| PUT    | `/api/team-rules/:teamId`         | Replace the team-rules text (4000-char cap)                  | No      |
+| GET    | `/api/team-chat`                  | Cursor-read the team peer-chat room                          | No      |
+| POST   | `/api/team-chat/exchange`         | Kick off ONE bounded peer-chat exchange                      | No      |
 
 ---
 
@@ -444,6 +448,228 @@ curl -X PATCH http://localhost:18790/api/teams/<team-id>/onboarding \
 
 ---
 
+## `GET /api/teams/:id/activity-summary`
+
+Builds a compact, on-demand snapshot of what a team has been doing, for injection into Boo Zero's **personal** chat when the user `@`-mentions that team. Composed from durable server state in order (brief, board, saved memory, recent chat), so it works regardless of what the browser has loaded. The sections are sized against a 2500-character budget: the Boo-Zero brief is clipped to 900, the board summary and saved memory are kept whole, and the recent-chat section (up to 30 turns, oldest dropped first) gets whatever budget remains.
+
+- **Path params**: `id` (team id).
+- **Request body**: none.
+
+### Responses
+
+**`400 Bad Request`**: the `:id` segment is missing:
+
+```json
+{ "error": "team id required" }
+```
+
+**`200 OK`**: the summary block, or `null` when the team has nothing to report:
+
+```ts
+{
+  content: string | null // null = no brief, no board tasks, no saved memory, no meaningful chat
+}
+```
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+<Note>
+An unknown team id is not a 404: it simply has no brief, board, memory, or chat, so it returns `{ "content": null }`. Saved memory is best-effort (a memory-store failure is swallowed and the section omitted) rather than a 500.
+</Note>
+
+### Example
+
+```bash
+curl http://localhost:18790/api/teams/<team-id>/activity-summary
+```
+
+---
+
+## `POST /api/teams/:id/chat`
+
+Ingests a user message into the team's **server** orchestrator and returns **202** immediately. The cascade proceeds detached: `req.on('close')` is deliberately not wired to abort it, so closing the client (or the request simply ending) never kills the run. Target resolution is by priority: an explicit `targetAgentId` that is in the roster, then a **leading** `@`-mention (the message must _start_ with `@<agent name>`, and the name must be followed by whitespace or the end of the message; a mention anywhere else in the text is ignored). The user message is persisted under the target's team session key before that agent's turn runs.
+
+The route is gated on the double-orchestration firewall: a team that has opted out via the `team-server-orchestrated:<teamId>` setting (value `'false'`) gets a **404**. Only the literal string `'false'` closes the gate, and nothing writes that value today: an absent key resolves to on, and the two paths that do write the key (`POST /api/teams` with `serverOrchestrated: true`, and the native-team onboarding seed) both write `'true'`. So in practice every team is server-orchestrated and the gate passes.
+
+- **Path params**: `id` (team id).
+- **Request body**:
+
+```ts
+{
+  message: string          // required; trimmed, must be non-empty
+  targetAgentId?: string   // honored only when it matches a roster member
+  entryId?: string         // client-minted id for the persisted user entry (SSE dedup)
+}
+```
+
+### Responses
+
+**`400 Bad Request`**: the `:id` segment is missing:
+
+```json
+{ "error": "team id required" }
+```
+
+**`400 Bad Request`**: `message` is absent, not a string, or empty after trimming:
+
+```json
+{ "error": "message required" }
+```
+
+**`404 Not Found`**: the team opted out of server orchestration:
+
+```json
+{ "error": "team is not server-orchestrated" }
+```
+
+**`202 Accepted`**: the message was enqueued (the run has NOT finished):
+
+```json
+{ "ok": true }
+```
+
+**`500 Internal Server Error`**: an unexpected throw before the enqueue:
+
+```json
+{ "error": "<message>" }
+```
+
+<Note>
+The 202 means "accepted", not "succeeded". Watch the run on `GET /api/teams/:id/chat/stream`. A failed delivery is recovered in place rather than returned here: a down OpenClaw operator connection is reconnected and the same turn retried once, and only a still-failing send is persisted into the transcript as a `role: 'system'`, `kind: 'meta'` entry.
+</Note>
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/teams/<team-id>/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Plan the launch checklist."}'
+```
+
+---
+
+## `POST /api/teams/:id/chat/stop`
+
+User Stop. Bumps the orchestrator's stop generation **synchronously** (before any await), then aborts every in-flight run through its runtime adapter. In-flight engine work bails at its next checkpoint, and because the generation changed, the resulting aborted terminals are read as a clean Stop rather than a failure: each claimed task is released back to `todo`, with no `blocked` status, no dependent cancellation, and no failure reflection to the delegator. Same server-orchestration gate as the ingest route.
+
+- **Path params**: `id` (team id).
+- **Request body**: none.
+
+### Responses
+
+**`400 Bad Request`**: the `:id` segment is missing:
+
+```json
+{ "error": "team id required" }
+```
+
+**`404 Not Found`**: the team opted out of server orchestration:
+
+```json
+{ "error": "team is not server-orchestrated" }
+```
+
+**`200 OK`**: the stop was applied, or there was nothing to stop:
+
+```json
+{ "ok": true }
+```
+
+**`500 Internal Server Error`**: an unexpected throw:
+
+```json
+{ "error": "<message>" }
+```
+
+<Note>
+Stopping a team with no live orchestrator (never started this process, or idle-evicted after 30 minutes) is a no-op that still returns `{ "ok": true }`.
+</Note>
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/teams/<team-id>/chat/stop
+```
+
+---
+
+## `GET /api/teams/:id/chat/stream`
+
+Server-Sent Events live-tail of a team's chat transcript, in two tiers. **Tier 1** polls the durable `chat_messages` rows for the team's session keys every 750 ms on the monotonic `id` cursor (up to 500 rows per batch); each row's stored `data` is already a serialized `TranscriptEntry` and goes straight to the wire. **Tier 2** forwards ephemeral in-memory signals (assistant token deltas, board-projection changes, agent status) as _named_ frames with no `id:` line, so they never advance the resume cursor.
+
+This is a pure **reader**: the stream never drives orchestration, so a server-side cascade runs to completion with zero clients connected. It is ungated by design (tailing `chat_messages` is safe for any team); the double-orchestration firewall lives on the write path. The session-key set (`agent:<id>:team:<teamId>` for each member, plus Boo Zero's team-scoped key) is resolved **once at connect**, so a member added mid-stream is picked up on the next reconnect.
+
+- **Path params**: `id` (team id).
+- **Query params**:
+
+| Param   | Type   | Notes                                                                                               |
+| ------- | ------ | --------------------------------------------------------------------------------------------------- |
+| `since` | number | Resume cursor over the `chat_messages` id. Negative/non-finite → `0`. `Last-Event-ID` wins over it. |
+
+- **Request body**: none.
+
+<Note>
+This is an SSE route, not request/response. There is no JSON response body; the catalog below describes the wire frames. An unknown team id is not a 404: no session keys match, so the stream opens and stays open emitting only keepalives. Resume replays **committed rows only**: deltas, board changes, and status frames carry no id and are never replayed.
+</Note>
+
+### Connection
+
+On open, the handler writes `HTTP/1.1 200` with:
+
+```http
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-cache, no-transform
+Connection: keep-alive
+X-Accel-Buffering: no
+```
+
+then emits a `: connected` comment frame, flushes any rows already past the cursor, and replays the team's last-known agent status per agent.
+
+### Event catalog
+
+| Frame           | When                                             | Shape                                                                                        |
+| --------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `: connected`   | Immediately on open                              | SSE comment (ignored by `EventSource`)                                                       |
+| _(unnamed)_     | Per committed transcript row (poll every 750 ms) | `id: <row id>` line + `data: <TranscriptEntry json>` line                                    |
+| `event: delta`  | Per live assistant-text delta                    | `{ sessionKey, runId, text }`; `text` is the FULL running text so far (replace, not append)  |
+| `event: board`  | Per board mutation the orchestrator makes        | `{ id, title?, status?, assigneeAgentId?, parentTaskId?, createdAt?, updatedAt?, summary? }` |
+| `event: status` | Per run boundary, plus a snapshot on connect     | `{ agentId, status: 'running' \| 'idle' \| 'error' }`                                        |
+| `: keepalive`   | Every 20 s while open                            | SSE comment (keeps the connection warm)                                                      |
+
+Only the unnamed frames carry an `id:`, so only they move the resume cursor. A client reconciles any board change it missed across a reconnect with a `GET /api/board` reload.
+
+Example frames:
+
+```text
+: connected
+
+id: 8121
+data: {"entryId":"...","role":"user","kind":"user","text":"Plan the launch checklist.","sessionKey":"agent:<id>:team:<team-id>","runId":null,"source":"local-send","timestampMs":1718450000000,"sequenceKey":1,"confirmed":true,"fingerprint":"..."}
+
+event: status
+data: {"agentId":"<agent-id>","status":"running"}
+
+event: delta
+data: {"sessionKey":"agent:<id>:team:<team-id>","runId":"<run-id>","text":"Here is the checklist so far"}
+
+: keepalive
+```
+
+### Example
+
+```bash
+curl -N http://localhost:18790/api/teams/<team-id>/chat/stream
+
+# Resume from a known transcript row id
+curl -N 'http://localhost:18790/api/teams/<team-id>/chat/stream?since=8121'
+```
+
+---
+
 ## `GET /api/team-rules/:teamId`
 
 Reads the durable per-team rules text. The rules are captured either through the maintenance-panel textarea or the `/rule <text>` slash command in the team-chat composer; either path writes here. The text is injected into the message preamble for every team agent so user corrections survive across sessions. When no row exists, `{ content: '' }` is returned.
@@ -681,7 +907,7 @@ curl -X POST http://localhost:18790/api/team-chat/exchange \
 
 ## Error envelope
 
-Every error response on these routes is the standard envelope `{ error: string }`. The two exceptions are on `/api/team-chat/exchange`: the **409** re-entrancy refusal and the **404**/**422** exchange-refused branches use `{ ok: false, error: string }` (the success shape is `{ ok: true, roomId, result }`).
+Every error response on these routes is the standard envelope `{ error: string }`. The two exceptions are on `/api/team-chat/exchange`: the **409** re-entrancy refusal and the **404**/**422** exchange-refused branches use `{ ok: false, error: string }` (the success shape is `{ ok: true, roomId, result }`). The SSE route `/api/teams/:id/chat/stream` has no error body at all: it commits a `200` event stream up front and swallows transient tail-read errors to keep the connection alive.
 
 ## See also
 

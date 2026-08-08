@@ -121,7 +121,7 @@ erDiagram
 Persisted transcript entries so chat history survives a page refresh. Keyed internally by an autoincrement `id`, but deduplicated on the application-supplied `entry_id` (UUID) for idempotent batch inserts.
 
 - **Columns**: `id` (PK, autoinc), `session_key`, `gateway_url`, `entry_id`, `timestamp_ms`, `data` (JSON-serialised `TranscriptEntry`).
-- **Indexes**: `uniq_chat_messages_entry_id` (unique on `entry_id`), `idx_chat_messages_session_ts` on `(session_key, timestamp_ms)`.
+- **Indexes**: `uniq_chat_messages_entry_id` (unique on `entry_id`), `idx_chat_messages_session_ts` on `(session_key, timestamp_ms)`, `idx_chat_messages_session_id` on `(session_key, id)` (the tail index the live SSE stream range-seeks on, so each poll is O(new rows) per key instead of an O(history) scan + sort).
 
 ### `teams`
 
@@ -161,7 +161,7 @@ Saved Ghost Graph / Atlas node and edge positions, keyed per layout name + gatew
 
 ### `settings`
 
-A typed key/value store. Backs durable per-team briefs, team rules, onboarding flags, the Boo Zero global brief / display name, the API port mirror, and any other simple config-by-key. (See [Configuration](/reference/configuration) for the documented keys.)
+A typed key/value store. Backs team rules, onboarding flags, the Boo Zero global brief / display name, and any other simple config-by-key. (Keys are documented where they are set: see [Boo Zero](/using/boo-zero) for `boo-zero:global-brief` and `boo-zero:display-name:<agentId>`, and [Using teams](/using/teams) for `team-rules:<teamId>` and `team-onboarding:<teamId>`.)
 
 - **Columns**: `key` (PK, text), `value` (text), `updated_at`.
 - **Helpers**: `getSetting(db, key)` / `setSetting(db, key, value)` (upsert on conflict).
@@ -203,7 +203,7 @@ The transactional source of truth for team/task coordination state. The board re
 The kanban cards.
 
 - **Columns**: `id` (PK, text), `title`, `description`, `status` (default `backlog`; one of `backlog`|`todo`|`in_progress`|`in_review`|`blocked`|`done`|`cancelled`), `priority` (default `0`), `team_id` (soft ref), `assignee_agent_id` (soft ref), `assignee_runtime`, `parent_task_id` (**FK → `tasks.id` self-ref**), `source_delegation_id`, `worktree_ref`, `branch_ref`, `cost_usd` (`REAL`, default `0`), `parent_session_id`, `dropped` (`0`/`1` soft-delete), `tenant_id` (dormant), `verification` (JSON `VerificationResult`; `null` until a gate runs; the `in_review → done` gate reads `.status === 'pass'`), `scheduled_by` (default `manual`; the one-firing-owner label, open set: `manual`|`clawboo`|`openclaw`|…), `created_at`, `updated_at`, `completed_at`.
-- **Indexes**: `idx_tasks_team_status` on `(team_id, status)`, `idx_tasks_assignee`, `idx_tasks_parent`.
+- **Indexes**: `idx_tasks_team_status` on `(team_id, status)`, `idx_tasks_assignee`, `idx_tasks_parent`, `idx_tasks_parent_dropped_created` on `(parent_task_id, dropped, created_at)`. The composite serves both guarded-create counts, which run while the write lock is held: the per-parent child count (`parent_task_id = ? AND dropped = 0`, an index prefix) and the root-rate count (`parent_task_id IS NULL AND dropped = 0 AND created_at > ?`, equality-equality-range, so the range column comes last). `idx_tasks_parent` is deliberately retained: dropping it from the DDL would not drop it from databases that already bootstrapped it.
 
 ### `task_deps`
 
@@ -399,7 +399,8 @@ Boot-time health helpers also live in `db.ts`: `integrityCheck(db)` runs `PRAGMA
 
 ## See also
 
-- [Configuration](/reference/configuration): `settings.json`, file/dir locations, documented `settings` keys
+- [Configuration](/reference/configuration): `settings.json`, file/dir locations
+- [Boo Zero](/using/boo-zero) and [Using teams](/using/teams): the documented `settings`-table keys
 - [Environment variables](/reference/environment-variables): `CLAWBOO_DB_PATH`, `CLAWBOO_HOME`
 - [Data and state](/operating/data-and-state): SQLite file, backup, reset
 - [The board](/concepts/the-board): `tasks` / `task_deps` / `execution_processes` state machine and atomic claim

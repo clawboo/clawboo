@@ -24,6 +24,7 @@
 
 ## Checklist
 
+- [ ] `pnpm format:check` passes (fix with `pnpm format`)
 - [ ] `pnpm build` passes
 - [ ] `pnpm typecheck` passes
 - [ ] `pnpm lint` passes

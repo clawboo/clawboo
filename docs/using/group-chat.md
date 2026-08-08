@@ -118,7 +118,7 @@ Team rules are loaded and prepended to the context preamble on every future turn
 
 ## The peer-chat room
 
-Every team also has a durable **peer-chat room**, where each runtime posts as a named peer, opened from the toggle in the team header. It is a **read-only** view: peers post to the room through their TeamChat MCP tool as they coordinate, not from this panel, and you watch. It is the "one room, any runtime can lead" surface, distinct from the user-facing group chat above (where you type). See [Peer chat](/concepts/peer-chat) for the model.
+Every team also has a durable **peer-chat room** underneath the group chat, where each runtime posts as a named peer. It has **no dashboard viewer today**: there is no toggle in the team header and no panel that renders it. Posts land in the shared `team_chat` table from two directions in a shipped install: the bounded exchange engine writes each runtime's turn to the room as a named peer (kicked off by `POST /api/team-chat/exchange`), and board mutations made through the REST board API narrate themselves into the same room as `system` lines. Agents can also post and read the room directly through the TeamChat MCP tools (`team_chat_post` / `team_chat_subscribe`), but those are off by default (`teamchat: false`) on the teams the dashboard creates. The only way for _you_ to read the room back is the REST endpoint, `GET /api/team-chat?teamId=<id>`. It is the "one room, any runtime can lead" surface, distinct from the user-facing group chat above (where you type). See [Peer chat](/concepts/peer-chat) for the model.
 
 ## Options / variations
 
@@ -130,7 +130,6 @@ Every team also has a durable **peer-chat room**, where each runtime posts as a 
 | Add a durable rule          | `/rule <text>`                                             | Persists to `/api/team-rules/:teamId`; injected on every future turn                                        |
 | Stop the team               | Click the red Stop button                                  | `POST /api/teams/:id/chat/stop`: aborts in-flight runs, releases tasks to `todo`                            |
 | Insert a mention            | Click an agent chip                                        | Inserts `@AgentName` into the composer                                                                      |
-| Open the peer-chat room     | Toggle in the team header                                  | A read-only view of the durable room where runtimes post as named peers                                     |
 | Read further back           | Click **Load earlier messages** at the top of the timeline | Reveals 100 more items; the chat renders the most recent ~150 by default so a long session stays responsive |
 
 ## Verify it worked

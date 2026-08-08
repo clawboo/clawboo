@@ -9,7 +9,7 @@ This page is for people working _on_ Clawboo who need to cut a release or unders
 
 ## What ships, and what doesn't
 
-There are 25 scoped `@clawboo/*` packages plus two apps. Run `git grep '"private"' packages` and you find `"private": true` on every library; the same is true of `apps/web` (`@clawboo/web`) and `docs` (`@clawboo/docs`). The **only** non-private package in the entire workspace is `apps/cli`, whose `name` is `clawboo` (no scope) and whose `files` array is just `["dist"]`. So `pnpm changeset publish` skips everything private and publishes exactly one tarball: the CLI.
+There are 30 scoped `@clawboo/*` packages under `packages/` (25 top-level plus 5 runtime adapters under `packages/adapters/*`) plus two apps. Run `git grep '"private"' packages` and you find `"private": true` on every library; the same is true of `apps/web` (`@clawboo/web`) and `docs` (`@clawboo/docs`). The **only** non-private package in the entire workspace is `apps/cli`, whose `name` is `clawboo` (no scope) and whose `files` array is just `["dist"]`. So `pnpm changeset publish` skips everything private and publishes exactly one tarball: the CLI.
 
 The libraries still ship; they just travel _inside_ the CLI bundle, not as separate npm installs. The web server's tsup config marks the whole `@clawboo/*` scope `noExternal`, so `dist/server.js` inlines `db`, `mcp`, `governance`, the adapters, and the rest into one file. `assemble-cli.sh` copies that `server.js`, the Vite `ui/`, and the four bundled MCP stdio bins into `apps/cli/dist/`. The published tarball is therefore: the CLI entrypoint, the inlined server bundle, the SPA assets, and the MCP bins, nothing else.
 
@@ -19,7 +19,7 @@ This single-artifact posture is **enforced by a test**, not just a convention. `
 
 ```mermaid
 graph TD
-  subgraph ws["workspace (27 @clawboo/* packages + apps/web + docs)"]
+  subgraph ws["workspace (30 @clawboo/* packages + apps/web + docs)"]
     libs["@clawboo/db, mcp, governance,<br/>adapters, … — all private:true"]
   end
   libs -- "tsup noExternal: /^@clawboo/" --> bundle["apps/web dist/server.js<br/>(inlines the libs)"]
@@ -63,7 +63,7 @@ The release flow is intent-first: you describe the change in a `.changeset/*.md`
 pnpm changeset
 ```
 
-This walks you through which package changed (in practice, `clawboo`) and at what semver level (patch / minor / major), then writes a markdown file under `.changeset/` describing the bump. You commit that `.md` file alongside your code change. On a fresh checkout, `.changeset/` holds only `config.json`; there is no pending changeset committed at the documented commit.
+This walks you through which package changed (in practice, `clawboo`) and at what semver level (patch / minor / major), then writes a markdown file under `.changeset/` describing the bump. You commit that `.md` file alongside your code change. A clone of `main` may or may not carry pending changesets: `ls .changeset` tells you which phase the next `publish.yml` run will take, because any `*.md` present means the next run opens a Version PR, and none present means it publishes.
 
 <Note>
 Because the libraries don't publish, a changeset is in practice always *about the `clawboo` CLI*. A code change deep in `@clawboo/db` is still released as a CLI version bump; the lib change rides inside the CLI bundle, so the user-facing artifact that changed is the CLI.
@@ -75,13 +75,15 @@ Every push to `main` and every pull request runs `.github/workflows/ci.yml`. It 
 
 | Job                 | Command                                     | What it guards                                                                                  |
 | ------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `lint`              | `pnpm lint`                                 | ESLint across the workspace + the docs frontmatter check.                                       |
+| `lint`              | `pnpm format:check` → `pnpm lint`           | Prettier formatting, then ESLint across the workspace + the docs frontmatter check.             |
 | `typecheck`         | `pnpm typecheck`                            | `tsc --noEmit` across the workspace.                                                            |
 | `test`              | `pnpm test:coverage`                        | Per-package Vitest suites plus a coverage table (no gate).                                      |
 | `build`             | `pnpm build` → `check-entry-chunk.mjs`      | Builds every package + app `dist/`, and asserts the marketplace catalog stays a deferred chunk. |
 | `verify-catalog`    | `pnpm verify:catalog`                       | The committed marketplace catalog matches its integrity manifest — offline, no upstream fetch.  |
 | `smoke-test-bundle` | `pnpm assemble` → `pnpm test:clean-install` | The published tarball actually works end-to-end.                                                |
 | `e2e`               | `pnpm build` → `pnpm e2e`                   | Playwright: the chat → board round-trip and onboarding.                                         |
+
+The Prettier half of the `lint` job runs first because it takes seconds and needs no build, whereas `turbo lint` builds every workspace dependency before it can run ESLint. It also means a formatting-only failure reddens the `lint` job while ESLint itself is green; the fix is `pnpm format`.
 
 The `smoke-test-bundle` job is the one that earns its keep at release time, and it runs on a **`[ubuntu-latest, windows-latest, macos-latest]` matrix**. It first `pnpm assemble`s the CLI bundle, then `pnpm test:clean-install` simulates `npx clawboo` on a real machine. Crucially, it does not run the repo build in place: it `pnpm pack`s `apps/cli` and `npm install`s the tarball into a throwaway directory under the OS temp dir, so nothing resolves through the workspace's `node_modules` and the published `files` whitelist plus the published dependency closure are what get exercised. Against that install it asserts the packaged `bin` entries and their npm shims exist, that every module the bundles still load is declared / builtin / documented-optional, that the CLI's HTTP-signature port probe skips a fake non-Clawboo listener on 18791 (it picks 18790, never 18791), that the SPA renders at `/` and a deep route falls through to `index.html`, that `/api/settings` returns Clawboo-shaped JSON, that the SPA actually boots in headless Chromium rather than merely being served, that an installed MCP stdio bin completes a real JSON-RPC `tools/list` handshake, that a real `POST /api/runtimes/clawboo-native/run` drives a board task to `done`, and that a SECOND launch against an already-running dashboard reuses it instead of forking a second server. This exists because v0.1.1 shipped a `Cannot GET /` SPA-catch-all bug and v0.1.2 shipped a port-collision `Unauthorized` bug; the smoke test catches that whole class before a bundle reaches npm. The Windows leg is the regression gate for the v0.1.4 Windows-compat fixes (`npm.cmd` resolution, the `which`→`where` shim, `netstat`-based process lookup); the macOS leg covers a primary user OS. See [Testing](/internals/testing#the-clean-install-smoke-does-npx-clawboo-actually-work) for the full assertion list.
 

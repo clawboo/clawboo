@@ -45,10 +45,10 @@ Clawboo only ever _reads_ OpenClaw's `~/.openclaw/` directory for interop; it ne
 
 By default the server binds to loopback `127.0.0.1`, so a fresh install is not reachable from other hosts. Widening the bind is an explicit opt-in: set the `HOST` environment variable (`HOSTNAME` is deliberately ignored, since Docker and CI inject it automatically). When you do, you **must** also set `STUDIO_ACCESS_TOKEN`; a wide bind with no token makes the server refuse to start.
 
-The token activates the access gate: every `/api/*` route then requires a valid cookie, set once by opening `/?access_token=<token>`. The gate compares tokens in constant time, folds path case before its prefix check (so `/API/...` cannot evade it), and restricts the token charset to `[A-Za-z0-9._~-]`. If you bind to a non-loopback interface _without_ a token, the server logs a loud SECURITY warning at boot rather than silently exposing the dashboard.
+The token activates the access gate: every `/api/*` route then requires a valid cookie, set once by opening `/?access_token=<token>`. The gate compares tokens in constant time, folds path case before its prefix check (so `/API/...` cannot evade it), and restricts the token charset to `[A-Za-z0-9._~-]`. If you bind to a non-loopback interface _without_ a token, the server logs a `SECURITY: refusing to start` error and exits 1 rather than silently exposing the dashboard.
 
 <Warning>
-A non-loopback bind with no `STUDIO_ACCESS_TOKEN` leaves the dashboard and every API route reachable by anyone on your network with no authentication. Set the token before widening the bind.
+The refusal names three fixes: set `STUDIO_ACCESS_TOKEN=<random>`, unset `HOST` to bind loopback only, or set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose. Only that last escape hatch reaches the warn-and-keep-serving path, which leaves the dashboard and every API route reachable by anyone on your network with no authentication.
 </Warning>
 
 The one deliberate carve-out: a loopback request to `/api/mcp/*` is exempt from the gate, because the server's own spawned runtimes attach their MCP clients over `http://127.0.0.1:<port>/api/mcp/*` with no cookie. A non-loopback `/api/mcp/*` request still requires the cookie. The full threat model is in [security](/operating/security); the operator walkthrough is in [self-host securely](/guides/self-host-securely).

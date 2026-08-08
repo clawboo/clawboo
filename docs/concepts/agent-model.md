@@ -1,6 +1,6 @@
 ---
 title: The agent model
-description: What a Boo is, how Boo Zero leads, and how a runtime-agnostic agent record maps onto the five runtime classes.
+description: What a Boo is, how Boo Zero leads, and how a runtime-agnostic agent record maps onto the five runtimes and the three runtime classes.
 ---
 
 A **Boo** is a single agent in Clawboo. Concretely it is an `AgentRecord`, a runtime-agnostic row in the agent [registry of record](/appendices/glossary). The record says _who exists_: a stable id, a display name, a status, an optional team, and, critically, a `runtime` field and a `participantKind`. The record does **not** contain the agent's execution loop. That belongs to a [runtime](/appendices/glossary), reached through the uniform `RuntimeAdapter` trait. The same Boo can be backed by any of Clawboo's five runtimes, and the team layer never branches on which one.

@@ -3,9 +3,9 @@ title: Changelog
 description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.3.1.
 ---
 
-Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a monorepo of 25 `@clawboo/*` workspace packages, but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
+Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a monorepo of 30 `@clawboo/*` workspace packages (25 top-level plus 5 runtime adapters under `packages/adapters/`), but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
 
-Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which re-runs the full PR gate (`verify:ingest`, `build`, `lint`, `typecheck`, `test`) plus the bundled-CLI clean-install smoke test, and then runs `pnpm changeset publish`. The full mechanics are in [Release process](/internals/release-process).
+Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which re-runs the full PR gate (`verify:catalog`, `build`, `lint`, `typecheck`, `test`) plus the bundled-CLI clean-install smoke test, and then runs `pnpm changeset publish`. The catalog gate on that path is the offline one, checking the committed catalog against its committed integrity manifest; the live upstream re-derive (`verify:ingest`) runs in its own `verify-ingest.yml` workflow (weekly cron, plus PRs touching the ingest scripts), so an upstream outage cannot hold up a release. The full mechanics are in [Release process](/internals/release-process).
 
 <Note>
   The current npm `latest` is **`clawboo@0.3.1`**, the version these docs describe, so `npx clawboo`
@@ -72,7 +72,7 @@ A patch release on top of native-first. Nothing architectural moved; the changes
 **Onboarding and providers**
 
 - **Native-first wizard**: the first real step connects a provider key, then optionally adds runtimes, then deploys a real team from the 82-team marketplace. Connect, Runtimes, Team, Ready. The generic auto-seeded pair is gone: you pick the team you actually want, and it deploys fully native. See [Quickstart (native)](/getting-started/quickstart-native).
-- **Ten native providers**: Anthropic, OpenAI, OpenRouter, and Ollama, plus Google, xAI, Groq, Mistral, Together, Cerebras, and Moonshot routed through an OpenAI-compatible base URL. Pasting a key fetches that provider's live model list, so the model picker offers what your key can actually reach.
+- **Ten key-based native providers plus keyless Ollama**: Anthropic, OpenAI, OpenRouter, and Ollama, plus Google, xAI, Groq, Mistral, Together, Cerebras, and Moonshot routed through an OpenAI-compatible base URL. Pasting a key fetches that provider's live model list, so the model picker offers what your key can actually reach.
 - **Providers hub** in Settings, with API keys moved out of Maintenance into one surface, backed by an encrypted vault under `~/.clawboo/secrets/`. A key you connect once is reused: an Anthropic key satisfies Claude Code, an OpenRouter key satisfies Hermes, and OpenClaw setup no longer asks for a second key.
 - **First-run capability tour**: a one-time, skippable spotlight over the real sidebar controls that ends by opening your team's group chat. See the [dashboard tour](/getting-started/dashboard-tour).
 

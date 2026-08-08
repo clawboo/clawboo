@@ -102,7 +102,7 @@ A toast confirms `Installed "<skill>" on <agent>`. The leadership orbital that a
 
 Routing edges are agent-to-agent delegation rules. To add one from the canvas:
 
-1. Click **Connect** in the top-right toolbar. The button reads **Drawing Edges** while active and makes every Boo's connection handles always-visible. (You can also click-to-connect: click a source handle, then a target handle.)
+1. Click the **Connect** button (GitBranch icon) at the right end of the top-right toolbar. It is icon-only, so hover for the tooltip: **Connect agents (draw routing)**, which becomes **Stop drawing edges** while armed. Connect mode tints the button red, draws a red inset ring around the canvas, and makes every Boo's connection handles always-visible. (You can also click-to-connect: click a source handle, then a target handle.)
 2. Drag from one Boo to another. Clawboo **optimistically** adds the edge, then appends `- Route to @<TargetName> for delegated tasks.` to the source agent's `AGENTS.md` (via the per-agent mutation queue) and best-effort enables agent-to-agent coordination in Gateway config. On failure the optimistic edge rolls back with an error toast.
 
 Dropping a **skill** node onto a Boo in connect mode performs a skill install instead of a routing edge; the canvas validates that source/target pair and routes accordingly.
@@ -130,6 +130,18 @@ Right-click any Boo for its action menu:
 
 The first three all land in the same place, the [agent detail view](/using/agents). `Select in sidebar` is the highlight-only action; left-click is reserved for peacock expand.
 
+### Keyboard
+
+Boo selection, the peacock expand/collapse, and the action menu all have keyboard equivalents; drawing a routing edge, drag-installing a skill, and opening the edge explain panel stay pointer-only. Each Boo is a Tab stop; the invisible Atlas team-root junctions and any collapsed skill/resource orbitals are taken out of the tab order, so you only land on things you can actually see.
+
+| Keys                                      | What it does                                                                                             |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `Enter` / `Space`                         | Toggle the peacock expand/collapse, the same as a single-click. React Flow also selects the focused Boo. |
+| Arrow keys                                | Move the selected Boo (React Flow's own handler, left intact).                                           |
+| `ContextMenu` / `Shift+F10` / `Alt+Enter` | Open the action menu above, anchored on the focused Boo's center.                                        |
+
+The `Alt+Enter` alias exists because macOS keyboards have no Menu key and the OS swallows `Shift+F10`. `Backspace` deliberately does _not_ delete a Boo: React Flow's default delete key is disabled on this canvas, so deletion stays context-menu only (that is the path that archives the agent through its runtime instead of silently splicing the node out of the local store).
+
 ### Re-layout
 
 Click **Re-layout** (top-right, appears once the first layout has run) to recompute positions from scratch. It drops your saved drag positions, re-runs ELK for the Boo hierarchy + orbital math for skills, and persists the fresh positions so a refresh is a no-op. Use it after adding agents or routes if the auto-layout looks tangled.
@@ -151,7 +163,7 @@ Click **Team halos** (Atlas-only, Pin icon) to draw a colored convex-hull backgr
 
 ### Activity dock
 
-Click **Activity** (Atlas-only, Terminal icon) to slide in a right-edge live-activity terminal scoped to all teams, the "what is every team doing right now" feed, sourced from the orchestration event log. The dock is always mounted (so it animates both ways) but only tails events while open.
+Click the **Activity** button (Atlas-only, Terminal icon; it is icon-only, so its tooltip reads **Activity feed (all teams)**, and **Hide activity feed** while open) to slide in a right-edge live-activity terminal scoped to all teams, the "what is every team doing right now" feed, sourced from the orchestration event log. The dock is always mounted (so it animates both ways) but only tails events while open.
 
 ## The MiniMap
 

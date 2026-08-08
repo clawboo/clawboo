@@ -8,7 +8,7 @@ description: 'The codex runtime: spawns codex exec, signs in with your ChatGPT s
 Codex differs from the other CLI runtimes in two ways that matter operationally: it authenticates through an **interactive ChatGPT OAuth login** (`codex login`), not a pasted API key; and it reports **no USD cost**, so spend is surfaced as token usage with an explicitly estimated, null dollar figure. Because the credential is a ChatGPT account, Codex is also the runtime a **ChatGPT-subscription user without any API key** runs their whole team on: the onboarding wizard's OpenAI card offers **Sign in with ChatGPT** (Recommended, the economical path), deploys every agent on Codex, and designates a Codex agent as the team's universal leader. Use this page to understand its capabilities, how to install and connect it, how the driver works, and how a Codex agent leads a team.
 
 <Note>
-**Authentication posture.** Clawboo only ever reuses your own `codex login`: it never automates the OAuth exchange, never reads or refreshes the token, and never calls the ChatGPT backend directly. You sign in with OpenAI's official CLI in your own terminal; Clawboo spawns that CLI and lets it do its own auth.
+**Authentication posture.** Clawboo only ever drives OpenAI's official CLI, whether you run `codex login` yourself in a terminal or click **Sign in with ChatGPT** and let Clawboo's local server spawn that same command for you. It never performs the OAuth exchange itself, never reads or refreshes the token, and never calls the ChatGPT backend directly: the CLI does its own auth and you authorize in your own browser on OpenAI's page.
 </Note>
 
 ## What it is
@@ -69,7 +69,7 @@ This is where Codex departs from the other api-key runtimes. Codex authenticates
 { "ok": true, "connectionState": "needs-login", "loginCommand": "codex login" }
 ```
 
-The card surfaces the `codex login` command with a copy button. Run it in your own terminal to complete the ChatGPT OAuth flow, then click **Re-check** in the card. The status probe DETECTS an existing login (`codex login status` is parsed, never the token file), so a user who signed in before ever opening Clawboo reads `ready` immediately. Once signed in, every spawned run gets a managed `CODEX_HOME` seeded with a copy of your `~/.codex/auth.json` (copy-only, freshness-checked so a rotated refresh token in the managed home is never clobbered; the real `~/.codex` is never written). Clawboo never stores a Codex credential in its vault, and `disconnect` is likewise a no-op for Codex.
+The card offers a one-click **Sign in with ChatGPT**: Clawboo's local server spawns `codex login` for you (`POST /api/auth/cli-login/codex`, an SSE stream that relays the CLI's own user-facing output), the CLI opens your browser and waits on its localhost callback, and you approve there, with nothing to type. When the login lands, the server re-probes the real auth store and the card re-checks itself. If the CLI is missing, the platform is unsupported, or the spawn fails, the card degrades to the copyable `codex login` command: run it in your own terminal, then click **Re-check**. The status probe DETECTS an existing login (`codex login status` is parsed, never the token file), so a user who signed in before ever opening Clawboo reads `ready` immediately. Once signed in, every spawned run gets a managed `CODEX_HOME` seeded with a copy of your `~/.codex/auth.json` (copy-only, freshness-checked so a rotated refresh token in the managed home is never clobbered; the real `~/.codex` is never written). Clawboo never stores a Codex credential in its vault, and `disconnect` is likewise a no-op for Codex.
 
 <Info>
 The connection state machine reflects this: an installed `oauth` runtime reads `ready` when the login probe detects a signed-in Codex, `needs-login` otherwise; it never reaches `ready` from a vault key.
@@ -133,7 +133,7 @@ A Codex agent can be a team's universal leader, which is what makes the ChatGPT-
 ## Verify it worked
 
 - `GET /api/runtimes` should show the `codex` entry with `installed: true` once the CLI resolves, `authKind: "oauth"`, `envVar: null`, and `connectionState: "ready"` when you are signed in (`needs-login` otherwise). It never reads `ready` from a stored vault key.
-- After running `codex login` in your terminal, click **Re-check** in the card to re-probe.
+- A successful **Sign in with ChatGPT** re-checks the card for you. After the manual fallback (`codex login` in your own terminal), click **Re-check** in the card to re-probe.
 - Run a board task via `POST /api/runtimes/codex/run`. A clean run returns `doneReason: 'success'` with `costUsd: null` and `usedWorktree: true`.
 
 ## Troubleshooting

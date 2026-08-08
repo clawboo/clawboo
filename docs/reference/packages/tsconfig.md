@@ -70,11 +70,11 @@ The presets only ship `compilerOptions`. They set no `include` / `exclude` / `ou
 
 ## Used by
 
-The other 26 workspace packages (all but `tsconfig` itself) and both apps add `@clawboo/tsconfig` as a `devDependency` and extend one of the three presets:
+The other 29 workspace packages (all but `tsconfig` itself) and both apps add `@clawboo/tsconfig` as a `devDependency` and extend one of the three presets:
 
-- **`base.json`** (19 consumers), the pure / build-tool-resolved packages: `agent-registry`, `boo-avatar`, `capability-registry`, `compaction`, `control-client`, `evals`, `events`, `executor`, `gateway-client`, `governance`, `obs`, `protocol`, `scheduler`, `team-orchestration`, and the five adapters (`adapter-{claude-code,codex,hermes,native,openclaw}`).
+- **`base.json`** (21 consumers), the pure / build-tool-resolved packages: `agent-registry`, `board-core`, `boo-avatar`, `capability-registry`, `compaction`, `control-client`, `evals`, `events`, `executor`, `gateway-client`, `governance`, `model-catalog`, `obs`, `protocol`, `scheduler`, `team-orchestration`, and the five adapters (`adapter-{claude-code,codex,hermes,native,openclaw}`).
 - **`react.json`** (2 consumers), `apps/web` and `packages/ui` (the only DOM/JSX surfaces).
-- **`node.json`** (7 consumers), `apps/cli`, `packages/config`, `packages/db`, `packages/gateway-proxy`, `packages/logger`, `packages/mcp`, `packages/worktrees` (the server-side / Node-resolved packages).
+- **`node.json`** (8 consumers), `apps/cli`, `packages/config`, `packages/db`, `packages/gateway-proxy`, `packages/logger`, `packages/mcp`, `packages/process-lookup`, `packages/worktrees` (the server-side / Node-resolved packages).
 
 ## Source
 

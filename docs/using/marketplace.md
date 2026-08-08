@@ -130,7 +130,7 @@ When the modal finishes, Clawboo selects the new team and opens its **group chat
 ## Troubleshooting
 
 <Warning>
-**Deploy fails with a name collision.** Team deploy creates Boos by name; if your fleet already has an agent with that exact name, the runtime can reject the create. The deploy step surfaces the error with a "Continue anyway" escape. Rename the conflicting agent, or deploy into a fresh fleet.
+**Some roster agents are missing after a deploy.** A per-agent create failure does not abort the run: the loop records the name, continues through the rest of the roster, and ends with an error toast reading `N of M agents created (… failed)`. If nothing at all was created, the modal drops back to the Customize step with _"No agents could be created. Check that the runtime is connected, then retry."_ and leaves the empty team row in place so you can retry or delete it. A **name collision is not a failure mode**: before creating anything, the deploy computes the smallest free numeric suffix and applies it to the team and every roster agent (`Code Reviewer Boo 2`), rewriting the `@`-mention routing to match, so you never need to rename an existing agent or deploy into a fresh fleet. See [Teams](/using/teams).
 </Warning>
 
 <Warning>
