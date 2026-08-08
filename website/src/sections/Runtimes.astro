@@ -93,8 +93,8 @@ const runtimes = [
       >
         <span class="font-display text-[15px] font-bold text-foreground">Behind one interface</span>
         <p class="text-[13px] leading-relaxed text-secondary">
-          Every runtime executes board tasks isolated in its own git worktree, with a structured
-          handoff so work can move between runtimes.
+          Code tasks get their own git worktree on Native, Claude Code, Codex and Hermes; OpenClaw
+          runs over its own Gateway connection. A structured handoff moves work between runtimes.
         </p>
         <span class="mt-1 inline-flex items-center gap-1 text-[13px] font-semibold text-primary">
           See the Runtimes guide

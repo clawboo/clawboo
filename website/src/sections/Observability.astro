@@ -8,7 +8,7 @@ const pillars = [
     icon: 'shield',
     accent: 'var(--mint)',
     title: 'Verified',
-    body: 'Built-in verification for autonomous work. The builder is not the judge, so a completion is reviewed before it counts as done.',
+    body: 'Built-in verification for autonomous work. The builder is not the judge, so a completion with a diff is reviewed before it counts as done.',
   },
   {
     icon: 'gauge',
@@ -20,7 +20,7 @@ const pillars = [
     icon: 'activity',
     accent: 'var(--category-data)',
     title: 'Observable',
-    body: 'OpenTelemetry traces, structured logs, and a clear error taxonomy, all on by default. You can see exactly what every agent did.',
+    body: 'Structured logs, a durable event trace, and a clear error taxonomy, all on by default. Point Clawboo at an OpenTelemetry collector when you want traces exported.',
   },
 ]
 ---
@@ -31,8 +31,9 @@ const pillars = [
       Autonomous, but never unaccountable.
     </h2>
     <p class="mt-4 text-[16px] leading-relaxed text-secondary">
-      Every autonomous completion is independently verified, spend is tracked with warnings, and
-      sensitive steps wait for approval. Traces, logs, and an error taxonomy are on from the start.
+      Work done in a task worktree is independently verified before it counts as done, spend is
+      tracked with warnings, and sensitive steps wait for approval. Traces, logs, and an error
+      taxonomy are on from the start.
     </p>
   </Reveal>
 

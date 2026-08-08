@@ -20,11 +20,11 @@ export const faqs: FaqItem[] = [
   },
   {
     q: 'Which providers and models can I use?',
-    a: 'Clawboo Native talks directly to Anthropic, OpenAI, and OpenRouter, or to a local Ollama with no key needed. Connected runtimes bring their own: Claude Code uses Anthropic, Codex uses OpenAI, and Hermes runs over OpenRouter. You only paste the keys for the runtimes you actually turn on.',
+    a: 'Clawboo Native talks directly to Anthropic, OpenAI, OpenRouter and a local Ollama, plus seven more OpenAI-compatible providers: Google, xAI, Groq, Mistral, Together, Cerebras and Moonshot. Connected runtimes bring their own: Claude Code uses Anthropic, Codex uses OpenAI, and Hermes runs over OpenRouter. You only paste the keys for the runtimes you actually turn on.',
   },
   {
     q: 'Where does my data live?',
-    a: 'On your machine. Everything is local-first. The board persists in SQLite at ~/.clawboo/clawboo.db, and your API keys live in an AES-256-GCM encrypted vault under ~/.clawboo/secrets/. No SaaS, no cloud account, nothing uploaded.',
+    a: 'On your machine. The Clawboo app does not collect telemetry, usage data, or analytics. Your board, chat history, memory and settings are stored locally in ~/.clawboo/, with the board in SQLite at ~/.clawboo/clawboo.db and your API keys in an AES-256-GCM encrypted vault under ~/.clawboo/secrets/. Model calls go only to the provider you configure, whether that is Anthropic, OpenRouter, or a local Ollama that never leaves your machine.',
   },
   {
     q: 'Is it production-ready?',
@@ -44,11 +44,11 @@ export const faqs: FaqItem[] = [
   },
   {
     q: 'How do agents avoid stepping on each other?',
-    a: 'The board is the canonical source of truth. Claims are race-free, every delegation is a real board mutation, and each runtime executes its tasks isolated in its own git worktree. Coordination flows over structured lifecycle events and MCP calls.',
+    a: 'The board is the canonical source of truth. Claims are race-free, every delegation is a real board mutation, and code tasks get their own git worktree on Native, Claude Code, Codex and Hermes. OpenClaw runs over its own Gateway connection, without a worktree. Coordination flows over structured lifecycle events and MCP calls.',
   },
   {
     q: 'What is not in yet?',
-    a: 'We are honest about open seams. Onboarding seeds a native starter team (you build mixed-runtime teams yourself), the peer-chat room is read-only, and human participants on the board plus multi-tenant deployments are on the roadmap, not shipped yet.',
+    a: 'We are honest about open seams. Onboarding seeds a native starter team (you build mixed-runtime teams yourself), or you can pick one straight from the marketplace. Human participants on the board plus multi-tenant deployments are on the roadmap, not shipped yet.',
   },
   {
     q: 'Which platforms does it run on?',
