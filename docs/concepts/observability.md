@@ -120,17 +120,18 @@ A `zombie` is exactly what the board's orphan reconciliation reaps on the next r
 
 Every runtime or tool failure is classified into a baseline of **expected** classes; anything that doesn't match is `Unknown`, and an `Unknown` is treated as a **harness bug**: a defect in Clawboo, not in the user's prompt or the provider. Clawboo surfaces the unknown loudly rather than swallowing it.
 
-`classifyError(code, message)` runs an ordered list of regex rules over the combined error code and message. The order matters; more specific signals (rate-limit, user abort) are checked before the broader provider/environment buckets. The classes are:
+`classifyError(code, message)` runs an ordered list of regex rules over the combined error code and message. The order matters; more specific signals (rate-limit, user abort) are checked before the broader provider/environment buckets, and `ContextOverflow` sits deliberately before `InvalidArgs` so an oversized-input `400` classifies as a context overflow rather than a generic bad request. The classes are:
 
-| Class           | Matches (examples)                                           |
-| --------------- | ------------------------------------------------------------ |
-| `RateLimited`   | `429`, "rate limit", "too many requests", "quota"            |
-| `UserAborted`   | "abort", "cancelled", `SIGINT`, `SIGTERM`                    |
-| `Timeout`       | "timeout", "timed out", `ETIMEDOUT`, "deadline exceeded"     |
-| `UnexpectedEnv` | `ENOENT`, `EACCES`, "command not found", "module not found"  |
-| `InvalidArgs`   | `400`, `422`, "invalid argument", "validation", "malformed"  |
-| `ProviderError` | `500`–`504`, "upstream", "overloaded", "service unavailable" |
-| `Unknown`       | nothing matched                                              |
+| Class             | Matches (examples)                                                                     |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `RateLimited`     | `429`, "rate limit", "too many requests", "quota"                                      |
+| `UserAborted`     | "abort", "cancelled", `SIGINT`, `SIGTERM`                                              |
+| `Timeout`         | "timeout", "timed out", `ETIMEDOUT`, "deadline exceeded"                               |
+| `UnexpectedEnv`   | `ENOENT`, `EACCES`, "command not found", "module not found"                            |
+| `ContextOverflow` | "context length/window/limit", "prompt too long", "maximum context", "too many tokens" |
+| `InvalidArgs`     | `400`, `422`, "invalid argument", "validation", "malformed"                            |
+| `ProviderError`   | `500`–`504`, "upstream", "overloaded", "service unavailable"                           |
+| `Unknown`         | nothing matched                                                                        |
 
 `isHarnessBug(cls)` returns `true` exactly when the class is `Unknown`. When the executor runner sees an error event, it classifies the failure, writes an `error` event with `errorClass` and a `harnessBug` flag in `data`, and, if it's a harness bug, also raises an error-level structured-log alert via `alertHarnessBug`. The `GET /api/obs/errors?harnessBug=true` query is the alert feed; it also returns a running `harnessBugCount`.
 
@@ -158,7 +159,7 @@ The `@opentelemetry/api` namespace is sourced from `@opentelemetry/sdk-node`'s r
 
 `GET /api/obs/stream` is a Server-Sent-Events live tail of the log, scoped by team, task, or agent. It is a short-interval (750 ms) DB poll keyed on the `seq` cursor rather than an in-process emit hook; so it is **cross-process correct**: it catches writes from the MCP stdio bins, not just the in-process server. Each pushed event uses its `seq` as the SSE `id`, so an `EventSource` resumes from `Last-Event-ID` (or `?since=<seq>`) after a disconnect. Each event's `data` is redacted on the way out (see below).
 
-The stream opens a fresh `better-sqlite3` handle per connection and closes it on `req`/`res` close, so a long-lived or dropped stream doesn't leak a database handle.
+The tail polls through the process-wide shared SQLite connection (`getDb()`), resolved _before_ the `200` is written so an open failure surfaces as a real error response rather than a `200` plus a `: connected` marker the client has already been told to trust. Cleanup on `req`/`res` close clears only the poll and keepalive timers; it closes no database handle, because that handle belongs to the whole server and closing it when one tab drops its stream would kill SQLite for every other caller. There is no per-connection database handle to leak.
 
 ## Redaction on display
 

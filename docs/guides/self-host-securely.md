@@ -51,10 +51,14 @@ ssh -N -L 18790:127.0.0.1:18790 user@your-server
 # then open http://localhost:18790 on your client
 ```
 
-**Reverse proxy that terminates TLS.** Run nginx/Caddy on the box, terminate HTTPS there, and forward to `127.0.0.1:<port>`. Pin the port so the upstream is stable ([Port resolution](/operating/deployment#port-resolution)):
+**Reverse proxy that terminates TLS.** Run nginx/Caddy on the box, terminate HTTPS there, and forward to `127.0.0.1:<port>`. Pin the port so the upstream is stable ([Port resolution](/operating/deployment#port-resolution)), and widen the same-origin guard to the public hostname you will reach it at:
 
 ```bash
-CLAWBOO_API_PORT=18790 CLAWBOO_UI_DIR=./dist/ui node dist/server.js
+CLAWBOO_API_PORT=18790 \
+CLAWBOO_UI_DIR=./dist/ui \
+CLAWBOO_ALLOWED_ORIGINS=https://dash.example.com \
+CLAWBOO_ALLOWED_HOSTS=dash.example.com \
+node dist/server.js
 ```
 
 Forward both HTTP and the WebSocket upgrade for the Gateway proxy at `/api/gateway/ws`:
@@ -72,6 +76,10 @@ location / {
 }
 ```
 
+<Warning>
+Skip those two variables and the proxy recipe fails in a way that looks like it worked. The same-origin guard runs always, independent of the access gate, and its `Host` allowlist is loopback plus the literal bind host only. `proxy_set_header Host $host;` forwards your public hostname, which is not on that list, so every `/api/*` request answers `403 Cross-origin request blocked.` while the SPA HTML still loads (the guard gates `/api/` only): the dashboard renders and then nothing works. `CLAWBOO_ALLOWED_HOSTS` covers the forwarded `Host`; `CLAWBOO_ALLOWED_ORIGINS` covers the browser `Origin` on state-changing fetches and the `/api/gateway/ws` upgrade. Both only widen the allowlist, never disable it, and a loopback bind logs no boot warning about the omission.
+</Warning>
+
 With either option, Clawboo never accepts a connection off-host directly; your tunnel or proxy is the only network-facing surface, and it brings its own authentication and TLS. You can still add an access token on top, but you do not have to widen the bind to get there.
 
 ## Step 3: Or widen the bind, and set an access token
@@ -83,8 +91,12 @@ HOST=0.0.0.0 \
 STUDIO_ACCESS_TOKEN="$(openssl rand -hex 24)" \
 CLAWBOO_API_PORT=18790 \
 CLAWBOO_UI_DIR=./dist/ui \
+CLAWBOO_ALLOWED_ORIGINS=http://192.168.1.10:18790 \
+CLAWBOO_ALLOWED_HOSTS=192.168.1.10 \
 node dist/server.js
 ```
+
+The allowlist lines are not optional here either. `0.0.0.0` is a wildcard, not a name anyone types, so the guard's automatic bind-host entry covers nothing and a LAN browser 403s until you enumerate the address it actually uses. (Binding that address directly, `HOST=192.168.1.10`, gets the same two entries for free.) The boot log warns on any non-loopback bind with no `CLAWBOO_ALLOWED_ORIGINS`.
 
 <Warning>
 A non-loopback bind with **no** access token would expose the dashboard and every `/api/*` route to your network, unauthenticated, including the routes that resolve provider keys into spawned runtimes. Clawboo never auto-generates a token; instead it **refuses to start** in that configuration (the origin guard is not authentication against a non-browser client, which can forge the `Host`/`Origin` headers). Set `STUDIO_ACCESS_TOKEN`, unset `HOST` to bind loopback only, or set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose.
@@ -112,7 +124,7 @@ The exemption is loopback-scoped at the socket layer. Putting a reverse proxy in
 
 The gate marks the access cookie `Secure` **only** when the request arrived over TLS, which it detects from the `X-Forwarded-Proto: https` header. This is deliberate: a `Secure` cookie is never sent back over plain HTTP, so adding it unconditionally would break the gate on a loopback/dev HTTP origin.
 
-The practical consequence for a self-host: terminate TLS at your reverse proxy and forward `X-Forwarded-Proto`. The nginx sketch in [Step 2](#step-2--reach-it-from-another-machine-without-widening-the-bind-recommended) already sets `proxy_set_header X-Forwarded-Proto $scheme;`; that single header is what upgrades the cookie to `Secure` end to end.
+The practical consequence for a self-host: terminate TLS at your reverse proxy and forward `X-Forwarded-Proto`. The nginx sketch in [Step 2](#step-2-reach-it-from-another-machine-without-widening-the-bind-recommended) already sets `proxy_set_header X-Forwarded-Proto $scheme;`; that single header is what upgrades the cookie to `Secure` end to end.
 
 ## Options / variations
 
@@ -121,6 +133,7 @@ The practical consequence for a self-host: terminate TLS at your reverse proxy a
 | Loopback-only (default)            | nothing                                          | Safe out of the box; no token.                                                |
 | Remote access, bind stays loopback | SSH tunnel or reverse proxy → `127.0.0.1:<port>` | Recommended. Transport security from your tunnel/proxy.                       |
 | Direct wide bind                   | `HOST=0.0.0.0` + `STUDIO_ACCESS_TOKEN=…`         | Always pair the two. TLS in front for a `Secure` cookie.                      |
+| Reverse proxy or LAN origin        | `CLAWBOO_ALLOWED_ORIGINS=…`                      | Widens the always-on guard; add `CLAWBOO_ALLOWED_HOSTS` for a proxied `Host`. |
 | Stable upstream port               | `CLAWBOO_API_PORT=18790`                         | An explicitly pinned port gets **no** fallback, frees you from the auto-scan. |
 | Custom state dir                   | `CLAWBOO_HOME=/path`                             | Moves the vault, settings, port file, and worktrees with it.                  |
 | Bring your own vault key           | `CLAWBOO_SECRETS_MASTER_KEY=…`                   | 32-byte base64, 64 hex chars, or a raw 32-char string.                        |
@@ -130,7 +143,7 @@ See [Environment variables](/reference/environment-variables) for every variable
 ## Verify it worked
 
 - **Confirm the bind.** Boot the server and read the startup log. A non-loopback bind with no token **refuses to start** with a `SECURITY:` error (unless `CLAWBOO_ALLOW_INSECURE=1`, which logs a loud warning instead); a clean boot means you're either loopback or gated.
-- **Check the access gate.** With the gate on, `curl https://your-host/api/settings` without a cookie should return `401`. The same request with `?access_token=<token>` should `302`-redirect and set the `clawboo_access` cookie.
+- **Check the access gate.** With the gate on, `curl https://your-host/api/settings` without a cookie should return `401`. The same request with `?access_token=<token>` should `302`-redirect and set the `clawboo_access` cookie. A `403 Cross-origin request blocked.` instead means the always-on same-origin guard rejected the public `Host` before the gate ever ran; add that hostname to `CLAWBOO_ALLOWED_HOSTS`.
 - **Confirm Clawboo-shaped health.** `GET /api/settings` returns `{ gatewayUrl, hasToken }`; `GET /api/health` returns the boot probe (`{ ok, degraded, fatal, checks, … }`). `ok: true` means no fatal checks failed. See [Deployment → Verify it worked](/operating/deployment#verify-it-worked).
 
 ## Troubleshooting

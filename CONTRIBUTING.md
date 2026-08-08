@@ -59,6 +59,7 @@ We use [GitHub Flow](https://docs.github.com/en/get-started/using-git/github-flo
 ```bash
 pnpm build                              # build all packages and apps
 pnpm typecheck                          # tsc --noEmit across the monorepo
+pnpm format:check                       # Prettier --check across the repo; fix with pnpm format
 pnpm lint                               # ESLint flat config across all packages, plus the docs frontmatter + heading checks
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright end-to-end tests (incl. board round-trip + eval smoke)
@@ -86,7 +87,7 @@ Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines,
 
 ### 2. Pass CI before requesting review
 
-Every PR must pass CI: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a red check is a red check: fix it, or say in the PR why it is unrelated.
+Every PR must pass CI: `pnpm build`, `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a red check is a red check: fix it, or say in the PR why it is unrelated.
 
 ### 3. Add a changeset for user-facing changes
 

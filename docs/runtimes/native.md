@@ -3,7 +3,7 @@ title: Clawboo Native runtime
 description: 'The clawboo-native in-process conversational harness: provider SDKs direct, no Gateway, jailed file tools, in-process MCP, and how to connect a key.'
 ---
 
-`clawboo-native` is Clawboo's own [runtime](/appendices/glossary): an in-process conversational harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, Ollama) with **no OpenClaw Gateway** in the loop. It is one of the five runtimes, a co-equal peer beside `openclaw`, `claude-code`, `codex`, and `hermes`; there is no conversion or export between a native agent and any other runtime's agent.
+`clawboo-native` is Clawboo's own [runtime](/appendices/glossary): an in-process conversational harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, Ollama, plus seven more OpenAI-compatible providers) with **no OpenClaw Gateway** in the loop. It is one of the five runtimes, a co-equal peer beside `openclaw`, `claude-code`, `codex`, and `hermes`; there is no conversion or export between a native agent and any other runtime's agent.
 
 Use this page to understand what the native runtime is, its capabilities and the shared MCP spine it consumes, its persistent per-identity home, its jailed file tools, how providers are routed and how fallback works, how a turn is priced, and how to connect it (paste a provider key; that is the entire setup, because nothing has to be installed).
 
@@ -51,7 +51,7 @@ interface AgentConfig {
   id: string
   name: string
   systemPrompt: string // the STABLE prompt tier (KV-cache safe)
-  primaryProvider: string // 'anthropic' | 'openai' | 'openrouter' | 'ollama' | custom
+  primaryProvider: string // one of the 11 KNOWN_PROVIDERS ids (see the routing table)
   primaryModel: string
   fallbacks?: { provider: string; model: string }[]
   envVar: string // vault env-var NAME for the primary key (never the secret)
@@ -85,8 +85,15 @@ A native run's candidate list is the agent's `primaryProvider` plus its declared
 | `openai`     | `OPENAI_API_KEY`     | OpenAI SDK (Chat Completions, streaming)                                              | `api.openai.com` gets `max_completion_tokens`                    |
 | `openrouter` | `OPENROUTER_API_KEY` | OpenAI SDK with `baseURL: https://openrouter.ai/api/v1`                               | Compat endpoint gets `max_tokens`                                |
 | `ollama`     | _(keyless)_          | OpenAI SDK with `baseURL: <OLLAMA_BASE_URL>/v1` (default `http://localhost:11434/v1`) | No key needed                                                    |
+| `google`     | `GEMINI_API_KEY`     | OpenAI SDK with `baseURL: https://generativelanguage.googleapis.com/v1beta/openai`    | Google                                                           |
+| `xai`        | `XAI_API_KEY`        | OpenAI SDK with `baseURL: https://api.x.ai/v1`                                        | xAI                                                              |
+| `groq`       | `GROQ_API_KEY`       | OpenAI SDK with `baseURL: https://api.groq.com/openai/v1`                             | Groq                                                             |
+| `mistral`    | `MISTRAL_API_KEY`    | OpenAI SDK with `baseURL: https://api.mistral.ai/v1`                                  | Mistral                                                          |
+| `together`   | `TOGETHER_API_KEY`   | OpenAI SDK with `baseURL: https://api.together.xyz/v1`                                | Together                                                         |
+| `cerebras`   | `CEREBRAS_API_KEY`   | OpenAI SDK with `baseURL: https://api.cerebras.ai/v1`                                 | Cerebras                                                         |
+| `moonshot`   | `MOONSHOT_API_KEY`   | OpenAI SDK with `baseURL: https://api.moonshot.ai/v1`                                 | Moonshot                                                         |
 
-The OpenAI client is also the carrier for OpenRouter and Ollama; both ride the exact same client with a base-URL override, so no extra dependency is needed. An unknown provider id with no base-URL convention is refused.
+The OpenAI client is also the carrier for OpenRouter, Ollama, and the seven extra providers; they all ride the exact same client with a base-URL override, so no extra dependency is needed. The last seven are resolved through one registry (`NATIVE_COMPAT_PROVIDERS`), which the router, the live-model fetcher, and the key-health probe all read. An unknown provider id with no base-URL convention is refused.
 
 ### Fallback
 
@@ -191,6 +198,13 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/healthcheck \
 | _(omitted)_ or `anthropic` | `ANTHROPIC_API_KEY`                  |
 | `openai`                   | `OPENAI_API_KEY`                     |
 | `openrouter`               | `OPENROUTER_API_KEY`                 |
+| `google`                   | `GEMINI_API_KEY`                     |
+| `xai`                      | `XAI_API_KEY`                        |
+| `groq`                     | `GROQ_API_KEY`                       |
+| `mistral`                  | `MISTRAL_API_KEY`                    |
+| `together`                 | `TOGETHER_API_KEY`                   |
+| `cerebras`                 | `CEREBRAS_API_KEY`                   |
+| `moonshot`                 | `MOONSHOT_API_KEY`                   |
 | `ollama`                   | _(keyless, nothing stored, a no-op)_ |
 
 The provider is validated against the runtime's known env-var set (`ANTHROPIC_API_KEY` plus its `altEnvVars`); an unrecognized provider falls back to the default `ANTHROPIC_API_KEY`. The response never echoes the key.
@@ -209,7 +223,7 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
 
 ### 3. Seed a default starter team (`seed-native-team`)
 
-`POST /api/onboarding/seed-native-team` with `{ provider?, model? }` mints a default native team in one call, a leader (`tasks` tool on, capable model) and a specialist (cheap model). First-run onboarding no longer calls this; it deploys a team you pick from the marketplace instead. The endpoint remains as a quick way to stand up a default two-agent native team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). Per-provider model defaults: `anthropic` → `claude-sonnet-4-6` / `claude-haiku-4-5`; `openai` → `gpt-4o` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`.
+`POST /api/onboarding/seed-native-team` with `{ provider?, model? }` mints a default native team in one call: a leader (capable model) and a specialist (cheap model). Both get the Memory and Tools MCP; the Tasks MCP and TeamChat are deliberately **off**, because the orchestration engine owns the board (a leader-created task would race the engine's claim or become an unrun orphan). The leader hands work over through the `delegate` signal tool the native driver adds for team runs, and sees results as `[Task Update]` reflections. First-run onboarding no longer calls this; it deploys a team you pick from the marketplace instead. The endpoint remains as a quick way to stand up a default two-agent native team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). Per-provider leader / specialist model defaults: `anthropic` → `claude-sonnet-5` / `claude-haiku-4-5`; `openai` → `gpt-5.4` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`. Each of the seven extra OpenAI-compatible providers carries its own pair in the same `MODEL_DEFAULTS` table, and all eleven ids are accepted (an unrecognized `provider` is a `400`).
 
 ```bash
 curl -X POST http://localhost:18790/api/onboarding/seed-native-team \

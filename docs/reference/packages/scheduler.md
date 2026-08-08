@@ -14,7 +14,7 @@ description: 'Pure scheduling primitives: cron-spec parsing, next-occurrence mat
 The package is the _only_ place `croner` is imported in the monorepo. Every other consumer, the Routines ledger, the ticker, the REST layer, deals in precomputed epoch-ms timestamps, so swapping the tick library changes exactly one file (`occurrence.ts`).
 
 <Note>
-A Routine cron spec is either a croner-parseable cron expression (5/6-field) or a one-shot `once@<ISO-8601>`. The richer canonical `cronSpec` on a `ScheduleRecord` also encodes the Gateway's `every:<ms>` / `at:<iso>` / `@tz:<tz>` forms via [`encodeCronSpec`](#encodecronspec--decodecronspec).
+A Routine cron spec is either a croner-parseable cron expression (5/6-field) or a one-shot `once@<ISO-8601>`. The richer canonical `cronSpec` on a `ScheduleRecord` also encodes the Gateway's `every:<ms>` / `at:<iso>` / `@tz:<tz>` forms via [`encodeCronSpec`](#functions).
 </Note>
 
 ## Public API

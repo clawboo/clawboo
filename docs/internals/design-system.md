@@ -43,7 +43,7 @@ The same block registers the `@custom-variant dark (&:where(.dark, .dark *))` so
 
 ### `:root` light, `.dark` overrides
 
-Light is the default. `:root` declares the full token set with light values; the `.dark` selector re-declares the _same_ token names with dark values. The light theme is paper-white (`--background: #f8fafc`, `--surface: #ffffff`, slate-900 text); the dark theme is the original production palette (`--background: #0a0e1a`, `--surface: #111827`, `#e8e8e8` text). Brand colors are deepened in light mode for AA contrast on white; OpenClaw Red is `#e94560` in dark but `#dc2a48` in light, mint is `#34d399` → `#059669`, amber is `#fbbf24` → `#d97706`.
+Light is the default. `:root` declares the full token set with light values; the `.dark` selector re-declares the _same_ token names with dark values. The light theme is paper-white (`--background: #f8fafc`, `--surface: #ffffff`, slate-900 text); the dark theme is the original production palette (`--background: #0a0e1a`, `--surface: #111827`, `#e8e8e8` text). Brand colors are deepened in light mode for AA contrast on white; OpenClaw Red is `#e94762` in dark but `#d82947` in light, mint is `#34d399` → `#059669`, amber is `#fbbf24` → `#d97706`.
 
 A handful of tokens are deliberately theme-_invariant_, declared only in `:root` and inherited everywhere:
 
@@ -147,7 +147,7 @@ The brand identity is three accents, OpenClaw Red (primary), mint, and amber, pl
 
 | Token       | Light     | Dark      | Role                                                |
 | ----------- | --------- | --------- | --------------------------------------------------- |
-| `--primary` | `#dc2a48` | `#e94560` | OpenClaw Red, accent, destructive-adjacent emphasis |
+| `--primary` | `#d82947` | `#e94762` | OpenClaw Red, accent, destructive-adjacent emphasis |
 | `--mint`    | `#059669` | `#34d399` | Success / working / done                            |
 | `--amber`   | `#d97706` | `#fbbf24` | Warning / pending                                   |
 
@@ -176,7 +176,7 @@ The pattern primitives live in `apps/web/src/features/shared/`. Each one bundles
 | `Skeleton`       | `Skeleton.tsx`       | A shimmer placeholder block (`width` / `height` / `radius`). Uses the `.clawboo-skeleton` class, which animates a `--surface → --surface-raised → --surface` gradient sweep and freezes to a static tint under reduced motion. `aria-hidden`.                                                          |
 | `Spinner`        | `Spinner.tsx`        | An in-flight `Loader2` spinner. Under `prefers-reduced-motion` it swaps to a static `LoaderCircle` ring (a frozen partial arc would read as broken). `aria-hidden`.                                                                                                                                    |
 | `StatusPill`     | `StatusPill.tsx`     | The canonical mono / uppercase / tracking-wider status indicator. `tone` ∈ `working \| done \| idle \| warning \| success \| error`; omit `label` to render a dot-only indicator (the Working-pulse / Done-mint / Idle-gray pattern). Each tone maps to a brand token, so themes flow through.         |
-| `EmptyState`     | `EmptyState.tsx`     | The branded empty state: a 56px circular icon disc + a Lucide icon @ 26px + a Cabinet-Grotesk title + a DM-Sans helper + an optional CTA. `tone` ∈ `neutral \| mint \| amber \| primary` tints the disc. Never an emoji.                                                                               |
+| `EmptyState`     | `EmptyState.tsx`     | The branded empty state: a 56px circular icon disc + a Lucide icon @ 26px + a display-font title (`--font-display`, Inter) @ 70% opacity + a body helper @ 40% opacity + an optional CTA. `tone` ∈ `neutral \| mint \| amber \| primary` tints the disc. Never an emoji.                               |
 | `FormattedAlert` | `FormattedAlert.tsx` | A thin in-flow callout strip with a leading semantic Lucide icon. `tone` ∈ `info \| warning \| error`; `role="alert"` for errors, `role="status"` otherwise. Not for toasts (those have their own motion system).                                                                                      |
 | `Select`         | `Select.tsx`         | A custom listbox popover, NOT a native `<select>` (whose OS-drawn list can't be themed): a pill trigger plus a portalled `bg-popover` menu with arrow-key navigation, check-marked rows, viewport flipping, and an optional search filter. `size` ∈ `sm \| md`; pass `options` or `<option>` children. |
 | `ErrorBoundary`  | `ErrorBoundary.tsx`  | The React error boundary and its `role="alert"` fallback card (heading, message, Try again + Reload). `variant` ∈ `app \| panel \| compact` — full-viewport at the root, inline for one surface, icon-only for a narrow rail. Renders `children` verbatim while healthy, so it adds no DOM.            |

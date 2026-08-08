@@ -101,7 +101,7 @@ System narration (a board mutation reflected into the room) carries `kind=system
 
 ## How each runtime attaches
 
-The room is reachable by all five runtime classes, but the attach mechanism differs by class because the anti-spoof binding has to survive each one's config dialect.
+The room is reachable by all five runtimes, but the attach mechanism differs by runtime class because the anti-spoof binding has to survive each one's config dialect.
 
 | Runtime class              | Attach mechanism                                                                                                                                       | Binding                              |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |

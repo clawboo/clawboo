@@ -42,7 +42,7 @@ The package exposes no classes. `logger` is a configured pino instance, `createL
 </Note>
 
 <Info>
-`redact*` is the display/log layer and masks with `••••`. It is distinct from `@clawboo/db`'s storage-layer `scrubSecrets` (masks with `[REDACTED]` before anything is persisted). They run at different boundaries and compose; already-scrubbed data passes through here harmlessly. Numeric token counts and cost survive both layers (a `SAFE_COUNT_KEYS` allowlist exempts `tokens` / `inputtokens` / `tokencount` / etc.).
+`redact*` is the display/log layer and masks with `••••`. It is distinct from `@clawboo/db`'s storage-layer `scrubSecrets` (masks with `[REDACTED]` before anything is persisted). They run at different boundaries and compose; already-scrubbed data passes through here harmlessly. Numeric token counts and cost survive both layers: a `SAFE_COUNT_KEYS` allowlist, matched against the exact key name, exempts the token-count keys (`tokens` / `inputtokens` / `tokencount` / etc.) plus `author` / `authors`, which only matched at all because `auth` is a substring of the sensitive-key pattern. A real credential under `accessToken` or `authorization` still redacts.
 </Info>
 
 ## Used by

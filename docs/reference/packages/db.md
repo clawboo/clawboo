@@ -12,7 +12,7 @@ description: 'SQLite + Drizzle ORM data layer: schema, board, memory, tools, gov
 This is the registry of record. The 27 Drizzle-typed tables + the idempotent `CREATE TABLE IF NOT EXISTS` bootstrap in `ensureSchema` (`schemaBootstrap.ts`) make a fresh file immediately usable; that DDL is the **sole** schema source; there is no migration ladder (no `db:migrate` / `db:generate` scripts; a schema change is a hard reset of the local DB). SQLite-native columns (team, personality, runtime, capabilities) are never clobbered by a Gateway re-sync.
 </Note>
 
-The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schema`, `db`, and nine domain sub-modules (`board`, `capabilities`, `memory`, `tools`, `governance`, `events`, `sessions`, `routines`, `teamChat`) via `export *`. There are no `package.json` subpath `exports`; everything is reachable from `@clawboo/db`.
+The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schema`, `db`, and ten domain sub-modules (`board`, `capabilities`, `memory`, `tools`, `governance`, `events`, `sessions`, `routines`, `teamChat`, `chat`) via `export *`. There are no `package.json` subpath `exports`; everything is reachable from `@clawboo/db`.
 
 One of those re-exports crosses a package boundary: the board **state machine** lives in the pure, zero-dep [`@clawboo/board-core`](/reference/packages/board-core), so the browser UI and the orchestration engine can read the same transition table without pulling this package's sqlite graph. `@clawboo/db` re-exports it by name, so the symbols below are reachable from `@clawboo/db` exactly as before.
 
@@ -20,13 +20,13 @@ One of those re-exports crosses a package boundary: the board **state machine** 
 
 ### Functions
 
-**Connection (`db.ts`)**
+**Connection (`db.ts`, `schemaBootstrap.ts`, `openStats.ts`)**
 
 | Export           | Signature                                       | Contract                                                                                                                                                                     |
 | ---------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `createDb`       | `(dbPath: string) => ClawbooDb`                 | `openDb` + `ensureSchema` in one call. For a process that opens one connection and exits (the MCP stdio bins, the eval harness, tests). Not for per-request use in a server. |
 | `openDb`         | `(dbPath: string) => ClawbooDb`                 | Open a connection and apply the WAL + contention pragmas. **No DDL** — pair with `ensureSchema`. The seam a long-lived process uses.                                         |
-| `ensureSchema`   | `(db: ClawbooDb) => void`                       | Apply the bootstrap DDL. Idempotent (every statement is `IF NOT EXISTS`), but not free — 88 statements re-resolved against `sqlite_master` per call.                         |
+| `ensureSchema`   | `(db: ClawbooDb) => void`                       | Apply the bootstrap DDL. Idempotent (every statement is `IF NOT EXISTS`), but not free: 89 statements re-resolved against `sqlite_master` per call.                          |
 | `dbOpenStats`    | `() => { connectionsOpened, schemaBootstraps }` | Monotonic process-lifetime counters. A rising `connectionsOpened` on a steady-state server is the fd-leak signal; also the shared-connection regression seam.                |
 | `defaultDbPath`  | `() => string`                                  | Resolve `CLAWBOO_DB_PATH` env, else `~/.openclaw/clawboo/clawboo.db`.                                                                                                        |
 | `getSetting`     | `(db, key: string) => string \| null`           | Read one `settings` KV value.                                                                                                                                                |
@@ -177,6 +177,13 @@ One of those re-exports crosses a package boundary: the board **state machine** 
 | `readRoom`           | `(db, input: ReadRoomInput) => DbTeamChat[]` | Cursor read in `seq` order; `excludeAuthorId` IS the per-poster echo guard.              |
 | `roomMaxSeq`         | `(db, roomId) => number`                     | Unfiltered head `seq` of a room (0 when empty).                                          |
 
+**Chat transcript tail (`chat/*`)**
+
+| Export                   | Signature                                                       | Contract                                                                                                                                                                        |
+| ------------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `listChatMessagesSince`  | `(db, filter: ListChatMessagesSinceFilter) => DbChatMessage[]`  | Tail `chat_messages` for a set of `sessionKeys` past an `id` cursor, ascending (default limit 500). An empty key set short-circuits to `[]`. Backs the live team-chat SSE poll. |
+| `listRecentChatMessages` | `(db, filter: ListRecentChatMessagesFilter) => DbChatMessage[]` | The most-recent N rows across those keys (a reverse range-seek, then reversed to oldest-first; default limit 20).                                                               |
+
 ### Types & interfaces
 
 - **Drizzle row types** (per table, select + insert): `DbAgent`/`DbAgentInsert`, `DbApprovalHistory(+Insert)`, `DbBooZeroTeamBrief(+Insert)`, `DbBudget(+Insert)`, `DbCapability(+Insert)`, `DbChatMessage(+Insert)`, `DbCostRecord(+Insert)`, `DbExecutionProcess(+Insert)`, `DbGovernanceAudit(+Insert)`, `DbGraphLayout(+Insert)`, `DbMemoryFact(+Insert)`, `DbMemoryProcedure(+Insert)`, `DbOrchestrationEvent(+Insert)`, `DbScheduledRun(+Insert)`, `DbSession(+Insert)`, `DbSetting(+Insert)`, `DbSkill(+Insert)`, `DbTask(+Insert)`, `DbTaskComment(+Insert)`, `DbTaskDep(+Insert)`, `DbTeam(+Insert)`, `DbTeamChat(+Insert)`, `DbTeamProfile(+Insert)`, `DbToolCallApproval(+Insert)`, `DbToolCallAudit(+Insert)`, `DbToolRegistry(+Insert)`, `DbWorkspace(+Insert)`.
@@ -194,6 +201,7 @@ One of those re-exports crosses a package boundary: the board **state machine** 
 - **Sessions**, `RecordRotationInput`.
 - **Routines**, `ScheduledRunStatus`, `RegisterScheduledRunInput`, `RegisterScheduledRunResult`, `ListScheduledRunsFilter`, `RoutineScope`, `RunOutcome`, `SetStatusResult`, `UpdateScheduledRunPatch`.
 - **Team-chat**, `TeamChatKind`, `PostToRoomInput`, `ReadRoomInput`.
+- **Chat transcript tail**, `ListChatMessagesSinceFilter`, `ListRecentChatMessagesFilter`.
 
 ### Classes
 
@@ -219,7 +227,7 @@ One of those re-exports crosses a package boundary: the board **state machine** 
 
 ## Source
 
-Barrel: [`packages/db/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/db/src/index.ts). Schema: `packages/db/src/schema.ts`. Sub-modules: `board/`, `capabilities/`, `memory/`, `tools/`, `governance/`, `events/`, `sessions/`, `routines/`, `teamChat/`. Connection + inline schema DDL: `db.ts` (the sole schema source; there is no migration ladder).
+Barrel: [`packages/db/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/db/src/index.ts). Schema: `packages/db/src/schema.ts`. Sub-modules: `board/`, `capabilities/`, `memory/`, `tools/`, `governance/`, `events/`, `sessions/`, `routines/`, `teamChat/`, `chat/`. Connection: `db.ts`. Schema bootstrap DDL: `schemaBootstrap.ts` (the sole schema source; there is no migration ladder). Open-counters: `openStats.ts`.
 
 ## See also
 

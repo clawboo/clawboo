@@ -26,6 +26,9 @@ Per-agent routes are multi-source: each operation routes to the source that OWNS
 | PUT    | `/api/agents/:agentId/files/:name` | Write one agent file                                  | No      |
 | GET    | `/api/agents/:agentId/sessions`    | List the agent's live sessions                        | No      |
 | PATCH  | `/api/agents/:agentId/model`       | Change a native agent's model (native-only, 404 else) | No      |
+| POST   | `/api/agents/:agentId/chat`        | Drive one 1:1 turn on a native agent (detached, 202)  | No      |
+| POST   | `/api/agents/:agentId/chat/stop`   | Abort the agent's in-flight 1:1 turn                  | No      |
+| GET    | `/api/agents/:agentId/chat/stream` | SSE live-tail of the agent's 1:1 chat session         | SSE     |
 
 The `AgentRecord` shape (returned by `GET /api/agents`, `GET /api/agents/:agentId`, and inside the create `201`):
 
@@ -625,9 +628,156 @@ curl -X PATCH http://localhost:18790/api/agents/<agent-id>/model \
 
 ---
 
+## `POST /api/agents/:agentId/chat`
+
+Drives ONE conversational turn on a **clawboo-native** agent's 1:1 personal chat (the Boo Zero personal chat, and any native agent's chat). The handler persists the user turn under the session key `agent:<agentId>:native`, then starts the run **detached** and returns **202** immediately: the reply streams over the SSE route below and is persisted by the native driver, so it is not aborted when the client disconnects. OpenClaw agents keep the Gateway 1:1 path, so this route returns **404** for a non-native agent.
+
+- **Path params**: `agentId`.
+- **Request body**:
+
+```ts
+{
+  message: string       // required; trimmed; must be non-empty. The context-injected
+                        // text delivered to the model.
+  displayText?: string  // what the transcript shows; defaults to `message`. The two
+                        // differ when the client prepends a rules block / @team brief.
+  entryId?: string      // idempotency key for the persisted user turn; defaults to
+                        // `user-<Date.now()>`. Re-posting one inserts nothing (the
+                        // optimistic client bubble and the SSE replay share the id).
+}
+```
+
+### Responses
+
+**`202 Accepted`**: the user turn was persisted and the reply run started:
+
+```json
+{ "ok": true }
+```
+
+**`400 Bad Request`**: missing `agentId` segment:
+
+```json
+{ "error": "agentId required" }
+```
+
+**`400 Bad Request`**: missing or blank `message`:
+
+```json
+{ "error": "message required" }
+```
+
+**`404 Not Found`**: the agent's `runtime` is not `clawboo-native`:
+
+```json
+{ "error": "agent is not a native conversational agent" }
+```
+
+**`500 Internal Server Error`**: any other failure:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/agents/<agent-id>/chat \
+  -H 'content-type: application/json' \
+  -d '{ "message": "summarize the board", "entryId": "user-1718450000000" }'
+```
+
+---
+
+## `POST /api/agents/:agentId/chat/stop`
+
+Aborts the agent's in-flight 1:1 turn (the composer's Stop button). A native agent has at most one live 1:1 run, tracked by its session key; with nothing in flight the call is a no-op that still returns **200**.
+
+- **Path params**: `agentId`.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: the run was aborted, or there was nothing to abort:
+
+```json
+{ "ok": true }
+```
+
+**`400 Bad Request`**: missing `agentId` segment:
+
+```json
+{ "error": "agentId required" }
+```
+
+**`500 Internal Server Error`**: a failure during abort:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/agents/<agent-id>/chat/stop
+```
+
+---
+
+## `GET /api/agents/:agentId/chat/stream`
+
+Server-Sent Events live-tail of the agent's 1:1 session (`agent:<agentId>:native`). A pure reader: it never drives a turn. Two tiers: **committed** `chat_messages` rows polled every 750 ms past an `id` cursor (durable, carry an `id:` line, replayed on resume), and **ephemeral** in-memory bus frames for live tokens and run state (no `id:` line, never replayed). Resume from a known position via the standard `EventSource` `Last-Event-ID` header or the `?since=<id>` query param.
+
+- **Path params**: `agentId`.
+- **Query params**:
+
+| Param   | Type   | Notes                                                                                      |
+| ------- | ------ | ------------------------------------------------------------------------------------------ |
+| `since` | number | Resume cursor (a `chat_messages` row id). Negative/non-finite → `0`. `Last-Event-ID` wins. |
+
+- **Request body**: none.
+
+<Note>
+This is an SSE route, not request/response. There is no JSON response body; the catalog below describes the wire frames. A missing `agentId` ends the response with a bare **400** and no `{ error }` envelope. Each polled batch reads up to 500 rows past the cursor. The stream is cleaned up on `req`/`res` close and closes no database handle (the tail reads through the process-wide shared connection).
+</Note>
+
+### Connection
+
+On open, the handler writes `HTTP/1.1 200` with:
+
+```http
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-cache, no-transform
+Connection: keep-alive
+X-Accel-Buffering: no
+```
+
+then emits a `: connected` comment frame, flushes any rows already past the cursor, and replays the session's last-published `status` per agent so a reconnecting client reconciles a badge left stale by a run that ended while no stream was open.
+
+### Event catalog
+
+| Frame           | When                                 | Shape                                                                 |
+| --------------- | ------------------------------------ | --------------------------------------------------------------------- |
+| `: connected`   | Immediately on open                  | SSE comment (ignored by `EventSource`)                                |
+| entry data      | Per new committed row (every 750 ms) | `id: <row id>` line + `data: <json>` line (the stored chat entry)     |
+| `event: delta`  | Per live assistant-text delta        | `{ sessionKey, runId, text }`; `text` is the FULL running text so far |
+| `event: status` | At each run boundary, plus on open   | `{ agentId, status: 'running' \| 'idle' \| 'error' }`                 |
+| `: keepalive`   | Every 20 s while open                | SSE comment (keeps the connection warm)                               |
+
+`delta` and `status` frames carry no `id:` line, so they never move the resume cursor: the committed rows are the source of truth, and the deltas only make a turn type out live.
+
+### Example
+
+```bash
+curl -N http://localhost:18790/api/agents/<agent-id>/chat/stream
+curl -N 'http://localhost:18790/api/agents/<agent-id>/chat/stream?since=4187'
+```
+
+---
+
 ## Error envelope
 
-Every error response on these routes is the standard `{ error: string }` envelope. The disconnect case is a **503** with the literal `{ "error": "gateway_disconnected" }` on the write/file/session routes; the read routes (`GET /api/agents`, `GET /api/agents/:agentId`) keep serving SQLite instead.
+Every error response on these routes is the standard `{ error: string }` envelope, except the SSE route (`GET /api/agents/:agentId/chat/stream`), whose only pre-stream failure is a bare **400** with no body. The disconnect case is a **503** with the literal `{ "error": "gateway_disconnected" }` on the write/file/session routes; the read routes (`GET /api/agents`, `GET /api/agents/:agentId`) keep serving SQLite instead.
 
 ## See also
 

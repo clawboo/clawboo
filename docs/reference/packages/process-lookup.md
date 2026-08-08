@@ -22,11 +22,17 @@ All exports come from the single `.` barrel (`src/index.ts`). No subpath exports
 
 ### Functions
 
-| Export            | Signature                                          | Contract                                                                                                                                                                                                                                          |
-| ----------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `findListenerPid` | `(port: number) => number \| null`                 | The PID **listening** on `port`, or `null` when it cannot be determined: nothing is listening, the tool is absent (`lsof` is missing from Alpine and some hardened images), or the socket belongs to another user and is invisible. Never throws. |
-| `parseLsofPids`   | `(stdout: string) => number[]`                     | Pure. Parse `lsof -t` output (one PID per line) into deduped PIDs in output order. A dual-stack listener (`0.0.0.0` + `::`) reports the same PID twice, so the dedupe makes the result a list of processes rather than of sockets.                |
-| `parseNetstatPid` | `(stdout: string, port: number) => number \| null` | Pure. Parse `netstat -ano` for the PID listening on `port`. Reads the **local** address column specifically, prefers an explicit `LISTENING` row, and falls back to the locale-independent listener signature described below.                    |
+| Export            | Signature                                             | Contract                                                                                                                                                                                                                                          |
+| ----------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `findListenerPid` | `(port: number, deps?: LookupDeps) => number \| null` | The PID **listening** on `port`, or `null` when it cannot be determined: nothing is listening, the tool is absent (`lsof` is missing from Alpine and some hardened images), or the socket belongs to another user and is invisible. Never throws. |
+| `parseLsofPids`   | `(stdout: string) => number[]`                        | Pure. Parse `lsof -t` output (one PID per line) into deduped PIDs in output order. A dual-stack listener (`0.0.0.0` + `::`) reports the same PID twice, so the dedupe makes the result a list of processes rather than of sockets.                |
+| `parseNetstatPid` | `(stdout: string, port: number) => number \| null`    | Pure. Parse `netstat -ano` for the PID listening on `port`. Reads the **local** address column specifically, prefers an explicit `LISTENING` row, and falls back to the locale-independent listener signature described below.                    |
+
+### Types
+
+| Export       | Shape                                                                               | Contract                                                                                                                                                                                                                                                              |
+| ------------ | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LookupDeps` | `{ run?: (command: string, args: string[]) => string; platform?: NodeJS.Platform }` | Test seam for the two impure things `findListenerPid` does. `run` throws exactly like `execFileSync`. Both fields are optional: they default to the real `execFileSync` wrapper (UTF-8, `windowsHide`, a 16 MB `maxBuffer`, a 5 s timeout) and to `process.platform`. |
 
 ### The three details that matter
 
@@ -40,7 +46,7 @@ All exports come from the single `.` barrel (`src/index.ts`). No subpath exports
 
 ## Testing
 
-`src/__tests__/processLookup.test.ts` covers the parsers against realistic `netstat -ano` and `lsof -t` fixtures — including a localized (`ABHÖREN`) row, a space-bearing French state string, IPv6 local addresses, CRLF output, UDP rows on the same port, prefix collisions (`:187890` must not match `:18789`), and a synthetic `LISTENING` row whose _foreign_ address is the target port, which is the only shape that isolates the local-address column check. `findListenerPid` itself is not unit-tested; it spawns real tools, and its behavior is covered by the CLI's end-to-end `stop` / `restart` scenarios.
+`src/__tests__/processLookup.test.ts` covers the parsers against realistic `netstat -ano` and `lsof -t` fixtures, including a localized (`ABHÖREN`) row, a space-bearing French state string, IPv6 local addresses, CRLF output, UDP rows on the same port, prefix collisions (`:187890` must not match `:18789`), and a synthetic `LISTENING` row whose _foreign_ address is the target port, which is the only shape that isolates the local-address column check. `findListenerPid` is unit-tested too, through the exported `LookupDeps` seam (an injected `run` plus `platform`): the POSIX `lsof -nP -iTCP:<port> -sTCP:LISTEN -t` argv, the Windows `netstat -ano` path, and the tool-absent / non-zero-exit case, all without spawning anything. The CLI's `stopDashboard` tests (`apps/cli/src/__tests__/lifecycle.test.ts`) stub the lookup out and cover the SIGTERM / poll / SIGKILL escalation instead.
 
 ## See also
 

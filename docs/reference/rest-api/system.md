@@ -17,18 +17,19 @@ Every child process this group spawns (`openclaw`, `npm`) is launched with `shel
 
 ## Routes
 
-| Method | Path                             | Summary                                                          | Stream?                   |
-| ------ | -------------------------------- | ---------------------------------------------------------------- | ------------------------- |
-| GET    | `/api/system/status`             | Node / OpenClaw / Gateway status snapshot                        | No                        |
-| POST   | `/api/system/install-openclaw`   | Install the OpenClaw CLI via `npm install -g`                    | SSE                       |
-| POST   | `/api/system/configure-openclaw` | Write `openclaw.json` + `.env`, mint a Gateway token             | No                        |
-| POST   | `/api/system/gateway`            | Gateway lifecycle: `start` / `stop` / `restart` / `status`       | SSE for `start`/`restart` |
-| GET    | `/api/system/openclaw-config`    | Read `openclaw.json` + provider-key flags                        | No                        |
-| PATCH  | `/api/system/openclaw-config`    | Read-modify-write `openclaw.json` (model, port, keys, exec, a2a) | No                        |
-| POST   | `/api/system/approve-device`     | Approve the latest pending device-pairing request                | No                        |
-| GET    | `/api/system/models`             | Model catalog (CLI-backed, falls back to static)                 | No                        |
-| GET    | `/api/system/self-version`       | Which Clawboo this server is, and whether a newer one exists     | No                        |
-| POST   | `/api/system/self-update`        | Install `clawboo@latest` globally, then restart into it          | SSE                       |
+| Method | Path                                  | Summary                                                             | Stream?                   |
+| ------ | ------------------------------------- | ------------------------------------------------------------------- | ------------------------- |
+| GET    | `/api/system/status`                  | Node / OpenClaw / Gateway status snapshot                           | No                        |
+| POST   | `/api/system/install-openclaw`        | Install the OpenClaw CLI via `npm install -g`                       | SSE                       |
+| POST   | `/api/system/configure-openclaw`      | Write `openclaw.json` + `.env`, mint a Gateway token                | No                        |
+| POST   | `/api/system/auto-configure-openclaw` | Provision OpenClaw from an already-connected credential (no prompt) | No                        |
+| POST   | `/api/system/gateway`                 | Gateway lifecycle: `start` / `stop` / `restart` / `status`          | SSE for `start`/`restart` |
+| GET    | `/api/system/openclaw-config`         | Read `openclaw.json` + provider-key flags                           | No                        |
+| PATCH  | `/api/system/openclaw-config`         | Read-modify-write `openclaw.json` (model, port, keys, exec, a2a)    | No                        |
+| POST   | `/api/system/approve-device`          | Approve the latest pending device-pairing request                   | No                        |
+| GET    | `/api/system/models`                  | Model catalog (CLI-backed, falls back to static)                    | No                        |
+| GET    | `/api/system/self-version`            | Which Clawboo this server is, and whether a newer one exists        | No                        |
+| POST   | `/api/system/self-update`             | Install `clawboo@latest` globally, then restart into it             | SSE                       |
 
 ---
 
@@ -140,7 +141,7 @@ curl -N -X POST http://localhost:18790/api/system/install-openclaw
 
 ## `POST /api/system/configure-openclaw`
 
-Writes a minimal `openclaw.json` and `.env` for a chosen provider, mints a fresh Gateway auth token, and saves the resulting `gatewayUrl` + token into Clawboo's settings. The written `openclaw.json` sets `gateway.mode: 'local'`, the agent default model, and turns on agent-to-agent coordination (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`). The raw token is persisted server-side only; it is never returned in the body (the same-origin proxy injects it on connect).
+Writes a minimal `openclaw.json` and `.env` for a chosen provider, mints a fresh Gateway auth token, and saves the resulting `gatewayUrl` + token into Clawboo's settings. The written `openclaw.json` sets `gateway.mode: 'local'`, the agent default model, and turns on agent-to-agent coordination (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`). The raw token is persisted server-side only; it is never returned in the body (the same-origin proxy injects it on connect). This is the route that _prompts_ for a key: the onboarding wizard's configure step posts straight here, always asking for a provider and (except for keyless providers) a key. The inline OpenClaw setup rendered in the Settings Runtimes panel and the wizard's add-runtimes step does not use this route at all; it posts the no-prompt [`auto-configure-openclaw`](#post-apisystemauto-configure-openclaw) on mount, and when that answers `needsKey` it saves the pasted key through `POST /api/providers/:id/connect` and retries auto-configure.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -194,6 +195,59 @@ When `model` is omitted, the handler picks a per-provider default from its `MODE
 curl -X POST http://localhost:18790/api/system/configure-openclaw \
   -H 'Content-Type: application/json' \
   -d '{"provider":"anthropic","apiKey":"sk-ant-...","gatewayPort":18789}'
+```
+
+---
+
+## `POST /api/system/auto-configure-openclaw`
+
+The no-prompt counterpart to [`configure-openclaw`](#post-apisystemconfigure-openclaw): it provisions OpenClaw from a credential you have **already** connected, so the OpenClaw setup flow never re-asks for a key. The SPA's inline OpenClaw setup calls this first and only falls back to the key prompt when this route reports it has nothing to work with.
+
+- **Path/query params**: none.
+- **Request body**: none (the handler ignores the request entirely).
+
+It resolves a credential in four rungs, in order, and stops at the first that matches:
+
+| Rung | Condition                                                           | Outcome                                                                                               |
+| ---- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 1    | A connected provider key (encrypted vault **or** OpenClaw's `.env`) | Key upserted into `.env` + every agent's `auth-profiles.json`, config written → `{ ok: true, ... }`   |
+| 2    | No key, but OpenClaw already holds an `openai-codex` OAuth profile  | Config writes only, **no** key write (the credential is OpenClaw's own profile) → `{ ok: true, ... }` |
+| 3    | No such profile, but the `codex` CLI is logged in                   | `{ ok: false, needsCodexAuth: true, loginCommand }`, so the UI offers a ChatGPT sign-in + a re-check  |
+| 4    | Nothing connected                                                   | `{ ok: false, needsKey: true }`, so the UI falls back to the key prompt                               |
+
+Rung 3 exists because a `codex login` in your terminal is a subscription OpenClaw cannot use until it holds a profile of its own; `loginCommand` is `openclaw models auth login --provider openai-codex`. The dashboard runs it for you over
+`POST /api/auth/cli-login/openclaw`, and surfaces the raw command only if that fails.
+
+### Responses
+
+**`200 OK` (rungs 1 and 2)**: `openclaw.json` was written and the Gateway URL + token saved into Clawboo's settings. `provider` is the id that satisfied the rung (`'openai-codex'` for rung 2):
+
+```ts
+{ ok: true, gatewayUrl: string, provider: string }   // gatewayUrl is `ws://localhost:18789`
+```
+
+**`200 OK` (rungs 3 and 4)**: nothing was written; the body tells the caller which prompt to show:
+
+```ts
+{ ok: false, needsCodexAuth: true, loginCommand: string }
+// or
+{ ok: false, needsKey: true }
+```
+
+**`500 Internal Server Error`**: a filesystem or token-generation failure:
+
+```json
+{ "error": "<message>" }
+```
+
+<Note>
+Both writes are non-destructive read-modify-writes, which is what makes this safe to call on an existing install. The Gateway token is **reused** from `~/.openclaw/.env` when `GATEWAY_AUTH_TOKEN` is already set; a fresh one is minted only when it is absent. In `openclaw.json` only `gateway.mode` is forced (to `'local'`); `gateway.port`, `gateway.auth`, the default model, `tools.agentToAgent` and `tools.sessions` are filled in **only when missing**, so fields you set by hand survive. Unlike `configure-openclaw`, there is no `gatewayPort` input: the port defaults to `18789` and an existing numeric `gateway.port` is left alone.
+</Note>
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/system/auto-configure-openclaw
 ```
 
 ---

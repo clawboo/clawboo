@@ -36,7 +36,7 @@ You either already have one (from native onboarding) or you deploy one now.
 
 ![The team showcase, here in the create-team flow: the same curated template grid the Marketplace Teams tab renders, with Details and Deploy buttons](/images/team-gallery.png)
 
-**Expected result:** the create-team modal advances to a deploy screen showing one ghost avatar per agent in the template.
+**Expected result:** the create-team modal advances to a deploy screen: the team icon you picked, animating, above a **Deploying** heading that carries your team's name.
 
 ### 2. Watch the team deploy
 
@@ -46,9 +46,9 @@ Clawboo now creates the team and its agents in order:
 2. For each agent in the template, **`createAgent`** writes its four agent files: `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, and a collaboration-protocol `AGENTS.md`, then **`POST /api/teams/:id/agents`** assigns it to the team. The protocol file teaches each agent the team roster and the structured `<delegate to="@Name">task</delegate>` syntax it uses to route work.
 3. If the template defines `@mention` routing, agent-to-agent coordination is auto-enabled.
 
-Each ghost in the deploy screen lights up with a green check as its agent is created, and a progress bar tracks `N / N Boos created`. The screen briefly reads **"All N Boos ready"**, then the modal hands you off.
+The deploy screen tracks this live: a **Creating _agent name_…** line names the agent being written right now, and a progress bar under it counts `N/M agents`. When the last one lands, the screen flips to a check mark and **"Team deployed!"**, then the modal hands you off.
 
-**Expected result:** you land directly in your new team's group chat. There is no extra "done" popup; deploying a team lands you in its chat.
+**Expected result:** after the brief **"Team deployed!"** beat the modal closes itself and you land directly in your new team's group chat, with a success toast confirming the agent count. There is no separate "done" dialog to dismiss.
 
 ### 3. Run the "Know Your Team" gate
 

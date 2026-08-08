@@ -78,10 +78,10 @@ The inline init script in `index.html` is a hand-mirrored copy of the resolver i
 
 There are no two stylesheets and no JavaScript re-styling. `globals.css` declares one set of Tailwind tokens that resolve to CSS variables, then defines the variable values twice:
 
-- **`:root`** holds the **light** values (`--background: #f8fafc`, `--foreground: #0f172a`, `--primary: #dc2a48`, …) plus `color-scheme: light`.
+- **`:root`** holds the **light** values (`--background: #f8fafc`, `--foreground: #0f172a`, `--primary: #d82947`, …) plus `color-scheme: light`.
 - **`.dark`** overrides the same variables with the **dark** production values (`--background: #0a0e1a`, `--foreground: #e8e8e8`, …) plus `color-scheme: dark`.
 
-A Tailwind 4 `@theme inline` block maps semantic color tokens (`--color-background`, `--color-foreground`, `--color-primary`, and so on) onto those variables, and a `@custom-variant dark (&:where(.dark, .dark *))` makes the `.dark` class the dark-mode switch. So toggling the single `.dark` class on `<html>` re-resolves every token at once, instant, no rebuild. Light-mode brand colors are deepened one step (for example primary red `#dc2a48` vs. the dark `#e94560`) for AA contrast on white.
+A Tailwind 4 `@theme inline` block maps semantic color tokens (`--color-background`, `--color-foreground`, `--color-primary`, and so on) onto those variables, and a `@custom-variant dark (&:where(.dark, .dark *))` makes the `.dark` class the dark-mode switch. So toggling the single `.dark` class on `<html>` re-resolves every token at once, instant, no rebuild. Light-mode brand colors are deepened one step (for example primary red `#d82947` vs. the dark `#e94762`) for AA contrast on white. In dark mode the brand red is split in two: `--primary` for text, accents, and the focus ring, and `--primary-solid` (`#c83b53`) for fills that carry a white label. See [Design system](/internals/design-system) for the full token table.
 
 ## Options / variations
 

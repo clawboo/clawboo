@@ -6,7 +6,7 @@ description: Protocol adapters exposing Clawboo's Tasks / Memory / Tools / TeamC
 **Version** `0.1.0` · **Purity** server-only · **Purpose** thin MCP protocol adapters over the `@clawboo/db` service cores, served over stdio bins + in-process Streamable HTTP.
 
 - **Workspace deps**: `@clawboo/db`
-- **External deps**: `@modelcontextprotocol/sdk` (pinned `1.29.0`), `zod`
+- **External deps**: `@modelcontextprotocol/sdk` (pinned `1.30.0`), `zod`
 
 The package is the protocol layer of the MCP quartet (Tasks · Memory · Tools · TeamChat). Each server is a low-level SDK `Server` built from `@clawboo/db` data-access cores. The same SQLite file is the cross-process bus, so a stdio bin spawned by an external runtime and the in-process Express server read/write the same board / memory / tools / team_chat store.
 

@@ -107,7 +107,7 @@ curl 'http://localhost:18790/api/board?teamId=<team-id>&status=in_progress'
 
 ## `POST /api/board`
 
-Creates a task. `status` defaults to `todo` (immediately claimable); pass `backlog` for triage. A subtask is created by setting `parentTaskId` (the parent chain bounds delegation depth). This route is **not** capped; the per-parent child-count and depth ceilings are enforced at the [Tasks MCP boundary](/reference/mcp-tools#create_subtask), where an attached model creates rows unsupervised. On success the handler emits a `task_created` observability event (a no-op when obs is off).
+Creates a task. `status` defaults to `todo` (immediately claimable); pass `backlog` for triage. A subtask is created by setting `parentTaskId` (the parent chain bounds delegation depth). This route is **not** capped; the per-parent child-count and depth ceilings are enforced at the [Tasks MCP boundary](/reference/mcp-tools#create_subtask), where an attached model creates rows unsupervised. On success the handler emits a `task_created` observability event (best-effort: an append failure is swallowed and never fails the request).
 
 - **Path/query params**: none.
 - **Request body** (validated by `createTaskBody`):

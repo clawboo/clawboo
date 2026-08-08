@@ -39,6 +39,8 @@ The order in `api/index.ts` matters: `/api/cost-records/summary` and `/api/exec-
 | PUT    | `/api/boo-zero/global-brief`          | Upsert the global Boo Zero brief                     | No      |
 | GET    | `/api/boo-zero/display-name/:agentId` | Load Boo Zero's display-name override                | No      |
 | PUT    | `/api/boo-zero/display-name/:agentId` | Set Boo Zero's display-name override                 | No      |
+| GET    | `/api/boo-zero/override`              | Read the leader override + the effective Boo Zero    | No      |
+| POST   | `/api/boo-zero/override`              | Set or clear the leader override                     | No      |
 
 ---
 
@@ -597,7 +599,7 @@ Adds a skill (a capability annotation) to an agent. Before recording anything, t
 ```bash
 curl -X POST http://localhost:18790/api/skills \
   -H 'Content-Type: application/json' \
-  -d '{"id":"web-search","name":"Web Search","source":"verified","agentId":"<agent-id>","category":"web"}'
+  -d '{"id":"web-search","name":"Web Search","source":"curated","agentId":"<agent-id>","category":"web"}'
 ```
 
 ### `DELETE /api/skills`
@@ -829,7 +831,7 @@ curl http://localhost:18790/api/fleet/summary
 
 ## Boo Zero context: `/api/boo-zero/*`
 
-[Boo Zero](/appendices/glossary) is the universal team leader. These routes store the markdown briefs it reads (per-team and global) and a Clawboo-side display-name override. Per-team briefs live in the `boo_zero_team_briefs` table (FK-cascades on team delete); the global brief and the display name live in the `settings` key/value table.
+[Boo Zero](/appendices/glossary) is the universal team leader. These routes store the markdown briefs it reads (per-team and global), a Clawboo-side display-name override, and the runtime-neutral leader override that decides which agent is Boo Zero at all. Per-team briefs live in the `boo_zero_team_briefs` table (FK-cascades on team delete); the global brief, the display name, and the leader override live in the `settings` key/value table.
 
 <Note>
 A missing brief returns `null` content, not a 404; the UI then falls back to a client-side default brief. Likewise a missing display name returns `name: null` so the caller falls back to the Gateway-side agent name.
@@ -1101,6 +1103,100 @@ Sets the display-name override. The value is trimmed and truncated to 80 chars; 
 curl -X PUT http://localhost:18790/api/boo-zero/display-name/<agent-id> \
   -H 'Content-Type: application/json' \
   -d '{"name":"Boo Zero"}'
+```
+
+### `GET /api/boo-zero/override`
+
+Reads the runtime-neutral leader override stored in the `settings` key `boo-zero:agent-id`, alongside the Boo Zero that `resolveBooZero` currently lands on and which rung of its chain (override → native → OpenClaw) produced it.
+
+- **Request body**: none.
+
+#### Responses
+
+**`200 OK`**: the stored override (`null` when unset or cleared), the effective leader, and the tier:
+
+```ts
+{
+  overrideAgentId: string | null
+  effective: { id: string, name: string } | null
+  tier: 'override' | 'native' | 'openclaw' | null
+}
+```
+
+`tier` is derived from the stored setting first, so a non-null `overrideAgentId` always reports `'override'`.
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+#### Example
+
+```bash
+curl http://localhost:18790/api/boo-zero/override
+```
+
+### `POST /api/boo-zero/override`
+
+Sets or clears the override. Any runtime is legal by design (the resolver does no runtime check), which is what lets a non-native agent lead every team in a mixed install. Setting validates that the agent row exists and is not archived, so a stale id is never stored; clearing writes an empty value, restoring the default override → native → OpenClaw chain.
+
+- **Request body**:
+
+```ts
+{
+  agentId: string | null
+} // required (a non-empty string to set, null to clear)
+```
+
+#### Responses
+
+**`400 Bad Request`**: the body is not an object, or has no `agentId` key:
+
+```json
+{ "error": "agentId is required (string to set, null to clear)" }
+```
+
+**`400 Bad Request`**: `agentId` is neither `null` nor a non-empty string:
+
+```json
+{ "error": "agentId must be a non-empty string or null" }
+```
+
+**`404 Not Found`**: the id does not match a live agent row:
+
+```json
+{ "error": "agent not found (or archived)" }
+```
+
+**`200 OK`**: stored (or cleared), with the re-resolved effective leader:
+
+```ts
+{
+  ok: true
+  overrideAgentId: string | null
+  effective: { id: string, name: string } | null
+}
+```
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+#### Example
+
+```bash
+# Promote any agent (any runtime) to Boo Zero
+curl -X POST http://localhost:18790/api/boo-zero/override \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":"<agent-id>"}'
+
+# Clear the override
+curl -X POST http://localhost:18790/api/boo-zero/override \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":null}'
 ```
 
 ---

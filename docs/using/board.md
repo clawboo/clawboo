@@ -28,7 +28,7 @@ The number shortcuts cover the four sidebar work surfaces only: `Cmd/Ctrl+1` Atl
 
 ## The columns
 
-The board renders **seven columns**, one per task status, in lifecycle order:
+The board renders **seven status columns**, one per task status, in lifecycle order:
 
 | Column      | Status        | What it means                                    |
 | ----------- | ------------- | ------------------------------------------------ |
@@ -39,6 +39,8 @@ The board renders **seven columns**, one per task status, in lifecycle order:
 | Blocked     | `blocked`     | Stalled (e.g. a failed blocker or red-gate debt) |
 | Done        | `done`        | Terminal, completed                              |
 | Cancelled   | `cancelled`   | Terminal, abandoned                              |
+
+Ahead of those sits a **Needs approval** column, always the first column on the board. It is scoped to the team filter, collapses to a thin rail when there is nothing pending, and auto-expands the moment a request arrives. It is fed by its own poll rather than by `GET /api/board`, so a board outage never hides a pending, time-sensitive gate. See [Approvals](/using/approvals).
 
 Each column shows its label and a live count of the tasks in it. The panel header shows a total task count (`{N} tasks`) and polls `GET /api/board` every five seconds, so status changes and new tasks appear without a manual refresh. A **Refresh** button forces an immediate re-fetch.
 
@@ -75,7 +77,7 @@ Each task is a card showing its title plus a row of badges:
 
 - **Runtime badge**: the task's `assigneeRuntime` (the [runtime](/appendices/glossary) that owns the work), defaulting to `openclaw` when unset.
 - **Verification badge**: present only once a [verification](/concepts/verification) verdict is stored. The card parses the task's `verification` JSON and renders the verdict: `pass` (green), `fail` (red), or `debt` for `completed_with_debt` (amber).
-- **Cost**: the task's `costUsd`, formatted to three decimals (e.g. `$0.012`), shown only when a cost is recorded.
+- **Cost**: the task's `costUsd`, shown only when a cost is recorded. An exactly-zero cost reads `$0.000`; a sub-cent cost keeps four decimals (`$0.0004`) so a real charge is never rounded away; a cost of one cent or more shows cents (`$0.42`).
 - **Sub badge**: a "sub" marker when the task has a `parentTaskId` (it was spawned by a delegation).
 
 Click any card to open its detail drawer.
@@ -100,7 +102,7 @@ The drawer sections, top to bottom:
 
 The task's core fields: **Status**, **Assignee** (`assigneeAgentId`), **Runtime** (`assigneeRuntime`, default `openclaw`), **Cost** (`costUsd` to four decimals), and **Parent** (a truncated `parentTaskId`, shown only for subtasks).
 
-**Status** is an inline editor, not just a label: a dropdown that offers only the transitions the [state machine](/concepts/the-board) permits from the current status (so it never lets you pick a move the server would reject), writes through `PATCH /api/board/:taskId`, and updates optimistically — rolling back and toasting if the write is refused, with the message naming the cause (an illegal transition vs. the verification gate). Terminal tasks (`done` / `cancelled`) have no legal moves, so the control locks.
+**Status** is an inline editor, not just a label: a dropdown that offers only the transitions the [state machine](/concepts/the-board) permits from the current status (so it never lets you pick a move the server would reject), writes through `PATCH /api/board/:taskId`, and updates optimistically, rolling back and toasting if the write is refused, with the message naming the cause (an illegal transition vs. the verification gate). A committed change also moves the card to its new column on the board immediately rather than waiting for the five-second poll; it goes through the same shared commit path as [drag-and-drop](#moving-a-task-by-drag-and-drop), so a read already in flight can't snap the card back. Releasing a task to **To do** additionally clears its assignee, runtime, and stored verdict, so the card's verification badge disappears and its runtime badge falls back to `openclaw`, matching what the server writes. Terminal tasks (`done` / `cancelled`) have no legal moves, so the control locks.
 
 When a `→ done` is refused **specifically by the [verification](/concepts/verification) gate** (the task carries a non-promotable verdict), the editor doesn't dead-end: it offers a **"Complete anyway"** confirmation that re-submits with the server's `humanOverride`. That's the supported path for a human shipping despite a non-promotable verdict — and, like on the server, the override is **recorded in the audit log**. An _illegal_ transition can't be overridden this way (the override only bypasses the verification gate, not the state machine). This lives in the shared status-mutation path, so it works the same whether you change status from this drawer or by [dragging a card](#moving-a-task-by-drag-and-drop) to the Done column.
 

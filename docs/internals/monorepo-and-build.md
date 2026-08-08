@@ -11,7 +11,7 @@ If you want the per-package API surface and the dependency graph in detail, read
 
 The repo is a **single workspace** of many small packages, not a polyrepo with version pins. Every `@clawboo/*` library is consumed via `workspace:*` (or `workspace:^`) protocol from the two apps, so there is no internal npm publish-then-install loop; Turbo builds a package's `dist/` and the app that depends on it picks it up directly.
 
-It is **not** a "publish every package" monorepo. Despite 29 scoped packages, **all of them are `private: true`**; none publishes to npm. The **only** published artifact is the `clawboo` CLI in `apps/cli`, and it does not depend on its sibling packages at runtime the way the web app does. Instead, the build _inlines_ the libraries it needs into the CLI's shipped bundle. See [What publishes](#what-publishes).
+It is **not** a "publish every package" monorepo. Despite 30 scoped packages, **all of them are `private: true`**; none publishes to npm. The **only** published artifact is the `clawboo` CLI in `apps/cli`, and it does not depend on its sibling packages at runtime the way the web app does. Instead, the build _inlines_ the libraries it needs into the CLI's shipped bundle. See [What publishes](#what-publishes).
 
 ## The workspace layout
 
@@ -25,7 +25,7 @@ packages:
   - 'docs'
 ```
 
-The second glob is load-bearing. The five runtime adapters live one level deeper, `packages/adapters/{native,openclaw,claude-code,codex,hermes}`, so without `packages/adapters/*` pnpm would not discover them and `workspace:*` resolution would fail. The result is **29 packages** (24 top-level under `packages/*` plus 5 nested adapters), two apps, and the `docs/` Mintlify site (hand-edited Markdown, deployed as-is).
+The second glob is load-bearing. The five runtime adapters live one level deeper, `packages/adapters/{native,openclaw,claude-code,codex,hermes}`, so without `packages/adapters/*` pnpm would not discover them and `workspace:*` resolution would fail. The result is **30 packages** (25 top-level under `packages/*` plus 5 nested adapters; `packages/adapters` itself is a glob container with no `package.json`), two apps, and the `docs/` Mintlify site (hand-edited Markdown, deployed as-is).
 
 `@clawboo/tsconfig` is the shared TypeScript-config root, `base.json`, `react.json`, `node.json`. It is a devDependency everywhere and has no runtime edge, so it doesn't appear in the dependency graph that drives the build order.
 
@@ -46,7 +46,7 @@ The rules use relative-only patterns on purpose, so a legitimate bare specifier 
 ```mermaid
 graph TD
   root["pnpm-workspace.yaml"]
-  root --> p["packages/*<br/>(24 top-level libs)"]
+  root --> p["packages/*<br/>(25 top-level libs)"]
   root --> a["packages/adapters/*<br/>(5 runtime adapters)"]
   root --> apps["apps/*<br/>(web + cli)"]
   p -. "@clawboo/* scope" .- a
@@ -96,10 +96,13 @@ graph TD
     protocol["protocol"]
     ar["agent-registry"]
     bc["board-core"]
+    cr["capability-registry"]
+    pl["process-lookup"]
   end
   subgraph t3["3"]
     events["events → gateway-client, logger, protocol"]
     gp["gateway-proxy → config"]
+    cc["control-client → agent-registry"]
   end
   subgraph t4["4 · pure + adapters + db deps"]
     executor["executor"]
@@ -111,9 +114,10 @@ graph TD
     obs["obs"]
     adapters["adapters/* → executor<br/>(openclaw also → events/gateway-client/logger/protocol)"]
   end
-  subgraph t4b["4b · db, after its deps"]
+  subgraph t4b["4b · db + team-orchestration, after their deps"]
     db["db → board-core, compaction, governance, obs"]
     evals["evals → db, executor, governance, obs"]
+    to["team-orchestration → board-core, executor, governance"]
   end
   subgraph t5["5"]
     booavatar["boo-avatar"]
@@ -123,20 +127,20 @@ graph TD
     mcp["mcp → db"]
   end
   subgraph t7["7 · apps"]
-    web["apps/web → 27 runtime packages (direct)"]
-    cli["apps/cli → config"]
+    web["apps/web → 28 runtime packages (direct)"]
+    cli["apps/cli → config, process-lookup"]
   end
 
   t1 --> t2 --> t3 --> t4 --> t4b --> t5 --> t6 --> t7
 ```
 
 1. **`tsconfig` + `logger`**: the shared TS-config root and the base logger. `logger` has no `@clawboo/*` runtime edge.
-2. **`config` · `gateway-client` · `protocol` · `agent-registry` · `board-core`**: `gateway-client` depends on `logger`; the rest are pure/zero-dep. `board-core` holds the task state machine that `db`, `team-orchestration`, and the board UI all read.
-3. **`events` · `gateway-proxy`**: `events` → `gateway-client`/`logger`/`protocol`; `gateway-proxy` → `config`.
-4. **`executor` · `adapters/*` · `worktrees` · `compaction` · `model-catalog` · `scheduler` · `governance` · `obs`**: `executor` is pure (`.` + `./contract` + `./tiers` subpath exports); the five adapters depend only on `executor` (`adapter-openclaw` also on `events`/`gateway-client`/`logger`/`protocol`). `compaction`/`governance`/`obs` are the dependencies `db` pulls in, so `db` (and `evals`, which needs `db`/`executor`/`governance`/`obs`) sequence after this tier. `model-catalog` is a zero-dep leaf both `apps/web` layers read, extracted so the server never imports SPA source.
+2. **`config` · `gateway-client` · `protocol` · `agent-registry` · `board-core` · `capability-registry` · `process-lookup`**: `gateway-client` depends on `logger`; the rest carry no `@clawboo/*` edge. `board-core` holds the task state machine that `db`, `team-orchestration`, and the board UI all read.
+3. **`events` · `gateway-proxy` · `control-client`**: `events` → `gateway-client`/`logger`/`protocol`; `gateway-proxy` → `config`; `control-client` → `agent-registry`.
+4. **`executor` · `adapters/*` · `worktrees` · `compaction` · `model-catalog` · `scheduler` · `governance` · `obs`**: `executor` is pure (`.` + `./contract` + `./tiers` subpath exports); the five adapters depend only on `executor` (`adapter-openclaw` also on `events`/`gateway-client`/`logger`/`protocol`). `compaction`/`governance`/`obs` are the dependencies `db` pulls in, so `db` (and `evals`, which needs `db`/`executor`/`governance`/`obs`, and `team-orchestration`, which needs `board-core`/`executor`/`governance`) sequence after this tier. `model-catalog` is a zero-dep leaf both `apps/web` layers read, extracted so the server never imports SPA source.
 5. **`boo-avatar` + `ui`**: `ui` → `boo-avatar`.
 6. **`mcp`**: depends on `db`; its build also produces the stdio bins.
-7. **`apps/web` → `apps/cli`**: the web app directly depends on 27 of the `@clawboo/*` runtime packages (`boo-avatar` reaches it transitively via `ui`, so all 28 are consumed); the CLI's only `@clawboo/*` dependency is `config`.
+7. **`apps/web` → `apps/cli`**: the web app directly depends on 28 of the `@clawboo/*` runtime packages (`boo-avatar` reaches it transitively via `ui`, so all 29 are consumed); the CLI's only `@clawboo/*` code edges are `config` and `process-lookup`.
 
 ## What publishes
 
@@ -144,7 +148,7 @@ Run `pnpm build` and you produce `dist/` for every package. But `npm publish` on
 
 The CLI ships as a self-contained bundle. The web server's tsup config (`tsup.server.config.ts`) marks the whole `@clawboo/*` scope `noExternal`, so `dist/server.js` **inlines** every workspace library it uses, `db`, `mcp`, `governance`, the adapters, and the rest, into one file. `assemble-cli.sh` then copies that `server.js`, the Vite `ui/`, and the four bundled MCP stdio bins into `apps/cli/dist/`. The published CLI tarball's `files` array is just `dist`, so the npm package is exactly: the CLI entrypoint, the inlined server bundle, the SPA assets, and the MCP bins.
 
-This is why the CLI's `package.json` lists only `@clawboo/config` (and the `@clawboo/tsconfig` devDependency) as a workspace dependency. Everything else reaches the published package already bundled into `server.js`, not as a separate npm install.
+This is why the CLI's `package.json` carries only two workspace code dependencies, `@clawboo/config` and `@clawboo/process-lookup` (the shared cross-platform port → PID lookup behind `clawboo stop`/`restart`), plus the `@clawboo/tsconfig` config root; all three sit in `devDependencies`, because tsup inlines anything not listed in `dependencies` into the shipped bundle. Everything else reaches the published package already bundled into `server.js`, not as a separate npm install.
 
 <Info>
 A few runtime deps stay **external** in the server bundle and must be present in the CLI's own `dependencies`: `better-sqlite3`, `ws`, `pino`, and `pino-pretty` (native or stream-y modules tsup shouldn't inline), plus the lazily-imported `@opentelemetry/*`. The provider SDKs `@anthropic-ai/sdk` + `openai` and the scheduler's `croner`, by contrast, **are** bundled (`noExternal`) so a clean `npx clawboo` install runs the native runtime and Routines with no extra `node_modules`.

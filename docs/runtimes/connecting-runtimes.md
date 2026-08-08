@@ -23,22 +23,22 @@ The Runtimes panel is always available; every runtime is listed regardless of in
 
 Every runtime resolves to one **connection state** that drives the card UI. The state is derived from `installed` + `hasCredential` + the runtime's auth model, and is recomputed (never echoing any secret) after each action.
 
-| State           | Meaning                                                         | Card action                                |
-| --------------- | --------------------------------------------------------------- | ------------------------------------------ |
-| `not-installed` | CLI binary not found on PATH or known user-install dirs         | **Install** (SSE)                          |
-| `needs-auth`    | Installed (api-key runtime) but no key stored                   | Paste key → **Connect**                    |
-| `needs-login`   | Installed (oauth runtime, i.e. `codex`), no pasted key possible | Run `codex login`, then **Re-check**       |
-| `ready`         | Installed and credential present (or `none` auth)               | **Re-check** · **Disconnect** (panel only) |
-| `unknown`       | First status fetch in flight                                    | **Re-check**                               |
+| State           | Meaning                                                         | Card action                                                    |
+| --------------- | --------------------------------------------------------------- | -------------------------------------------------------------- |
+| `not-installed` | CLI binary not found on PATH or known user-install dirs         | **Install** (SSE)                                              |
+| `needs-auth`    | Installed (api-key runtime) but no key stored                   | Paste key → **Connect**                                        |
+| `needs-login`   | Installed (oauth runtime, i.e. `codex`), no pasted key possible | Run `codex login`, then **Re-check**                           |
+| `ready`         | Installed and credential present (or `none` auth)               | **Re-check** · **Disconnect** (api-key) / **Sign out** (codex) |
+| `unknown`       | First status fetch in flight                                    | **Re-check**                                                   |
 
 ## Per-runtime matrix
 
-| Runtime                           | Built-in | Install                                      | Auth    | Env var written to vault                                       | Notes                                                                                                                                                                                                |
-| --------------------------------- | -------- | -------------------------------------------- | ------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `clawboo-native` (Clawboo Native) | yes      | none                                         | api-key | `ANTHROPIC_API_KEY` (+ `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) | In-process harness; multi-provider; any of the three keys (or `OLLAMA_BASE_URL`) counts as connected                                                                                                 |
-| `claude-code` (Claude Code)       | no       | `npm install -g @anthropic-ai/claude-code@2` | api-key | `ANTHROPIC_API_KEY`                                            | Health binary `claude`                                                                                                                                                                               |
-| `codex` (Codex)                   | no       | `npm install -g @openai/codex@0`             | oauth   | none                                                           | Connects via `codex login`, not a pasted key; health binary `codex`                                                                                                                                  |
-| `hermes` (Hermes)                 | no       | `pipx install 'hermes-agent[anthropic]<1'`   | api-key | `OPENROUTER_API_KEY`                                           | Python 3.11+ CLI; installs to the user-site bin (resolved off PATH); health binary `hermes`. Keyless alternative: a ChatGPT-subscription login (`hermes auth add openai-codex`) also reads Connected |
+| Runtime                           | Built-in | Install                                      | Auth    | Env var written to vault                                                                                                                                                                                       | Notes                                                                                                                                                                                                |
+| --------------------------------- | -------- | -------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clawboo-native` (Clawboo Native) | yes      | none                                         | api-key | `ANTHROPIC_API_KEY` + nine alternates (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `TOGETHER_API_KEY`, `CEREBRAS_API_KEY`, `MOONSHOT_API_KEY`) | In-process harness; multi-provider; a key for any of the ten supported providers (Anthropic, OpenAI, OpenRouter, Google, xAI, Groq, Mistral, Together, Cerebras, Moonshot) counts as connected       |
+| `claude-code` (Claude Code)       | no       | `npm install -g @anthropic-ai/claude-code@2` | api-key | `ANTHROPIC_API_KEY`                                                                                                                                                                                            | Health binary `claude`                                                                                                                                                                               |
+| `codex` (Codex)                   | no       | `npm install -g @openai/codex@0`             | oauth   | none                                                                                                                                                                                                           | Connects via `codex login`, not a pasted key; health binary `codex`                                                                                                                                  |
+| `hermes` (Hermes)                 | no       | `pipx install 'hermes-agent[anthropic]<1'`   | api-key | `OPENROUTER_API_KEY`                                                                                                                                                                                           | Python 3.11+ CLI; installs to the user-site bin (resolved off PATH); health binary `hermes`. Keyless alternative: a ChatGPT-subscription login (`hermes auth add openai-codex`) also reads Connected |
 
 ## Steps
 
@@ -52,15 +52,15 @@ A built-in runtime (`clawboo-native`) always reports `installed: true` with `bin
 
 `POST /api/runtimes/:id/install` is a Server-Sent Events stream. The card opens it from the `not-installed` state and renders the install log in a terminal box. Events:
 
-| Event `type` | Payload                       | Meaning                                                                                          |
-| ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------ |
-| `progress`   | `{ step, message }`           | Phase marker (`installing`, `retrying`)                                                          |
-| `output`     | `{ line }`                    | A line of the installer's stdout/stderr                                                          |
-| `error`      | `{ code, message }`           | Failure (`NPM_MISSING`, `PYTHON_MISSING`, `EACCES`, `SPAWN_THROW`, `SPAWN_ERROR`, `EXIT_<code>`) |
-| `complete`   | `{ success: true, warning? }` | Install finished; `warning` set if the binary still is not resolvable                            |
+| Event `type` | Payload                       | Meaning                                                                                                            |
+| ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `progress`   | `{ step, message }`           | Phase marker (`installing`, `retrying`)                                                                            |
+| `output`     | `{ line }`                    | A line of the installer's stdout/stderr                                                                            |
+| `error`      | `{ code, message }`           | Failure (`NPM_MISSING`, `PYTHON_MISSING`, `PYTHON_TOO_OLD`, `EACCES`, `SPAWN_THROW`, `SPAWN_ERROR`, `EXIT_<code>`) |
+| `complete`   | `{ success: true, warning? }` | Install finished; `warning` set if the binary still is not resolvable                                              |
 
 - **npm runtimes** (`claude-code`, `codex`) run `npm install -g <pkg>`. If `npm` is not found, the stream emits `error` with code `NPM_MISSING`.
-- **The pip runtime** (`hermes`) prefers `pipx install <pkg>`. If `pipx` is absent it falls back to `python -m pip install --user <pkg>`, and if it detects a PEP-668 externally-managed environment it retries once with `--break-system-packages`. If neither `pipx` nor `python` is found it emits `error` with code `PYTHON_MISSING`.
+- **The pip runtime** (`hermes`) prefers `pipx install <pkg>`. If `pipx` is absent it falls back to `python -m pip install --user <pkg>`, and if it detects a PEP-668 externally-managed environment it retries once with `--break-system-packages`. If neither `pipx` nor `python` is found it emits `error` with code `PYTHON_MISSING`. If `pipx` is absent and the only Python it can resolve is older than the runtime's minimum (3.11 for Hermes), it emits `PYTHON_TOO_OLD` instead, naming the version it found and suggesting a newer Python or `pipx`.
 - Calling install on a built-in runtime returns `400` (plain JSON, the SSE stream never opens); `clawboo-native` has nothing to install.
 
 <Warning>
@@ -69,7 +69,7 @@ A global npm install can hit `EACCES`. When the installer's stderr contains `EAC
 
 ### 3. Connect (api-key runtimes)
 
-`POST /api/runtimes/:id/connect` with body `{ apiKey, provider? }` stores the key in the [encrypted vault](#where-keys-are-stored) and returns the recomputed `connectionState`. The key is trimmed; an empty key returns `400` (`{ error: "apiKey is required" }`). **The response never echoes the key.**
+`POST /api/runtimes/:id/connect` with body `{ apiKey, provider? }` stores the key in the [encrypted vault](#where-keys-are-stored) and returns the recomputed `connectionState`. The key is trimmed. An empty key returns `400` (`{ error: "apiKey is required" }`), with one exception: for `clawboo-native` with an explicit `provider`, omitting `apiKey` is a keyless reconnect against a key that already resolves for that provider (`200`, nothing stored). That is what the Providers manager's one-click **Use** sends; when nothing resolves for that provider the `400` reads `no existing key found for <provider>` instead. **The response never echoes the key.**
 
 The card sends the key from the `needs-auth` state (the input label is the runtime's `envVar`, with a show/hide toggle). On success it clears the input and re-fetches status, which flips the card to `ready`.
 
@@ -103,7 +103,11 @@ It returns `{ ok: true }` on a 2xx, or `{ ok: false, error }` on a bad key (`401
 
 ### 6. Disconnect
 
-`POST /api/runtimes/:id/disconnect` deletes the runtime's stored credential and returns the recomputed `connectionState`. It keeps the CLI installed, so the card drops from `ready` to `needs-auth`. The card's **Disconnect** button (panel variant only) confirms first, since you will need to re-enter the key to reconnect. For `codex` (no `envVar`) this is a no-op that just re-reports state.
+`POST /api/runtimes/:id/disconnect` deletes the runtime's stored credential and returns the recomputed `connectionState`. It keeps the CLI installed, so the card drops from `ready` to `needs-auth`. A connected runtime shows the button in its **Manage** body, and it confirms first, since you will need to re-enter the key to reconnect. For `codex` the button is labelled **Sign out** and calls the logout route below instead; `POST /api/runtimes/codex/disconnect` (no `envVar`) has no stored credential to delete and is not wired to any button.
+
+### 7. Sign out (codex)
+
+`POST /api/runtimes/:id/logout` is the oauth counterpart to Disconnect. It runs the CLI's own `codex logout`, invalidates the cached auth probe, and re-probes, so the returned `connectionState` reflects the real post-logout state. It returns `404` (`{ error: "runtime '<id>' has no sign-out" }`) for an api-key runtime, which uses `/disconnect`, and `400` if the CLI is not installed.
 
 ## Where keys are stored
 

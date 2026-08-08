@@ -10,7 +10,7 @@ This page documents only Clawboo's own configuration variables, sourced from `@c
 </Info>
 
 <Note>
-Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) are read indirectly through the credential-resolution chain (`process.env` → encrypted vault → OpenClaw's `~/.openclaw/.env`). Setting one in the process environment is the highest-priority way to satisfy a runtime's credential check. See [Runtime provider keys](#runtime-provider-keys) and [Connecting runtimes](/runtimes/connecting-runtimes).
+Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, plus the seven native OpenAI-compatible keys listed below) are read indirectly through the credential-resolution chain (`process.env` → encrypted vault → OpenClaw's `~/.openclaw/.env`). Setting one in the process environment is the highest-priority way to satisfy a runtime's credential check. See [Runtime provider keys](#runtime-provider-keys) and [Connecting runtimes](/runtimes/connecting-runtimes).
 </Note>
 
 ## At a glance
@@ -40,6 +40,13 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) 
 | `ANTHROPIC_API_KEY`                   | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
 | `OPENAI_API_KEY`                      | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
 | `OPENROUTER_API_KEY`                  | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
+| `GEMINI_API_KEY`                      | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `XAI_API_KEY`                         | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `GROQ_API_KEY`                        | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `MISTRAL_API_KEY`                     | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `TOGETHER_API_KEY`                    | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `CEREBRAS_API_KEY`                    | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `MOONSHOT_API_KEY`                    | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
 | `OLLAMA_BASE_URL`                     | Runtime keys       | `http://localhost:11434/v1`      | native OpenAI-compat provider           |
 | `CLAWBOO_REVIEWER_MODEL`              | Runtime tuning     | (the builder's model)            | executor verification critic            |
 | `LOG_LEVEL`                           | Logging            | `info`                           | `@clawboo/logger`                       |
@@ -92,7 +99,7 @@ There are no feature-flag environment variables; every subsystem (board, executo
 - **Default**: `~/.openclaw/clawboo/clawboo.db`.
 
 <Note>
-The in-process Express server resolves its DB path through `getDbPath()` → `~/.clawboo/clawboo.db` (following `CLAWBOO_HOME`), **not** `defaultDbPath()`. `CLAWBOO_DB_PATH` only affects the out-of-process MCP bins. Point both at the same file if you override the server's home so external runtimes share the board. See [Configuration](/reference/configuration#sqlite-database).
+The in-process Express server resolves its DB path through `getDbPath()` → `~/.clawboo/clawboo.db` (following `CLAWBOO_HOME`), **not** `defaultDbPath()`. `CLAWBOO_DB_PATH` only affects the out-of-process MCP bins. Point both at the same file if you override the server's home so external runtimes share the board. See [Configuration](/reference/configuration#the-two-db-path-resolvers).
 </Note>
 
 ### `CLAWBOO_UI_DIR`
@@ -103,7 +110,7 @@ The in-process Express server resolves its DB path through `getDbPath()` → `~/
 
 ### `CLAWBOO_SERVER_PATH`
 
-- **Read by**: the CLI (`apps/cli/src/index.ts`) when falling back to dev-mode launch (no bundled `server.js` present).
+- **Read by**: the CLI's `findMonorepoRoot()` (`apps/cli/src/lifecycle.ts`) when falling back to dev-mode launch (no bundled `server.js` present).
 - **Purpose**: overrides the monorepo root the CLI spawns `tsx apps/web/server/index.ts` from. Only consulted in the dev-fallback path; the published CLI tarball uses the bundled server and ignores it.
 - **Default**: auto-discovered monorepo root.
 
@@ -230,6 +237,20 @@ These are resolved through the credential chain `resolveRuntimeKey(envVar)`: `pr
 - **Read by**: `resolveRuntimeKey()` for the `hermes` runtime (`envVar`) and the `clawboo-native` runtime (an `altEnvVar`).
 - **Purpose**: the OpenRouter provider key. Satisfies the Hermes and Native (OpenRouter) credential checks.
 - **Default**: none.
+
+### Native OpenAI-compatible provider keys
+
+The `clawboo-native` descriptor's `altEnvVars` is the whole `NATIVE_PROVIDER_ENV_VARS` list minus its primary `ANTHROPIC_API_KEY`, so seven further provider keys are read on the same terms as the three above. Each is resolved by `resolveRuntimeKey()`, on its own satisfies the Native runtime's credential check (`nativeKeyHealth()` iterates `envVar` plus `altEnvVars`), and selects that provider's OpenAI-compatible client when a routed call or fallback names it. Default for all seven: none.
+
+| Variable           | Provider | OpenAI-compatible base URL                                |
+| ------------------ | -------- | --------------------------------------------------------- |
+| `GEMINI_API_KEY`   | Google   | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| `XAI_API_KEY`      | xAI      | `https://api.x.ai/v1`                                     |
+| `GROQ_API_KEY`     | Groq     | `https://api.groq.com/openai/v1`                          |
+| `MISTRAL_API_KEY`  | Mistral  | `https://api.mistral.ai/v1`                               |
+| `TOGETHER_API_KEY` | Together | `https://api.together.xyz/v1`                             |
+| `CEREBRAS_API_KEY` | Cerebras | `https://api.cerebras.ai/v1`                              |
+| `MOONSHOT_API_KEY` | Moonshot | `https://api.moonshot.ai/v1`                              |
 
 ### `OLLAMA_BASE_URL`
 

@@ -201,7 +201,7 @@ Bind Clawboo to loopback and let the proxy be the only network-facing surface, *
 </Warning>
 
 <Warning>
-**`clawboo` opens a 401 or an unrelated page.** Older launchers used a bare TCP probe and could route to the Gateway's aux ports or Chrome's debug port. The current launcher validates `GET /api/settings`, so make sure you are on a build that ships the HTTP-signature probe (v0.1.2+). If a stale `api-port.txt` points at a dead port, the launcher re-scans; delete the file if it persists.
+**`clawboo` opens a 401 or an unrelated page.** Older launchers used a bare TCP probe and could route to the Gateway's aux ports or Chrome's debug port. The current launcher validates `GET /api/settings`, so make sure you are on a build that ships the HTTP-signature probe (v0.1.3+). If a stale `api-port.txt` points at a dead port, the launcher re-scans; delete the file if it persists.
 </Warning>
 
 <Danger>

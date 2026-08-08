@@ -18,7 +18,7 @@ Servers are built with the low-level MCP SDK `Server` + `setRequestHandler` API,
 | [Tasks](#tasks-server)       | `clawboo-tasks`    | 12                                | durable board repository                 | n/a                             |
 | [Memory](#memory-server)     | `clawboo-memory`   | 3                                 | `SqliteMemoryStore` (facts + procedures) | `boundScope` (team/agent)       |
 | [Tools](#tools-server)       | `clawboo-tools`    | 4 builtin (availability-filtered) | tool broker                              | n/a                             |
-| [TeamChat](#teamchat-server) | `clawboo-teamchat` | 2                                 | `team_chat` room substrate               | `boundIdentity` (author + room) |
+| [TeamChat](#teamchat-server) | `clawboo-teamchat` | 2 (+1 when orchestrator-driven)   | `team_chat` room substrate               | `boundIdentity` (author + room) |
 
 | Server   | stdio bin              | HTTP path           |
 | -------- | ---------------------- | ------------------- |
@@ -260,7 +260,7 @@ These builtins re-express real capabilities so the broker has tools to gate, ins
 
 ## TeamChat server
 
-`createTeamChatServer(db, opts?)` → `clawboo-teamchat`. Two tools that let every runtime, regardless of dialect, post to and listen on the shared team room over the `team_chat` substrate. The board stays canonical; a post is narration, never a board mutation (this server has no board access).
+`createTeamChatServer(db, opts?)` → `clawboo-teamchat`. Two tools that let every runtime, regardless of dialect, post to and listen on the shared team room over the `team_chat` substrate, plus a third, `team_delegate`, pushed onto the tool list only on orchestrator-driven team runs. The board stays canonical; a post is narration, never a board mutation (this server has no board access).
 
 <Info>
 **The `boundIdentity` binding (anti-spoof).** When the server is constructed with `opts.boundIdentity`, the post author and room are authoritative, taken from the binding, never from tool args. A runtime may pass `authorAgentId` / `teamId` / `roomId` in args; they are ignored. The binding rides the clawboo-written attach URL (`roomTeamId` / `postAuthorAgentId`), so a runtime cannot post as a peer it is not. When unbound (the raw stdio bin / external attach), the model must pass `authorAgentId` + `teamId` in args; the default room is `team:<teamId>`.
@@ -294,6 +294,19 @@ Read new posts from your team room since a cursor (`sinceSeq`, default `0`). Ret
 ```
 
 The `isUser=false` substring is the load-bearing safety property: a peer post is delivered as tool-routed evidence, never as a turn carrying user authority. Each delivered post entry is `{ seq, authorAgentId, kind, wrapped }`, where `wrapped` is the `[Inter-session message · from=… · kind=… · seq=… · isUser=false]` envelope.
+
+### `team_delegate`
+
+Hand a self-contained piece of work to a teammate by name. **Conditional**: this tool is pushed onto the list only when the bound identity carries `delegate: true`, which the HTTP route sets from the `delegate=1` attach-URL param. On every other session (unbound stdio, or a merely team-scoped attach) it is absent from `tools/list`.
+
+```ts
+{
+  assignee: string
+  task: string
+}
+```
+
+Signal-only, and the one tool on this server that does not touch the `team_chat` substrate at all: the handler writes neither the board nor the room. It validates that both fields are non-empty (otherwise the tool-error `team_delegate requires both an assignee (teammate name) and a task`) and returns an acknowledgement string. The orchestration engine watches the emitted `tool-call` event, matches it by _name_, resolves `assignee` against the team roster, and creates the durable board task; a name that resolves to nobody, or to the caller itself, is dropped. The engine owns every board write. See [Codex: leading a team](/runtimes/codex#leading-a-team) for the leader-side flow.
 
 ---
 
@@ -333,7 +346,7 @@ A POST without a valid session that is not an `initialize` request returns a JSO
 Over HTTP, the authoritative bindings ride query params on the attach URL the server itself writes (the model never controls the URL):
 
 - **Memory**: `scopeTeamId` / `scopeAgentId` / `scopeTenantId` set the run's visibility scope (`boundScope`).
-- **TeamChat**: `roomTeamId` / `postAuthorAgentId` set the room and post author (`boundIdentity`).
+- **TeamChat**: `roomTeamId` / `postAuthorAgentId` set the room and post author (`boundIdentity`); an added `delegate=1` marks the session orchestrator-driven and exposes [`team_delegate`](#team_delegate). Clawboo writes that param on orchestrator-driven team runs and nowhere else: an external attach must not add it, because nothing is observing the tool-call there and the delegation would silently no-op.
 - **Tasks / Tools**: no scope params; the URL stays bare.
 
 When these params are absent (an external attach, or the stdio bins), the server is unbound and the model supplies scope/identity in args.

@@ -76,9 +76,9 @@ Each row shows the agent id, an open-run count, the status, and the agent's spen
 
 The **Error taxonomy** section (`GET /api/obs/errors`) groups `error` events by their class and counts them, sorted by frequency. Clawboo classifies every runtime/tool failure into a fixed set of expected classes:
 
-`InvalidArgs` · `Timeout` · `ProviderError` · `RateLimited` · `UserAborted` · `UnexpectedEnv` · `Unknown`
+`InvalidArgs` · `ContextOverflow` · `Timeout` · `ProviderError` · `RateLimited` · `UserAborted` · `UnexpectedEnv` · `Unknown`
 
-The classifier matches the error's code and message against ordered rules. Anything that matches none is `Unknown`; and `Unknown` is treated as a **harness bug**: it is flagged in the panel (an accent-colored badge plus a "harness bug" label) and counted in the section header (`N bugs`). An unrecognized failure is treated as a defect in Clawboo's own error handling, not a normal runtime hiccup, so it alerts rather than being swallowed.
+The classifier matches the error's code and message against ordered rules. `ContextOverflow` catches oversized-input failures, and its rule is checked ahead of the `InvalidArgs` rule so a "context length exceeded" `400` lands there instead of in the generic bad-request bucket; it is an expected recoverable condition, not a harness bug. Anything that matches none is `Unknown`; and `Unknown` is treated as a **harness bug**: it is flagged in the panel (an accent-colored badge plus a "harness bug" label) and counted in the section header (`N bugs`). An unrecognized failure is treated as a defect in Clawboo's own error handling, not a normal runtime hiccup, so it alerts rather than being swallowed.
 
 The error feed is also the agent-readable "what errored in the last window" query; pass `?since=<ms>` to scope it, or `?harnessBug=true` to return only the harness bugs.
 

@@ -60,7 +60,7 @@ The port-discovery probe is signature-checked, not just a TCP test: the CLI does
 
 The SPA is just static files Express serves; in production any unmatched `GET` falls through to `index.html` so client-side routing works. Every API call the SPA makes is a **same-origin relative path** (`fetch('/api/board')`, `fetch('/api/settings')`, …); there is no hardcoded backend host in the browser. That keeps the architecture portable: wherever the server is reachable, the SPA reaches it.
 
-Sitting in front of every route is an optional **access gate**, active only when `STUDIO_ACCESS_TOKEN` is set. It folds the request path to lowercase before matching (so an uppercased `/API/settings` can't evade it), validates the token's character set, and, importantly, exempts a **loopback** `/api/mcp/*` request from the cookie requirement, because that path is the control plane a spawned runtime attaches to with its credentials scrubbed. A non-loopback bind with no token set triggers a loud security warning. See [security](/operating/security).
+Sitting in front of every route is an optional **access gate**, active only when `STUDIO_ACCESS_TOKEN` is set. It folds the request path to lowercase before matching (so an uppercased `/API/settings` can't evade it), validates the token's character set, and, importantly, exempts a **loopback** `/api/mcp/*` request from the cookie requirement, because that path is the control plane a spawned runtime attaches to with its credentials scrubbed. A non-loopback bind with no token set makes the server refuse to start (exit 1); running unauthenticated on a wide bind requires an explicit `CLAWBOO_ALLOW_INSECURE=1`, which downgrades the refusal to a loud warning. See [security](/operating/security).
 
 There is one non-HTTP path: the browser opens a WebSocket to the same-origin `/api/gateway/ws`, which the server proxies to the OpenClaw Gateway, injecting the upstream auth token and signing the device handshake server-side so the browser never holds a credential. That's the only way the browser reaches the Gateway. See [Gateway and events](/concepts/gateway-and-events).
 
@@ -100,7 +100,7 @@ Every coordination action, a task created, a delegation routed, a run started, a
 ## Boundaries and non-goals
 
 - **Not multi-machine in v0.3.1.** The stack is one local process. The `tenant_id` columns are a dormant seam, not active per-tenant scoping.
-- **Not a hosted product.** There is no cloud control plane, no account system, and no remote management surface beyond binding to a non-loopback interface (which requires an access token and triggers a warning).
+- **Not a hosted product.** There is no cloud control plane, no account system, and no remote management surface beyond binding to a non-loopback interface (which requires an access token, or the server refuses to start).
 - **OpenClaw is special.** Four runtimes go through the uniform executor runner; OpenClaw is a connected substrate driven over a live WebSocket and refused by the runner, a deliberate asymmetry, not an inconsistency.
 - **This is the overview, not the spec.** Each layer here has a concept page with the real mechanics, and a reference page with the exact routes, shapes, and defaults. Follow the links.
 

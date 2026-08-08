@@ -106,13 +106,17 @@ A handful of routes deviate from the bare `{ error }` shape, and those deviation
 
 ## Streaming endpoints (SSE)
 
-Three routes are **Server-Sent Events**, not request/response. They set `Content-Type: text/event-stream`, flush headers, and emit `data: <json>\n\n` frames. They are documented with an event-stream catalog (event `type` → payload) on their resource pages, not with a response body:
+Eight routes stream a Clawboo-shaped **Server-Sent Events** response, not request/response. (The four
+MCP session channels at `GET /api/mcp/*` are SSE too, but they carry MCP JSON-RPC rather than a Clawboo
+event catalog; see [Tools & MCP](/reference/rest-api/tools-and-mcp).) They set `Content-Type: text/event-stream`, flush headers, and emit `data: <json>\n\n` frames (the three live-tail routes prefix each persisted row with an `id:` cursor line, and the two chat streams add named `event:` frames on top). They are documented with an event-stream catalog (event `type` → payload) on their resource pages, not with a response body:
 
-| Route                                                                           | Resource page                                          |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `POST /api/system/install-openclaw`, `POST /api/system/gateway` (start/restart) | [System API](/reference/rest-api/system)               |
-| `POST /api/runtimes/:id/install`                                                | [Runtimes API](/reference/rest-api/runtimes)           |
-| `GET /api/obs/stream`                                                           | [Observability API](/reference/rest-api/observability) |
+| Route                                                                                                           | Resource page                                          |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `POST /api/system/install-openclaw`, `POST /api/system/gateway` (start/restart), `POST /api/system/self-update` | [System API](/reference/rest-api/system)               |
+| `POST /api/runtimes/:id/install`, `POST /api/auth/cli-login/:tool`                                              | [Runtimes API](/reference/rest-api/runtimes)           |
+| `GET /api/agents/:agentId/chat/stream`                                                                          | [Agents API](/reference/rest-api/agents)               |
+| `GET /api/teams/:id/chat/stream`                                                                                | [Teams API](/reference/rest-api/teams)                 |
+| `GET /api/obs/stream`                                                                                           | [Observability API](/reference/rest-api/observability) |
 
 ## Route index
 
