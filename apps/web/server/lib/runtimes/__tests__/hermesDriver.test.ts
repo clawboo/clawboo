@@ -85,8 +85,12 @@ describe('hermes driver (preserved runtime)', () => {
   it('provisions a 0700 home; the same path re-provisions with created=false (stable across runs)', async () => {
     const first = await provisionHermesHome(identityHome())
     expect(first.created).toBe(true)
-    const st = await stat(first.home)
-    expect(st.mode & 0o777).toBe(0o700)
+    // 0700 hardening is POSIX-only (Windows has no mode bits), so gate that assertion;
+    // the provisioning + re-provision stability below still runs on every platform.
+    if (process.platform !== 'win32') {
+      const st = await stat(first.home)
+      expect(st.mode & 0o777).toBe(0o700)
+    }
 
     const second = await provisionHermesHome(identityHome())
     expect(second.home).toBe(first.home)

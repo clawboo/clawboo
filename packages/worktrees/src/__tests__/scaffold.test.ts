@@ -56,9 +56,13 @@ describe('system-of-record scaffold', () => {
       ]) {
         await expect(readFile(path.join(dir, leaf), 'utf8')).resolves.toBeTruthy()
       }
-      // init.sh is executable (owner exec bit set).
-      const st = await stat(path.join(dir, SOR_FILES.init))
-      expect(st.mode & 0o100).toBeTruthy()
+      // init.sh gets the owner exec bit on POSIX. Windows has no executable bit
+      // (the chmod is a no-op there and the script runs via its interpreter, not +x),
+      // so gate the assertion — the file-creation checks above still run everywhere.
+      if (process.platform !== 'win32') {
+        const st = await stat(path.join(dir, SOR_FILES.init))
+        expect(st.mode & 0o100).toBeTruthy()
+      }
       // AGENT_HANDOFF.json is the clock-out artifact — not written by the scaffold.
       await expect(readFile(path.join(dir, SOR_FILES.handoff), 'utf8')).rejects.toThrow()
     })
