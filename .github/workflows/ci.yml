@@ -104,6 +104,56 @@ jobs:
         env:
           CLAWBOO_CONCURRENCY_TEST: '1'
 
+  # A cost-bounded cross-platform leg for the most platform-sensitive suites, so a
+  # Windows / macOS regression in runtime spawning, process-tree termination on
+  # abort, per-task git worktrees, or path handling is caught on a PR rather than
+  # only after a release. The full Vitest suite still runs Linux-only in `test`
+  # above; this runs just the highest-value packages — `packages/worktrees` (the
+  # real-git per-task worktree lifecycle) and `apps/web/server` (runtime spawning,
+  # boot probe, executor). `fail-fast: false` so Windows and macOS report
+  # independently. macOS is otherwise only exercised by `smoke-test-bundle`'s boot
+  # check; Windows adds the unit coverage its boot smoke lacks. Issue #75.
+  test-cross-platform:
+    name: Test (cross-platform)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # Matches smoke-test-bundle's budget: a cold Windows runner plus a from-source
+    # build of better-sqlite3's native binding is the slow part.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The scoped suites import @clawboo/* packages through their built dist/
+      # (there is no source export condition, and nothing builds dist during
+      # install). The Linux `test` job gets this for free from `turbo test`, which
+      # builds a package's dependencies first; here we invoke Vitest directly to
+      # scope to the platform-sensitive suites, so the dependency build is explicit.
+      - run: pnpm build
+
+      # packages/worktrees: the real-git, per-task worktree lifecycle that underpins
+      # every file-mutating task. Drives a real `git` binary via its gitHarness.
+      - run: pnpm --filter @clawboo/worktrees exec vitest run
+
+      # apps/web/server: runtime CLI spawning, process-tree abort, the boot probe,
+      # and path handling — the node-environment server/ suites only (the `server/`
+      # filter excludes the jsdom UI tests, which aren't platform-sensitive).
+      # Unix-only perms / process-tree assertions still skip on `win32` (they guard
+      # behavior with no Windows analogue yet — see the PR notes); they DO run on
+      # macOS, since the guards key on `win32`.
+      - run: pnpm --filter @clawboo/web exec vitest run server/
+
   build:
     name: Build
     runs-on: ubuntu-latest

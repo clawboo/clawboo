@@ -838,22 +838,27 @@ describe('executor runner — per-identity home serialization + cancellation + 0
     expect(getTask(createDb(getDbPath()), taskId)?.status).toBe('todo')
   })
 
-  it.skipIf(process.platform === 'win32')(
-    'materializes the persistent identity home as 0700',
-    async () => {
-      const taskId = newTask('perms')
-      await runTaskOnRuntime({
-        db: createDb(getDbPath()),
-        makeAdapter: () => makeConcurrencyAdapter('clawboo-native', { active: 0, max: 0 }),
-        taskId,
-        assigneeAgentId: 'agent-perms',
-      })
-      const homeDir = runtimeIdentityHomePath('clawboo-native', 'agent-perms')
-      expect(resolveClawbooDir()).toContain(home) // sanity: the home is sandboxed
-      const st = await stat(homeDir)
-      expect(st.mode & 0o777).toBe(0o700)
-    },
-  )
+  // Runs on EVERY platform now (issue #75, criterion 3): the identity-home
+  // materialization — path handling + directory creation — is exactly the
+  // Windows-sensitive behavior worth exercising, so it no longer skips on win32.
+  // Only the `0700` hardening is gated: Windows has no POSIX mode bits and the
+  // source applies no ACL equivalent yet, so asserting it there would be false.
+  it('materializes the persistent identity home (0700 on POSIX)', async () => {
+    const taskId = newTask('perms')
+    await runTaskOnRuntime({
+      db: createDb(getDbPath()),
+      makeAdapter: () => makeConcurrencyAdapter('clawboo-native', { active: 0, max: 0 }),
+      taskId,
+      assigneeAgentId: 'agent-perms',
+    })
+    const homeDir = runtimeIdentityHomePath('clawboo-native', 'agent-perms')
+    expect(resolveClawbooDir()).toContain(home) // sanity: the home is sandboxed
+    const st = await stat(homeDir)
+    expect(st.isDirectory()).toBe(true) // materialized on all platforms
+    if (process.platform !== 'win32') {
+      expect(st.mode & 0o777).toBe(0o700) // POSIX-only hardening
+    }
+  })
 })
 
 // A CodexDriver / HermesDriver double that REPLAYS its native events the moment the
