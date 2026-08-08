@@ -104,6 +104,69 @@ jobs:
         env:
           CLAWBOO_CONCURRENCY_TEST: '1'
 
+  # A cost-bounded cross-platform leg for the most platform-sensitive suites, so a
+  # Windows / macOS regression in runtime spawning, process-tree termination on
+  # abort, per-task git worktrees, or path handling is caught on a PR rather than
+  # only after a release. The full Vitest suite still runs Linux-only in `test`
+  # above; this runs just the highest-value packages — `packages/worktrees` (the
+  # real-git per-task worktree lifecycle) and `apps/web/server` (runtime spawning,
+  # boot probe, executor). `fail-fast: false` so Windows and macOS report
+  # independently. macOS is otherwise only exercised by `smoke-test-bundle`'s boot
+  # check; Windows adds the unit coverage its boot smoke lacks. Issue #75.
+  test-cross-platform:
+    name: Test (cross-platform)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # Matches smoke-test-bundle's budget: a cold Windows runner plus a from-source
+    # build of better-sqlite3's native binding is the slow part.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The scoped suites import @clawboo/* packages through their built dist/
+      # (there is no source export condition, and nothing builds dist during
+      # install). The Linux `test` job gets this for free from `turbo test`, which
+      # builds a package's dependencies first; here we invoke Vitest directly to
+      # scope to the platform-sensitive suites, so the dependency build is explicit.
+      - run: pnpm build
+
+      # packages/worktrees: the real-git, per-task worktree lifecycle that underpins
+      # every file-mutating task. Drives a real `git` binary via its gitHarness.
+      # `--fail-if-no-match` so a mistyped filter can't yield a green leg that ran nothing.
+      - run: pnpm --filter @clawboo/worktrees --fail-if-no-match exec vitest run
+
+      # apps/web/server platform surface (Windows leg): npm.cmd resolution, the
+      # which→where shim, and .exe candidate lookup — the DB-free slice of the server
+      # suite that runs green on Windows today, and the exact npm.cmd/shim regression
+      # surface #75 targets. Scoped to the FILE, not the dir: vitest's positional filter
+      # is a substring match, so `server/lib/runtimes/` would also pull in
+      # hermesDriver.test.ts, which fails on Windows.
+      - if: runner.os == 'Windows'
+        run: pnpm --filter @clawboo/web --fail-if-no-match exec vitest run server/lib/__tests__/platform.test.ts
+
+      # apps/web/server (full node server/ suite): macOS only for now — it already covers
+      # the platform test above. On Windows the suite fails two INDEPENDENT ways: (1) the
+      # SQLite-backed harness can't reset an open DB file between tests (better-sqlite3
+      # holds it → EBUSY on unlink), and (2) some suites override HOME but not
+      # USERPROFILE/CLAWBOO_HOME, so they resolve the real home rather than the sandbox
+      # (this PR fixes that class in executorRunner.test.ts; other suites still need it).
+      # Both are the "platform familiarity" follow-through the issue names — both, so the
+      # follow-up isn't mis-scoped as SQLite-only.
+      - if: runner.os != 'Windows'
+        run: pnpm --filter @clawboo/web --fail-if-no-match exec vitest run server/
+
   build:
     name: Build
     runs-on: ubuntu-latest
