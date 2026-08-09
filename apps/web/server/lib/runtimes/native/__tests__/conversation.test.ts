@@ -21,7 +21,6 @@ import { isContextOverflowMessage } from '../providers/types'
 import type { NeutralMessage, ProviderStreamEvent, ProviderTurnParams } from '../providers/types'
 import type { RoutedProviderClient } from '../routeCall'
 import { loadSessionTranscript } from '../sessionStore'
-import { resetDb } from '../../../db'
 
 const OPTS: StartOpts = {
   agentId: 'native-conv-1',
@@ -94,10 +93,11 @@ describe('Conversation turn loop', () => {
     events = []
   })
   afterEach(async () => {
-    // Close BEFORE removing the dir: Windows refuses to remove a directory
-    // that still holds an open file. The suite never opens the handle itself,
-    // the server code under test does. (#140)
-    resetDb()
+    // This suite OWNS its connection (createDb at a fixture path), so resetDb()
+    // cannot reach it: that only evicts the getDb() memo. Windows refuses to
+    // remove a directory that still holds an open file, so close it before the
+    // rm. Mirrors the ownership rule in lib/db.ts. (#140)
+    db.$client.close()
     await rm(sandbox, { recursive: true, force: true })
   })
 
