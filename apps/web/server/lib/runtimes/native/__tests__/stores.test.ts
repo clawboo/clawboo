@@ -19,6 +19,7 @@ import {
   writeNativeAgentFile,
 } from '../agentConfigStore'
 import { priceTurn } from '../pricing'
+import { resetDb } from '../../../db'
 import {
   loadSessionTranscript,
   saveSessionTranscript,
@@ -34,6 +35,10 @@ describe('native stores', () => {
     db = createDb(path.join(sandbox, 'test.db'))
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. The suite never opens the handle itself,
+    // the server code under test does. (#140)
+    resetDb()
     await rm(sandbox, { recursive: true, force: true })
   })
 

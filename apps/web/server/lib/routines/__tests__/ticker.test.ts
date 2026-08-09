@@ -24,6 +24,7 @@ import {
 } from '@clawboo/db'
 
 import { createRoutinesTicker, type RoutinesTickerDeps } from '../ticker'
+import { resetDb } from '../../db'
 
 let dir: string
 let db: ClawbooDb
@@ -60,6 +61,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Close BEFORE removing the dir: Windows refuses to remove a directory
+  // that still holds an open file. The suite never opens the handle itself,
+  // the server code under test does. (#140)
+  resetDb()
   rmSync(dir, { recursive: true, force: true })
 })
 

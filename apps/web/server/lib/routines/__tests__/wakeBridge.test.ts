@@ -27,6 +27,7 @@ import { NotImplementedError } from '@clawboo/scheduler'
 import type { runTaskOnRuntime } from '../../executorRunner'
 import { dispatchRoutine } from '../wakeBridge'
 import type { dispatchConnectedSubstrate } from '../openclawDispatch'
+import { resetDb } from '../../db'
 
 type RunTaskInput = Parameters<typeof runTaskOnRuntime>[0]
 
@@ -74,6 +75,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Close BEFORE removing the dir: Windows refuses to remove a directory
+  // that still holds an open file. The suite never opens the handle itself,
+  // the server code under test does. (#140)
+  resetDb()
   rmSync(dir, { recursive: true, force: true })
 })
 

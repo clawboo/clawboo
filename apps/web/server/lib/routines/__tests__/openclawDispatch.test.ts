@@ -33,6 +33,7 @@ import { createAsyncQueue } from '@clawboo/executor'
 import type { TaskTemplate } from '@clawboo/scheduler'
 
 import { dispatchConnectedSubstrate, type OperatorClientLike } from '../openclawDispatch'
+import { resetDb } from '../../db'
 
 // ── Local clone of the adapter package's unpublished FakeGatewayClient ──────
 class FakeOperatorClient {
@@ -136,6 +137,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Close BEFORE removing the dir: Windows refuses to remove a directory
+  // that still holds an open file. The suite never opens the handle itself,
+  // the server code under test does. (#140)
+  resetDb()
   rmSync(dir, { recursive: true, force: true })
 })
 

@@ -19,6 +19,7 @@ import type { RuntimeRunContext } from '../../types'
 import { createNativeDriver } from '../nativeDriver'
 import type { ProviderStreamEvent } from '../providers/types'
 import type { RoutedProviderClient } from '../routeCall'
+import { resetDb } from '../../../db'
 
 /** A scripted text-only provider client: one turn that emits `text` then usage. */
 function textClient(text: string): RoutedProviderClient {
@@ -48,6 +49,10 @@ describe('native driver — :native chat write de-double for team runs', () => {
     db = createDb(path.join(sandbox, 'test.db'))
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. The suite never opens the handle itself,
+    // the server code under test does. (#140)
+    resetDb()
     await rm(sandbox, { recursive: true, force: true })
   })
 

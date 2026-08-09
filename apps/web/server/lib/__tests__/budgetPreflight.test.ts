@@ -6,6 +6,7 @@ import { createDb, recordSpend, setBudgetLimit, type ClawbooDb } from '@clawboo/
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { budgetPreflight } from '../budgetPreflight'
+import { resetDb } from '../db'
 
 let dir: string
 let db: ClawbooDb
@@ -13,7 +14,13 @@ beforeEach(() => {
   dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-preflight-'))
   db = createDb(path.join(dir, 'test.db'))
 })
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
+afterEach(() => {
+  // Close BEFORE removing the dir: Windows refuses to remove a directory that
+  // still holds an open file. The suite never opens the handle itself, the
+  // server code under test does. (#140)
+  resetDb()
+  rmSync(dir, { recursive: true, force: true })
+})
 
 describe('budgetPreflight', () => {
   it('does not block when no budget rows exist (uncapped)', () => {

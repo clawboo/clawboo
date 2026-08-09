@@ -20,6 +20,7 @@ import {
 } from '@clawboo/db'
 import { buildTeamSessionKey } from '@clawboo/team-orchestration'
 
+import { resetDb } from '../../lib/db'
 import { resolveTeamSessionKeys } from '../teamChatStream'
 
 let dir: string
@@ -57,7 +58,13 @@ beforeEach(() => {
   db = createDb(path.join(dir, 'test.db'))
   seq = 0
 })
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
+afterEach(() => {
+  // Close BEFORE removing the dir: Windows refuses to remove a directory that
+  // still holds an open file. The suite never opens the handle itself, the
+  // server code under test does. (#140)
+  resetDb()
+  rmSync(dir, { recursive: true, force: true })
+})
 
 describe('teamChatStream read path', () => {
   it('resolveTeamSessionKeys → the team members’ team-keys, excluding other teams', () => {

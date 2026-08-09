@@ -14,6 +14,7 @@ import {
 } from '@clawboo/db'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { resetDb } from '../../db'
 import { recordToInsert } from '../mapper'
 import { NativeCapabilitySource } from '../native'
 import { HermesCapabilitySource } from '../hermes'
@@ -30,7 +31,13 @@ beforeEach(() => {
   dbPath = path.join(dir, 'test.db')
   db = createDb(dbPath)
 })
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
+afterEach(() => {
+  // Close BEFORE removing the dir: Windows refuses to remove a directory that
+  // still holds an open file. The suite never opens the handle itself, the
+  // server code under test does. (#140)
+  resetDb()
+  rmSync(dir, { recursive: true, force: true })
+})
 
 function seedAgent(id: string, runtime: string, sourceId = 'openclaw'): void {
   const now = Date.now()

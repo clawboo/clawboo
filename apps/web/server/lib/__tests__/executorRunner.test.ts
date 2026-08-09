@@ -850,7 +850,13 @@ describe('executor runner — per-identity home serialization + cancellation + 0
       assigneeAgentId: 'agent-Z',
       abortSignal: ctl.signal,
     })
-    await new Promise((r) => setTimeout(r, 30)) // let the run reach the hang
+    // Wait until the run has ACTUALLY reached the hang, rather than guessing with
+    // a fixed sleep. `release` is only assigned once the generator is parked, and
+    // abort() resolves it. On a loaded runner (this is what timed out on Windows
+    // CI) 30ms can elapse before the generator gets there; aborting first leaves
+    // `release` null, so nothing ever unparks the generator and the run never
+    // settles. Polling the real signal makes it deterministic everywhere. (#140)
+    while (!release) await new Promise((r) => setTimeout(r, 5))
     ctl.abort()
     const result = await p
     expect(aborted).toBe(true) // the live run was aborted
