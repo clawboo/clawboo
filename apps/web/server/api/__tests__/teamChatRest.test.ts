@@ -7,11 +7,11 @@ import type { IncomingMessage } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createDb, postToRoom, resolveRoomForTeam } from '@clawboo/db'
+import { postToRoom, resolveRoomForTeam } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { releaseRoom, tryAcquireRoom } from '../../lib/teamChat/roomLock'
 import { parseTeamChatBinding } from '../mcp'
 import { teamChatExchangePOST, teamChatGET } from '../teamChat'
@@ -68,6 +68,9 @@ describe('GET /api/team-chat', () => {
     process.env['CLAWBOO_HOME'] = dir
   })
   afterAll(() => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
     else process.env['CLAWBOO_HOME'] = prevHome
     rmSync(dir, { recursive: true, force: true })
@@ -90,7 +93,7 @@ describe('GET /api/team-chat', () => {
 
   it('reads a team room (resolves roomId from teamId) in seq order', () => {
     // Seed the sandboxed DB the handler opens via getDbPath().
-    const db = createDb(getDbPath())
+    const db = getDb()
     postToRoom(db, {
       roomId: resolveRoomForTeam('tm-rest'),
       teamId: 'tm-rest',

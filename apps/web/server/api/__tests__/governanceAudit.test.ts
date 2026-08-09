@@ -6,11 +6,11 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { appendAudit, createDb } from '@clawboo/db'
+import { appendAudit } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { governanceAuditGET } from '../governanceAudit'
 
 function mockRes(): { res: Response; status: () => number; body: () => unknown } {
@@ -45,13 +45,16 @@ describe('governance audit REST', () => {
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
   })
 
   it('filters by circuit_break event type and a future `since` cutoff', () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     appendAudit(db, { eventType: 'budget', agentId: 'a1', summary: { note: 'spend' } })
     appendAudit(db, {
       eventType: 'circuit_break',

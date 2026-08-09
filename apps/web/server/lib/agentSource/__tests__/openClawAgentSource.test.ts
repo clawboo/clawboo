@@ -8,12 +8,12 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createDb, teams } from '@clawboo/db'
+import { agents, teams } from '@clawboo/db'
 import { GatewayResponseError } from '@clawboo/gateway-client'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getDb, getDbPath, resetDb } from '../../db'
+import { getDb, resetDb } from '../../db'
 import {
   OpenClawAgentSource,
   type AgentListEntryLike,
@@ -129,6 +129,9 @@ describe('OpenClawAgentSource', () => {
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     // Drop the process-wide memo and this fixture's own handle before the
     // sandbox is removed — otherwise each test leaves a live SQLite handle
     // behind (and Windows refuses to rm a dir that still holds an open file).
@@ -171,7 +174,7 @@ describe('OpenClawAgentSource', () => {
 
     // Simulate clawboo-native edits (team assignment + personality) made by other
     // code paths AFTER the first sync.
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
     db.insert(teams)
       .values({
@@ -258,7 +261,7 @@ describe('OpenClawAgentSource', () => {
 
     // Seed the team the agent will join (agents.team_id has a real FK to teams).
     const now = Date.now()
-    createDb(getDbPath())
+    getDb()
       .insert(teams)
       .values({
         id: 'team-3',

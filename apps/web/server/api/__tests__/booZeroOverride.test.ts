@@ -8,11 +8,11 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createDb, getSetting, type ClawbooDb } from '@clawboo/db'
+import { agents, getSetting, type ClawbooDb } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { resolveBooZero, SETTING_BOO_ZERO_OVERRIDE } from '../../lib/teamChat/booZero'
 import { booZeroOverrideGET, booZeroOverridePOST } from '../booZeroOverride'
 
@@ -43,7 +43,7 @@ describe('Boo Zero override (runtime-neutral leader designation)', () => {
     await mkdir(path.join(home, '.clawboo'), { recursive: true })
     prevHome = process.env['HOME']
     process.env['HOME'] = home
-    db = createDb(getDbPath())
+    db = getDb()
     const now = Date.now()
     db.insert(agents)
       .values([
@@ -72,6 +72,9 @@ describe('Boo Zero override (runtime-neutral leader designation)', () => {
       .run()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})

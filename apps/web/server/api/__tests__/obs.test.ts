@@ -7,11 +7,11 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { appendEvent, createDb, listEvents } from '@clawboo/db'
+import { appendEvent, listEvents } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import {
   obsErrorsGET,
   obsEventsGET,
@@ -74,7 +74,7 @@ function mockSse(query: Record<string, string> = {}): {
 }
 
 function seed(): void {
-  const db = createDb(getDbPath())
+  const db = getDb()
   const now = Date.now()
   // A two-agent mission under trace tr1.
   appendEvent(db, {
@@ -178,6 +178,9 @@ describe('observability REST', () => {
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
@@ -317,5 +320,5 @@ describe('observability REST', () => {
 })
 
 function listEventsForTask(taskId: string): string[] {
-  return listEvents(createDb(getDbPath()), { taskId }).map((e) => e.kind)
+  return listEvents(getDb(), { taskId }).map((e) => e.kind)
 }

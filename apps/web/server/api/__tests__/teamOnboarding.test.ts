@@ -8,11 +8,11 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { chatMessages, createDb, setSetting, type ClawbooDb } from '@clawboo/db'
+import { chatMessages, setSetting, type ClawbooDb } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
 import { teamOnboardingGET } from '../teamOnboarding'
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 
 const TEAM = 'team-1'
 
@@ -44,10 +44,13 @@ describe('teamOnboardingGET — chat-history override', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
-    db = createDb(getDbPath())
+    db = getDb()
     seq = 0
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']

@@ -12,14 +12,14 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
-import { createDb, getSetting, setSetting, agents, teams } from '@clawboo/db'
+import { getSetting, setSetting, agents, teams } from '@clawboo/db'
 
 import {
   onboardingNativeLeaderModelGET,
   onboardingNativeLeaderModelPOST,
   onboardingSeedNativeTeamPOST,
 } from '../onboardingSeed'
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { loadAgentConfig, saveAgentConfig } from '../../lib/runtimes/native/agentConfigStore'
 import { SETTING_NATIVE_BOO_ZERO_ID, SETTING_NATIVE_LEADER_MODEL } from '../../lib/teamChat/booZero'
 
@@ -58,6 +58,9 @@ describe('onboarding seed-native-team REST', () => {
     process.env['OPENCLAW_STATE_DIR'] = mkdtempSync(path.join(os.tmpdir(), 'clawboo-seed-state-'))
   })
   afterEach(() => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     for (const k of SAVED) {
       if (prev[k] === undefined) delete process.env[k]
       else process.env[k] = prev[k]
@@ -75,7 +78,7 @@ describe('onboarding seed-native-team REST', () => {
     expect(out.specialistAgentId).toMatch(/^native-/)
     expect(out.leaderAgentId).not.toBe(out.specialistAgentId)
 
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     // The team row exists with the leader recorded.
     const team = db.select().from(teams).where(eq(teams.id, out.teamId)).get()
@@ -128,6 +131,9 @@ describe('onboarding native-leader-model REST', () => {
     process.env['OPENCLAW_STATE_DIR'] = mkdtempSync(path.join(os.tmpdir(), 'clawboo-lm-state-'))
   })
   afterEach(() => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     for (const k of SAVED) {
       if (prev[k] === undefined) delete process.env[k]
       else process.env[k] = prev[k]
@@ -139,7 +145,7 @@ describe('onboarding native-leader-model REST', () => {
     const m = mockRes()
     onboardingNativeLeaderModelPOST(req({ provider: 'anthropic', model: 'claude-sonnet-5' }), m.res)
     expect(m.statusCode()).toBe(200)
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(JSON.parse(getSetting(db, SETTING_NATIVE_LEADER_MODEL) ?? '{}')).toEqual({
       provider: 'anthropic',
       model: 'claude-sonnet-5',
@@ -171,7 +177,7 @@ describe('onboarding native-leader-model REST', () => {
   })
 
   it('POST retro-applies the pick to an EXISTING native Boo Zero AgentConfig', () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     // Seed a native Boo Zero + its stored AgentConfig (the shape ensureNativeBooZero writes).
     setSetting(db, SETTING_NATIVE_BOO_ZERO_ID, 'native-bz-1')
     saveAgentConfig(db, {

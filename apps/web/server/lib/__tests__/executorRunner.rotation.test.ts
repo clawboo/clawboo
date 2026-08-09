@@ -14,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   SqliteMemoryStore,
-  createDb,
   createTask,
   getBudget,
   getSessionBySourceId,
@@ -32,7 +31,7 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 
-import { getDbPath } from '../db'
+import { getDb, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
 
 type Reason = 'success' | 'max_turns' | 'error'
@@ -127,6 +126,9 @@ describe('executor runner — session rotation + memory injection', () => {
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true })
@@ -136,7 +138,7 @@ describe('executor runner — session rotation + memory injection', () => {
     title = 'Implement payment processing',
     description = 'wire the Stripe path',
   ): string {
-    return createTask(createDb(getDbPath()), {
+    return createTask(getDb(), {
       title,
       description,
       status: 'todo',
@@ -148,7 +150,7 @@ describe('executor runner — session rotation + memory injection', () => {
     const taskId = newTask()
     const fake = new RotatingAdapter('claude-code', ['max_turns', 'success'])
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'claude-1',
@@ -164,7 +166,7 @@ describe('executor runner — session rotation + memory injection', () => {
     expect(fake.startedContexts[1]).toContain('Session handoff (rotation)')
 
     // The session_rotated obs event was emitted under the run's trace.
-    const db = createDb(getDbPath())
+    const db = getDb()
     const rotated = listEvents(db, { taskId, kinds: ['session_rotated'] })
     expect(rotated).toHaveLength(1)
     const data = JSON.parse(rotated[0]!.data) as {
@@ -190,7 +192,7 @@ describe('executor runner — session rotation + memory injection', () => {
       'max_turns',
     ])
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'claude-1',
@@ -202,7 +204,7 @@ describe('executor runner — session rotation + memory injection', () => {
     expect(result.doneReason).toBe('max_turns')
     expect(result.status).toBe('todo') // chain exhausted → released, retryable
     expect(fake.startCount).toBe(3) // initial + 2 rotations
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(listEvents(db, { taskId, kinds: ['session_rotated'] })).toHaveLength(2)
   })
 
@@ -210,7 +212,7 @@ describe('executor runner — session rotation + memory injection', () => {
     const taskId = newTask()
     const fake = new RotatingAdapter('claude-code', ['success'])
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'claude-1',
@@ -219,18 +221,16 @@ describe('executor runner — session rotation + memory injection', () => {
     expect(result.ok && result.status).toBe('done')
     expect(fake.startCount).toBe(1)
     expect(fake.serializeCount).toBe(0)
-    expect(listEvents(createDb(getDbPath()), { taskId, kinds: ['session_rotated'] })).toHaveLength(
-      0,
-    )
+    expect(listEvents(getDb(), { taskId, kinds: ['session_rotated'] })).toHaveLength(0)
   })
 
   it('accumulates budget spend across rotations (cumulative, not per-run)', async () => {
     const taskId = newTask()
-    const db = createDb(getDbPath())
+    const db = getDb()
     setBudgetLimit(db, { scope: 'agent', scopeId: 'claude-1', limitUsdCents: 100 }) // high → never pauses
     const fake = new RotatingAdapter('claude-code', ['max_turns', 'success'], 0.05) // 5¢ per run
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'claude-1',
@@ -238,12 +238,12 @@ describe('executor runner — session rotation + memory injection', () => {
     })
     expect(result.ok).toBe(true)
     // Two runs × 5¢ = 10¢ recorded against the agent budget.
-    expect(getBudget(createDb(getDbPath()), 'agent', 'claude-1')?.spentUsdCents).toBe(10)
+    expect(getBudget(getDb(), 'agent', 'claude-1')?.spentUsdCents).toBe(10)
   })
 
   it('injects an <auto-memory> block at run start (and suppresses it when disabled)', async () => {
     // Seed a relevant fact into the SAME db the runner reads.
-    await new SqliteMemoryStore(createDb(getDbPath())).saveFact({
+    await new SqliteMemoryStore(getDb()).saveFact({
       title: 'Payments',
       content: 'payment processing uses the Stripe checkout API',
       scope: { teamId: 'team-1' },
@@ -252,7 +252,7 @@ describe('executor runner — session rotation + memory injection', () => {
     const taskOn = newTask()
     const fakeOn = new RotatingAdapter('claude-code', ['success'])
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fakeOn,
       taskId: taskOn,
       assigneeAgentId: 'claude-1',
@@ -263,7 +263,7 @@ describe('executor runner — session rotation + memory injection', () => {
     const taskOff = newTask()
     const fakeOff = new RotatingAdapter('claude-code', ['success'])
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fakeOff,
       taskId: taskOff,
       assigneeAgentId: 'claude-1',

@@ -17,7 +17,7 @@ import { promisify } from 'node:util'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createDb, createTask, getTask, listEvents } from '@clawboo/db'
+import { createTask, getTask, listEvents } from '@clawboo/db'
 import type {
   Capabilities,
   RunHandle,
@@ -28,7 +28,7 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 
-import { getDbPath } from '../db'
+import { getDb, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
 import type { RuntimeRunContext } from '../runtimes'
 import { getTaskWorkspace } from '../worktrees'
@@ -158,13 +158,16 @@ describe('executor runner — native-preservation routing (by construction)', ()
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true })
   })
 
   function newTask(title = 'Implement the thing'): string {
-    return createTask(createDb(getDbPath()), {
+    return createTask(getDb(), {
       title,
       description: 'do it',
       status: 'todo',
@@ -182,7 +185,7 @@ describe('executor runner — native-preservation routing (by construction)', ()
       nativeScheduler: true,
     })
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'agent-1',
@@ -190,7 +193,7 @@ describe('executor runner — native-preservation routing (by construction)', ()
     })
     expect(result).toEqual({ ok: false, reason: 'connected_substrate' })
     expect(fake.startCount).toBe(0) // the adapter was never started
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('todo') // never claimed
     expect(listEvents(db, { taskId, kinds: ['execution_started'] })).toHaveLength(0) // no exec row opened
   })
@@ -201,7 +204,7 @@ describe('executor runner — native-preservation routing (by construction)', ()
     const first = new SeamAdapter('hermes', HERMES_SHAPED)
     const f1 = recordingFactory(first)
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: f1.makeAdapter,
       taskId: newTask(),
       assigneeAgentId: 'hermes-1',
@@ -214,7 +217,7 @@ describe('executor runner — native-preservation routing (by construction)', ()
     const second = new SeamAdapter('hermes', HERMES_SHAPED)
     const f2 = recordingFactory(second)
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: f2.makeAdapter,
       taskId: newTask('Another task'),
       assigneeAgentId: 'hermes-1',
@@ -226,7 +229,7 @@ describe('executor runner — native-preservation routing (by construction)', ()
     const third = new SeamAdapter('hermes', HERMES_SHAPED)
     const f3 = recordingFactory(third)
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: f3.makeAdapter,
       taskId: newTask('Third task'),
       assigneeAgentId: 'hermes-2',
@@ -241,7 +244,7 @@ describe('executor runner — native-preservation routing (by construction)', ()
     const fake = new SeamAdapter('claude-code', FULL_CAPS)
     const f = recordingFactory(fake)
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: f.makeAdapter,
       taskId: newTask(),
       assigneeAgentId: 'claude-1',
@@ -265,6 +268,9 @@ describe('executor runner — native session resume across dispatches', () => {
     repo = await initRepo()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true })
@@ -272,7 +278,7 @@ describe('executor runner — native session resume across dispatches', () => {
   })
 
   function newTask(): string {
-    return createTask(createDb(getDbPath()), {
+    return createTask(getDb(), {
       title: 'Long task',
       description: 'spans dispatches',
       status: 'todo',
@@ -283,7 +289,7 @@ describe('executor runner — native session resume across dispatches', () => {
   /** Dispatch 1: pause-for-handoff so the worktree (and its handoff) survives. */
   async function pauseRun(taskId: string, adapter: SeamAdapter): Promise<void> {
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: recordingFactory(adapter).makeAdapter,
       taskId,
       assigneeAgentId: 'hermes-1',
@@ -308,7 +314,7 @@ describe('executor runner — native session resume across dispatches', () => {
     const second = new SeamAdapter('hermes', HERMES_SHAPED, ['success'], 'hsess-B')
     const f2 = recordingFactory(second)
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: f2.makeAdapter,
       taskId,
       assigneeAgentId: 'hermes-1',
@@ -329,7 +335,7 @@ describe('executor runner — native session resume across dispatches', () => {
     const other = new SeamAdapter('codex', codexShaped, ['success'], 'thread-X')
     const f = recordingFactory(other)
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: f.makeAdapter,
       taskId,
       assigneeAgentId: 'codex-1',
@@ -350,7 +356,7 @@ describe('executor runner — native session resume across dispatches', () => {
     const rotating = new SeamAdapter('hermes', HERMES_SHAPED, ['max_turns', 'success'], 'hsess-B')
     const f = recordingFactory(rotating)
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: f.makeAdapter,
       taskId,
       assigneeAgentId: 'hermes-1',
@@ -384,7 +390,7 @@ describe('executor runner — native session resume across dispatches', () => {
     const failing = new SeamAdapter('hermes', HERMES_SHAPED, ['error'], null)
     const f = recordingFactory(failing)
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: f.makeAdapter,
       taskId,
       assigneeAgentId: 'hermes-1',
@@ -405,7 +411,7 @@ describe('executor runner — native session resume across dispatches', () => {
     const third = new SeamAdapter('hermes', HERMES_SHAPED, ['success'], 'hsess-new')
     const f3 = recordingFactory(third)
     const ok = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: f3.makeAdapter,
       taskId,
       assigneeAgentId: 'hermes-1',

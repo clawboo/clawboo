@@ -17,12 +17,12 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createDb, setSetting, teams, type ClawbooDb } from '@clawboo/db'
+import { agents, setSetting, teams, type ClawbooDb } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { SETTING_DEFAULT_ID } from '../../lib/agentSource/openClawAgentSource'
 import { resolveBooZero, resolveNativeBooZero } from '../../lib/teamChat/booZero'
 import { agentsCreatePOST } from '../agents'
@@ -77,10 +77,13 @@ describe('teamAgentPOST → eager native Boo Zero', () => {
       delete process.env[v]
     }
     process.env['ANTHROPIC_API_KEY'] = 'sk-test-key'
-    db = createDb(getDbPath())
+    db = getDb()
   })
 
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     for (const v of NATIVE_KEY_VARS) {

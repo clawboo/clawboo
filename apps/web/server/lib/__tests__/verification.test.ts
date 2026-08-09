@@ -16,7 +16,6 @@ import { promisify } from 'node:util'
 
 import {
   claimTask,
-  createDb,
   createTask,
   getComments,
   getTask,
@@ -34,7 +33,7 @@ import type {
 import type { DiffStat, Worktree } from '@clawboo/worktrees'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../db'
+import { getDb, resetDb } from '../db'
 import { verifyTask } from '../verification'
 import { actOnTaskWorkspace, provisionTaskWorkspace } from '../worktrees'
 
@@ -100,7 +99,7 @@ async function provisionForTask(
   repoPath: string,
   verifyCmd: string,
 ): Promise<{ taskId: string; worktree: Worktree }> {
-  const db = createDb(getDbPath())
+  const db = getDb()
   const task = createTask(db, { title: 'do the thing', teamId: 'team1' })
   claimTask(db, task.id, 'agent1', 'openclaw') // → in_progress (a real run owns it before completion)
   const prov = await provisionTaskWorkspace(task.id, { repoPath, kind: 'code' })
@@ -128,6 +127,9 @@ describe('verification gate (real board + real git worktree)', () => {
     repo = await initRepo()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
@@ -138,15 +140,15 @@ describe('verification gate (real board + real git worktree)', () => {
     const { taskId } = await provisionForTask(repo, 'exit 0')
     const r = await actOnTaskWorkspace(taskId, 'complete')
     expect(r.ok && r.action === 'complete' ? r.verified : null).toBe('pass')
-    expect(getTask(createDb(getDbPath()), taskId)?.status).toBe('done')
-    expect(getTaskVerification(createDb(getDbPath()), taskId)?.status).toBe('pass')
+    expect(getTask(getDb(), taskId)?.status).toBe('done')
+    expect(getTaskVerification(getDb(), taskId)?.status).toBe('pass')
   })
 
   it('a failing gate blocks done and reverts to in_progress with a structured error', async () => {
     const { taskId } = await provisionForTask(repo, 'exit 1')
     const r = await actOnTaskWorkspace(taskId, 'complete')
     expect(r.ok && r.action === 'complete' ? r.verified : null).toBe('fail')
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('in_progress')
     const comments = getComments(db, taskId)
     expect(
@@ -156,7 +158,7 @@ describe('verification gate (real board + real git worktree)', () => {
 
   it('marks completed_with_debt at cycle exhaustion (never deadlocks)', async () => {
     const { taskId, worktree } = await provisionForTask(repo, 'exit 1')
-    const db = createDb(getDbPath())
+    const db = getDb()
     const verdict = await verifyTask({
       db,
       taskId,
@@ -172,7 +174,7 @@ describe('verification gate (real board + real git worktree)', () => {
 
   it('a completed_with_debt verdict over a RED gate routes to BLOCKED (never silently done)', async () => {
     const { taskId } = await provisionForTask(repo, 'exit 1') // gate always red
-    const db = createDb(getDbPath())
+    const db = getDb()
     // Pre-seed 2 prior failing attempts so the next cycle (default max 3) exhausts
     // the fix loop → completed_with_debt with a still-failing deterministic gate.
     const failAttempt = (n: number) => ({
@@ -217,7 +219,7 @@ describe('verification gate (real board + real git worktree)', () => {
 
   it('the read-only critic runs on a risky diff and a blocking finding fails the verdict', async () => {
     const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
-    const db = createDb(getDbPath())
+    const db = getDb()
     const reviewRoot = path.join(home, 'reviews')
     const blocking = JSON.stringify({
       findings: [{ severity: 'security', title: 'hardcoded token', confidence: 0.9 }],
@@ -245,7 +247,7 @@ describe('verification gate (real board + real git worktree)', () => {
 
   it('skips the critic on a small, low-risk diff (passes on the gate alone)', async () => {
     const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
-    const db = createDb(getDbPath())
+    const db = getDb()
     const verdict = await verifyTask({
       db,
       taskId,

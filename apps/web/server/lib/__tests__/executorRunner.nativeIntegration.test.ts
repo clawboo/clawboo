@@ -16,7 +16,6 @@ import { promisify } from 'node:util'
 import {
   chatMessages,
   claimTask,
-  createDb,
   createTask,
   getBudget,
   getComments,
@@ -39,7 +38,7 @@ import type {
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../db'
+import { getDb, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
 import type { RuntimeRunContext } from '../runtimes'
 import { createNativeDriver } from '../runtimes/native'
@@ -99,8 +98,7 @@ const usage = (input: number, output: number): ProviderStreamEvent => ({
 function makeNativeFactory(client: RoutedProviderClient) {
   return (ctx: RuntimeRunContext): RuntimeAdapter =>
     new NativeAdapter(
-      (opts: StartOpts) =>
-        createNativeDriver(opts, ctx, { client, mcp: null, db: createDb(getDbPath()) }),
+      (opts: StartOpts) => createNativeDriver(opts, ctx, { client, mcp: null, db: getDb() }),
       async () => ({ ok: true }),
     )
 }
@@ -119,6 +117,9 @@ describe('executor runner — native runtime integration', () => {
     repo = await initRepo()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']
@@ -127,7 +128,7 @@ describe('executor runner — native runtime integration', () => {
   })
 
   function newCodeTask(title = 'Add GREETING.md'): string {
-    return createTask(createDb(getDbPath()), {
+    return createTask(getDb(), {
       title,
       description: 'write it',
       status: 'todo',
@@ -137,7 +138,7 @@ describe('executor runner — native runtime integration', () => {
 
   it('happy path: claim → file-tool worktree mutation → verify gate → done + handoff nativeSessionId', async () => {
     const taskId = newCodeTask()
-    setBudgetLimit(createDb(getDbPath()), {
+    setBudgetLimit(getDb(), {
       scope: 'agent',
       scopeId: 'native-spec-1',
       limitUsdCents: 10_000,
@@ -169,7 +170,7 @@ describe('executor runner — native runtime integration', () => {
     ])
 
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: makeNativeFactory(client),
       taskId,
       assigneeAgentId: 'native-spec-1',
@@ -185,7 +186,7 @@ describe('executor runner — native runtime integration', () => {
     expect(result.status).toBe('done')
     expect(result.costUsd).toBeGreaterThan(0) // real priced turns, cumulative
 
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('done')
     expect(getComments(db, taskId).some((c) => c.body.includes('Wrote the greeting'))).toBe(true)
     expect(getTaskVerification(db, taskId)?.status).toBe('pass')
@@ -232,7 +233,7 @@ describe('executor runner — native runtime integration', () => {
 
   it('budget kill-switch aborts a native conversation mid-stream and releases the task', async () => {
     const taskId = newCodeTask('Expensive task')
-    setBudgetLimit(createDb(getDbPath()), {
+    setBudgetLimit(getDb(), {
       scope: 'agent',
       scopeId: 'native-spend-1',
       limitUsdCents: 1,
@@ -247,7 +248,7 @@ describe('executor runner — native runtime integration', () => {
     ])
 
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: makeNativeFactory(client),
       taskId,
       assigneeAgentId: 'native-spend-1',
@@ -261,19 +262,19 @@ describe('executor runner — native runtime integration', () => {
     expect(result.status).toBe('todo') // released — clean resumable state
     expect(result.summary).toBe('auto-paused (budget)')
 
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('todo')
     expect(listGovernanceAudit(db, { eventType: 'budget' })).toHaveLength(1)
     expect(getTaskVerification(db, taskId) ?? null).toBeNull() // verify never ran
   })
 
   it('coexistence: native + hermes-shaped + openclaw tasks complete on ONE board', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     // 1) Native (real driver + scripted provider).
     const nativeTask = newCodeTask('Native leg')
     const nativeResult = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: makeNativeFactory(
         scriptedClient([
           [
@@ -344,7 +345,7 @@ describe('executor runner — native runtime integration', () => {
       async writeContext() {}
     }
     const hermesResult = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: (ctx: RuntimeRunContext) => {
         if (ctx.cwd) {
           writeFileSync(path.join(ctx.cwd, 'hermes.txt'), 'hermes\n', 'utf8')

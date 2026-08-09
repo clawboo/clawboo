@@ -8,13 +8,13 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createDb, getCapability, upsertCapabilities } from '@clawboo/db'
+import { agents, getCapability, upsertCapabilities } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildRecord } from '../../lib/capabilitySource/helpers'
 import { recordToInsert, rowToRecord } from '../../lib/capabilitySource/mapper'
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { capabilitiesActionPOST, capabilitiesListGET } from '../capabilities'
 
 function mockRes(): { res: Response; status: () => number; body: () => unknown } {
@@ -56,7 +56,7 @@ describe('capabilities REST', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
     db.insert(agents)
       .values({
@@ -72,6 +72,9 @@ describe('capabilities REST', () => {
   })
 
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']
@@ -114,7 +117,7 @@ describe('capabilities REST', () => {
   })
 
   it('enable/disable on an observe-only capability is 422', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const rec = buildRecord({
       sourceId: 'hermes',
       runtime: 'hermes',
@@ -146,7 +149,7 @@ describe('capabilities REST', () => {
     expect(r.status()).toBe(404)
   })
 
-  function seedOpenClawConnector(db: ReturnType<typeof createDb>): ReturnType<typeof buildRecord> {
+  function seedOpenClawConnector(db: ReturnType<typeof getDb>): ReturnType<typeof buildRecord> {
     const rec = buildRecord({
       sourceId: 'openclaw',
       runtime: 'openclaw',
@@ -165,7 +168,7 @@ describe('capabilities REST', () => {
   }
 
   it('rowToRecord re-derives writable:false for a runtime-of-record OpenClaw extension (degraded last-good DB keeps the gate)', () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const rec = seedOpenClawConnector(db)
     // The column does NOT persist `writable`; reading the row back + mapping must
     // RE-DERIVE writable:false so the dashboard's dead-button gate survives a
@@ -189,7 +192,7 @@ describe('capabilities REST', () => {
   })
 
   it('disable on a non-writable runtime-of-record connector is 422 at the REST gate (before any adapter write)', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const rec = seedOpenClawConnector(db)
     const r = mockRes()
     await capabilitiesActionPOST(

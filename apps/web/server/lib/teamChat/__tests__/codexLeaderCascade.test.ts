@@ -27,7 +27,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   agents,
-  createDb,
   getComments,
   getSetting,
   listTasks,
@@ -52,7 +51,7 @@ import {
   type BoardOrchestrator,
 } from '@clawboo/team-orchestration'
 
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import { booZeroForTeam } from '../booZero'
 import { nativeTeamSessionSettingKey } from '../nativeTeamSession'
 import { createServerBoardClient } from '../serverBoardClient'
@@ -156,7 +155,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-codex-lead-'))
     prevHome = process.env['HOME']
     process.env['HOME'] = home
-    db = createDb(getDbPath())
+    db = getDb()
     const now = Date.now()
     db.insert(teams)
       .values({
@@ -195,6 +194,9 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
       .run()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     vi.useRealTimers()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome

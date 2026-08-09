@@ -7,18 +7,12 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import {
-  createDb,
-  createTask,
-  listGovernanceAudit,
-  setTaskVerification,
-  updateStatus,
-} from '@clawboo/db'
+import { createTask, listGovernanceAudit, setTaskVerification, updateStatus } from '@clawboo/db'
 import type { VerificationResult } from '@clawboo/governance'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { boardUpdatePATCH } from '../board'
 
 function mockRes(): { res: Response; statusCode: () => number; body: () => unknown } {
@@ -82,13 +76,16 @@ describe('board PATCH verification gate (intrinsic + audited override)', () => {
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
   })
 
   function redGatedTask(): string {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const t = createTask(db, { title: 'x' })
     updateStatus(db, t.id, 'in_progress')
     updateStatus(db, t.id, 'in_review')
@@ -112,7 +109,7 @@ describe('board PATCH verification gate (intrinsic + audited override)', () => {
       r.res,
     )
     expect(r.statusCode()).toBe(200)
-    const audit = listGovernanceAudit(createDb(getDbPath()), { eventType: 'verification' })
+    const audit = listGovernanceAudit(getDb(), { eventType: 'verification' })
     expect(audit.some((row) => String(row.summary).includes('override'))).toBe(true)
   })
 })

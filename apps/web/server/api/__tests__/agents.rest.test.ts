@@ -8,11 +8,11 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createDb, getSetting, teams } from '@clawboo/db'
+import { agents, getSetting, teams } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { runtimeAgentFileKey } from '../../lib/agentSource/runtimeAgentFileStore'
 import {
   agentsListGET,
@@ -61,7 +61,7 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
     // Seed a synced agent row (as the sync would have produced).
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
     db.insert(teams)
       .values({ id: 't1', name: 'Team', icon: '👻', color: '#fff', createdAt: now, updatedAt: now })
@@ -82,6 +82,9 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
       .run()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']
@@ -214,7 +217,7 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     expect(patch.status()).toBe(200)
     expect(patch.body()).toEqual({ ok: true, model: 'claude-haiku-4-5' })
     // The AgentConfig KV row carries the new primaryModel.
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(loadAgentConfig(db, id)?.primaryModel).toBe('claude-haiku-4-5')
 
     // The OpenClaw-seeded agent (a1) is not native → 404 (model change is native-only).
@@ -265,7 +268,7 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
       filePut.res,
     )
     expect(filePut.status()).toBe(200)
-    const db = createDb(getDbPath())
+    const db = getDb()
     const fileKey = runtimeAgentFileKey(created.id, 'SOUL.md')
     expect(getSetting(db, fileKey)).toBe('# coder')
 

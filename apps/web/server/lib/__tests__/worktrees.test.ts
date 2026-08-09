@@ -17,7 +17,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   claimTask,
-  createDb,
   createTask,
   getTask,
   getWorkspaceForTask,
@@ -28,7 +27,7 @@ import {
 } from '@clawboo/db'
 import { isWorktreeRegistered, SOR_FILES } from '@clawboo/worktrees'
 
-import { getDbPath } from '../db'
+import { getDb, resetDb } from '../db'
 import {
   actOnTaskWorkspace,
   gcTaskWorkspaces,
@@ -68,6 +67,9 @@ describe('server worktree orchestrator (real git + real board)', () => {
   })
 
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true })
@@ -75,7 +77,7 @@ describe('server worktree orchestrator (real git + real board)', () => {
   })
 
   function newClaimedCodeTask(): string {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const task = createTask(db, {
       title: 'Implement feature X',
       description: 'Wire feature X end to end.',
@@ -99,7 +101,7 @@ describe('server worktree orchestrator (real git + real board)', () => {
     // Worktree lives OUTSIDE the user's repo (under the sandbox HOME).
     expect(prov.worktree.worktreePath.startsWith(home)).toBe(true)
 
-    const db = createDb(getDbPath())
+    const db = getDb()
     const ws = getWorkspaceForTask(db, taskId)
     expect(ws?.worktreePath).toBe(prov.worktree.worktreePath)
     expect(ws?.branch).toBe(prov.worktree.branch)
@@ -161,7 +163,7 @@ describe('server worktree orchestrator (real git + real board)', () => {
     expect(result.taskStatus).toBe('done')
     expect(existsSync(prov.worktree.worktreePath)).toBe(false)
 
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('done')
     expect(getWorkspaceForTask(db, taskId)?.status).toBe('archived')
   })
@@ -175,7 +177,7 @@ describe('server worktree orchestrator (real git + real board)', () => {
     // An earlier dirty attempt failed verification; the fix reduced the diff to
     // empty on this re-complete. The empty-diff terminal must not be blocked by the
     // stale failing verdict (an empty diff has no deliverable to verify).
-    const db = createDb(getDbPath())
+    const db = getDb()
     setTaskVerification(db, taskId, {
       status: 'fail',
       attempts: [
@@ -230,13 +232,13 @@ describe('server worktree orchestrator (real git + real board)', () => {
     expect(result.taskStatus).toBe('in_progress')
     expect(existsSync(prov.worktree.worktreePath)).toBe(true)
 
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('in_progress')
     expect(getWorkspaceForTask(db, taskId)?.status).toBe('active')
   })
 
   it('refuses to provision a worktree for read-only research work', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const task = createTask(db, { title: 'Research the options', status: 'todo' })
     const prov = await provisionTaskWorkspace(task.id, { repoPath: repo, kind: 'research' })
     expect(prov.ok).toBe(false)
@@ -249,7 +251,7 @@ describe('server worktree orchestrator (real git + real board)', () => {
     expect(prov.ok).toBe(true)
     if (!prov.ok) return
     const wtPath = prov.worktree.worktreePath
-    const db = createDb(getDbPath())
+    const db = getDb()
     const wsId = getWorkspaceForTask(db, taskId)!.id
 
     // Simulate a GC reap: the worktree dir is gone (branch kept) + row marked stale.
@@ -275,7 +277,7 @@ describe('server worktree orchestrator (real git + real board)', () => {
     expect(a.ok && b.ok).toBe(true)
     if (!a.ok || !b.ok) return
     expect(b.workspaceId).toBe(a.workspaceId) // same row, not a duplicate
-    const db = createDb(getDbPath())
+    const db = getDb()
     const activeForTask = listActiveWorkspaces(db).filter((w) => w.taskId === taskId)
     expect(activeForTask).toHaveLength(1)
   })
@@ -285,7 +287,7 @@ describe('server worktree orchestrator (real git + real board)', () => {
     // snapshot, so a task that is active at reap time is genuinely protected. This
     // exercises the real gcTaskWorkspaces → gcWorktrees → live callback path and
     // locks the predicate to BOTH active statuses (in_progress AND in_review).
-    const db = createDb(getDbPath())
+    const db = getDb()
     const running = newClaimedCodeTask() // stays in_progress
     const reviewing = newClaimedCodeTask() // → in_review
     const released = newClaimedCodeTask() // → todo (no longer active)

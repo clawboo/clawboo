@@ -7,11 +7,11 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createDb, createTask, listScheduledRuns } from '@clawboo/db'
+import { agents, createTask, listScheduledRuns } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { resetScheduleMultiplexer } from '../../lib/scheduleSource/registry'
 import {
   schedulesCreatePOST,
@@ -58,7 +58,7 @@ describe('schedules REST (gateway disconnected)', () => {
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
     resetScheduleMultiplexer()
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
     db.insert(agents)
       .values({
@@ -73,6 +73,9 @@ describe('schedules REST (gateway disconnected)', () => {
   })
 
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']
@@ -108,7 +111,7 @@ describe('schedules REST (gateway disconnected)', () => {
   })
 
   it('a duplicate bound registration is a 409 (one firing-owner; never retried)', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const task = createTask(db, { title: 'Owned elsewhere', scheduledBy: 'openclaw' })
     const r = mockRes()
     // A bound routine must be one-shot (once@); the ownership conflict still applies.
@@ -123,7 +126,7 @@ describe('schedules REST (gateway disconnected)', () => {
   })
 
   it('a RECURRING schedule bound to a team task is a 400 (must be one-shot)', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const task = createTask(db, { title: 'Bound', status: 'todo' })
     const r = mockRes()
     await schedulesCreatePOST(req({ body: { ...CREATE_BODY, teamTaskId: task.id } }), r.res) // recurring + bound
@@ -194,6 +197,6 @@ describe('schedules REST (gateway disconnected)', () => {
     const run = mockRes()
     await schedulesRunPOST(req({ params: { id } }), run.res)
     expect(run.status()).toBe(202)
-    expect(listScheduledRuns(createDb(getDbPath()))[0]?.status).toBe('queued')
+    expect(listScheduledRuns(getDb())[0]?.status).toBe('queued')
   })
 })

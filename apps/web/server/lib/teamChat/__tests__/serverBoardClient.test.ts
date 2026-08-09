@@ -10,16 +10,9 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import {
-  createDb,
-  getComments,
-  getTask,
-  listEvents,
-  listExecutions,
-  type ClawbooDb,
-} from '@clawboo/db'
+import { getComments, getTask, listEvents, listExecutions, type ClawbooDb } from '@clawboo/db'
 
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import { createServerBoardClient } from '../serverBoardClient'
 
 const TEAM = 'team-sbc'
@@ -33,9 +26,12 @@ describe('serverBoardClient (direct-DB BoardClient over the board repo)', () => 
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-sbc-home-'))
     prevHome = process.env['HOME']
     process.env['HOME'] = home // → getDbPath() lands in the sandbox
-    db = createDb(getDbPath())
+    db = getDb()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true })

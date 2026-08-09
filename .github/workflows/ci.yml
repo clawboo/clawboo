@@ -147,25 +147,23 @@ jobs:
       # `--fail-if-no-match` so a mistyped filter can't yield a green leg that ran nothing.
       - run: pnpm --filter @clawboo/worktrees --fail-if-no-match exec vitest run
 
-      # apps/web/server platform surface (Windows leg): npm.cmd resolution, the
-      # which→where shim, and .exe candidate lookup — the DB-free slice of the server
-      # suite that runs green on Windows today, and the exact npm.cmd/shim regression
-      # surface #75 targets. Scoped to the FILE, not the dir: vitest's positional filter
-      # is a substring match, so `server/lib/runtimes/` would also pull in
-      # hermesDriver.test.ts, which fails on Windows.
-      - if: runner.os == 'Windows'
-        run: pnpm --filter @clawboo/web --fail-if-no-match exec vitest run server/lib/__tests__/platform.test.ts
-
-      # apps/web/server (full node server/ suite): macOS only for now — it already covers
-      # the platform test above. On Windows the suite fails two INDEPENDENT ways: (1) the
-      # SQLite-backed harness can't reset an open DB file between tests (better-sqlite3
-      # holds it → EBUSY on unlink), and (2) some suites override HOME but not
-      # USERPROFILE/CLAWBOO_HOME, so they resolve the real home rather than the sandbox
-      # (this PR fixes that class in executorRunner.test.ts; other suites still need it).
-      # Both are the "platform familiarity" follow-through the issue names — both, so the
-      # follow-up isn't mis-scoped as SQLite-only.
-      - if: runner.os != 'Windows'
-        run: pnpm --filter @clawboo/web --fail-if-no-match exec vitest run server/
+      # apps/web/server (full node `server/` suite): runtime CLI spawning, process-tree
+      # abort, the boot probe, npm.cmd resolution and the which→where shim, and path
+      # handling. The `server/` filter excludes the jsdom UI tests, which live in src/.
+      #
+      # Runs on BOTH legs as of issue #140. It was macOS-only before, because on Windows
+      # the suite failed two independent ways, both fixed there:
+      #   1. A HOME-only sandbox. os.homedir() reads %USERPROFILE% on Windows and
+      #      ignores $HOME, so every suite resolved the runner's REAL home instead of
+      #      its temp dir and they all shared one clawboo.db, which is what produced
+      #      the cascading UNIQUE-constraint failures. Fixed at one seam, the Vitest
+      #      setup file server/__vitest__/setupHomedir.ts, rather than per suite.
+      #   2. A leaked SQLite handle. better-sqlite3 holds the DB file open and Windows
+      #      refuses to unlink an open file, so teardown threw EBUSY. The suites now
+      #      open through getDb() and call resetDb() before removing the sandbox dir.
+      # The dedicated platform.test.ts step this replaces is redundant now, since that
+      # file runs as part of the full suite here.
+      - run: pnpm --filter @clawboo/web --fail-if-no-match exec vitest run server/
 
   build:
     name: Build
