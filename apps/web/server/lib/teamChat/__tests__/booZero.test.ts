@@ -11,10 +11,10 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { agents, createDb, getSetting, setSetting, teams, type ClawbooDb } from '@clawboo/db'
+import { agents, getSetting, setSetting, teams, type ClawbooDb } from '@clawboo/db'
 
 import { SETTING_DEFAULT_ID } from '../../agentSource/openClawAgentSource'
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import {
   booZeroForTeam,
   ensureNativeBooZero,
@@ -50,10 +50,13 @@ describe('booZero', () => {
       savedKeys[v] = process.env[v]
       delete process.env[v]
     }
-    db = createDb(getDbPath())
+    db = getDb()
     created = 0
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     for (const v of NATIVE_KEY_VARS) {

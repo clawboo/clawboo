@@ -12,7 +12,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   agents,
-  createDb,
   getBudget,
   getScheduledRun,
   listEvents,
@@ -30,7 +29,7 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import { runTaskOnRuntime } from '../../executorRunner'
 import { createRoutinesTicker } from '../ticker'
 import { dispatchRoutine } from '../wakeBridge'
@@ -95,7 +94,7 @@ describe('routines × governance (real ledger + real executor runner)', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
-    db = createDb(getDbPath())
+    db = getDb()
     const now = Date.now()
     db.insert(agents)
       .values({
@@ -110,6 +109,9 @@ describe('routines × governance (real ledger + real executor runner)', () => {
   })
 
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']

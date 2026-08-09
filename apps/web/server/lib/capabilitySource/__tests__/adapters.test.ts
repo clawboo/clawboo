@@ -30,7 +30,14 @@ beforeEach(() => {
   dbPath = path.join(dir, 'test.db')
   db = createDb(dbPath)
 })
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
+afterEach(() => {
+  // This suite OWNS its connection (createDb at a fixture path), so resetDb()
+  // cannot reach it: that only evicts the getDb() memo. Windows refuses to
+  // remove a directory that still holds an open file, so close it before the
+  // rm. Mirrors the ownership rule in lib/db.ts. (#140)
+  db.$client.close()
+  rmSync(dir, { recursive: true, force: true })
+})
 
 function seedAgent(id: string, runtime: string, sourceId = 'openclaw'): void {
   const now = Date.now()

@@ -25,7 +25,6 @@ import { HermesAdapter, type HermesDriver, type HermesNativeEvent } from '@clawb
 import { resolveClawbooDir } from '@clawboo/config'
 import {
   claimTask,
-  createDb,
   createTask,
   getBudget,
   getComments,
@@ -43,7 +42,7 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 
-import { getDbPath } from '../db'
+import { getDb, resetDb } from '../db'
 import { planDegradations } from '../degradation'
 import { runTaskOnRuntime } from '../executorRunner'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
@@ -132,6 +131,9 @@ describe('executor runner (real board + real git worktree)', () => {
   })
 
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
@@ -141,7 +143,7 @@ describe('executor runner (real board + real git worktree)', () => {
   })
 
   function newCodeTask(title = 'Implement the thing'): string {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const task = createTask(db, { title, description: 'do it', status: 'todo', teamId: 'team-1' })
     return task.id
   }
@@ -150,7 +152,7 @@ describe('executor runner (real board + real git worktree)', () => {
     const taskId = newCodeTask()
     const fake = new FakeRunnerAdapter('claude-code', FULL_CAPS, 'Implemented and verified.')
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'claude-1',
@@ -174,10 +176,10 @@ describe('executor runner (real board + real git worktree)', () => {
   it('refuses a second claim with 409 and never retries', async () => {
     const taskId = newCodeTask()
     // Someone else already owns it (in_progress).
-    claimTask(createDb(getDbPath()), taskId, 'other-agent', 'openclaw')
+    claimTask(getDb(), taskId, 'other-agent', 'openclaw')
     const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'should not run')
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'codex-1',
@@ -193,7 +195,7 @@ describe('executor runner (real board + real git worktree)', () => {
     const leak = 'crash: OPENROUTER_API_KEY=sk-or-SECRETKEY1234567890ABCDEF env dump'
     const fake = new FakeRunnerAdapter('hermes', FULL_CAPS, leak, 'error')
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'hermes-1',
@@ -206,7 +208,7 @@ describe('executor runner (real board + real git worktree)', () => {
     expect(result.doneReason).toBe('error')
     expect(result.summary).not.toContain('sk-or-SECRETKEY')
     // The durable board comment + execution row carry the redacted text, not the key.
-    const comments = getComments(createDb(getDbPath()), taskId)
+    const comments = getComments(getDb(), taskId)
     expect(JSON.stringify(comments)).not.toContain('sk-or-SECRETKEY')
     expect(JSON.stringify(comments)).toContain('[REDACTED]')
   })
@@ -221,7 +223,7 @@ describe('executor runner (real board + real git worktree)', () => {
       'Wired the --json flag; NEXT: finish the SSE parser.',
     )
     const r1 = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => run1,
       taskId,
       assigneeAgentId: 'claude-1',
@@ -240,7 +242,7 @@ describe('executor runner (real board + real git worktree)', () => {
     // prompt context must carry run 1's handoff, reconstructed from the worktree.
     const run2 = new FakeRunnerAdapter('codex', FULL_CAPS, 'Finished the parser. Done.')
     const r2 = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => run2,
       taskId,
       assigneeAgentId: 'codex-1',
@@ -251,7 +253,7 @@ describe('executor runner (real board + real git worktree)', () => {
   })
 
   it('refuses a task nested PAST MAX_SPAWN_DEPTH but dispatches one exactly at it', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const root = createTask(db, { title: 'root', status: 'todo' })
     const child = createTask(db, { title: 'child', status: 'todo', parentTaskId: root.id })
     const grandchild = createTask(db, {
@@ -265,7 +267,7 @@ describe('executor runner (real board + real git worktree)', () => {
     const tooDeep = new FakeRunnerAdapter('claude-code', FULL_CAPS, 'nope')
     expect(
       await runTaskOnRuntime({
-        db: createDb(getDbPath()),
+        db: getDb(),
         makeAdapter: () => tooDeep,
         taskId: great.id,
         assigneeAgentId: 'claude-1',
@@ -280,7 +282,7 @@ describe('executor runner (real board + real git worktree)', () => {
     // permanently undispatchable cards on the board.
     const atCeiling = new FakeRunnerAdapter('claude-code', FULL_CAPS, 'nope')
     const ok = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => atCeiling,
       taskId: grandchild.id,
       assigneeAgentId: 'claude-2',
@@ -303,7 +305,7 @@ describe('executor runner (real board + real git worktree)', () => {
     }
     const fake = new FakeRunnerAdapter('hermes', limited, 'done')
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'hermes-1',
@@ -469,6 +471,9 @@ describe('executor runner — circuit breakers', () => {
     repo = await initRepo()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
@@ -478,7 +483,7 @@ describe('executor runner — circuit breakers', () => {
   })
 
   function newCodeTask(title = 'Implement the thing'): string {
-    return createTask(createDb(getDbPath()), {
+    return createTask(getDb(), {
       title,
       description: 'do it',
       status: 'todo',
@@ -488,7 +493,7 @@ describe('executor runner — circuit breakers', () => {
 
   async function run(taskId: string, fake: ScriptedAdapter, agentId = 'claude-1') {
     return runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: agentId,
@@ -499,7 +504,7 @@ describe('executor runner — circuit breakers', () => {
 
   /** Assert the full breaker teardown for a given halt reason. */
   function expectHalted(taskId: string, reason: string) {
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('todo') // released — clean resumable state
     expect(listGovernanceAudit(db, { eventType: 'circuit_break' }).length).toBe(1)
     expect(getComments(db, taskId).some((c) => c.body.includes(`[stopped: ${reason}]`))).toBe(true)
@@ -604,7 +609,7 @@ describe('executor runner — circuit breakers', () => {
     const ctl = new AbortController()
     ctl.abort()
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'claude-1',
@@ -615,7 +620,7 @@ describe('executor runner — circuit breakers', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.reason).toBe('conflict')
     expect(fake.startedOpts).toBeNull() // never claimed → adapter never started
-    expect(getTask(createDb(getDbPath()), taskId)?.status).toBe('todo') // board untouched
+    expect(getTask(getDb(), taskId)?.status).toBe('todo') // board untouched
   })
 
   it('honors a per-run breakerConfig override (a tighter iteration cap trips early)', async () => {
@@ -625,7 +630,7 @@ describe('executor runner — circuit breakers', () => {
     b.done('success')
     const fake = new ScriptedAdapter('claude-code', b.build())
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'claude-1',
@@ -639,7 +644,7 @@ describe('executor runner — circuit breakers', () => {
 
   it('composes with the budget kill-switch — exactly one abort, budget wins the tie', async () => {
     const taskId = newCodeTask()
-    setBudgetLimit(createDb(getDbPath()), {
+    setBudgetLimit(getDb(), {
       scope: 'agent',
       scopeId: 'claude-1',
       limitUsdCents: 1,
@@ -655,7 +660,7 @@ describe('executor runner — circuit breakers', () => {
     if (!result.ok) return
     expect(result.summary).toBe('auto-paused (budget)') // budget, not the breaker
     expect(fake.aborts).toBe(1) // exactly one abort — no double-abort
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(listGovernanceAudit(db, { eventType: 'circuit_break' }).length).toBe(0) // breaker did NOT fire
     expect(listGovernanceAudit(db, { eventType: 'budget' }).length).toBe(1)
     expect(listEvents(db, { taskId, kinds: ['execution_completed'] }).length).toBe(1) // one terminal
@@ -707,6 +712,9 @@ describe('executor runner — per-identity home serialization + cancellation + 0
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
@@ -715,7 +723,7 @@ describe('executor runner — per-identity home serialization + cancellation + 0
   })
 
   function newTask(title = 'persistent task'): string {
-    return createTask(createDb(getDbPath()), {
+    return createTask(getDb(), {
       title,
       description: 'do it',
       status: 'todo',
@@ -766,7 +774,7 @@ describe('executor runner — per-identity home serialization + cancellation + 0
     const t2 = newTask('b')
     const run = (taskId: string) =>
       runTaskOnRuntime({
-        db: createDb(getDbPath()),
+        db: getDb(),
         makeAdapter: () => makeConcurrencyAdapter('clawboo-native', tracker),
         taskId,
         assigneeAgentId: 'agent-X', // SAME identity → same persistent home
@@ -783,7 +791,7 @@ describe('executor runner — per-identity home serialization + cancellation + 0
     const t2 = newTask('b')
     const run = (taskId: string, agentId: string) =>
       runTaskOnRuntime({
-        db: createDb(getDbPath()),
+        db: getDb(),
         makeAdapter: () => makeConcurrencyAdapter('clawboo-native', tracker),
         taskId,
         assigneeAgentId: agentId,
@@ -836,13 +844,19 @@ describe('executor runner — per-identity home serialization + cancellation + 0
     }
     const ctl = new AbortController()
     const p = runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => adapter,
       taskId,
       assigneeAgentId: 'agent-Z',
       abortSignal: ctl.signal,
     })
-    await new Promise((r) => setTimeout(r, 30)) // let the run reach the hang
+    // Wait until the run has ACTUALLY reached the hang, rather than guessing with
+    // a fixed sleep. `release` is only assigned once the generator is parked, and
+    // abort() resolves it. On a loaded runner (this is what timed out on Windows
+    // CI) 30ms can elapse before the generator gets there; aborting first leaves
+    // `release` null, so nothing ever unparks the generator and the run never
+    // settles. Polling the real signal makes it deterministic everywhere. (#140)
+    while (!release) await new Promise((r) => setTimeout(r, 5))
     ctl.abort()
     const result = await p
     expect(aborted).toBe(true) // the live run was aborted
@@ -850,7 +864,7 @@ describe('executor runner — per-identity home serialization + cancellation + 0
     if (!result.ok) return
     expect(result.doneReason).toBe('aborted')
     expect(result.status).toBe('todo') // released, retryable
-    expect(getTask(createDb(getDbPath()), taskId)?.status).toBe('todo')
+    expect(getTask(getDb(), taskId)?.status).toBe('todo')
   })
 
   // win32-skipped: this file is not Windows-runnable yet (SQLite reset + a
@@ -862,7 +876,7 @@ describe('executor runner — per-identity home serialization + cancellation + 0
     async () => {
       const taskId = newTask('perms')
       await runTaskOnRuntime({
-        db: createDb(getDbPath()),
+        db: getDb(),
         makeAdapter: () => makeConcurrencyAdapter('clawboo-native', { active: 0, max: 0 }),
         taskId,
         assigneeAgentId: 'agent-perms',
@@ -917,6 +931,9 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     repo = await initRepo()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
@@ -926,7 +943,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
   })
 
   function newTeamTask(title = 'Do the thing'): string {
-    return createTask(createDb(getDbPath()), {
+    return createTask(getDb(), {
       title,
       description: 'do it',
       status: 'todo',
@@ -936,7 +953,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
 
   it('estimates a CODEX run from reported usage so the cap engages (real adapter), then blocks the next dispatch', async () => {
     // A 1-cent team cap; Codex reports usage but NO USD → the executor must estimate.
-    setBudgetLimit(createDb(getDbPath()), {
+    setBudgetLimit(getDb(), {
       scope: 'team',
       scopeId: 'team-1',
       limitUsdCents: 1,
@@ -945,7 +962,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     const taskId = newTeamTask()
 
     const r1 = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () =>
         new CodexAdapter(
           () =>
@@ -968,7 +985,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     if (!r1.ok) return
     expect(r1.doneReason).toBe('aborted') // the kill-switch fired on the estimated spend
     expect(r1.status).toBe('todo')
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('todo') // released, retryable
     const b = getBudget(db, 'team', 'team-1')
     expect(b?.status).toBe('paused') // the cap engaged from estimated usage
@@ -977,7 +994,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     // The NEXT dispatch on the same (paused) team is refused pre-flight — never claimed.
     const taskId2 = newTeamTask('next')
     const r2 = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () =>
         new CodexAdapter(
           () =>
@@ -999,11 +1016,11 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     expect(r2.ok).toBe(false)
     if (r2.ok) return
     expect(r2.reason).toBe('budget_paused')
-    expect(getTask(createDb(getDbPath()), taskId2)?.status).toBe('todo') // never claimed
+    expect(getTask(getDb(), taskId2)?.status).toBe('todo') // never claimed
   })
 
   it('estimates a HERMES run from reported usage so the cap engages (real adapter)', async () => {
-    setBudgetLimit(createDb(getDbPath()), {
+    setBudgetLimit(getDb(), {
       scope: 'team',
       scopeId: 'team-1',
       limitUsdCents: 1,
@@ -1012,7 +1029,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     const taskId = newTeamTask()
 
     const r = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () =>
         new HermesAdapter(
           () =>
@@ -1034,14 +1051,14 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.doneReason).toBe('aborted')
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('todo')
     expect(getBudget(db, 'team', 'team-1')?.status).toBe('paused')
   })
 
   it('records a REAL costUsd exactly — the estimate never fires for an exact-cost runtime (no regression)', async () => {
     // A warn budget with plenty of headroom — it must record the EXACT cost, unpaused.
-    setBudgetLimit(createDb(getDbPath()), {
+    setBudgetLimit(getDb(), {
       scope: 'team',
       scopeId: 'team-1',
       limitUsdCents: 100_000,
@@ -1052,7 +1069,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     b.costUsd(0.5) // a real reported costUsd (Claude Code / pinned-native shape) → exactly 50¢
     b.done('success')
     const r = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => new ScriptedAdapter('claude-code', b.build()),
       taskId,
       assigneeAgentId: 'claude-1',
@@ -1060,7 +1077,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
       kind: 'code',
     })
     expect(r.ok).toBe(true)
-    const bud = getBudget(createDb(getDbPath()), 'team', 'team-1')
+    const bud = getBudget(getDb(), 'team', 'team-1')
     expect(bud?.spentUsdCents).toBe(50) // exact — the estimate path did not re-price it
     expect(bud?.status).not.toBe('paused') // a warn budget never pauses
   })

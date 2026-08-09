@@ -29,7 +29,6 @@ import { promisify } from 'node:util'
 import type { Request, Response } from 'express'
 
 import {
-  createDb,
   createTask,
   getBudget,
   getComments,
@@ -50,7 +49,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { runtimesRunPOST } from '../../api/runtimes'
-import { getDbPath } from '../db'
+import { getDb, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
 import type { RuntimeRunContext } from '../runtimes'
 import { getTaskWorkspace } from '../worktrees'
@@ -183,6 +182,9 @@ describe('executor runner — all-on integration (board + executors + worktrees 
   })
 
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
@@ -190,7 +192,7 @@ describe('executor runner — all-on integration (board + executors + worktrees 
   })
 
   function newCodeTask(title = 'Implement the thing'): string {
-    return createTask(createDb(getDbPath()), {
+    return createTask(getDb(), {
       title,
       description: 'do it',
       status: 'todo',
@@ -201,7 +203,7 @@ describe('executor runner — all-on integration (board + executors + worktrees 
   it('happy path: all six subsystems cooperate on one successful run', async () => {
     const taskId = newCodeTask()
     // A generous agent budget: spend is RECORDED (governance live) without pausing.
-    setBudgetLimit(createDb(getDbPath()), {
+    setBudgetLimit(getDb(), {
       scope: 'agent',
       scopeId: 'claude-1',
       limitUsdCents: 10_000,
@@ -214,7 +216,7 @@ describe('executor runner — all-on integration (board + executors + worktrees 
     const adapter = new ScriptedAdapter('claude-code', b.build())
 
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: (ctx: RuntimeRunContext) => {
         if (ctx.cwd) dirtyWorktree(ctx.cwd) // real call (worktree present) → leave a verifiable deliverable
         return adapter
@@ -234,7 +236,7 @@ describe('executor runner — all-on integration (board + executors + worktrees 
     expect(result.doneReason).toBe('success')
     expect(result.status).toBe('done') // verify gate passed → in_review → done
 
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     // ── board ──────────────────────────────────────────────────────────────────
     expect(getTask(db, taskId)?.status).toBe('done')
@@ -277,7 +279,7 @@ describe('executor runner — all-on integration (board + executors + worktrees 
 
   it('all-on halt path: a budget trip cancels the run cleanly and SKIPS verify', async () => {
     const taskId = newCodeTask()
-    setBudgetLimit(createDb(getDbPath()), {
+    setBudgetLimit(getDb(), {
       scope: 'agent',
       scopeId: 'claude-1',
       limitUsdCents: 1,
@@ -291,7 +293,7 @@ describe('executor runner — all-on integration (board + executors + worktrees 
     const adapter = new ScriptedAdapter('claude-code', b.build())
 
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: (ctx: RuntimeRunContext) => {
         if (ctx.cwd) dirtyWorktree(ctx.cwd)
         return adapter
@@ -309,7 +311,7 @@ describe('executor runner — all-on integration (board + executors + worktrees 
     expect(result.summary).toBe('auto-paused (budget)') // budget, not the breaker
     expect(adapter.aborts).toBe(1) // exactly one abort — no double-abort
 
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('todo')
     expect(listGovernanceAudit(db, { eventType: 'budget' })).toHaveLength(1)
     expect(listGovernanceAudit(db, { eventType: 'circuit_break' })).toHaveLength(0) // breaker did NOT fire
@@ -345,12 +347,15 @@ describe.skipIf(process.env['CLAWBOO_LIVE_ACCEPTANCE'] !== '1')(
       repo = await initRepo()
     })
     afterEach(async () => {
+      // Close BEFORE removing the dir: Windows refuses to remove a directory
+      // that still holds an open file. (#140)
+      resetDb()
       if (prevHome !== undefined) process.env['HOME'] = prevHome
       await rm(repo, { recursive: true, force: true }).catch(() => {})
     })
 
     it('a real Claude Code run completes a board task with a worktree + verify + obs', async () => {
-      const taskId = createTask(createDb(getDbPath()), {
+      const taskId = createTask(getDb(), {
         title: 'Append a line to feature.txt and set VERIFY_CMD',
         description:
           "Create a file `feature.txt` with a single line of text in the working directory, then set `VERIFY_CMD='test -f feature.txt'` inside init.sh. Report a one-line summary when done.",
@@ -374,7 +379,7 @@ describe.skipIf(process.env['CLAWBOO_LIVE_ACCEPTANCE'] !== '1')(
       )
       expect(res.statusCode()).toBe(200)
 
-      const db = createDb(getDbPath())
+      const db = getDb()
       const task = getTask(db, taskId)
       expect(['done', 'in_review', 'in_progress']).toContain(task?.status)
       // the run left an obs trace + a board comment (report-up).

@@ -19,6 +19,7 @@ vi.mock('../../lib/teamChat/runTeamExchange', () => ({
 }))
 
 import { teamChatExchangePOST } from '../teamChat'
+import { resetDb } from '../../lib/db'
 
 function mockRes(): Response & { _status: number; _json?: unknown } {
   const res = {
@@ -54,6 +55,10 @@ describe('POST /api/team-chat/exchange — host-header injection', () => {
     captured.input = null
   })
   afterEach(() => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. The suite never opens the handle itself,
+    // the server code under test does. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
     else process.env['CLAWBOO_HOME'] = prevHome
     rmSync(home, { recursive: true, force: true })

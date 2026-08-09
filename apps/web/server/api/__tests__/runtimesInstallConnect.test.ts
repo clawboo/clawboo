@@ -13,6 +13,7 @@ import path from 'node:path'
 
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resetDb } from '../../lib/db'
 
 // ── Mock platform: control which CLI bins are "installed". ───────────────────
 type PyResult = {
@@ -217,6 +218,10 @@ describe('runtimes install/connect REST', () => {
     process.env['HERMES_HOME'] = path.join(home, '.hermes')
   })
   afterEach(() => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. The suite never opens the handle itself,
+    // the server code under test does. (#140)
+    resetDb()
     for (const k of SAVED) {
       if (prev[k] === undefined) delete process.env[k]
       else process.env[k] = prev[k]

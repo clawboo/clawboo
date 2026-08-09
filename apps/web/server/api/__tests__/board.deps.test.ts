@@ -8,11 +8,11 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createDb, createTask, getDependents } from '@clawboo/db'
+import { createTask, getDependents } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { boardLinkDepPOST } from '../board'
 
 function mockRes(): { res: Response; statusCode: () => number; body: () => unknown } {
@@ -50,13 +50,16 @@ describe('POST /api/board/:taskId/deps — cycle rejection', () => {
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
   })
 
   it('a link that would close a cycle is 409, not 500, and no edge is written', () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const a = createTask(db, { title: 'A' })
     const b = createTask(db, { title: 'B' })
 
@@ -70,7 +73,7 @@ describe('POST /api/board/:taskId/deps — cycle rejection', () => {
   })
 
   it('a link to a task that does not exist is still 404', () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const a = createTask(db, { title: 'A' })
     expect(link(a.id, 'no-such-task').statusCode()).toBe(404)
   })

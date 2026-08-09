@@ -86,7 +86,14 @@ describe('hermes driver (preserved runtime)', () => {
     const first = await provisionHermesHome(identityHome())
     expect(first.created).toBe(true)
     const st = await stat(first.home)
-    expect(st.mode & 0o777).toBe(0o700)
+    // The home is materialized on every platform; only the 0700 hardening is
+    // POSIX-only. Windows has no mode bits (the chmod is a no-op there and the
+    // stat reports 0666), and the source applies no ACL equivalent yet, so
+    // asserting 0700 there would assert something untrue rather than untested.
+    expect(st.isDirectory()).toBe(true)
+    if (process.platform !== 'win32') {
+      expect(st.mode & 0o777).toBe(0o700)
+    }
 
     const second = await provisionHermesHome(identityHome())
     expect(second.home).toBe(first.home)

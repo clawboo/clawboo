@@ -13,7 +13,6 @@ import {
   agents,
   booZeroTeamBriefs,
   chatMessages,
-  createDb,
   createTask,
   SqliteMemoryStore,
   teams,
@@ -23,7 +22,7 @@ import { buildTeamSessionKey } from '@clawboo/team-orchestration'
 import type { Request, Response } from 'express'
 
 import { teamActivitySummaryGET } from '../../../api/teamActivity'
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import { buildTeamActivitySummary } from '../teamActivitySummary'
 
 const TEAM = 'team-1'
@@ -40,10 +39,13 @@ describe('buildTeamActivitySummary', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
-    db = createDb(getDbPath())
+    db = getDb()
     seq = 0
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']

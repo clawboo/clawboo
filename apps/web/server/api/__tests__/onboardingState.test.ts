@@ -7,11 +7,11 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createDb, teams } from '@clawboo/db'
+import { agents, teams } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { setRuntimeSecret } from '../../lib/secretsVault'
 import { onboardingStateGET } from '../onboardingState'
 
@@ -59,6 +59,9 @@ describe('GET /api/onboarding/state', () => {
     delete process.env['HERMES_HOME']
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     if (prevStateDir === undefined) delete process.env['OPENCLAW_STATE_DIR']
@@ -69,7 +72,7 @@ describe('GET /api/onboarding/state', () => {
 
   it('reports the fresh-install shape (all false)', async () => {
     // Touch the db so it exists (empty). No teams / native agents / vault keys.
-    createDb(getDbPath())
+    getDb()
     const r = mockRes()
     await onboardingStateGET(req(), r.res)
     expect(r.status()).toBe(200)
@@ -83,7 +86,7 @@ describe('GET /api/onboarding/state', () => {
   })
 
   it('flips hasTeam + hasNative once a native team is seeded', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
     db.insert(teams)
       .values({
@@ -120,7 +123,7 @@ describe('GET /api/onboarding/state', () => {
   })
 
   it('flips hasConnectedRuntime when a runtime key is stored in the vault', async () => {
-    createDb(getDbPath())
+    getDb()
     setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-vault-test')
     const r = mockRes()
     await onboardingStateGET(req(), r.res)

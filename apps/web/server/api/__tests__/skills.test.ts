@@ -7,11 +7,11 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createDb, listGovernanceAudit, skills } from '@clawboo/db'
+import { listGovernanceAudit, skills } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { skillsPOST } from '../skills'
 
 function mockRes(): { res: Response; statusCode: () => number; body: () => unknown } {
@@ -42,6 +42,9 @@ describe('skills install — supply-chain injection scan', () => {
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
@@ -59,7 +62,7 @@ describe('skills install — supply-chain injection scan', () => {
       res.res,
     )
     expect(res.statusCode()).toBe(422)
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(
       listGovernanceAudit(db, { eventType: 'install' }).some((r) =>
         r.summary.includes('"blocked":true'),
@@ -72,7 +75,7 @@ describe('skills install — supply-chain injection scan', () => {
     const res = mockRes()
     skillsPOST(req({ id: 's2', name: 'Web Search', source: 'curated', agentId: 'a1' }), res.res)
     expect(res.statusCode()).toBe(200)
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(db.select().from(skills).all()).toHaveLength(1)
     expect(
       listGovernanceAudit(db, { eventType: 'install' }).some((r) =>
@@ -86,7 +89,7 @@ describe('skills install — supply-chain injection scan', () => {
     // agentId as an object is truthy but not a string — it must never persist.
     skillsPOST(req({ id: 's3', name: 'API Tester', source: 'curated', agentId: {} }), res.res)
     expect(res.statusCode()).toBe(400)
-    const db = createDb(getDbPath())
+    const db = getDb()
     expect(db.select().from(skills).all()).toHaveLength(0) // never recorded
   })
 })

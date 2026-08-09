@@ -246,45 +246,59 @@ describe('POST /api/auth/cli-login/:tool', () => {
     expect(m.events()).toContainEqual({ type: 'complete', success: true, loggedIn: true })
   })
 
-  it('openclaw: PTY-wrapped via `script`, browser-PKCE by default; the `Open:` line becomes auth-url', async () => {
-    const m = sseRes()
-    cliLoginPOST(req('openclaw'), m.res)
-    const call = spawnState.calls[0]!
-    expect(call.cmd).toBe('script') // the stdin.isTTY guard demands a PTY
-    // NO --device-code: the default oauth method is the ungated browser flow.
-    expect(call.args.join(' ')).toContain('models auth login --provider openai-codex')
-    expect(call.args.join(' ')).not.toContain('--device-code')
-    spawnState.children[0]!.emitStdout(
-      'Open: https://auth.openai.com/oauth/authorize?client_id=app_x&state=z\n',
-    )
-    expect(m.events()).toContainEqual({
-      type: 'auth-url',
-      url: 'https://auth.openai.com/oauth/authorize?client_id=app_x&state=z',
-    })
-    probeState.openclawProfile = true
-    spawnState.children[0]!.emitClose(0)
-    await flush()
-    expect(m.events()).toContainEqual({ type: 'complete', success: true, loggedIn: true })
-  })
-
-  it('the store WATCHER completes on the credential landing on disk — WITHOUT the child exiting', async () => {
-    // The slow-openclaw case: a >16s sign-in shows the CLI's paste-prompt, which
-    // holds the process open after the callback succeeds. Completion must come
-    // from the auth store, and the lingering child gets reaped.
-    vi.useFakeTimers()
-    try {
+  // POSIX-only by DESIGN, not merely untested on Windows: `buildCliLoginPlan`
+  // returns UNSUPPORTED_PLATFORM for openclaw on win32 (cliLoginPlans.ts), because
+  // `models auth login` has a hard stdin.isTTY guard and there is no `script` to
+  // wrap it in. So there is no spawn to assert on there. The Windows branch is
+  // covered portably by cliLoginPlans.test.ts, which injects 'win32' and therefore
+  // runs on every platform. (#140)
+  it.skipIf(process.platform === 'win32')(
+    'openclaw: PTY-wrapped via `script`, browser-PKCE by default; the `Open:` line becomes auth-url',
+    async () => {
       const m = sseRes()
       cliLoginPOST(req('openclaw'), m.res)
-      expect(m.events()).not.toContainEqual(expect.objectContaining({ type: 'complete' }))
-      probeState.openclawProfile = true // the profile lands on disk mid-flow
-      await vi.advanceTimersByTimeAsync(3_100)
+      const call = spawnState.calls[0]!
+      expect(call.cmd).toBe('script') // the stdin.isTTY guard demands a PTY
+      // NO --device-code: the default oauth method is the ungated browser flow.
+      expect(call.args.join(' ')).toContain('models auth login --provider openai-codex')
+      expect(call.args.join(' ')).not.toContain('--device-code')
+      spawnState.children[0]!.emitStdout(
+        'Open: https://auth.openai.com/oauth/authorize?client_id=app_x&state=z\n',
+      )
+      expect(m.events()).toContainEqual({
+        type: 'auth-url',
+        url: 'https://auth.openai.com/oauth/authorize?client_id=app_x&state=z',
+      })
+      probeState.openclawProfile = true
+      spawnState.children[0]!.emitClose(0)
+      await flush()
       expect(m.events()).toContainEqual({ type: 'complete', success: true, loggedIn: true })
-      expect(m.ended()).toBe(true)
-      expect(killState.killed).toHaveLength(1) // the lingering child is reaped
-    } finally {
-      vi.useRealTimers()
-    }
-  })
+    },
+  )
+
+  // POSIX-only for the same reason as the test above: on win32 the openclaw plan
+  // is UNSUPPORTED_PLATFORM, so no child is ever spawned to watch. (#140)
+  it.skipIf(process.platform === 'win32')(
+    'the store WATCHER completes on the credential landing on disk — WITHOUT the child exiting',
+    async () => {
+      // The slow-openclaw case: a >16s sign-in shows the CLI's paste-prompt, which
+      // holds the process open after the callback succeeds. Completion must come
+      // from the auth store, and the lingering child gets reaped.
+      vi.useFakeTimers()
+      try {
+        const m = sseRes()
+        cliLoginPOST(req('openclaw'), m.res)
+        expect(m.events()).not.toContainEqual(expect.objectContaining({ type: 'complete' }))
+        probeState.openclawProfile = true // the profile lands on disk mid-flow
+        await vi.advanceTimersByTimeAsync(3_100)
+        expect(m.events()).toContainEqual({ type: 'complete', success: true, loggedIn: true })
+        expect(m.ended()).toBe(true)
+        expect(killState.killed).toHaveLength(1) // the lingering child is reaped
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
 
   it('client disconnect (Cancel) kills the child TREE', () => {
     const m = sseRes()

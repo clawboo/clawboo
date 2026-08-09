@@ -10,12 +10,12 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { chatMessages, createDb, type ClawbooDb } from '@clawboo/db'
+import { chatMessages, type ClawbooDb } from '@clawboo/db'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { buildTeamSessionKey } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import { persistTeamChatEntry } from '../persistTeamChatEntry'
 
 const TEAM = 'team-1'
@@ -29,9 +29,12 @@ describe('persistTeamChatEntry (the single team-chat writer)', () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-persist-home-'))
     prevHome = process.env['HOME']
     process.env['HOME'] = home
-    db = createDb(getDbPath())
+    db = getDb()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true })

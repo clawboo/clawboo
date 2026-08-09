@@ -10,7 +10,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createDb, createTask, listEvents } from '@clawboo/db'
+import { createTask, listEvents } from '@clawboo/db'
 import type {
   Capabilities,
   RunHandle,
@@ -21,7 +21,7 @@ import type {
 } from '@clawboo/executor'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../db'
+import { getDb, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
 import { spanIdFor } from '../obs'
 
@@ -80,14 +80,16 @@ describe('executor runner → observability', () => {
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
   })
 
   function newTask(): string {
-    return createTask(createDb(getDbPath()), { title: 'do it', status: 'todo', teamId: 'team-1' })
-      .id
+    return createTask(getDb(), { title: 'do it', status: 'todo', teamId: 'team-1' }).id
   }
 
   it('emits the full task trace under one traceId (AC1)', async () => {
@@ -120,22 +122,20 @@ describe('executor runner → observability', () => {
       { ...base(), kind: 'done', reason: 'success', summary: 'all done' },
     ])
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => adapter,
       taskId,
       assigneeAgentId: 'a1',
     })
     expect(result.ok).toBe(true)
 
-    const evs = listEvents(createDb(getDbPath()), { taskId, limit: 1000 })
-    const traceEvs = listEvents(createDb(getDbPath()), { limit: 1000 }).filter(
-      (e) => e.kind === 'span_start',
-    )
+    const evs = listEvents(getDb(), { taskId, limit: 1000 })
+    const traceEvs = listEvents(getDb(), { limit: 1000 }).filter((e) => e.kind === 'span_start')
     expect(traceEvs).toHaveLength(1)
     const traceId = traceEvs[0]!.traceId
     expect(traceId).toBeTruthy()
     // All run events share the one trace.
-    const all = listEvents(createDb(getDbPath()), { traceId: traceId!, limit: 1000 })
+    const all = listEvents(getDb(), { traceId: traceId!, limit: 1000 })
     const kinds = all.map((e) => e.kind)
     for (const k of [
       'span_start',
@@ -156,7 +156,7 @@ describe('executor runner → observability', () => {
   })
 
   it('nests a child run under its parent run via the board ancestor chain (cross-run traceparent)', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const parent = createTask(db, { title: 'parent', status: 'todo', teamId: 'team-1' })
     const child = createTask(db, {
       title: 'child',
@@ -169,19 +169,19 @@ describe('executor runner → observability', () => {
       base: () => { runId: string; sessionId: string | null; ts: number; seq: number },
     ): RuntimeEvent[] => [{ ...base(), kind: 'done', reason: 'success', summary: 'ok' }]
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => new ScriptedAdapter('cc', done),
       taskId: parent.id,
       assigneeAgentId: 'a1',
     })
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => new ScriptedAdapter('cc', done),
       taskId: child.id,
       assigneeAgentId: 'a2',
     })
 
-    const starts = listEvents(createDb(getDbPath()), { kinds: ['span_start'], limit: 100 })
+    const starts = listEvents(getDb(), { kinds: ['span_start'], limit: 100 })
     const parentStart = starts.find((e) => e.taskId === parent.id)!
     const childStart = starts.find((e) => e.taskId === child.id)!
     // One trace for the whole mission.
@@ -205,13 +205,13 @@ describe('executor runner → observability', () => {
       },
     ])
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => adapter,
       taskId,
       assigneeAgentId: 'a1',
     })
 
-    const errors = listEvents(createDb(getDbPath()), { kinds: ['error'], limit: 100 })
+    const errors = listEvents(getDb(), { kinds: ['error'], limit: 100 })
     expect(errors.length).toBeGreaterThanOrEqual(1)
     const data = JSON.parse(errors[0]!.data) as { errorClass: string; harnessBug: boolean }
     expect(data.errorClass).toBe('Unknown')
@@ -224,12 +224,12 @@ describe('executor runner → observability', () => {
       { ...base(), kind: 'done', reason: 'error', summary: 'request timed out after 600s' },
     ])
     await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => adapter,
       taskId,
       assigneeAgentId: 'a1',
     })
-    const data = JSON.parse(listEvents(createDb(getDbPath()), { kinds: ['error'] })[0]!.data) as {
+    const data = JSON.parse(listEvents(getDb(), { kinds: ['error'] })[0]!.data) as {
       errorClass: string
       harnessBug: boolean
     }

@@ -57,7 +57,14 @@ beforeEach(() => {
   db = createDb(path.join(dir, 'test.db'))
   seq = 0
 })
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
+afterEach(() => {
+  // This suite OWNS its connection (createDb at a fixture path), so resetDb()
+  // cannot reach it: that only evicts the getDb() memo. Windows refuses to
+  // remove a directory that still holds an open file, so close it before the
+  // rm. Mirrors the ownership rule in lib/db.ts. (#140)
+  db.$client.close()
+  rmSync(dir, { recursive: true, force: true })
+})
 
 describe('teamChatStream read path', () => {
   it('resolveTeamSessionKeys → the team members’ team-keys, excluding other teams', () => {

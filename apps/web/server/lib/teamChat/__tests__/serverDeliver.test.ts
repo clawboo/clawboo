@@ -15,7 +15,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   agents,
-  createDb,
   getBudget,
   listEvents,
   setBudgetLimit,
@@ -33,7 +32,7 @@ import type {
 } from '@clawboo/executor'
 import { createNudgeQueue, type NudgeQueue } from '@clawboo/team-orchestration'
 
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
 
 const CAPS: Capabilities = {
@@ -107,9 +106,12 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-deliver-home-'))
     prevHome = process.env['HOME']
     process.env['HOME'] = home
-    db = createDb(getDbPath())
+    db = getDb()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true })
