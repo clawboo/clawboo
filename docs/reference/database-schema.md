@@ -8,7 +8,7 @@ Clawboo persists all of its durable state in one local SQLite file. This page do
 There are **27 tables**. They cluster by subsystem: the agent/team **registry of record**, the durable **board**, the **memory** store, the **tools** broker, **governance**, the **observability** event log, the **capability** inventory, and the **team-chat** room substrate. The `memory_facts_fts` FTS5 virtual table (and its shadow tables) are not in the table count; they are raw DDL in `createDb`, not modellable in `schema.ts`.
 
 <Info>
-There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`) is the **sole** schema-creation source. `schema.ts` is the Drizzle type layer over the same tables, used for typed queries, never to apply migrations. A schema change is a hard reset of the local DB; see [Schema source of truth](#schema-source-of-truth--no-migration-ladder) below.
+There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`) is the **sole** schema-creation source. `schema.ts` is the Drizzle type layer over the same tables, used for typed queries, never to apply migrations. Upgrading in place adds columns an older database is missing, derived from that same DDL; changing or removing an existing column is still a reset. See [Schema source of truth](#schema-source-of-truth--no-migration-ladder) below.
 </Info>
 
 ## At a glance
@@ -362,12 +362,29 @@ There is **no live migration ladder**. The model is "bootstrap-via-`createDb`":
 
 - **The single source of truth** is the `CREATE TABLE IF NOT EXISTS …` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`). It declares every table, index, the FTS5 virtual table, and its triggers on a fresh DB outright. Running it twice is a no-op (`IF NOT EXISTS`).
 - **`schema.ts` is the Drizzle type layer** over the same tables, used for typed queries (`db.select()…`, the `Db*` / `Db*Insert` inferred types), never to apply migrations.
-- **A schema change is a hard reset** of the local DB. There are no users with persisted data to migrate, so the project carries no forward-only `ALTER` ladder.
+- **Upgrading in place is additive**, and derived from that same DDL rather than hand-listed. See below.
 
 This posture is enforced by `schemaSource.test.ts`, which:
 
 1. builds a DB through the real `createDb()` and asserts every `schema.ts` table and its column set matches the live DDL (and vice versa), the drift guard;
 2. asserts the unapplied drizzle ladder does **not** ship or run: `package.json` `files` excludes `drizzle`, there are no `db:migrate` / `db:generate` scripts, and **no migration-ladder directory exists on disk**.
+
+### Upgrading an existing database
+
+`CREATE TABLE IF NOT EXISTS` skips the **whole** statement when the table is already there, so a column added to an existing table would be a silent no-op on every database created before the change: the upgrade appears to succeed, then fails at runtime on the first query that touches the column.
+
+`ensureSchema` closes that with one derived, additive step, in this order:
+
+1. **`reconcileSchema`** (`packages/db/src/schemaReconcile.ts`) reads the declared column set back out of the same DDL, diffs it against `PRAGMA table_info` for each table that already exists, and issues `ALTER TABLE … ADD COLUMN` for anything missing.
+2. **the DDL batch** then creates everything absent: new tables, indexes, triggers.
+
+The order is load-bearing. A new column normally ships with an index over it, and `CREATE INDEX IF NOT EXISTS … ON t (new_col)` fails with "no such column" if the batch runs first, which takes the whole batch, and the boot, with it.
+
+Parsing the DDL rather than maintaining a list of `ALTER`s keeps one source of truth; `schemaReconcile.test.ts` makes that safe by asserting the parsed column set is identical to what SQLite actually creates from the same DDL, so a construct the parser cannot read fails the build instead of shipping.
+
+<Warning>
+`ADD COLUMN` is the only schema change SQLite makes without rewriting the table, so this covers **additive** evolution only. A new column on an existing table must be addable: it may not use `PRIMARY KEY`, `UNIQUE`, or a `STORED` generated column; any `DEFAULT` must be a literal rather than an expression; a `NOT NULL` column must carry one; and a `REFERENCES` column must not have a non-NULL one. A test catches one that is not before it ships, and if one ever escapes, the bootstrap throws with a message naming the column and the remedy, which the boot probe reports as a fatal `databaseSchema` check. Changing an existing column's type or constraints, dropping one, adding a table constraint, redefining an index or trigger (their `IF NOT EXISTS` matches on **name**), and any change to the FTS5 virtual table are all still not in-place upgrades. Columns the DDL no longer declares are left alone, so opening a newer database with an older Clawboo does not destroy them.
+</Warning>
 
 <Danger>
 Five drizzle migration stubs (`0000`–`0004`) existed before the migration ladder was removed; they now survive only in git history, never on disk. There is no `packages/db/drizzle/` directory in the checked-out tree, and `schemaSource.test.ts` asserts it stays absent. Nothing applies them, so never resurrect one from history against a bootstrapped DB. The only `drizzle-kit` script wired up is `db:studio` (a read-only browser), and `drizzle.config.ts` exists for that tool only.

@@ -17,6 +17,9 @@ import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
 import { ensureSchema, openDb, type ClawbooDb } from '@clawboo/db'
+import { createLogger } from '@clawboo/logger'
+
+const log = createLogger('db')
 
 export function getDbPath(): string {
   return path.join(resolveClawbooDir(), 'clawboo.db')
@@ -47,7 +50,17 @@ export function getDb(): ClawbooDb {
   // whole lifetime.
   const db = openDb(dbPath)
   try {
-    ensureSchema(db)
+    // `ensureSchema` also reconciles an older file's tables up to the current
+    // column set (see packages/db/src/schemaReconcile.ts). That happens exactly
+    // once, on the first boot after an upgrade that added a column: worth a line
+    // in the log, because it is the only visible trace that the file changed shape.
+    const { added } = ensureSchema(db)
+    if (added.length > 0) {
+      log.info(
+        { count: added.length, columns: added.map((c) => `${c.table}.${c.column}`) },
+        'SQLite: added missing columns to an existing database',
+      )
+    }
   } catch (err) {
     // The connection is already OPEN but not yet memoised, so neither `closeDb()`
     // nor `resetDb()` could ever reach it. Close it here: because the failure is

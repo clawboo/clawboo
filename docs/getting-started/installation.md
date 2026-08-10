@@ -124,7 +124,7 @@ Clawboo keeps **all of its own state** under a single directory, separate from O
 | `~/.clawboo/api-port.txt`  | The runtime port file written on each successful bind.                                                                                     |
 | `~/.openclaw/`             | OpenClaw's state directory. Clawboo only ever **reads** this for interop (Gateway config and provider-key fallback); it never writes here. |
 
-Because Clawboo's state is self-contained, "uninstalling" is just removing `~/.clawboo` (and, if you only used Clawboo through `npx`, clearing the npx cache). There is no migration ladder; a schema reset is a hard reset of that directory.
+Because Clawboo's state is self-contained, "uninstalling" is just removing `~/.clawboo` (and, if you only used Clawboo through `npx`, clearing the npx cache). Upgrading needs no such step: there is no migration ladder, but a newer Clawboo adds any columns your existing database is missing when it opens it.
 
 <Danger>
 Deleting `~/.clawboo` permanently removes your teams, board tasks, chat history, memory, and settings. Back up `~/.clawboo/clawboo.db` first if you want to keep them.

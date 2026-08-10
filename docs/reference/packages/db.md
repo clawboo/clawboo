@@ -9,7 +9,7 @@ description: 'SQLite + Drizzle ORM data layer: schema, board, memory, tools, gov
 **External deps** `better-sqlite3`, `drizzle-orm`, `zod`, `@noble/ed25519`
 
 <Note>
-This is the registry of record. The 27 Drizzle-typed tables + the idempotent `CREATE TABLE IF NOT EXISTS` bootstrap in `ensureSchema` (`schemaBootstrap.ts`) make a fresh file immediately usable; that DDL is the **sole** schema source; there is no migration ladder (no `db:migrate` / `db:generate` scripts; a schema change is a hard reset of the local DB). SQLite-native columns (team, personality, runtime, capabilities) are never clobbered by a Gateway re-sync.
+This is the registry of record. The 27 Drizzle-typed tables + the idempotent `CREATE TABLE IF NOT EXISTS` bootstrap in `ensureSchema` (`schemaBootstrap.ts`) make a fresh file immediately usable; that DDL is the **sole** schema source; there is no migration ladder (no `db:migrate` / `db:generate` scripts). Opening an older file also reconciles it, adding any columns it is missing, derived from the same DDL. SQLite-native columns (team, personality, runtime, capabilities) are never clobbered by a Gateway re-sync.
 </Note>
 
 The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schema`, `db`, and ten domain sub-modules (`board`, `capabilities`, `memory`, `tools`, `governance`, `events`, `sessions`, `routines`, `teamChat`, `chat`) via `export *`. There are no `package.json` subpath `exports`; everything is reachable from `@clawboo/db`.
@@ -22,17 +22,18 @@ One of those re-exports crosses a package boundary: the board **state machine** 
 
 **Connection (`db.ts`, `schemaBootstrap.ts`, `openStats.ts`)**
 
-| Export           | Signature                                       | Contract                                                                                                                                                                     |
-| ---------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createDb`       | `(dbPath: string) => ClawbooDb`                 | `openDb` + `ensureSchema` in one call. For a process that opens one connection and exits (the MCP stdio bins, the eval harness, tests). Not for per-request use in a server. |
-| `openDb`         | `(dbPath: string) => ClawbooDb`                 | Open a connection and apply the WAL + contention pragmas. **No DDL** — pair with `ensureSchema`. The seam a long-lived process uses.                                         |
-| `ensureSchema`   | `(db: ClawbooDb) => void`                       | Apply the bootstrap DDL. Idempotent (every statement is `IF NOT EXISTS`), but not free: 89 statements re-resolved against `sqlite_master` per call.                          |
-| `dbOpenStats`    | `() => { connectionsOpened, schemaBootstraps }` | Monotonic process-lifetime counters. A rising `connectionsOpened` on a steady-state server is the fd-leak signal; also the shared-connection regression seam.                |
-| `defaultDbPath`  | `() => string`                                  | Resolve `CLAWBOO_DB_PATH` env, else `~/.openclaw/clawboo/clawboo.db`.                                                                                                        |
-| `getSetting`     | `(db, key: string) => string \| null`           | Read one `settings` KV value.                                                                                                                                                |
-| `setSetting`     | `(db, key: string, value: string) => void`      | Upsert one `settings` KV value.                                                                                                                                              |
-| `integrityCheck` | `(db) => string`                                | Run `PRAGMA integrity_check` and return its result string.                                                                                                                   |
-| `listTableNames` | `(db) => string[]`                              | List the SQLite table names present.                                                                                                                                         |
+| Export                 | Signature                                       | Contract                                                                                                                                                                                                        |
+| ---------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createDb`             | `(dbPath: string) => ClawbooDb`                 | `openDb` + `ensureSchema` in one call. For a process that opens one connection and exits (the MCP stdio bins, the eval harness, tests). Not for per-request use in a server.                                    |
+| `openDb`               | `(dbPath: string) => ClawbooDb`                 | Open a connection and apply the WAL + contention pragmas. **No DDL** — pair with `ensureSchema`. The seam a long-lived process uses.                                                                            |
+| `ensureSchema`         | `(db) => SchemaReconcileReport`                 | Reconcile an existing database up to the declared column set, then apply the bootstrap DDL. Idempotent, but not free: 89 statements re-resolved against `sqlite_master` per call. Returns the columns it added. |
+| `missingSchemaColumns` | `(db) => AddedColumn[]`                         | The read-only half of the reconcile: columns the DDL declares that an existing table lacks. Empty after a successful `ensureSchema`; the boot probe uses it to verify the outcome rather than trust it.         |
+| `dbOpenStats`          | `() => { connectionsOpened, schemaBootstraps }` | Monotonic process-lifetime counters. A rising `connectionsOpened` on a steady-state server is the fd-leak signal; also the shared-connection regression seam.                                                   |
+| `defaultDbPath`        | `() => string`                                  | Resolve `CLAWBOO_DB_PATH` env, else `~/.openclaw/clawboo/clawboo.db`.                                                                                                                                           |
+| `getSetting`           | `(db, key: string) => string \| null`           | Read one `settings` KV value.                                                                                                                                                                                   |
+| `setSetting`           | `(db, key: string, value: string) => void`      | Upsert one `settings` KV value.                                                                                                                                                                                 |
+| `integrityCheck`       | `(db) => string`                                | Run `PRAGMA integrity_check` and return its result string.                                                                                                                                                      |
+| `listTableNames`       | `(db) => string[]`                              | List the SQLite table names present.                                                                                                                                                                            |
 
 **Board, repository (`board/repository.ts`)**
 
@@ -227,7 +228,7 @@ One of those re-exports crosses a package boundary: the board **state machine** 
 
 ## Source
 
-Barrel: [`packages/db/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/db/src/index.ts). Schema: `packages/db/src/schema.ts`. Sub-modules: `board/`, `capabilities/`, `memory/`, `tools/`, `governance/`, `events/`, `sessions/`, `routines/`, `teamChat/`, `chat/`. Connection: `db.ts`. Schema bootstrap DDL: `schemaBootstrap.ts` (the sole schema source; there is no migration ladder). Open-counters: `openStats.ts`.
+Barrel: [`packages/db/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/db/src/index.ts). Schema: `packages/db/src/schema.ts`. Sub-modules: `board/`, `capabilities/`, `memory/`, `tools/`, `governance/`, `events/`, `sessions/`, `routines/`, `teamChat/`, `chat/`. Connection: `db.ts`. Schema bootstrap DDL: `schemaBootstrap.ts` (the sole schema source; there is no migration ladder). Additive in-place upgrade: `schemaReconcile.ts`. Open-counters: `openStats.ts`.
 
 ## See also
 

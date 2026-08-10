@@ -112,7 +112,7 @@ Clawboo owns one state directory, default `~/.clawboo`, overridable with `CLAWBO
 | `~/.clawboo/proxy-device-identity.json` | The Ed25519 device key the proxy signs Gateway connects with.                                                     |
 
 <Info>
-There is **no migration ladder**. The schema is the `CREATE TABLE IF NOT EXISTS` DDL in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`); a schema change is a hard reset of the local DB. To wipe state, run `clawboo stop`, delete `~/.clawboo` (or just `~/.clawboo/clawboo.db`), then re-run onboarding.
+There is **no migration ladder**. The schema is the `CREATE TABLE IF NOT EXISTS` DDL in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`), and a version bump reconciles an existing database up to it on first open, adding any columns it is missing, so an image bump needs no data migration step. That covers additive changes only: a release that rewrote or removed an existing column would still need the reset below, and would say so in its notes. To wipe state, run `clawboo stop`, delete `~/.clawboo` (or just `~/.clawboo/clawboo.db`), then re-run onboarding. See [Upgrading an existing database](/reference/database-schema#upgrading-an-existing-database).
 </Info>
 
 OpenClaw's own state dir (`~/.openclaw`, set by `OPENCLAW_STATE_DIR`) is **read-only interop**; Clawboo reads the Gateway config and a provider-key fallback from it but never writes there.
@@ -205,7 +205,7 @@ Bind Clawboo to loopback and let the proxy be the only network-facing surface, *
 </Warning>
 
 <Danger>
-**Deleting `~/.clawboo` deletes all Clawboo state**: the database (board, memory, registry), the encrypted vault, and worktrees. There is no migration/repair path; a delete is a clean reset that re-triggers onboarding.
+**Deleting `~/.clawboo` deletes all Clawboo state**: the database (board, memory, registry), the encrypted vault, and worktrees. There is no undo; a delete is a clean reset that re-triggers onboarding.
 </Danger>
 
 ## Related

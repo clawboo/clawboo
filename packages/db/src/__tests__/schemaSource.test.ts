@@ -1,20 +1,21 @@
 // Schema source-of-truth guard. The runtime `CREATE TABLE IF NOT EXISTS` DDL in
-// db.ts is the SOLE schema-creation source: there is no migration ladder — a
-// schema change is a hard reset of the local DB (no users). `schema.ts` is the
-// Drizzle TYPE layer over the same tables (used for typed queries, NEVER to
-// apply migrations). Nothing keeps the two descriptions in sync automatically,
-// so this test does: it builds a DB via the REAL `createDb()` and asserts every
-// `schema.ts` table + its column set matches the live DDL (and vice-versa). The
-// FTS5 virtual table + its shadow tables are excluded (raw DDL in db.ts, not
-// modellable in schema.ts).
+// schemaBootstrap.ts is the SOLE schema-creation source: there is no migration
+// ladder, only the additive column reconcile derived from that same DDL (see
+// schemaReconcile.test.ts). `schema.ts` is the Drizzle TYPE layer over the same
+// tables (used for typed queries, NEVER to apply migrations). Nothing keeps the two
+// descriptions in sync automatically, so this test does: it builds a DB via the
+// REAL `createDb()` and asserts every `schema.ts` table + its column set matches the
+// live DDL (and vice-versa). The FTS5 virtual table + its shadow tables are excluded
+// (raw DDL in schemaBootstrap.ts, not modellable in schema.ts).
 //
 // SCOPE — read before trusting this as the FULL parity guard: it compares ONLY
 // {table -> set(column NAMES)}. Column TYPE / NOT NULL / DEFAULT / PRIMARY KEY / FK /
 // index drift between the two sources is NOT compared — the Drizzle-column →
 // SQLite-PRAGMA affinity/default mapping is lossy and would produce false drift, so
-// the deeper shape check is deliberately deferred (revisit before a real schema
-// change). The drift this DOES catch: a column or table added to one source but not
-// the other.
+// the deeper shape check is deliberately deferred. Names are also the granularity
+// the reconciler works at: it adds a missing column and never rewrites an existing
+// one. The drift this DOES catch: a column or table added to one source but not the
+// other.
 //
 // It also pins the posture decision: the previously-shipped, never-applied
 // drizzle migration ladder must not ship in the npm package nor be runnable as

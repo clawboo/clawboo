@@ -185,12 +185,12 @@ The repo requires Node `>=22` and pnpm `>=9` (`packageManager` pins `pnpm@9.15.0
 
 `@clawboo/db` exposes exactly one script: `db:studio` (`drizzle-kit studio`, a read-only browser over the dev DB). There is **no `db:migrate` and no `db:generate`**; both were removed.
 
-The reason is the schema model: Clawboo has **no migration ladder**. The schema is created by `ensureSchema`'s `CREATE TABLE IF NOT EXISTS` DDL (`packages/db/src/schemaBootstrap.ts`); that DDL is the _sole_ schema-creation source for all 27 tables. `schema.ts` is the Drizzle **type** layer used for typed queries, never to apply migrations. A schema change is a hard reset of the local SQLite file (the database is per-user local state, not a shared server), so there is nothing to generate or migrate.
+The reason is the schema model: Clawboo has **no migration ladder**. The schema is created by `ensureSchema`'s `CREATE TABLE IF NOT EXISTS` DDL (`packages/db/src/schemaBootstrap.ts`); that DDL is the _sole_ schema-creation source for all 27 tables. `schema.ts` is the Drizzle **type** layer used for typed queries, never to apply migrations. Upgrading an existing file is handled by `reconcileSchema`, which is derived from that same DDL rather than generated, so there is still nothing to generate or migrate.
 
 A unit test (`schemaSource.test.ts`) guards this posture two ways: it builds a real in-memory DB via `createDb()` and asserts every `schema.ts` table and its column set matches the live DDL (catching drift between the type layer and the bootstrap), and it asserts the package ships no `db:migrate`/`db:generate` scripts, no `drizzle` entry in `files`, and no migration-ladder directory on disk. `drizzle.config.ts` remains only so `drizzle-kit studio` can find the schema.
 
 <Danger>
-Do not reintroduce a migration ladder or a `db:migrate` script casually. The "DDL is the schema, schema change is a reset" decision is enforced by a test that will fail the build if you ship the migration-runner scripts. If a future change needs migrations, it's a deliberate architectural shift; start by reading `schemaSource.test.ts`.
+Do not reintroduce a migration ladder or a `db:migrate` script casually. The "DDL is the schema, and the in-place upgrade is derived from it" decision is enforced by a test that will fail the build if you ship the migration-runner scripts. If a future change needs a migration that is not additive, it's a deliberate architectural shift; start by reading `schemaSource.test.ts` and `schemaReconcile.test.ts`.
 </Danger>
 
 ## The release gate
