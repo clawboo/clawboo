@@ -185,7 +185,7 @@ On every start (and from the System Health surface via `GET /api/health`), Clawb
 | `vaultPerms`            | Assert `secrets/` is `0700` and `master.key` / `proxy-device-identity.json` are `0600` (POSIX only)  | Degrades if perms are too open                           |
 | `masterKeyBootSentinel` | Encrypt a sentinel on first boot, decrypt it on every later boot to prove the master key still works | Degrades if the key changed                              |
 
-A fatal check means the install is broken in a way the probe cannot fix, so read its `detail` first: it says what is wrong and what to do. Upgrading is not one of those cases, because opening an older database adds any columns it is missing on its own. When nothing in the detail applies, the [full reset](#full-reset) above and re-running onboarding against a clean `~/.clawboo` is the supported recovery.
+A fatal check means the install is broken in a way the probe cannot fix, so read its `detail` first: it says what is wrong and what to do. Upgrading is not one of those cases, because opening an older database adds any columns it is missing on its own. When nothing in the detail applies, the [full reset](#full-reset-everything) above and re-running onboarding against a clean `~/.clawboo` is the supported recovery.
 
 ## Verify it worked
 
@@ -204,7 +204,7 @@ A fatal check means the install is broken in a way the probe cannot fix, so read
 </Warning>
 
 <Danger>
-**System Health shows `master key changed`.** The master key no longer decrypts the vault sentinel. If you rotated or lost `secrets/master.key` (or changed `CLAWBOO_SECRETS_MASTER_KEY`), saved runtime keys are unrecoverable; re-enter them in the Runtimes panel, or do a [full reset](#full-reset).
+**System Health shows `master key changed`.** The master key no longer decrypts the vault sentinel. If you rotated or lost `secrets/master.key` (or changed `CLAWBOO_SECRETS_MASTER_KEY`), saved runtime keys are unrecoverable; re-enter them in the Runtimes panel, or do a [full reset](#full-reset-everything).
 </Danger>
 
 ## See also

@@ -416,12 +416,15 @@ function sleepSync(ms: number): void {
  * (`createDb(defaultDbPath())`), so the boot after an upgrade is exactly when
  * several processes may reconcile at once.
  *
- * `ensureSchema` wraps its WHOLE transaction in this, not one `ALTER`. That is the
- * only level at which it works: the transaction is DEFERRED and the reconcile reads
- * first, so it holds a WAL read snapshot before its first write, and a concurrent
- * commit makes SQLite return SQLITE_BUSY_SNAPSHOT, a stale-snapshot error that
- * retrying in place can never clear. Rolling back and re-running the diff can, and
- * by then the racing process has usually added the columns already.
+ * `ensureSchema` wraps its WHOLE transaction in this, not one `ALTER`, and opens it
+ * with BEGIN IMMEDIATE. Both matter. A DEFERRED transaction would read first and so
+ * hold a WAL read snapshot before its first write, and a concurrent commit then
+ * makes SQLite return SQLITE_BUSY_SNAPSHOT, a stale-snapshot error that retrying in
+ * place can never clear. Taking the write intent up front means the diff is never
+ * built against a snapshot something else can invalidate, and the only lock error
+ * left is a plain busy one, which waiting does clear. Wrapping the transaction
+ * rather than a statement is what lets a retry start from a fresh diff, by which
+ * point a racing process has usually added the columns already.
  *
  * Exported for its unit test, which injects the sleep so it cannot flake on timing.
  */

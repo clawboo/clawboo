@@ -534,9 +534,12 @@ export function ensureSchema(db: ClawbooDb): SchemaReconcileReport {
     db.$client.exec(SCHEMA_DDL)
     return report
   })
-  // Retry at the TRANSACTION level: a concurrent commit invalidates this one's read
-  // snapshot, which only a rollback and a fresh diff can clear. See `retryOnBusy`.
-  const report = retryOnBusy(() => apply())
+  // BEGIN IMMEDIATE, so the write intent is taken before the reconcile reads and the
+  // diff cannot be built against a snapshot a concurrent commit then invalidates.
+  // The retry is at the TRANSACTION level because that is the only level a lock
+  // error can be cleared from. See `retryOnBusy`, and `immediateWrite` in
+  // board/contention.ts, which is the same posture for the board's writes.
+  const report = retryOnBusy(() => apply.immediate())
   noteSchemaBootstrap()
   return report
 }

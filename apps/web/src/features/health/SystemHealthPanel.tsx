@@ -181,8 +181,9 @@ export function SystemHealthPanel() {
               {fatalCount > 0 ? (
                 <>
                   <strong>The install has a fatal problem.</strong> See the failing check below for
-                  what to do. If nothing there applies, reset{' '}
-                  <code className="font-data text-[11px]">~/.clawboo</code> and re-run onboarding to
+                  what to do. If nothing there applies, back up{' '}
+                  <code className="font-data text-[11px]">~/.clawboo</code> (resetting it deletes
+                  your board, chat history and memory), then delete it and re-run onboarding to
                   start clean.
                 </>
               ) : (

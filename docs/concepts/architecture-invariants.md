@@ -224,7 +224,7 @@ Three things keep this honest:
 So the _spirit_ of "forward-only" holds exactly: the committed schema is never destructively rewritten in place, the DDL is additive and idempotent, and the type layer stays in lockstep. The _mechanism_ changed: instead of a stack of `.sql` files applied in order, a single idempotent DDL block runs once when a database is opened, once per process for the server, which then holds one connection for its lifetime.
 
 <Danger>
-The in-place upgrade path is **additive only**. A new column on an existing table must be addable, so no `PRIMARY KEY`, no `UNIQUE`, no `STORED` generated column, a literal (not an expression) `DEFAULT`, one whenever it is `NOT NULL`, and no non-NULL `DEFAULT` on a `REFERENCES` column; one that is not fails the build, and would fail loudly at boot rather than silently. Changing an existing column's type or constraints, or removing one, remains a hard reset of the local DB.
+The in-place upgrade path is **additive only**. A new column on an existing table must be addable, so it may not use `PRIMARY KEY`, `UNIQUE`, or a `STORED` generated column; any `DEFAULT` must be a literal rather than an expression; a `NOT NULL` column must carry one; and a `REFERENCES` column must not have a non-NULL one; one that is not fails the build, and would fail loudly at boot rather than silently. Changing an existing column's type or constraints, or removing one, remains a hard reset of the local DB.
 </Danger>
 
 ## Design rationale and trade-offs

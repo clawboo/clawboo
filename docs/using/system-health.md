@@ -120,7 +120,7 @@ curl -s http://localhost:18790/api/health | jq '.ok, .fatal, .degraded'
 ## Troubleshooting
 
 <Danger>
-**A fatal check means the install is broken.** A fatal `clawbooHomeWritable` or `databaseIntegrity` is not something the panel can fix. A fatal `databaseSchema` means a column the current version needs is missing and could not be added; its `detail` names the column and the remedy. When nothing there applies, reset `~/.clawboo` and re-run the onboarding wizard to start clean. (Back up the database first if you need its data.)
+**A fatal check means the install is broken.** A fatal `clawbooHomeWritable` or `databaseIntegrity` is not something the panel can fix. A fatal `databaseSchema` means the database is short something the current version needs: a core table, or a column that could not be added. Its `detail` names what is missing and the remedy, so follow that before resetting. When nothing there applies, reset `~/.clawboo` and re-run the onboarding wizard to start clean. (Back up the database first if you need its data.)
 </Danger>
 
 <Warning>
