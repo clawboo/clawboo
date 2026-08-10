@@ -17,7 +17,7 @@
     "@astrojs/react": "^6.0.2",
     "@astrojs/sitemap": "^3.2.1",
     "@tailwindcss/vite": "^4.3.3",
-    "astro": "^5.2.0",
+    "astro": "^7.2.0",
     "framer-motion": "^12.43.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
