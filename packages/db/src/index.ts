@@ -125,5 +125,7 @@ export {
   listTableNames,
 } from './db'
 export type { ClawbooDb } from './db'
-export { ensureSchema } from './schemaBootstrap'
+export { ensureSchema, missingSchemaColumns } from './schemaBootstrap'
+export { SchemaUpgradeError } from './schemaReconcile'
+export type { AddedColumn, SchemaReconcileReport } from './schemaReconcile'
 export { dbOpenStats } from './openStats'

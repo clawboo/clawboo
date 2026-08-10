@@ -1,12 +1,30 @@
 // ─── Schema bootstrap ─────────────────────────────────────────────────────────
-// The SOLE schema-creation source. There is no migration ladder: a schema change
-// is a hard reset of the local DB (there are no users), so this block declares
-// every table, index and trigger on a fresh DB outright. `schema.ts` is the
-// Drizzle TYPE layer over the same tables (used for typed queries, never to apply
-// migrations); schemaSource.test.ts guards the two against drift, and the
-// db.test.ts PRAGMA assertions guard that the CREATE DDL stays complete. We never
-// carry forward-only ALTERs — those would also have to blanket-swallow DDL errors
-// to stay re-runnable.
+// The SOLE schema-creation source: this block declares every table, index and
+// trigger on a fresh DB outright. `schema.ts` is the Drizzle TYPE layer over the
+// same tables (used for typed queries, never to apply migrations);
+// schemaSource.test.ts guards the two against drift, and the db.test.ts PRAGMA
+// assertions guard that the CREATE DDL stays complete.
+//
+// THERE IS STILL NO MIGRATION LADDER. No numbered `.sql` files, no `user_version`,
+// no `db:migrate`. What there IS is one derived, additive reconcile step: because
+// `CREATE TABLE IF NOT EXISTS` skips the whole statement when the table already
+// exists, a column added to an existing table would otherwise be a silent no-op on
+// every database created before the change, surfacing later as a runtime SQL error
+// on the first query that touches it. `reconcileSchema` (schemaReconcile.ts) reads
+// the column set back out of this DDL and `ALTER TABLE ADD COLUMN`s whatever an
+// existing table is missing, so the DDL below stays the single source of truth and
+// nothing has to be hand-maintained alongside it.
+//
+// WHAT THAT ASKS OF THIS BLOCK. Keep it additive, and keep a NEW column on an
+// EXISTING table addable: no PRIMARY KEY, no UNIQUE, no STORED generated column, a
+// literal (not an expression) DEFAULT, one whenever it is NOT NULL, and no non-NULL
+// DEFAULT on a REFERENCES column. A new column that breaks those rules fails loudly
+// at boot with an actionable message rather than silently; see `unaddableReason`,
+// and `schemaBaseline.ts`, which fails the BUILD for one instead of waiting for a
+// user's upgrade to find it. Changing an existing column's type/NOT NULL/DEFAULT,
+// removing one, adding a table constraint, redefining an index or trigger (their
+// `IF NOT EXISTS` matches on NAME), and any change to the FTS5 virtual table are all
+// still NOT in-place upgrades.
 //
 // WHY THIS IS ITS OWN MODULE. Every statement is `IF NOT EXISTS`, so re-running
 // the block is SAFE — which is exactly why it was easy to run it on every
@@ -18,6 +36,13 @@
 
 import type { ClawbooDb } from './db'
 import { noteSchemaBootstrap } from './openStats'
+import {
+  findMissingColumns,
+  parseDdlColumns,
+  reconcileSchema,
+  retryOnBusy,
+} from './schemaReconcile'
+import type { AddedColumn, SchemaColumn, SchemaReconcileReport } from './schemaReconcile'
 
 const SCHEMA_DDL = `
     CREATE TABLE IF NOT EXISTS teams (
@@ -472,15 +497,67 @@ const SCHEMA_DDL = `
     CREATE INDEX IF NOT EXISTS idx_team_chat_team ON team_chat (team_id);`
 
 /**
- * Apply the bootstrap DDL so the file is immediately usable without a separate
- * migration step. Idempotent: every statement is `IF NOT EXISTS`, so a re-run
- * against an already-bootstrapped database is a no-op — just not a free one, which
- * is why a long-lived server runs it once at boot rather than per connection.
+ * Bring the database up to the schema above, so the file is immediately usable
+ * without a separate migration step. Two phases, in this order:
  *
- * Goes through the raw better-sqlite3 client on purpose: this is a MULTI-statement
- * batch, and drizzle's `run()` prepares a single statement.
+ *  1. `reconcileSchema` adds any column an ALREADY-EXISTING table is missing. On a
+ *     fresh database this is a no-op, because there are no tables yet.
+ *  2. the DDL batch creates everything absent: new tables, indexes, triggers.
+ *
+ * The order is load-bearing, not stylistic. A new column normally ships with an
+ * index over it, and `CREATE INDEX IF NOT EXISTS … ON t (new_col)` fails with
+ * "no such column" if the batch runs before the column exists. That takes the
+ * whole batch, and the boot, with it.
+ *
+ * Idempotent: every statement is `IF NOT EXISTS` and the reconcile is a diff, so a
+ * re-run against an already-bootstrapped database changes nothing (just not for
+ * free), which is why a long-lived server runs it once at boot rather than per
+ * connection.
+ *
+ * BOTH phases run in ONE transaction, because SQLite DDL is transactional. So a
+ * failure anywhere (an un-addable column found late, an index the new data cannot
+ * satisfy, a lock that outlasts its retry) leaves the file exactly as it was
+ * rather than half-upgraded, and the next start retries from a known state.
+ *
+ * Returns what the reconcile changed. `added` is empty on a fresh database and on
+ * every steady-state boot, and non-empty exactly once: on the boot that follows an
+ * upgrade. Throws `SchemaUpgradeError` when a missing column can never be added
+ * (see `unaddableReason`); the server treats that as fatal rather than serving a
+ * database whose every query would fail.
+ *
+ * The batch goes through the raw better-sqlite3 client on purpose: it is a
+ * MULTI-statement string, and drizzle's `run()` prepares a single statement.
  */
-export function ensureSchema(db: ClawbooDb): void {
-  db.$client.exec(SCHEMA_DDL)
+export function ensureSchema(db: ClawbooDb): SchemaReconcileReport {
+  const apply = db.$client.transaction((): SchemaReconcileReport => {
+    const report = reconcileSchema(db, SCHEMA_DDL)
+    db.$client.exec(SCHEMA_DDL)
+    return report
+  })
+  // Retry at the TRANSACTION level: a concurrent commit invalidates this one's read
+  // snapshot, which only a rollback and a fresh diff can clear. See `retryOnBusy`.
+  const report = retryOnBusy(() => apply())
   noteSchemaBootstrap()
+  return report
+}
+
+/**
+ * Columns the DDL declares that an existing table does not have. Empty after a
+ * successful `ensureSchema`; a non-empty result means a query touching one of them
+ * would fail at runtime, which is why the boot probe checks it rather than trusting
+ * that the bootstrap ran.
+ */
+export function missingSchemaColumns(db: ClawbooDb): AddedColumn[] {
+  return findMissingColumns(db, SCHEMA_DDL)
+}
+
+/**
+ * The column set the DDL above declares, per table. Deliberately NOT on the package
+ * barrel: its one consumer is `schemaReconcile.test.ts`, which asserts this is
+ * identical to what SQLite actually creates from the same DDL. That assertion is
+ * what makes parsing the DDL safe: a construct the parser cannot read fails the
+ * build instead of silently shrinking the set of columns the reconciler knows about.
+ */
+export function declaredSchemaColumns(): Map<string, SchemaColumn[]> {
+  return parseDdlColumns(SCHEMA_DDL)
 }

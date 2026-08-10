@@ -219,7 +219,7 @@ interface BootConfig {
 
 ### Fatal vs degraded
 
-Almost every check **degrades** (the server keeps running and the UI shows a banner) rather than being fatal. Only two failures are fatal: `clawbooHomeWritable` and `databaseIntegrity`, because nothing works without them. There are no migration/upgrade paths: a fatal boot means the install is broken, and the remedy is to reset `~/.clawboo` and re-run the onboarding wizard.
+Almost every check **degrades** (the server keeps running and the UI shows a banner) rather than being fatal. Three failures are fatal: `clawbooHomeWritable`, `databaseIntegrity` and `databaseSchema`, because nothing works without them. A fatal check's `detail` says what to do; resetting `~/.clawboo` and re-running the onboarding wizard is the last resort.
 
 `ok = report.fatal.length === 0`. A degraded-but-not-fatal install returns `ok: true` with a non-empty `degraded[]`.
 
@@ -231,7 +231,7 @@ Almost every check **degrades** (the server keeps running and the UI shows a ban
 | `vaultPerms`               | `secrets/` is `700`, `master.key`/`proxy-device-identity.json` are `600` (POSIX-only; skipped on Windows and on a fresh install)                | No      |
 | `masterKeyBootSentinel`    | A fixed value encrypted on first boot still decrypts (a rotated/lost master key fails closed)                                                   | No      |
 | `databaseIntegrity`        | `PRAGMA integrity_check` returns `ok`                                                                                                           | **Yes** |
-| `databaseSchema`           | The core tables (`teams`, `agents`, `settings`, `budgets`, `orchestration_events`, `tasks`) are present                                         | No      |
+| `databaseSchema`           | The core tables are present, and no column the bootstrap DDL declares is missing from them                                                      | **Yes** |
 | `apiPortFileMatches`       | The on-disk api-port file matches the actual listening port (skipped when no port is supplied)                                                  | No      |
 | `mcpServersHealthy`        | Each in-process MCP server builds and answers a `tools/list` round-trip                                                                         | No      |
 | `openclawGatewayReachable` | The configured OpenClaw Gateway is reachable + synced (degrades to serving last-synced agents from SQLite; skipped when no `gatewayUrl` is set) | No      |

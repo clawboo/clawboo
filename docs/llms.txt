@@ -72,7 +72,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 ## Operating Clawboo
 
 - [Operating Clawboo](operating/index.md): Operator overview — where Clawboo runs, how to expose it safely, where data lives, and what the defaults are.
-- [Data and state](operating/data-and-state.md): Where Clawboo stores everything, how to back it up, and how the hard-reset model works.
+- [Data and state](operating/data-and-state.md): Where Clawboo stores everything, how to back it up, how upgrades reach an existing database, and how to reset it.
 - [Deploying Clawboo](operating/deployment.md): Run Clawboo via npx, in dev mode, or as a bundled server — covering ports, state dir, host binding, and reverse-proxy setup.
 - [Attaching Clawboo's MCP servers](operating/mcp-servers.md): Attach the four hosted MCP servers (tasks, memory, tools, teamchat) to an external agent over stdio or Streamable HTTP.
 - [Production defaults & posture](operating/production-defaults.md): The values a fresh Clawboo install runs with — log level, budget posture, breaker thresholds, reaper TTLs — each justified, with override env vars.

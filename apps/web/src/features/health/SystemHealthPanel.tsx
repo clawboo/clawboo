@@ -180,9 +180,10 @@ export function SystemHealthPanel() {
             <FormattedAlert tone={fatalCount > 0 ? 'error' : 'warning'}>
               {fatalCount > 0 ? (
                 <>
-                  <strong>The install has a fatal problem.</strong> clawboo has no upgrade/repair
-                  path — reset <code className="font-data text-[11px]">~/.clawboo</code> and re-run
-                  onboarding to start clean.
+                  <strong>The install has a fatal problem.</strong> See the failing check below for
+                  what to do. If nothing there applies, reset{' '}
+                  <code className="font-data text-[11px]">~/.clawboo</code> and re-run onboarding to
+                  start clean.
                 </>
               ) : (
                 <>

@@ -1,11 +1,11 @@
 ---
 title: Data and state
-description: Where Clawboo stores everything, how to back it up, and how the hard-reset model works.
+description: Where Clawboo stores everything, how to back it up, how upgrades reach an existing database, and how to reset it.
 ---
 
 Use this page when you need to find Clawboo's data, back it up, move it, or wipe it. Clawboo keeps **all** of its own state under one directory (`~/.clawboo` by default). It also _reads_ OpenClaw's directory (`~/.openclaw`) for interop, but never writes there.
 
-There is no migration ladder. The SQLite schema is bootstrapped from an idempotent `CREATE TABLE IF NOT EXISTS` DDL block when a database is opened (once at boot for the server), so the reset model is "delete the database file"; see [Hard reset](#hard-reset). This is intentional for the pre-1.0 single-user product.
+There is no migration ladder. The SQLite schema is bootstrapped from an idempotent `CREATE TABLE IF NOT EXISTS` DDL block when a database is opened (once at boot for the server), and opening an older file also adds any columns it is missing, so a normal upgrade needs no action from you. Resetting is for wiping state, or for the rare schema change that is not additive; see [Hard reset](#hard-reset).
 
 ## The state directory
 
@@ -142,7 +142,7 @@ Restore by copying the files back into `~/.clawboo` with the server stopped (`cl
 
 ## Hard reset
 
-There is no schema migration step. A schema change in Clawboo is a hard reset of the local database; the boot-time `ensureSchema()` bootstrap re-creates every table the next time the server opens the file. So "reset" means **delete the database file**.
+There is no schema migration step to run. Upgrading Clawboo brings an existing database up to the new schema when it opens it, adding any columns it is missing (see [Upgrading an existing database](/reference/database-schema#upgrading-an-existing-database)). A reset is for when you want the data gone, or after the rare schema change that is not additive, and means **deleting the database file**; the boot-time `ensureSchema()` bootstrap re-creates every table the next time the server opens it.
 
 ### Reset just the data (keep credentials and settings)
 
@@ -175,17 +175,17 @@ A full reset deletes your saved provider keys (the vault and its master key), th
 
 ## How boot health checks your data
 
-On every start (and from the System Health surface via `GET /api/health`), Clawboo runs a **boot probe** that reports a per-check verdict. Two of its checks concern your data, and they are the only two checks that are **fatal** (the server cannot run without them); everything else _degrades_ (the server keeps serving and shows a banner):
+On every start (and from the System Health surface via `GET /api/health`), Clawboo runs a **boot probe** that reports a per-check verdict. Three of its checks concern your data, and those three are the only **fatal** ones (the server cannot run without them); everything else _degrades_ (the server keeps serving and shows a banner):
 
-| Check id                | What it does                                                                                              | Verdict                                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `clawbooHomeWritable`   | `mkdir -p` the state dir and assert write access                                                          | **Fatal** if not writable                                |
-| `databaseIntegrity`     | `PRAGMA integrity_check`; `ok` is healthy; any other string is corruption                                 | **Fatal** if the file can't be opened or fails the check |
-| `databaseSchema`        | Confirm the core tables exist (`teams`, `agents`, `settings`, `budgets`, `orchestration_events`, `tasks`) | Degrades if any are missing                              |
-| `vaultPerms`            | Assert `secrets/` is `0700` and `master.key` / `proxy-device-identity.json` are `0600` (POSIX only)       | Degrades if perms are too open                           |
-| `masterKeyBootSentinel` | Encrypt a sentinel on first boot, decrypt it on every later boot to prove the master key still works      | Degrades if the key changed                              |
+| Check id                | What it does                                                                                         | Verdict                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `clawbooHomeWritable`   | `mkdir -p` the state dir and assert write access                                                     | **Fatal** if not writable                                |
+| `databaseIntegrity`     | `PRAGMA integrity_check`; `ok` is healthy; any other string is corruption                            | **Fatal** if the file can't be opened or fails the check |
+| `databaseSchema`        | Confirm the core tables exist, and that no column the bootstrap DDL declares is missing from them    | **Fatal**; the detail names the missing columns          |
+| `vaultPerms`            | Assert `secrets/` is `0700` and `master.key` / `proxy-device-identity.json` are `0600` (POSIX only)  | Degrades if perms are too open                           |
+| `masterKeyBootSentinel` | Encrypt a sentinel on first boot, decrypt it on every later boot to prove the master key still works | Degrades if the key changed                              |
 
-Because a fatal boot failure means a broken install (a corrupt DB, or an unwritable home), the documented remedy is the [full reset](#full-reset) above. There is deliberately no repair/upgrade path; re-running onboarding against a clean `~/.clawboo` is the supported recovery.
+A fatal check means the install is broken in a way the probe cannot fix, so read its `detail` first: it says what is wrong and what to do. Upgrading is not one of those cases, because opening an older database adds any columns it is missing on its own. When nothing in the detail applies, the [full reset](#full-reset) above and re-running onboarding against a clean `~/.clawboo` is the supported recovery.
 
 ## Verify it worked
 

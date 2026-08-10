@@ -209,22 +209,22 @@ The historical rule was "SQLite migrations are forward-only, never edit a commit
 
 ```ts
 // packages/db/src/schemaBootstrap.ts
-// The SOLE schema-creation source. There is no migration ladder: a schema change
-// is a hard reset of the local DB, so this block declares every table, index and
+// The SOLE schema-creation source: this block declares every table, index and
 // trigger on a fresh DB outright. `schema.ts` is the Drizzle TYPE layer over the
 // same tables (used for typed queries, NEVER migrations); schemaSource.test.ts
 // guards the two against drift.
 ```
 
-Two things keep this honest:
+Three things keep this honest:
 
 - **The unapplied drizzle ladder must not ship or run.** The `@clawboo/db` package's `files` array excludes `drizzle`, and there are no `db:migrate` / `db:generate` scripts (only a read-only `db:studio`). A test pins this posture so a stray migration runner can't be reintroduced.
 - **The type layer and the runtime DDL must agree.** `schemaSource.test.ts` builds a real DB via `createDb(':memory:')` and asserts that every table and column in the Drizzle `schema.ts` type layer matches the live DDL, and vice versa.
+- **An existing database is reconciled up to the DDL, not assumed to match it.** `IF NOT EXISTS` skips the whole `CREATE TABLE` when the table is present, so a new column would never reach a database created before it. `reconcileSchema` derives the declared column set from the same DDL and adds what is missing, before the DDL batch runs (an index over a new column cannot be created until the column exists). See [Database schema](/reference/database-schema#upgrading-an-existing-database).
 
-So the _spirit_ of "forward-only" holds exactly: the committed schema is never destructively rewritten in place, the DDL is additive and idempotent, and the type layer stays in lockstep. The _mechanism_ changed: instead of a stack of `.sql` files applied in order, a single idempotent DDL block runs once when a database is opened — once per process for the server, which then holds one connection for its lifetime — and a schema change targets a fresh database rather than migrating in place.
+So the _spirit_ of "forward-only" holds exactly: the committed schema is never destructively rewritten in place, the DDL is additive and idempotent, and the type layer stays in lockstep. The _mechanism_ changed: instead of a stack of `.sql` files applied in order, a single idempotent DDL block runs once when a database is opened, once per process for the server, which then holds one connection for its lifetime.
 
 <Danger>
-Because there is no migration ladder, a schema change at this stage is a **hard reset** of the local DB, not an in-place upgrade. In v0.3.1 this is acceptable; it is the part of this invariant most likely to change when real data needs preserving across schema versions.
+The in-place upgrade path is **additive only**. A new column on an existing table must be addable, so no `PRIMARY KEY`, no `UNIQUE`, no `STORED` generated column, a literal (not an expression) `DEFAULT`, one whenever it is `NOT NULL`, and no non-NULL `DEFAULT` on a `REFERENCES` column; one that is not fails the build, and would fail loudly at boot rather than silently. Changing an existing column's type or constraints, or removing one, remains a hard reset of the local DB.
 </Danger>
 
 ## Design rationale and trade-offs
@@ -241,13 +241,13 @@ The one-way dependency graph (4) buys independently-buildable, browser-safe pack
 
 Real-state-only edges (5) and real-record-only Boos (6) buy a canvas you can trust: what you see maps to what the system will do. The cost is the synthetic-edge tagging and the source-scoped cleanup that keep "real" honest in a multi-source world.
 
-The idempotent schema (7) buys a zero-friction fresh install, `createDb` produces a usable database with no migration step, at the cost of no in-place upgrade path, a deliberate v0.3.1 trade-off.
+The idempotent schema (7) buys a zero-friction fresh install, `createDb` produces a usable database with no migration step, and an in-place upgrade that costs nothing to maintain because it is derived from the same DDL. The cost is that the upgrade path is additive only: a column can be added to an existing database, but not changed or removed.
 
 ## Boundaries and non-goals
 
 - **Invariants are structural, not behavioral.** They guarantee the _shape_ of the system (who is canonical, who talks to whom, which way dependencies point). They do not, by themselves, guarantee that a feature behaves correctly; that is what tests and the cascade-prevention machinery are for.
 - **Some invariants are OpenClaw-specific and have generalized.** Invariants 1, 2, 3, and 6 were originally phrased around the single OpenClaw runtime. As the multi-runtime board path became the default, they generalized: a teammate is now a `RuntimeAdapter` (not only an OpenClaw agent), and a future non-OpenClaw runtime emits a normalized lifecycle-event stream server-side rather than flowing through the Gateway WS bridge. The generalized forms above are the current ones.
-- **The schema invariant will likely evolve again.** "No migration ladder, hard reset on change" is a v0.3.1 posture. Preserving real data across schema versions is a planned future requirement.
+- **The schema invariant will likely evolve again.** Preserving real data across an _additive_ schema change is handled. Preserving it across a change that rewrites or removes a column is not, and is the next step whenever one is needed.
 
 <Note>
 These docs describe Clawboo **v0.3.1**, the current release.

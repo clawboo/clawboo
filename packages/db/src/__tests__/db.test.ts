@@ -1,8 +1,10 @@
-// The CREATE TABLE IF NOT EXISTS bootstrap is the SOLE schema source — there is
-// no in-place ALTER migration ladder (hard reset on schema change; no users).
-// These PRAGMA assertions are the standing guard that the CREATE DDL stays
-// complete: every column that the (now-deleted) forward-only ALTERs used to add
-// must be present on a fresh in-memory DB.
+// The CREATE TABLE IF NOT EXISTS bootstrap is the SOLE schema source. There is no
+// migration ladder, only the additive column reconcile derived from that same DDL
+// (see schemaReconcile.test.ts, which covers the in-place upgrade path). These
+// PRAGMA assertions are the standing guard that the CREATE DDL stays complete:
+// every column that the (long-deleted) forward-only ALTERs used to add must be
+// present on a fresh in-memory DB, so a fresh install never depends on the
+// reconcile to be correct.
 
 import { sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'

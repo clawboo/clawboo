@@ -73,7 +73,7 @@ Pair Routines with [governance](/concepts/governance) before leaving a fleet una
 
 ## How do I reset Clawboo?
 
-There is no schema migration ladder; a schema change is a hard reset of the local database, which `createDb()` re-bootstraps on the next connect. So "reset" means delete the database file.
+There is no schema migration ladder. Upgrading Clawboo adds any columns your database is missing, so a normal upgrade needs no reset. "Reset" is for when you want the data gone, or after a schema change that is not additive, and means deleting the database file, which `createDb()` re-bootstraps on the next connect.
 
 - **Reset just the data** (keep keys + settings): `clawboo stop`, then `rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm`.
 - **Full reset** (everything, including provider keys): `clawboo stop`, then `rm -rf ~/.clawboo`, then `clawboo`.
