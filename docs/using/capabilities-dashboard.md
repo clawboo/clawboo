@@ -140,6 +140,10 @@ flowchart LR
 **An OpenClaw connector or plugin has no Enable/Disable button.** Some OpenClaw `runtime-of-record` rows are read-only in the dashboard (their `config.patch` write is a follow-up); the source marks them non-writable so the UI never shows a dead button. The Gateway `tools.allow`/`deny` surface is the writable runtime-of-record one.
 </Danger>
 
+<Warning>
+**Toggling a Gateway tool fails with `gateway_disconnected`.** That write goes through the Gateway's own `config.patch`, so it needs a live operator connection. The dashboard still lists the tool from its last good read, which is why the button is there while the Gateway is down. Bring the Gateway back up, then retry. See [OpenClaw](/runtimes/openclaw).
+</Warning>
+
 ## Related
 
 - [Capabilities (concept)](/concepts/capabilities), the inventory model and manageability tiers

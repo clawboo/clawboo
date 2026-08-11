@@ -137,7 +137,7 @@ The service layer (`loadCapabilities`) is the single read path both renderers go
 The merge dedupes by `id` with fresh records winning over cached ones, then applies the query filter (`runtime`, `kind`, `scope`, `agentId`). The source-scoped reconcile is the disconnect-tolerance mechanism: the table is a per-source cache, and a fresh `read()` repopulates it. There is no migration or back-fill; a hard reset of the table is acceptable because the next read rebuilds it.
 
 <Note>
-The `writable: false` derivation for a degraded OpenClaw connector is *recomputed* when serving cached rows. The column doesn't persist `writable`, so `rowToRecord` re-derives it from the row's origin and tier; without that, the cached (disconnected-Gateway) path would drop `writable` and the dead Enable/Disable button would resurface.
+The `writable: false` derivation for a degraded OpenClaw connector or plugin is *recomputed* when serving cached rows. The column doesn't persist `writable`, so `rowToRecord` re-derives it from the row's origin and kind, through the same `isSourceWritable` predicate the owning source's `write()` gates on; without that, the cached (disconnected-Gateway) path would drop `writable` and the dead Enable/Disable button would resurface. A Gateway `tools.allow`/`tools.deny` row (kind `tool`) stays writable through the round trip, because `config.patch` is a real write path for it.
 </Note>
 
 ## One stream, two surfaces

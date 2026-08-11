@@ -55,6 +55,14 @@ function isInstallSpec(v: unknown): v is CapabilityInstallSpec {
   )
 }
 
+// The OpenClaw source throws Error('gateway_disconnected') when the operator
+// connection is down. Same mapping as agents.ts: a reachable-later failure is a
+// 503, not a 500. Reachable since #146, because a Gateway tool row is writable
+// now, so the gate passes and the adapter is the thing that can be offline.
+function isDisconnected(err: unknown): boolean {
+  return err instanceof Error && err.message === 'gateway_disconnected'
+}
+
 // ─── POST /api/capabilities/:action  (install | enable | disable | approve) ──
 export async function capabilitiesActionPOST(req: Request, res: Response): Promise<void> {
   const action = strParam(req.params['action'])
@@ -141,6 +149,10 @@ export async function capabilitiesActionPOST(req: Request, res: Response): Promi
 
     res.status(400).json({ error: `unknown action: ${action ?? ''}` })
   } catch (err) {
+    if (isDisconnected(err)) {
+      res.status(503).json({ error: 'gateway_disconnected' })
+      return
+    }
     if (err instanceof UnknownCapabilityError) {
       res.status(404).json({ error: err.message })
       return

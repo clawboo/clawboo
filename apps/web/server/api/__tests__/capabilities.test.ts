@@ -2,7 +2,9 @@
 // (fresh DB per test). Covers the manageability gate end-to-end: GET 200 merged,
 // install spec-validation 400, install target-agent 404 (no invisible orphan +
 // false ok), install onto a live agent ok, enable/disable observe-only 422 +
-// unknown-id 404, approve validation 400/404, and the unknown-action 400.
+// unknown-id 404, approve validation 400/404, and the unknown-action 400. Also pins
+// the writable derivation's TOOL carve-out (#146): a Gateway tools.allow/deny row must
+// stay actionable through the DB round-trip, the REST gate, and the GET.
 
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
@@ -167,13 +169,36 @@ describe('capabilities REST', () => {
     return rec
   }
 
-  it('rowToRecord re-derives writable:false for a runtime-of-record OpenClaw extension (degraded last-good DB keeps the gate)', () => {
+  // The tools.allow/deny surface, the ONE write openclaw.write() actually supports
+  // (openclaw.ts:188). Same origin + manageability as the connector above; only
+  // `kind` differs, which is the whole point of the carve-out. (#146)
+  function seedOpenClawTool(db: ReturnType<typeof getDb>): ReturnType<typeof buildRecord> {
+    const rec = buildRecord({
+      sourceId: 'openclaw',
+      runtime: 'openclaw',
+      scope: 'global',
+      kind: 'tool',
+      sourceKey: 'shell',
+      origin: 'openclaw-extension',
+      manageability: 'runtime-of-record',
+      name: 'shell',
+      description: 'OpenClaw Gateway tool',
+      available: true,
+      status: 'ready',
+      // NOT writable:false. toolRecord() omits it, so buildRecord defaults it true.
+    })
+    upsertCapabilities(db, 'openclaw', [recordToInsert(rec)])
+    return rec
+  }
+
+  it('rowToRecord re-derives writable:false for a NON-TOOL runtime-of-record OpenClaw extension (degraded last-good DB keeps the gate)', () => {
     const db = getDb()
     const rec = seedOpenClawConnector(db)
     // The column does NOT persist `writable`; reading the row back + mapping must
     // RE-DERIVE writable:false so the dashboard's dead-button gate survives a
     // disconnected (last-good DB) OpenClaw source. A managed native tool stays actionable.
     expect(rowToRecord(getCapability(db, rec.id)!).writable).toBe(false)
+    // NON-TOOL only: a tools.allow/deny row IS writable, see the tool test below. (#146)
     const native = buildRecord({
       sourceId: 'native',
       runtime: 'clawboo-native',
@@ -204,6 +229,63 @@ describe('capabilities REST', () => {
     // blocks BEFORE delegating to the adapter's write() throw (the body carries
     // writable:false; the observe-only/adapter-throw paths never do).
     expect((r.body() as { writable?: boolean }).writable).toBe(false)
+  })
+
+  it('rowToRecord keeps a runtime-of-record Gateway TOOL writable (config.patch is a real write path)', () => {
+    const db = getDb()
+    const rec = seedOpenClawTool(db)
+    // The derivation must carve out `kind: 'tool'`: openclaw.write() supports
+    // exactly `origin === 'openclaw-extension' && kind === 'tool'` (openclaw.ts:188),
+    // so stamping the tool non-writable makes the one supported write unreachable
+    // (#146). Post-fix the key is ABSENT (the mapper spreads it conditionally),
+    // never `true`, hence not.toBe(false), matching the native assertion above.
+    expect(rowToRecord(getCapability(db, rec.id)!).writable).not.toBe(false)
+  })
+
+  it('disable on a runtime-of-record Gateway TOOL passes the REST gate and reaches the adapter', async () => {
+    const db = getDb()
+    const rec = seedOpenClawTool(db)
+    const r = mockRes()
+    await capabilitiesActionPOST(
+      req({ params: { action: 'disable' }, body: { id: rec.id } }),
+      r.res,
+    )
+    // 422 is the REGRESSION signal: the gate wrongly blocked (#146). Getting past
+    // it means the adapter ran. This suite never starts the shared operator
+    // connection, so OpenClawCapabilitySource.write() throws `gateway_disconnected`
+    // (openclaw.ts:181) BEFORE its own ownership/writability checks, and
+    // unsupported() is the ONLY thing in that adapter that yields a 422. So a 422
+    // here can only have come from the gate, and 503 is the one reachable post-gate
+    // outcome. Asserting the specific code keeps this honest: a bare not.toBe(422)
+    // would also pass on an unrelated crash.
+    expect(r.status()).not.toBe(422)
+    expect(r.status()).toBe(503)
+    expect((r.body() as { error: string }).error).toBe('gateway_disconnected')
+  })
+
+  it('GET serves a Gateway TOOL as writable on the degraded last-good path (the panel keeps its action button)', async () => {
+    const db = getDb()
+    const rec = seedOpenClawTool(db)
+    const r = mockRes()
+    await capabilitiesListGET(req({ query: { runtime: 'openclaw' } }), r.res)
+    expect(r.status()).toBe(200)
+    const body = r.body() as {
+      records: Array<{ id: string; writable?: boolean }>
+      sources: Array<{ sourceId: string; ok: boolean }>
+    }
+    // The openclaw source is disconnected here, so loadCapabilities serves this row
+    // from the table through rowToRecord (service.ts:58-62), the exact path the
+    // derivation exists for. A writable:false here makes CapabilitiesPanel's
+    // actionsFor drop the button (CapabilitiesPanel.tsx:71), so the bug is a missing
+    // button as much as it is a 422. Being degraded also means the source-scoped
+    // reconcile skips openclaw, so the seeded row survives the read.
+    expect(body.sources.find((s) => s.sourceId === 'openclaw')?.ok).toBe(false)
+    // Assert the row was SERVED before asserting its flag: `find(...)?.writable` is
+    // `undefined` when the record is absent, and `undefined` is `not.toBe(false)`,
+    // so without this the assertion would still pass if the degraded path broke.
+    const served = body.records.find((x) => x.id === rec.id)
+    expect(served).toBeDefined()
+    expect(served?.writable).not.toBe(false)
   })
 
   it('install resolves the runtime from the agent row (the record reflects the agent, not the placeholder spec.runtime)', async () => {
