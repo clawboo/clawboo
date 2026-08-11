@@ -40,7 +40,7 @@
   "dependencies": {
     "@clawboo/logger": "workspace:*",
     "@noble/ed25519": "^2.1.0",
-    "ws": "^8.18.0"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",
