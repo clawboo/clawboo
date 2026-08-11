@@ -160,9 +160,27 @@ export function createServerBoardClient(db: ClawbooDb): BoardClient {
 
     async completeExecution(execId, outcome: CompleteExecutionOutcome): Promise<void> {
       try {
-        completeExecutionProcess(db, execId, outcome)
+        // Carry the same correlation columns `createExecution` puts on
+        // `execution_started`. Without them `projectFleetHealth` drops the
+        // completion (it skips any event with no `agentId`), so the open-run
+        // counter never decrements and a finished agent reads working → stalled
+        // → zombie forever; `projectGraph` likewise skips the authoritative
+        // cost on `if (!taskId)`. `teamId` matters just as much: it is the
+        // column the team-scoped dashboard read filters on, and SQL equality
+        // never matches NULL, so an uncorrelated completion is invisible to the
+        // Ghost Graph overlay even once the other two are populated.
+        const exec = completeExecutionProcess(db, execId, outcome)
+        // No row matched, so nothing was closed. Emitting anyway would append
+        // exactly the uncorrelated event this block exists to prevent, for a run
+        // that never ended.
+        if (!exec) return
+        const task = getTask(db, exec.taskId)
         emitEvent(db, {
           kind: 'execution_completed',
+          taskId: exec.taskId,
+          teamId: task?.teamId ?? null,
+          agentId: task?.assigneeAgentId ?? null,
+          runtime: exec.executorType,
           data: {
             execId,
             status: outcome.status,

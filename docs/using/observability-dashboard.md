@@ -134,6 +134,8 @@ The read endpoints share a query vocabulary:
 | `order=asc\|desc` | `events`                              | Causal (`asc`) or newest-first (`desc`)                    |
 | `harnessBug=true` | `errors`                              | Only harness bugs (`Unknown` class)                        |
 
+`health` and `graph` fold the most recent 5000 events for the requested scope, so both surfaces keep tracking current activity however long the log has been accumulating. An agent or task whose events have scrolled out of that window stops appearing.
+
 The SSE stream (`GET /api/obs/stream`) is a short-interval DB-tail on the `seq` cursor. `EventSource` reconnects automatically and resumes from the last `seq` via its `Last-Event-ID` header (or `?since=`). Each event's `data` is redacted before it reaches the browser; credential-shaped keys and values are masked, while numeric cost and token fields survive.
 
 ## Verify it worked

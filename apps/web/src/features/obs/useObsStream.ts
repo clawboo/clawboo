@@ -134,12 +134,19 @@ export function useObsStream(
     void (async () => {
       try {
         const bp = new URLSearchParams(base)
-        bp.set('order', 'asc')
+        // Backfill the RECENT window, not the oldest one. `/api/obs/events`
+        // orders `seq ASC` by default, so `asc` + `limit` returns the FIRST N
+        // events ever recorded for this scope, on a log nothing prunes. That
+        // strands the terminal on ancient rows AND seeds `maxSeq` from them, so
+        // the SSE tail below then replays the whole log forward from that
+        // cursor, 500 rows per poll. Ask newest-first and reverse, so the
+        // terminal still renders chronologically and the cursor starts live.
+        bp.set('order', 'desc')
         bp.set('limit', String(limit))
         const r = await fetch(`/api/obs/events?${bp.toString()}`, { signal: backfillAbort.signal })
         if (!cancelled && r.ok) {
           const body = (await r.json()) as { events?: Record<string, unknown>[] }
-          const rows = (body.events ?? []).map(parseRow)
+          const rows = (body.events ?? []).map(parseRow).reverse()
           for (const row of rows) {
             seen.add(row.seq)
             if (row.seq > maxSeq) maxSeq = row.seq

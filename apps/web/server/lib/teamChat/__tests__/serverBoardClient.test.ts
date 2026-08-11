@@ -10,10 +10,34 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getComments, getTask, listEvents, listExecutions, type ClawbooDb } from '@clawboo/db'
+import {
+  getComments,
+  getTask,
+  listEvents,
+  listExecutions,
+  type ClawbooDb,
+  type DbOrchestrationEvent,
+} from '@clawboo/db'
+import {
+  projectFleetHealth,
+  projectGraph,
+  type OrchestrationEvent,
+  type OrchestrationEventKind,
+} from '@clawboo/obs'
 
 import { getDb, resetDb } from '../../db'
 import { createServerBoardClient } from '../serverBoardClient'
+
+/** Rehydrate a stored row into the reducer shape (mirrors api/obs.ts `toEvent`). */
+function toObsEvent(row: DbOrchestrationEvent): OrchestrationEvent {
+  let data: Record<string, unknown> = {}
+  try {
+    data = JSON.parse(row.data) as Record<string, unknown>
+  } catch {
+    data = {}
+  }
+  return { ...row, kind: row.kind as OrchestrationEventKind, data }
+}
 
 const TEAM = 'team-sbc'
 
@@ -37,9 +61,11 @@ describe('serverBoardClient (direct-DB BoardClient over the board repo)', () => 
     await rm(home, { recursive: true, force: true })
   })
 
-  // Query ALL events (fresh sandbox DB per test). Note: like api/board.ts, the
-  // comment_added / dep_linked / execution_completed events carry no teamId, so a
-  // teamId-filtered query would miss them — the unfiltered list is the parity check.
+  // Query ALL events (fresh sandbox DB per test). `comment_added` / `dep_linked`
+  // still carry no teamId, so a teamId-filtered query would miss those and the
+  // unfiltered list stays the parity check. `execution_completed` no longer
+  // belongs on that list: it is now correlated like `execution_started`, which
+  // the two tests below pin.
   const kinds = (): string[] => listEvents(db).map((e) => e.kind)
 
   it('createTask → row + task_created obs', async () => {
@@ -74,6 +100,59 @@ describe('serverBoardClient (direct-DB BoardClient over the board repo)', () => 
     await client.completeExecution(exec!.id, { status: 'succeeded', summary: 'ok', costUsd: 0.01 })
     expect(listExecutions(db, task!.id)[0]?.status).toBe('succeeded')
     expect(kinds()).toContain('execution_completed')
+  })
+
+  it('execution_completed carries the same correlation columns as execution_started', async () => {
+    const client = createServerBoardClient(db)
+    const task = await client.createTask({ title: 't', teamId: TEAM })
+    await client.claim(task!.id, 'a1')
+    const exec = await client.createExecution(task!.id, 'clawboo-native')
+    await client.completeExecution(exec!.id, { status: 'succeeded', costUsd: 0.01 })
+
+    // The request only carries an execId, but the closed row carries its taskId,
+    // so these are recoverable. Uncorrelated, `projectFleetHealth` skips the
+    // completion (it drops any event with no agentId) and the agent reads as a
+    // permanent zombie; a teamId-scoped read drops it too, since SQL equality
+    // never matches NULL.
+    const done = listEvents(db, { kinds: ['execution_completed'] })
+    expect(done).toHaveLength(1)
+    expect(done[0]!.taskId).toBe(task!.id)
+    expect(done[0]!.teamId).toBe(TEAM)
+    expect(done[0]!.agentId).toBe('a1')
+    // The team-scoped read the dashboards actually issue must see it.
+    expect(listEvents(db, { teamId: TEAM, kinds: ['execution_completed'] })).toHaveLength(1)
+  })
+
+  it('an unknown execId closes nothing and emits nothing', async () => {
+    const client = createServerBoardClient(db)
+    const task = await client.createTask({ title: 't', teamId: TEAM })
+    await client.claim(task!.id, 'a1')
+    await client.createExecution(task!.id, 'clawboo-native')
+
+    await client.completeExecution('no-such-exec', { status: 'succeeded' })
+
+    // A completion for a run that never ended would be uncorrelated by
+    // construction (there is no row to recover a taskId from), reintroducing the
+    // very event shape the correlation fix removes.
+    expect(listEvents(db, { kinds: ['execution_completed'] })).toHaveLength(0)
+    expect(listExecutions(db, task!.id)[0]?.status).toBe('running')
+  })
+
+  it('a finished run reads idle, not a phantom zombie', async () => {
+    const client = createServerBoardClient(db)
+    const task = await client.createTask({ title: 't', teamId: TEAM })
+    await client.claim(task!.id, 'a1')
+    const exec = await client.createExecution(task!.id, 'clawboo-native')
+    await client.completeExecution(exec!.id, { status: 'succeeded', costUsd: 0.42 })
+
+    const events = listEvents(db, { teamId: TEAM }).map(toObsEvent)
+    // 31 min later: an undecremented open counter would have gone working →
+    // stalled → zombie by now, so this pins the decrement, not just the columns.
+    const health = projectFleetHealth(events, Date.now() + 31 * 60_000)
+    expect(health.get('a1')?.status).toBe('idle')
+    expect(health.get('a1')?.openExecutions).toBe(0)
+    // And the authoritative run cost lands on the task instead of being skipped.
+    expect(projectGraph(events).tasks.find((t) => t.id === task!.id)?.costUsd).toBe(0.42)
   })
 
   it('updateStatus(done) on an unverified task → true + done + status_changed; an illegal/unknown transition → false (no throw)', async () => {
