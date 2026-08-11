@@ -10,7 +10,14 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, getCapability, upsertCapabilities } from '@clawboo/db'
+import {
+  agents,
+  getCapability,
+  isToolEnabled,
+  seedBuiltinTools,
+  setToolEnabled,
+  upsertCapabilities,
+} from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -149,6 +156,43 @@ describe('capabilities REST', () => {
       r.res,
     )
     expect(r.status()).toBe(404)
+  })
+
+  // The gate is deliberately NARROWER than CapabilitiesPanel's actionsFor: it reads
+  // the tier (observe-only / writable), never `available` or `status`. This pins
+  // that, because the tempting "make the gate symmetric with the UI" change wedges
+  // exactly this row. A brokered tool disabled while it was available, whose
+  // provider key later went away, reads available:false + status:'disabled'
+  // (native.ts:92), and actionsFor's `!available` branch (CapabilitiesPanel.tsx:67)
+  // runs before its status branch, so the panel shows no Enable button. REST is the
+  // only remaining way to turn it back on.
+  it('enable on an UNAVAILABLE managed brokered tool passes the gate (available is state, not permission)', async () => {
+    const db = getDb()
+    // Required, not incidental: setToolEnabled UPDATEs an existing row, so on an
+    // unseeded registry it is a silent no-op and isToolEnabled falls back to true,
+    // which would make both assertions below vacuous.
+    seedBuiltinTools(db)
+    setToolEnabled(db, 'web_search', false)
+    expect(isToolEnabled(db, 'web_search')).toBe(false)
+    const rec = buildRecord({
+      sourceId: 'native',
+      runtime: 'clawboo-native',
+      scope: 'global',
+      kind: 'tool',
+      sourceKey: 'web_search',
+      origin: 'brokered-mcp',
+      manageability: 'managed',
+      name: 'web_search',
+      // What native.ts emits for web_search with no TAVILY_API_KEY: the
+      // availability requirement is unmet, and `!enabled` wins the status ternary.
+      available: false,
+      status: 'disabled',
+    })
+    upsertCapabilities(db, 'native', [recordToInsert(rec)])
+    const r = mockRes()
+    await capabilitiesActionPOST(req({ params: { action: 'enable' }, body: { id: rec.id } }), r.res)
+    expect(r.status()).toBe(200)
+    expect(isToolEnabled(db, 'web_search')).toBe(true)
   })
 
   function seedOpenClawConnector(db: ReturnType<typeof getDb>): ReturnType<typeof buildRecord> {
