@@ -149,7 +149,7 @@ The error-taxonomy feed: every `error` event, recent-first, projected to a compa
 
 - **Request body**: none.
 
-The read is fixed to `kinds: ['error']`, `order: 'desc'`, `limit: 500`. The `harnessBug` filter is applied after projection.
+The read is fixed to `kinds: ['error']`, `limit: 500`, newest-first **by `ts`**. Wall-clock order is what a display feed wants, and it is the order the only index over `kind` can serve, so the cost stays proportional to the 500 rows returned rather than to every error ever recorded. The `harnessBug` filter is applied after projection.
 
 ### Responses
 
@@ -365,7 +365,7 @@ Mirrors client-observed runtime events into the durable log. The OpenClaw runtim
 {
   events?: Array<{
     kind: 'tool_call' | 'tool_result' | 'error'  // any other kind is dropped
-    ts?: number
+    ts?: number              // must be within [now - 24h, now + 60s], else server time is used
     teamId?: string | null
     taskId?: string | null
     agentId?: string | null
@@ -376,6 +376,8 @@ Mirrors client-observed runtime events into the durable log. The OpenClaw runtim
 ```
 
 A non-array `events` is treated as empty. At most 200 events are accepted per call (the rest are sliced off). Any event whose `kind` is missing or not in the whitelist is skipped.
+
+A supplied `ts` is clamped to a band around server time (60 s ahead for clock skew, 24 h behind) and replaced with server time when it falls outside. `ts` is not just metadata: fleet health derives staleness from it, so a future timestamp would pin an agent at `working` and mask a genuine `zombie`. A mirror reports what a browser just observed, so a timestamp far from now is wrong regardless of intent.
 
 ### Responses
 

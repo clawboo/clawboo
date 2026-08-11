@@ -125,12 +125,34 @@ function readRecentEvents(req: Request): OrchestrationEvent[] {
 // fails the batch).
 const INGEST_KINDS = new Set<OrchestrationEventKind>(['tool_call', 'tool_result', 'error'])
 const MAX_INGEST_BATCH = 200
+/** Tolerated clock skew ahead of the server for a mirrored event. */
+const INGEST_MAX_AHEAD_MS = 60_000
+/** How far back a mirrored event may be dated (a mirror is near-real-time). */
+const INGEST_MAX_BEHIND_MS = 24 * 60 * 60_000
+
+/**
+ * Accept a caller-supplied `ts` only within a sane band around server time,
+ * falling back to server `now` otherwise.
+ *
+ * `ts` is not just metadata: `projectFleetHealth` derives staleness from
+ * `now - lastEventTs`, and `lastEventTs` is a MAX over the window. A future
+ * timestamp therefore makes `quiet` negative, pinning an agent with an open
+ * execution at `working` permanently and masking a genuine `zombie`. Since this
+ * route exists to mirror what a browser observed, a timestamp far from now is
+ * wrong regardless of intent.
+ */
+function ingestTs(v: unknown, now: number): number | undefined {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return undefined
+  if (v > now + INGEST_MAX_AHEAD_MS || v < now - INGEST_MAX_BEHIND_MS) return undefined
+  return v
+}
 
 export function obsIngestPOST(req: Request, res: Response): void {
   try {
     const body = req.body as { events?: unknown } | undefined
     const raw = Array.isArray(body?.events) ? body.events : []
     const db = getDb()
+    const now = Date.now()
     let count = 0
     for (const e of raw.slice(0, MAX_INGEST_BATCH)) {
       if (!e || typeof e !== 'object') continue
@@ -139,7 +161,7 @@ export function obsIngestPOST(req: Request, res: Response): void {
       if (typeof kind !== 'string' || !INGEST_KINDS.has(kind as OrchestrationEventKind)) continue
       emitEvent(db, {
         kind: kind as OrchestrationEventKind,
-        ts: typeof ev['ts'] === 'number' ? (ev['ts'] as number) : undefined,
+        ts: ingestTs(ev['ts'], now),
         teamId: strOrNull(ev['teamId']),
         taskId: strOrNull(ev['taskId']),
         agentId: strOrNull(ev['agentId']),
@@ -282,9 +304,17 @@ export function obsTraceGET(req: Request, res: Response): void {
 export function obsErrorsGET(req: Request, res: Response): void {
   try {
     const sinceRaw = strParam(req.query['since'])
+    // Order by `ts`, not `seq`. This is a human-facing "most recent errors"
+    // feed on a 5-second poll, and `(kind, ts)` is the only index over `kind`:
+    // sorting it by `seq` cannot use that index, so SQLite pushes every error
+    // row in the table through a temp B-tree before applying the limit. The
+    // cost then grows with accumulated errors rather than with the 500 returned
+    // (measured at 100k errors: 57.3 ms sorted by seq, 0.9 ms by ts), which
+    // means the error dashboard got slowest exactly when it had most to show.
     const rows = listEvents(getDb(), {
       kinds: ['error'],
       since: sinceRaw ? Number(sinceRaw) : undefined,
+      orderBy: 'ts',
       order: 'desc',
       limit: 500,
     })

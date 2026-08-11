@@ -29,6 +29,16 @@ export interface ListEventsFilter {
   afterSeq?: number
   limit?: number
   order?: 'asc' | 'desc'
+  /**
+   * Which column the `order` applies to. Defaults to `seq`, the causal key a
+   * replay needs. Pass `'ts'` for a kind-filtered DISPLAY feed: the only index
+   * over `kind` is `(kind, ts)`, so ordering such a read by `seq` cannot use it
+   * and SQLite sorts every matching row through a temp B-tree first, at a cost
+   * that grows with how many of that kind have accumulated. Wall-clock order is
+   * what a human-facing feed wants anyway. Do NOT use it to feed a reducer: `ts`
+   * is caller-suppliable and therefore not strictly monotonic.
+   */
+  orderBy?: 'seq' | 'ts'
 }
 
 export function listEvents(db: ClawbooDb, filter: ListEventsFilter = {}): DbOrchestrationEvent[] {
@@ -41,8 +51,8 @@ export function listEvents(db: ClawbooDb, filter: ListEventsFilter = {}): DbOrch
     conds.push(inArray(orchestrationEvents.kind, filter.kinds))
   if (filter.since) conds.push(gte(orchestrationEvents.ts, filter.since))
   if (filter.afterSeq != null) conds.push(gt(orchestrationEvents.seq, filter.afterSeq))
-  const ordering =
-    filter.order === 'desc' ? desc(orchestrationEvents.seq) : asc(orchestrationEvents.seq)
+  const col = filter.orderBy === 'ts' ? orchestrationEvents.ts : orchestrationEvents.seq
+  const ordering = filter.order === 'desc' ? desc(col) : asc(col)
   return db
     .select()
     .from(orchestrationEvents)

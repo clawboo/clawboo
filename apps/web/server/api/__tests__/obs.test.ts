@@ -328,6 +328,61 @@ describe('observability REST', () => {
     expect(s.writes()).not.toContain('data:')
   })
 
+  it('POST /api/obs/ingest clamps a forged ts (it must not mask a zombie)', () => {
+    const res = mockRes()
+    const far = Date.now() + 10 * 365 * 24 * 60 * 60_000 // a decade ahead
+    const r = {
+      query: {},
+      params: {},
+      body: { events: [{ kind: 'tool_call', taskId: 'sub', agentId: 'a2', ts: far, data: {} }] },
+    } as unknown as Request
+    obsIngestPOST(r, res.res)
+    expect((res.body() as { count: number }).count).toBe(1)
+
+    // Stored at server time, not the forged one. projectFleetHealth derives
+    // staleness from `now - lastEventTs` (a MAX over the window), so a future ts
+    // makes `quiet` negative and pins an agent at `working` forever.
+    const stored = listEvents(getDb(), { taskId: 'sub' })
+    expect(stored).toHaveLength(1)
+    expect(stored[0]!.ts).toBeLessThanOrEqual(Date.now() + 60_000)
+
+    // A plausible recent ts is still honoured (a mirror reports what it saw).
+    const recent = Date.now() - 5_000
+    const res2 = mockRes()
+    obsIngestPOST(
+      {
+        query: {},
+        params: {},
+        body: {
+          events: [{ kind: 'tool_call', taskId: 'ok', agentId: 'a2', ts: recent, data: {} }],
+        },
+      } as unknown as Request,
+      res2.res,
+    )
+    expect(listEvents(getDb(), { taskId: 'ok' })[0]!.ts).toBe(recent)
+  })
+
+  it('GET /api/obs/errors orders by ts (index-backed) and still reads newest-first', () => {
+    const db = getDb()
+    for (const [taskId, ts] of [
+      ['old', 1_000],
+      ['newest', 9_000],
+      ['mid', 5_000],
+    ] as const) {
+      appendEvent(db, {
+        kind: 'error',
+        taskId,
+        agentId: 'a1',
+        ts,
+        data: { message: taskId, errorClass: 'Timeout', harnessBug: false },
+      })
+    }
+    const res = mockRes()
+    obsErrorsGET(req({}), res.res)
+    const body = res.body() as { errors: { taskId: string }[] }
+    expect(body.errors.map((e) => e.taskId)).toEqual(['newest', 'mid', 'old'])
+  })
+
   it('GET /api/obs/events clamps limit (a negative one must not drain the table)', () => {
     seed()
     const res = mockRes()

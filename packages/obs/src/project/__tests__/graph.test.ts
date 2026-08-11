@@ -136,6 +136,38 @@ describe('projectGraph', () => {
     expect(a3.costUsd).toBeCloseTo(0.05)
   })
 
+  it('materialises a parent that scrolled out of the window, so no edge dangles', () => {
+    // A read of the log is a WINDOW, so a child's `task_created` can be inside
+    // it while its parent's has already scrolled out. Only the child is fed here.
+    const g = projectGraph([
+      {
+        id: 'e1',
+        seq: 1,
+        ts: 1000,
+        kind: 'task_created',
+        teamId: 'team1',
+        taskId: 'child',
+        agentId: null,
+        runtime: null,
+        traceId: null,
+        spanId: null,
+        parentSpanId: null,
+        correlationId: null,
+        tenantId: null,
+        data: { title: 'child', status: 'todo', parentTaskId: 'evicted-parent' },
+      },
+    ])
+    const ids = g.tasks.map((t) => t.id)
+    expect(ids).toContain('child')
+    expect(ids, 'every edge endpoint must resolve to a node').toContain('evicted-parent')
+    // A placeholder, not invented detail.
+    const parent = g.tasks.find((t) => t.id === 'evicted-parent')!
+    expect(parent.title).toBeNull()
+    expect(parent.status).toBe('unknown')
+    // It has no assignee, so no phantom agent edge is derived from it.
+    expect(g.agentEdges).toHaveLength(0)
+  })
+
   it('REPLAY reproduces the graph state (the surface cannot drift)', () => {
     const log = buildLog()
     const a = projectGraph(log)
