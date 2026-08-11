@@ -160,6 +160,14 @@ describe('projectGraph', () => {
     const ids = g.tasks.map((t) => t.id)
     expect(ids).toContain('child')
     expect(ids, 'every edge endpoint must resolve to a node').toContain('evicted-parent')
+    // The edge itself must still be emitted; materialising the parent is only
+    // useful if the edge that referenced it is there to resolve.
+    expect(g.taskEdges).toContainEqual({
+      id: 'delegation:evicted-parent->child',
+      source: 'evicted-parent',
+      target: 'child',
+      kind: 'delegation',
+    })
     // A placeholder, not invented detail.
     const parent = g.tasks.find((t) => t.id === 'evicted-parent')!
     expect(parent.title).toBeNull()

@@ -123,6 +123,21 @@ describe('serverBoardClient (direct-DB BoardClient over the board repo)', () => 
     expect(listEvents(db, { teamId: TEAM, kinds: ['execution_completed'] })).toHaveLength(1)
   })
 
+  it('an unknown execId closes nothing and emits nothing', async () => {
+    const client = createServerBoardClient(db)
+    const task = await client.createTask({ title: 't', teamId: TEAM })
+    await client.claim(task!.id, 'a1')
+    await client.createExecution(task!.id, 'clawboo-native')
+
+    await client.completeExecution('no-such-exec', { status: 'succeeded' })
+
+    // A completion for a run that never ended would be uncorrelated by
+    // construction (there is no row to recover a taskId from), reintroducing the
+    // very event shape the correlation fix removes.
+    expect(listEvents(db, { kinds: ['execution_completed'] })).toHaveLength(0)
+    expect(listExecutions(db, task!.id)[0]?.status).toBe('running')
+  })
+
   it('a finished run reads idle, not a phantom zombie', async () => {
     const client = createServerBoardClient(db)
     const task = await client.createTask({ title: 't', teamId: TEAM })

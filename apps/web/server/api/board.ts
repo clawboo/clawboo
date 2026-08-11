@@ -297,13 +297,20 @@ export function boardExecutionCompletePATCH(req: Request, res: Response): void {
     // so the open-run counter never decremented and a finished agent read as a
     // permanent zombie. "Correlate by execId" was never implemented downstream.
     const exec = completeExecutionProcess(db, execId, parsed.data)
-    const task = exec ? getTask(db, exec.taskId) : null
+    // `execId` is a raw path param, so an unknown one reaches here. Nothing was
+    // closed, so answer 404 rather than reporting success, and above all do not
+    // append a completion for a run that never ended.
+    if (!exec) {
+      res.status(404).json({ error: 'execution not found' })
+      return
+    }
+    const task = getTask(db, exec.taskId)
     emitEvent(db, {
       kind: 'execution_completed',
-      taskId: exec?.taskId ?? null,
+      taskId: exec.taskId,
       teamId: task?.teamId ?? null,
       agentId: task?.assigneeAgentId ?? null,
-      runtime: exec?.executorType ?? null,
+      runtime: exec.executorType,
       data: {
         execId,
         status: parsed.data.status,

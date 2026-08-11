@@ -483,7 +483,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/executions \
 
 ## `PATCH /api/board/executions/:execId`
 
-Closes out an execution row with its outcome and an optional token/cost ledger. The handler emits an `execution_completed` event; `taskId`/`agentId` are not in scope on this REST path (only `execId`), so correlate via the `execution_started` event by `execId`.
+Closes out an execution row with its outcome and an optional token/cost ledger. The handler emits an `execution_completed` event carrying the run's `taskId`, `teamId`, `agentId` and `runtime`, recovered from the closed row, so the event correlates with the `execution_started` it pairs with. An unknown `execId` closes nothing and returns `404` without appending an event.
 
 - **Path params**: `execId`.
 - **Request body** (validated by `completeExecutionBody`):
@@ -514,6 +514,12 @@ Closes out an execution row with its outcome and an optional token/cost ledger. 
 
 ```json
 { "ok": true }
+```
+
+**`404 Not Found`**: no execution row matched `execId`; nothing was closed and no event was appended:
+
+```json
+{ "error": "execution not found" }
 ```
 
 **`500 Internal Server Error`**:

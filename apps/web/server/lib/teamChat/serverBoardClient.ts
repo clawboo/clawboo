@@ -170,13 +170,17 @@ export function createServerBoardClient(db: ClawbooDb): BoardClient {
         // never matches NULL, so an uncorrelated completion is invisible to the
         // Ghost Graph overlay even once the other two are populated.
         const exec = completeExecutionProcess(db, execId, outcome)
-        const task = exec ? getTask(db, exec.taskId) : null
+        // No row matched, so nothing was closed. Emitting anyway would append
+        // exactly the uncorrelated event this block exists to prevent, for a run
+        // that never ended.
+        if (!exec) return
+        const task = getTask(db, exec.taskId)
         emitEvent(db, {
           kind: 'execution_completed',
-          taskId: exec?.taskId ?? null,
+          taskId: exec.taskId,
           teamId: task?.teamId ?? null,
           agentId: task?.assigneeAgentId ?? null,
-          runtime: exec?.executorType ?? null,
+          runtime: exec.executorType,
           data: {
             execId,
             status: outcome.status,

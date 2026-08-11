@@ -137,4 +137,17 @@ describe('board REST → observability emits', () => {
     expect(bodies.some((b) => /report up/.test(b))).toBe(true)
     expect(bodies.some((b) => /depends on/.test(b))).toBe(true)
   })
+
+  it('PATCH executions/:execId with an unknown id → 404, and appends no event', () => {
+    const res = mockRes()
+    // `execId` is a raw path param, so an unknown one reaches the handler. It
+    // closes nothing, so reporting success would be a lie, and appending a
+    // completion would strand an uncorrelated lifecycle event in the log.
+    boardExecutionCompletePATCH(
+      req({ status: 'succeeded', costUsd: 0.01 }, { execId: 'no-such-exec' }),
+      res.res,
+    )
+    expect(res.statusCode()).toBe(404)
+    expect(kindsInLog().filter((k) => k === 'execution_completed')).toHaveLength(0)
+  })
 })
