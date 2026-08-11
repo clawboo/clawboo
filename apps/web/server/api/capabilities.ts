@@ -55,6 +55,14 @@ function isInstallSpec(v: unknown): v is CapabilityInstallSpec {
   )
 }
 
+// The OpenClaw source throws Error('gateway_disconnected') when the operator
+// connection is down. Same mapping as agents.ts: a reachable-later failure is a
+// 503, not a 500. Reachable since #146, because a Gateway tool row is writable
+// now, so the gate passes and the adapter is the thing that can be offline.
+function isDisconnected(err: unknown): boolean {
+  return err instanceof Error && err.message === 'gateway_disconnected'
+}
+
 // ─── POST /api/capabilities/:action  (install | enable | disable | approve) ──
 export async function capabilitiesActionPOST(req: Request, res: Response): Promise<void> {
   const action = strParam(req.params['action'])
@@ -120,11 +128,21 @@ export async function capabilitiesActionPOST(req: Request, res: Response): Promi
         res.status(404).json({ error: 'capability not found' })
         return
       }
-      // Gate symmetrically with the UI (CapabilitiesPanel actionsFor): an
-      // observe-only OR a non-writable runtime-of-record capability cannot be
-      // modified. `rowToRecord` derives `writable` from the row (the column isn't
-      // persisted), so the server enforces the same tier the UI shows — never
-      // delegating the writability check to each adapter's write() throw.
+      // Gate on the AUTHORIZATION tier only: observe-only, or a row the owning
+      // source cannot write. `rowToRecord` derives `writable` from the row (the
+      // column isn't persisted), so the server enforces the same tier the panel
+      // reads, never delegating the writability check to an adapter's write() throw.
+      //
+      // Deliberately NARROWER than CapabilitiesPanel's actionsFor, which ALSO drops
+      // `!available` rows and renders pending-auth as a disabled button. Those two
+      // are runtime STATE, not permission: the panel uses them so a greyed row
+      // carries no live button. Gating on them here would wedge the row that needs
+      // the write most, a brokered tool disabled while it was available whose
+      // provider key later went away (native.ts:92 then reads available:false +
+      // status:'disabled', and actionsFor's `!available` branch runs BEFORE its
+      // status branch, so the panel offers no Enable and REST is the only way
+      // back). The pending-auth shape comes only from codex, whose write() is
+      // unconditionally unsupported(), so it already answers the same 422.
       const rec = rowToRecord(row)
       if (rec.manageability === 'observe-only' || rec.writable === false) {
         res.status(422).json({
@@ -141,6 +159,10 @@ export async function capabilitiesActionPOST(req: Request, res: Response): Promi
 
     res.status(400).json({ error: `unknown action: ${action ?? ''}` })
   } catch (err) {
+    if (isDisconnected(err)) {
+      res.status(503).json({ error: 'gateway_disconnected' })
+      return
+    }
     if (err instanceof UnknownCapabilityError) {
       res.status(404).json({ error: err.message })
       return

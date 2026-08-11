@@ -198,6 +198,12 @@ Toggles an existing capability identified by its composite `id`. The handler res
 }
 ```
 
+**`503 Service Unavailable`**: the write reached the owning source, but that source needs a live connection it does not have (the OpenClaw operator connection is down):
+
+```json
+{ "error": "gateway_disconnected" }
+```
+
 **`200 OK`**: the toggle was applied; the updated record is returned (or `null`):
 
 ```ts
@@ -299,7 +305,7 @@ curl -X POST http://localhost:18790/api/capabilities/approve \
 
 ## Error envelope
 
-Every error response on these routes is the standard `{ error: string }` envelope. The two manageability-gated **422** responses additionally carry `manageability` (and, for the `enable`/`disable` pre-check, `writable`) so a client can render the right read-only affordance without a second lookup. The `error` string on a **500** is passed through a display-layer redactor before it is sent.
+Every error response on these routes is the standard `{ error: string }` envelope. The two manageability-gated **422** responses additionally carry `manageability` (and, for the `enable`/`disable` pre-check, `writable`) so a client can render the right read-only affordance without a second lookup. A **503** means the tier allowed the write but the owning source could not reach the runtime, so a retry after reconnecting is the remedy. The `error` string on a **500** is passed through a display-layer redactor before it is sent.
 
 ## See also
 

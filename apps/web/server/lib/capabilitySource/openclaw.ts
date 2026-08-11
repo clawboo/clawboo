@@ -21,7 +21,7 @@ import {
 import { appendAudit, getCapability, type ClawbooDb } from '@clawboo/db'
 import { encodeConfigPatchParams } from '@clawboo/gateway-client'
 
-import { buildRecord, builtinRollup, degradedStatus, okStatus } from './helpers'
+import { buildRecord, builtinRollup, degradedStatus, isSourceWritable, okStatus } from './helpers'
 
 /** The operator slice OpenClawAgentSource satisfies as-is (no second connection). */
 export interface OperatorConfigClientLike {
@@ -182,16 +182,32 @@ export class OpenClawCapabilitySource implements CapabilitySource {
 
     const row = getCapability(this.db(), action.id)
     if (!row) unsupported('openclaw', action.kind)
-    // Only the Gateway tools.allow/deny surface is a confirmed runtime-of-record
-    // write; mcp/plugin enable/disable through config.patch is a documented
-    // follow-up (needs the live-spike-confirmed plugin config shape).
-    if (row.origin !== 'openclaw-extension' || row.kind !== 'tool') {
+    // Two DISTINCT assertions, both required. Ownership: an `openclaw:`-prefixed
+    // id can also be a clawboo-spine row whose origin is 'mcp-connector', and the
+    // multiplexer routes on the id prefix alone, so this source must reject a row
+    // it does not own. Writability: `isSourceWritable` is the shared predicate the
+    // mapper derives `writable` from, so this guard and the REST gate can never
+    // disagree about which rows are actionable (issue #146). Only the Gateway
+    // tools.allow/deny surface is a confirmed runtime-of-record write; mcp/plugin
+    // enable/disable through config.patch is a documented follow-up (needs the
+    // live-spike-confirmed plugin config shape).
+    if (row.origin !== 'openclaw-extension' || !isSourceWritable(row.origin, row.kind)) {
       unsupported('openclaw', action.kind)
     }
     const enable = action.kind === 'enable'
-    const config = await this.deps.client.operatorCall<
-      GatewayConfigShape & { hash?: string; baseHash?: string }
+    // Same SNAPSHOT WRAPPER unwrap as read(): on OpenClaw 2026.5.x the live config
+    // sits under `.config`. Reading `tools` off the top level yields undefined, so
+    // allow/deny would start EMPTY and the wholesale re-assert below would REPLACE
+    // the user's entire tool policy with just the toggled id, wiping the
+    // sessions_spawn/sessions_yield denies registerSharedMcpServers unions in as
+    // anti-sub-agent enforcement. Harmless while this path was unreachable behind
+    // the writable gate; live since #146 opened that gate, hence fixed here.
+    // The hash stays on the OUTER snapshot, so read it from `snapshot`, NEVER from
+    // the unwrapped `config`.
+    const snapshot = await this.deps.client.operatorCall<
+      { config?: GatewayConfigShape } & GatewayConfigShape & { hash?: string; baseHash?: string }
     >('config.get')
+    const config = (snapshot.config ?? snapshot) as GatewayConfigShape
     const tools = { ...(config.tools ?? {}) }
     const allow = new Set(asStringArray(tools.allow))
     const deny = new Set(asStringArray(tools.deny))
@@ -211,7 +227,7 @@ export class OpenClawCapabilitySource implements CapabilitySource {
     // replaces them wholesale (the intended set), not appends.
     await this.deps.client.operatorCall(
       'config.patch',
-      encodeConfigPatchParams({ tools }, config.hash ?? config.baseHash),
+      encodeConfigPatchParams({ tools }, snapshot.hash ?? snapshot.baseHash),
     )
     appendAudit(this.db(), {
       eventType: 'install',

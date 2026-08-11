@@ -1,8 +1,9 @@
 // Shared helpers for the five CapabilitySource adapters: deterministic record
 // construction (the `id` encodes the composite identity), availability
 // evaluation (reusing the tool-broker's evaluator → the same greying the
-// MCPToolsSection uses), and the ok/degraded read-status builders. Keeping these
-// here means every adapter projects an identical record shape.
+// MCPToolsSection uses), the ok/degraded read-status builders, and the shared
+// write-policy predicate the mapper and each source's write() both gate on.
+// Keeping these here means every adapter projects an identical record shape.
 
 import {
   makeCapabilityId,
@@ -38,7 +39,13 @@ export interface BuildRecordInput {
   diagnostics?: string[]
   provenance?: CapabilityProvenance | null
   status?: CapabilityStatus
-  /** Whether the owning source can write this record (default true). */
+  /**
+   * Whether the owning source can write this record. Omit it and `buildRecord`
+   * derives it via `isSourceWritable(origin, kind)`, which is `true` everywhere
+   * except an OpenClaw extension row that is not a tool. Pass it explicitly only
+   * to say something the (origin, kind) pair cannot, as the clawboo MCP spine row
+   * does: its origin is `mcp-connector`, which is writable for native.
+   */
   writable?: boolean
   /** Source-supplied affordance hint (e.g. a pending-auth command). */
   hint?: string
@@ -75,7 +82,7 @@ export function buildRecord(input: BuildRecordInput): CapabilityRecord {
     diagnostics,
     provenance: input.provenance ?? null,
     status: input.status ?? (available ? 'ready' : 'unavailable'),
-    writable: input.writable ?? true,
+    writable: input.writable ?? isSourceWritable(input.origin, input.kind),
     ...(input.hint !== undefined ? { hint: input.hint } : {}),
     tenantId: input.tenantId ?? null,
     syncedAt: new Date().toISOString(),
@@ -94,6 +101,41 @@ export function evalAvailability(req: CapabilityAvailability | null): {
     defaultAvailabilityContext(),
   )
   return { available: r.visible, diagnostics: r.diagnostics }
+}
+
+/**
+ * Whether the OWNING source can actually WRITE a row with this (origin, kind).
+ * The ONE statement of that policy: `buildRecord` stamps it on the live record,
+ * `rowToRecord` re-derives it for the last-good DB path (the column does not
+ * persist), and the owning `write()` gates on it. All three read the same row, so
+ * none of them may carry its own copy of the rule.
+ *
+ * They did, and it broke. The mapper's copy said "any runtime-of-record OpenClaw
+ * extension is unwritable", which also swallowed the tools.allow/deny rows
+ * OpenClawCapabilitySource.write() genuinely supports, so every Gateway tool
+ * enable/disable 422'd at the REST gate while the dashboard still rendered the
+ * button (issue #146).
+ *
+ * OpenClaw is runtime-of-record for its own config and clawboo drives changes
+ * through `config.patch`, where only the tools.allow/deny surface (kind 'tool') is
+ * a confirmed write. Its MCP connectors and plugins stay read-only until their
+ * config.patch shape is live-spike confirmed, so they render no dead button. Every
+ * other origin is writable by its own source.
+ *
+ * Scope note: this keys on (origin, kind), NOT on sourceId, so it cannot tell
+ * openclaw's own `mcp-connector` spine row (unwritable) from native's
+ * `mcp-connector` records (managed, writable). That is deliberate. The spine row
+ * is already blocked twice over, by its `observe-only` tier at the REST gate and
+ * by the ownership check in OpenClawCapabilitySource.write(), so a per-source
+ * dispatch table would buy nothing today.
+ *
+ * Params are `string`, not the CapabilityOrigin/CapabilityKind unions: both real
+ * callers read a DbCapability whose columns are plain text, so union params would
+ * force a cast at every call site and buy nothing the comparisons here do not.
+ */
+export function isSourceWritable(origin: string, kind: string): boolean {
+  if (origin === 'openclaw-extension') return kind === 'tool'
+  return true
 }
 
 export function okStatus(sourceId: CapabilitySourceId): SourceReadStatus {
