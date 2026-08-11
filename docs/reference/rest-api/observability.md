@@ -196,7 +196,7 @@ Fleet-health triage, a per-agent state folded from the event log, time-sensitive
 - **Query params**: `teamId` (string), scope to one team.
 - **Request body**: none.
 
-The read is capped at 5000 events.
+The read is capped at the **most recent 5000 events** for the requested scope. `orchestration_events` is append-only and is never pruned, so the triage folds a trailing window rather than the whole history: rows are selected newest-first, then folded in causal order. An agent whose activity has scrolled out of that window stops appearing.
 
 ### Responses
 
@@ -237,7 +237,7 @@ Folds the ordered event stream into a delegation/status/cost graph projection. T
 - **Query params**: `teamId` (string), scope to one team.
 - **Request body**: none.
 
-The read is capped at 5000 events.
+The read is capped at the **most recent 5000 events** for the requested scope. `orchestration_events` is append-only and is never pruned, so the projection folds a trailing window rather than the whole history: rows are selected newest-first, then folded in causal order. A task whose events have all scrolled out of that window stops appearing, and one only partly inside it projects from the events that remain.
 
 ### Responses
 

@@ -54,6 +54,52 @@ function strOrNull(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null
 }
 
+// ─── The dashboard read window ───────────────────────────────────────────────
+// Fleet health and the graph projection fold a WINDOW of the log, not the whole
+// log: `orchestration_events` is append-only and nothing prunes it, so an
+// unbounded read is not an option. The window must be the most RECENT rows.
+//
+// `listEvents` defaults to `seq ASC`, the causal replay order the reducers need,
+// so a `limit` with no `order` silently selects the OLDEST N rows. That is a
+// freeze, not an error: past N events both dashboards would pin themselves to
+// the first N events the database ever recorded and never reflect current state
+// again. Read `desc` to select the recent window, then reverse it so
+// `projectFleetHealth` / `projectGraph` still fold chronologically (they are
+// order-sensitive: fed newest-first, an `execution_completed` would be seen
+// before its `execution_started` and every agent would read as `working`).
+//
+// The direction also decides which way a CUT pair can lie, and the two are not
+// symmetric. A completion always carries a higher `seq` than its start, so a
+// trailing window can only ever drop the START, which `Math.max(0, open - 1)`
+// clamps to `idle`: it can under-report a still-open execution but never invent
+// one. A leading window drops the COMPLETION instead, leaving `open` stuck at 1
+// with a stale `lastEventTs`, which is why the old read did not merely freeze,
+// it reported healthy agents as permanent zombies. A missed zombie is the safe
+// way to be wrong here, and the stuck execution behind it is still reaped by the
+// board's orphan reconciliation regardless of what this view shows.
+export const DASHBOARD_EVENT_WINDOW = 5000
+
+/**
+ * The most recent `DASHBOARD_EVENT_WINDOW` events for the requested scope, in
+ * chronological (`seq ASC`) order. Shared by both dashboard handlers so the two
+ * cannot drift apart on ordering again. Query: `teamId?`.
+ *
+ * A `since` (ms) narrowing filter is deliberately NOT offered here, unlike on
+ * `/api/obs/events`: no index leads with `ts`, so a window matching fewer rows
+ * than the limit must scan the whole never-pruned table to prove none remain,
+ * and this read sits on a synchronous 5-second poll. `teamId` rides
+ * `idx_orch_events_team_seq`, so scoping by team stays an index seek.
+ */
+function readRecentEvents(req: Request): OrchestrationEvent[] {
+  return listEvents(getDb(), {
+    teamId: strParam(req.query['teamId']),
+    order: 'desc',
+    limit: DASHBOARD_EVENT_WINDOW,
+  })
+    .reverse()
+    .map(toEvent)
+}
+
 // ─── POST /api/obs/ingest ────────────────────────────────────────────────────
 // Mirror client-observed runtime events (the OpenClaw in-browser path, which the
 // server never sees) into the durable log so the activity terminal is uniform
@@ -196,6 +242,11 @@ export function obsEventsGET(req: Request, res: Response): void {
 // ─── GET /api/obs/traces/:traceId ────────────────────────────────────────────
 // One trace = all events sharing the traceId, ordered seq ASC (causal). Renders
 // the full multi-agent task (leader → specialists → tools).
+//
+// The ASC window here is DELIBERATE. Do not "fix" it to `desc` by analogy with
+// the dashboard handlers below. A trace is a bounded tree, not a growing stream:
+// if one ever exceeded the limit, the head (root span first) is the half that
+// still reconstructs, whereas the tail would be orphan child spans with no parent.
 export function obsTraceGET(req: Request, res: Response): void {
   try {
     const traceId = (req.params['traceId'] as string | undefined) ?? ''
@@ -257,10 +308,7 @@ export function obsErrorsGET(req: Request, res: Response): void {
 // Fleet-health triage (working / idle / stalled / zombie). Query: teamId?
 export function obsHealthGET(req: Request, res: Response): void {
   try {
-    const events = listEvents(getDb(), {
-      teamId: strParam(req.query['teamId']),
-      limit: 5000,
-    }).map(toEvent)
+    const events = readRecentEvents(req)
     const health = projectFleetHealth(events, Date.now())
     res.json({ agents: [...health.entries()].map(([id, h]) => ({ agentId: id, ...h })) })
   } catch (err) {
@@ -272,11 +320,7 @@ export function obsHealthGET(req: Request, res: Response): void {
 // The event-sourced delegation/status/cost graph projection. Query: teamId?
 export function obsGraphGET(req: Request, res: Response): void {
   try {
-    const events = listEvents(getDb(), {
-      teamId: strParam(req.query['teamId']),
-      limit: 5000,
-    }).map(toEvent)
-    res.json(projectGraph(events))
+    res.json(projectGraph(readRecentEvents(req)))
   } catch (err) {
     res.status(500).json({ error: redactValue(String(err)) })
   }

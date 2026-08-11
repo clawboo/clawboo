@@ -2,6 +2,12 @@
 // a trace/graph replay reproduces state deterministically (a deliberate deviation
 // from governance/audit's `desc(createdAt)`, which suits a "most-recent" lineage
 // feed). Pass `order: 'desc'` for a recent-first events feed.
+//
+// ⚠ `limit` composes with `order`, and the log is append-only and never pruned.
+// A `limit` with no `order` therefore selects the OLDEST N rows, not the newest.
+// A caller reading a WINDOW of a live stream must pass `order: 'desc'` and
+// reverse the result if its consumer needs chronological order. Getting this
+// wrong is silent: the read keeps succeeding while pinned to ancient rows.
 
 import { and, asc, desc, eq, gt, gte, inArray, type SQL } from 'drizzle-orm'
 
