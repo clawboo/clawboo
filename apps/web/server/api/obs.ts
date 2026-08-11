@@ -54,6 +54,22 @@ function strOrNull(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null
 }
 
+/**
+ * Clamp a caller-supplied row cap to `[1, DASHBOARD_EVENT_WINDOW]`, or undefined
+ * to take the data layer's default. Forwarding the raw value let a single
+ * request drain a table nothing prunes: SQLite reads a NEGATIVE limit as
+ * unbounded, so `?limit=-1` returned every row (measured: 1M rows in ~2.9s) on
+ * the synchronous connection that also serves the event loop, then redacted all
+ * of them on the way out.
+ */
+function parseLimit(v: unknown): number | undefined {
+  const raw = strParam(v)
+  if (!raw) return undefined
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return undefined
+  return Math.min(Math.max(Math.trunc(n), 1), DASHBOARD_EVENT_WINDOW)
+}
+
 // ─── The dashboard read window ───────────────────────────────────────────────
 // Fleet health and the graph projection fold a WINDOW of the log, not the whole
 // log: `orchestration_events` is append-only and nothing prunes it, so an
@@ -217,7 +233,6 @@ export function obsEventsGET(req: Request, res: Response): void {
       .map((k) => k.trim())
       .filter(Boolean) as OrchestrationEventKind[] | undefined
     const sinceRaw = strParam(req.query['since'])
-    const limitRaw = strParam(req.query['limit'])
     const afterSeqRaw = strParam(req.query['afterSeq'])
     const rows = listEvents(db, {
       teamId: strParam(req.query['teamId']),
@@ -227,7 +242,7 @@ export function obsEventsGET(req: Request, res: Response): void {
       kinds: kinds && kinds.length ? kinds : undefined,
       since: sinceRaw ? Number(sinceRaw) : undefined,
       afterSeq: afterSeqRaw ? Number(afterSeqRaw) : undefined,
-      limit: limitRaw ? Number(limitRaw) : undefined,
+      limit: parseLimit(req.query['limit']),
       order: req.query['order'] === 'desc' ? 'desc' : 'asc',
     })
     // Redact-on-display: mask any credential-shaped key/value in each event's JSON

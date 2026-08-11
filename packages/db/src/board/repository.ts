@@ -796,13 +796,20 @@ export interface CompleteExecOutcome {
   costUsd?: number | null
 }
 
+/**
+ * Close an execution row. Returns the updated row (null when `execId` matched
+ * nothing) so a caller holding only an `execId` can recover its `taskId`. The
+ * obs `execution_completed` emitters need it to stay correlated with the
+ * `execution_started` they pair with. Mirrors `createExecutionProcess`, which
+ * has always returned its row.
+ */
 export function completeExecutionProcess(
   db: ClawbooDb,
   execId: string,
   outcome: CompleteExecOutcome,
-): void {
+): DbExecutionProcess | null {
   const now = Date.now()
-  withWriteRetry(() =>
+  const row = withWriteRetry(() =>
     db
       .update(executionProcesses)
       .set({
@@ -818,8 +825,10 @@ export function completeExecutionProcess(
         costUsd: outcome.costUsd ?? null,
       })
       .where(eq(executionProcesses.id, execId))
-      .run(),
+      .returning()
+      .get(),
   )
+  return (row as DbExecutionProcess | undefined) ?? null
 }
 
 /** List a task's execution-process rows (the run ledger), oldest first. */

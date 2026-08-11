@@ -328,6 +328,23 @@ describe('observability REST', () => {
     expect(s.writes()).not.toContain('data:')
   })
 
+  it('GET /api/obs/events clamps limit (a negative one must not drain the table)', () => {
+    seed()
+    const res = mockRes()
+    // SQLite reads a NEGATIVE limit as UNBOUNDED, so forwarding this raw let one
+    // request pull every row of a never-pruned table on the synchronous
+    // connection that also serves the event loop.
+    obsEventsGET(req({ limit: '-1' }), res.res)
+    expect(res.statusCode()).toBe(200)
+    const body = res.body() as { events: unknown[] }
+    expect(body.events.length).toBeGreaterThan(0)
+    expect(body.events.length).toBeLessThanOrEqual(DASHBOARD_EVENT_WINDOW)
+
+    const capped = mockRes()
+    obsEventsGET(req({ limit: '2' }), capped.res)
+    expect((capped.body() as { events: unknown[] }).events).toHaveLength(2)
+  })
+
   // ── The dashboard read window ─────────────────────────────────────────────
   // Both dashboards fold a WINDOW of an append-only, never-pruned log. Two
   // independent things have to hold, so they get independent tests:

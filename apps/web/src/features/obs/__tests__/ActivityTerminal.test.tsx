@@ -90,6 +90,31 @@ describe('ActivityTerminal', () => {
     expect(screen.getByText('error')).toBeInTheDocument()
   })
 
+  it('backfills the RECENT window (order=desc) and still renders chronologically', async () => {
+    let requestedOrder: string | null = null
+    server.use(
+      http.get('/api/obs/events', ({ request }) => {
+        requestedOrder = new URL(request.url).searchParams.get('order')
+        // A desc feed: newest first, the way the server returns it.
+        return HttpResponse.json({
+          events: [
+            wire(2, 'tool_call', { name: 'newer_call', input: {} }),
+            wire(1, 'tool_call', { name: 'older_call', input: {} }),
+          ],
+        })
+      }),
+    )
+    render(<ActivityTerminal scope={{ taskId: 't1' }} />)
+    expect(await screen.findByText('older_call')).toBeInTheDocument()
+    // `asc` would backfill the FIRST N events ever recorded for this scope, on a
+    // log nothing prunes, and seed the SSE cursor from them so the tail replays
+    // the whole log forward.
+    expect(requestedOrder).toBe('desc')
+    // The hook reverses the window, so the terminal still reads oldest → newest.
+    const shown = screen.getAllByText(/older_call|newer_call/).map((n) => n.textContent)
+    expect(shown).toEqual(['older_call', 'newer_call'])
+  })
+
   it('shows the branded empty state when there is no activity', async () => {
     server.use(http.get('/api/obs/events', () => HttpResponse.json({ events: [] })))
     render(<ActivityTerminal scope={{ taskId: 't1' }} />)

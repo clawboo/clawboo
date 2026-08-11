@@ -42,7 +42,7 @@ Returns rows from the event log filtered by the query params, ordered by the mon
 | `kinds`    | string          | Comma-separated list of event kinds; empty/blank values dropped. |
 | `since`    | number          | `ts >=` (wall-clock ms), a recent-window read.                   |
 | `afterSeq` | number          | `seq >` cursor (strictly monotonic, collision-free).             |
-| `limit`    | number          | Row cap (defaults to 500 in the data layer when omitted).        |
+| `limit`    | number          | Row cap, clamped to 1-5000 (defaults to 500 when omitted).       |
 | `order`    | `asc` \| `desc` | `desc` only when literally `"desc"`; anything else is `asc`.     |
 
 - **Request body**: none.

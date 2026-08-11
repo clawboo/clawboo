@@ -291,12 +291,19 @@ export function boardExecutionCompletePATCH(req: Request, res: Response): void {
     }
     const db = getDb()
     const execId = (req.params['execId'] as string | undefined) ?? ''
-    completeExecutionProcess(db, execId, parsed.data)
-    // taskId/agentId aren't in scope on this REST path (only execId) — the
-    // execution_started event carries them; correlate by execId. The runner path
-    // (T5) emits a fully-correlated execution_completed.
+    // The request carries only an execId, but the closed row carries its taskId,
+    // so the correlation columns ARE recoverable here. Emitting without them
+    // stranded this event: `projectFleetHealth` skips any event with no agentId,
+    // so the open-run counter never decremented and a finished agent read as a
+    // permanent zombie. "Correlate by execId" was never implemented downstream.
+    const exec = completeExecutionProcess(db, execId, parsed.data)
+    const task = exec ? getTask(db, exec.taskId) : null
     emitEvent(db, {
       kind: 'execution_completed',
+      taskId: exec?.taskId ?? null,
+      teamId: task?.teamId ?? null,
+      agentId: task?.assigneeAgentId ?? null,
+      runtime: exec?.executorType ?? null,
       data: {
         execId,
         status: parsed.data.status,
