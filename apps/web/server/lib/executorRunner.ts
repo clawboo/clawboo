@@ -225,6 +225,15 @@ async function acquireWorkspace(
   repoPath: string | null | undefined,
   kind: string,
 ): Promise<WorkspaceOutcome> {
+  // `worktrees: false` means the runtime MANAGES ITS OWN workspace, not that it
+  // has none. The only adapter that declares it is OpenClaw, a connected
+  // substrate that runs inside its Gateway-owned workspace and is refused by
+  // this runner before the claim (see the `connected_substrate` guard). Every
+  // SPAWNED runtime declares `worktrees: true` and is therefore covered by the
+  // file-mutating refusal further down, which is the case that actually matters:
+  // those inherit THIS process's cwd when `cwd` is null. Do not "harden" this
+  // into a refusal — it breaks the deliberate `worktrees: false` fakes that let
+  // runner tests skip git setup, and guards a path that cannot be reached.
   if (!caps.worktrees) return { ok: true, cwd: null, resume: null }
 
   const existing = await getTaskWorkspace(taskId)
@@ -342,6 +351,14 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
         // the run reached a terminal state (e.g. writing the handoff on the success
         // path); releasing then would resurrect a finished task and clear its
         // verification verdict, which is worse than the stranded claim we're fixing.
+        // Close the execution row first: releasing the task without it leaves an
+        // orphaned `running` execution that only boot-time reconciliation clears.
+        if (claimState.execId) {
+          completeExecutionProcess(input.db, claimState.execId, {
+            status: 'failed',
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
         if (input.db && getTask(input.db, input.taskId)?.status === 'in_progress') {
           releaseTask(input.db, input.taskId)
         }
@@ -353,9 +370,11 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
   }
 }
 
-/** Mutable claim flag shared with `runTaskInner` (see the safety net above). */
+/** Mutable run state shared with `runTaskInner` (see the safety net above). */
 interface ClaimState {
   claimed: boolean
+  /** Set once the execution row exists, so an unexpected throw can close it. */
+  execId?: string
 }
 
 async function runTaskInner(
@@ -422,6 +441,9 @@ async function runTaskInner(
     executorType: runtimeId,
     runReason: degr.resumeViaHandoff ? 'resume-via-handoff' : 'run',
   })
+  // Share it with the outer safety net so an unexpected throw can close the row
+  // instead of leaving it `running` with no runner behind it.
+  claimState.execId = exec.id
   emitEvent(db, {
     kind: 'execution_started',
     traceId: span.traceId,

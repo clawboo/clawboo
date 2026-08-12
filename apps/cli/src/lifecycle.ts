@@ -379,6 +379,12 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
   const childStdio: 'ignore' | ['ignore', number, number] = serverLog
     ? ['ignore', serverLog.fd, serverLog.fd]
     : 'ignore'
+  // `fork()` only auto-attaches its required IPC channel for the 'ignore'
+  // SHORTHAND; an explicit stdio array must carry 'ipc' itself or fork() throws
+  // "Forked processes must have an IPC channel". `spawn()` must NOT have it.
+  const forkStdio: 'ignore' | ['ignore', number, number, 'ipc'] = serverLog
+    ? ['ignore', serverLog.fd, serverLog.fd, 'ipc']
+    : 'ignore'
 
   // Strategy 1: Bundled mode — server.js sits next to this CLI entry
   const bundledServerPath = path.join(__dirname, 'server.js')
@@ -419,7 +425,7 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
         ...pinned,
       },
       detached: true,
-      stdio: childStdio,
+      stdio: forkStdio,
     })
     child.unref()
     // `fork()` ALWAYS attaches an IPC channel, even under `stdio: 'ignore'`, and
