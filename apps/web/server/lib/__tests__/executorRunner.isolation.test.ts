@@ -18,7 +18,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createDb, createTask, getTask } from '@clawboo/db'
+import { createTask, getTask } from '@clawboo/db'
 import type {
   Capabilities,
   RunHandle,
@@ -28,7 +28,7 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 
-import { getDbPath } from '../db'
+import { getDb, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
 
 const CAPS: Capabilities = {
@@ -84,13 +84,16 @@ describe('executor runner — isolation + claim safety', () => {
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true })
   })
 
   function newTask(): string {
-    return createTask(createDb(getDbPath()), {
+    return createTask(getDb(), {
       title: 'Change some files',
       description: 'file-mutating work',
       status: 'todo',
@@ -103,7 +106,7 @@ describe('executor runner — isolation + claim safety', () => {
     const fake = new ProbeAdapter('claude-code')
 
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'claude-1',
@@ -118,7 +121,7 @@ describe('executor runner — isolation + claim safety', () => {
     // The agent must never have been started.
     expect(fake.startCount).toBe(0)
     // And the task goes back to the queue rather than being stranded.
-    expect(getTask(createDb(getDbPath()), taskId)?.status).toBe('todo')
+    expect(getTask(getDb(), taskId)?.status).toBe('todo')
   })
 
   it('still runs read-only work without a worktree', async () => {
@@ -126,7 +129,7 @@ describe('executor runner — isolation + claim safety', () => {
     const fake = new ProbeAdapter('claude-code')
 
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: () => fake,
       taskId,
       assigneeAgentId: 'claude-1',
@@ -144,7 +147,7 @@ describe('executor runner — isolation + claim safety', () => {
 
     await expect(
       runTaskOnRuntime({
-        db: createDb(getDbPath()),
+        db: getDb(),
         makeAdapter: () => fake,
         taskId,
         assigneeAgentId: 'claude-1',
@@ -154,6 +157,6 @@ describe('executor runner — isolation + claim safety', () => {
     ).rejects.toThrow(/driver exploded/)
 
     // The throw propagates, but the task must not be left wedged in_progress.
-    expect(getTask(createDb(getDbPath()), taskId)?.status).toBe('todo')
+    expect(getTask(getDb(), taskId)?.status).toBe('todo')
   })
 })

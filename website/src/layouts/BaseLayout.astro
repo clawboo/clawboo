@@ -165,15 +165,19 @@ const jsonLd = { '@context': 'https://schema.org', '@graph': graph }
       Skipped entirely for Do Not Track visitors (see the guard below).
     -->
     <script is:inline>
-      // Do Not Track: skip the ENTIRE analytics bootstrap, not just capture.
-      // Gating here (rather than relying on posthog's own respect_dnt) means the
-      // loader never runs and no request is ever made, which is verifiable from
-      // the network panel and independent of posthog-js internals.
-      const dnt =
-        navigator.doNotTrack === '1' ||
-        window.doNotTrack === '1' ||
-        navigator.msDoNotTrack === '1'
-      if (!dnt) {
+      // Wrapped in an IIFE because <ClientRouter /> can re-execute an is:inline
+      // script on a client-side navigation; a top-level `const` would then throw
+      // "Identifier 'dnt' has already been declared" and take the page with it.
+      ;(function () {
+        // Do Not Track: skip the ENTIRE analytics bootstrap, not just capture.
+        // Gating here (rather than relying on posthog's own respect_dnt) means the
+        // loader never runs and no request is ever made, which is verifiable from
+        // the network panel and independent of posthog-js internals.
+        var dnt =
+          navigator.doNotTrack === '1' ||
+          window.doNotTrack === '1' ||
+          navigator.msDoNotTrack === '1'
+        if (dnt) return
       !(function (t, e) {
         var o, n, p, r
         e.__SV ||
@@ -227,7 +231,7 @@ const jsonLd = { '@context': 'https://schema.org', '@graph': graph }
         // from running at all; this covers any path that reaches init anyway.
         respect_dnt: true,
       })
-      }
+      })()
     </script>
 
     <script type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, '\\u003c')} />
