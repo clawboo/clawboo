@@ -6,7 +6,11 @@ on:
 
 concurrency:
   group: publish-${{ github.ref }}
-  cancel-in-progress: true
+  # NEVER cancel a release mid-flight. `changeset publish` pushes to npm and then
+  # creates the git tags; cancelling between those steps leaves a version live on
+  # npm with no tag behind it, which cannot be undone. Queue the next run instead --
+  # a superseded release is cheap, a desynced one is not.
+  cancel-in-progress: false
 
 # Least-privilege default, matching ci.yml and evals.yml. Any job added here
 # without its own `permissions:` block would otherwise inherit whatever the

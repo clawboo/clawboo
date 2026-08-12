@@ -5,7 +5,7 @@
 <p align="center">
   A <strong>TypeScript orchestrator for heterogeneous AI agent runtimes</strong>. Native agents are built in: paste a key and go.
   <br/>
-  Claude Code, Codex, Hermes, and OpenClaw join as <strong>peer teammates in one chat</strong>, sharing one board, one memory, and one capability dashboard, all governed, with autonomous work independently verified.
+  Claude Code, Codex, Hermes, and OpenClaw join as <strong>peer teammates in one chat</strong>, sharing one board, one memory, and one capability dashboard, all governed, with autonomous file-mutating work independently verified before it counts as done.
 </p>
 
 <p align="center">
@@ -77,7 +77,7 @@ The server keeps running after the CLI exits, so `clawboo stop` and `clawboo res
 - **Mixed-runtime peer chat.** Native, Claude Code, Codex, Hermes, and OpenClaw agents are all named peers in one room, and any runtime can lead. Coordination flows over structured lifecycle events and MCP calls, never terminal-output scraping.
 - **Native agents built in, external runtimes one click away.** Paste a provider key and Clawboo runs agents itself, or install and connect a coding-agent CLI from the Runtimes panel. Each runtime keeps its own native powers (OpenClaw keeps its channels and always-on heartbeat; Hermes keeps its self-improvement and skills).
 - **One shared memory, one capability dashboard.** Every runtime reads and writes the same tiered memory store and shows up in one unified skills and connectors inventory, while its private self-model stays its own.
-- **Verified, governed, observable.** Built-in verification for autonomous completions (builder is not the judge), spend tracking and warnings, depth and fan-out caps, and approvals, plus OpenTelemetry traces, structured logs, and an error taxonomy, all on by default. Hard spend caps that auto-pause a run are opt-in.
+- **Verified, governed, observable.** Built-in verification for autonomous file-mutating completions (builder is not the judge: a deterministic gate always, plus an independent read-only critic on a risky or large diff; read-only research carries no verdict), spend tracking and warnings, and depth and fan-out caps, plus OpenTelemetry traces, structured logs, and an error taxonomy, all on by default. Interactive tool approvals apply to the connected OpenClaw path; the spawned runtimes execute board tasks non-interactively inside a per-task worktree. Hard spend caps that auto-pause a run are opt-in.
 
 ---
 

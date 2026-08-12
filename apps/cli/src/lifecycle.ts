@@ -23,6 +23,8 @@ import fs from 'fs'
 
 import { resolveClawbooDir } from '@clawboo/config'
 
+import { openServerLog } from './server-log'
+
 import { VERSION } from './version'
 import { findListenerPid } from '@clawboo/process-lookup'
 
@@ -358,7 +360,7 @@ export interface StartOptions {
 export type StartOutcome =
   | { status: 'started'; port: number; mode: LaunchMode }
   | { status: 'no-server' }
-  | { status: 'timeout'; mode: LaunchMode; monorepoRoot: string | null }
+  | { status: 'timeout'; mode: LaunchMode; monorepoRoot: string | null; logPath: string | null }
 
 /**
  * Start a detached dashboard server and wait for it to answer.
@@ -369,6 +371,15 @@ export type StartOutcome =
  * while the server keeps running.
  */
 export async function startDashboard(opts: StartOptions = {}): Promise<StartOutcome> {
+  // The server is detached with `stdio: 'ignore'`, so a boot failure leaves no
+  // trace and the launcher can only report an unexplained timeout. Capture the
+  // child's output to a rolling log instead; `startAndReport` tails it on timeout.
+  // A null log (unwritable home) degrades to the previous ignore-everything path.
+  const serverLog = openServerLog(`\n--- clawboo v${VERSION} · pid ${process.pid} ---\n`)
+  const childStdio: 'ignore' | ['ignore', number, number] = serverLog
+    ? ['ignore', serverLog.fd, serverLog.fd]
+    : 'ignore'
+
   // Strategy 1: Bundled mode — server.js sits next to this CLI entry
   const bundledServerPath = path.join(__dirname, 'server.js')
 
@@ -408,7 +419,7 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
         ...pinned,
       },
       detached: true,
-      stdio: 'ignore',
+      stdio: childStdio,
     })
     child.unref()
     // `fork()` ALWAYS attaches an IPC channel, even under `stdio: 'ignore'`, and
@@ -430,7 +441,7 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
           cwd: monorepoRoot!,
           env: { ...process.env, NODE_ENV: 'production', CLAWBOO_VERSION: VERSION, ...pinned },
           detached: true,
-          stdio: 'ignore',
+          stdio: childStdio,
           shell: true,
           windowsHide: true,
         })
@@ -438,7 +449,7 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
           cwd: monorepoRoot!,
           env: { ...process.env, NODE_ENV: 'production', CLAWBOO_VERSION: VERSION, ...pinned },
           detached: true,
-          stdio: 'ignore',
+          stdio: childStdio,
         })
     // Without a listener a failed spawn emits an unhandled 'error' event, which
     // takes the launcher down with an opaque stack instead of the readiness
@@ -470,7 +481,7 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
     if (found !== null) return { status: 'started', port: found, mode }
   }
 
-  return { status: 'timeout', mode, monorepoRoot }
+  return { status: 'timeout', mode, monorepoRoot, logPath: serverLog?.path ?? null }
 }
 
 /** Test seams — every side effect `stopDashboard` performs is injectable. */

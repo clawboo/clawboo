@@ -213,6 +213,10 @@ const jsonLd = { '@context': 'https://schema.org', '@graph': graph }
         cookieless_mode: 'always',
         defaults: '2026-05-30',
         autocapture: true,
+        // Honour the browser's Do Not Track signal: when set, posthog-js opts the
+        // visitor out at init and sends nothing. Re-evaluated on every page load,
+        // so it still applies under cookieless (memory-only) persistence.
+        respect_dnt: true,
       })
     </script>
 

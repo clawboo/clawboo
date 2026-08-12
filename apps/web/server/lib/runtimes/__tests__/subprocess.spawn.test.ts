@@ -32,7 +32,7 @@ vi.mock('node:child_process', () => {
   }
 })
 
-const { createSpawnDriver } = await import('../subprocess')
+const { createSpawnDriver, killLiveSubprocesses } = await import('../subprocess')
 
 describe('createSpawnDriver — never spawns with a shell', () => {
   it('passes shell:false and the untrusted prompt verbatim as argv', async () => {
@@ -86,5 +86,33 @@ describe('createSpawnDriver — never spawns with a shell', () => {
       if (prevStudio === undefined) delete process.env['STUDIO_ACCESS_TOKEN']
       else process.env['STUDIO_ACCESS_TOKEN'] = prevStudio
     }
+  })
+})
+
+// A spawned runtime child is detached and never unref'd, so it OUTLIVES the server
+// unless shutdown reaps it explicitly. Without that, a Ctrl-C leaves an agent CLI
+// running against a task worktree while boot reconciliation hands that task to
+// another runner — two live runs, and untracked provider spend.
+describe('killLiveSubprocesses — shutdown reaps running children', () => {
+  it('reports the children it terminated and empties the registry', async () => {
+    killLiveSubprocesses() // start from a clean registry
+
+    const mk = () =>
+      createSpawnDriver({
+        resolve: async () => ({ command: '/abs/codex', args: ['exec', 'work'] }),
+        parseLine: () => [],
+        onClose: () => [],
+      })
+    await mk().start()
+    await mk().start()
+
+    // Both live children are reaped...
+    expect(killLiveSubprocesses()).toBe(2)
+    // ...and the registry is cleared, so a second pass is a no-op.
+    expect(killLiveSubprocesses()).toBe(0)
+  })
+
+  it('is safe to call when nothing is running', () => {
+    expect(killLiveSubprocesses()).toBe(0)
   })
 })

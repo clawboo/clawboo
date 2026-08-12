@@ -155,6 +155,9 @@ describe('executor runner — session rotation + memory injection', () => {
       taskId,
       assigneeAgentId: 'claude-1',
       disableMemoryAutoInject: true,
+      // Read-only: this suite exercises rotation mechanics, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -197,6 +200,9 @@ describe('executor runner — session rotation + memory injection', () => {
       taskId,
       assigneeAgentId: 'claude-1',
       disableMemoryAutoInject: true,
+      // Read-only: this suite exercises rotation mechanics, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
       maxRotations: 2,
     })
     expect(result.ok).toBe(true)
@@ -217,6 +223,9 @@ describe('executor runner — session rotation + memory injection', () => {
       taskId,
       assigneeAgentId: 'claude-1',
       disableMemoryAutoInject: true,
+      // Read-only: this suite exercises rotation mechanics, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
     })
     expect(result.ok && result.status).toBe('done')
     expect(fake.startCount).toBe(1)
@@ -235,6 +244,9 @@ describe('executor runner — session rotation + memory injection', () => {
       taskId,
       assigneeAgentId: 'claude-1',
       disableMemoryAutoInject: true,
+      // Read-only: this suite exercises rotation mechanics, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
     })
     expect(result.ok).toBe(true)
     // Two runs × 5¢ = 10¢ recorded against the agent budget.
@@ -256,6 +268,9 @@ describe('executor runner — session rotation + memory injection', () => {
       makeAdapter: () => fakeOn,
       taskId: taskOn,
       assigneeAgentId: 'claude-1',
+      // Read-only: this suite exercises rotation mechanics, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
     })
     expect(fakeOn.startedContexts[0]).toContain('<auto-memory')
     expect(fakeOn.startedContexts[0]).toContain('Stripe checkout')
@@ -268,6 +283,9 @@ describe('executor runner — session rotation + memory injection', () => {
       taskId: taskOff,
       assigneeAgentId: 'claude-1',
       disableMemoryAutoInject: true,
+      // Read-only: this suite exercises rotation mechanics, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
     })
     expect(fakeOff.startedContexts[0]).not.toContain('<auto-memory')
   })

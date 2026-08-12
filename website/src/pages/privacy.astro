@@ -37,10 +37,13 @@ const a = 'text-foreground underline decoration-foreground/30 underline-offset-2
         <li>
           <strong class="font-semibold text-foreground/90">The marketing site (www.claw.boo)</strong>
           uses Cloudflare Web Analytics for page views and performance, and PostHog (US-hosted) in
-          cookieless mode to measure which calls-to-action and features people use. Neither sets
-          cookies nor stores anything in your browser, and PostHog does not identify you across
-          sessions. Both process your IP address to serve and count requests, acting as our
-          processors.
+          cookieless mode to measure which calls-to-action and features people use. PostHog's
+          autocapture is enabled, so it records interaction events across the site — clicks, form
+          submissions, and the text and attributes of the element you interacted with — alongside the
+          page URL. Neither sets cookies nor stores anything in your browser, and PostHog does not
+          identify you across sessions. Both process your IP address to serve and count requests,
+          acting as our processors. If your browser sends a Do Not Track signal, PostHog opts you out
+          at load and sends nothing.
         </li>
         <li>
           <strong class="font-semibold text-foreground/90">The documentation (docs.claw.boo)</strong>

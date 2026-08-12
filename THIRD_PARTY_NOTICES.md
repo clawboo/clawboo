@@ -68,6 +68,7 @@ These are used to build and test Clawboo and are not shipped in the npm package:
 **Ingested commit**: `64eee9f8e04f69b04e78e150d771a443c64720be`
 **Content location**: `apps/web/src/features/marketplace/agents/agency/`
 **Files ingested**: 179 agent `.md` files across 13 domain folders
+**License verified**: MIT, confirmed at the pinned commit on 2026-07-28 (GitHub license API, `spdx_id: MIT`). Because the ingest is commit-pinned, a later upstream relicense does not affect the grant that applied at this commit; re-verify when the pin is next moved.
 
 MIT License
 
@@ -97,6 +98,7 @@ SOFTWARE.
 **Ingested commit**: `659895e58e2105c6db8fbef39f446c8a786a480c`
 **Content location**: `apps/web/src/features/marketplace/agents/awesome-openclaw/`
 **Files ingested**: 42 usecase `.md` files transformed into 110 agent catalog entries
+**License verified**: MIT, confirmed at the pinned commit on 2026-07-28 (GitHub license API, `spdx_id: MIT`). Because the ingest is commit-pinned, a later upstream relicense does not affect the grant that applied at this commit; re-verify when the pin is next moved.
 
 Each generated catalog entry stores the full, verbatim usecase body in its
 `identityTemplate` field (zero-loss ingestion), with a source URL pointing back to the

@@ -17,6 +17,36 @@ import path from 'node:path'
 import { isWindows } from '../platform'
 import { buildChildEnv } from './childEnv'
 import { killProcessTree } from './killTree'
+
+/**
+ * Every spawned runtime child that is still running.
+ *
+ * Children are spawned `detached` (POSIX) so `abort()` can signal the whole
+ * process group, and they are deliberately never `unref`'d. That means a server
+ * exit does NOT take them with it: without this registry a Ctrl-C or crash leaves
+ * an agent CLI running against a task worktree, still burning provider spend,
+ * while boot-time reconciliation releases that task for another runner to claim —
+ * two live runs on one worktree.
+ */
+const liveChildren = new Set<ChildProcess>()
+
+/**
+ * Kill every still-running runtime child. Called from the server's shutdown path
+ * so a graceful stop doesn't orphan agent processes. Best-effort and synchronous:
+ * it runs inside a signal handler, just before `process.exit`.
+ */
+export function killLiveSubprocesses(): number {
+  const count = liveChildren.size
+  for (const child of liveChildren) {
+    try {
+      killProcessTree(child)
+    } catch {
+      // Best effort — one stubborn child must not block the rest of shutdown.
+    }
+  }
+  liveChildren.clear()
+  return count
+}
 import { resolveWindowsSpawn } from './winSpawn'
 
 export interface ResolvedSpawn {
@@ -104,6 +134,10 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
         ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         stdio: ['ignore', 'pipe', 'pipe'],
       })
+      // Track it so a server shutdown can reap it instead of orphaning it.
+      // (Deregistered in the 'close' handler below.)
+      liveChildren.add(child)
+      const spawned = child
       let buf = ''
       child.stdout?.on('data', (d: Buffer) => {
         const s = d.toString()
@@ -124,6 +158,8 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
           push(ev)
       })
       child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+        // No longer running — drop it from the shutdown-reap registry.
+        liveChildren.delete(spawned)
         if (buf.trim()) for (const ev of cfg.parseLine(buf)) push(ev)
         for (const ev of cfg.onClose(code, signal, stdoutAll, stderrAll)) push(ev)
       })
