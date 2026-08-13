@@ -23,3 +23,8 @@ coverage
 
 # Astro generated cache + types (website/) — regenerated on build, must never be committed.
 website/.astro/
+
+# Package tarballs. `pnpm pack` (used by test:clean-install, and by `changeset
+# publish` at release time) writes one into the package directory; it is a build
+# artifact, never a source file.
+*.tgz

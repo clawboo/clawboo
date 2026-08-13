@@ -71,6 +71,7 @@ import { buildMemoryInjection } from './memoryInjection'
 import {
   alertHarnessBug,
   emitEvent,
+  logStructured,
   recordToolSpan,
   spanIdFor,
   withTaskSpan,
@@ -230,10 +231,10 @@ async function acquireWorkspace(
   // substrate that runs inside its Gateway-owned workspace and is refused by
   // this runner before the claim (see the `connected_substrate` guard). Every
   // SPAWNED runtime declares `worktrees: true` and is therefore covered by the
-  // file-mutating refusal further down, which is the case that actually matters:
-  // those inherit THIS process's cwd when `cwd` is null. Do not "harden" this
-  // into a refusal — it breaks the deliberate `worktrees: false` fakes that let
-  // runner tests skip git setup, and guards a path that cannot be reached.
+  // file-mutating refusal further down, which is the case that matters: those
+  // inherit this process's cwd when `cwd` is null. Keep this branch permissive —
+  // refusing here guards an unreachable path and breaks the `worktrees: false`
+  // fakes that let runner tests skip git setup.
   if (!caps.worktrees) return { ok: true, cwd: null, resume: null }
 
   const existing = await getTaskWorkspace(taskId)
@@ -660,6 +661,11 @@ async function runTaskInner(
     inputTokens = 0
     outputTokens = 0
     doneReason = 'error'
+    // Whether the runtime reported ANY spend for this pass. Codex and Hermes only
+    // emit a cost event `if (ev.usage)`, so a CLI output-format drift silently
+    // yields zero recorded spend — the budget ledger would then under-count real
+    // money with no signal at all. Surfaced after the loop.
+    let sawSpend = false
 
     for await (const ev of adapter.events(run)) {
       if (ev.kind === 'text-delta') {
@@ -680,6 +686,7 @@ async function runTaskInner(
                 })
               : 0
         const costEstimated = ev.costUsd == null
+        sawSpend = true
         costUsd = usd
         if (ev.usage) {
           inputTokens = ev.usage.inputTokens
@@ -849,13 +856,39 @@ async function runTaskInner(
       } else if (ev.kind === 'done') {
         doneReason = ev.reason
         summary = ev.summary || lastText
-        if (ev.costUsd != null) costUsd = ev.costUsd
+        if (ev.costUsd != null) {
+          sawSpend = true
+          costUsd = ev.costUsd
+        }
         if (ev.usage) {
           inputTokens = ev.usage.inputTokens
           outputTokens = ev.usage.outputTokens
         }
         break
       }
+    }
+
+    // A pass that finished its stream without reporting spend means the budget
+    // ledger under-counts this run. Codex and Hermes emit a cost event only
+    // `if (ev.usage)`, so a change in a CLI's output format stops spend reaching
+    // the ledger without failing anything. An aborted pass is excluded: it may
+    // legitimately not have billed.
+    if (!sawSpend && doneReason !== 'aborted') {
+      logStructured({
+        level: 'warn',
+        component: 'executorRunner',
+        action: 'spend_unreported',
+        correlationId: span.traceId,
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        error:
+          'Run finished without reporting any usage or cost, so no spend was recorded. ' +
+          'Budgets and caps under-count for this run; suspect a runtime output-format change.',
+        output: { doneReason },
+      })
     }
 
     // External cancel forces the aborted terminal regardless of how the runtime

@@ -1,22 +1,21 @@
 // The published `clawboo` bin entry.
 //
-// This file exists for ONE reason: the Node-version check has to happen before
-// any dependency is loaded. `dist/index.js` `require()`s externalized packages
-// at module scope, and at least one of them (`ora`) is ESM-only with no CJS
-// entry. On Node 22.0-22.11, which predates `require(esm)`, that throws a raw
-// `ERR_REQUIRE_ESM` the moment the file is loaded, long before Commander could
-// register a `preAction` hook. A guard living inside the CLI can therefore never
-// fire on the exact versions it exists to catch.
+// The Node-version check must run before any dependency loads. `dist/index.js`
+// requires externalized packages at module scope, and one of them (`ora`) is
+// ESM-only with no CJS entry, so on Node 22.0-22.11 — which predates
+// `require(esm)` — loading it throws `ERR_REQUIRE_ESM` before Commander can
+// register a `preAction` hook. A check inside the CLI cannot run on the versions
+// it needs to catch.
 //
-// So the bin points here instead. This module imports NOTHING but the local,
-// dependency-free version check (tsup inlines it), runs on any Node that can
-// parse it, and only then hands off to the real CLI.
+// This module therefore imports nothing but the local, dependency-free version
+// check (tsup inlines it) and hands off to the real CLI once the runtime is
+// supported.
 
 import { nodeVersionError } from './node-version'
 
 const versionError = nodeVersionError(process.version)
 if (versionError) {
-  // No chalk: it is a dependency, and loading one here would defeat the purpose.
+  // Written with a raw escape rather than chalk: this path must load no dependency.
   process.stderr.write(`[31m✖ [39m${versionError}\n`)
   process.exit(1)
 }

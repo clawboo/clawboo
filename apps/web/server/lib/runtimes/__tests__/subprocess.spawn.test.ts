@@ -12,27 +12,48 @@ interface SpawnCall {
   args: string[]
   opts: Record<string, unknown>
 }
-const spawnState = vi.hoisted(() => ({ calls: [] as SpawnCall[] }))
+const spawnState = vi.hoisted(() => ({
+  calls: [] as SpawnCall[],
+  children: [] as Record<string, unknown>[],
+}))
 
 vi.mock('node:child_process', () => {
   const makeChild = (): unknown => {
+    const listeners: Record<string, ((...a: unknown[]) => void)[]> = {}
     const child: Record<string, unknown> = {
       stdout: { on: () => undefined },
       stderr: { on: () => undefined },
       kill: () => undefined,
+      // DELIBERATELY no `pid`: killProcessTree early-returns without one, so a
+      // test can never signal a real process group via `process.kill(-pid)`.
+      exitCode: null,
+      signalCode: null,
+      // Let a test drive the lifecycle the shutdown path actually waits on.
+      emitClose: () => {
+        child['exitCode'] = 0
+        for (const fn of listeners['close'] ?? []) fn(0, null)
+      },
     }
-    child['on'] = () => child // chainable no-op for 'error'/'close'
+    const add = (ev: string, fn: (...a: unknown[]) => void): unknown => {
+      ;(listeners[ev] ??= []).push(fn)
+      return child
+    }
+    child['on'] = add
+    child['once'] = add
     return child
   }
   return {
     spawn: (command: string, args: string[], opts: Record<string, unknown>) => {
       spawnState.calls.push({ command, args, opts })
-      return makeChild()
+      const child = makeChild()
+      spawnState.children.push(child as Record<string, unknown>)
+      return child
     },
   }
 })
 
-const { createSpawnDriver, killLiveSubprocesses } = await import('../subprocess')
+const { createSpawnDriver, killLiveSubprocesses, shutdownLiveSubprocesses } =
+  await import('../subprocess')
 
 describe('createSpawnDriver — never spawns with a shell', () => {
   it('passes shell:false and the untrusted prompt verbatim as argv', async () => {
@@ -114,5 +135,61 @@ describe('killLiveSubprocesses — shutdown reaps running children', () => {
 
   it('is safe to call when nothing is running', () => {
     expect(killLiveSubprocesses()).toBe(0)
+  })
+})
+
+// `killLiveSubprocesses` only SENDS SIGTERM; killTree then schedules a SIGKILL
+// escalation on a timer. A signal handler that calls process.exit(0) right after
+// destroys that timer with the process, so a child ignoring SIGTERM outlives the
+// server. Shutdown therefore waits — but must never be able to hang.
+describe('shutdownLiveSubprocesses — waits for children, bounded', () => {
+  const startOne = async () => {
+    await createSpawnDriver({
+      resolve: async () => ({ command: '/abs/codex', args: ['exec', 'work'] }),
+      parseLine: () => [],
+      onClose: () => [],
+    }).start()
+    return spawnState.children[spawnState.children.length - 1]!
+  }
+
+  beforeEach(() => {
+    spawnState.children.length = 0
+    killLiveSubprocesses() // start from an empty registry
+  })
+
+  it('returns immediately when nothing is running', async () => {
+    await expect(shutdownLiveSubprocesses(50)).resolves.toEqual({ signalled: 0, exited: 0 })
+  })
+
+  it('waits for a child to close and reports it exited', async () => {
+    const child = await startOne()
+    // Close on the next tick, as a real child would after SIGTERM.
+    setTimeout(() => (child['emitClose'] as () => void)(), 5)
+
+    const started = Date.now()
+    const out = await shutdownLiveSubprocesses(2_000)
+
+    expect(out).toEqual({ signalled: 1, exited: 1 })
+    // Resolved on the close, NOT by burning the full timeout.
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('gives up on the deadline when a child never dies, instead of hanging', async () => {
+    await startOne() // never emits close — the stuck-child case
+
+    const started = Date.now()
+    const out = await shutdownLiveSubprocesses(60)
+    const elapsed = Date.now() - started
+
+    expect(out.signalled).toBe(1)
+    expect(out.exited).toBe(0) // it never closed
+    expect(elapsed).toBeGreaterThanOrEqual(50) // it did wait
+    expect(elapsed).toBeLessThan(2_000) // but it gave up — shutdown cannot hang
+  })
+
+  it('clears the registry so a second pass is a no-op', async () => {
+    await startOne()
+    await shutdownLiveSubprocesses(60)
+    await expect(shutdownLiveSubprocesses(60)).resolves.toEqual({ signalled: 0, exited: 0 })
   })
 })

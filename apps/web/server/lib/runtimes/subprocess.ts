@@ -17,6 +17,7 @@ import path from 'node:path'
 import { isWindows } from '../platform'
 import { buildChildEnv } from './childEnv'
 import { killProcessTree } from './killTree'
+import { resolveWindowsSpawn } from './winSpawn'
 
 /**
  * Every spawned runtime child that is still running.
@@ -47,7 +48,68 @@ export function killLiveSubprocesses(): number {
   liveChildren.clear()
   return count
 }
-import { resolveWindowsSpawn } from './winSpawn'
+
+/**
+ * How long shutdown waits for signalled children to actually die.
+ *
+ * Must exceed `killTree`'s SIGTERM→SIGKILL grace (3s): exiting sooner would kill
+ * the escalation timer before it fires, leaving a child that ignores SIGTERM
+ * running after the server is gone.
+ */
+export const SHUTDOWN_WAIT_MS = 5_000
+
+/**
+ * Signal every live runtime child and WAIT for it to exit (bounded).
+ *
+ * `killLiveSubprocesses` only sends SIGTERM; `killProcessTree` then schedules a
+ * SIGKILL escalation on a timer. A signal handler that calls `process.exit(0)`
+ * immediately afterwards kills that timer with the process, so a child ignoring
+ * SIGTERM survives. Awaiting here gives the escalation room to run.
+ *
+ * Bounded by design: a hung child must never prevent the server from exiting, so
+ * the wait resolves on the deadline regardless. Never rejects.
+ */
+export async function shutdownLiveSubprocesses(
+  timeoutMs: number = SHUTDOWN_WAIT_MS,
+): Promise<{ signalled: number; exited: number }> {
+  const children = [...liveChildren]
+  if (children.length === 0) return { signalled: 0, exited: 0 }
+
+  for (const child of children) {
+    try {
+      killProcessTree(child)
+    } catch {
+      // Best effort — one stubborn child must not block the rest of shutdown.
+    }
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs)
+    // Never let the deadline itself hold the event loop open.
+    timer.unref?.()
+  })
+  const allClosed = Promise.all(
+    children.map((child) =>
+      // Already reaped (its 'close' fired) — nothing left to await.
+      child.exitCode !== null || child.signalCode !== null
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => child.once('close', () => resolve())),
+    ),
+  ).then(() => undefined)
+
+  try {
+    await Promise.race([allClosed, deadline])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+
+  // Whatever is still tracked did not close in time; drop it so a second pass is
+  // a no-op and the registry cannot leak across a restart.
+  const exited = children.length - liveChildren.size
+  liveChildren.clear()
+  return { signalled: children.length, exited }
+}
 
 export interface ResolvedSpawn {
   command: string
