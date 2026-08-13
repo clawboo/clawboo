@@ -187,6 +187,22 @@ describe('shutdownLiveSubprocesses — waits for children, bounded', () => {
     expect(elapsed).toBeLessThan(2_000) // but it gave up — shutdown cannot hang
   })
 
+  it('does not let a child that starts DURING shutdown escape', async () => {
+    const first = await startOne() // keeps the wait pending (never closes)
+
+    const shutdown = shutdownLiveSubprocesses(200)
+    // A run that spawns after the snapshot was taken.
+    const late = await startOne()
+    const out = await shutdown
+
+    // The late child was not in the snapshot...
+    expect(out.signalled).toBe(1)
+    // ...so it must remain tracked for the synchronous fallback rather than being
+    // silently dropped, which would let it outlive the server.
+    expect(killLiveSubprocesses()).toBe(1)
+    expect(first).not.toBe(late)
+  })
+
   it('clears the registry so a second pass is a no-op', async () => {
     await startOne()
     await shutdownLiveSubprocesses(60)

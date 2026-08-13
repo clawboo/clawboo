@@ -32,11 +32,19 @@ import { resolveWindowsSpawn } from './winSpawn'
 const liveChildren = new Set<ChildProcess>()
 
 /**
+ * Set once shutdown has begun. A run that spawns after this point is killed as
+ * soon as it registers: shutdown has already taken its snapshot, so an unsignalled
+ * late child would otherwise outlive the server.
+ */
+let shuttingDown = false
+
+/**
  * Kill every still-running runtime child. Called from the server's shutdown path
  * so a graceful stop doesn't orphan agent processes. Best-effort and synchronous:
  * it runs inside a signal handler, just before `process.exit`.
  */
 export function killLiveSubprocesses(): number {
+  shuttingDown = false
   const count = liveChildren.size
   for (const child of liveChildren) {
     try {
@@ -72,6 +80,7 @@ export const SHUTDOWN_WAIT_MS = 5_000
 export async function shutdownLiveSubprocesses(
   timeoutMs: number = SHUTDOWN_WAIT_MS,
 ): Promise<{ signalled: number; exited: number }> {
+  shuttingDown = true
   const children = [...liveChildren]
   if (children.length === 0) return { signalled: 0, exited: 0 }
 
@@ -104,10 +113,11 @@ export async function shutdownLiveSubprocesses(
     if (timer) clearTimeout(timer)
   }
 
-  // Whatever is still tracked did not close in time; drop it so a second pass is
-  // a no-op and the registry cannot leak across a restart.
-  const exited = children.length - liveChildren.size
-  liveChildren.clear()
+  // Untrack only what this pass signalled. A child that registered during the wait
+  // was killed on registration but stays tracked, so the synchronous fallback in
+  // `cleanup()` still sees it rather than it vanishing from the registry.
+  const exited = children.reduce((n, c) => n + (liveChildren.has(c) ? 0 : 1), 0)
+  for (const child of children) liveChildren.delete(child)
   return { signalled: children.length, exited }
 }
 
@@ -199,6 +209,15 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
       // Track it so a server shutdown can reap it instead of orphaning it.
       // (Deregistered in the 'close' handler below.)
       liveChildren.add(child)
+      if (shuttingDown) {
+        // Spawned after shutdown began — it missed the snapshot, so signal it now
+        // rather than let it run on past process exit.
+        try {
+          killProcessTree(child)
+        } catch {
+          // Best effort — it may already be gone.
+        }
+      }
       const spawned = child
       let buf = ''
       child.stdout?.on('data', (d: Buffer) => {
