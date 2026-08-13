@@ -22,7 +22,7 @@
     "mission-control"
   ],
   "bin": {
-    "clawboo": "dist/index.js",
+    "clawboo": "dist/bootstrap.js",
     "clawboo-mcp-tasks": "dist/bin/tasks.js",
     "clawboo-mcp-memory": "dist/bin/memory.js",
     "clawboo-mcp-tools": "dist/bin/tools.js",
@@ -38,11 +38,11 @@
     "test": "vitest run"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "@clack/prompts": "^0.9.0",
-    "better-sqlite3": "11.10.0",
+    "better-sqlite3": "12.11.1",
     "chalk": "^5.4.0",
     "commander": "^12.1.0",
     "ora": "^8.1.0",

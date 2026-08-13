@@ -43,6 +43,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       mcp: true,
       worktrees: true,
       resume: true,
+      // Capability of the runtime, not of a board run: clawboo drives this
+      // runtime headless, where the SDK run sets permissionMode: 'bypassPermissions'.
+      // Isolation for those runs comes from the per-task worktree instead.
       toolApproval: true,
       models: ['sonnet', 'opus', 'haiku'],
       // Claude (Sonnet/Opus) ships a 200k-token context window — drives the

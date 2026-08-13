@@ -19,6 +19,108 @@ import { buildChildEnv } from './childEnv'
 import { killProcessTree } from './killTree'
 import { resolveWindowsSpawn } from './winSpawn'
 
+/**
+ * Every spawned runtime child that is still running.
+ *
+ * Children are spawned `detached` (POSIX) so `abort()` can signal the whole
+ * process group, and they are deliberately never `unref`'d. That means a server
+ * exit does NOT take them with it: without this registry a Ctrl-C or crash leaves
+ * an agent CLI running against a task worktree, still burning provider spend,
+ * while boot-time reconciliation releases that task for another runner to claim —
+ * two live runs on one worktree.
+ */
+const liveChildren = new Set<ChildProcess>()
+
+/**
+ * Set once shutdown has begun. A run that spawns after this point is killed as
+ * soon as it registers: shutdown has already taken its snapshot, so an unsignalled
+ * late child would otherwise outlive the server.
+ */
+let shuttingDown = false
+
+/**
+ * Kill every still-running runtime child. Called from the server's shutdown path
+ * so a graceful stop doesn't orphan agent processes. Best-effort and synchronous:
+ * it runs inside a signal handler, just before `process.exit`.
+ */
+export function killLiveSubprocesses(): number {
+  shuttingDown = false
+  const count = liveChildren.size
+  for (const child of liveChildren) {
+    try {
+      killProcessTree(child)
+    } catch {
+      // Best effort — one stubborn child must not block the rest of shutdown.
+    }
+  }
+  liveChildren.clear()
+  return count
+}
+
+/**
+ * How long shutdown waits for signalled children to actually die.
+ *
+ * Must exceed `killTree`'s SIGTERM→SIGKILL grace (3s): exiting sooner would kill
+ * the escalation timer before it fires, leaving a child that ignores SIGTERM
+ * running after the server is gone.
+ */
+export const SHUTDOWN_WAIT_MS = 5_000
+
+/**
+ * Signal every live runtime child and WAIT for it to exit (bounded).
+ *
+ * `killLiveSubprocesses` only sends SIGTERM; `killProcessTree` then schedules a
+ * SIGKILL escalation on a timer. A signal handler that calls `process.exit(0)`
+ * immediately afterwards kills that timer with the process, so a child ignoring
+ * SIGTERM survives. Awaiting here gives the escalation room to run.
+ *
+ * Bounded by design: a hung child must never prevent the server from exiting, so
+ * the wait resolves on the deadline regardless. Never rejects.
+ */
+export async function shutdownLiveSubprocesses(
+  timeoutMs: number = SHUTDOWN_WAIT_MS,
+): Promise<{ signalled: number; exited: number }> {
+  shuttingDown = true
+  const children = [...liveChildren]
+  if (children.length === 0) return { signalled: 0, exited: 0 }
+
+  for (const child of children) {
+    try {
+      killProcessTree(child)
+    } catch {
+      // Best effort — one stubborn child must not block the rest of shutdown.
+    }
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs)
+    // Never let the deadline itself hold the event loop open.
+    timer.unref?.()
+  })
+  const allClosed = Promise.all(
+    children.map((child) =>
+      // Already reaped (its 'close' fired) — nothing left to await.
+      child.exitCode !== null || child.signalCode !== null
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => child.once('close', () => resolve())),
+    ),
+  ).then(() => undefined)
+
+  try {
+    await Promise.race([allClosed, deadline])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+
+  // Untrack only what this pass signalled. A child that registered during the wait
+  // was killed on registration but stays tracked, so the synchronous fallback in
+  // `cleanup()` still sees it rather than it vanishing from the registry.
+  const exited = children.reduce((n, c) => n + (liveChildren.has(c) ? 0 : 1), 0)
+  for (const child of children) liveChildren.delete(child)
+  return { signalled: children.length, exited }
+}
+
 export interface ResolvedSpawn {
   command: string
   args: string[]
@@ -104,6 +206,19 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
         ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         stdio: ['ignore', 'pipe', 'pipe'],
       })
+      // Track it so a server shutdown can reap it instead of orphaning it.
+      // (Deregistered in the 'close' handler below.)
+      liveChildren.add(child)
+      if (shuttingDown) {
+        // Spawned after shutdown began — it missed the snapshot, so signal it now
+        // rather than let it run on past process exit.
+        try {
+          killProcessTree(child)
+        } catch {
+          // Best effort — it may already be gone.
+        }
+      }
+      const spawned = child
       let buf = ''
       child.stdout?.on('data', (d: Buffer) => {
         const s = d.toString()
@@ -124,6 +239,8 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
           push(ev)
       })
       child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+        // No longer running — drop it from the shutdown-reap registry.
+        liveChildren.delete(spawned)
         if (buf.trim()) for (const ev of cfg.parseLine(buf)) push(ev)
         for (const ev of cfg.onClose(code, signal, stdoutAll, stderrAll)) push(ev)
       })

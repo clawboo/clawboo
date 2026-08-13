@@ -41,7 +41,15 @@ export interface Capabilities {
   worktrees: boolean
   /** Can resume a prior session from a serialized handle. */
   resume: boolean
-  /** Surfaces tool-approval gates the host must resolve. */
+  /**
+   * The RUNTIME can surface tool-approval gates for a host to resolve.
+   *
+   * This describes what the runtime is capable of, NOT whether a given host path
+   * actually gates. Clawboo's per-task runner deliberately spawns the CLI
+   * runtimes headless with their gates bypassed and relies on the per-task
+   * worktree as the isolation boundary, so `true` here must not be read as
+   * "board runs are approval-gated".
+   */
   toolApproval: boolean
   /** Model identifiers this runtime can use (may be empty when unknown). */
   models: string[]

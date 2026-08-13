@@ -44,7 +44,7 @@
     "@clawboo/governance": "workspace:*",
     "@clawboo/obs": "workspace:*",
     "@noble/ed25519": "^2.1.0",
-    "better-sqlite3": "^11.8.0",
+    "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
     "zod": "^3.25.0"
   },

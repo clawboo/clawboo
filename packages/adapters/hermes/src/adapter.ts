@@ -41,6 +41,9 @@ export class HermesAdapter implements RuntimeAdapter {
       mcp: true,
       worktrees: true,
       resume: true,
+      // Capability of the runtime, not of a board run: clawboo drives this
+      // runtime headless, where the CLI run passes --yolo.
+      // Isolation for those runs comes from the per-task worktree instead.
       toolApproval: true,
       models: [], // provider-defined — Hermes resolves models via its own provider config
       // Native-preservation seam: a wrapped one-shot whose value COMPOUNDS in

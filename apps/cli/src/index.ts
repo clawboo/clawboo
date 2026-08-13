@@ -26,6 +26,8 @@ import fs from 'fs'
 import { resolveClawbooDir } from '@clawboo/config'
 
 import { VERSION } from './version'
+import { nodeVersionError } from './node-version'
+import { tailServerLog } from './server-log'
 import { shouldOfferRestart } from './versionCheck'
 import {
   discoverDashboard,
@@ -113,6 +115,18 @@ async function startAndReport(opts: {
           chalk.white(`cd ${outcome.monorepoRoot} && pnpm dev`)
         : chalk.yellow('Dashboard is taking too long to start.')
     ui.spinner?.fail(hint)
+    // Show WHY. The server is detached, so without this a failed boot is invisible
+    // and the only signal is the timeout itself.
+    if (outcome.logPath) {
+      const lines = tailServerLog(outcome.logPath)
+      if (lines.length > 0) {
+        console.log()
+        console.log(chalk.bold('Last lines from the server log:'))
+        for (const line of lines) console.log(chalk.gray('  ' + line))
+      }
+      console.log()
+      console.log(chalk.gray('Full log: ') + chalk.white(outcome.logPath))
+    }
     return null
   }
 
@@ -569,6 +583,17 @@ program
   .option('--no-version-check', 'Skip comparing a running server against this launcher.')
   .option('-y, --yes', 'Restart an older running server without prompting.')
   .showHelpAfterError()
+  // Node preflight for EVERY command, not just the default launch. This binary is
+  // bundled as CJS and require()s ESM-only deps, so an unsupported Node fails with a
+  // raw ERR_REQUIRE_ESM before any of our code runs. A hook here means `stop`,
+  // `restart`, `backup` — and any future subcommand — inherit it automatically.
+  .hook('preAction', () => {
+    const versionError = nodeVersionError(process.version)
+    if (versionError) {
+      console.error(chalk.red('✖ ') + versionError)
+      process.exit(1)
+    }
+  })
 
 program.action((opts: LaunchOptions, command: Command) => {
   // Commander dispatches registered subcommands before reaching here and does

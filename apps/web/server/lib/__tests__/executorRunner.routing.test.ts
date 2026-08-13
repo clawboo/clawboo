@@ -190,6 +190,9 @@ describe('executor runner — native-preservation routing (by construction)', ()
       taskId,
       assigneeAgentId: 'agent-1',
       disableMemoryAutoInject: true,
+      // Read-only: this case exercises homeDir routing, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
     })
     expect(result).toEqual({ ok: false, reason: 'connected_substrate' })
     expect(fake.startCount).toBe(0) // the adapter was never started
@@ -209,6 +212,9 @@ describe('executor runner — native-preservation routing (by construction)', ()
       taskId: newTask(),
       assigneeAgentId: 'hermes-1',
       disableMemoryAutoInject: true,
+      // Read-only: this case exercises homeDir routing, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
     })
     expect(f1.liveCtx()?.homeDir).toBe(expected)
 
@@ -222,6 +228,9 @@ describe('executor runner — native-preservation routing (by construction)', ()
       taskId: newTask('Another task'),
       assigneeAgentId: 'hermes-1',
       disableMemoryAutoInject: true,
+      // Read-only: this case exercises homeDir routing, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
     })
     expect(f2.liveCtx()?.homeDir).toBe(expected)
 
@@ -234,6 +243,9 @@ describe('executor runner — native-preservation routing (by construction)', ()
       taskId: newTask('Third task'),
       assigneeAgentId: 'hermes-2',
       disableMemoryAutoInject: true,
+      // Read-only: this case exercises homeDir routing, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
     })
     expect(f3.liveCtx()?.homeDir).toBe(
       path.join(home, '.clawboo', 'runtimes', 'hermes', 'hermes-2'),
@@ -249,6 +261,9 @@ describe('executor runner — native-preservation routing (by construction)', ()
       taskId: newTask(),
       assigneeAgentId: 'claude-1',
       disableMemoryAutoInject: true,
+      // Read-only: this case exercises homeDir routing, not file mutation, so it
+      // opts out of worktree isolation explicitly (see isolationForTask).
+      kind: 'research',
     })
     expect(f.liveCtx()).not.toBeNull()
     expect(f.liveCtx()?.homeDir).toBeNull()

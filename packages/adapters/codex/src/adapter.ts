@@ -39,6 +39,9 @@ export class CodexAdapter implements RuntimeAdapter {
       mcp: true,
       worktrees: true,
       resume: true,
+      // Capability of the runtime, not of a board run: clawboo drives this
+      // runtime headless, where the CLI run passes --dangerously-bypass-approvals-and-sandbox.
+      // Isolation for those runs comes from the per-task worktree instead.
       toolApproval: true,
       models: ['gpt-5-codex', 'gpt-5', 'o4-mini'],
       // Native-preservation seam: a wrapped one-shot with a PERSISTENT per-identity

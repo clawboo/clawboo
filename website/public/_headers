@@ -1,10 +1,21 @@
 # Cloudflare Pages headers for www.claw.boo
 
+# Content-Security-Policy. `script-src` keeps 'unsafe-inline': the theme,
+# analytics and behaviour snippets are inline by design (the theme script must run
+# before first paint, or the page flashes the wrong colour scheme). The policy
+# therefore constrains WHERE resources may load from rather than blocking inline
+# injection. Two allow-listed origins are not discoverable from source:
+#   - us-assets.i.posthog.com is derived at runtime by the PostHog snippet
+#     (api_host.replace('.i.posthog.com', '-assets.i.posthog.com')).
+#   - static.cloudflareinsights.com is injected at the edge by Cloudflare Pages
+#     Web Analytics, which also beacons to cloudflareinsights.com.
+
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
   Permissions-Policy: geolocation=(), microphone=(), camera=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://us-assets.i.posthog.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://api.fontshare.com; font-src 'self' data: https://fonts.gstatic.com https://api.fontshare.com https://cdn.fontshare.com; img-src 'self' data:; media-src 'self'; connect-src 'self' https://us.i.posthog.com https://us-assets.i.posthog.com https://api.github.com https://static.cloudflareinsights.com https://cloudflareinsights.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
 
 # Hashed build assets are immutable.
 /_astro/*

@@ -12,6 +12,7 @@ import { reconcileOrphans, reconcileStaleInProgress, seedBuiltinTools } from '@c
 import { apiRouter } from './api/index'
 import { attachIdentity } from './lib/auth'
 import { closeDb, getDb } from './lib/db'
+import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { startMcpSupervisor } from './lib/mcpSupervisor'
 import { startApprovalReaper } from './lib/approvalReaper'
@@ -436,6 +437,16 @@ async function main() {
   const cleanup = (): void => {
     if (shutDown) return
     shutDown = true
+    // Reap spawned runtime children BEFORE we go. They are detached process-group
+    // leaders and are deliberately never unref'd, so they outlive this process —
+    // still spending against the provider while boot-time reconciliation hands
+    // their task to another runner (two live runs on one worktree).
+    try {
+      const reaped = killLiveSubprocesses()
+      if (reaped > 0) log.info({ reaped }, 'Terminated running runtime subprocesses on shutdown')
+    } catch (err) {
+      log.warn({ err }, 'Failed to terminate runtime subprocesses on shutdown (non-fatal)')
+    }
     // Only if the file still names OUR port: a second instance (auto-scan
     // fallback, or a restart successor that has already rebound) may have
     // rewritten it, and deleting that would strand a server that is still up.
@@ -446,14 +457,31 @@ async function main() {
       log.warn({ err }, 'WAL checkpoint on shutdown failed (non-fatal)')
     }
   }
-  process.once('SIGINT', () => {
+  // A signal shutdown WAITS for the children to actually die before exiting.
+  // `cleanup()`'s reap only sends SIGTERM; killTree then schedules a SIGKILL
+  // escalation on a timer, and `process.exit(0)` would kill that timer with the
+  // process — so a child ignoring SIGTERM used to outlive the server. The wait is
+  // bounded (SHUTDOWN_WAIT_MS) so a hung child can never block the exit, and it
+  // never throws.
+  const gracefulExit = async (): Promise<void> => {
+    try {
+      const { signalled, exited } = await shutdownLiveSubprocesses()
+      if (signalled > 0) {
+        log.info({ signalled, exited }, 'Terminated running runtime subprocesses on shutdown')
+      }
+    } catch (err) {
+      log.warn({ err }, 'Failed to terminate runtime subprocesses on shutdown (non-fatal)')
+    }
     cleanup()
-    process.exit(0)
+  }
+  process.once('SIGINT', () => {
+    void gracefulExit().finally(() => process.exit(0))
   })
   process.once('SIGTERM', () => {
-    cleanup()
-    process.exit(0)
+    void gracefulExit().finally(() => process.exit(0))
   })
+  // Last-resort synchronous path (a `process.exit` from anywhere else): it cannot
+  // await, so it falls back to signalling without waiting.
   process.once('exit', cleanup)
 
   // Defensive graceful degradation: a background subsystem that rejects without a

@@ -162,8 +162,22 @@ const jsonLd = { '@context': 'https://schema.org', '@graph': graph }
       PostHog product analytics in cookieless mode: no cookies, no local or
       session storage, no consent banner. Project is US-hosted. The phc_ key is
       a publishable client-side ingestion key (safe to ship in the browser).
+      Skipped entirely for Do Not Track visitors (see the guard below).
     -->
     <script is:inline>
+      // Wrapped in an IIFE because <ClientRouter /> can re-execute an is:inline
+      // script on a client-side navigation; a top-level `const` would then throw
+      // "Identifier 'dnt' has already been declared" and take the page with it.
+      ;(function () {
+        // Do Not Track: skip the ENTIRE analytics bootstrap, not just capture.
+        // Gating here (rather than relying on posthog's own respect_dnt) means the
+        // loader never runs and no request is ever made, which is verifiable from
+        // the network panel and independent of posthog-js internals.
+        var dnt =
+          navigator.doNotTrack === '1' ||
+          window.doNotTrack === '1' ||
+          navigator.msDoNotTrack === '1'
+        if (dnt) return
       !(function (t, e) {
         var o, n, p, r
         e.__SV ||
@@ -213,7 +227,11 @@ const jsonLd = { '@context': 'https://schema.org', '@graph': graph }
         cookieless_mode: 'always',
         defaults: '2026-05-30',
         autocapture: true,
+        // Defense in depth. The DNT guard above already prevents this bootstrap
+        // from running at all; this covers any path that reaches init anyway.
+        respect_dnt: true,
       })
+      })()
     </script>
 
     <script type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, '\\u003c')} />
