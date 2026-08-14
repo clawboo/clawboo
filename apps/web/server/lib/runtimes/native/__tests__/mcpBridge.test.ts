@@ -9,26 +9,34 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { DeterministicEmbeddingProvider, SqliteMemoryStore, createDb, listTasks } from '@clawboo/db'
+import {
+  DeterministicEmbeddingProvider,
+  SqliteMemoryStore,
+  createDb,
+  listTasks,
+  type ClawbooDb,
+} from '@clawboo/db'
 
 import { connectMcpBridge } from '../mcpBridge'
 
 describe('native MCP bridge (in-process)', () => {
   let sandbox: string
   let dbPath: string
+  let db: ClawbooDb
 
   beforeEach(async () => {
     sandbox = await mkdtemp(path.join(os.tmpdir(), 'clawboo-native-mcp-'))
     dbPath = path.join(sandbox, 'test.db')
-    createDb(dbPath) // bootstrap the schema
+    db = createDb(dbPath) // bootstrap the schema
   })
   afterEach(async () => {
+    db.$client.close()
     await rm(sandbox, { recursive: true, force: true })
   })
 
   it('returns null when every server toggle is off', async () => {
     const bridge = await connectMcpBridge({
-      dbPath,
+      db,
       enable: { tasks: false, memory: false, tools: false },
     })
     expect(bridge).toBeNull()
@@ -36,7 +44,7 @@ describe('native MCP bridge (in-process)', () => {
 
   it('lists tools from the enabled servers (name-sorted) and routes calls', async () => {
     const bridge = await connectMcpBridge({
-      dbPath,
+      db,
       agentId: 'native-bridge-test',
       enable: { tasks: true, memory: true, tools: false },
     })
@@ -55,7 +63,6 @@ describe('native MCP bridge (in-process)', () => {
     })
     expect(result.isError).toBe(false)
 
-    const db = createDb(dbPath)
     const rows = listTasks(db, { teamId: 'team-bridge' })
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ title: 'Bridge-created task' })
@@ -65,7 +72,7 @@ describe('native MCP bridge (in-process)', () => {
 
   it('an unknown tool call is a tool error, not a throw', async () => {
     const bridge = await connectMcpBridge({
-      dbPath,
+      db,
       enable: { tasks: true, memory: false, tools: false },
     })
     const out = await bridge!.callTool('nope', {})
@@ -75,7 +82,7 @@ describe('native MCP bridge (in-process)', () => {
 
   it('a disabled server contributes no tools', async () => {
     const bridge = await connectMcpBridge({
-      dbPath,
+      db,
       enable: { tasks: true, memory: false, tools: false },
     })
     const names = (await bridge!.listTools()).map((t) => t.name)
@@ -89,7 +96,7 @@ describe('native MCP bridge (in-process)', () => {
     // native-saved fact stores a vector and is recallable via VECTOR search — which
     // it could not be if the bridge constructed the store with a null provider.
     const bridge = await connectMcpBridge({
-      dbPath,
+      db,
       agentId: 'native-bridge-test',
       enable: { tasks: false, memory: true, tools: false },
       memoryScope: { teamId: 'team-bridge', agentId: 'native-bridge-test' },
@@ -101,7 +108,6 @@ describe('native MCP bridge (in-process)', () => {
     })
     await bridge!.close()
 
-    const db = createDb(dbPath)
     const store = new SqliteMemoryStore(db, new DeterministicEmbeddingProvider())
     const results = await store.searchMemory('payments', {
       mode: 'vector',

@@ -40,6 +40,30 @@ export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
           break
 
         case 'commitChat': {
+          // Drop a replayed terminal frame for a run that already closed. Two
+          // things must not happen twice: minting fresh transcript entryIds (the
+          // triple-render symptom), and applying the terminal patch — which, if a
+          // NEW run has since started, flips a live agent back to idle.
+          //
+          // Compare the INCOMING frame's runId, never `getAgentRunId(agentId)`:
+          // once a run closes the agent's runId is null (or already the NEXT
+          // run's id), so a current-runId read can never name the run this guard
+          // exists to recognise.
+          //
+          // A legitimate post-approval continuation carries the SAME runId, but
+          // its run was never closed — `dispatchIntent` skips the status patch
+          // while an approval is pending, so the pre/post comparison below never
+          // fires and the id is absent from `closedRuns`. It passes.
+          //
+          // A missing runId fails OPEN: losing a real message is worse than
+          // showing a duplicate.
+          if (intent.runId && closedRuns.has(intent.runId)) {
+            deps.log?.debug(
+              { kind: intent.kind, agentId: intent.agentId, runId: intent.runId },
+              'skipping stale commitChat for closed run',
+            )
+            break
+          }
           deps.clearPendingLivePatch(intent.agentId)
           if (intent.outputLines.length > 0) {
             deps.appendOutputLines(intent.agentId, intent.outputLines, intent.sessionKey)
@@ -60,12 +84,15 @@ export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
         }
 
         case 'updateAgentStatus': {
-          // Skip stale terminal updates for runs that already closed
+          // Skip stale terminal updates for runs that already closed. Same rule
+          // as `commitChat`: match the INCOMING frame's runId. Reading the
+          // agent's CURRENT runId here was a no-op — a closed run's runId is
+          // already null, so the comparison could never be true for the run this
+          // guard exists to recognise.
           if (intent.patch.status !== 'running') {
-            const currentRunId = deps.getAgentRunId(intent.agentId)
-            if (currentRunId && closedRuns.has(currentRunId)) {
+            if (intent.runId && closedRuns.has(intent.runId)) {
               deps.log?.debug(
-                { kind: intent.kind, agentId: intent.agentId },
+                { kind: intent.kind, agentId: intent.agentId, runId: intent.runId },
                 'skipping stale terminal updateAgentStatus',
               )
               break

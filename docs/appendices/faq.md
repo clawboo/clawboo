@@ -6,7 +6,7 @@ description: 'Common questions about Clawboo: runtimes, data location, local-fir
 Short, grounded answers to the questions that come up most. Each answer links to the page that covers the topic in full.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## Do I need OpenClaw to use Clawboo?
@@ -33,7 +33,7 @@ A team can mix runtimes, one agent on Native, another on Claude Code, another on
 
 Clawboo is local-first. The server binds to loopback by default, stores everything on your machine, and makes no telemetry or analytics calls. The only outbound network traffic is what a runtime makes to **the model provider you chose**: the native runtime calls `api.anthropic.com`, `api.openai.com`, OpenRouter (`https://openrouter.ai/api/v1`), or your local Ollama, with the key you supplied. That is the same call any agent runtime makes; Clawboo is the orchestrator in front of it, not a relay through a Clawboo-hosted service.
 
-When you paste a provider key into the native "Test connection" affordance, the key is used for exactly one GET to the provider's models endpoint to validate it and is **never persisted** by that endpoint; it is not written to the vault, logged, or echoed back. See [security](/operating/security) and the [runtimes API healthcheck](/reference/rest-api/runtimes).
+Clawboo verifies a provider key before it stores one — on onboarding's **Continue**, on the Providers hub's **Save**, on a runtime's **Connect**, and via the native "Test connection" affordance. Each of those makes exactly one GET to the provider's models endpoint to validate the key, and that key is **never persisted** by the validating endpoint; it is not written to the vault, logged, or echoed back. See [security](/operating/security) and the [runtimes API healthcheck](/reference/rest-api/runtimes).
 
 ## Where is my data stored?
 
@@ -45,10 +45,10 @@ Clawboo only ever _reads_ OpenClaw's `~/.openclaw/` directory for interop; it ne
 
 By default the server binds to loopback `127.0.0.1`, so a fresh install is not reachable from other hosts. Widening the bind is an explicit opt-in: set the `HOST` environment variable (`HOSTNAME` is deliberately ignored, since Docker and CI inject it automatically). When you do, you **must** also set `STUDIO_ACCESS_TOKEN`; a wide bind with no token makes the server refuse to start.
 
-The token activates the access gate: every `/api/*` route then requires a valid cookie, set once by opening `/?access_token=<token>`. The gate compares tokens in constant time, folds path case before its prefix check (so `/API/...` cannot evade it), and restricts the token charset to `[A-Za-z0-9._~-]`. If you bind to a non-loopback interface _without_ a token, the server logs a loud SECURITY warning at boot rather than silently exposing the dashboard.
+The token activates the access gate: every `/api/*` route then requires a valid cookie, set once by opening `/?access_token=<token>`. The gate compares tokens in constant time, folds path case before its prefix check (so `/API/...` cannot evade it), and restricts the token charset to `[A-Za-z0-9._~-]`. If you bind to a non-loopback interface _without_ a token, the server logs a `SECURITY: refusing to start` error and exits 1 rather than silently exposing the dashboard.
 
 <Warning>
-A non-loopback bind with no `STUDIO_ACCESS_TOKEN` leaves the dashboard and every API route reachable by anyone on your network with no authentication. Set the token before widening the bind.
+The refusal names three fixes: set `STUDIO_ACCESS_TOKEN=<random>`, unset `HOST` to bind loopback only, or set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose. Only that last escape hatch reaches the warn-and-keep-serving path, which leaves the dashboard and every API route reachable by anyone on your network with no authentication.
 </Warning>
 
 The one deliberate carve-out: a loopback request to `/api/mcp/*` is exempt from the gate, because the server's own spawned runtimes attach their MCP clients over `http://127.0.0.1:<port>/api/mcp/*` with no cookie. A non-loopback `/api/mcp/*` request still requires the cookie. The full threat model is in [security](/operating/security); the operator walkthrough is in [self-host securely](/guides/self-host-securely).
@@ -65,12 +65,20 @@ Yes, with guardrails. **Routines** schedule recurring team-task work on a cron e
 
 Pair Routines with [governance](/concepts/governance) before leaving a fleet unattended: budgets (track-and-warn by default, hard-cap opt-in), tool-loop circuit breakers, depth/fan-out/cost caps, and approval gates are the controls that keep an unsupervised run from running away. Verification ([builder ≠ judge](/concepts/verification)) keeps "done" meaning _verified_ rather than merely claimed.
 
+## How do I stop the Clawboo server?
+
+`clawboo stop`. The launcher starts the dashboard server **detached**, so it outlives the terminal you launched it from and there is usually no Ctrl-C to press. `clawboo stop` finds the running instance through `~/.clawboo/api-port.txt` and terminates it, and it is safe to run when nothing is running.
+
+`clawboo restart` stops it and starts a fresh one on the same port, which is what you want after `npm install -g clawboo@latest`: installing replaces the bytes on disk, not the process already running the old ones. Running `clawboo` also notices this on its own now, and offers to restart an older server rather than attaching to it. See the [CLI reference](/reference/cli#clawboo-stop).
+
 ## How do I reset Clawboo?
 
-There is no schema migration ladder; a schema change is a hard reset of the local database, which `createDb()` re-bootstraps on the next connect. So "reset" means delete the database file.
+There is no schema migration ladder. Upgrading Clawboo adds any columns your database is missing, so a normal upgrade needs no reset. "Reset" is for when you want the data gone, or after a schema change that is not additive, and means deleting the database file, which `createDb()` re-bootstraps on the next connect.
 
-- **Reset just the data** (keep keys + settings): stop the server, then `rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm`.
-- **Full reset** (everything, including provider keys): `rm -rf ~/.clawboo` then `clawboo` (or `npx clawboo`).
+- **Reset just the data** (keep keys + settings): `clawboo stop`, then `rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm`.
+- **Full reset** (everything, including provider keys): `clawboo stop`, then `rm -rf ~/.clawboo`, then `clawboo`.
+
+If you set `CLAWBOO_HOME`, substitute that directory for `~/.clawboo` in both commands — every path below resolves through it.
 
 The full reset is destructive; it removes the vault, the proxy device identity, and all teams/board/chat/memory data. Back up `~/.clawboo` first if any of it matters. Full instructions and the WAL-sidecar caveat are in [data and state → hard reset](/operating/data-and-state#hard-reset).
 

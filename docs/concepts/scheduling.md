@@ -147,7 +147,7 @@ There is deliberately no third source. Claude Code, Codex, Hermes, and native ha
 The trait's contract has a load-bearing property: **`read()` never rejects**. A source whose backend is down (a disconnected Gateway) returns a degraded status with whatever records it can; a stale cache, or none, so one dead source can never take the merged view down. The REST `GET /api/schedules` therefore always returns `200`, with per-source degradation reported as data. Writes route by owner: an `observe-only` source refuses with `403`, a `team-task` create into a runtime-own-life source returns `422`, an unknown id returns `404`, an illegal transition or ownership conflict returns `409`, and a write against a disconnected Gateway returns `503`. The `manageability` tier is a structural gate; the UI is a pure function of it and can never offer an action the owning system forbids.
 
 <Note>
-The legacy in-app Scheduler panel still talks to the OpenClaw Gateway's `cron.*` methods over the browser proxy connection directly. The unified `/api/schedules` surface is the durable, multi-domain backend; the panel converges onto it in a future release.
+The Scheduler panel reads and writes exclusively through this unified `/api/schedules` surface. Gateway cron jobs are reached server-side via the `OpenClawGatewayCronScheduleSource`; the browser never speaks the Gateway's `cron.*` RPC directly.
 </Note>
 
 ## Design rationale and trade-offs
@@ -162,11 +162,11 @@ The error-halts policy trades autonomy for safety: a recurring Routine that fail
 
 - **Not a runtime's own scheduler.** Clawboo never fires a team task into a runtime's own-life cron, and never auto-creates own-life crons. The Gateway-cron source is an operator surface over schedules the Gateway owns, not their owner.
 - **No native scheduler for the one-shot runtimes.** Claude Code, Codex, Hermes, and native have no live scheduler Clawboo drives; scheduling them is a Clawboo Routine. `hermes gateway` is deliberately never launched.
-- **Human participants are a seam, not a feature.** A Routine targeting a `participantKind: 'human'` agent reaches a typed `NotImplementedError`; the intended future shape is a scheduled board ping, not a spawned process. It is reachable and typed, but not built in v0.3.0.
+- **Human participants are a seam, not a feature.** A Routine targeting a `participantKind: 'human'` agent reaches a typed `NotImplementedError`; the intended future shape is a scheduled board ping, not a spawned process. It is reachable and typed, but not built in v0.3.1.
 - **Single implicit tenant today.** Every ledger row carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

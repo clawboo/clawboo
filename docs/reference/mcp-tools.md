@@ -18,7 +18,7 @@ Servers are built with the low-level MCP SDK `Server` + `setRequestHandler` API,
 | [Tasks](#tasks-server)       | `clawboo-tasks`    | 12                                | durable board repository                 | n/a                             |
 | [Memory](#memory-server)     | `clawboo-memory`   | 3                                 | `SqliteMemoryStore` (facts + procedures) | `boundScope` (team/agent)       |
 | [Tools](#tools-server)       | `clawboo-tools`    | 4 builtin (availability-filtered) | tool broker                              | n/a                             |
-| [TeamChat](#teamchat-server) | `clawboo-teamchat` | 2                                 | `team_chat` room substrate               | `boundIdentity` (author + room) |
+| [TeamChat](#teamchat-server) | `clawboo-teamchat` | 2 (+1 when orchestrator-driven)   | `team_chat` room substrate               | `boundIdentity` (author + room) |
 
 | Server   | stdio bin              | HTTP path           |
 | -------- | ---------------------- | ------------------- |
@@ -33,7 +33,7 @@ Servers are built with the low-level MCP SDK `Server` + `setRequestHandler` API,
 
 `createTasksServer(db)` → `clawboo-tasks`. A protocol façade over the durable board so any runtime can coordinate on the same kanban board. The atomic claim surfaces a conflict as a tool-error the model must not retry (the "never retry a 409" rule).
 
-A few tools return a tool-error (`isError: true`) rather than throwing: `get_task` on an unknown id, `claim_task` / `assign_task` on a conflict, `update_task_status` / `block_task` / `unblock_task` on an illegal state-machine transition.
+A few tools return a tool-error (`isError: true`) rather than throwing: `get_task` on an unknown id, `claim_task` / `assign_task` on a conflict, `update_task_status` / `block_task` / `unblock_task` on an illegal state-machine transition, `link_task` on a dependency cycle, and `create_task` / `create_subtask` when the parent is unknown, the parent is already at its child-count or depth ceiling, or the root-creation rate is exhausted.
 
 ### `list_tasks`
 
@@ -59,7 +59,7 @@ Get a task with its comments and ancestor chain. Returns `{ task, comments, ance
 
 ### `create_task`
 
-Create a board task.
+Create a board task. Setting `parentTaskId` makes this a subtask: the per-parent child-count and nesting-depth caps apply, and it inherits the parent's team unless `teamId` is given. Without one it is a root task, bounded instead by a rolling-window creation rate. Both paths are covered by the caps note under [`create_subtask`](#create_subtask).
 
 ```ts
 {
@@ -68,18 +68,34 @@ Create a board task.
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
   priority?: number        // integer
   teamId?: string
-  parentTaskId?: string
+  parentTaskId?: string    // non-empty when present
   assigneeRuntime?: string
 }
 ```
 
 ### `create_subtask`
 
-Create a subtask under a parent (inherits the parent's team).
+Create a subtask under a parent (inherits the parent's team). Same creation caps and tool-errors as a parented `create_task`.
 
 ```ts
 { parentTaskId: string; title: string; description?: string }
 ```
+
+<Note>
+**Creation caps.** A parented create is bounded so a looping agent cannot fill the board: a parent may have at most **24 live (non-dropped) children**, and a task may nest at most **2 levels** deep (`root → child → grandchild`), the same ceiling the delegation depth cap applies at dispatch. Soft-deleting a stale child frees a slot; `done` and `cancelled` children still count, since they are still rows on the board.
+
+Both checks and the insert run inside **one `BEGIN IMMEDIATE` transaction** in the board's `createCappedSubtask`, so two attached runtimes racing the same parent cannot both land the N+1th child. Do not automatically retry the unchanged request: while the board state stays as it is, the answer does not change. A retry _after_ remediation can legitimately succeed — dropping a stale child frees a slot, and the root-rate window rolls.
+
+- `parent not found: <id>` — previously this reached the foreign key and failed the tool call with a protocol error instead of returning a tool-error.
+- `subtask rejected: parent <id> is at the maximum nesting depth (2); attach the new task higher in the tree`
+- `subtask rejected: parent <id> already has 24 children (max 24); drop one or attach the new task elsewhere`
+
+A **root** create (no `parentTaskId`) is bounded too, by a rolling-window **rate** rather than a total: at most **30 root tasks per 5 minutes**, counted across every surface. A lifetime ceiling on roots would eventually jam a long-lived board, and counting only open roots would be trivially evadable by an agent that completes-then-creates; velocity is the actual runaway signature and it self-clears. The refusal is `task rejected: <n> root tasks already created in the last 5 min (max 30); …`. A subtask is never charged against it, so decomposition still works while filing is limited.
+
+An **empty** `parentTaskId` is rejected by the schema (`invalid args`), never silently treated as a root task.
+
+The caps bound this protocol boundary only: the REST board API and the in-process team-chat orchestrator write through the uncapped repository primitive and carry their own per-turn fan-out and dispatch-depth limits. Measurement is global, though — rows those surfaces create still count toward a parent's total, so an agent cannot launder rows in through another surface to raise its own ceiling. A refusal is returned to the calling model and is not recorded in the governance audit log. It does ride the typed `_meta.denied` channel with its machine-readable reason (`child_cap`, `depth_cap`, `root_rate_cap`, `parent_not_found`), so an in-process caller classifies it without parsing prose — and an agent that keeps hitting the same wall trips the circuit breaker's repeat-policy-denied rule instead of looping forever.
+</Note>
 
 ### `claim_task`
 
@@ -153,7 +169,7 @@ Add a comment to a task (report-up summaries, system notes). `authorType` defaul
 
 ### `link_task`
 
-Make `taskId` depend on `dependsOnTaskId`; it stays unready until the dependency is done.
+Make `taskId` depend on `dependsOnTaskId`; it stays unready until the dependency is done. A link that would close a cycle — directly (`A → B`, then `B → A`) or transitively (`A → B → C → A`) — is refused with the tool-error `linking <taskId> to <dependsOnTaskId> would create a dependency cycle`. Re-linking an edge that already exists is still a harmless no-op.
 
 ```ts
 {
@@ -161,6 +177,10 @@ Make `taskId` depend on `dependsOnTaskId`; it stays unready until the dependency
   dependsOnTaskId: string
 }
 ```
+
+<Warning>
+Do not work around the cycle refusal by re-linking in the other direction. A cycle can never resolve: a task is ready only when _every_ dependency is `done`, so both ends sit un-ready forever and nothing surfaces the stall — the ready-pump simply has nothing to fire. That silent deadlock is what the check exists to prevent.
+</Warning>
 
 ---
 
@@ -240,7 +260,7 @@ These builtins re-express real capabilities so the broker has tools to gate, ins
 
 ## TeamChat server
 
-`createTeamChatServer(db, opts?)` → `clawboo-teamchat`. Two tools that let every runtime, regardless of dialect, post to and listen on the shared team room over the `team_chat` substrate. The board stays canonical; a post is narration, never a board mutation (this server has no board access).
+`createTeamChatServer(db, opts?)` → `clawboo-teamchat`. Two tools that let every runtime, regardless of dialect, post to and listen on the shared team room over the `team_chat` substrate, plus a third, `team_delegate`, pushed onto the tool list only on orchestrator-driven team runs. The board stays canonical; a post is narration, never a board mutation (this server has no board access).
 
 <Info>
 **The `boundIdentity` binding (anti-spoof).** When the server is constructed with `opts.boundIdentity`, the post author and room are authoritative, taken from the binding, never from tool args. A runtime may pass `authorAgentId` / `teamId` / `roomId` in args; they are ignored. The binding rides the clawboo-written attach URL (`roomTeamId` / `postAuthorAgentId`), so a runtime cannot post as a peer it is not. When unbound (the raw stdio bin / external attach), the model must pass `authorAgentId` + `teamId` in args; the default room is `team:<teamId>`.
@@ -274,6 +294,19 @@ Read new posts from your team room since a cursor (`sinceSeq`, default `0`). Ret
 ```
 
 The `isUser=false` substring is the load-bearing safety property: a peer post is delivered as tool-routed evidence, never as a turn carrying user authority. Each delivered post entry is `{ seq, authorAgentId, kind, wrapped }`, where `wrapped` is the `[Inter-session message · from=… · kind=… · seq=… · isUser=false]` envelope.
+
+### `team_delegate`
+
+Hand a self-contained piece of work to a teammate by name. **Conditional**: this tool is pushed onto the list only when the bound identity carries `delegate: true`, which the HTTP route sets from the `delegate=1` attach-URL param. On every other session (unbound stdio, or a merely team-scoped attach) it is absent from `tools/list`.
+
+```ts
+{
+  assignee: string
+  task: string
+}
+```
+
+Signal-only, and the one tool on this server that does not touch the `team_chat` substrate at all: the handler writes neither the board nor the room. It validates that both fields are non-empty (otherwise the tool-error `team_delegate requires both an assignee (teammate name) and a task`) and returns an acknowledgement string. The orchestration engine watches the emitted `tool-call` event, matches it by _name_, resolves `assignee` against the team roster, and creates the durable board task; a name that resolves to nobody, or to the caller itself, is dropped. The engine owns every board write. See [Codex: leading a team](/runtimes/codex#leading-a-team) for the leader-side flow.
 
 ---
 
@@ -313,7 +346,7 @@ A POST without a valid session that is not an `initialize` request returns a JSO
 Over HTTP, the authoritative bindings ride query params on the attach URL the server itself writes (the model never controls the URL):
 
 - **Memory**: `scopeTeamId` / `scopeAgentId` / `scopeTenantId` set the run's visibility scope (`boundScope`).
-- **TeamChat**: `roomTeamId` / `postAuthorAgentId` set the room and post author (`boundIdentity`).
+- **TeamChat**: `roomTeamId` / `postAuthorAgentId` set the room and post author (`boundIdentity`); an added `delegate=1` marks the session orchestrator-driven and exposes [`team_delegate`](#team_delegate). Clawboo writes that param on orchestrator-driven team runs and nowhere else: an external attach must not add it, because nothing is observing the tool-call there and the delegation would silently no-op.
 - **Tasks / Tools**: no scope params; the URL stays bare.
 
 When these params are absent (an external attach, or the stdio bins), the server is unbound and the model supplies scope/identity in args.

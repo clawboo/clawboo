@@ -8,7 +8,7 @@ Clawboo persists all of its durable state in one local SQLite file. This page do
 There are **27 tables**. They cluster by subsystem: the agent/team **registry of record**, the durable **board**, the **memory** store, the **tools** broker, **governance**, the **observability** event log, the **capability** inventory, and the **team-chat** room substrate. The `memory_facts_fts` FTS5 virtual table (and its shadow tables) are not in the table count; they are raw DDL in `createDb`, not modellable in `schema.ts`.
 
 <Info>
-There is no migration ladder. The inline `CREATE TABLE IF NOT EXISTS` block in `createDb()` (`packages/db/src/db.ts`) is the **sole** schema-creation source. `schema.ts` is the Drizzle type layer over the same tables, used for typed queries, never to apply migrations. A schema change is a hard reset of the local DB; see [Schema source of truth](#schema-source-of-truth--no-migration-ladder) below.
+There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`) is the **sole** schema-creation source. `schema.ts` is the Drizzle type layer over the same tables, used for typed queries, never to apply migrations. Upgrading in place adds columns an older database is missing, derived from that same DDL; changing or removing an existing column is still a reset. See [Schema source of truth](#schema-source-of-truth--no-migration-ladder) below.
 </Info>
 
 ## At a glance
@@ -121,7 +121,7 @@ erDiagram
 Persisted transcript entries so chat history survives a page refresh. Keyed internally by an autoincrement `id`, but deduplicated on the application-supplied `entry_id` (UUID) for idempotent batch inserts.
 
 - **Columns**: `id` (PK, autoinc), `session_key`, `gateway_url`, `entry_id`, `timestamp_ms`, `data` (JSON-serialised `TranscriptEntry`).
-- **Indexes**: `uniq_chat_messages_entry_id` (unique on `entry_id`), `idx_chat_messages_session_ts` on `(session_key, timestamp_ms)`.
+- **Indexes**: `uniq_chat_messages_entry_id` (unique on `entry_id`), `idx_chat_messages_session_ts` on `(session_key, timestamp_ms)`, `idx_chat_messages_session_id` on `(session_key, id)` (the tail index the live SSE stream range-seeks on, so each poll is O(new rows) per key instead of an O(history) scan + sort).
 
 ### `teams`
 
@@ -161,7 +161,7 @@ Saved Ghost Graph / Atlas node and edge positions, keyed per layout name + gatew
 
 ### `settings`
 
-A typed key/value store. Backs durable per-team briefs, team rules, onboarding flags, the Boo Zero global brief / display name, the API port mirror, and any other simple config-by-key. (See [Configuration](/reference/configuration) for the documented keys.)
+A typed key/value store. Backs team rules, onboarding flags, the Boo Zero global brief / display name, and any other simple config-by-key. (Keys are documented where they are set: see [Boo Zero](/using/boo-zero) for `boo-zero:global-brief` and `boo-zero:display-name:<agentId>`, and [Using teams](/using/teams) for `team-rules:<teamId>` and `team-onboarding:<teamId>`.)
 
 - **Columns**: `key` (PK, text), `value` (text), `updated_at`.
 - **Helpers**: `getSetting(db, key)` / `setSetting(db, key, value)` (upsert on conflict).
@@ -203,7 +203,7 @@ The transactional source of truth for team/task coordination state. The board re
 The kanban cards.
 
 - **Columns**: `id` (PK, text), `title`, `description`, `status` (default `backlog`; one of `backlog`|`todo`|`in_progress`|`in_review`|`blocked`|`done`|`cancelled`), `priority` (default `0`), `team_id` (soft ref), `assignee_agent_id` (soft ref), `assignee_runtime`, `parent_task_id` (**FK → `tasks.id` self-ref**), `source_delegation_id`, `worktree_ref`, `branch_ref`, `cost_usd` (`REAL`, default `0`), `parent_session_id`, `dropped` (`0`/`1` soft-delete), `tenant_id` (dormant), `verification` (JSON `VerificationResult`; `null` until a gate runs; the `in_review → done` gate reads `.status === 'pass'`), `scheduled_by` (default `manual`; the one-firing-owner label, open set: `manual`|`clawboo`|`openclaw`|…), `created_at`, `updated_at`, `completed_at`.
-- **Indexes**: `idx_tasks_team_status` on `(team_id, status)`, `idx_tasks_assignee`, `idx_tasks_parent`.
+- **Indexes**: `idx_tasks_team_status` on `(team_id, status)`, `idx_tasks_assignee`, `idx_tasks_parent`, `idx_tasks_parent_dropped_created` on `(parent_task_id, dropped, created_at)`. The composite serves both guarded-create counts, which run while the write lock is held: the per-parent child count (`parent_task_id = ? AND dropped = 0`, an index prefix) and the root-rate count (`parent_task_id IS NULL AND dropped = 0 AND created_at > ?`, equality-equality-range, so the range column comes last). `idx_tasks_parent` is deliberately retained: dropping it from the DDL would not drop it from databases that already bootstrapped it.
 
 ### `task_deps`
 
@@ -360,14 +360,31 @@ The schema-drift guard (`schemaSource.test.ts`) deliberately excludes `memory_fa
 
 There is **no live migration ladder**. The model is "bootstrap-via-`createDb`":
 
-- **The single source of truth** is the inline `CREATE TABLE IF NOT EXISTS …` block in `createDb()` (`packages/db/src/db.ts`). It declares every table, index, the FTS5 virtual table, and its triggers on a fresh DB outright. Running it twice is a no-op (`IF NOT EXISTS`).
+- **The single source of truth** is the `CREATE TABLE IF NOT EXISTS …` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`). It declares every table, index, the FTS5 virtual table, and its triggers on a fresh DB outright. Running it twice is a no-op (`IF NOT EXISTS`).
 - **`schema.ts` is the Drizzle type layer** over the same tables, used for typed queries (`db.select()…`, the `Db*` / `Db*Insert` inferred types), never to apply migrations.
-- **A schema change is a hard reset** of the local DB. There are no users with persisted data to migrate, so the project carries no forward-only `ALTER` ladder.
+- **Upgrading in place is additive**, and derived from that same DDL rather than hand-listed. See below.
 
 This posture is enforced by `schemaSource.test.ts`, which:
 
 1. builds a DB through the real `createDb()` and asserts every `schema.ts` table and its column set matches the live DDL (and vice versa), the drift guard;
 2. asserts the unapplied drizzle ladder does **not** ship or run: `package.json` `files` excludes `drizzle`, there are no `db:migrate` / `db:generate` scripts, and **no migration-ladder directory exists on disk**.
+
+### Upgrading an existing database
+
+`CREATE TABLE IF NOT EXISTS` skips the **whole** statement when the table is already there, so a column added to an existing table would be a silent no-op on every database created before the change: the upgrade appears to succeed, then fails at runtime on the first query that touches the column.
+
+`ensureSchema` closes that with one derived, additive step, in this order:
+
+1. **`reconcileSchema`** (`packages/db/src/schemaReconcile.ts`) reads the declared column set back out of the same DDL, diffs it against `PRAGMA table_info` for each table that already exists, and issues `ALTER TABLE … ADD COLUMN` for anything missing.
+2. **the DDL batch** then creates everything absent: new tables, indexes, triggers.
+
+The order is load-bearing. A new column normally ships with an index over it, and `CREATE INDEX IF NOT EXISTS … ON t (new_col)` fails with "no such column" if the batch runs first, which takes the whole batch, and the boot, with it.
+
+Parsing the DDL rather than maintaining a list of `ALTER`s keeps one source of truth; `schemaReconcile.test.ts` makes that safe by asserting the parsed column set is identical to what SQLite actually creates from the same DDL, so a construct the parser cannot read fails the build instead of shipping.
+
+<Warning>
+`ADD COLUMN` is the only schema change SQLite makes without rewriting the table, so this covers **additive** evolution only. A new column on an existing table must be addable: it may not use `PRIMARY KEY`, `UNIQUE`, or a `STORED` generated column; any `DEFAULT` must be a literal rather than an expression; a `NOT NULL` column must carry one; and a `REFERENCES` column must not have a non-NULL one. A test catches one that is not before it ships, and if one ever escapes, the bootstrap throws with a message naming the column and the remedy, which the boot probe reports as a fatal `databaseSchema` check. Changing an existing column's type or constraints, dropping one, adding a table constraint, redefining an index or trigger (their `IF NOT EXISTS` matches on **name**), and any change to the FTS5 virtual table are all still not in-place upgrades. Columns the DDL no longer declares are left alone, so opening a newer database with an older Clawboo does not destroy them.
+</Warning>
 
 <Danger>
 Five drizzle migration stubs (`0000`–`0004`) existed before the migration ladder was removed; they now survive only in git history, never on disk. There is no `packages/db/drizzle/` directory in the checked-out tree, and `schemaSource.test.ts` asserts it stays absent. Nothing applies them, so never resurrect one from history against a bootstrapped DB. The only `drizzle-kit` script wired up is `db:studio` (a read-only browser), and `drizzle.config.ts` exists for that tool only.
@@ -375,17 +392,17 @@ Five drizzle migration stubs (`0000`–`0004`) existed before the migration ladd
 
 ## Pragmas and contention
 
-`createDb` opens the file with the multi-writer-safe pragma recipe (many agents may write one DB):
+`openDb` opens the file with the multi-writer-safe pragma recipe (many agents may write one DB); `createDb` is `openDb` followed by `ensureSchema`:
 
 ```sql
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 PRAGMA synchronous = NORMAL;
-PRAGMA busy_timeout = 1000;
+PRAGMA busy_timeout = 250;
 PRAGMA wal_autocheckpoint = 50;
 ```
 
-This pairs with the application-level jittered retry + `BEGIN IMMEDIATE` in the board repository (`packages/db/src/board/contention.ts`), the write-contention recipe behind the board's atomic claim.
+This pairs with the application-level jittered retry + `BEGIN IMMEDIATE` in the board repository (`packages/db/src/board/contention.ts`), the write-contention recipe behind the board's atomic claim. The retry is bounded by a 1.5-second wall-clock budget (`CLAWBOO_DB_WRITE_BUDGET_MS`), which is why `busy_timeout` is deliberately short.
 
 ## Where the file lives
 
@@ -399,7 +416,8 @@ Boot-time health helpers also live in `db.ts`: `integrityCheck(db)` runs `PRAGMA
 
 ## See also
 
-- [Configuration](/reference/configuration): `settings.json`, file/dir locations, documented `settings` keys
+- [Configuration](/reference/configuration): `settings.json`, file/dir locations
+- [Boo Zero](/using/boo-zero) and [Using teams](/using/teams): the documented `settings`-table keys
 - [Environment variables](/reference/environment-variables): `CLAWBOO_DB_PATH`, `CLAWBOO_HOME`
 - [Data and state](/operating/data-and-state): SQLite file, backup, reset
 - [The board](/concepts/the-board): `tasks` / `task_deps` / `execution_processes` state machine and atomic claim

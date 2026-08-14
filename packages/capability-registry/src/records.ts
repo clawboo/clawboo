@@ -18,13 +18,7 @@ export type CapabilitySourceId = 'native' | 'hermes' | 'claude-code' | 'codex' |
  * as an `observe-only`, `agent`-scoped record with zero special-casing.
  */
 export type CapabilityRuntime =
-  | 'openclaw'
-  | 'clawboo-native'
-  | 'claude-code'
-  | 'codex'
-  | 'hermes'
-  | 'human'
-  | (string & {})
+  'openclaw' | 'clawboo-native' | 'claude-code' | 'codex' | 'hermes' | 'human' | (string & {})
 
 export type CapabilityKind = 'skill' | 'tool' | 'connector'
 
@@ -39,10 +33,7 @@ export type CapabilityScope = 'team' | 'agent' | 'global'
  * - 'observe-only'      clawboo can read but never write (built-ins, external-vendor CLIs).
  */
 export type CapabilityManageability =
-  | 'managed'
-  | 'external-write'
-  | 'runtime-of-record'
-  | 'observe-only'
+  'managed' | 'external-write' | 'runtime-of-record' | 'observe-only'
 
 /** Where the record was read from — drives the manageability + the write route. */
 export type CapabilityOrigin =

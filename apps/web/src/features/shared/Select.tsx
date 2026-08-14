@@ -3,7 +3,9 @@
 //
 // Mirrors the app's other pickers (`ModelDropdown` / `AgentModelSelector`): a
 // pill trigger + a `bg-popover` popover with check-marked rows, arrow-key
-// navigation, outside-click / Escape close. The popover is rendered through a
+// navigation, and outside-click / Escape close via the shared dismissable-layer
+// stack (so a dropdown inside a dialog dismisses alone, leaving the dialog and
+// its half-filled form intact). The popover is rendered through a
 // portal to `document.body` with FIXED positioning anchored to the trigger rect
 // (so it escapes every ancestor's `overflow: hidden` / clipped rounded corners),
 // and flips ABOVE the trigger when there isn't room below.
@@ -29,6 +31,7 @@ import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
 
 import { SearchInput } from './SearchInput'
+import { useDismissableLayer } from './useDismissableLayer'
 
 export type SelectSize = 'sm' | 'md'
 
@@ -97,8 +100,9 @@ function optionsFromChildren(children: ReactNode): NormalizedOption[] {
   const out: NormalizedOption[] = []
   Children.toArray(children).forEach((child) => {
     if (!isValidElement(child) || child.type !== 'option') return
-    const props = (child as ReactElement<{ value?: string; disabled?: boolean; children?: ReactNode }>)
-      .props
+    const props = (
+      child as ReactElement<{ value?: string; disabled?: boolean; children?: ReactNode }>
+    ).props
     out.push({
       value: String(props.value ?? ''),
       label: props.children,
@@ -182,7 +186,9 @@ export function Select({
       left,
       width,
       maxHeight,
-      ...(openUp ? { bottom: window.innerHeight - r.top + MENU_GAP } : { top: r.bottom + MENU_GAP }),
+      ...(openUp
+        ? { bottom: window.innerHeight - r.top + MENU_GAP }
+        : { top: r.bottom + MENU_GAP }),
     })
   }, [normalized.length, menuWidth])
 
@@ -190,27 +196,31 @@ export function Select({
     if (open) computePosition()
   }, [open, computePosition])
 
+  // Escape and outside-press both run through the shared layer stack, which
+  // hands the gesture to the TOPMOST open layer only. That is what keeps a
+  // dropdown opened inside a dialog from tearing the dialog down with it — the
+  // popover level outranks the dialog, so it is dismissed first and the dialog
+  // survives to take the next Escape. Focus goes back to the trigger, both for
+  // the ARIA combobox contract and so the NEXT Escape has a real target instead
+  // of falling through to <body> and reaching the app shell.
+  const dismiss = useCallback(() => {
+    setOpen(false)
+    triggerRef.current?.focus()
+  }, [])
+  useDismissableLayer({
+    active: open,
+    level: 'popover',
+    onEscape: dismiss,
+    contains: (t) => !!triggerRef.current?.contains(t) || !!menuRef.current?.contains(t),
+    onPressOutside: () => setOpen(false),
+  })
+
   useEffect(() => {
     if (!open) return
-    const onPointerDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return
-      setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation() // don't also close a parent modal behind the dropdown
-        setOpen(false)
-      }
-    }
     const onReflow = () => computePosition()
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKey, true)
     window.addEventListener('resize', onReflow)
     window.addEventListener('scroll', onReflow, true)
     return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKey, true)
       window.removeEventListener('resize', onReflow)
       window.removeEventListener('scroll', onReflow, true)
     }
@@ -278,11 +288,10 @@ export function Select({
         e.preventDefault()
         const opt = filtered[activeIndex]
         if (opt) choose(opt)
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        setOpen(false)
       }
+      // No Escape branch: the layer stack owns it. A handler here would run
+      // FIRST (React delegates to #root, below document) and its
+      // preventDefault() would veto the stack — same outcome, two code paths.
     },
     [step, filtered, activeIndex, choose],
   )
@@ -313,10 +322,7 @@ export function Select({
   )
 
   return (
-    <div
-      className={className}
-      style={{ position: 'relative', display: 'inline-block', ...style }}
-    >
+    <div className={className} style={{ position: 'relative', display: 'inline-block', ...style }}>
       <button
         ref={triggerRef}
         type="button"
@@ -457,7 +463,9 @@ export function Select({
                       textAlign: 'left',
                       border: 'none',
                       cursor: opt.disabled ? 'not-allowed' : 'pointer',
-                      color: opt.disabled ? 'rgb(var(--foreground-rgb) / 0.4)' : 'var(--foreground)',
+                      color: opt.disabled
+                        ? 'rgb(var(--foreground-rgb) / 0.4)'
+                        : 'var(--foreground)',
                       background: isSelected
                         ? 'rgb(var(--primary-rgb) / 0.07)'
                         : isActive && !opt.disabled

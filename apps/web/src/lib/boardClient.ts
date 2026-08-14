@@ -194,10 +194,7 @@ export async function fetchBoardTasks(teamId?: string): Promise<BoardTask[]> {
  *  can react to it (e.g. offer the human override for a blocking verification gate)
  *  instead of collapsing every failure into a bare boolean. */
 export type StatusChangeReason =
-  | 'illegal_transition'
-  | 'verification_required'
-  | 'not_found'
-  | 'error'
+  'illegal_transition' | 'verification_required' | 'not_found' | 'error'
 
 export interface StatusChangeResult {
   ok: boolean

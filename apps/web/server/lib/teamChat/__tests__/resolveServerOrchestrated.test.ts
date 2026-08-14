@@ -8,9 +8,9 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { agents, createDb, setSetting, teams, type ClawbooDb } from '@clawboo/db'
+import { agents, setSetting, teams, type ClawbooDb } from '@clawboo/db'
 
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import {
   resolveServerOrchestrated,
   serverOrchestratedSettingKey,
@@ -27,9 +27,12 @@ describe('resolveServerOrchestrated', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
-    db = createDb(getDbPath())
+    db = getDb()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']
@@ -39,7 +42,15 @@ describe('resolveServerOrchestrated', () => {
   function team(id: string, leaderAgentId: string | null = null): void {
     const now = Date.now()
     db.insert(teams)
-      .values({ id, name: id, icon: '👻', color: '#fff', leaderAgentId, createdAt: now, updatedAt: now })
+      .values({
+        id,
+        name: id,
+        icon: '👻',
+        color: '#fff',
+        leaderAgentId,
+        createdAt: now,
+        updatedAt: now,
+      })
       .run()
   }
   function agent(id: string, teamId: string, runtime: string): void {

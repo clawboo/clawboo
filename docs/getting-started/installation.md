@@ -6,7 +6,7 @@ description: Install Clawboo with npm i -g clawboo or npx clawboo, launch the da
 By the end of this tutorial you'll have the Clawboo dashboard running locally and open in your browser, ready for the onboarding wizard. Installation is a single command; there is nothing to configure first.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## Prerequisites
@@ -36,17 +36,17 @@ npm install -g clawboo
 clawboo
 ```
 
-The global install gives you a persistent `clawboo` command and one-click in-app updates from the dashboard. Prefer not to install? `npx clawboo` downloads and runs the latest package (currently `0.3.0`) without adding anything to your global `node_modules`.
+The global install gives you a persistent `clawboo` command and one-click in-app updates from the dashboard. Prefer not to install? `npx clawboo` downloads and runs the latest package (currently `0.3.1`) without adding anything to your global `node_modules`.
 
-**Expected result:** the terminal prints the Clawboo ASCII logo and a version line like `Clawboo v0.3.0`, then begins starting the dashboard.
+**Expected result:** the terminal prints the Clawboo ASCII logo and a version line like `Clawboo v0.3.1`, then begins starting the dashboard.
 
 ### 2. Watch the launch sequence
 
-The CLI is a thin launcher. Its job is to get you to a running dashboard and open your browser there. In order, it:
+Run bare, the CLI is a thin launcher. Its job is to get you to a running dashboard and open your browser there. (It also carries `backup`, `stop`, and `restart`; see the [CLI reference](/reference/cli).) In order, it:
 
 1. **Prints the logo and tagline.**
 2. **Does an informational Gateway probe.** It opens a quick TCP connection to `localhost:18789` (the OpenClaw Gateway's default port). This is purely informational; it prints either `OpenClaw Gateway detected` or `No Gateway detected — the dashboard will guide you through setup.` and does not change what happens next. You do **not** need a Gateway running; the native runtime needs none at all.
-3. **Finds or starts the dashboard server.** First it looks for an already-running Clawboo dashboard (see [Port discovery](#port-discovery) below). If none is found, it starts the bundled server.
+3. **Finds or starts the dashboard server.** First it looks for an already-running Clawboo dashboard (see [Port discovery](#port-discovery) below). If it finds one, it asks that server what version it is and offers to restart it when it turns out to be older than the CLI you just ran, since the server is detached and would otherwise stay bound to the port on the old build. If none is found, it starts the bundled server.
 4. **Opens your browser** at the discovered URL.
 
 **Expected result:** you see a spinner that resolves to `Dashboard started`, then `Clawboo opened at http://localhost:18790` (or the next free port in the `18790–18809` range), and a "Clawboo is ready!" summary with next-step hints.
@@ -124,7 +124,7 @@ Clawboo keeps **all of its own state** under a single directory, separate from O
 | `~/.clawboo/api-port.txt`  | The runtime port file written on each successful bind.                                                                                     |
 | `~/.openclaw/`             | OpenClaw's state directory. Clawboo only ever **reads** this for interop (Gateway config and provider-key fallback); it never writes here. |
 
-Because Clawboo's state is self-contained, "uninstalling" is just removing `~/.clawboo` (and, if you only used Clawboo through `npx`, clearing the npx cache). There is no migration ladder; a schema reset is a hard reset of that directory.
+Because Clawboo's state is self-contained, "uninstalling" is just removing `~/.clawboo` (and, if you only used Clawboo through `npx`, clearing the npx cache). Upgrading needs no such step: there is no migration ladder, but a newer Clawboo adds any columns your existing database is missing when it opens it.
 
 <Danger>
 Deleting `~/.clawboo` permanently removes your teams, board tasks, chat history, memory, and settings. Back up `~/.clawboo/clawboo.db` first if you want to keep them.
@@ -133,7 +133,7 @@ Deleting `~/.clawboo` permanently removes your teams, board tasks, chat history,
 ## Troubleshooting
 
 <Warning>
-**"Could not find the Clawboo server."** The launcher couldn't locate either the bundled `server.js` or a monorepo checkout. Re-run `npx clawboo` (this re-fetches the package), or install it explicitly with `npm install -g clawboo`.
+**"Could not find the Clawboo server."** The launcher couldn't locate either the bundled `server.js` or a monorepo checkout. Re-run `npx clawboo@latest` (the `@latest` is what forces a re-fetch; a bare `npx clawboo` can reuse whatever is already in npm's `_npx` cache), or install it explicitly with `npm install -g clawboo`.
 </Warning>
 
 <Warning>

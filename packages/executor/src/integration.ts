@@ -11,9 +11,7 @@ import type { Capabilities } from './types'
  *  a throwaway per-run dir, or no host-managed home at all (the runtime is a
  *  connected substrate that owns its own state entirely). */
 export type IntegrationHome =
-  | { kind: 'persistent'; scope: 'per-identity' }
-  | { kind: 'ephemeral' }
-  | { kind: 'connected' }
+  { kind: 'persistent'; scope: 'per-identity' } | { kind: 'ephemeral' } | { kind: 'connected' }
 
 export interface RuntimeIntegrationPlan {
   home: IntegrationHome

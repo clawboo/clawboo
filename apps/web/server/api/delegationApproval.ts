@@ -17,20 +17,15 @@ import type { Request, Response } from 'express'
 import {
   appendAudit,
   createApproval,
-  createDb,
   priorAllowAlways,
   waitForApproval,
   type ClawbooDb,
 } from '@clawboo/db'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 export type DelegationApprovalResolution =
-  | 'allow_once'
-  | 'allow_always'
-  | 'deny'
-  | 'expired'
-  | 'timeout'
+  'allow_once' | 'allow_always' | 'deny' | 'expired' | 'timeout'
 
 export interface ResolveDelegationApprovalInput {
   leaderAgentId: string
@@ -102,7 +97,7 @@ export async function delegationApprovalPOST(req: Request, res: Response): Promi
   const targetAgentName =
     typeof body['targetAgentName'] === 'string' ? body['targetAgentName'] : undefined
   const taskId = typeof body['taskId'] === 'string' ? body['taskId'] : null
-  const db = createDb(getDbPath())
+  const db = getDb()
   const resolution = await resolveDelegationApproval(db, {
     leaderAgentId,
     targetAgentName,

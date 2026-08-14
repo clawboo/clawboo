@@ -1,0 +1,82 @@
+name: CodeQL
+
+# Static analysis (GitHub code scanning) over the TypeScript sources and over the
+# workflow files themselves. Findings land in the repository's Security tab, the
+# same place SECURITY.md already sends vulnerability reporters.
+#
+# This is CodeQL's "advanced setup": a workflow committed to the repo rather than
+# the Settings toggle, so the language list, the schedule, and the paths-ignore
+# in .github/codeql/codeql-config.yml are all reviewable in a pull request like
+# any other code. GitHub's *default* setup must therefore stay disabled; enabling
+# it makes GitHub reject the results this workflow uploads.
+#
+# Two languages:
+#   - javascript-typescript covers the ~1,100 .ts/.tsx files plus the .mjs/.cjs
+#     scripts. The Express server under apps/web/server/ is the highest-value
+#     target here: it is not covered by `eslint src/`, and it spawns runtime
+#     subprocesses and manages git worktrees.
+#   - actions covers ci.yml / evals.yml / publish.yml / this file, for expression
+#     injection and over-broad permissions. publish.yml holds NPM_TOKEN and the
+#     OIDC token that signs npm provenance, so it is worth scanning.
+#
+# No untrusted event input is interpolated into any step: the only expressions
+# used are github.ref, github.event_name, and the static matrix value.
+#
+# This workflow deliberately installs no dependencies: `build-mode: none`
+# extracts straight from source, and node_modules is out of scope either way.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly re-scan. CodeQL's query packs are updated continuously, so without
+    # this a newly published query would only ever fire on the next diff that
+    # happened to touch the affected code, never on the code already sitting in
+    # main.
+    - cron: '41 6 * * 1'
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  # Deliberately narrower than the flat `true` the other workflows use: a
+  # superseded pull-request run is safe to cancel, but cancelling a run on main
+  # would abandon the analysis that establishes the branch's baseline, and
+  # alerts are diffed against that baseline.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least-privilege default, matching ci.yml and evals.yml. The analyze job opts
+# into the extra scopes it needs below.
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Upload the SARIF results to the Security tab.
+      security-events: write
+      # Read the workflow-run metadata the results are attached to.
+      actions: read
+      contents: read
+    strategy:
+      # One language failing should not hide the other language's findings.
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:${{ matrix.language }}'

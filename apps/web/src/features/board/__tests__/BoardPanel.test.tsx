@@ -17,13 +17,21 @@ import { BoardPanel } from '../BoardPanel'
 // dnd-kit's real pointer drag can't run in jsdom (no layout/rects), so we capture
 // the REAL onDragEnd handler by passing through DndContext (keeping the real provider
 // so useDraggable/useDroppable still work) and invoke it with synthetic drag events.
-const dnd = vi.hoisted(() => ({ onDragEnd: undefined as undefined | ((e: unknown) => void) }))
+// The same passthrough also captures the `accessibility.announcements` object,
+// so the screen-reader wiring can be asserted without a real drag (the callbacks
+// are pure `(args) => string`; their exact copy is covered in
+// `boardAnnouncements.test.ts`).
+const dnd = vi.hoisted(() => ({
+  onDragEnd: undefined as undefined | ((e: unknown) => void),
+  announcements: undefined as undefined | Record<string, (args: never) => string | undefined>,
+}))
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>()
   return {
     ...actual,
     DndContext: (props: React.ComponentProps<typeof actual.DndContext>) => {
       dnd.onDragEnd = props.onDragEnd as (e: unknown) => void
+      dnd.announcements = props.accessibility?.announcements as typeof dnd.announcements
       return <actual.DndContext {...props} />
     },
   }
@@ -366,13 +374,199 @@ describe('BoardPanel', () => {
     expect(within(screen.getByTestId('board-column-done')).queryByTestId('board-card')).toBeNull()
   })
 
+  it('ignores a board response that was already in flight when a drag committed', async () => {
+    // Regression (#105): reads overlap by design (the 5s poll, Refresh/Retry, the
+    // post-create reconcile), so a GET issued BEFORE a drag commits can resolve
+    // AFTER it, carrying the PRE-drag status. Applied unconditionally it snapped the
+    // card back to its old column until the next poll healed it. `refresh()` is
+    // sequenced against local commits, so the stale snapshot is dropped instead.
+    let calls = 0
+    let releaseStale: (() => void) | undefined
+    let staleAnswered = false
+    server.use(
+      http.get('/api/board', async () => {
+        calls += 1
+        // Hold the 2nd read open until the test releases it. Every read answers with
+        // the pre-drag snapshot, so the released one is genuinely stale.
+        if (calls === 2) {
+          await new Promise<void>((resolve) => {
+            releaseStale = resolve
+          })
+          staleAnswered = true
+        }
+        return HttpResponse.json({ tasks: [{ id: 't1', title: 'Ship it', status: 'in_progress' }] })
+      }),
+      http.patch('/api/board/t1', () =>
+        HttpResponse.json({ ok: true, task: { id: 't1', status: 'done' } }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    // Start the slow read, then commit the drag while it is still in flight.
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(calls).toBe(2))
+    await act(async () => {
+      dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'done' } }) // in_progress → done (legal)
+    })
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('board-column-done')).queryByTestId('board-card'),
+      ).not.toBeNull(),
+    )
+
+    // The stale read now lands, reporting the task still In progress.
+    releaseStale?.()
+    await waitFor(() => expect(staleAnswered).toBe(true))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0)) // flush fetch → json → setState
+    })
+
+    // The committed move survives — no snap-back to In progress.
+    expect(
+      within(screen.getByTestId('board-column-done')).getByTestId('board-card'),
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('board-column-in_progress')).queryByTestId('board-card'),
+    ).toBeNull()
+  })
+
+  it('ignores a board response that was already in flight when a task was created', async () => {
+    // Regression (#105), the create half: the composer prepends the new task
+    // optimistically and kicks a reconcile read. A read issued BEFORE the POST
+    // landed answers WITHOUT the new task, so applying it blanked the just-created
+    // card until the next poll. Only the newest read may write to the board.
+    const EXISTING = [{ id: 't1', title: 'Existing', status: 'todo' }]
+    let calls = 0
+    let releaseStale: (() => void) | undefined
+    let staleAnswered = false
+    let created = false
+    server.use(
+      http.get('/api/board', async () => {
+        calls += 1
+        // Read 2 is held open and answers with the pre-create snapshot; read 3 is
+        // handleCreated's reconcile, which sees the new task.
+        if (calls === 2) {
+          await new Promise<void>((resolve) => {
+            releaseStale = resolve
+          })
+          staleAnswered = true
+          return HttpResponse.json({ tasks: EXISTING })
+        }
+        return HttpResponse.json({
+          tasks: created
+            ? [...EXISTING, { id: 'new1', title: 'Draft the changelog', status: 'todo' }]
+            : EXISTING,
+        })
+      }),
+      http.post('/api/board', async ({ request }) => {
+        const body = (await request.json()) as { title: string; status?: string }
+        created = true
+        return HttpResponse.json({
+          task: { id: 'new1', title: body.title, status: body.status ?? 'todo' },
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    // Start the slow read, then create a task while it is still in flight.
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(calls).toBe(2))
+
+    await user.click(screen.getByRole('button', { name: /New task/i }))
+    const dialog = await screen.findByTestId('new-task-dialog')
+    await user.type(within(dialog).getByLabelText('Title'), 'Draft the changelog')
+    await user.click(within(dialog).getByRole('button', { name: /Create task/i }))
+    expect(await screen.findByText('Draft the changelog')).toBeInTheDocument()
+
+    // The stale read now lands, reporting a board without the new task.
+    releaseStale?.()
+    await waitFor(() => expect(staleAnswered).toBe(true))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0)) // flush fetch → json → setState
+    })
+
+    // The created card survives — it isn't blanked by the pre-create snapshot.
+    expect(screen.getByText('Draft the changelog')).toBeInTheDocument()
+  })
+
+  it('discards an in-flight response for the previous team filter', async () => {
+    // Same ordering hazard on the filter path: switching teams re-enters the loading
+    // state, but a read for the PREVIOUS filter can still resolve afterwards. Applied
+    // it would both write the wrong team's tasks and dismiss the skeleton over them.
+    useTeamStore.setState({
+      teams: [
+        {
+          id: 'team-1',
+          name: 'Alpha',
+          icon: '🐙',
+          color: '#e94560',
+          colorCollectionId: null,
+          templateId: null,
+          agentCount: 1,
+          leaderAgentId: null,
+          isArchived: false,
+          serverOrchestrated: false,
+        },
+      ],
+      selectedTeamId: null, // teamFilter starts at 'all' → the first read has no ?teamId
+    })
+    let releaseStale: (() => void) | undefined
+    let staleAnswered = false
+    server.use(
+      http.get('/api/board', async ({ request }) => {
+        const teamId = new URL(request.url).searchParams.get('teamId')
+        if (teamId === null) {
+          // The all-teams read from mount, held open past the filter switch.
+          await new Promise<void>((resolve) => {
+            releaseStale = resolve
+          })
+          staleAnswered = true
+          return HttpResponse.json({
+            tasks: [{ id: 'a1', title: 'All-teams task', status: 'todo' }],
+          })
+        }
+        return HttpResponse.json({ tasks: [{ id: 'b1', title: 'Alpha task', status: 'todo' }] })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    // The first read hasn't resolved, so the board is still skeletons.
+    expect(screen.getByTestId('board-skeleton')).toBeInTheDocument()
+
+    // Switch to the team filter; its read resolves normally.
+    await user.click(screen.getByLabelText('Filter by team'))
+    await user.click(await screen.findByRole('option', { name: /Alpha/ }))
+    expect(await screen.findByText('Alpha task')).toBeInTheDocument()
+
+    // The all-teams read now lands, after the filter already moved on.
+    releaseStale?.()
+    await waitFor(() => expect(staleAnswered).toBe(true))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0)) // flush fetch → json → setState
+    })
+
+    expect(screen.getByText('Alpha task')).toBeInTheDocument()
+    expect(screen.queryByText('All-teams task')).toBeNull()
+  })
+
   it('confirms before a drag that unassigns a running agent (→ To do)', async () => {
     let patched: { status?: string } | null = null
     server.use(
       http.get('/api/board', () =>
         HttpResponse.json({
           tasks: [
-            { id: 't1', title: 'Ship it', status: 'in_progress', assigneeAgentId: 'agent-7' },
+            {
+              id: 't1',
+              title: 'Ship it',
+              status: 'in_progress',
+              assigneeAgentId: 'agent-7',
+              assigneeRuntime: 'claude-code',
+              verification: JSON.stringify({ status: 'fail' }),
+            },
           ],
         }),
       ),
@@ -388,7 +582,10 @@ describe('BoardPanel', () => {
         <ConfirmDialog />
       </>,
     )
-    await screen.findByTestId('board-card')
+    // Sanity: before the move the card carries its runtime + verdict pills.
+    const card = await screen.findByTestId('board-card')
+    expect(within(card).getByText('claude-code')).toBeInTheDocument()
+    expect(within(card).getByText('fail')).toBeInTheDocument()
 
     await act(async () => {
       dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'todo' } }) // in_progress → todo (release)
@@ -399,6 +596,15 @@ describe('BoardPanel', () => {
     expect(patched).toBeNull()
     await user.click(within(dialog).getByTestId('confirm-ok'))
     await waitFor(() => expect(patched).toEqual({ status: 'todo' }))
+
+    // The commit mirrors the server's →todo release: it also clears assignee/runtime/verdict,
+    // so the card in To do no longer shows the stale 'claude-code' runtime or the misleading
+    // 'fail' verdict — the reflection is complete, not just the column. (Deleting the →todo
+    // branch in commitStatus fails this.)
+    const todoCard = () => within(screen.getByTestId('board-column-todo')).getByTestId('board-card')
+    await waitFor(() => expect(within(todoCard()).queryByText('claude-code')).toBeNull())
+    expect(within(todoCard()).queryByText('fail')).toBeNull()
+    expect(within(todoCard()).getByText('openclaw')).toBeInTheDocument()
   })
 
   it('offers "Complete anyway" when a drag to Done hits the verification gate', async () => {
@@ -441,5 +647,178 @@ describe('BoardPanel', () => {
     expect(
       within(screen.getByTestId('board-column-done')).getByTestId('board-card'),
     ).toBeInTheDocument()
+  })
+
+  // dnd-kit's `defaultAnnouncements` read raw ids at a screen-reader user
+  // ("Picked up draggable item 9f3c8a1e-…"). This asserts the WIRING — that the
+  // custom announcements reach DndContext and that the grip carries the payload
+  // they read. The copy itself is covered in boardAnnouncements.test.ts.
+  it('announces drags by task title and column label, not by raw ids', async () => {
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Ship it', status: 'in_progress' }] }),
+      ),
+    )
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+
+    // The grip handle is dnd-kit's drag activator; it carries the instructions
+    // a keyboard user hears before pickup.
+    const grip = screen.getByRole('button', { name: /Drag to move “Ship it”/ })
+    expect(grip).toHaveAttribute('aria-describedby')
+
+    const a = dnd.announcements
+    expect(a).toBeDefined()
+    const active = { id: 't1', data: { current: { fromStatus: 'in_progress', title: 'Ship it' } } }
+
+    expect(a?.onDragStart?.({ active } as never)).toBe('Picked up “Ship it” from In progress.')
+    const dropped = a?.onDragEnd?.({ active, over: { id: 'done' } } as never)
+    expect(dropped).toContain('Ship it')
+    expect(dropped).toContain('Done')
+    expect(dropped).not.toMatch(/t1|in_progress/)
+  })
+
+  it('moves a card to its new column immediately when a status change commits in the drawer (#98)', async () => {
+    // A drawer status commit patches BoardPanel.tasks via onStatusCommitted, so the card
+    // jumps columns at once instead of waiting up to ~5s for the reconciliation poll.
+    // Server truth advances on the PATCH (a real backend would), so the next poll —
+    // proxied by Refresh, the same refresh() path the 5s poll uses — keeps the card in
+    // its new column with no flicker and no duplicate.
+    let board = [{ id: 't1', title: 'Ship it', status: 'todo' }]
+    let boardGets = 0
+    server.use(
+      http.get('/api/board', () => {
+        boardGets++
+        return HttpResponse.json({ tasks: board })
+      }),
+      // The drawer's on-mount fetches; the detail reflects the current server status.
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: board[0]!.status },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      http.patch('/api/board/t1', async ({ request }) => {
+        const body = (await request.json()) as { status: string }
+        board = [{ id: 't1', title: 'Ship it', status: body.status }] // the server advances
+        return HttpResponse.json({ ok: true, task: { id: 't1', status: body.status } })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+
+    // The card starts in To do.
+    await screen.findByTestId('board-card')
+    expect(
+      within(screen.getByTestId('board-column-todo')).getByTestId('board-card'),
+    ).toBeInTheDocument()
+
+    // Open the drawer and pick the In progress target.
+    await user.click(screen.getByTestId('board-card'))
+    await screen.findByTestId('task-detail-drawer')
+    await user.click(screen.getByTestId('task-status-select'))
+    const option = await screen.findByRole('option', { name: 'In progress' })
+
+    // Snapshot the board-list fetch count right before the commit. Nothing in the window
+    // below fetches the list, so the only thing that can move the card is the optimistic
+    // onStatusCommitted patch — a poll/refetch would bump this count and fail the assert.
+    // (Captured here, not before opening the drawer, to keep the window tiny so the real
+    // 5s poll can't race it.)
+    const getsBeforeMove = boardGets
+    await user.click(option)
+
+    // The card is in the In progress column right away — optimistic, not poll-driven.
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('board-column-in_progress')).getByTestId('board-card'),
+      ).toBeInTheDocument(),
+    )
+    expect(within(screen.getByTestId('board-column-todo')).queryByTestId('board-card')).toBeNull()
+    expect(boardGets).toBe(getsBeforeMove) // moved without waiting for the poll
+    expect(screen.getAllByTestId('board-card')).toHaveLength(1) // no duplicate
+
+    // Close the drawer; the board keeps the card in its new column.
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByTestId('task-detail-drawer')).toBeNull())
+
+    // Focus comes back to the card, not <body>. Moving columns destroyed the exact node
+    // the drawer was opened from, so the return only works because the card carries
+    // `data-focus-restore-id` for useFocusTrap to re-find it. Without it a keyboard user
+    // closes the drawer and the next Tab restarts at the top of the document.
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('board-column-in_progress')).getByTestId('board-card'),
+      ).toHaveFocus(),
+    )
+
+    // The next poll (Refresh runs the identical refresh()) reconciles against the advanced
+    // server and keeps the card put — no flicker back to To do, still exactly one card.
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(boardGets).toBeGreaterThan(getsBeforeMove))
+    expect(
+      within(screen.getByTestId('board-column-in_progress')).getByTestId('board-card'),
+    ).toBeInTheDocument()
+    expect(screen.getAllByTestId('board-card')).toHaveLength(1)
+  })
+
+  it('leaves the card in its column when a drawer status change is rejected (#98)', async () => {
+    // Board analog of the drag-rollback test: onStatusCommitted is wired to StatusSelect's
+    // success-only onChange, so a 500'd PATCH never calls it — the card must not move, and
+    // no refetch is triggered. Guards against a regression that moves the callback outside
+    // the success gate.
+    let boardGets = 0
+    let patchCalls = 0
+    server.use(
+      http.get('/api/board', () => {
+        boardGets++
+        return HttpResponse.json({ tasks: [{ id: 't1', title: 'Ship it', status: 'todo' }] })
+      }),
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'todo' },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      http.patch('/api/board/t1', () => {
+        patchCalls++
+        return new HttpResponse(null, { status: 500 }) // legal move todo→in_progress, refused
+      }),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+
+    await screen.findByTestId('board-card')
+    await user.click(screen.getByTestId('board-card'))
+    await screen.findByTestId('task-detail-drawer')
+    await user.click(screen.getByTestId('task-status-select'))
+    const option = await screen.findByRole('option', { name: 'In progress' })
+    const getsBeforeMove = boardGets
+    await user.click(option)
+
+    // The failure surfaced as an error toast — the rejection path ran to completion.
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.some((t) => t.type === 'error')).toBe(true),
+    )
+    // ...driven by a REAL server rejection: the PATCH fired exactly once. This is what
+    // distinguishes a 500 from a client-side illegal-transition refusal that never sends a
+    // request — todo→in_progress is legal, so the request goes out and comes back refused.
+    expect(patchCalls).toBe(1)
+    // ...and the board card never moved: still in To do, exactly one card, and no refetch.
+    expect(
+      within(screen.getByTestId('board-column-todo')).getByTestId('board-card'),
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('board-column-in_progress')).queryByTestId('board-card'),
+    ).toBeNull()
+    expect(screen.getAllByTestId('board-card')).toHaveLength(1)
+    expect(boardGets).toBe(getsBeforeMove)
   })
 })

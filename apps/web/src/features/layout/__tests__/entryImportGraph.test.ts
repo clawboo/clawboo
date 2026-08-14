@@ -1,0 +1,196 @@
+// Guards the SPA's eager import graph — specifically, that the ~4.4 MB marketplace
+// agent + team catalogs stay OFF the entry chunk.
+//
+// Why a test and not just a code review: PR #94 made `MarketplacePanel` lazy and added
+// vendor `manualChunks`, and the catalog still shipped in the entry chunk because
+// `WelcomeState → CreateTeamModal → teamCatalog → agents` was a four-hop TRANSITIVE
+// static chain, with every hop individually reasonable. Nothing in review or in the
+// build output flagged it. This walks the graph the bundler walks, so the same class of
+// regression fails loudly instead of silently costing every dashboard load 4 MB of
+// parse work. See issue #83 and features/teams/CreateTeamModalLazy.tsx.
+//
+// Parsed with the TypeScript compiler API rather than a regex: the catalog data files
+// embed literal `import … from '…'` lines inside template literals (verbatim upstream
+// markdown), which a regex walker would happily follow.
+
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+
+import ts from 'typescript'
+import { describe, expect, it } from 'vitest'
+
+const SRC_DIR = path.resolve(__dirname, '../../..')
+const ENTRY = path.join(SRC_DIR, 'main.tsx')
+
+/** Module data that must never be reachable from the entry via static imports. */
+const FORBIDDEN = ['features/marketplace/agents/', 'features/marketplace/teams/']
+
+/** Non-code imports (`main.tsx` pulls `./app/globals.css`). */
+const ASSET_EXTENSIONS = [
+  '.css',
+  '.svg',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.json',
+  '.woff2',
+]
+
+/** Extension-less specifiers resolve against these, first match wins. */
+const RESOLVE_SUFFIXES = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js']
+
+const toPosix = (p: string): string => p.split(path.sep).join('/')
+const rel = (p: string): string => `src/${toPosix(path.relative(SRC_DIR, p))}`
+
+/**
+ * Static module specifiers only. A dynamic `import()` is a CallExpression rather than
+ * a top-level ImportDeclaration, so it is excluded structurally — which is the whole
+ * point. (`ts.preProcessFile` conflates the two; don't use it.)
+ *
+ * Type-only edges are skipped, since they are erased at build time. A plain
+ * `import { SomeType }` is deliberately still counted: `verbatimModuleSyntax` is off,
+ * so whether the transformer elides it is an implementation detail — not something to
+ * bet a 4 MB chunk on. The fix is to write `import type`.
+ */
+function staticImportsOf(file: string): string[] {
+  const source = ts.createSourceFile(
+    file,
+    fs.readFileSync(file, 'utf8'),
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ false,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  )
+
+  const specifiers: string[] = []
+  for (const statement of source.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const clause = statement.importClause
+      if (clause?.isTypeOnly) continue
+      // `import { type A, type B } from '…'` — every binding erased.
+      if (
+        clause &&
+        !clause.name &&
+        clause.namedBindings &&
+        ts.isNamedImports(clause.namedBindings) &&
+        clause.namedBindings.elements.length > 0 &&
+        clause.namedBindings.elements.every((e) => e.isTypeOnly)
+      )
+        continue
+      // A clause-less `import './x'` is a real side-effect edge — keep it.
+      if (ts.isStringLiteral(statement.moduleSpecifier))
+        specifiers.push(statement.moduleSpecifier.text)
+    } else if (ts.isExportDeclaration(statement) && statement.moduleSpecifier) {
+      if (statement.isTypeOnly) continue
+      if (ts.isStringLiteral(statement.moduleSpecifier))
+        specifiers.push(statement.moduleSpecifier.text)
+    }
+  }
+  return specifiers
+}
+
+/** `null` = intentionally ignored (bare package or asset). Throws when unresolvable. */
+function resolve(specifier: string, fromFile: string): string | null {
+  const isRelative = specifier.startsWith('./') || specifier.startsWith('../')
+  const isAliased = specifier.startsWith('@/')
+  // Bare specifiers are packages — nothing under packages/ or node_modules reaches
+  // the web app's marketplace catalog, so they are not worth walking.
+  if (!isRelative && !isAliased) return null
+  if (ASSET_EXTENSIONS.some((ext) => specifier.endsWith(ext))) return null
+
+  const base = isAliased
+    ? path.join(SRC_DIR, specifier.slice(2))
+    : path.resolve(path.dirname(fromFile), specifier)
+
+  for (const suffix of RESOLVE_SUFFIXES) {
+    const candidate = base + suffix
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+  }
+
+  // Failing here is deliberate: silently dropping an unresolvable specifier is how a
+  // guard like this rots into a no-op after a rename.
+  throw new Error(`${rel(fromFile)}: cannot resolve '${specifier}'`)
+}
+
+/** BFS the static graph from `main.tsx`, remembering how each module was reached. */
+function walkEagerGraph(): { reached: Set<string>; parent: Map<string, string> } {
+  const reached = new Set<string>([ENTRY])
+  const parent = new Map<string, string>()
+  const queue = [ENTRY]
+
+  while (queue.length > 0) {
+    const file = queue.shift()!
+    for (const specifier of staticImportsOf(file)) {
+      const target = resolve(specifier, file)
+      if (target === null || reached.has(target)) continue
+      reached.add(target)
+      parent.set(target, file)
+      queue.push(target)
+    }
+  }
+  return { reached, parent }
+}
+
+function chainTo(file: string, parent: Map<string, string>): string {
+  const chain = [file]
+  for (let at = parent.get(file); at !== undefined; at = parent.get(at)) chain.unshift(at)
+  return chain.map((f, i) => `${i === 0 ? '  ' : '   → '}${rel(f)}`).join('\n')
+}
+
+/** Called only when there IS an offender — builds the shortest chain to the first. */
+function explain(offenders: string[], parent: Map<string, string>, what: string): string {
+  const first = offenders[0]!
+  return [
+    `Eager import of ${what} from the SPA entry (${offenders.length} module(s) reachable).`,
+    '',
+    chainTo(first, parent),
+    '',
+    'These are ~4.4 MB of static data and MUST stay behind a dynamic import(), or every',
+    'dashboard load pays to parse them. Reach the create-team modal through',
+    '`@/features/teams/CreateTeamModalLazy`, or add your own React.lazy boundary.',
+    'If the import is types-only, write `import type` — it is not counted then.',
+    'See apps/web/vite.config.ts (the `marketplace-catalog` chunk) and issue #83.',
+  ].join('\n')
+}
+
+describe('SPA eager import graph', () => {
+  const { reached, parent } = walkEagerGraph()
+  const reachedRel = [...reached].map(rel)
+
+  it('walks a plausible share of the app (guards against a vacuous pass)', () => {
+    // 159 modules today. A resolution bug that stops the walk early would otherwise
+    // report "no offenders" and pass while checking nothing — and that failure mode is
+    // catastrophic (single digits), not marginal, so the floor has real slack.
+    expect(reached.size).toBeGreaterThan(120)
+  })
+
+  it('never reaches the marketplace agent or team catalogs', () => {
+    const offenders = [...reached].filter((f) => FORBIDDEN.some((d) => toPosix(f).includes(d)))
+    // Thrown rather than passed as an `expect` message: vitest evaluates that message
+    // eagerly, and building the chain needs an offender to exist.
+    if (offenders.length > 0) throw new Error(explain(offenders, parent, 'the marketplace catalog'))
+    expect(offenders).toEqual([])
+  })
+
+  it('does not reach features/marketplace at all', () => {
+    // Tighter than the rule above and true today — it catches a creeping re-entry one
+    // hop before the data itself. If a genuinely small, catalog-free marketplace module
+    // ever needs to be eager, relax THIS assertion, never the one above.
+    const offenders = [...reached].filter((f) => toPosix(f).includes('features/marketplace/'))
+    if (offenders.length > 0) throw new Error(explain(offenders, parent, 'features/marketplace'))
+    expect(offenders).toEqual([])
+  })
+
+  it('actually follows the chain that used to leak the catalog', () => {
+    // A positive control. The three assertions above all pass if the walker simply
+    // fails to walk, and the size floor only catches a total collapse. This pins the
+    // exact route that leaked before #83 — main.tsx → App → ContentArea → WelcomeState
+    // → the lazy wrapper — so the guard is proven to traverse `@/` aliases, relative
+    // specifiers and barrels right up to the boundary it is policing.
+    expect(reachedRel).toContain('src/features/layout/WelcomeState.tsx')
+    expect(reachedRel).toContain('src/features/teams/CreateTeamModalLazy.tsx')
+    // ...and stops there: the wrapper reaches the modal only through a dynamic import.
+    expect(reachedRel).not.toContain('src/features/teams/CreateTeamModal.tsx')
+  })
+})

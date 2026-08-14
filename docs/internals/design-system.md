@@ -43,7 +43,7 @@ The same block registers the `@custom-variant dark (&:where(.dark, .dark *))` so
 
 ### `:root` light, `.dark` overrides
 
-Light is the default. `:root` declares the full token set with light values; the `.dark` selector re-declares the _same_ token names with dark values. The light theme is paper-white (`--background: #f8fafc`, `--surface: #ffffff`, slate-900 text); the dark theme is the original production palette (`--background: #0a0e1a`, `--surface: #111827`, `#e8e8e8` text). Brand colors are deepened in light mode for AA contrast on white; OpenClaw Red is `#e94560` in dark but `#dc2a48` in light, mint is `#34d399` → `#059669`, amber is `#fbbf24` → `#d97706`.
+Light is the default. `:root` declares the full token set with light values; the `.dark` selector re-declares the _same_ token names with dark values. The light theme is paper-white (`--background: #f8fafc`, `--surface: #ffffff`, slate-900 text); the dark theme is the original production palette (`--background: #0a0e1a`, `--surface: #111827`, `#e8e8e8` text). Brand colors are deepened in light mode for AA contrast on white; OpenClaw Red is `#e94762` in dark but `#d82947` in light, mint is `#34d399` → `#059669`, amber is `#fbbf24` → `#d97706`.
 
 A handful of tokens are deliberately theme-_invariant_, declared only in `:root` and inherited everywhere:
 
@@ -108,7 +108,20 @@ Motion is theme-invariant and lives in `:root`. Five tokens cover the app's tran
 
 The first three are full `<duration> <easing>` shorthands you drop straight into a `transition` property (`transition: border-color var(--motion-fast)`); the last two are easing curves only, for when you need a custom duration. Framer Motion springs are the runtime side of this, used for state-change choreography that CSS transitions can't express.
 
-Accessibility is built in. A global `@media (prefers-reduced-motion: reduce)` rule neutralizes CSS `animation-duration` / `transition-duration` to `0.001ms` across `*`, freezes the skeleton shimmer to a static tint, and forces `scroll-behavior: auto`. Framer Motion respects `prefers-reduced-motion` at the framework level on top of that. A global `:focus-visible` rule paints a 2px accent ring (`outline: 2px solid var(--primary)`) on every keyboard-focused interactive element, suppressed inside React Flow and CodeMirror, which own their focus visuals.
+Accessibility is built in. A global `@media (prefers-reduced-motion: reduce)` rule neutralizes CSS `animation-duration` / `transition-duration` to `0.001ms` across `*`, freezes the skeleton shimmer to a static tint, and forces `scroll-behavior: auto`. Framer Motion is opted in on top of that by a single `<MotionConfig reducedMotion="user">` at the app root (`app/providers.tsx`) — it does **not** honour the preference on its own, since `MotionConfigContext` defaults to `reducedMotion: "never"`. That CSS rule cannot reach motion written straight to the DOM from a `requestAnimationFrame` loop, so the graph's two raw-RAF loops (`useFloatingMotion`'s idle float and `graphPhysics`' relaxation pass) read the preference themselves through `lib/prefersReducedMotion.ts` and stay parked; they also subscribe to the media query, so toggling the OS setting takes effect without a reload.
+
+A global `:focus-visible` rule paints a 2px accent ring (`outline: 2px solid var(--primary)`) on every keyboard-focused interactive element. It is suppressed inside CodeMirror, which owns its focus visuals, and inside React Flow's pane and handles — but **not** on `.react-flow__node`, which really is a Tab stop (React Flow makes nodes focusable by default), so graph navigation stays visible. Boo nodes paint the ring on their inner `.group` because the node wrapper is a 280px transparent envelope around a much smaller shape.
+
+Muted body text uses `--muted-foreground`, which is held at ≥4.5:1 against every surface token in both themes and is the token to reach for instead of a low-opacity `text-foreground/N`. `apps/web/src/app/__tests__/tokenContrast.test.ts` parses `globals.css` and enforces it: every text token clears 4.5:1 against every surface it is painted on, every status colour clears the 3:1 non-text floor, and both button-label-on-fill pairs clear 4.5:1. Its `KNOWN_DEBT` ratchet is empty, and an addition to it means deliberately shipping text below AA.
+
+Dark mode resolves a conflict worth knowing about, and it is why the brand red is **two** tokens. As text, the red has to be light enough to clear the dark surfaces; under a white button label it has to be dark, because white on that lighter red is only 3.83:1 — which was every primary CTA in the app. Lightening fixes the first and worsens the second, so the roles are split:
+
+| Token             | Role                         | Dark                          | Light               |
+| ----------------- | ---------------------------- | ----------------------------- | ------------------- |
+| `--primary`       | text, accents, focus ring    | `#e94762` (4.52:1 as text)    | `#d82947`           |
+| `--primary-solid` | the fill under a white label | `#c83b53` (4.99:1 with white) | aliases `--primary` |
+
+`--destructive` / `--destructive-solid` follow the same pattern. Light mode has no conflict, so the `-solid` tokens alias their base there. Reach for `bg-primary-solid` / `bg-destructive-solid` whenever a filled button carries `text-primary-foreground` / `text-destructive-foreground`; use plain `bg-primary` for tints, rings and borders. The guard asserts the label pairs against the `-solid` fills, so wiring a label onto the wrong one fails the build.
 
 ## Type scale
 
@@ -134,7 +147,7 @@ The brand identity is three accents, OpenClaw Red (primary), mint, and amber, pl
 
 | Token       | Light     | Dark      | Role                                                |
 | ----------- | --------- | --------- | --------------------------------------------------- |
-| `--primary` | `#dc2a48` | `#e94560` | OpenClaw Red, accent, destructive-adjacent emphasis |
+| `--primary` | `#d82947` | `#e94762` | OpenClaw Red, accent, destructive-adjacent emphasis |
 | `--mint`    | `#059669` | `#34d399` | Success / working / done                            |
 | `--amber`   | `#d97706` | `#fbbf24` | Warning / pending                                   |
 
@@ -158,18 +171,42 @@ The full deployment-matches-preview discipline (a team's create-time preview pal
 
 The pattern primitives live in `apps/web/src/features/shared/`. Each one bundles the right tokens so a recurring UI pattern reads consistently and stays theme-correct, accessible, and reduced-motion-safe by construction.
 
-| Primitive        | File                 | What it gives you                                                                                                                                                                                                                                                                              |
-| ---------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Skeleton`       | `Skeleton.tsx`       | A shimmer placeholder block (`width` / `height` / `radius`). Uses the `.clawboo-skeleton` class, which animates a `--surface → --surface-raised → --surface` gradient sweep and freezes to a static tint under reduced motion. `aria-hidden`.                                                  |
-| `Spinner`        | `Spinner.tsx`        | An in-flight `Loader2` spinner. Under `prefers-reduced-motion` it swaps to a static `LoaderCircle` ring (a frozen partial arc would read as broken). `aria-hidden`.                                                                                                                            |
-| `StatusPill`     | `StatusPill.tsx`     | The canonical mono / uppercase / tracking-wider status indicator. `tone` ∈ `working \| done \| idle \| warning \| success \| error`; omit `label` to render a dot-only indicator (the Working-pulse / Done-mint / Idle-gray pattern). Each tone maps to a brand token, so themes flow through. |
-| `EmptyState`     | `EmptyState.tsx`     | The branded empty state: a 56px circular icon disc + a Lucide icon @ 26px + a Cabinet-Grotesk title + a DM-Sans helper + an optional CTA. `tone` ∈ `neutral \| mint \| amber \| primary` tints the disc. Never an emoji.                                                                       |
-| `FormattedAlert` | `FormattedAlert.tsx` | A thin in-flow callout strip with a leading semantic Lucide icon. `tone` ∈ `info \| warning \| error`; `role="alert"` for errors, `role="status"` otherwise. Not for toasts (those have their own motion system).                                                                              |
-| `Select`         | `Select.tsx`         | A styled wrapper around the native `<select>`, keeps full keyboard / type-ahead / screen-reader / mobile-picker behavior, layers on token-driven chrome and a custom Lucide chevron. `size` ∈ `sm \| md`; pass `options` or `<option>` children.                                               |
+| Primitive        | File                 | What it gives you                                                                                                                                                                                                                                                                                      |
+| ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Skeleton`       | `Skeleton.tsx`       | A shimmer placeholder block (`width` / `height` / `radius`). Uses the `.clawboo-skeleton` class, which animates a `--surface → --surface-raised → --surface` gradient sweep and freezes to a static tint under reduced motion. `aria-hidden`.                                                          |
+| `Spinner`        | `Spinner.tsx`        | An in-flight `Loader2` spinner. Under `prefers-reduced-motion` it swaps to a static `LoaderCircle` ring (a frozen partial arc would read as broken). `aria-hidden`.                                                                                                                                    |
+| `StatusPill`     | `StatusPill.tsx`     | The canonical mono / uppercase / tracking-wider status indicator. `tone` ∈ `working \| done \| idle \| warning \| success \| error`; omit `label` to render a dot-only indicator (the Working-pulse / Done-mint / Idle-gray pattern). Each tone maps to a brand token, so themes flow through.         |
+| `EmptyState`     | `EmptyState.tsx`     | The branded empty state: a 56px circular icon disc + a Lucide icon @ 26px + a display-font title (`--font-display`, Inter) @ 70% opacity + a body helper @ 40% opacity + an optional CTA. `tone` ∈ `neutral \| mint \| amber \| primary` tints the disc. Never an emoji.                               |
+| `FormattedAlert` | `FormattedAlert.tsx` | A thin in-flow callout strip with a leading semantic Lucide icon. `tone` ∈ `info \| warning \| error`; `role="alert"` for errors, `role="status"` otherwise. Not for toasts (those have their own motion system).                                                                                      |
+| `Select`         | `Select.tsx`         | A custom listbox popover, NOT a native `<select>` (whose OS-drawn list can't be themed): a pill trigger plus a portalled `bg-popover` menu with arrow-key navigation, check-marked rows, viewport flipping, and an optional search filter. `size` ∈ `sm \| md`; pass `options` or `<option>` children. |
+| `ErrorBoundary`  | `ErrorBoundary.tsx`  | The React error boundary and its `role="alert"` fallback card (heading, message, Try again + Reload). `variant` ∈ `app \| panel \| compact` — full-viewport at the root, inline for one surface, icon-only for a narrow rail. Renders `children` verbatim while healthy, so it adds no DOM.            |
 
 Two principles run through all of them. **They are token-driven**, every color is a CSS variable (`rgb(var(--mint-rgb) / 0.2)`, `var(--primary)`), so a primitive recolors itself when the theme flips with no per-component logic. **They are accessibility-first**; reduced-motion fallbacks, `aria-*` and `role` attributes, and native-element semantics are baked in, so callers get correct behavior for free.
 
-`ResizeHandle.tsx` lives in the same directory but is a layout primitive (the split-panel drag seam) rather than a token-bundling design primitive.
+### Dismissal: one stack, one owner
+
+Overlays do not each listen for Escape. `useDismissableLayer.ts` keeps a single
+`keydown` and a single `mousedown` listener on `document` and hands the gesture to
+the **topmost open layer only** — `Modal`, `Select`'s popover, `ConfirmDialog`,
+the context menus and the model pickers all register there while open.
+
+Two rules make the ordering explicit rather than emergent:
+
+- A `popover` always outranks a `dialog`, so a dropdown opened inside a modal is
+  dismissed on its own and the modal (and its half-filled form) survives to take
+  the next Escape.
+- The listener bubbles, so anything nearer the event target — a React
+  `onKeyDown`, CodeMirror's keymap — runs first and can **veto** the stack by
+  calling `preventDefault()`. That is the contract for element-scoped Escape
+  handlers.
+
+Before this, each overlay bound its own listener and picked a phase to win or
+lose the race; two listeners on `document` in the same phase both fired, because
+`stopPropagation()` does not suppress a same-target, same-phase sibling. An
+ESLint rule (`no-restricted-syntax` in `eslint.config.mjs`) now rejects new
+capture-phase key listeners anywhere in `apps/web/src`.
+
+`ResizeHandle.tsx` and `LazyBoundary.tsx` live in the same directory but are layout / structural primitives (the split-panel drag seam, and the `ErrorBoundary` + `Suspense` + retry seam every lazily-loaded surface renders through) rather than token-bundling design primitives.
 
 ## Design rationale and trade-offs
 
@@ -188,7 +225,7 @@ Two principles run through all of them. **They are token-driven**, every color i
 - **`globals.css` is the single source of truth.** Every token value comes from `globals.css`; this page documents what ships.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

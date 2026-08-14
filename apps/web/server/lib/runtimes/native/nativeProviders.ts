@@ -26,7 +26,12 @@ export const NATIVE_COMPAT_PROVIDERS: NativeCompatProvider[] = [
   },
   { id: 'xai', name: 'xAI', baseURL: 'https://api.x.ai/v1', envVar: 'XAI_API_KEY' },
   { id: 'groq', name: 'Groq', baseURL: 'https://api.groq.com/openai/v1', envVar: 'GROQ_API_KEY' },
-  { id: 'mistral', name: 'Mistral', baseURL: 'https://api.mistral.ai/v1', envVar: 'MISTRAL_API_KEY' },
+  {
+    id: 'mistral',
+    name: 'Mistral',
+    baseURL: 'https://api.mistral.ai/v1',
+    envVar: 'MISTRAL_API_KEY',
+  },
   {
     id: 'together',
     name: 'Together',

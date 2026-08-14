@@ -13,6 +13,7 @@ import path from 'node:path'
 
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resetDb } from '../../lib/db'
 
 // ── Mock platform: control which CLI bins are "installed". ───────────────────
 type PyResult = {
@@ -217,6 +218,10 @@ describe('runtimes install/connect REST', () => {
     process.env['HERMES_HOME'] = path.join(home, '.hermes')
   })
   afterEach(() => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. The suite never opens the handle itself,
+    // the server code under test does. (#140)
+    resetDb()
     for (const k of SAVED) {
       if (prev[k] === undefined) delete process.env[k]
       else process.env[k] = prev[k]
@@ -811,6 +816,54 @@ describe('runtimes install/connect REST', () => {
     vi.unstubAllGlobals()
   })
 
+  it('native healthcheck refuses to FOLLOW a redirect while carrying the key', async () => {
+    // The probe sends a live credential to a hard-coded provider endpoint. Node's
+    // fetch strips `Authorization` across origins but NOT Anthropic's custom
+    // `x-api-key`, so following a 3xx could hand the key to whatever host
+    // answered. Assert the option itself, not just the catch: a test that only
+    // checked the error path would still pass if `redirect` were dropped.
+    // Declare the params so the mock's call tuple is typed — a bare `vi.fn(async
+    // () => …)` infers `[]` and indexing `[1]` is a compile error.
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response(null, { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const m = mockRes()
+    await runtimesHealthcheckPOST(
+      req({
+        params: { id: 'clawboo-native' },
+        body: { provider: 'anthropic', apiKey: 'sk-probe' },
+      }),
+      m.res,
+    )
+    expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe('error')
+    vi.unstubAllGlobals()
+  })
+
+  it('native healthcheck fails closed (never ok) when the provider redirects', async () => {
+    // `redirect: 'error'` makes fetch reject; the handler must degrade to the
+    // friendly unreachable message rather than surfacing a 200.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('unexpected redirect')
+      }),
+    )
+    const m = mockRes()
+    await runtimesHealthcheckPOST(
+      req({
+        params: { id: 'clawboo-native' },
+        body: { provider: 'anthropic', apiKey: 'sk-probe' },
+      }),
+      m.res,
+    )
+    const body = m.body() as { ok?: boolean; error?: string }
+    expect(body.ok).toBe(false)
+    expect(body.error).toMatch(/could not reach/i)
+    expect(JSON.stringify(body)).not.toContain('sk-probe')
+    vi.unstubAllGlobals()
+  })
+
   it('native healthcheck reports a friendly failure on a 401', async () => {
     vi.stubGlobal(
       'fetch',
@@ -824,6 +877,47 @@ describe('runtimes install/connect REST', () => {
     const body = m.body() as { ok?: boolean; error?: string }
     expect(body.ok).toBe(false)
     expect(body.error).toMatch(/invalid/i)
+    vi.unstubAllGlobals()
+  })
+
+  it('healthcheck with NO apiKey probes the key already stored for that provider', async () => {
+    // The one-click "Use" reconnect never re-pastes the key, so verifying it has to
+    // read the saved one. The probe must still leave the vault exactly as it found
+    // it and must not echo the key it used.
+    setRuntimeSecret('OPENROUTER_API_KEY', 'sk-or-stored')
+    const seen: { headers?: HeadersInit } = {}
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        seen.headers = init.headers
+        return new Response(null, { status: 200 })
+      }),
+    )
+    const m = mockRes()
+    await runtimesHealthcheckPOST(
+      req({ params: { id: 'clawboo-native' }, body: { provider: 'openrouter' } }),
+      m.res,
+    )
+    expect((m.body() as { ok?: boolean }).ok).toBe(true)
+    // It really used the stored key…
+    expect(JSON.stringify(seen.headers)).toContain('sk-or-stored')
+    // …left it in place, and never echoed it.
+    expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(true)
+    expect(JSON.stringify(m.body())).not.toContain('sk-or-stored')
+    vi.unstubAllGlobals()
+  })
+
+  it('healthcheck with NO apiKey and no stored key still 400s', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const m = mockRes()
+    await runtimesHealthcheckPOST(
+      req({ params: { id: 'clawboo-native' }, body: { provider: 'openrouter' } }),
+      m.res,
+    )
+    expect(m.statusCode()).toBe(400)
+    expect(String((m.body() as { error?: string }).error)).toMatch(/apiKey is required/i)
+    expect(fetchMock).not.toHaveBeenCalled() // nothing to probe with — don't call out
     vi.unstubAllGlobals()
   })
 

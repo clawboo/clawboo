@@ -6,21 +6,29 @@
 // servers, the optional OpenClaw Gateway, the optional OTel exporter).
 //
 // Philosophy: almost everything DEGRADES (the server keeps running, the UI shows a
-// banner) rather than being fatal. Only two failures are fatal — the clawboo home
-// is not writable, or the SQLite file fails its integrity check — because nothing
-// works without them. There are NO migration / upgrade paths: a fatal boot means
-// the install is broken; the user-facing remedy is to reset ~/.clawboo and re-run
-// the onboarding wizard (the System Health view says so).
+// banner) rather than being fatal. Three failures are fatal, because nothing works
+// without them: the clawboo home is not writable, the SQLite file fails its
+// integrity check, or its schema is short a column. There is no migration ladder;
+// the one upgrade path is the additive column reconcile inside `ensureSchema`, and
+// `databaseSchema` verifies its OUTCOME rather than trusting that it ran. A fatal
+// check means the install is broken in a way the probe cannot fix; each one says
+// what to do, and resetting ~/.clawboo is always the last resort.
 
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, statSync } from 'node:fs'
 
 import { resolveClawbooDir, loadSettings } from '@clawboo/config'
-import { createDb, integrityCheck, listTableNames, type ClawbooDb } from '@clawboo/db'
+import {
+  integrityCheck,
+  listTableNames,
+  missingSchemaColumns,
+  SchemaUpgradeError,
+  type ClawbooDb,
+} from '@clawboo/db'
 import { getProxyDeviceIdentityPath } from '@clawboo/gateway-proxy'
 import { MCP_SERVER_NAMES } from '@clawboo/mcp'
 
 import { getRegistry } from './agentSource'
-import { getDbPath } from './db'
+import { getDb, getDbPath } from './db'
 import { DEFAULTS } from './defaults'
 import { probeMcpServer } from './mcpSupervisor'
 import { otlpConfigured } from './obs/obsFlags'
@@ -70,8 +78,11 @@ export interface BootReport {
   }
 }
 
-// Only these two failing modes are fatal; every other check degrades.
-const FATAL_IDS = new Set(['clawbooHomeWritable', 'databaseIntegrity'])
+// A missing column is not an optional subsystem: every query touching it fails, so
+// `databaseSchema` is fatal rather than degraded. It should never fire, because
+// `ensureSchema` either adds the column or throws; it is here to report the outcome
+// rather than assume it.
+const FATAL_IDS = new Set(['clawbooHomeWritable', 'databaseIntegrity', 'databaseSchema'])
 
 // A core subset of the bootstrap schema; their absence means the DDL never ran.
 const CORE_TABLES = ['teams', 'agents', 'settings', 'budgets', 'orchestration_events', 'tasks']
@@ -294,17 +305,25 @@ async function runBootProbeInner(input: { port?: number } = {}): Promise<BootRep
   // 4 + 5. SQLite integrity + schema (share one handle).
   let db: ClawbooDb | null = null
   let dbOpenError: string | null = null
+  // The server normally exits on an un-upgradable schema rather than reaching the
+  // probe, but `POST /api/health/recheck` gets here, so report it accurately.
+  let schemaCannotUpgrade = false
   try {
-    db = createDb(dbPath)
+    db = getDb()
   } catch (err) {
     dbOpenError = err instanceof Error ? err.message : String(err)
+    schemaCannotUpgrade = err instanceof SchemaUpgradeError
   }
   checks.push(
     await runCheck('databaseIntegrity', () => {
       if (!db)
         return {
           ok: false,
-          message: 'SQLite database could not be opened',
+          // The file opened fine in the upgrade case; saying otherwise sends the
+          // reader looking for corruption that is not there.
+          message: schemaCannotUpgrade
+            ? 'SQLite integrity not checked: the schema could not be upgraded (see below)'
+            : 'SQLite database could not be opened',
           detail: dbOpenError ?? '',
         }
       const verdict = integrityCheck(db)
@@ -319,12 +338,41 @@ async function runBootProbeInner(input: { port?: number } = {}): Promise<BootRep
   )
   checks.push(
     await runCheck('databaseSchema', () => {
-      if (!db) return { ok: false, message: 'SQLite database unavailable (schema not checked)' }
+      if (!db) {
+        // Distinguish "the file would not open" from "it opened and cannot be
+        // upgraded". The second is the actionable one, and its message is the whole
+        // remedy, so it belongs in the detail rather than being flattened away.
+        return schemaCannotUpgrade
+          ? {
+              ok: false,
+              message: 'SQLite schema cannot be upgraded in place',
+              detail: dbOpenError ?? '',
+            }
+          : { ok: false, message: 'SQLite database unavailable (schema not checked)' }
+      }
       const present = new Set(listTableNames(db))
-      const missing = CORE_TABLES.filter((t) => !present.has(t))
-      return missing.length === 0
-        ? { ok: true, message: `schema bootstrapped (${present.size} tables)` }
-        : { ok: false, message: 'core tables missing', detail: `missing: ${missing.join(', ')}` }
+      const missingTables = CORE_TABLES.filter((t) => !present.has(t))
+      if (missingTables.length > 0) {
+        return {
+          ok: false,
+          message: 'core tables missing',
+          detail: `missing: ${missingTables.join(', ')}`,
+        }
+      }
+      // Verify the OUTCOME rather than trusting the mechanism. `ensureSchema`
+      // reconciles an older file's tables up to the current column set and throws
+      // if it cannot, so this should always be empty. But a column missing here is
+      // precisely the failure that used to boot clean and then break at runtime on
+      // the first query touching it, so it is worth reporting instead of assuming.
+      const missingColumns = missingSchemaColumns(db)
+      if (missingColumns.length > 0) {
+        return {
+          ok: false,
+          message: `schema is missing ${missingColumns.length} column(s); queries touching them will fail`,
+          detail: `missing: ${missingColumns.map((c) => `${c.table}.${c.column}`).join(', ')}`,
+        }
+      }
+      return { ok: true, message: `schema bootstrapped (${present.size} tables)` }
     }),
   )
 

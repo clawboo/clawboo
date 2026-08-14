@@ -48,6 +48,11 @@ describe('native driver — :native chat write de-double for team runs', () => {
     db = createDb(path.join(sandbox, 'test.db'))
   })
   afterEach(async () => {
+    // This suite OWNS its connection (createDb at a fixture path), so resetDb()
+    // cannot reach it: that only evicts the getDb() memo. Windows refuses to
+    // remove a directory that still holds an open file, so close it before the
+    // rm. Mirrors the ownership rule in lib/db.ts. (#140)
+    db.$client.close()
     await rm(sandbox, { recursive: true, force: true })
   })
 

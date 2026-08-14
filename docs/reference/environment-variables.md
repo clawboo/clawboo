@@ -10,7 +10,7 @@ This page documents only Clawboo's own configuration variables, sourced from `@c
 </Info>
 
 <Note>
-Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) are read indirectly through the credential-resolution chain (`process.env` → encrypted vault → OpenClaw's `~/.openclaw/.env`). Setting one in the process environment is the highest-priority way to satisfy a runtime's credential check. See [Runtime provider keys](#runtime-provider-keys) and [Connecting runtimes](/runtimes/connecting-runtimes).
+Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, plus the seven native OpenAI-compatible keys listed below) are read indirectly through the credential-resolution chain (`process.env` → encrypted vault → OpenClaw's `~/.openclaw/.env`). Setting one in the process environment is the highest-priority way to satisfy a runtime's credential check. See [Runtime provider keys](#runtime-provider-keys) and [Connecting runtimes](/runtimes/connecting-runtimes).
 </Note>
 
 ## At a glance
@@ -27,6 +27,8 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) 
 | `CLAWBOO_MCP_BIN_DIR`                 | State & paths      | (set by CLI)                     | `GET /api/mcp/config` stdio snippet     |
 | `CLAWBOO_API_PORT`                    | Ports & binding    | `18790` (auto-scan)              | `resolveApiPort()`                      |
 | `CLAWBOO_API_PORT_START`              | Ports & binding    | `18790`                          | `resolveApiPort()` scan start           |
+| `CLAWBOO_AWAIT_PORT`                  | Ports & binding    | (none)                           | server boot (restart handoff)           |
+| `CLAWBOO_VERSION`                     | Version & updates  | (read from the shipped manifest) | `getCurrentVersion()`                   |
 | `PORT`                                | Ports & binding    | (none)                           | `resolveApiPort()` (production only)    |
 | `HOST`                                | Ports & binding    | `127.0.0.1`                      | `resolveHost()`                         |
 | `HOSTNAME`                            | Ports & binding    | (ignored)                        | ignored (no longer a bind signal)       |
@@ -38,10 +40,18 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) 
 | `ANTHROPIC_API_KEY`                   | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
 | `OPENAI_API_KEY`                      | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
 | `OPENROUTER_API_KEY`                  | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
+| `GEMINI_API_KEY`                      | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `XAI_API_KEY`                         | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `GROQ_API_KEY`                        | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `MISTRAL_API_KEY`                     | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `TOGETHER_API_KEY`                    | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `CEREBRAS_API_KEY`                    | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `MOONSHOT_API_KEY`                    | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
 | `OLLAMA_BASE_URL`                     | Runtime keys       | `http://localhost:11434/v1`      | native OpenAI-compat provider           |
 | `CLAWBOO_REVIEWER_MODEL`              | Runtime tuning     | (the builder's model)            | executor verification critic            |
 | `LOG_LEVEL`                           | Logging            | `info`                           | `@clawboo/logger`                       |
 | `NODE_ENV`                            | Logging            | (none)                           | `@clawboo/logger` transport selection   |
+| `CLAWBOO_DB_WRITE_BUDGET_MS`          | Operational tuning | `1500` (1.5 s)                   | SQLite write-retry budget               |
 | `CLAWBOO_BOARD_STALE_TTL_MS`          | Operational tuning | `3600000` (60 min)               | board stale-task sweep                  |
 | `CLAWBOO_BOARD_STALE_SWEEP_MS`        | Operational tuning | `300000` (5 min)                 | board stale-task sweep                  |
 | `CLAWBOO_APPROVAL_TTL_MS`             | Operational tuning | `86400000` (24 h)                | approval reaper                         |
@@ -89,7 +99,7 @@ There are no feature-flag environment variables; every subsystem (board, executo
 - **Default**: `~/.openclaw/clawboo/clawboo.db`.
 
 <Note>
-The in-process Express server resolves its DB path through `getDbPath()` → `~/.clawboo/clawboo.db` (following `CLAWBOO_HOME`), **not** `defaultDbPath()`. `CLAWBOO_DB_PATH` only affects the out-of-process MCP bins. Point both at the same file if you override the server's home so external runtimes share the board. See [Configuration](/reference/configuration#sqlite-database).
+The in-process Express server resolves its DB path through `getDbPath()` → `~/.clawboo/clawboo.db` (following `CLAWBOO_HOME`), **not** `defaultDbPath()`. `CLAWBOO_DB_PATH` only affects the out-of-process MCP bins. Point both at the same file if you override the server's home so external runtimes share the board. See [Configuration](/reference/configuration#the-two-db-path-resolvers).
 </Note>
 
 ### `CLAWBOO_UI_DIR`
@@ -100,7 +110,7 @@ The in-process Express server resolves its DB path through `getDbPath()` → `~/
 
 ### `CLAWBOO_SERVER_PATH`
 
-- **Read by**: the CLI (`apps/cli/src/index.ts`) when falling back to dev-mode launch (no bundled `server.js` present).
+- **Read by**: the CLI's `findMonorepoRoot()` (`apps/cli/src/lifecycle.ts`) when falling back to dev-mode launch (no bundled `server.js` present).
 - **Purpose**: overrides the monorepo root the CLI spawns `tsx apps/web/server/index.ts` from. Only consulted in the dev-fallback path; the published CLI tarball uses the bundled server and ignores it.
 - **Default**: auto-discovered monorepo root.
 
@@ -164,6 +174,26 @@ A non-loopback bind (`HOST=0.0.0.0`, a LAN IP, or a hostname) WITHOUT `STUDIO_AC
 - **Purpose**: a comma-separated list of extra hostnames to accept in the HTTP `Host` header (the guard's DNS-rebinding defense). Like `CLAWBOO_ALLOWED_ORIGINS`, it only widens the always-enforced loopback allowlist. Set it when a reverse proxy forwards a public hostname to the dashboard.
 - **Default**: none (only loopback hostnames plus the actual bind host are accepted).
 
+### `CLAWBOO_AWAIT_PORT`
+
+- **Read by**: server boot in `apps/web/server/index.ts`, before `resolveApiPort()`.
+- **Set by**: the server's in-app self-update (`selfRestart.ts`) and the CLI's `clawboo restart` (and the restart it offers when it finds an older server), on the successor process.
+- **Purpose**: makes a starting server **wait**, up to 15 seconds, for that port to be released before it tries to bind. A restart hands the same port to the successor, but the process being replaced still holds it for a moment. Without the wait, an explicitly-pinned `CLAWBOO_API_PORT` would fail loudly on a taken port and a scanning boot would drift to the next free one, orphaning the browser tab already pointed at the old URL. A missing or invalid value is a no-op, which is the common path.
+- **Default**: unset (no waiting).
+
+## Version & updates
+
+### `CLAWBOO_VERSION`
+
+- **Read by**: `getCurrentVersion()` in `apps/web/server/lib/updateCheck.ts`, which backs `GET /api/system/self-version`, the dashboard's "update available" chip, and the CLI's version-aware discovery check.
+- **Set by**: the `clawboo` CLI on every server it spawns, so the server knows which release launched it without reading `package.json` off disk.
+- **Purpose**: the fast path for "what version is this server running". The on-disk `clawboo` manifest is the fallback **and** the source of truth after an in-app self-update: a successor started by `selfRestart.ts` is launched with this variable deliberately **deleted**, precisely so it recomputes from the freshly-installed `package.json` instead of inheriting the pre-update value.
+- **Default**: unset → read from the shipped `package.json` (name-guarded, so `apps/web/package.json` is never mistaken for the release), falling back to `0.0.0-dev` in a checkout.
+
+<Note>
+Setting `CLAWBOO_VERSION` by hand makes the server report a version it is not running, and makes the CLI's discovery check compare against a fiction. It exists as a launcher-to-server handoff, not as a knob.
+</Note>
+
 ## Secrets & auth
 
 ### `STUDIO_ACCESS_TOKEN`
@@ -208,6 +238,20 @@ These are resolved through the credential chain `resolveRuntimeKey(envVar)`: `pr
 - **Purpose**: the OpenRouter provider key. Satisfies the Hermes and Native (OpenRouter) credential checks.
 - **Default**: none.
 
+### Native OpenAI-compatible provider keys
+
+The `clawboo-native` descriptor's `altEnvVars` is the whole `NATIVE_PROVIDER_ENV_VARS` list minus its primary `ANTHROPIC_API_KEY`, so seven further provider keys are read on the same terms as the three above. Each is resolved by `resolveRuntimeKey()`, on its own satisfies the Native runtime's credential check (`nativeKeyHealth()` iterates `envVar` plus `altEnvVars`), and selects that provider's OpenAI-compatible client when a routed call or fallback names it. Default for all seven: none.
+
+| Variable           | Provider | OpenAI-compatible base URL                                |
+| ------------------ | -------- | --------------------------------------------------------- |
+| `GEMINI_API_KEY`   | Google   | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| `XAI_API_KEY`      | xAI      | `https://api.x.ai/v1`                                     |
+| `GROQ_API_KEY`     | Groq     | `https://api.groq.com/openai/v1`                          |
+| `MISTRAL_API_KEY`  | Mistral  | `https://api.mistral.ai/v1`                               |
+| `TOGETHER_API_KEY` | Together | `https://api.together.xyz/v1`                             |
+| `CEREBRAS_API_KEY` | Cerebras | `https://api.cerebras.ai/v1`                              |
+| `MOONSHOT_API_KEY` | Moonshot | `https://api.moonshot.ai/v1`                              |
+
 ### `OLLAMA_BASE_URL`
 
 - **Read by**: the Native runtime's OpenAI-compatible provider (`ollamaBaseUrl()`); also treated as a connection signal in `cliHealth` for runtimes that can route to Ollama.
@@ -243,6 +287,12 @@ Codex authenticates via interactive ChatGPT OAuth (`codex login`), not a pasted 
 ## Operational tuning
 
 These tune the always-on background services that run at server boot. Each is parsed as a positive number of milliseconds and falls back to its default on a missing or invalid value.
+
+### `CLAWBOO_DB_WRITE_BUDGET_MS`
+
+- **Read by**: the write-contention retry in `packages/db/src/board/contention.ts`.
+- **Purpose**: the wall-clock budget for one outermost write's jittered lock retries. The retry sleep is synchronous (`Atomics.wait`), so in the server it blocks the event loop — this is what bounds how long a single contended write can freeze the process. Worst case is this budget plus one final `busy_timeout` (250 ms). A write that exhausts it throws `WriteBudgetExhaustedError`, which still carries `code = 'SQLITE_BUSY'`.
+- **Default**: `1500` (1.5 seconds).
 
 ### `CLAWBOO_BOARD_STALE_TTL_MS`
 

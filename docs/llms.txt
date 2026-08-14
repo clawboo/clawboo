@@ -2,7 +2,7 @@
 
 > Clawboo is an open-source, local-first multi-agent mission-control dashboard and orchestrator, installed via `npx clawboo`. Deploy a team of agents across five runtimes (clawboo-native, OpenClaw, Claude Code, Codex, Hermes), watch them collaborate live in group chat and on a durable kanban board, and govern them with builder-not-judge verification, USD budgets, circuit breakers, and an always-on observability event log.
 
-This file indexes the Clawboo documentation for language models. Paths are relative to the documentation root. Documents Clawboo v0.3.0, the current published release (npm `latest` = `clawboo@0.3.0`).
+This file indexes the Clawboo documentation for language models. Paths are relative to the documentation root. Documents Clawboo v0.3.1, the current published release (npm `latest` = `clawboo@0.3.1`).
 
 ## Introduction
 
@@ -72,7 +72,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 ## Operating Clawboo
 
 - [Operating Clawboo](operating/index.md): Operator overview — where Clawboo runs, how to expose it safely, where data lives, and what the defaults are.
-- [Data and state](operating/data-and-state.md): Where Clawboo stores everything, how to back it up, and how the hard-reset model works.
+- [Data and state](operating/data-and-state.md): Where Clawboo stores everything, how to back it up, how upgrades reach an existing database, and how to reset it.
 - [Deploying Clawboo](operating/deployment.md): Run Clawboo via npx, in dev mode, or as a bundled server — covering ports, state dir, host binding, and reverse-proxy setup.
 - [Attaching Clawboo's MCP servers](operating/mcp-servers.md): Attach the four hosted MCP servers (tasks, memory, tools, teamchat) to an external agent over stdio or Streamable HTTP.
 - [Production defaults & posture](operating/production-defaults.md): The values a fresh Clawboo install runs with — log level, budget posture, breaker thresholds, reaper TTLs — each justified, with override env vars.
@@ -81,7 +81,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 ## Reference
 
 - [Reference](reference/index.md): Index of Clawboo's factual reference — REST API, CLI, configuration, env vars, database schema, MCP tools, marketplace catalog, events, and packages.
-- [CLI reference](reference/cli.md): The single npx clawboo launcher (only --version/--help) plus the four bundled MCP stdio bins.
+- [CLI reference](reference/cli.md): The clawboo launcher (find-or-start, version-aware attach) and its backup/stop/restart subcommands, plus the four bundled MCP stdio bins.
 - [Configuration reference](reference/configuration.md): settings.json schema, the ~/.clawboo state directory, every file Clawboo owns, and OpenClaw interop reads.
 - [Database schema reference](reference/database-schema.md): The 27 SQLite tables Clawboo persists, their columns, indexes, and how the schema is bootstrapped without a migration ladder.
 - [Environment variables](reference/environment-variables.md): Every environment variable Clawboo reads — state paths, ports, secrets, runtime keys, OpenClaw interop, logging, and operational tuning.
@@ -140,7 +140,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Internals overview](internals/index.md): A contributor's map of Clawboo's monorepo — the packages, the seams, and the internals deep-dives that explain how it all fits together.
 - [AgentSource (registry of record)](internals/agent-source.md): The AgentSource trait, the neutral record types, the registry multiplexer, and the two concrete sources that make SQLite the agent registry of record.
 - [Board internals](internals/board-internals.md): The board data-access layer — the atomic claim, the transactional state machine, the SQLite contention recipe, recursive CTEs, and crash recovery.
-- [Codegen and ingestion](internals/codegen-and-ingestion.md): How the marketplace catalog is generated from pinned upstream repos, the zero-loss identityTemplate invariant, and the verify:ingest drift gate that keeps committed codegen honest.
+- [Codegen and ingestion](internals/codegen-and-ingestion.md): How the marketplace catalog is generated from pinned upstream repos, the zero-loss identityTemplate invariant, and the two gates - an offline integrity manifest and the live verify:ingest drift check - that keep committed codegen honest.
 - [Design system](internals/design-system.md): How Clawboo's theme, surface tiers, motion, type scale, brand palette, and reusable UI primitives fit together — grounded in globals.css.
 - [Event pipeline internals](internals/event-pipeline.md): How @clawboo/events turns raw OpenClaw Gateway frames into store updates through pure Bridge and Policy layers and a stateful Handler with a RAF patch queue.
 - [The executor runner](internals/executor-runner.md): How the server drives one board task through a runtime end-to-end — claim, worktree, prompt assembly, governance, rotation, verify, and handoff.
@@ -162,7 +162,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 
 ## Appendices
 
-- [Changelog](appendices/changelog.md): Release history of the clawboo CLI from the 0.1.0 name-claim placeholder through v0.3.0.
+- [Changelog](appendices/changelog.md): Release history of the clawboo CLI from the 0.1.0 name-claim placeholder through v0.3.1.
 - [Contributing to Clawboo](appendices/contributing.md): Clone, run the dev stack, pass the local gate, add a changeset, and respect the architecture invariants.
 - [Frequently asked questions](appendices/faq.md): Common questions about Clawboo — runtimes, data location, local-first behavior, cost, safe network exposure, and resetting.
 - [Glossary](appendices/glossary.md): Canonical definitions of Clawboo's core terms, each linked to the page that explains it.

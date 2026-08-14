@@ -2,10 +2,14 @@
 title: Contributing to Clawboo
 description: Clone, run the dev stack, pass the local gate, add a changeset, and respect the architecture invariants.
 ---
-Use this page when you want to make a change to Clawboo and open a pull request. It summarizes the contributor workflow and points at the canonical sources: the repo's [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md) is the authority on process; the [Internals section](/internals/index) explains *why* the code is shaped the way it is.
+
+Use this page when you want to make a change to Clawboo and open a pull request. It summarizes the contributor workflow and points at the canonical sources: the repo's [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md) is the authority on process; the [Internals section](/internals/index) explains _why_ the code is shaped the way it is.
 
 <Note>
-The single source of truth for process is [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md) at the repo root. This page is a guided tour of it with cross-links into the rest of the docs. If the two ever disagree, `CONTRIBUTING.md` and the root `package.json` win.
+  The single source of truth for process is
+  [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md) at the repo
+  root. This page is a guided tour of it with cross-links into the rest of the docs. If the two ever
+  disagree, `CONTRIBUTING.md` and the root `package.json` win.
 </Note>
 
 ## Prerequisites
@@ -43,20 +47,22 @@ The root `dev` script runs `turbo dev`. For the dashboard, `apps/web`'s dev orch
 Clawboo stores all of its state under `~/.clawboo/` (auto-created on first run). To point a dev instance at a throwaway directory, set [`CLAWBOO_HOME`](/reference/environment-variables). There are **no feature flags**; every subsystem ships on, so there is nothing to enable.
 
 <Tip>
-Governance ships in track-and-warn mode: budgets record spend and warn at thresholds, but nothing auto-pauses a run until you set a hard cap. See [Production defaults](/operating/production-defaults).
+  Governance ships in track-and-warn mode: budgets record spend and warn at thresholds, but nothing
+  auto-pauses a run until you set a hard cap. See [Production
+  defaults](/operating/production-defaults).
 </Tip>
 
 ### 3. Make your change on a branch
 
 Clawboo follows [GitHub Flow](https://docs.github.com/en/get-started/using-git/github-flow): branch from `main`, push, open a PR, and squash-merge once CI is green. Use a descriptive prefix:
 
-| Prefix | For |
-|---|---|
-| `feat/` | A new feature or surface |
-| `fix/` | A bug fix |
-| `chore/` | Tooling, deps, housekeeping |
-| `docs/` | Documentation only |
-| `test/` | Tests only |
+| Prefix      | For                          |
+| ----------- | ---------------------------- |
+| `feat/`     | A new feature or surface     |
+| `fix/`      | A bug fix                    |
+| `chore/`    | Tooling, deps, housekeeping  |
+| `docs/`     | Documentation only           |
+| `test/`     | Tests only                   |
 | `refactor/` | Non-behavioral restructuring |
 
 ### 4. Run the local gate before pushing
@@ -66,22 +72,32 @@ Run the same checks CI runs, in this order. They are all root scripts in `packag
 ```bash
 pnpm build                              # turbo build — all packages and apps
 pnpm typecheck                          # tsc --noEmit across the monorepo
-pnpm lint                               # ESLint flat config across all packages
+pnpm format:check                       # prettier --check .; CI runs this before pnpm lint
+pnpm lint                               # ESLint across all packages, plus the docs frontmatter + heading checks
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright e2e (incl. board round-trip + eval smoke)
-pnpm verify:ingest                      # marketplace codegen drift gate
-pnpm assemble && pnpm test:clean-install  # bundle the CLI and smoke-test a clean install
+pnpm verify:catalog                     # marketplace catalog integrity gate (offline)
+pnpm verify:ingest                      # marketplace codegen drift gate (live, needs network)
+pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the tarball, smoke-test it
+pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
 ```
 
 What each one guards:
 
 - **`pnpm test`** runs two Vitest projects: a node project for pure logic (`*.test.ts`) and a jsdom project for React components (`*.test.tsx`, RTL + MSW + jest-dom + jest-axe). See [Testing](/internals/testing).
 - **`pnpm e2e`** runs Playwright end-to-end, including the durable-board round-trip and the eval smoke suite.
-- **`pnpm verify:ingest`** re-derives the codegen'd marketplace catalog (304 agents, 82 teams) and fails on any drift from the committed files. If you touched ingestion, regenerate with `pnpm ingest:marketplace` first. See [Codegen and ingestion](/internals/codegen-and-ingestion).
-- **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI and boots it as a clean install to catch first-run regressions. This is the same gate the release workflow runs: see [Release process](/internals/release-process).
+- **`pnpm verify:catalog`** checks the committed marketplace catalog (304 agents, 82 teams) against its committed integrity manifest. It is offline, and it is the gate CI and the release path run.
+- **`pnpm verify:ingest`** re-derives the codegen'd catalog from the pinned upstream commits and fails on any drift. It needs network, and runs weekly plus on PRs touching ingestion. If you touched ingestion, regenerate with `pnpm ingest:marketplace` first. See [Codegen and ingestion](/internals/codegen-and-ingestion).
+- **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI, packs it, installs the tarball into a throwaway temp dir, and boots _that_ install to catch first-run regressions — through a headless-Chromium pass that fails on any uncaught exception or first-party console error, right up to one real agent run and a second-launch check that the CLI reuses a dashboard already running instead of forking another. It needs network access for the `npm install` and the same `pnpm exec playwright install chromium` download as `pnpm e2e`, and it refuses to run while another Clawboo dashboard holds `18790`–`18809` (stop your `pnpm dev` server first). This is the same gate the release workflow runs: see [Release process](/internals/release-process).
 
 <Tip>
-Running the full gate locally avoids review back-and-forth. At minimum, every PR must pass `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`; new surfaces should also pass `pnpm e2e`.
+  Running the full gate locally avoids review back-and-forth. Every PR must pass CI: `pnpm build`,
+  `pnpm format:check` and `pnpm lint` (two separate steps of CI's Lint job, format check first
+  because it takes seconds while `turbo lint` has to build every workspace dependency), `pnpm
+  typecheck`, `pnpm test:coverage` (the same suites as `pnpm test`, plus a coverage table in the
+  log: informational, not a threshold), `pnpm e2e`, and CodeQL code scanning. Not every one of those
+  blocks the merge button today, but a red check is a red check. Note `pnpm e2e` needs a built
+  workspace and a Chromium download (`pnpm build`, then `pnpm exec playwright install chromium`).
 </Tip>
 
 ### 5. Add a changeset for user-facing changes
@@ -95,12 +111,31 @@ pnpm changeset
 The interactive CLI asks which packages changed, the bump type (`patch` / `minor` / `major`), and a one-line summary, then writes a file under `.changeset/`. Commit it alongside your code.
 
 <Info>
-Every `@clawboo/*` library is `private: true`; only the `clawboo` CLI publishes to npm, with the libraries inlined into its bundle. So in practice a changeset matters when your change reaches the `clawboo` CLI's bundled behavior. **Documentation-only, CI-only, and `apps/web`-only changes do not need a changeset**; the dashboard package (`@clawboo/web`) and `@clawboo/docs` are in the changeset `ignore` list, and the dashboard is not published.
+  Every `@clawboo/*` library is `private: true`; only the `clawboo` CLI publishes to npm, with the
+  libraries inlined into its bundle. So in practice a changeset matters when your change reaches the
+  `clawboo` CLI's bundled behavior. **Documentation-only, CI-only, and `apps/web`-only changes do
+  not need a changeset**; the dashboard package (`@clawboo/web`) and `@clawboo/docs` are in the
+  changeset `ignore` list, and the dashboard is not published.
 </Info>
 
 ### 6. Open the pull request
 
 Push your branch and open a PR. The PR template walks the checklist. Keep it to **one concern per PR**; split unrelated changes. Add a test for anything you add (unit logic in Vitest, components in the jsdom project, new end-to-end behavior in Playwright). CI must be green before review, and PRs are squash-merged into `main`.
+
+## Documentation changes
+
+The page you are reading lives in the repo at `docs/`, and that directory **is** this site: hand-edited Mintlify Markdown with no build or generation step. Merging a docs PR to `main` redeploys [docs.claw.boo](https://docs.claw.boo) as-is, so the files in the diff are exactly what ships. See [Monorepo and build](/internals/monorepo-and-build) for where `docs/` sits in the workspace.
+
+<Warning>
+Frontmatter is parsed as YAML, so **quote any `title` or `description` value that contains a colon, or that starts with `@` or a backtick**. An unquoted `:` followed by a space parses as a nested mapping, and Mintlify serves the page as a 404 instead of rendering it. Single and double quotes are both valid YAML; Prettier normalizes them to single quotes when the pre-commit hook formats the page.
+
+Same class of breakage, opposite symptom: **never put a bare `%` in a body heading**. Mintlify URI-decodes headings into anchor slugs, so invalid percent-encoding fails the page. A `%` in prose is fine.
+
+</Warning>
+
+The two rules fail in opposite tools, which is why you want both. `mint broken-links` only validates links, so it misses the frontmatter one entirely; a full `mint dev` build catches that. The heading `%` is the reverse: `broken-links` reports it as a whole-page parse error, while a `mint dev` build can render straight past it. `pnpm check:docs` catches both without needing the Mintlify CLI: it is the `docs` package's `lint` script, so it also runs under `pnpm lint` and in CI's Lint job on every PR. The repo's [`docs/README.md`](https://github.com/clawboo/clawboo/blob/main/docs/README.md) covers the rest: the directory layout, the hand-maintained `docs.json` navigation, and local preview.
+
+Documentation-only changes do not need a changeset (see the note in step 5).
 
 ## Code guidelines
 
@@ -111,7 +146,7 @@ These are enforced by review and, where possible, by lint:
 - **Lucide icons only**, never emoji in the UI.
 - **Theme tokens, never raw hex**: use the CSS variables and Tailwind tokens (brand marks are the only exception). See the [design system](/internals/design-system).
 - **Pure where it claims to be.** Policy and projection functions stay side-effect-free and unit-testable.
-- **No secrets in logs, responses, or storage.** A credential's *presence* may be shown (the env-var name plus true/false), never its *value*. See [Security](/operating/security).
+- **No secrets in logs, responses, or storage.** A credential's _presence_ may be shown (the env-var name plus true/false), never its _value_. See [Security](/operating/security).
 
 ## Architecture invariants to respect
 
@@ -121,15 +156,18 @@ A change must not break the [seven architecture invariants](/concepts/architectu
 - **Packages never import apps.** Dependency flow is one-way (`apps/web` → `packages/**`, `packages/adapters/*` → `@clawboo/executor`). See the [package dependency graph](/reference/packages/index).
 - **A teammate is a [`RuntimeAdapter`](/internals/runtime-adapter).** New runtimes implement the trait and emit the normalized `RuntimeEvent` union rather than special-casing the orchestrator.
 - **The board is canonical for task/coordination state.** Prefer board mutations over prose-scanning heuristics: see [Board internals](/internals/board-internals) and [Delegation and orchestration](/concepts/delegation-and-orchestration).
-- **Schema changes are a hard reset.** There is no migration ladder; `createDb`'s inline `CREATE TABLE IF NOT EXISTS` DDL is the sole source of the schema. Changing it means a fresh `~/.clawboo`, not an in-place migration. See the [database schema reference](/reference/database-schema).
+- **Schema changes are additive.** There is no migration ladder; the `CREATE TABLE IF NOT EXISTS` DDL in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`) is the sole source of the schema, and `reconcileSchema` derives the in-place upgrade from it by adding whatever columns an existing database is missing. So a **new** column is fine as long as it is addable (it may not use `PRIMARY KEY`, `UNIQUE`, or a `STORED` generated column; any `DEFAULT` must be a literal rather than an expression; a `NOT NULL` column must carry one; and a `REFERENCES` column must not have a non-NULL one). A test fails the build on one that is not, comparing against the snapshot in `packages/db/src/__tests__/schemaBaseline.ts`, which needs no upkeep when you add a column. Changing or removing an existing column still means a fresh `~/.clawboo`. See the [database schema reference](/reference/database-schema#upgrading-an-existing-database).
 
 <Warning>
-The [Internals](/internals/index) pages flag "caution surfaces": files that encode load-bearing fixes (cascade prevention, stop-generation, history-hydration gating, deterministic plan keys). Read the relevant internals page before changing one, so you preserve the invariant or replace it with a documented reason.
+  The [Internals](/internals/index) pages flag "caution surfaces": files that encode load-bearing
+  fixes (cascade prevention, stop-generation, history-hydration gating, deterministic plan keys).
+  Read the relevant internals page before changing one, so you preserve the invariant or replace it
+  with a documented reason.
 </Warning>
 
 ## Release process
 
-Releases are automated and maintainer-only: when changesets land on `main`, the `publish.yml` workflow opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the `clawboo` CLI. No manual `npm publish`. The clean-install gate (`pnpm test:clean-install`) runs in the workflow before publish. See [Release process](/internals/release-process) for the full pipeline.
+Releases are automated and maintainer-only: when changesets land on `main`, the `publish.yml` workflow opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the `clawboo` CLI. No manual `npm publish`. The workflow re-runs the whole PR gate before publishing (`verify:catalog`, `build`, `lint`, `typecheck`, `test`, then `assemble` and the `pnpm test:clean-install` gate), so a release cannot skip a check a pull request had to pass. The catalog gate on that path is the offline one; the live re-derive (`verify:ingest`) runs in its own workflow so an upstream outage cannot block a release. See [Release process](/internals/release-process) for the full pipeline.
 
 ## License
 

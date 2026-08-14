@@ -6,7 +6,7 @@ description: Canonical definitions of Clawboo's core terms, each linked to the p
 Definitions of the vocabulary used throughout the Clawboo docs. Each entry is a one- or two-sentence definition with a link to the page that goes deeper. Terms are grouped by area; within a group they are roughly ordered from most-foundational to most-specific.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## Agents and runtimes
@@ -89,7 +89,7 @@ These docs describe Clawboo **v0.3.0**, the current release.
 
 **circuit breaker**: a deterministic, cross-runtime backstop that stops a run burning turns or tokens with no progress. It trips on `iteration-cap`, `repeat-failure`, `no-progress`, `token-velocity`, or `repeat-policy-denied`, keyed on typed `RuntimeEvent` fields rather than scraped prose. See [governance](/concepts/governance).
 
-**cap**: a hard ceiling enforced in code: delegation depth (default max 2), per-turn fan-out, and per-node cost. The depth cap is the single-reduce-point + report-up-by-default discipline. See [governance](/concepts/governance).
+**cap**: a hard ceiling enforced in code: delegation depth (default max 2), per-turn fan-out, per-parent live-child count on the board (default 24), a root-creation rate (default 30 per 5 min), and per-node cost. The depth cap is the single-reduce-point + report-up-by-default discipline. See [governance](/concepts/governance).
 
 **approval**: a human gate on a risky tool call or delegation, resolved via the Approvals queue (allow-once / always / deny). It is a Clawboo-native DB-mediated handshake, distinct from OpenClaw's own exec-approval flow. See [approvals](/using/approvals).
 
@@ -129,7 +129,7 @@ These docs describe Clawboo **v0.3.0**, the current release.
 
 **Atlas**: the global, all-teams view of the Ghost Graph: Boo Zero presides at the top over per-team rows. Reached via the dedicated Atlas nav button. See [the Ghost Graph](/using/ghost-graph).
 
-**marketplace**: the in-app catalog of 304 first-class agents and 82 workflow teams across three MIT-licensed sources. The catalog is codegen'd from pinned upstream commits and gated by a `verify:ingest` check; deploying an entry writes its full source verbatim to the agent's files. See [the marketplace](/using/marketplace) and [the marketplace catalog reference](/reference/marketplace-catalog).
+**marketplace**: the in-app catalog of 304 first-class agents and 82 workflow teams across three MIT-licensed sources. The catalog is codegen'd from pinned upstream commits, gated offline by a `verify:catalog` integrity check plus a weekly live `verify:ingest` re-derive, and code-split into its own on-demand bundle chunk; deploying an entry writes its full source verbatim to the agent's files. See [the marketplace](/using/marketplace) and [the marketplace catalog reference](/reference/marketplace-catalog).
 
 ## Security
 

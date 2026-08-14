@@ -31,7 +31,13 @@ async function timedFetch(url: string, headers: Record<string, string>): Promise
   const ctl = new AbortController()
   const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS)
   try {
-    return await fetch(url, { headers, signal: ctl.signal })
+    // `redirect: 'error'` for the same reason as the healthcheck probe: these are
+    // hard-coded provider `/models` endpoints that never legitimately 3xx, and the
+    // request carries the user's key. `fetch` strips `Authorization` across
+    // origins but NOT Anthropic's custom `x-api-key`, so following a redirect
+    // could hand the key to another host. Failing closed returns null → the
+    // caller serves its last-good list.
+    return await fetch(url, { headers, redirect: 'error', signal: ctl.signal })
   } catch {
     return null
   } finally {
@@ -56,7 +62,10 @@ async function fetchAnthropic(key: string): Promise<ModelOption[] | null> {
   } | null
   if (!body || !Array.isArray(body.data)) return null
   return body.data
-    .filter((m): m is { id: string; display_name?: string; created_at?: string } => typeof m.id === 'string')
+    .filter(
+      (m): m is { id: string; display_name?: string; created_at?: string } =>
+        typeof m.id === 'string',
+    )
     .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
     .map((m) => ({ id: m.id, label: (m.display_name?.trim() || m.id) as string }))
 }
@@ -81,7 +90,8 @@ async function fetchOpenAI(key: string): Promise<ModelOption[] | null> {
 
 // Non-chat models a bare OpenAI-compat `/models` list may include — dropped so
 // the picker shows usable chat/reasoning models.
-const COMPAT_DROP_RE = /(embedding|embed|rerank|whisper|tts|audio|dall-?e|image|vision-encoder|moderation|guard|transcribe|-ocr|bge-|nomic-)/i
+const COMPAT_DROP_RE =
+  /(embedding|embed|rerank|whisper|tts|audio|dall-?e|image|vision-encoder|moderation|guard|transcribe|-ocr|bge-|nomic-)/i
 
 /** Generic OpenAI-compatible `/models` reader (Google, xAI, Groq, Mistral, …). */
 async function fetchOpenAiCompat(baseURL: string, key: string): Promise<ModelOption[] | null> {
@@ -111,7 +121,10 @@ export function hasLiveModels(provider: string): boolean {
 /** Fetch a provider's live model list using `key`. Cached per (provider, key),
  *  serves last-good on failure, returns [] for an unsupported provider or a
  *  total failure with no prior cache. Never throws. */
-export async function fetchNativeModelsForKey(provider: string, key: string): Promise<ModelOption[]> {
+export async function fetchNativeModelsForKey(
+  provider: string,
+  key: string,
+): Promise<ModelOption[]> {
   const fetcher = FETCHERS[provider]
   if (!fetcher || !key) return []
   const kh = keyHash(key)

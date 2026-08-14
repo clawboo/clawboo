@@ -11,11 +11,11 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { NativeDriver, NativeEvent } from '@clawboo/adapter-native'
-import { chatMessages, createDb, type ClawbooDb } from '@clawboo/db'
+import { chatMessages, type ClawbooDb } from '@clawboo/db'
 import type { StartOpts } from '@clawboo/executor'
 import { isTeamSessionKey } from '@clawboo/team-orchestration'
 
-import { getDbPath } from '../../db'
+import { getDb } from '../../db'
 import type { RuntimeRunContext } from '../types'
 import { loadAgentConfigOrDefault } from './agentConfigStore'
 import { Conversation } from './conversation'
@@ -85,7 +85,7 @@ export function createNativeDriver(
   let conversation: Conversation | null = null
   let pendingModel: string | null = null
 
-  const db = deps.db ?? createDb(getDbPath())
+  const db = deps.db ?? getDb()
 
   const push = (ev: NativeEvent): void => {
     // Persist the agent's reply into its 1:1 history — UNLESS this run is a
@@ -110,7 +110,7 @@ export function createNativeDriver(
         deps.mcp !== undefined
           ? deps.mcp
           : await connectMcpBridge({
-              dbPath: getDbPath(),
+              db,
               agentId: opts.agentId,
               enable: {
                 tasks: config.tools.tasks,

@@ -1,4 +1,3 @@
-import { lazy, Suspense } from 'react'
 import { Group, Panel } from 'react-resizable-panels'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -7,8 +6,11 @@ import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { ChatPanel } from '@/features/chat/ChatPanel'
 import { ResizeHandle } from '@/features/shared/ResizeHandle'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { connectionStatusLabel } from '@/features/connection/connectionStatusDisplay'
 import { useNativeRuntimeState } from '@/features/runtimes/useNativeRuntimeState'
+import { LazyBoundary } from '@/features/shared/LazyBoundary'
 import { Spinner } from '@/features/shared/Spinner'
+import { createRetryableLazy } from '@/lib/lazyRetry'
 
 // This view is on the eager path (ContentArea imports it statically), so both of
 // its heavy panes are lazy-loaded — otherwise they'd anchor their libraries to
@@ -16,8 +18,17 @@ import { Spinner } from '@/features/shared/Spinner'
 //
 // MiniGraph pulls in React Flow (+ ELK via the shared graph modules); InlineEditor
 // owns one of the two CodeMirror entry points (AgentFileEditorOverlay is the other).
-const MiniGraph = lazy(() => import('./MiniGraph').then((m) => ({ default: m.MiniGraph })))
-const InlineEditor = lazy(() => import('./InlineEditor').then((m) => ({ default: m.InlineEditor })))
+//
+// Both go through `createRetryableLazy` + `LazyBoundary` so a failed chunk (or a
+// crash inside React Flow / CodeMirror) degrades to a card in THAT pane. Before
+// this, either failure threw past both Suspense boundaries and took down the
+// whole agent view — including the chat, which is the part still worth using.
+const miniGraphSource = createRetryableLazy(() =>
+  import('./MiniGraph').then((m) => ({ default: m.MiniGraph })),
+)
+const inlineEditorSource = createRetryableLazy(() =>
+  import('./InlineEditor').then((m) => ({ default: m.InlineEditor })),
+)
 
 // Shared fallback for the two lazy panes — centered spinner, sized to the pane.
 function PaneFallback() {
@@ -98,7 +109,7 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
             </span>
           ) : (
             <span
-              className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45"
+              className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
               aria-label={`Connection: ${connectionStatus}`}
             >
               <span
@@ -106,10 +117,14 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
                   'inline-block h-1.5 w-1.5 rounded-full',
                   connectionStatus === 'connected'
                     ? 'bg-mint shadow-[0_0_6px_rgb(var(--mint-rgb)/0.6)]'
-                    : 'bg-amber/70',
+                    : // A retrying socket pulses — it distinguishes "coming back"
+                      // from a flat "not connected".
+                      connectionStatus === 'reconnecting'
+                      ? 'bg-amber/70 animate-pulse'
+                      : 'bg-amber/70',
                 ].join(' ')}
               />
-              {connectionStatus === 'connected' ? 'Connected' : connectionStatus}
+              {connectionStatusLabel(connectionStatus)}
             </span>
           )}
         </div>
@@ -132,17 +147,36 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
           <Panel defaultSize={55} minSize={25}>
             <Group orientation="vertical" id="agent-detail-v">
               <Panel defaultSize={55} minSize={15}>
-                <Suspense fallback={<PaneFallback />}>
-                  <MiniGraph agentId={agentId} />
-                </Suspense>
+                {/* Keyed by agentId so a pane that failed for ONE agent can't
+                    show its stale card for the next one. The `booZero` view is
+                    why this is load-bearing: its viewKey does not change when
+                    `booZeroAgentId` is re-identified after a delete, so the
+                    subtree is re-rendered with a new agentId rather than
+                    remounted, and a boundary keyed only on `attempt` would keep
+                    the previous agent's fallback on screen. */}
+                <LazyBoundary
+                  key={agentId}
+                  source={miniGraphSource}
+                  label="the agent graph"
+                  suspenseFallback={<PaneFallback />}
+                  render={(MiniGraph) => <MiniGraph agentId={agentId} />}
+                  logContext={{ pane: 'mini-graph', agentId }}
+                />
               </Panel>
 
               <ResizeHandle direction="vertical" />
 
               <Panel defaultSize={45} minSize={15}>
-                <Suspense fallback={<PaneFallback />}>
-                  <InlineEditor agentId={agentId} agentName={agent.name} />
-                </Suspense>
+                <LazyBoundary
+                  key={agentId}
+                  source={inlineEditorSource}
+                  label="the file editor"
+                  suspenseFallback={<PaneFallback />}
+                  render={(InlineEditor) => (
+                    <InlineEditor agentId={agentId} agentName={agent.name} />
+                  )}
+                  logContext={{ pane: 'inline-editor', agentId }}
+                />
               </Panel>
             </Group>
           </Panel>

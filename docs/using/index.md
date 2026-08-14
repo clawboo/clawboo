@@ -3,7 +3,7 @@ title: 'Using Clawboo: the feature map'
 description: A navigation index to every Clawboo dashboard feature, grouped by where it lives in the UI.
 ---
 
-Clawboo's dashboard is a single window split into three columns: a leftmost team-icon strip, an agent/nav column, and the main content area. The main area is a [discriminated `ViewMode`](/appendices/glossary): selecting a team opens its **group chat**, clicking an agent opens its **detail view**, and the bottom nav buttons switch the main area to one of fourteen full-screen **nav panels** (`NAV_VIEWS` in `stores/view.ts`, each mapped to a feature component in `ContentArea`'s `NAV_PANELS`). A few surfaces, Teams, Group chat, Agents, Boo Zero, and Theming, are reached through the sidebar, agent rows, the group-chat row, or the theme toggle rather than a nav button. This page is mostly navigation; each linked how-to grounds itself in its own feature module and backing API route(s).
+Clawboo's dashboard is a single window split into three columns: a leftmost team-icon strip, an agent/nav column, and the main content area. The main area is a [discriminated `ViewMode`](/appendices/glossary): selecting a team opens its **group chat**, clicking an agent opens its **detail view**, and the bottom nav buttons switch the main area to one of fourteen full-screen **nav panels** (`NAV_VIEWS` in `stores/view.ts`, each mapped to a lazily-loaded feature component by `NavPanel` in `features/layout/navPanels.tsx`, which also wraps each panel in its own error boundary). A few surfaces, Teams, Group chat, Agents, Boo Zero, and Theming, are reached through the sidebar, agent rows, the group-chat row, or the theme toggle rather than a nav button. This page is mostly navigation; each linked how-to grounds itself in its own feature module and backing API route(s).
 
 ## Team-scoped surfaces
 
@@ -21,7 +21,6 @@ These are the bottom nav buttons in `AgentListColumn`. Each switches the main co
 
 - **[Board](/using/board)**: The durable kanban board, fused with chat. Columns by task status; cards carry runtime, verification, and cost badges.
 - **[Marketplace](/using/marketplace)**: Browse and deploy the 304 first-class agents and 82 workflow teams across a Skills / Agents / Teams tab strip.
-- **[Approvals](/using/approvals)**: The pending-approval queue (Gateway exec approvals plus the brokered tool-approval queue).
 - **[Cost & budgets](/using/cost-and-budgets)**: The **Tokens Used** dashboard: per-agent and per-team token usage and trends, plus USD budgets via the Governance surface.
 - **[Scheduler](/using/scheduler)**: The Routines tab for recurring team-task and runtime-own-life schedules.
 - **[Memory](/using/memory-browser)**: Search, save, and browse the shared Memory-MCP tier (facts and procedures).
@@ -33,6 +32,7 @@ These are the bottom nav buttons in `AgentListColumn`. Each switches the main co
 
 ## App-wide
 
+- **[Approvals](/using/approvals)**: The pending-approval queue (Gateway exec approvals plus the brokered tool-approval queue). Not a nav panel: it renders as the Board's **Needs approval** column and as an inline tray above the group-chat composer.
 - **[Theming](/using/theming)**: The light/dark/system theme toggle in the bottom-left of the sidebar (`ThemeToggle`); fresh installs default to light.
 
 ## Where things live (nav slots)

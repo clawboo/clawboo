@@ -14,7 +14,7 @@ The app is three persistent columns plus a swappable content area:
 ```mermaid
 flowchart LR
     A["Team sidebar<br/>(60px)<br/>team icons + Boo Zero mascot"]
-    B["Agent-list column<br/>(208px)<br/>agents · Group Chat · global nav"]
+    B["Agent-list column<br/>(236px)<br/>agents · Group Chat · global nav"]
     C["Content area<br/>(flex)<br/>the active view"]
     A --> B --> C
 ```
@@ -22,7 +22,7 @@ flowchart LR
 The team sidebar (column 1) and the content area (column 3) are always present. The agent-list column (column 2) is hidden in two cases: when you're in the standalone **Boo Zero** view, and when you collapse it with the sidebar's collapse toggle. The Boo Zero view dedicates the whole window to Boo Zero's agent detail, so the agent list, which is team-scoped, has nothing to show.
 
 <Note>
-Widths are fixed: the team sidebar is 60px, the agent-list column is 208px. The content area takes the rest. There's no draggable shell divider; the only resizable seams are *inside* views (the agent detail panels, the group-chat graph/chat split).
+Widths are fixed: the team sidebar is 60px, the agent-list column is 236px. The content area takes the rest. There's no draggable shell divider; the only resizable seams are *inside* views (the agent detail panels, the group-chat graph/chat split).
 </Note>
 
 ### Team sidebar (column 1)
@@ -31,7 +31,7 @@ The leftmost strip is a Discord-style icon rail. Top to bottom:
 
 - **The Boo Zero mascot** (the Clawboo logo). Clicking it deselects any team and opens the standalone **Boo Zero** view. [Boo Zero](/concepts/agent-model) is the universal team leader, teamless in the registry, but present in every team. Right-clicking the mascot offers "Show all agents," which clears the team filter and opens [Atlas](#atlas-vs-the-per-team-ghost-graph).
 - **One icon per active team** (its emoji on its color). Clicking a team icon selects that team _and_ opens its **group chat** directly, not Atlas. A Discord-style pill marks the selected team. Right-clicking a team icon opens a context menu: archive/unarchive, "Refresh Protocol" (regenerate each agent's routing file), "Delete team only" (orphan the agents), or "Delete with agents."
-- **The "+" button** opens the create-team modal.
+- **The "+" button** opens the Marketplace's **Teams** tab, the one place to browse and deploy a team or start one from scratch.
 - **The collapse toggle** hides or shows the agent-list column.
 
 Archived teams are filtered out of the rail; unarchive one from a team's context menu while it's still visible, or before archiving.
@@ -104,7 +104,7 @@ The `nav` mode carries a `view` field, one of the 14 `NAV_VIEWS`: `graph` (Atlas
 
 ### Keyboard navigation
 
-- `Escape`: leave an agent / Boo Zero / group-chat view back to the welcome screen (ignored while a file-editor overlay is open or you're typing).
+- `Escape`: leave an agent / Boo Zero / group-chat view back to the welcome screen. Ignored while you're typing, or while any overlay is open — an open dialog, drawer, menu or dropdown takes `Escape` first, innermost one first, so dismissing a dropdown inside a dialog leaves the dialog (and anything you typed into it) alone.
 - `Cmd/Ctrl + 1…4`: jump to a sidebar work surface, in this order: **1** Atlas, **2** Fleet, **3** Marketplace, **4** Board. (The shortcut order is the `NavView` order, which is not the visual order of the nav blocks.)
 - `Cmd/Ctrl + ,`: open the Settings modal (Runtimes, Providers, Memory, Capabilities, Scheduler, Tokens Used, Observability, Governance, System, System Health).
 
@@ -121,7 +121,7 @@ So: **Atlas is a nav destination; the per-team Ghost Graph is part of a team's g
 
 ## The agent detail view
 
-Clicking an agent opens a three-panel detail view: a chat panel on the left, a single-agent compact graph (its Boo, skills, and resources) top-right, and an inline editor bottom-right with tabs for personality sliders and the four agent files (SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md). The panels are resizable, and their sizes persist across sessions.
+Clicking an agent opens a three-panel detail view: a chat panel on the left, a single-agent compact graph (its Boo, skills, and resources) top-right, and an inline editor bottom-right with tabs for personality sliders and the four agent files (SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md). The panels are resizable; their sizes reset to the defaults (45/55 horizontally, 55/45 in the right-hand stack) on reload.
 
 ![Agent detail, chat on the left, the agent's compact graph top-right, personality sliders and file tabs bottom-right](/images/agent-detail.png)
 

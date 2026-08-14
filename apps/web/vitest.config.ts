@@ -11,6 +11,18 @@ const alias = { '@': path.resolve(__dirname, 'src') }
 export default defineConfig({
   test: {
     globals: true,
+    // Bound the TOTAL worker pool. Vitest runs the two projects below
+    // CONCURRENTLY, and each one sizes its own pool to the full CPU count — so
+    // the default is ~2x cores of workers fighting over the machine. The
+    // jsdom project's transforms (framer-motion / React Flow / jest-axe) are
+    // CPU-bound, so that over-subscription starves whole files past their
+    // timeout: on an 8-core box the suite took ~42 min with 18-62 spurious
+    // "Test timed out" failures, and 48 s with ZERO at 50%. The failures were
+    // never real — every one of those files passes on its own.
+    //
+    // This is the actual fix for that starvation; the widened per-project
+    // timeouts below are the older, blunter mitigation for the same cause.
+    maxWorkers: '50%',
     projects: [
       {
         resolve: { alias },
@@ -19,6 +31,11 @@ export default defineConfig({
           include: ['src/**/*.test.ts', 'server/**/*.test.ts'],
           environment: 'node',
           globals: true,
+          // Makes `$HOME` authoritative for `os.homedir()` on every platform, so the
+          // suites that sandbox `process.env.HOME` actually land in their temp dir on
+          // Windows too (Node reads %USERPROFILE% there). A no-op on POSIX. See the
+          // file's header for why this is one seam rather than an env var per suite.
+          setupFiles: ['./server/__vitest__/setupHomedir.ts'],
           // The server suite has real-git + real-sqlite integration tests that run
           // a few seconds each in isolation. When the jsdom project's heavier
           // component transforms run concurrently in the same `vitest run`, those

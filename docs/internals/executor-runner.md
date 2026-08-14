@@ -35,7 +35,7 @@ flowchart TD
     F -->|yes| RC[return conflict]
     F -->|no| G{task exists?}
     G -->|no| RNF[return not_found]
-    G -->|yes| H{ancestor depth ≥ MAX_SPAWN_DEPTH?}
+    G -->|yes| H{ancestor depth > MAX_SPAWN_DEPTH?}
     H -->|yes| RTD[return too_deep]
     H -->|no| I{connected substrate?}
     I -->|yes| RCS[return connected_substrate]
@@ -78,7 +78,10 @@ Everything that can refuse the dispatch without mutating the board runs _before_
 
 1. **Aborted waiter.** A run can sit queued behind a same-identity dispatch in the home mutex for the whole duration of the prior run. If the caller disconnected meanwhile (its `AbortController` fired), the runner bails and returns `conflict` before the claim, so a dead waiter never mutates the board.
 2. **Task existence** → `not_found`.
-3. **Depth bound.** Recursion is bounded via the board's ancestor chain: a task whose ancestor count reaches `MAX_SPAWN_DEPTH` (2) is refused with `too_deep`. This is the single-reduce-point invariant; children never fan out past the depth ceiling.
+3. **Depth bound.** Recursion is bounded via the board's ancestor chain: a task whose ancestor count is **past** `MAX_SPAWN_DEPTH` (2) is refused with `too_deep`. This is the single-reduce-point invariant; children never fan out past the depth ceiling.
+
+   The comparison here is `>`, while the creation-side caps use `>=` on the **parent's** depth, and the asymmetry is deliberate: a create is refused when the parent already sits at the max (the child would be `max + 1`), so the deepest task that can exist is exactly `max` — and this gate must therefore admit it. Both sides read the same `DEFAULT_MAX_DEPTH` from `@clawboo/governance`, so they cannot drift to different numbers. They previously both used `>=`, which meant the orchestrator created depth-2 tasks this runner then refused forever: cards that looked workable and could never run. The invariant is now that anything creatable is dispatchable.
+
 4. **Connected-substrate refusal.** The integration class comes from `capabilities()`, never from a runtime-id switch. `resolveRuntimeIntegration(caps)` resolves a `connected-substrate` runtime (OpenClaw) to a `connected` home, and the runner refuses it with `connected_substrate`; this one-shot runner must never spawn it.
 5. **Budget preflight.** A _cap-mode_ paused budget on the agent, mission, or team scope blocks the dispatch with `budget_paused`. This is the only enforceable cap for a connected substrate that reports no incremental cost (its spend lands only on the terminal); a warn-mode budget is clamped to never read `paused`, so it never blocks here.
 
@@ -220,7 +223,7 @@ The cost is a second concurrency boundary (the per-identity home mutex) layered 
 - **Best-effort lineage and handoff.** Session-codec serialization, rotation lineage, and the native-session-id persistence never fail a completed run; losing native resume degrades gracefully to the prose handoff, which is the designed cross-runtime path anyway.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

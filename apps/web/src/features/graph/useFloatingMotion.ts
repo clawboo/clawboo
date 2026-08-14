@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+import { onReducedMotionChange, prefersReducedMotion } from '@/lib/prefersReducedMotion'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -119,8 +121,28 @@ export function useFloatingMotion(
     paramsRef.current = deriveParams(nodeId, type)
   }, [nodeId, type])
 
+  // Reduced motion: the float is a purely decorative idle animation with no
+  // information content, so it is the first thing to drop. Tracked as STATE, not
+  // a one-shot read, because the RAF loop is a shared singleton — a stale `false`
+  // here would keep it spinning for every node on the canvas after the user
+  // flips the OS setting, with no reload to correct it.
+  const [reduced, setReduced] = useState(() => prefersReducedMotion())
+  useEffect(() => {
+    // Re-read on mount too: the preference can change between module import and
+    // this node mounting.
+    setReduced(prefersReducedMotion())
+    return onReducedMotionChange(setReduced)
+  }, [])
+
   // Subscribe to the singleton RAF loop
   useEffect(() => {
+    if (reduced) {
+      // Clear anything written before the preference flipped, so the node lands
+      // back on its exact layout position instead of freezing mid-orbit.
+      const el = elementRef.current
+      if (el) el.style.transform = ''
+      return
+    }
     return subscribe((time) => {
       const el = elementRef.current
       if (!el) return
@@ -135,7 +157,7 @@ export function useFloatingMotion(
       const y = Math.cos(time * speedY + phase * 0.7) * amplitudeY
       el.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`
     })
-  }, [])
+  }, [reduced])
 
   return useCallback((el: HTMLDivElement | null) => {
     elementRef.current = el

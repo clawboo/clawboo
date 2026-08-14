@@ -1,11 +1,22 @@
-import { lazy, Suspense } from 'react'
 import { AnimatePresence } from 'framer-motion'
+import { AlertTriangle } from 'lucide-react'
 import { useEditorStore } from '@/stores/editor'
+import { Button } from '@/features/shared/Button'
+import { LazyBoundary } from '@/features/shared/LazyBoundary'
+import { Modal } from '@/features/shared/Modal'
+import { createRetryableLazy } from '@/lib/lazyRetry'
+
+/** Only one editor overlay can be mounted at a time, so a fixed id is safe. */
+const EDITOR_ERROR_TITLE_ID = 'agent-file-editor-error-title'
 
 // The editor pulls in the whole CodeMirror stack. This overlay is mounted
 // eagerly by ContentArea but renders nothing until the user opens a file, so
 // lazy-loading the editor itself keeps CodeMirror off the entry chunk.
-const AgentFileEditor = lazy(() =>
+//
+// Retryable + boundary-wrapped: this overlay is a SIBLING of ContentArea's
+// AnimatePresence, so it sits outside the per-view boundary. A failed CodeMirror
+// chunk here would otherwise escape all the way to the root and blank the app.
+const agentFileEditorSource = createRetryableLazy(() =>
   import('./AgentFileEditor').then((m) => ({ default: m.AgentFileEditor })),
 )
 
@@ -18,12 +29,66 @@ export function AgentFileEditorOverlay() {
   return (
     <AnimatePresence>
       {isOpen && agentId && agentName && (
-        // `null` fallback: the overlay animates in over the current view, so a
-        // spinner would flash on top of it. The editor mounts once its chunk
-        // resolves.
-        <Suspense key={agentId} fallback={null}>
-          <AgentFileEditor agentId={agentId} agentName={agentName} onClose={closeEditor} />
-        </Suspense>
+        <LazyBoundary
+          key={agentId}
+          source={agentFileEditorSource}
+          label="the file editor"
+          // `null` fallback: the overlay animates in over the current view, so a
+          // spinner would flash on top of it. The editor mounts once its chunk
+          // resolves.
+          suspenseFallback={null}
+          render={(AgentFileEditor) => (
+            <AgentFileEditor agentId={agentId} agentName={agentName} onClose={closeEditor} />
+          )}
+          logContext={{ surface: 'agent-file-editor', agentId }}
+          // A bespoke fallback: the default panel card would tile the whole
+          // content area behind this overlay. This one goes through `Modal` —
+          // the failure surface dims the app exactly like the editor it replaces,
+          // so it owes the same contract: `role="alertdialog"` + `aria-modal`, an
+          // accessible name, initial focus on the recovery action, a Tab trap,
+          // and focus return to whatever opened the editor. Hand-rolling the
+          // scrim (as this first did) gave a keyboard or screen-reader user a
+          // full-screen overlay they could tab straight out of.
+          fallback={({ error, retry }) => (
+            <Modal
+              open
+              onClose={closeEditor}
+              role="alertdialog"
+              labelledBy={EDITOR_ERROR_TITLE_ID}
+              layer={50}
+              panelClassName="surface-overlay-tier w-full max-w-[380px] rounded-2xl p-6 text-center"
+              data-testid="editor-error-boundary"
+            >
+              <AlertTriangle
+                size={22}
+                strokeWidth={1.75}
+                color="var(--amber)"
+                aria-hidden
+                style={{ margin: '0 auto' }}
+              />
+              <h1
+                id={EDITOR_ERROR_TITLE_ID}
+                className="mt-3 font-display text-[15px] font-bold text-foreground"
+                style={{ letterSpacing: '-0.01em' }}
+              >
+                Couldn’t load the file editor.
+              </h1>
+              <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
+                {error.message || error.name}
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                {/* First focusable in the panel, so the trap lands here on open —
+                    recovery is the action we want under the user's hands. */}
+                <Button variant="primary" size="sm" onClick={retry}>
+                  Try again
+                </Button>
+                <Button variant="secondary" size="sm" onClick={closeEditor}>
+                  Close
+                </Button>
+              </div>
+            </Modal>
+          )}
+        />
       )}
     </AnimatePresence>
   )

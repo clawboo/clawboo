@@ -97,7 +97,7 @@ export function StepIndicator({
                   done
                     ? 'bg-mint text-background'
                     : active
-                      ? 'bg-accent text-primary-foreground ring-4 ring-accent/20'
+                      ? 'bg-primary-solid text-primary-foreground ring-4 ring-accent/20'
                       : 'bg-foreground/10 text-secondary/50',
                 ].join(' ')}
               >

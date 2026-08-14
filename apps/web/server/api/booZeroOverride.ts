@@ -13,10 +13,10 @@
 // refusing it at write time surfaces the mistake to the caller).
 
 import type { Request, Response } from 'express'
-import { agents, createDb, getSetting, setSetting } from '@clawboo/db'
+import { agents, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import {
   resolveBooZero,
   resolveNativeBooZero,
@@ -31,7 +31,7 @@ import {
  *  absence-of-anything-else fallback (the Gateway `main`) that a deliberate
  *  designation may legitimately outrank. */
 function effectiveTier(
-  db: ReturnType<typeof createDb>,
+  db: ClawbooDb,
   overrideAgentId: string | null,
 ): 'override' | 'native' | 'openclaw' | null {
   if (overrideAgentId) return 'override'
@@ -47,7 +47,7 @@ function effectiveTier(
 
 export function booZeroOverrideGET(_req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const overrideAgentId = getSetting(db, SETTING_BOO_ZERO_OVERRIDE) || null
     res.json({
       overrideAgentId,
@@ -75,7 +75,7 @@ export function booZeroOverridePOST(req: Request, res: Response): void {
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     if (agentId === null) {
       setSetting(db, SETTING_BOO_ZERO_OVERRIDE, '')
       res.json({ ok: true, overrideAgentId: null, effective: resolveBooZero(db) })

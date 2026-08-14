@@ -7,9 +7,9 @@
 
 import type { Request, Response } from 'express'
 
-import { createDb, listGovernanceAudit, type GovernanceEventType } from '@clawboo/db'
+import { listGovernanceAudit, type GovernanceEventType } from '@clawboo/db'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { redactJsonString } from '../lib/redact'
 
 const EVENT_TYPES = [
@@ -36,7 +36,7 @@ export function governanceAuditGET(req: Request, res: Response): void {
   const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? Math.floor(sinceRaw) : undefined
   // Redact-on-display: the audit summary (JSON text) is scrubbed at write time; mask
   // its credential-shaped keys again at the rendering boundary (defense in depth).
-  const audit = listGovernanceAudit(createDb(getDbPath()), {
+  const audit = listGovernanceAudit(getDb(), {
     agentId,
     eventType,
     since,

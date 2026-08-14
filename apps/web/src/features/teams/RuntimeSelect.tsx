@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react'
 import { OpenClawIcon, RuntimeIcon } from '@/features/runtimes/RuntimeBrand'
 import type { RuntimeId } from '@/features/runtimes/runtimeCatalog'
 import type { RuntimeOption, SelectableSourceId } from './runtimeSelection'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 interface RuntimeSelectProps {
   value: SelectableSourceId
@@ -26,20 +27,19 @@ export function RuntimeSelect({ value, options, onChange, onDisabledClick }: Run
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
+  // Escape and outside-press are arbitrated by the shared layer stack: only the
+  // topmost open layer reacts, so this dismisses alone.
+  useDismissableLayer({
+    active: open,
+    level: 'popover',
+    onEscape: () => setOpen(false),
+    contains: (t) => !!ref.current?.contains(t),
+    onPressOutside: () => setOpen(false),
+  })
+
   useEffect(() => {
     if (!open) return
-    const onDoc = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onKey)
-    }
+    return () => {}
   }, [open])
 
   const current = options.find((o) => o.sourceId === value) ?? options[0]

@@ -30,6 +30,7 @@ import {
 } from '@/lib/soulPersonality'
 import { clawbooEditorThemeDark, clawbooEditorThemeLight } from './editorTheme'
 import { useTheme } from '@/features/theme/useTheme'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -268,6 +269,12 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
           },
         ]),
         EditorView.lineWrapping,
+        // CodeMirror's contenteditable is role="textbox" with only an
+        // aria-placeholder, which is NOT an accessible-name source — axe flags
+        // it as aria-input-field-name (WCAG 4.1.2, Level A) and a screen reader
+        // announces an unnamed edit field. A static label is enough: the file
+        // being edited is already announced by the tab bar above.
+        EditorView.contentAttributes.of({ 'aria-label': 'Agent file editor' }),
         comp.of(placeholder(AGENT_FILE_PLACEHOLDERS['SOUL.md'])),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -325,13 +332,21 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
 
   // ─── Escape key to close ──────────────────────────────────────────────────
 
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') void handleClose()
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleClose])
+  // `handleClose` is async (it may await a dirty-file save), so the layer is
+  // still registered while that settles — guard against a second Escape
+  // starting a concurrent close.
+  const closingRef = useRef(false)
+  useDismissableLayer({
+    active: true,
+    level: 'dialog',
+    onEscape: () => {
+      if (closingRef.current) return
+      closingRef.current = true
+      void handleClose().finally(() => {
+        closingRef.current = false
+      })
+    },
+  })
 
   // ─── Derived state ────────────────────────────────────────────────────────
 
@@ -345,18 +360,18 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div
-      className="fixed inset-y-0 right-0 z-40 flex flex-col bg-background"
-      style={{ left: 268 }}
-    >
+    <div className="fixed inset-y-0 right-0 z-40 flex flex-col bg-background" style={{ left: 268 }}>
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2.5">
         <div className="flex items-center gap-2.5">
           <AgentBooAvatar agentId={agentId} size={24} />
-          <span className="text-[13px] font-semibold text-foreground" style={{ letterSpacing: '-0.01em' }}>
+          <span
+            className="text-[13px] font-semibold text-foreground"
+            style={{ letterSpacing: '-0.01em' }}
+          >
             {agentName}
           </span>
-          <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+          <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Edit Files
           </span>
         </div>
@@ -428,7 +443,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between border-t border-border bg-surface px-4 py-1.5 font-mono text-[11px] text-foreground/40">
+      <div className="flex items-center justify-between border-t border-border bg-surface px-4 py-1.5 font-mono text-[11px] text-muted-foreground">
         <span>{AGENT_FILE_META[activeTab].hint}</span>
         <span className="font-data">
           {anyDirty ? 'Unsaved changes' : 'All saved'}

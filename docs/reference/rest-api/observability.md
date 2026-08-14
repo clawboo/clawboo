@@ -42,7 +42,7 @@ Returns rows from the event log filtered by the query params, ordered by the mon
 | `kinds`    | string          | Comma-separated list of event kinds; empty/blank values dropped. |
 | `since`    | number          | `ts >=` (wall-clock ms), a recent-window read.                   |
 | `afterSeq` | number          | `seq >` cursor (strictly monotonic, collision-free).             |
-| `limit`    | number          | Row cap (defaults to 500 in the data layer when omitted).        |
+| `limit`    | number          | Row cap, clamped to 1-5000 (defaults to 500 when omitted).       |
 | `order`    | `asc` \| `desc` | `desc` only when literally `"desc"`; anything else is `asc`.     |
 
 - **Request body**: none.
@@ -104,9 +104,7 @@ Reconstructs one trace, every event sharing the `traceId`, ordered `seq` ASC (ca
 ```ts
 {
   traceId: string
-  events: Array<{
-    /* same redacted row shape as GET /api/obs/events */
-  }>
+  events: Array<{/* same redacted row shape as GET /api/obs/events */}>
   metrics: {
     totalCostUsd: number
     inputTokens: number
@@ -151,7 +149,7 @@ The error-taxonomy feed: every `error` event, recent-first, projected to a compa
 
 - **Request body**: none.
 
-The read is fixed to `kinds: ['error']`, `order: 'desc'`, `limit: 500`. The `harnessBug` filter is applied after projection.
+The read is fixed to `kinds: ['error']`, `limit: 500`, newest-first **by `ts`**. Wall-clock order is what a display feed wants, and it is the order the only index over `kind` can serve, so the cost stays proportional to the 500 rows returned rather than to every error ever recorded. The `harnessBug` filter is applied after projection.
 
 ### Responses
 
@@ -198,7 +196,7 @@ Fleet-health triage, a per-agent state folded from the event log, time-sensitive
 - **Query params**: `teamId` (string), scope to one team.
 - **Request body**: none.
 
-The read is capped at 5000 events.
+The read is capped at the **most recent 5000 events** for the requested scope. `orchestration_events` is append-only and is never pruned, so the triage folds a trailing window rather than the whole history: rows are selected newest-first, then folded in causal order. An agent whose activity has scrolled out of that window stops appearing.
 
 ### Responses
 
@@ -239,7 +237,7 @@ Folds the ordered event stream into a delegation/status/cost graph projection. T
 - **Query params**: `teamId` (string), scope to one team.
 - **Request body**: none.
 
-The read is capped at 5000 events.
+The read is capped at the **most recent 5000 events** for the requested scope. `orchestration_events` is append-only and is never pruned, so the projection folds a trailing window rather than the whole history: rows are selected newest-first, then folded in causal order. A task whose events have all scrolled out of that window stops appearing, and one only partly inside it projects from the events that remain.
 
 ### Responses
 
@@ -367,7 +365,7 @@ Mirrors client-observed runtime events into the durable log. The OpenClaw runtim
 {
   events?: Array<{
     kind: 'tool_call' | 'tool_result' | 'error'  // any other kind is dropped
-    ts?: number
+    ts?: number              // must be within [now - 24h, now + 60s], else server time is used
     teamId?: string | null
     taskId?: string | null
     agentId?: string | null
@@ -378,6 +376,8 @@ Mirrors client-observed runtime events into the durable log. The OpenClaw runtim
 ```
 
 A non-array `events` is treated as empty. At most 200 events are accepted per call (the rest are sliced off). Any event whose `kind` is missing or not in the whitelist is skipped.
+
+A supplied `ts` is clamped to a band around server time (60 s ahead for clock skew, 24 h behind) and replaced with server time when it falls outside. `ts` is not just metadata: fleet health derives staleness from it, so a future timestamp would pin an agent at `working` and mask a genuine `zombie`. A mirror reports what a browser just observed, so a timestamp far from now is wrong regardless of intent.
 
 ### Responses
 
@@ -433,9 +433,7 @@ Both inputs are floored and clamped so the route can never be turned into a load
       taskId: string
       passed: boolean
       score: number
-      graders: Array<{
-        /* GraderResult */
-      }>
+      graders: Array<{/* GraderResult */}>
     }>
     passAt1: number // per-trial success rate = empirical pass@1
     passPowK: number // probability all k trials pass = passAt1^k

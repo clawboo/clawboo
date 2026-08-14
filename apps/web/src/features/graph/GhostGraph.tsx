@@ -60,6 +60,7 @@ import { GraphContextMenu } from './GraphContextMenu'
 import { installSkillForAgent } from './operations/installSkill'
 import { removeRouting } from './operations/removeRouting'
 import { graphPhysics } from './graphPhysics'
+import { graphKeyAction } from './graphKeyAction'
 import { EdgeMarkers } from './edges/EdgeMarkers'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import type { BooNodeData, SkillNodeData, GraphEdge, LayoutData, GhostGraphScope } from './types'
@@ -75,6 +76,15 @@ interface ContextMenuState {
 // the JS twin of the app's signature cubic-bezier(0.32, 0.72, 0, 1): fast
 // start, long soft landing. (easeOutQuart is the closest analytic curve.)
 const easePremium = (t: number) => 1 - Math.pow(1 - t, 4)
+
+// Where to open the Boo context menu when there are no pointer coordinates (the
+// keyboard path). The node element is the 280 x 280 transparent envelope, so its
+// top-left sits ~80px away from anything the user can see; anchor on the
+// envelope's CENTRE, which by construction IS the Boo's visual centre.
+function booMenuAnchor(el: HTMLElement): { x: number; y: number } {
+  const r = el.getBoundingClientRect()
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+}
 
 // fitView() honours the bounding box of every node we pass in. By default it
 // fits the full graph — but our peacock-collapse model keeps skill / resource
@@ -723,12 +733,49 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     event.preventDefault()
     if (node.type !== 'boo') return
     const data = node.data as BooNodeData
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      agentId: data.agentId,
-      agentName: data.name,
-    })
+    // A keyboard-originated `contextmenu` (Menu key / Shift+F10) reports 0,0 in
+    // several browsers, which would pin the menu to the top-left of the window.
+    // Fall back to the focused node's own rect in that case.
+    const fromKeyboard = event.clientX === 0 && event.clientY === 0
+    const anchor = fromKeyboard
+      ? booMenuAnchor(event.currentTarget as HTMLElement)
+      : { x: event.clientX, y: event.clientY }
+    setContextMenu({ ...anchor, agentId: data.agentId, agentName: data.name })
+  }, [])
+
+  // React Flow 12.10.1 exposes no `onNodeKeyDown` prop, and `Node.domAttributes`
+  // is typed `Omit<…, keyof DOMAttributes>` — it strips every React event
+  // handler. So the only additive hook is a listener on the wrapper; React Flow
+  // stamps `data-id` on each node element, which is the bridge back to the store
+  // node. Listening here (rather than replacing the node's own onKeyDown) leaves
+  // React Flow's selection + arrow-key node movement intact.
+  const onWrapperKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const action = graphKeyAction(event)
+    if (!action) return
+
+    const el = (event.target as HTMLElement | null)?.closest<HTMLElement>('.react-flow__node')
+    const nodeId = el?.dataset.id
+    if (!el || !nodeId) return
+    const node = useGraphStore.getState().nodes.find((n) => n.id === nodeId)
+    if (node?.type !== 'boo') return
+
+    if (action === 'activate') {
+      // Deliberately NOT preventDefault: React Flow's own handler also runs and
+      // marks the node selected, which is what enables its arrow-key move. We
+      // only add the expand/collapse the pointer path already has.
+      useGraphStore.getState().toggleBooNodeExpanded(node.id)
+      // Reheat physics exactly as the pointer path does — otherwise a fan
+      // expanded from the keyboard never relaxes against its neighbours.
+      graphPhysics.wake()
+      return
+    }
+
+    // preventDefault cancels the browser's default action for ContextMenu /
+    // Shift+F10 — synthesizing a `contextmenu` event. Without it the menu would
+    // open twice (once here, once through onNodeContextMenu).
+    event.preventDefault()
+    const data = node.data as BooNodeData
+    setContextMenu({ ...booMenuAnchor(el), agentId: data.agentId, agentName: data.name })
   }, [])
 
   // ── Hover cascade handlers ────────────────────────────────────────────────
@@ -908,15 +955,25 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       if (n.type === 'boo') {
         return (n.hidden ? { ...n, hidden: false } : n) as typeof n
       }
+      // Atlas team-root junctions are 1px and invisible. React Flow gives every
+      // node tabIndex=0 by default, so without this they are silent, empty Tab
+      // stops in the middle of the graph — and, once the focus ring below is
+      // restored, visible rings on nothing.
+      if (n.type === 'team-root') {
+        return (n.focusable === false ? n : { ...n, focusable: false }) as typeof n
+      }
       if (n.type !== 'skill' && n.type !== 'resource') return n
       const ownerAgentId = n.data.agentIds?.[0]
       const parentBooId = ownerAgentId ? `boo-${ownerAgentId}` : null
       const isVisible = !!parentBooId && expandedBooNodeIds.has(parentBooId)
-      if (n.data.isVisible === isVisible) return n
+      if (n.data.isVisible === isVisible && n.focusable === isVisible) return n
       // Always keep skill/resource nodes mounted (`hidden` never set);
       // visibility is animated inside the node component via `data.isVisible`.
-      // The cast keeps the discriminated union narrow per branch.
-      return { ...n, data: { ...n.data, isVisible } } as typeof n
+      // But a COLLAPSED orbital is only opacity:0 / scale:0 with pointer-events
+      // off — which does not remove it from the tab order. A 12-agent Atlas
+      // would otherwise be ~60 invisible Tab stops, so focusability tracks
+      // visibility. The cast keeps the discriminated union narrow per branch.
+      return { ...n, focusable: isVisible, data: { ...n.data, isVisible } } as typeof n
     })
   }, [nodes, expandedBooNodeIds])
 
@@ -942,6 +999,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   return (
     <div
       ref={wrapperRef}
+      onKeyDown={onWrapperKeyDown}
       style={{
         width: '100%',
         height: '100%',
@@ -1223,6 +1281,25 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         // default <Controls> lock, which is why <Controls> is no longer rendered.
         nodesDraggable={!locked}
         elementsSelectable={!locked}
+        // React Flow's default `deleteKeyCode` is 'Backspace', and its keyboard
+        // a11y binds Enter/Space to select a focused node — so Tab, Enter,
+        // Backspace removes an agent from the canvas. That path runs through
+        // `onNodesChange` → `applyNodeChanges`, which only splices the node out of
+        // the local store: no confirmation, no `deleteAgentOperation`, no server
+        // call. The agent is untouched and silently reappears on reload.
+        // Deletion belongs to the context menu, which does all three.
+        deleteKeyCode={null}
+        // The hidden text every node's `aria-describedby` points at. NOTE the key
+        // names are inverted in @xyflow/system: with keyboard a11y ON (our case)
+        // React Flow renders `node.a11yDescription.keyboardDisabled`, NOT
+        // `…default`. Overriding it is the only non-hacky way to tell a screen
+        // reader about the shortcuts the wrapper handler adds.
+        ariaLabelConfig={{
+          'node.a11yDescription.keyboardDisabled':
+            'Press enter or space to select an agent and expand its capabilities. ' +
+            'Once selected, use the arrow keys to move it. Press the context menu key, ' +
+            'shift plus F10, or alt plus enter for agent actions. Press escape to deselect.',
+        }}
       >
         {/* Two-layer dot grid (micro + sparse macro) — the Linear/Obsidian
             depth treatment: the fine grid carries scale, the sparse layer
@@ -1282,7 +1359,6 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         <GraphContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          agentId={contextMenu.agentId}
           agentName={contextMenu.agentName}
           onClose={() => setContextMenu(null)}
           onChat={() => {
@@ -1415,7 +1491,7 @@ function EdgeExplainPanel({
         </div>
       )}
       {excerpt && (
-        <p className="mt-2 mb-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-foreground/30">
+        <p className="mt-2 mb-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">
           {excerpt}
         </p>
       )}

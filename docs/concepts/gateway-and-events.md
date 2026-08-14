@@ -115,7 +115,7 @@ The Bridge is pure parsing. `classifyEvent(frame)` switches on the frame's `even
 | `exec.approval.pending` / `.requested` / `.resolved` | `approval`        |
 | anything else                                        | `unknown`         |
 
-It extracts `agentId` from the session key (`agent:<id>:<session>`) or a top-level/nested `agentId` field. The Bridge also holds a set of small pure helpers the rest of the pipeline reuses: `parseChatPayload` and `parseAgentPayload` (shape-validate the raw payload, returning `null` on anything malformed), `isReasoningStream` (is this stream a thinking trace?), `mergeRuntimeStream`, and `dedupeRunLines`.
+It extracts `agentId` from the session key (`agent:<id>:<session>`) or a top-level/nested `agentId` field. The Bridge also holds a set of small pure helpers the rest of the pipeline reuses: `parseChatPayload` and `parseAgentPayload` (shape-validate the raw payload, returning `null` on anything malformed) and `isReasoningStream` (is this stream a thinking trace?).
 
 ### Stage 2, Policy: `derivePolicy`
 
@@ -132,7 +132,7 @@ A malformed payload returns a single `{ kind: 'ignore', reason }` intent instead
 
 The Handler is the only stateful stage. `createEventHandler(deps)` returns `{ applyIntents, dispose }`; `deps` are the injected dispatchers that write to the Zustand stores (so the pure package never imports `apps/web`). For each intent it dispatches: `queueLivePatch` feeds the RAF-batched [patch queue](/internals/event-pipeline) that coalesces rapid streaming updates per agent; `commitChat` appends output lines and finalizes the turn; `updateAgentStatus` flips an agent's status; `scheduleSummaryRefresh` debounces the fleet reload; `approvalPending` / `approvalResolved` update the approvals store.
 
-The Handler carries two pieces of guard state. A debounce timer collapses bursts of summary-refresh requests into one fleet reload. A `closedRuns` map (30-second TTL, capped at 500 entries) drops stale terminal events for a run that already closed, guarding against a duplicate `final` or a late lifecycle `end` flipping a fresh run back to idle. Both are cleared by `dispose()` when the Gateway disconnects.
+The Handler carries two pieces of guard state. A debounce timer collapses bursts of summary-refresh requests into one fleet reload. A `closedRuns` map (30-second TTL, capped at 500 entries) drops stale terminal events for a run that already closed — matching on the incoming frame's own run id — guarding against a duplicate `final` re-committing the same turn, or a late lifecycle `end` flipping a fresh run back to idle. Both are cleared by `dispose()` when the Gateway disconnects.
 
 In the browser, `useGatewayEvents` wires this together: it constructs the handler with store-backed dispatchers, subscribes to `client.onEvent`, and calls `processEvent(frame, handler)` for every frame.
 
@@ -166,7 +166,7 @@ The gate has one exemption: a **loopback** request to `/api/mcp/*` is let throug
 - **Device pairing depends on the CLI.** The approve-device endpoint shells out to `openclaw` and parses its output; it is a convenience over the manual `openclaw devices approve` flow, not a reimplementation of OpenClaw's pairing.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

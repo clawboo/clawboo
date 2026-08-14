@@ -53,7 +53,7 @@ stateDiagram-v2
     cancelled --> [*]
 ```
 
-The transition table is the single authority on what is legal:
+The transition table is the single authority on what is legal. It is declared exactly once in code, in [`@clawboo/board-core`](/reference/packages/board-core) — the server enforces it inside the write transaction and the board UI derives its status editor from the same module, so the two cannot drift:
 
 | From          | Legal `to` states                                   |
 | ------------- | --------------------------------------------------- |
@@ -103,13 +103,13 @@ Stale re-claim of a dead, abandoned `in_progress` task is deliberately _not_ the
 
 ## Dependencies
 
-Tasks form a blocks / blocked-by graph in the `task_deps` table. Linking a dependency means "this task won't become ready to work until that task is `done`." A composite primary key on `(task_id, depends_on_task_id)` prevents duplicate edges, and inserts are conflict-tolerant, so re-linking is harmless.
+Tasks form a blocks / blocked-by graph in the `task_deps` table. Linking a dependency means "this task won't become ready to work until that task is `done`." A composite primary key on `(task_id, depends_on_task_id)` prevents duplicate edges, and inserts are conflict-tolerant, so re-linking is harmless. A link that would close a cycle — directly (`A → B`, then `B → A`) or transitively — is refused at write time, because a cycle can never resolve: readiness requires every dependency to be `done`, so each task in the cycle would sit un-ready forever with nothing surfacing the stall. The reachability check runs in the same transaction as the insert, so concurrent links cannot race one in.
 
 A task is **ready** when it is `todo`, not dropped, and _every_ one of its dependencies is `done`. Plans become dependency chains: each step depends on the prior step, and an orchestration ready-pump fires the next step the moment its blocker completes. Ready tasks are ordered by priority (descending), then by recency.
 
 Dependencies also drive failure recovery. When a blocker fails, moves to `blocked` or otherwise can't reach `done`, its downstream chain can never become ready and would otherwise sit as permanent ghost `todo` cards. The board can cancel the still-pending (`todo` / `backlog`) transitive dependents of a failed task via a recursive walk of the dependency graph, returning the cancelled rows so the orchestrator can report the stalled plan to the team leader. Tasks already `in_progress`, `done`, or `cancelled` are left untouched.
 
-The board similarly walks the _parent_ chain (via the self-referential `parent_task_id`) with a recursive query to compute a task's ancestors, used to enforce delegation depth limits. Both recursive reads validate their raw SQL output with a schema at runtime rather than trusting the type system over a raw query.
+The board similarly walks the _parent_ chain (via the self-referential `parent_task_id`) with a recursive query to compute a task's ancestors, which is how delegation depth is enforced: the orchestrator and the board's capped create path refuse a _create_ once the parent's ancestor chain has reached the depth ceiling (default 2), while the executor runner refuses a _dispatch_ only for a task whose own ancestor chain is already past it. The two comparisons differ on purpose: the invariant is that anything creatable is dispatchable, so a task sitting exactly at the ceiling still runs. That create path adds two ceilings of its own: a per-parent live-child count (default 24), so an agent looping on `create_subtask` cannot quietly fill the board with rows, and a rolling-window rate on ROOT creation (default 30 per 5 minutes), which bounds the other runaway shape: a loop that files parentless tasks forever. Both recursive reads validate their raw SQL output with a schema at runtime rather than trusting the type system over a raw query.
 
 ## Worktree linkage
 
@@ -123,21 +123,21 @@ Each spawned run for a task is recorded as an `execution_processes` row, a per-r
 
 ## The contention recipe
 
-Clawboo is team-first: many agents may write one SQLite file. Without care, concurrent writers hit SQLite's single-writer lock and degrade into a "convoy." The board's answer is a layered recipe: three connection-level pragmas plus two application-level pieces.
+Clawboo is team-first: many agents may write one SQLite file. Without care, concurrent writers hit SQLite's single-writer lock and degrade into a "convoy." The board's answer is a layered recipe: five connection-level pragmas plus two application-level pieces.
 
-Every database connection sets:
+Every connection sets, at open:
 
-| Pragma               | Value        | Why                                                                               |
-| -------------------- | ------------ | --------------------------------------------------------------------------------- |
-| `journal_mode`       | `WAL`        | Write-ahead logging lets readers and a writer proceed concurrently.               |
-| `busy_timeout`       | `1000` (ms)  | Wait up to a second for the write lock before erroring, dodges the convoy effect. |
-| `wal_autocheckpoint` | `50` (pages) | A passive checkpoint keeps the WAL lean without an app-level write counter.       |
-| `synchronous`        | `NORMAL`     | Standard WAL durability/performance balance.                                      |
-| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                |
+| Pragma               | Value        | Why                                                                                  |
+| -------------------- | ------------ | ------------------------------------------------------------------------------------ |
+| `journal_mode`       | `WAL`        | Write-ahead logging lets readers and a writer proceed concurrently.                  |
+| `busy_timeout`       | `250` (ms)   | Wait a quarter-second for the write lock, then hand off to the jittered retry below. |
+| `wal_autocheckpoint` | `50` (pages) | A passive checkpoint keeps the WAL lean without an app-level write counter.          |
+| `synchronous`        | `NORMAL`     | Standard WAL durability/performance balance.                                         |
+| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                   |
 
 On top of those, the board's data-access layer adds two application-level mechanisms:
 
-- **Jittered retry.** Writes are wrapped so that _only_ transient lock errors (`SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED`) are retried, with a jittered backoff (20–150 ms, at most 15 attempts). A 0-row result, like a lost claim race, is returned to the caller unretried, which is what lets callers honor the never-retry-a-409 rule. Any other error propagates immediately.
+- **Jittered retry.** Writes are wrapped so that _only_ transient lock errors (`SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED`) are retried, with a jittered backoff (20–150 ms) bounded by a **1.5-second wall-clock budget** rather than an attempt count, because the retry sleep blocks the server's event loop: an attempt count does not bound how long a contended write can freeze the server, a deadline does. A 0-row result, like a lost claim race, is returned to the caller unretried, which is what lets callers honor the never-retry-a-409 rule. Any other error propagates immediately.
 - **`BEGIN IMMEDIATE` transactions.** Multi-step writes (status transitions, reconciliation passes) acquire the write lock up front rather than escalating mid-transaction, which avoids lock-escalation deadlocks. The whole transaction re-runs from scratch on a transient lock error.
 
 <Note>
@@ -166,10 +166,10 @@ SQLite is a deliberate choice: it ships in-process, needs no server, and, with t
 
 - **Not a general-purpose project tracker.** The board exists to coordinate agent execution, not to replace a human-facing issue tracker. Its statuses, transitions, and recovery passes are tuned for runtime-driven work.
 - **Not the agent or session registry.** The board references agents and sessions by id and owns no agent identity, agent files, or live session state. Those belong to the registry of record and the runtime.
-- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.3.0. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.3.1. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

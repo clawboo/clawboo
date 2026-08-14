@@ -49,9 +49,12 @@ vi.mock('@/features/teams/CreateTeamModal', () => ({
     ) : null,
 }))
 
-// The native connect path: write the vault key + record the leader model.
+// The native connect path: verify the key, write the vault key + record the
+// leader model. The healthcheck is what Continue runs BEFORE it stores anything,
+// so the spine can't advance without a verdict.
 function useNativeConnectHandlers() {
   server.use(
+    http.post('/api/runtimes/clawboo-native/healthcheck', () => HttpResponse.json({ ok: true })),
     http.post('/api/runtimes/clawboo-native/connect', () => HttpResponse.json({ ok: true })),
     http.post('/api/onboarding/native-leader-model', () => HttpResponse.json({ ok: true })),
     http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })),
@@ -76,8 +79,14 @@ describe('OnboardingWizard — native-first spine', () => {
   }
 
   // selectTeam: the (mocked) team marketplace auto-opens; deploy a real team.
+  //
+  // The deploy engine is reached through `CreateTeamModalLazy`, a React.lazy boundary
+  // that keeps the ~4.4 MB marketplace catalog off the SPA entry chunk (issue #83). The
+  // step therefore paints a Suspense fallback and swaps in the (mocked) modal a tick
+  // later, on top of the wizard's own step transition — more than RTL's 1 s `findBy`
+  // default reliably absorbs on a loaded machine, so give this one an explicit budget.
   async function deployTeamThenLand() {
-    await userEvent.click(await screen.findByTestId('fake-deploy'))
+    await userEvent.click(await screen.findByTestId('fake-deploy', {}, { timeout: 8_000 }))
     await userEvent.click(await screen.findByTestId('native-open-dashboard'))
   }
 

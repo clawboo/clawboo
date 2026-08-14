@@ -142,7 +142,7 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
           {skill.name}
         </span>
         <span
-          className="whitespace-nowrap rounded-md border border-border px-1.5 py-0.5 text-[9px] font-semibold uppercase text-foreground/45"
+          className="whitespace-nowrap rounded-md border border-border px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted-foreground"
           style={{ letterSpacing: '0.03em' }}
           title="Hand-picked clawboo catalog skill"
         >

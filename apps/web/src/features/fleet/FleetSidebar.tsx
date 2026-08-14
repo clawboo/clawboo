@@ -1,4 +1,5 @@
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -14,7 +15,7 @@ import {
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
-import { useConnectionStore } from '@/stores/connection'
+import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useViewStore } from '@/stores/view'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
 import { CreateBooModal } from './CreateBooModal'
@@ -157,7 +158,7 @@ function AgentRow({
           <div className="mt-1.5 flex items-center gap-2">
             <StatusBadge status={agent.status} />
             {agent.status !== 'running' && formatLastSeen(agent.lastSeenAt) && (
-              <span className="text-[10px] text-secondary/40">
+              <span className="text-[10px] text-muted-foreground">
                 {formatLastSeen(agent.lastSeenAt)}
               </span>
             )}
@@ -172,7 +173,11 @@ function AgentRow({
           e.stopPropagation()
           onDelete()
         }}
-        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive group-hover:opacity-100"
+        // `focus-visible:text-destructive` matches the hover tone: revealing the
+        // icon at `text-secondary/40` would clear the opacity gate but leave it
+        // under the contrast floor for the keyboard user who just focused it.
+        // The 2px ring comes from the global `:focus-visible` rule in globals.css.
+        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive focus-visible:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
       >
         <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
       </button>
@@ -194,12 +199,11 @@ export function FleetSidebar() {
   const [personalityOpen, setPersonalityOpen] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
 
-  // Tick counter to re-render "seen X ago" labels every 30s
+  // Tick counter to re-render "seen X ago" labels every 30s. Paused while the
+  // tab is hidden — nobody is reading a stale relative timestamp they can't see,
+  // and the catch-up tick on return brings every label current at once.
   const [, setTick] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 30_000)
-    return () => clearInterval(id)
-  }, [])
+  useVisiblePolling(() => setTick((n) => n + 1), 30_000)
 
   const handleBooCreated = useCallback(async () => {
     try {
@@ -211,7 +215,9 @@ export function FleetSidebar() {
 
   // Delayed empty state — only show after 1s to avoid flash during hydration
   const [showEmpty, setShowEmpty] = useState(false)
-  const isEmptyConnected = agents.length === 0 && connectionStatus === 'connected' && !query
+  // Live-session, not strictly 'connected' — see AgentListColumn: the empty card
+  // should survive a transient socket drop rather than restart its 1s timer.
+  const isEmptyConnected = agents.length === 0 && isSessionLive(connectionStatus) && !query
   useEffect(() => {
     if (!isEmptyConnected) {
       setShowEmpty(false)

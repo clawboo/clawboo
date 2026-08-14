@@ -44,12 +44,7 @@ export interface SystemInfo {
 export type InstallStatus = 'idle' | 'installing' | 'success' | 'error'
 
 export type GatewayControlStatus =
-  | 'idle'
-  | 'starting'
-  | 'stopping'
-  | 'running'
-  | 'stopped'
-  | 'error'
+  'idle' | 'starting' | 'stopping' | 'running' | 'stopped' | 'error'
 
 // ─── Store ───────────────────────────────────────────────────────────────────
 

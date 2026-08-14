@@ -10,9 +10,9 @@ import {
   type CapabilitySourceId,
   type SourceReadStatus,
 } from '@clawboo/capability-registry'
-import { createDb, listCapabilities, upsertCapabilities } from '@clawboo/db'
+import { listCapabilities, upsertCapabilities } from '@clawboo/db'
 
-import { getDbPath } from '../db'
+import { getDb } from '../db'
 import { recordToInsert, rowToRecord } from './mapper'
 import { getCapabilityMultiplexer } from './registry'
 
@@ -38,7 +38,7 @@ function matches(r: CapabilityRecord, f: CapabilityFilter): boolean {
 
 export async function loadCapabilities(filter: CapabilityFilter = {}): Promise<CapabilityView> {
   const { records, sources } = await getCapabilityMultiplexer().read()
-  const db = createDb(getDbPath())
+  const db = getDb()
 
   // Persist each OK source (source-scoped reconcile).
   const bySource = new Map<CapabilitySourceId, CapabilityRecord[]>()

@@ -9,8 +9,9 @@ import { UpdateChip } from '@/features/promo/UpdateChip'
 import { AppTopBar } from '@/features/promo/AppTopBar'
 import { SettingsModal } from '@/features/settings/SettingsModal'
 import { ConfirmDialog } from '@/features/shared/ConfirmDialog'
+import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
 import { useViewStore } from '@/stores/view'
-import { useConnectionStore } from '@/stores/connection'
+import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { shouldShowGlobalTopBar } from '@/lib/topBar'
 
@@ -19,8 +20,9 @@ export function App() {
   const isBooZero = viewMode.type === 'booZero'
   const columnCollapsed = useViewStore((s) => s.columnCollapsed)
   // The first-run nudge only belongs on the settled dashboard (status 'connected'
-  // in both gateway and native mode), never over the onboarding wizard.
-  const onDashboard = useConnectionStore((s) => s.status === 'connected')
+  // in both gateway and native mode), never over the onboarding wizard. Uses the
+  // live-session predicate so a transient socket drop does not unmount these.
+  const onDashboard = useConnectionStore((s) => isSessionLive(s.status))
   // While the Settings modal is open, the whole app shell is inert so
   // background controls leave the tab order + AT tree (honouring aria-modal).
   const settingsOpen = useSettingsModalStore((s) => s.open)
@@ -40,10 +42,31 @@ export function App() {
         inert={settingsOpen || undefined}
         className="flex h-screen overflow-hidden bg-background text-foreground"
       >
-        {/* Col 1 — Team sidebar (60px) */}
-        <TeamSidebar />
-        {/* Col 2 — Agent list + nav (208px) — hidden in Boo Zero view or when collapsed */}
-        {!isBooZero && !columnCollapsed && <AgentListColumn />}
+        {/* Col 1 — Team sidebar (60px).
+            Cols 1 + 2 each get their own boundary so a crash in one column can't
+            take the other — or the content area — down with it. Without these, a
+            throw in the agent column would unwind to the ROOT boundary and blank
+            the entire app, the exact failure this change exists to prevent. The
+            fallback is icon-only (a card can't fit a 60px rail) and inherits each
+            column's geometry so the layout doesn't shift. */}
+        <ErrorBoundary
+          variant="compact"
+          label="the team sidebar"
+          fallbackClassName="h-full w-[60px] shrink-0 border-r border-border bg-background"
+        >
+          <TeamSidebar />
+        </ErrorBoundary>
+        {/* Col 2 — Agent list + nav (236px) — hidden in Boo Zero view or when collapsed */}
+        {!isBooZero && !columnCollapsed && (
+          <ErrorBoundary
+            variant="compact"
+            label="the agent sidebar"
+            fallbackClassName="h-full shrink-0 border-r border-border bg-surface"
+            fallbackStyle={{ width: 236 }}
+          >
+            <AgentListColumn />
+          </ErrorBoundary>
+        )}
         {/* Col 3+4 — Slim top bar (44px) hosts the GitHub Star pill for
             views without their own integrated chrome. Hidden on agent /
             booZero / groupChat — those views host the Star pill inside

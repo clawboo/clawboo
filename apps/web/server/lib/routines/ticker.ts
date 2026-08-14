@@ -12,7 +12,6 @@
 
 import {
   claimScheduledRun,
-  createDb,
   listQueuedRuns,
   markRunRunning,
   minNextRunAt,
@@ -24,7 +23,7 @@ import {
 } from '@clawboo/db'
 import { isOnceSpec, nextOccurrence } from '@clawboo/scheduler'
 
-import { getDbPath } from '../db'
+import { getDb } from '../db'
 import { emitEvent } from '../obs'
 import { dispatchRoutine, type RoutineDispatchOutcome } from './wakeBridge'
 
@@ -59,7 +58,7 @@ export interface RoutinesTicker {
 }
 
 export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
-  const db = deps.db ?? createDb(getDbPath())
+  const db = deps.db ?? getDb()
   const now = deps.now ?? Date.now
   const dispatch =
     deps.dispatch ??

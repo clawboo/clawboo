@@ -107,7 +107,7 @@ curl 'http://localhost:18790/api/board?teamId=<team-id>&status=in_progress'
 
 ## `POST /api/board`
 
-Creates a task. `status` defaults to `todo` (immediately claimable); pass `backlog` for triage. A subtask is created by setting `parentTaskId` (the parent chain bounds delegation depth). On success the handler emits a `task_created` observability event (a no-op when obs is off).
+Creates a task. `status` defaults to `todo` (immediately claimable); pass `backlog` for triage. A subtask is created by setting `parentTaskId` (the parent chain bounds delegation depth). This route is **not** capped; the per-parent child-count and depth ceilings are enforced at the [Tasks MCP boundary](/reference/mcp-tools#create_subtask), where an attached model creates rows unsupervised. On success the handler emits a `task_created` observability event (best-effort: an append failure is swallowed and never fails the request).
 
 - **Path/query params**: none.
 - **Request body** (validated by `createTaskBody`):
@@ -483,7 +483,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/executions \
 
 ## `PATCH /api/board/executions/:execId`
 
-Closes out an execution row with its outcome and an optional token/cost ledger. The handler emits an `execution_completed` event; `taskId`/`agentId` are not in scope on this REST path (only `execId`), so correlate via the `execution_started` event by `execId`.
+Closes out an execution row with its outcome and an optional token/cost ledger. The handler emits an `execution_completed` event carrying the run's `taskId`, `teamId`, `agentId` and `runtime`, recovered from the closed row, so the event correlates with the `execution_started` it pairs with. An unknown `execId` closes nothing and returns `404` without appending an event.
 
 - **Path params**: `execId`.
 - **Request body** (validated by `completeExecutionBody`):
@@ -514,6 +514,12 @@ Closes out an execution row with its outcome and an optional token/cost ledger. 
 
 ```json
 { "ok": true }
+```
+
+**`404 Not Found`**: no execution row matched `execId`; nothing was closed and no event was appended:
+
+```json
+{ "error": "execution not found" }
 ```
 
 **`500 Internal Server Error`**:
@@ -592,6 +598,12 @@ Links a dependency: `taskId` will not become ready until `dependsOnTaskId` is `d
 
 ```json
 { "ok": true }
+```
+
+**`409 Conflict`**: the edge would close a direct or transitive **dependency cycle**. A cycle can never resolve, so the plan is unworkable rather than the server being at fault:
+
+```json
+{ "ok": false, "error": "task_dependency_cycle" }
 ```
 
 **`500 Internal Server Error`**:

@@ -30,12 +30,14 @@ import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { fetchCapabilities } from '@/lib/capabilitiesClient'
 import { formatRelative } from '@/lib/formatRelative'
 import { ENTER_SPRING } from '@/lib/motion'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { type ConnectionState, type RuntimeClass } from '@clawboo/control-client'
 import { useCapabilityFilterStore } from '@/stores/capabilityFilter'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 
 import { RuntimeDepthBadge, RuntimeGlyph } from './runtimeDepth'
 import { useRuntimeProbeStore, type ProbeSample } from './runtimeProbeStore'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -170,17 +172,11 @@ export function RuntimeDiagnosticsDrawer({
     }
   }, [target.id])
 
-  // Keep the relative timestamps fresh while open.
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 15_000)
-    return () => clearInterval(id)
-  }, [])
+  // Keep the relative timestamps fresh while open — and only while the tab is
+  // visible; the catch-up tick on return re-reads the clock in one go.
+  useVisiblePolling(() => setNow(Date.now()), 15_000)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useDismissableLayer({ active: true, level: 'dialog', onEscape: onClose })
 
   const handleRecheck = useCallback(async () => {
     setBusy(true)

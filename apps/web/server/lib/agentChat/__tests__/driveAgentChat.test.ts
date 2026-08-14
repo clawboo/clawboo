@@ -10,7 +10,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { agents, chatMessages, createDb, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { agents, chatMessages, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import type {
   Capabilities,
@@ -21,7 +21,7 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import { subscribeChatDelta } from '../../teamChat/chatDeltaBus'
 import { chatHistoryDELETE } from '../../../api/chatHistory'
 import {
@@ -84,9 +84,12 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-agentchat-'))
     prevHome = process.env['HOME']
     process.env['HOME'] = home
-    db = createDb(getDbPath())
+    db = getDb()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true })
@@ -323,7 +326,7 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     const key = nativeChatSessionSettingKey('native-x')
     setSetting(db, key, 'native-abc123')
     expect(getSetting(db, key)).toBe('native-abc123')
-    // chatHistoryDELETE opens its own createDb(getDbPath()) — the SAME sandbox file.
+    // chatHistoryDELETE opens its own getDb() — the SAME sandbox file.
     const req = {
       query: { sessionKey: nativeChatSessionKey('native-x') },
     } as unknown as Parameters<typeof chatHistoryDELETE>[0]

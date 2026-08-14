@@ -71,7 +71,11 @@ class RealCascadeBoard implements CascadeBoard {
     if (task) this.created.push(task)
     return task
   }
-  async claim(taskId: string, assigneeAgentId: string, assigneeRuntime?: string): Promise<ClaimResult> {
+  async claim(
+    taskId: string,
+    assigneeAgentId: string,
+    assigneeRuntime?: string,
+  ): Promise<ClaimResult> {
     this.onClaim?.()
     this.claims.push(taskId)
     if (this.forceClaimConflict) return { ok: false, reason: 'conflict' }

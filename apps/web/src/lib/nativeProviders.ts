@@ -157,3 +157,24 @@ const CONNECT_BY_ID = new Map(NATIVE_CONNECT_PROVIDERS.map((p) => [p.id as strin
 export function nativeConnectProvider(id: string): NativeMoreProvider | null {
   return CONNECT_BY_ID.get(id) ?? null
 }
+
+/** Whether a pasted key for this provider can be VERIFIED before it's stored.
+ *  The healthcheck route's probe table is exactly the native runtime's keyed
+ *  provider set, so this list is the authority. The Providers hub is wider (it
+ *  also carries keys clawboo only mirrors to OpenClaw); for those, a connect
+ *  surface must skip the check rather than block on one it can't run. */
+export function canHealthcheckProvider(id: string): boolean {
+  return CONNECT_BY_ID.has(id)
+}
+
+const CONNECT_BY_ENV_VAR = new Map(NATIVE_CONNECT_PROVIDERS.map((p) => [p.envVar, p.id as string]))
+
+/** The provider a vault env-var name belongs to, or `null` when it isn't one we
+ *  know how to reach. Single-provider runtimes (Claude Code → `ANTHROPIC_API_KEY`,
+ *  Hermes → `OPENROUTER_API_KEY`) identify their credential by env-var name, so
+ *  this is how a runtime connect surface names the provider to healthcheck. A
+ *  `null` means "we can't probe this" — the caller must skip the check, never
+ *  block on it. */
+export function nativeProviderForEnvVar(envVar: string | undefined): string | null {
+  return (envVar && CONNECT_BY_ENV_VAR.get(envVar)) ?? null
+}

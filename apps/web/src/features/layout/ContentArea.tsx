@@ -1,20 +1,41 @@
-import { useEffect, Suspense, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { NAV_PANELS } from './navPanels'
+import { NavPanel } from './navPanels'
 import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
 import { AgentDetailView } from '@/features/agent-detail'
 import { GroupChatView } from '@/features/group-chat/GroupChatView'
-import { Spinner } from '@/features/shared/Spinner'
+import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
+import { hasOpenLayer } from '@/features/shared/useDismissableLayer'
+import { NAV_VIEW_LABELS } from '@/lib/navLabels'
 import { WelcomeState } from './WelcomeState'
 import { useViewStore } from '@/stores/view'
-import { useEditorStore } from '@/stores/editor'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import type { NavView } from '@/stores/view'
+import { useEditorStore } from '@/stores/editor'
 
 // ─── View transition config ─────────────────────────────────────────────────
+
+/**
+ * True when something is layered over the content area and owns the keyboard, so
+ * the app-shell shortcuts must stand down.
+ *
+ * `hasOpenLayer()` is the dismissable-layer stack — every overlay that dismisses
+ * itself registers there, so this no longer enumerates them. Two surfaces are
+ * still named individually, and both for a reason the stack cannot cover:
+ *   • SettingsModal has no Escape handler of its own — THIS handler is its
+ *     Escape, complete with the "skip while typing" guard — so it deliberately
+ *     never joins the stack.
+ *   • The file editor is lazy-loaded: `useEditorStore.isOpen` flips as soon as
+ *     the user opens a file, but `AgentFileEditor` (and therefore its layer)
+ *     only mounts once the CodeMirror chunk resolves. The store flag covers that
+ *     window, during which the overlay is open but nothing is on the stack.
+ */
+function overlayOwnsKeyboard(): boolean {
+  return hasOpenLayer() || useSettingsModalStore.getState().open || useEditorStore.getState().isOpen
+}
 
 const VIEW_TRANSITION = { duration: 0.15, ease: 'easeOut' as const }
 const VIEW_STYLE = {
@@ -85,11 +106,28 @@ export function ContentArea() {
       // Escape — close the Settings modal first if it's open, else deselect
       // agent / go to welcome (only if no other overlay is open)
       if (e.key === 'Escape') {
+        // BEFORE the Settings branch, not after: a popover open ON TOP of
+        // Settings (a model picker inside it) owns Escape, and closing Settings
+        // out from under it is the same class of bug this PR fixes. The stack's
+        // own listener normally consumes the key before this handler ever runs;
+        // this ordering is what makes that true regardless of listener order.
+        if (hasOpenLayer()) return
+
         if (useSettingsModalStore.getState().open) {
           e.preventDefault()
           useSettingsModalStore.getState().close()
           return
         }
+        // Belt-and-braces. The layer stack's own listener already consumed this
+        // event before it reached here (it registers at module scope, so it is
+        // the first document-bubble listener in the app), which is why an open
+        // dialog cannot also deselect the agent and jump to Welcome behind it.
+        // This guard makes that independent of module-import order rather than a
+        // consequence of it — if this file's effect ever ran first, the check
+        // still holds.
+        //
+        // Not redundant with the stack: see `overlayOwnsKeyboard` — the editor's
+        // layer does not exist until its lazy chunk mounts.
         if (useEditorStore.getState().isOpen) return
         if (
           viewMode.type === 'agent' ||
@@ -102,6 +140,16 @@ export function ContentArea() {
         }
         return
       }
+
+      // Every remaining shortcut moves the view BEHIND whatever is layered over
+      // the content area, which is never what the user meant: Cmd/Ctrl+1..4 call
+      // `navigateTo` directly, and Cmd/Ctrl+, would stack Settings on top of a
+      // dialog that still owns the keyboard. Escape is handled above instead,
+      // because it has its own layering (Settings closes first, then the stack).
+      //
+      // The input guard at the top of this handler masks this while a text field
+      // holds focus; Tab to any button and the shortcut gets through.
+      if (overlayOwnsKeyboard()) return
 
       // Cmd/Ctrl+, — open the Settings modal (the universal settings shortcut)
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === ',') {
@@ -127,46 +175,48 @@ export function ContentArea() {
   }, [viewMode])
 
   // ── Compute view key + content ─────────────────────────────────────────────
+  // `viewLabel` is computed alongside `viewKey` so the per-view error boundary
+  // below names the surface that failed ("Couldn't load the team space.") without
+  // needing a second switch.
   let viewKey: string
+  let viewLabel: string
   let viewContent: ReactNode
 
   switch (viewMode.type) {
     case 'welcome':
       viewKey = 'welcome'
+      viewLabel = 'the welcome screen'
       viewContent = <WelcomeState />
       break
     case 'agent':
       viewKey = `agent-${viewMode.agentId}`
+      viewLabel = 'this agent'
       viewContent = <AgentDetailView agentId={viewMode.agentId} />
       break
     case 'booZero':
-      viewKey = 'booZero'
+      // Keyed by the agent, not just the view: `identifyBooZero` swaps
+      // `booZeroAgentId` in place when the current Boo Zero is deleted (edge
+      // case 7d above) without leaving this view. A constant key would re-render
+      // the subtree with a new agentId instead of remounting it — stranding the
+      // deleted agent's error card, and its chat state, on the replacement.
+      viewKey = `booZero-${booZeroAgentId ?? 'none'}`
+      viewLabel = 'this agent'
       viewContent = booZeroAgentId ? <AgentDetailView agentId={booZeroAgentId} /> : <WelcomeState />
       break
     case 'groupChat':
       viewKey = `group-chat-${viewMode.teamId}`
+      viewLabel = 'the team space'
       viewContent = <GroupChatView teamId={viewMode.teamId} />
       break
     case 'nav':
       viewKey = `nav-${viewMode.view}`
-      viewContent = (
-        <Suspense
-          fallback={
-            <div
-              role="status"
-              style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Spinner size={20} />
-              <span className="sr-only">Loading…</span>
-            </div>
-          }
-        >
-          {NAV_PANELS[viewMode.view]()}
-        </Suspense>
-      )
+      viewLabel = NAV_VIEW_LABELS[viewMode.view]
+      // NavPanel owns the per-panel boundary + Suspense + retry-that-re-imports.
+      viewContent = <NavPanel view={viewMode.view} />
       break
     default:
       viewKey = 'welcome'
+      viewLabel = 'the welcome screen'
       viewContent = <WelcomeState />
       break
   }
@@ -192,7 +242,22 @@ export function ContentArea() {
           transition={VIEW_TRANSITION}
           style={VIEW_STYLE}
         >
-          {viewContent}
+          {/* One boundary per VIEW, INSIDE the motion.div. Inside, so (a) the
+              sidebars and top bar stay mounted and interactive when a view
+              crashes, and (b) `key={viewKey}` remounts it on navigation — a
+              broken view heals itself the moment the user goes elsewhere and
+              back. It must NOT wrap the motion.div: that would make the boundary
+              AnimatePresence's direct child, hiding the `key` and killing every
+              exit animation. For `nav` this is the outer net; NavPanel's own
+              boundary catches first and is the one with the re-import retry. */}
+          <ErrorBoundary
+            variant="panel"
+            label={viewLabel}
+            resetKeys={[viewKey]}
+            logContext={{ viewKey }}
+          >
+            {viewContent}
+          </ErrorBoundary>
         </motion.div>
       </AnimatePresence>
     </div>

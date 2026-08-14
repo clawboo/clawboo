@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
-import { appendAudit, createDb, scanForInjection, skills } from '@clawboo/db'
+import { appendAudit, scanForInjection, skills } from '@clawboo/db'
 import { eq, desc } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 // ─── GET /api/skills?agentId=<optional> ─────────────────────────────────────
 
@@ -9,7 +9,7 @@ export function skillsGET(req: Request, res: Response): void {
   const agentId = req.query['agentId'] as string | undefined
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const rows = db.select().from(skills).orderBy(desc(skills.installedAt)).all()
 
     if (agentId) {
@@ -69,7 +69,7 @@ export function skillsPOST(req: Request, res: Response): void {
   const now = Date.now()
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     // Supply-chain posture: injection-scan a user-installed skill BEFORE it's
     // recorded / can run. A destructive/exfil/injection finding blocks the
@@ -156,7 +156,7 @@ export function skillsDELETE(req: Request, res: Response): void {
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     const existing = db.select().from(skills).where(eq(skills.id, skillId)).get()
 

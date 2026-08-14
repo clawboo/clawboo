@@ -6,7 +6,7 @@ description: 'The pure team-chat orchestration engine: one createBoardOrchestrat
 - **Version** `0.1.0`
 - **Purity** pure, browser-safe (no `node:*`, no I/O; every side effect arrives through injected deps)
 - **Purpose** The single engine that turns structured delegation signals into durable board mutations, plus the small pure utilities it needs. Extracted so **one** engine drives every team with no fork.
-- **Workspace deps** `@clawboo/executor` (types), `@clawboo/governance` (`checkFanoutCap`)
+- **Workspace deps** `@clawboo/board-core` (`TaskStatus`), `@clawboo/executor` (types), `@clawboo/governance` (`checkFanoutCap`)
 - **External deps** none
 - **Subpath exports** `.` and `./contract`
 
@@ -27,12 +27,12 @@ The engine is deps-injected: the board, delivery, narration, and cost all arrive
 
 Key constants, each a load-bearing invariant:
 
-| Name                         | Value    | Why                                                                                                                                                                     |
-| ---------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MAX_SPAWN_DEPTH`            | `2`      | Bounds the delegation tree via the board ancestor chain, enforced in code rather than by prompt.                                                                        |
-| `REFLECT_WINDOW_MS`          | `3000`   | Batches completed tasks into one `[Task Update]` to the leader, the single reduce point.                                                                                |
-| `DELEGATION_IDLE_TIMEOUT_MS` | `480000` | The 8-minute idle watchdog: a delegate that goes truly silent fails rather than hanging. Refreshed on every observed event, so a slow-but-working agent never trips it. |
-| `MAX_DELEGATION_FAILURES`    | `3`      | A per-`(agent, task)` loop breaker; reset on success.                                                                                                                   |
+| Name                         | Value    | Why                                                                                                                                                                                                    |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MAX_SPAWN_DEPTH`            | `2`      | Bounds the delegation tree via the board ancestor chain, enforced in code rather than by prompt. An alias for `DEFAULT_MAX_DEPTH` in `@clawboo/governance`, so it cannot drift from the runner's copy. |
+| `REFLECT_WINDOW_MS`          | `3000`   | Batches completed tasks into one `[Task Update]` to the leader, the single reduce point.                                                                                                               |
+| `DELEGATION_IDLE_TIMEOUT_MS` | `480000` | The 8-minute idle watchdog: a delegate that goes truly silent fails rather than hanging. Refreshed on every observed event, so a slow-but-working agent never trips it.                                |
+| `MAX_DELEGATION_FAILURES`    | `3`      | A per-`(agent, task)` loop breaker; reset on success.                                                                                                                                                  |
 
 ### The board seam (`boardClient.ts`)
 

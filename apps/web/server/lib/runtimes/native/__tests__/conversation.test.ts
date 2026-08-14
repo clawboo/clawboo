@@ -93,6 +93,11 @@ describe('Conversation turn loop', () => {
     events = []
   })
   afterEach(async () => {
+    // This suite OWNS its connection (createDb at a fixture path), so resetDb()
+    // cannot reach it: that only evicts the getDb() memo. Windows refuses to
+    // remove a directory that still holds an open file, so close it before the
+    // rm. Mirrors the ownership rule in lib/db.ts. (#140)
+    db.$client.close()
     await rm(sandbox, { recursive: true, force: true })
   })
 
@@ -207,8 +212,7 @@ describe('Conversation turn loop', () => {
     await conversation.run()
 
     const denied = events.find((e) => e.type === 'error') as
-      | { type: 'error'; code: string; fatal: boolean }
-      | undefined
+      { type: 'error'; code: string; fatal: boolean } | undefined
     expect(denied?.code).toBe('policy_denied')
     expect(denied?.fatal).toBe(false)
     // The denied tool-result still went back to the model, and the run finished ok.
@@ -415,9 +419,10 @@ describe('Conversation turn loop', () => {
   it('compacts a large tool result before it re-enters the model transcript (obs keeps the full output)', async () => {
     // A large, highly compressible tool output — the class of "read a whole file"
     // result that, re-sent every turn, would inflate the prompt past the window.
-    const bigOutput = Array.from({ length: 500 }, () => 'repeated line of tool output content').join(
-      '\n',
-    )
+    const bigOutput = Array.from(
+      { length: 500 },
+      () => 'repeated line of tool output content',
+    ).join('\n')
     const bigMcp: McpBridge = {
       async listTools() {
         return [{ name: 'big_read', description: 'reads a lot', inputSchema: { type: 'object' } }]

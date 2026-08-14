@@ -1,10 +1,9 @@
-import type { AgentStatus, ConnectionStatus, EventFrame } from '@clawboo/gateway-client'
+import type { AgentStatus, EventFrame } from '@clawboo/gateway-client'
 import type { Logger } from '@clawboo/logger'
 
 // ── Chat and Agent event payloads ──────────────────────────────────────────
 
 export type ChatState = 'delta' | 'final' | 'aborted' | 'error'
-export type LifecyclePhase = 'start' | 'end' | 'error'
 
 export type ChatEventPayload = {
   runId: string
@@ -14,6 +13,20 @@ export type ChatEventPayload = {
   stopReason?: string
   message?: unknown // raw message object from gateway
   errorMessage?: string
+  model?: string
+}
+
+/**
+ * Token spend for one committed turn, derived purely from the frame.
+ *
+ * `inputTokens` is `null` when the Gateway sent no usage block — the prompt
+ * size then has to be estimated from the agent's last user message, which is a
+ * store read and therefore the host's job, not the Policy layer's.
+ */
+export type ChatCost = {
+  model: string
+  inputTokens: number | null
+  outputTokens: number
 }
 
 export type AgentEventPayload = {
@@ -53,13 +66,6 @@ export type AgentStatusPatch = {
   lastActivityAt?: number
 }
 
-// ── Lifecycle transition ───────────────────────────────────────────────────
-
-export type LifecycleTransition =
-  | { kind: 'start'; patch: AgentStatusPatch; clearRunTracking: false }
-  | { kind: 'terminal'; patch: AgentStatusPatch; clearRunTracking: true }
-  | { kind: 'ignore' }
-
 // ── EventPlane ─────────────────────────────────────────────────────────────
 
 export type EventPlane = 'work' | 'agent' | 'trust'
@@ -82,11 +88,36 @@ export type EventIntent =
       plane: 'work'
       agentId: string
       sessionKey?: string
+      /**
+       * The runId of the frame that produced this commit. Distinct from
+       * `patch.runId`, which is ALWAYS null here (the patch *closes* the run).
+       * The Handler needs the INCOMING id to recognise a replayed terminal
+       * frame — by the time one arrives, the agent's current runId has already
+       * been cleared, so it can never name the run being recognised.
+       */
+      runId: string | null
       patch: AgentStatusPatch
       outputLines: string[]
+      /**
+       * Token spend to bill for this turn, or `null` when there is nothing to
+       * bill (an `aborted`/`error` final, or a message with no usable content).
+       *
+       * Riding on `commitChat` is deliberate: cost accounting used to run off a
+       * SECOND raw-frame subscription that re-parsed every `chat:final` itself,
+       * so a replayed frame was billed twice — the transcript guard below could
+       * not reach it. Here it inherits that guard for free.
+       */
+      cost: ChatCost | null
     }
   // Agent plane
-  | { kind: 'updateAgentStatus'; plane: 'agent'; agentId: string; patch: AgentStatusPatch }
+  | {
+      kind: 'updateAgentStatus'
+      plane: 'agent'
+      agentId: string
+      /** Incoming lifecycle frame's runId (`patch.runId` is null on terminal). */
+      runId: string | null
+      patch: AgentStatusPatch
+    }
   | {
       kind: 'scheduleSummaryRefresh'
       plane: 'agent'
@@ -109,7 +140,6 @@ export type EventIntent =
 
 export type EventHandlerDeps = {
   // State queries
-  getConnectionStatus: () => ConnectionStatus
   getAgentRunId: (agentId: string) => string | null
 
   // Dispatchers (to Zustand stores — injected from apps/web)

@@ -49,7 +49,6 @@ The code listed below ships inside the published `clawboo` package. Most of it i
 | `elkjs`                     | EPL-2.0    | Graph layout backend for the Ghost Graph                                   |
 | `framer-motion`             | MIT        | UI animation                                                               |
 | `zustand`                   | MIT        | Client state                                                               |
-| `@tanstack/react-query`     | MIT        | Server-state caching                                                       |
 | `codemirror`                | MIT        | The agent-file editor                                                      |
 | `lucide-react`              | ISC        | Icons                                                                      |
 | `simple-icons`              | CC0-1.0    | Brand marks (provider/runtime logos)                                       |
@@ -100,7 +99,7 @@ It also credits prior art in the agent-orchestration space (Paperclip, vibe-kanb
 
 - [`LICENSE`](https://github.com/clawboo/clawboo/blob/main/LICENSE) and [`THIRD_PARTY_NOTICES.md`](https://github.com/clawboo/clawboo/blob/main/THIRD_PARTY_NOTICES.md): the governing files in the repo
 - [Marketplace catalog reference](/reference/marketplace-catalog): agent/team schemas, sources, and counts
-- [Codegen & ingestion](/internals/codegen-and-ingestion): how the catalog is generated and the `verify:ingest` gate
+- [Codegen & ingestion](/internals/codegen-and-ingestion): how the catalog is generated, and the gates that keep it honest
 - [The CLI](/reference/cli): the single published npm package
 - [Runtimes overview](/runtimes/index): the peer runtimes Clawboo coordinates
 - [Contributing](/appendices/contributing): how to contribute to the project

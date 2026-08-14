@@ -1,6 +1,5 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -9,6 +8,8 @@ import type { CapabilityRecord } from '@clawboo/capability-registry'
 import { server } from '../../../__vitest__/mswServer'
 import { useToastStore } from '@/stores/toast'
 import { CapabilitiesPanel } from '../CapabilitiesPanel'
+
+import { axe } from '@/__vitest__/axe'
 
 afterEach(() => cleanup())
 
@@ -139,6 +140,36 @@ describe('CapabilitiesPanel', () => {
     expect(within(row).queryByTestId('capability-action')).toBeNull()
   })
 
+  it('a runtime-of-record TOOL (writable not false) DOES render an action button', async () => {
+    server.use(
+      http.get('/api/capabilities', () =>
+        HttpResponse.json({
+          records: [
+            rec({
+              id: 'openclaw:shell',
+              runtime: 'openclaw',
+              kind: 'tool',
+              source: 'openclaw-extension',
+              manageability: 'runtime-of-record',
+              name: 'shell',
+              status: 'ready',
+              // No `writable` key, exactly what rowToRecord emits for a Gateway
+              // tool. The connector case above is the same tier with kind:'connector'.
+            }),
+          ],
+          sources: [],
+        }),
+      ),
+    )
+    render(<CapabilitiesPanel />)
+    const row = (await screen.findByText('shell')).closest(
+      '[data-testid="capability-row"]',
+    ) as HTMLElement
+    // The tools.allow/deny toggle is a real config.patch write, so the button must
+    // survive the writable gate or the tier's one supported action is unreachable (#146).
+    expect(within(row).getByTestId('capability-action')).toBeEnabled()
+  })
+
   it('a pending-auth row renders the RECORD-supplied hint, not a hardcoded one', async () => {
     server.use(
       http.get('/api/capabilities', () =>
@@ -183,9 +214,7 @@ describe('CapabilitiesPanel', () => {
     const { container } = render(<CapabilitiesPanel />)
     await screen.findByTestId('capabilities-panel')
     await screen.findByTestId('capability-group-clawboo-native')
-    expect(
-      await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
-    ).toHaveNoViolations()
+    expect(await axe(container)).toHaveNoViolations()
   })
 
   it('clicking a managed action POSTs /api/capabilities/:action', async () => {

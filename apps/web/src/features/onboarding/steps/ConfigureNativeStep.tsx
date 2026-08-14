@@ -1,9 +1,14 @@
 // Native runtime setup: pick a provider, paste a key (or use a local Ollama
-// model), optionally test it, then continue to pick a real team. Mirrors
-// ConfigureStep's key-input affordance (Eye/EyeOff reveal). The key is written to
-// the encrypted vault via the runtime connect route — never directly. This step
-// no longer creates a team: real team selection + deployment is the NEXT step
-// (the user picks a template from the marketplace and deploys it).
+// model), then continue to pick a real team. Continue VERIFIES the credential
+// before it stores anything — the same healthcheck the optional "Test connection"
+// button runs — so a typo'd key, a revoked key, an unreachable provider, or a
+// stopped Ollama surfaces HERE, while the key is still on screen, instead of in
+// the user's first chat message. A failure is inline and offers "Continue anyway"
+// so a genuinely offline user is never hard-blocked. Mirrors ConfigureStep's
+// key-input affordance (Eye/EyeOff reveal). The key is written to the encrypted
+// vault via the runtime connect route — never directly. This step no longer
+// creates a team: real team selection + deployment is the NEXT step (the user
+// picks a template from the marketplace and deploys it).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -82,6 +87,13 @@ const CONNECT_SUBTITLE =
 
 type TestState = { phase: 'idle' | 'testing' | 'ok' | 'fail'; message?: string }
 
+/** Continue runs two awaits back to back — verify the credential, then store it.
+ *  Naming the phase lets the CTA say which one is in flight. */
+type SubmitPhase = 'idle' | 'verifying' | 'connecting'
+
+/** Where to get Ollama when the local daemon isn't answering. */
+const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download'
+
 /** A copy-able terminal command line (the RuntimeConnectionCard login-command idiom). */
 function CommandRow({
   command,
@@ -131,8 +143,20 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [test, setTest] = useState<TestState>({ phase: 'idle' })
-  const [submitting, setSubmitting] = useState(false)
+  const [submitPhase, setSubmitPhase] = useState<SubmitPhase>('idle')
+  const submitting = submitPhase !== 'idle'
   const [error, setError] = useState<string | null>(null)
+  // A FAILED pre-advance verification: the reason, kept separate from `error`
+  // (which is a hard connect failure). Only this one offers "Continue anyway" —
+  // a connect failure stored nothing, so there is nothing to continue past.
+  const [verifyFail, setVerifyFail] = useState<string | null>(null)
+  // This step is taller than a laptop viewport, and the failure lands at the very
+  // bottom — on a fresh 1280x900 the override sat ~18px under the fold, so the
+  // refusal could read as "the button did nothing". Bring it into view.
+  const verifyFailRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (verifyFail) verifyFailRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [verifyFail])
   // The OpenAI card offers TWO auth methods: Sign in with ChatGPT (Recommended —
   // uses the subscription via the Codex runtime, no API key) and an API key. The
   // ChatGPT method is the default: it's the economical path, and OpenAI is the one
@@ -269,7 +293,12 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
   const keyUrl = moreProvider?.keyUrl ?? getKeyUrl(provider)
   const canSubmit = useOllama || (chatgptActive ? codexPhase === 'ready' : apiKey.trim().length > 0)
 
-  const resetTest = useCallback(() => setTest({ phase: 'idle' }), [])
+  // Editing the key invalidates BOTH the verdict and the failure it produced —
+  // that's what makes `test.phase === 'ok'` a sound "this exact key verified".
+  const resetTest = useCallback(() => {
+    setTest({ phase: 'idle' })
+    setVerifyFail(null)
+  }, [])
 
   const selectProvider = useCallback((id: string) => {
     if (id === 'ollama') {
@@ -281,6 +310,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
     setModel(nativeLeaderModelFor(id)) // switch to the new provider's recommended model
     setTest({ phase: 'idle' })
     setError(null)
+    setVerifyFail(null)
   }, [])
 
   const handleTest = useCallback(async () => {
@@ -292,32 +322,69 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
     )
   }, [effectiveProvider, apiKey])
 
-  const handleSubmit = useCallback(async () => {
-    if (!canSubmit || submitting) return
-    // The ChatGPT method: Codex is ALREADY connected (the user's own `codex login`,
-    // verified via the status probe) — there is no key to store and no native leader
-    // model to record (Codex runs the ChatGPT account default). Just advance with
-    // 'codex' as the primary so the team deploy defaults every agent to it.
-    if (chatgptActive) {
-      onConnected('codex', '')
-      return
-    }
-    setSubmitting(true)
-    setError(null)
-    // 1. Store the key in the encrypted vault (the multi-provider native slot).
-    const c = await connectRuntime('clawboo-native', apiKey.trim(), effectiveProvider)
-    if (!c.ok) {
-      setSubmitting(false)
-      setError(c.error ?? 'Failed to save the key')
-      return
-    }
-    // 2. Record the chosen leader model so the universal Boo Zero runs on it
-    //    (best-effort — a failure just falls back to the per-provider default).
-    if (model) void setNativeLeaderModel(effectiveProvider, model)
-    setSubmitting(false)
-    // 3. Advance to real team selection (the next step deploys a real team).
-    onConnected(effectiveProvider, model)
-  }, [canSubmit, submitting, chatgptActive, apiKey, effectiveProvider, model, onConnected])
+  const handleSubmit = useCallback(
+    async (opts?: { skipVerify?: boolean }) => {
+      if (!canSubmit || submitting) return
+      // The ChatGPT method: Codex is ALREADY connected (the user's own `codex login`,
+      // verified via the status probe) — there is no key to store and no native leader
+      // model to record (Codex runs the ChatGPT account default). Just advance with
+      // 'codex' as the primary so the team deploy defaults every agent to it.
+      if (chatgptActive) {
+        onConnected('codex', '')
+        return
+      }
+      setError(null)
+      setVerifyFail(null)
+      // 0. Verify the credential BEFORE storing it — one models-list GET, the key
+      //    never persisted by that route. Skipped when "Test connection" already
+      //    verified THIS key (resetTest/selectProvider clear `ok`, so it can only
+      //    describe the current provider + key), and when the user overrode a
+      //    failure with "Continue anyway".
+      if (!opts?.skipVerify && test.phase !== 'ok') {
+        setSubmitPhase('verifying')
+        const h = await healthcheckNativeKey(effectiveProvider, apiKey.trim())
+        if (!h.ok) {
+          const message = h.error ?? 'Could not verify the key.'
+          setSubmitPhase('idle')
+          setTest({ phase: 'fail', message })
+          setVerifyFail(message)
+          return
+        }
+        // Record the verdict so a retry after a failed connect doesn't re-probe.
+        setTest({ phase: 'ok' })
+      }
+      setSubmitPhase('connecting')
+      // 1. Store the key in the encrypted vault (the multi-provider native slot).
+      const c = await connectRuntime('clawboo-native', apiKey.trim(), effectiveProvider)
+      if (!c.ok) {
+        setSubmitPhase('idle')
+        setError(c.error ?? 'Failed to save the key')
+        return
+      }
+      // 2. Record the chosen leader model so the universal Boo Zero runs on it
+      //    (best-effort — a failure just falls back to the per-provider default).
+      if (model) void setNativeLeaderModel(effectiveProvider, model)
+      setSubmitPhase('idle')
+      // 3. Advance to real team selection (the next step deploys a real team).
+      onConnected(effectiveProvider, model)
+    },
+    [
+      canSubmit,
+      submitting,
+      chatgptActive,
+      apiKey,
+      effectiveProvider,
+      model,
+      onConnected,
+      test.phase,
+    ],
+  )
+
+  // The server's ollama failure is almost always the generic "Could not reach
+  // ollama.", which the panel's own copy already says (and says better, since it
+  // also says what to do). Surface the raw reason only when it carries something
+  // we aren't already saying — never swallow an unexpected one.
+  const ollamaDetail = verifyFail && !/could not reach/i.test(verifyFail) ? verifyFail : null
 
   return (
     <OnboardingScreen
@@ -338,7 +405,11 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
             disabled={!canSubmit || submitting}
           >
             {submitting ? <Loader2 size={16} className="animate-spin" /> : null}
-            {submitting ? 'Connecting…' : 'Continue'}
+            {submitPhase === 'verifying'
+              ? 'Verifying…'
+              : submitPhase === 'connecting'
+                ? 'Connecting…'
+                : 'Continue'}
             {!submitting && <ArrowRight size={16} />}
           </OnboardingPrimary>
         </div>
@@ -356,15 +427,17 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
               aria-checked={active}
               data-testid={`native-provider-${p.id}`}
               onClick={() => selectProvider(p.id)}
+              disabled={submitting}
               className={[
                 'group flex items-center gap-3 rounded-2xl border p-4 text-left',
                 'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                'disabled:pointer-events-none disabled:opacity-60',
                 active
                   ? ''
                   : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
               ].join(' ')}
               style={{
-                cursor: 'pointer',
+                cursor: submitting ? 'not-allowed' : 'pointer',
                 ...(active
                   ? {
                       borderColor: 'var(--primary)',
@@ -400,8 +473,9 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
           data-testid="native-more-providers-toggle"
           aria-expanded={showMore}
           onClick={() => setShowMore((v) => !v)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-[13px] font-medium transition-colors hover:border-foreground/25"
-          style={{ color: muted(0.6), cursor: 'pointer' }}
+          disabled={submitting}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-[13px] font-medium transition-colors hover:border-foreground/25 disabled:pointer-events-none disabled:opacity-60"
+          style={{ color: muted(0.6), cursor: submitting ? 'not-allowed' : 'pointer' }}
         >
           More providers
           <ChevronDown
@@ -428,15 +502,17 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
                   aria-checked={active}
                   data-testid={`native-provider-${p.id}`}
                   onClick={() => selectProvider(p.id)}
+                  disabled={submitting}
                   className={[
                     'group flex items-center gap-2.5 rounded-xl border p-3 text-left',
                     'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                    'disabled:pointer-events-none disabled:opacity-60',
                     active
                       ? ''
                       : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
                   ].join(' ')}
                   style={{
-                    cursor: 'pointer',
+                    cursor: submitting ? 'not-allowed' : 'pointer',
                     ...(active
                       ? {
                           borderColor: 'var(--primary)',
@@ -498,15 +574,17 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
                 aria-checked={active}
                 data-testid={`native-auth-${m.id}`}
                 onClick={() => setAuthMethod(m.id)}
+                disabled={submitting}
                 className={[
                   'flex flex-col items-start gap-1 rounded-2xl border p-4 text-left',
                   'transition-[transform,border-color,box-shadow,background-color] duration-150',
+                  'disabled:pointer-events-none disabled:opacity-60',
                   active
                     ? ''
                     : 'border-border bg-surface hover:-translate-y-px hover:border-foreground/20',
                 ].join(' ')}
                 style={{
-                  cursor: 'pointer',
+                  cursor: submitting ? 'not-allowed' : 'pointer',
                   ...(active
                     ? {
                         borderColor: 'var(--primary)',
@@ -737,6 +815,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
             value={model}
             onChange={setModel}
             options={modelSelectOptions}
+            disabled={submitting}
             searchable={modelSelectOptions.length > 10}
             searchPlaceholder="Search models…"
           />
@@ -745,6 +824,59 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
             cheaper model. You can change any agent&rsquo;s model later, and connect more providers
             anytime in Settings &rarr; Providers.
           </p>
+        </div>
+      ) : null}
+
+      {/* Failed pre-advance verification — the reason, plus the two ways out:
+          fix the credential (the field is right there) or override deliberately.
+          Never a hard block: a user whose machine simply can't reach the provider
+          right now must still be able to finish onboarding. */}
+      {verifyFail ? (
+        <div
+          ref={verifyFailRef}
+          className="mt-5 flex flex-col gap-2"
+          data-testid="native-verify-failed"
+        >
+          <FormattedAlert tone="error">
+            {useOllama ? (
+              <>
+                <span className="font-semibold">Ollama isn&rsquo;t answering.</span> Start it and
+                try again &mdash; Clawboo runs your agents on your own machine, so Ollama has to be
+                running. {ollamaDetail}
+              </>
+            ) : (
+              <>
+                <span className="font-semibold">
+                  Key didn&rsquo;t verify &mdash; fix it or continue anyway.
+                </span>{' '}
+                {verifyFail}
+              </>
+            )}
+          </FormattedAlert>
+          {useOllama ? (
+            <>
+              <CommandRow command="ollama serve" />
+              <a
+                href={OLLAMA_DOWNLOAD_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                data-testid="native-get-ollama"
+                className="inline-flex items-center gap-1 self-start text-[12px] font-medium underline-offset-2 hover:underline"
+                style={{ color: 'var(--primary)' }}
+              >
+                Don&rsquo;t have Ollama? Install it <ExternalLink size={11} />
+              </a>
+            </>
+          ) : null}
+          <div>
+            <OnboardingGhost
+              testId="native-continue-anyway"
+              onClick={() => void handleSubmit({ skipVerify: true })}
+              disabled={submitting}
+            >
+              Continue anyway <ArrowRight size={14} />
+            </OnboardingGhost>
+          </div>
         </div>
       ) : null}
 

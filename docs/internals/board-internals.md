@@ -5,11 +5,11 @@ description: 'The board data-access layer: the atomic claim, the transactional s
 
 [The board](/concepts/the-board) is Clawboo's durable task-coordination substrate. This page is the implementation deep-dive for people working _on_ it: the single data-access layer that owns every board write, the conditional-UPDATE claim that makes single-assignee work race-free, the state machine that enforces legal transitions inside a write transaction, the SQLite contention recipe that keeps many concurrent writers honest, the recursive CTEs that walk the dependency and parent graphs, and the two reconciliation passes that recover stuck work.
 
-Everything here lives in `packages/db/src/board/`: four modules: `repository.ts` (the data access), `state-machine.ts` (the pure transition rules), `contention.ts` (the write recipe), and `schemas.ts` (the zod shapes for REST bodies and raw-CTE results). The connection-level pragmas they depend on are set in `packages/db/src/db.ts`. If you want the _why_ behind the board's existence, narration-vs-authority, the worktree linkage, read [the concept page](/concepts/the-board) first; this page assumes it.
+Everything here lives in `packages/db/src/board/`: four modules: `repository.ts` (the data access), `contention.ts` (the write recipe), `schemas.ts` (the zod shapes for REST bodies and raw-CTE results), and `verification.ts` (verdict persistence — `setTaskVerification` — feeding the intrinsic `→ done` gate). The pure transition rules sit one package over, in [`@clawboo/board-core`](/reference/packages/board-core), and are re-exported through `@clawboo/db` unchanged. The connection-level pragmas they depend on are set in `packages/db/src/db.ts`. If you want the _why_ behind the board's existence, narration-vs-authority, the worktree linkage, read [the concept page](/concepts/the-board) first; this page assumes it.
 
 ## What it is, and what it isn't
 
-The board data-access layer is **the only place in the codebase that touches the board tables**. `apps/web` never reaches a board table with raw Drizzle; it calls a repository function. That is deliberate: it keeps query construction out of the app, and it is the single seam a future SQLite→Postgres or multi-tenant swap would target. Every read that could be tenant-scoped takes an optional `scope` argument carrying a `tenantId`; the column exists on every board table but no filtering is active in v0.3.0.
+The board data-access layer is **the only place in the codebase that touches the board tables**. `apps/web` never reaches a board table with raw Drizzle; it calls a repository function. That is deliberate: it keeps query construction out of the app, and it is the single seam a future SQLite→Postgres or multi-tenant swap would target. Every read that could be tenant-scoped takes an optional `scope` argument carrying a `tenantId`; the column exists on every board table but no filtering is active in v0.3.1.
 
 It is **not** an ORM-over-everything layer. It is a hand-written set of typed functions over five tables (`tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes`), each function doing exactly one board operation. The pure transition rules live apart from the data access so they are unit-testable without a database; the contention helpers live apart so the rest of the repository reads as plain Drizzle.
 
@@ -19,7 +19,9 @@ The repository imports one cross-package symbol: `isVerdictPromotable` from `@cl
 
 ## The state machine
 
-`state-machine.ts` is pure: a `TaskStatus` union of seven values, a `LEGAL` transition map, and three predicates. There is no I/O here; it is the rulebook the repository consults inside a transaction.
+`@clawboo/board-core`'s `state-machine.ts` is pure: a `TaskStatus` union of seven values, a `LEGAL` transition map, and the accessors over it. There is no I/O here — and no imports at all, which is what lets the browser bundle the same file the server enforces.
+
+It lives outside `@clawboo/db` deliberately. Three layers need these rules and only one of them can touch a database: the repository enforces them inside the write transaction, `@clawboo/team-orchestration` types its `BoardClient` with `TaskStatus`, and the board UI derives its columns and its status editor from `TASK_STATUSES` + `legalTargets`. When each declared its own copy they agreed, but nothing linked them: a newly-legal transition on the server would have left the UI hiding a move it now accepts, with green CI.
 
 ```ts
 const LEGAL: Record<TaskStatus, readonly TaskStatus[]> = {
@@ -33,7 +35,7 @@ const LEGAL: Record<TaskStatus, readonly TaskStatus[]> = {
 }
 ```
 
-`canTransition(from, to)` returns `true` when `from === to` (same-status is an idempotent no-op, so re-emitting a transition is harmless) and otherwise checks membership in `LEGAL[from]`. `done` and `cancelled` have empty target lists; they are terminal. `isLocked(status)` returns `true` for `in_progress` and `in_review` (a locked task is actively owned and must not have its assignee reassigned). `isTerminal(status)` returns `true` for `done` and `cancelled`.
+`canTransition(from, to)` returns `true` when `from === to` (same-status is an idempotent no-op, so re-emitting a transition is harmless) and otherwise checks membership in `LEGAL[from]`. `legalTargets(from)` returns that row as a fresh array, which is how a UI enumerates the moves it may offer without copying the table. `done` and `cancelled` have empty target lists; they are terminal (a test pins `isTerminal(s)` ⇔ `legalTargets(s).length === 0`, so the two can never disagree). `isLocked(status)` returns `true` for `in_progress` and `in_review` (a locked task is actively owned and must not have its assignee reassigned). `isTerminal(status)` returns `true` for `done` and `cancelled`.
 
 The enforcement happens in `updateStatus` in the repository, not in the REST layer:
 
@@ -123,7 +125,23 @@ Stale re-claim of a dead, abandoned `in_progress` task is deliberately **not** t
 
 ## Dependencies and the recursive CTEs
 
-Tasks form a blocks / blocked-by graph in `task_deps`, with a composite primary key on `(task_id, depends_on_task_id)` that prevents duplicate edges. `linkDep` inserts with `onConflictDoNothing`, so re-linking is a harmless no-op.
+Tasks form a blocks / blocked-by graph in `task_deps`, with a composite primary key on `(task_id, depends_on_task_id)` that prevents duplicate edges. `linkDep` writes the whole edge inside `immediateWrite`: it rejects a self-link outright, then probes reachability with a recursive CTE and throws `TaskDependencyCycleError` when `taskId` is already upstream of `dependsOnTaskId` — that is, when the new edge would close a direct or transitive cycle. Only after the probe does it insert, still with `onConflictDoNothing`, so re-linking an existing edge remains a harmless no-op. Probe and insert share one `BEGIN IMMEDIATE` transaction, so two concurrent links cannot race a cycle into the graph.
+
+```ts
+sql`
+  WITH RECURSIVE dependencies(id) AS (
+    SELECT depends_on_task_id FROM task_deps WHERE task_id = ${dependsOnTaskId}
+    UNION
+    SELECT td.depends_on_task_id FROM task_deps td
+    JOIN dependencies dep ON td.task_id = dep.id
+  )
+  SELECT id FROM dependencies WHERE id = ${taskId} LIMIT 1
+`
+```
+
+<Note>
+A cycle is refused at write time because nothing downstream can recover from one: `getReadyTasks` requires every dependency to be `done`, so every task in a cycle is permanently un-ready and no error surfaces anywhere — the ready-pump simply has nothing to fire. `TaskDependencyCycleError` carries `code: 'task_dependency_cycle'`; the `link_task` MCP tool maps it to a tool-error, and the REST dependency route maps it to a `409` with that code in `error` — a client mistake, not a server fault.
+</Note>
 
 A task is **ready** when it is `todo`, not dropped, and _every_ one of its dependencies is `done`. `getReadyTasks` expresses that with a `NOT EXISTS` subquery and orders the results by priority descending, then `updatedAt` descending:
 
@@ -153,7 +171,9 @@ sql`
 
 This drives failure recovery. When a blocker fails, moves to `blocked` or otherwise can't reach `done`, its downstream chain can never become ready and would otherwise sit forever as ghost `todo` cards. `cancelDependents` walks `getDependents`, cancels only the still-pending (`todo` / `backlog`) members via `updateStatus`, and returns the cancelled rows so the orchestrator can report the stalled plan to the team leader. Tasks already `in_progress`, `done`, or `cancelled` are left untouched.
 
-**`getAncestors`** walks the _parent_ chain via the self-referential `parent_task_id`, returning a minimal `{ id, parent_task_id, title, status }` row per ancestor. It is used to enforce delegation depth limits; an orchestrator reads the ancestor count to refuse spawning past a maximum depth. Its raw rows are parsed with `ancestorRowsSchema` from `schemas.ts` before being returned.
+**`getAncestors`** walks the _parent_ chain via the self-referential `parent_task_id`, returning a minimal `{ id, parent_task_id, title, status }` row per ancestor. Its raw rows are parsed with `ancestorRowsSchema` from `schemas.ts` before being returned. It is the depth cap's counter at two call sites, both reading the same `DEFAULT_MAX_DEPTH`: the team orchestrator refuses to spawn when the SOURCE task is already at the ceiling (`ancestors.length >= max`, so the child would be one past it), and the executor runner refuses to dispatch a task that is itself past it (`ancestors.length > max`). The `>=`/`>` split is what makes the deepest creatable task also dispatchable. The creation-time cap enforces the orchestrator's rule but does not use this helper — see `createCappedSubtask` below.
+
+**`createCappedSubtask`** is the board's own bounded create, and the one the Tasks MCP create tools call. It does the parent lookup, an indexed `COUNT(*)` of the parent's non-dropped children, a step-bounded parent-chain walk, and the insert inside a single `BEGIN IMMEDIATE` transaction, returning `{ ok: false, reason: 'parent_not_found' | 'child_cap' | 'depth_cap' }` rather than throwing. The transaction is the point: the Tasks MCP ships as a stdio bin, one OS process per attached runtime on the shared database file, so a count-then-insert window would let two agents both land the N+1th child. It walks the chain itself instead of calling `getAncestors` because that helper takes a `ClawbooDb` rather than a transaction handle, and because a hard step bound cannot spin on corrupt data while a write lock is held. `createCappedRootTask` is its parentless sibling: same one-transaction shape, but the guard is a rolling-window RATE on root creation rather than a total, because a per-parent ceiling has no subject on a root and a lifetime ceiling would eventually jam a long-lived board. `createSubtask` remains the uncapped primitive for the orchestrator, the REST board, and the evals harness. Every count comes from durable board state, never from the model.
 
 ## Worktree linkage and execution rows
 
@@ -165,20 +185,24 @@ Each spawned run is an `execution_processes` row, a per-run ledger for any execu
 
 Clawboo is team-first: many agents may write one SQLite file, and out-of-process consumers (the MCP stdio bins an external runtime spawns) open the _same_ file the Express server serves. Without care, concurrent writers hit SQLite's single-writer lock and degrade into a "convoy." The board's answer is a layered recipe: connection-level pragmas plus two application-level pieces.
 
-Every connection `createDb` opens sets these pragmas:
+Every connection sets these pragmas at open (`openDb`, `packages/db/src/db.ts`). The Express server opens exactly one, at boot; each out-of-process MCP stdio bin opens one of its own:
 
-| Pragma               | Value        | Why                                                                                |
-| -------------------- | ------------ | ---------------------------------------------------------------------------------- |
-| `journal_mode`       | `WAL`        | Write-ahead logging lets readers and a single writer proceed concurrently.         |
-| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                 |
-| `synchronous`        | `NORMAL`     | The standard WAL durability/performance balance.                                   |
-| `busy_timeout`       | `1000` (ms)  | Wait up to a second for the write lock before erroring, dodges the convoy effect.  |
-| `wal_autocheckpoint` | `50` (pages) | A native PASSIVE checkpoint keeps the WAL lean without an app-level write counter. |
+| Pragma               | Value        | Why                                                                                                                               |
+| -------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `journal_mode`       | `WAL`        | Write-ahead logging lets readers and a single writer proceed concurrently.                                                        |
+| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                                                                |
+| `synchronous`        | `NORMAL`     | The standard WAL durability/performance balance.                                                                                  |
+| `busy_timeout`       | `250` (ms)   | Wait a quarter-second for the write lock, then hand off to the jittered app-level retry, which is the real anti-convoy mechanism. |
+| `wal_autocheckpoint` | `50` (pages) | A native PASSIVE checkpoint keeps the WAL lean without an app-level write counter.                                                |
 
 On top of those, `contention.ts` adds two application-level mechanisms:
 
-- **`withWriteRetry(fn)`** runs a synchronous write and retries **only** transient lock errors, `SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED` (the set `isBusyError` recognizes), with a jittered backoff (`20–150` ms, at most `15` attempts). A 0-row result, like a lost claim race, is not an exception; it is returned to the caller unretried, which is what lets callers honor the never-retry-a-409 rule. Any non-lock error propagates immediately.
+- **`withWriteRetry(fn)`** runs a synchronous write and retries **only** transient lock errors, `SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED` (the set `isBusyError` recognizes), with a jittered backoff (`20–150` ms) until a **wall-clock budget** expires (`1500` ms by default, tunable with `CLAWBOO_DB_WRITE_BUDGET_MS`, with a `24`-attempt backstop). The budget is a deadline rather than an attempt count because the retry sleep blocks the calling thread, which in the server is the event loop: an attempt count does not bound how long one contended write can freeze the server, a deadline does. Worst case is the budget plus one final `busy_timeout`, about `1.75` s. On exhaustion it throws `WriteBudgetExhaustedError`, which keeps `code = 'SQLITE_BUSY'` so `isBusyError` still recognizes it and existing callers are unaffected. A 0-row result, like a lost claim race, is not an exception; it is returned to the caller unretried, which is what lets callers honor the never-retry-a-409 rule. Any non-lock error propagates immediately.
 - **`immediateWrite(db, cb)`** runs `cb` inside a `db.transaction(cb, { behavior: 'immediate' })`; `BEGIN IMMEDIATE` acquires the write lock up front rather than escalating mid-transaction, avoiding lock-escalation deadlocks. The whole transaction re-runs from scratch on a transient lock error because `immediateWrite` itself is wrapped in `withWriteRetry`. `updateStatus`, `reconcileOrphans`, and `reconcileStaleInProgress` all run through it.
+
+<Warning>
+The budget is per **outermost** write, not per request: a handler doing three writes can block for three times the worst case. It also assumes the repository invariant that an `immediateWrite` body uses the `tx` handle directly and never calls a `withWriteRetry`-wrapped function (every call site complies today) — nest them and the budgets multiply.
+</Warning>
 
 <Note>
 The retry sleep is synchronous and non-busy-spinning: it uses `Atomics.wait` on a throwaway `SharedArrayBuffer`. `better-sqlite3` is fully synchronous, so making every repository method `async` just to `await` a backoff would be a needless cost; the synchronous block on a transient lock is the correct shape.
@@ -202,12 +226,12 @@ The **primary** mechanism is the orchestrator's own idle watchdog: the per-team 
 
 ## The no-migration-ladder model
 
-There is no migration ladder. `createDb`'s inline `CREATE TABLE IF NOT EXISTS` block in `db.ts` is the **sole** schema-creation source: it declares every table and column on a fresh database outright. A schema change is a hard reset of the local DB; there are no users to migrate, so the codebase never carries forward-only `ALTER`s (which would also have to blanket-swallow DDL errors). The package no longer ships `db:migrate` or `db:generate` scripts; only `db:studio` remains, and there is no `drizzle/` directory on disk.
+There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`) is the **sole** schema-creation source: it declares every table and column on a fresh database outright. The codebase carries no hand-written forward-only `ALTER`s either; the one in-place upgrade step, `reconcileSchema`, is _derived_ from that same DDL, adding whatever columns an existing database is missing (see [Database schema](/reference/database-schema#upgrading-an-existing-database)). A change that rewrites or removes an existing column is still a hard reset of the local DB. The package no longer ships `db:migrate` or `db:generate` scripts; only `db:studio` remains, and there is no `drizzle/` directory on disk.
 
 `schema.ts` is the Drizzle **type layer** over the same tables, used for typed queries and `$inferSelect` / `$inferInsert` types, never to apply migrations. Because nothing keeps the two descriptions in sync automatically, `schemaSource.test.ts` is the guard: it builds a database via the real `createDb()`, reads the live `{ table → column-name set }` via `PRAGMA table_info`, and asserts it matches the same map derived from the `schema.ts` type layer (and vice versa). It also pins the posture, asserting the npm `files` array excludes `drizzle`, that no `db:migrate` / `db:generate` scripts exist, and that no migration-ladder directory is present.
 
 <Note>
-`schemaSource.test.ts` compares **column names only**; column type, `NOT NULL`, `DEFAULT`, primary key, foreign key, and index drift are *not* checked, because the Drizzle-column → SQLite-PRAGMA mapping is lossy and would produce false drift. The test catches the drift that matters most (a column or table added to one source but not the other); deeper shape verification is deferred until a real schema change. The FTS5 virtual table and its shadow tables are excluded; they are raw DDL in `db.ts` that Drizzle cannot model.
+`schemaSource.test.ts` compares **column names only**; column type, `NOT NULL`, `DEFAULT`, primary key, foreign key, and index drift are *not* checked, because the Drizzle-column → SQLite-PRAGMA mapping is lossy and would produce false drift. The test catches the drift that matters most (a column or table added to one source but not the other); deeper shape verification is deferred until a real schema change. The FTS5 virtual table and its shadow tables are excluded; they are raw DDL in `schemaBootstrap.ts` that Drizzle cannot model.
 </Note>
 
 ## Design rationale and trade-offs
@@ -222,10 +246,10 @@ The cost is a second persistence layer beside each runtime's own session state, 
 
 - **Not the agent or session registry.** The board references agents, runtimes, and sessions by id (soft refs, no foreign key) and owns no agent identity, agent files, or live session state. Those belong to the [registry of record](/appendices/glossary) and the [runtime](/appendices/glossary). Only the internal `parent_task_id` self-reference is FK-enforced.
 - **Not a general-purpose tracker.** The statuses, transitions, and recovery passes are tuned for runtime-driven agent execution, not for a human-facing issue tracker.
-- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.3.0. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.3.1. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

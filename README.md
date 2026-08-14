@@ -5,13 +5,14 @@
 <p align="center">
   A <strong>TypeScript orchestrator for heterogeneous AI agent runtimes</strong>. Native agents are built in: paste a key and go.
   <br/>
-  Claude Code, Codex, Hermes, and OpenClaw join as <strong>peer teammates in one chat</strong>, sharing one board, one memory, and one capability dashboard, all governed, with autonomous work independently verified.
+  Claude Code, Codex, Hermes, and OpenClaw join as <strong>peer teammates in one chat</strong>, sharing one board, one memory, and one capability dashboard, all governed, with autonomous file-mutating work independently verified before it counts as done.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/clawboo"><img src="https://img.shields.io/npm/v/clawboo?color=E94560&label=clawboo&style=flat-square" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/clawboo"><img src="https://img.shields.io/npm/dm/clawboo?color=E94560&style=flat-square&label=downloads" alt="npm downloads" /></a>
   <a href="https://github.com/clawboo/clawboo/actions/workflows/ci.yml"><img src="https://github.com/clawboo/clawboo/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/clawboo/clawboo/actions/workflows/codeql.yml"><img src="https://github.com/clawboo/clawboo/actions/workflows/codeql.yml/badge.svg" alt="CodeQL" /></a>
   <a href="https://github.com/clawboo/clawboo/stargazers"><img src="https://img.shields.io/github/stars/clawboo/clawboo?style=flat-square&color=FBBF24" alt="GitHub Stars" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-34D399?style=flat-square" alt="License: MIT" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" /></a>
@@ -54,15 +55,17 @@ npm install -g clawboo
 clawboo
 ```
 
-The global install gives you a persistent `clawboo` command and one-click in-app updates. Just trying it out? `npx clawboo` runs the latest with no install.
+The global install gives you a persistent `clawboo` command and one-click in-app updates. Just trying it out? `npx clawboo@latest` runs the current release with no install (the `@latest` matters: a bare `npx clawboo` can reuse a build already in npm's `_npx` cache).
 
 Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard:
 
 1. Pick a runtime. **Clawboo Native** is the default: it runs agents in-process and talks to your provider directly.
-2. Paste one provider API key (Anthropic, OpenAI, OpenRouter, or a local Ollama, no key needed).
+2. Paste one provider API key (Anthropic, OpenAI, OpenRouter, or a local Ollama, no key needed), or pick one of seven more under **More providers**.
 3. Clawboo seeds a starter team and drops you into the dashboard. Your team is ready in about a minute.
 
 The dashboard opens at the port written to `~/.clawboo/api-port.txt` (default `http://localhost:18790`, auto-fallback through `18809` if busy). No flags, no external CLI, no cloud account.
+
+The server keeps running after the CLI exits, so `clawboo stop` and `clawboo restart` are how you reach it again, and `clawboo backup` takes a single-file snapshot of the database while it runs. Re-running `clawboo` also compares the running server's version against its own and offers to restart an older one, so an upgrade actually takes effect. See the [CLI reference](https://docs.claw.boo/reference/cli).
 
 > Prefer a different runtime? Connect Claude Code, Codex, Hermes, or a local OpenClaw Gateway from the **Runtimes** panel at any time.
 
@@ -74,7 +77,7 @@ The dashboard opens at the port written to `~/.clawboo/api-port.txt` (default `h
 - **Mixed-runtime peer chat.** Native, Claude Code, Codex, Hermes, and OpenClaw agents are all named peers in one room, and any runtime can lead. Coordination flows over structured lifecycle events and MCP calls, never terminal-output scraping.
 - **Native agents built in, external runtimes one click away.** Paste a provider key and Clawboo runs agents itself, or install and connect a coding-agent CLI from the Runtimes panel. Each runtime keeps its own native powers (OpenClaw keeps its channels and always-on heartbeat; Hermes keeps its self-improvement and skills).
 - **One shared memory, one capability dashboard.** Every runtime reads and writes the same tiered memory store and shows up in one unified skills and connectors inventory, while its private self-model stays its own.
-- **Verified, governed, observable.** Built-in verification for autonomous completions (builder is not the judge), spend tracking and warnings, depth and fan-out caps, and approvals, plus OpenTelemetry traces, structured logs, and an error taxonomy, all on by default. Hard spend caps that auto-pause a run are opt-in.
+- **Verified, governed, observable.** Built-in verification for autonomous file-mutating completions (builder is not the judge: a deterministic gate always, plus an independent read-only critic on a risky or large diff; read-only research carries no verdict), spend tracking and warnings, and depth and fan-out caps, plus OpenTelemetry traces, structured logs, and an error taxonomy, all on by default. Interactive tool approvals apply to the connected OpenClaw path; the spawned runtimes execute board tasks non-interactively inside a per-task worktree. Hard spend caps that auto-pause a run are opt-in.
 
 ---
 
@@ -150,15 +153,17 @@ Everything is local-first: the board persists in SQLite at `~/.clawboo/clawboo.d
 
 ## Runtimes
 
-| Runtime            | What it is                                                                                  | How to connect                                                           |
-| ------------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| **Clawboo Native** | Built-in conversational runtime, talks to Anthropic / OpenAI / OpenRouter / Ollama directly | Paste a key in onboarding, no install                                    |
-| **OpenClaw**       | A local OpenClaw Gateway, keeps its own channels and always-on                              | Start a Gateway and connect                                              |
-| **Claude Code**    | Anthropic's coding agent (Claude Agent SDK)                                                 | Install and connect from Runtimes; paste a key or use your logged-in CLI |
-| **Codex**          | OpenAI's coding agent CLI                                                                   | Install and connect; `codex login` once                                  |
-| **Hermes**         | Open-source agent runtime over OpenRouter, keeps its self-improvement and skills            | Install and connect; paste an OpenRouter key                             |
+| Runtime            | What it is                                                                                                                      | How to connect                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Clawboo Native** | Built-in conversational runtime, talks to 11 providers directly: Anthropic / OpenAI / OpenRouter / local Ollama plus seven more | Paste a key in onboarding, no install                                    |
+| **OpenClaw**       | A local OpenClaw Gateway, keeps its own channels and always-on                                                                  | Start a Gateway and connect                                              |
+| **Claude Code**    | Anthropic's coding agent (Claude Agent SDK)                                                                                     | Install and connect from Runtimes; paste a key or use your logged-in CLI |
+| **Codex**          | OpenAI's coding agent CLI                                                                                                       | Install and connect; `codex login` once                                  |
+| **Hermes**         | Open-source agent runtime over OpenRouter, keeps its self-improvement and skills                                                | Install and connect; paste an OpenRouter key                             |
 
-Every runtime executes board tasks behind one interface, isolated in its own git worktree, with a structured handoff artifact so work can move between runtimes.
+Every runtime executes board tasks behind one interface, with a structured handoff artifact so work can move between runtimes. Each file-mutating task runs in its own git worktree, which buys concurrency isolation (no write races), not a sandbox. Read-only research skips the worktree, review runs detached at a commit, and OpenClaw runs on its live Gateway session with no host worktree.
+
+> **Claude Code on an npm install:** the published tarball deliberately does not bundle `@anthropic-ai/claude-agent-sdk` (its per-platform binary would add ~210 MB to every install). Install it alongside Clawboo — `npm i -g clawboo @anthropic-ai/claude-agent-sdk` — or run Clawboo from source. [Details](https://docs.claw.boo/runtimes/claude-code)
 
 ---
 
@@ -192,12 +197,12 @@ pnpm dev          # Express API on :18790 (auto-fallback) + Vite SPA on :5173
 | ------------------------------------------ | --------------------------------------------- |
 | `pnpm build`                               | Build all packages + apps (Turbo)             |
 | `pnpm typecheck`                           | `tsc --noEmit` across the workspace           |
-| `pnpm lint`                                | ESLint flat config across all packages        |
+| `pnpm lint`                                | ESLint across all packages + docs frontmatter |
 | `pnpm test`                                | Vitest unit tests (node + jsdom projects)     |
 | `pnpm e2e`                                 | Playwright end-to-end tests                   |
 | `pnpm assemble && pnpm test:clean-install` | Bundle the CLI and smoke-test a clean install |
 
-Tech stack: Node.js 22+ and TypeScript 5 strict, TurboRepo + pnpm, Vite SPA + React 19 + Express, Tailwind CSS 4, Zustand + TanStack Query, React Flow + ELK.js for the graph, CodeMirror 6, SQLite via better-sqlite3 + Drizzle ORM, the Model Context Protocol SDK, and Vitest + Playwright + MSW for tests. macOS, Linux, and Windows are all first-class.
+Tech stack: Node.js 22+ and TypeScript 5 strict, TurboRepo + pnpm, Vite SPA + React 19 + Express, Tailwind CSS 4, Zustand, React Flow + ELK.js for the graph, CodeMirror 6, SQLite via better-sqlite3 + Drizzle ORM, the Model Context Protocol SDK, and Vitest + Playwright + MSW for tests. macOS, Linux, and Windows are all first-class.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for branching, the PR checklist, and code guidelines.
 
@@ -225,6 +230,7 @@ After that:
 - Ask questions or share team templates in [Discussions](https://github.com/clawboo/clawboo/discussions).
 - File [issues](https://github.com/clawboo/clawboo/issues) for bugs, repros, and regressions. macOS, Linux, and Windows are all first-class.
 - Send a PR. Small fixes very welcome, see [CONTRIBUTING.md](./CONTRIBUTING.md).
+- Found a security issue? Report it privately, not as an issue, see [SECURITY.md](./SECURITY.md).
 
 <br/>
 

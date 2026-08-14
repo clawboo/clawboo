@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   Activity,
@@ -16,13 +16,12 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useSettingsModalStore, type SettingsView } from '@/stores/settingsModal'
-import { NAV_PANELS } from '@/features/layout/navPanels'
+import { NavPanel } from '@/features/layout/navPanels'
+import { NAV_VIEW_LABELS } from '@/lib/navLabels'
 import { InSettingsModalContext } from './settingsModalContext'
-import { Spinner } from '@/features/shared/Spinner'
 
 interface SettingsItem {
   id: SettingsView
-  label: string
   icon: LucideIcon
   /** Extra search terms so a filter matches by concept, not just label. */
   keywords?: string
@@ -37,30 +36,31 @@ interface SettingsGroup {
 // insights, then the raw system surfaces. The daily-driver work surfaces
 // (Atlas, Fleet, Marketplace, Board, Approvals) deliberately stay in the
 // sidebar — they are navigation, not settings.
+//
+// Item labels come from `lib/navLabels.ts` (the single source of truth shared
+// with the sidebar and with failure copy), so a rename lands in every surface at
+// once instead of drifting between here and AgentListColumn.
 const GROUPS: SettingsGroup[] = [
   {
     label: 'Workspace',
     items: [
       {
         id: 'providers',
-        label: 'Providers',
         icon: KeyRound,
         keywords: 'api key anthropic openai google openrouter vault provider llm',
       },
       {
         id: 'runtimes',
-        label: 'Runtimes',
         icon: Cpu,
         keywords: 'connect install claude codex hermes native openclaw',
       },
-      { id: 'memory', label: 'Memory', icon: Brain, keywords: 'facts recall knowledge' },
+      { id: 'memory', icon: Brain, keywords: 'facts recall knowledge' },
       {
         id: 'capabilities',
-        label: 'Capabilities',
         icon: Puzzle,
         keywords: 'tools skills connectors',
       },
-      { id: 'scheduler', label: 'Scheduler', icon: Clock, keywords: 'routines cron schedule' },
+      { id: 'scheduler', icon: Clock, keywords: 'routines cron schedule' },
     ],
   },
   {
@@ -68,19 +68,16 @@ const GROUPS: SettingsGroup[] = [
     items: [
       {
         id: 'cost',
-        label: 'Tokens Used',
         icon: BarChart3,
         keywords: 'cost usage spend budget tokens',
       },
       {
         id: 'obs',
-        label: 'Observability',
         icon: Activity,
         keywords: 'traces telemetry events fleet health',
       },
       {
         id: 'governance',
-        label: 'Governance',
         icon: ShieldAlert,
         keywords: 'budget audit approvals caps',
       },
@@ -91,13 +88,11 @@ const GROUPS: SettingsGroup[] = [
     items: [
       {
         id: 'system',
-        label: 'System',
         icon: SettingsIcon,
         keywords: 'openclaw model api key gateway maintenance',
       },
       {
         id: 'health',
-        label: 'System Health',
         icon: HeartPulse,
         keywords: 'boot probe diagnostics status',
       },
@@ -161,7 +156,8 @@ export function SettingsModal() {
       ...g,
       items: g.items.filter(
         (it) =>
-          it.label.toLowerCase().includes(q) || (it.keywords?.toLowerCase().includes(q) ?? false),
+          NAV_VIEW_LABELS[it.id].toLowerCase().includes(q) ||
+          (it.keywords?.toLowerCase().includes(q) ?? false),
       ),
     })).filter((g) => g.items.length > 0)
   }, [query])
@@ -226,7 +222,7 @@ export function SettingsModal() {
               <nav aria-label="Settings sections" className="flex-1 overflow-y-auto px-2 pb-3">
                 {filteredGroups.map((g) => (
                   <div key={g.label} className="mb-1 mt-2 first:mt-0">
-                    <div className="px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-foreground/40">
+                    <div className="px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
                       {g.label}
                     </div>
                     {g.items.map((it) => {
@@ -255,7 +251,7 @@ export function SettingsModal() {
                                 : 'text-foreground/55 group-hover:text-foreground/80'
                             }
                           />
-                          {it.label}
+                          {NAV_VIEW_LABELS[it.id]}
                         </button>
                       )
                     })}
@@ -288,19 +284,12 @@ export function SettingsModal() {
               </div>
               <InSettingsModalContext.Provider value={true}>
                 <div key={view} className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                  {/* NAV_PANELS entries are lazy-loaded, so this surface needs its
-                      own Suspense boundary — the modal renders outside
-                      ContentArea's boundary (it's mounted directly under App). */}
-                  <Suspense
-                    fallback={
-                      <div role="status" className="flex flex-1 items-center justify-center">
-                        <Spinner size={20} />
-                        <span className="sr-only">Loading…</span>
-                      </div>
-                    }
-                  >
-                    {NAV_PANELS[view]()}
-                  </Suspense>
+                  {/* NavPanel carries its own Suspense AND error boundary. This
+                      surface renders outside ContentArea entirely (the modal is
+                      mounted directly under App), so it needs both of its own —
+                      a panel that throws in here leaves the modal chrome, the
+                      settings nav and the close button fully usable. */}
+                  <NavPanel view={view} />
                 </div>
               </InSettingsModalContext.Provider>
             </div>

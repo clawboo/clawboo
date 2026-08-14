@@ -24,9 +24,9 @@ body:
       label: Steps to reproduce
       description: Minimal steps to reproduce the issue.
       placeholder: |
-        1. Run `npx clawboo`
-        2. Connect to Gateway
-        3. Click on Ghost Graph tab
+        1. Run `npx clawboo@latest`
+        2. Paste a provider key in onboarding
+        3. Open the Atlas view
         4. See error in console
     validations:
       required: true
@@ -35,8 +35,8 @@ body:
     id: version
     attributes:
       label: Clawboo version
-      description: Run `npx clawboo --version` or check package.json
-      placeholder: '0.2.0'
+      description: Run `clawboo --version` or check package.json
+      placeholder: 'e.g. 0.3.1'
 
   - type: dropdown
     id: area

@@ -7,7 +7,6 @@ import type { IncomingMessage } from 'node:http'
 import path from 'node:path'
 
 import {
-  createDb,
   resolveEmbeddingProvider,
   resolveRoomForTeam,
   type DbTeamChat,
@@ -30,7 +29,7 @@ import {
 } from '@clawboo/mcp'
 import type { Request, Response } from 'express'
 
-import { getDbPath } from '../lib/db'
+import { getDb, getDbPath } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs/emit'
 
@@ -103,13 +102,13 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
   if (handlers) return handlers
   kickEmbedResolve()
   handlers = {
-    tasks: createStreamableHttpHandlers(() => createTasksServer(createDb(getDbPath()))),
+    tasks: createStreamableHttpHandlers(() => createTasksServer(getDb())),
     memory: createStreamableHttpHandlers((req) =>
-      createMemoryServer(createDb(getDbPath()), cachedEmbed, { boundScope: parseBoundScope(req) }),
+      createMemoryServer(getDb(), cachedEmbed, { boundScope: parseBoundScope(req) }),
     ),
-    tools: createStreamableHttpHandlers(() => createToolsServer(createDb(getDbPath()))),
+    tools: createStreamableHttpHandlers(() => createToolsServer(getDb())),
     teamchat: createStreamableHttpHandlers((req) => {
-      const db = createDb(getDbPath())
+      const db = getDb()
       return createTeamChatServer(db, {
         boundIdentity: parseTeamChatBinding(req),
         onPost: (post: DbTeamChat) =>

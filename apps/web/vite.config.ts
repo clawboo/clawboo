@@ -58,12 +58,40 @@ export default defineConfig({
         // drags recharts (~383 KB) onto the same load path. An explicit `d3`
         // chunk lets each side depend on the shared code independently.
         manualChunks(id) {
-          if (!id.includes('node_modules')) return
-          if (id.includes('@codemirror') || id.includes('/codemirror/') || id.includes('@lezer'))
+          // Rollup ids are '/'-separated, but normalize anyway — CI also builds on
+          // windows-latest (the smoke-test-bundle matrix).
+          const p = id.replace(/\\/g, '/')
+
+          if (!p.includes('node_modules')) {
+            // The ~4.4 MB agent + team catalogs are pure static data reachable ONLY
+            // from two dynamic entries — the lazy MarketplacePanel and the lazy
+            // CreateTeamModal (see features/teams/CreateTeamModalLazy.tsx). Naming
+            // the chunk keeps both sharing one copy and makes the split verifiable
+            // by name in dist/ui/assets (scripts/check-entry-chunk.mjs asserts the
+            // entry does not preload it).
+            //
+            // NOTE: this rule alone would NOT defer anything. A manual chunk that a
+            // static import still reaches becomes a modulepreload of the entry and
+            // is downloaded at boot regardless of its name — the lazy boundary is
+            // the load-bearing half. Issue #83.
+            //
+            // The 'marketplace/' segment is required: a bare 'features/teams/' would
+            // also swallow src/features/teams/* (the modal, RuntimeSelect, …) into
+            // the data chunk. The trailing slashes keep marketplace/teamCatalog.ts
+            // (glue, not data) with its consumers.
+            if (
+              p.includes('/src/features/marketplace/agents/') ||
+              p.includes('/src/features/marketplace/teams/')
+            )
+              return 'marketplace-catalog'
+            return
+          }
+
+          if (p.includes('@codemirror') || p.includes('/codemirror/') || p.includes('@lezer'))
             return 'codemirror'
-          if (id.includes('@xyflow') || id.includes('elkjs')) return 'graph'
-          if (id.includes('recharts')) return 'charts'
-          if (id.includes('/d3-') || id.includes('/internmap/') || id.includes('/victory-vendor/'))
+          if (p.includes('@xyflow') || p.includes('elkjs')) return 'graph'
+          if (p.includes('recharts')) return 'charts'
+          if (p.includes('/d3-') || p.includes('/internmap/') || p.includes('/victory-vendor/'))
             return 'd3'
         },
       },

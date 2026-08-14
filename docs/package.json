@@ -5,8 +5,12 @@
   "scripts": {
     "dev": "mint dev --port 3111",
     "check-links": "mint broken-links",
+    "check-frontmatter": "node scripts/check-frontmatter.mjs",
     "build": "echo 'docs is a hand-authored Mintlify site — Mintlify deploys this directory directly; no build step.'",
-    "lint": "echo 'skip'",
+    "lint": "pnpm run check-frontmatter",
     "typecheck": "echo 'skip'"
+  },
+  "devDependencies": {
+    "yaml": "^2.9.0"
   }
 }

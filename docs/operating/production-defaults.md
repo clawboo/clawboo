@@ -28,23 +28,26 @@ The server-level posture defaults (from `defaults.ts`):
 
 The referenced package-local defaults (the safety backstops and housekeeping timers):
 
-| Default                                 | Value                   | Why                                                              | Override                              |
-| --------------------------------------- | ----------------------- | ---------------------------------------------------------------- | ------------------------------------- |
-| Breaker: max tool iterations            | `30`                    | Hard ceiling on settled tool-calls per run                       | `breakerConfig` (per-run)             |
-| Breaker: repeat-failure threshold       | `3`                     | Consecutive identical-tool failures before halt                  | `breakerConfig` (per-run)             |
-| Breaker: no-progress threshold          | `6`                     | Consecutive results with no new output before halt               | `breakerConfig` (per-run)             |
-| Breaker: token-velocity ceiling         | `200000` tok/min        | Only egregious runaways trip it                                  | `breakerConfig` (per-run)             |
-| Breaker: velocity min window            | `15000 ms`              | An early burst can't false-trip a short run                      | `breakerConfig` (per-run)             |
-| Breaker: repeat-policy-denied threshold | `2`                     | Consecutive identical denial codes before halt                   | `breakerConfig` (per-run)             |
-| Session rotation watermark              | `85%` of context window | Rotate to a fresh session before exhausting context              | `maxRotations` (per-run)              |
-| Session rotation chain cap              | `3` successors          | Bounds the successor chain per task                              | `maxRotations` (per-run)              |
-| Approval TTL                            | `86400000 ms` (24 h)    | Abandoned pending approvals auto-expire                          | `CLAWBOO_APPROVAL_TTL_MS`             |
-| Approval reaper interval                | `3600000 ms` (1 h)      | How often the reaper sweeps                                      | `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` |
-| MCP probe interval                      | `60000 ms`              | MCP liveness health-probe cadence                                | `CLAWBOO_MCP_PROBE_MS`                |
-| Worktree GC age                         | `72 h`                  | Reap worktrees older than this (if their task isn't locked)      | (fixed constant)                      |
-| Worktree GC max count                   | `25`                    | Reap oldest beyond this count                                    | (fixed constant)                      |
-| Board stale-task TTL                    | `3600000 ms` (60 min)   | "Nobody is watching" backstop for an orphaned `in_progress` task | `CLAWBOO_BOARD_STALE_TTL_MS`          |
-| Board stale sweep interval              | `300000 ms` (5 min)     | How often the backstop runs                                      | `CLAWBOO_BOARD_STALE_SWEEP_MS`        |
+| Default                                  | Value                   | Why                                                              | Override                              |
+| ---------------------------------------- | ----------------------- | ---------------------------------------------------------------- | ------------------------------------- |
+| Breaker: max tool iterations             | `30`                    | Hard ceiling on settled tool-calls per run                       | `breakerConfig` (per-run)             |
+| Breaker: repeat-failure threshold        | `3`                     | Consecutive identical-tool failures before halt                  | `breakerConfig` (per-run)             |
+| Breaker: no-progress threshold           | `6`                     | Consecutive results with no new output before halt               | `breakerConfig` (per-run)             |
+| Breaker: token-velocity ceiling          | `200000` tok/min        | Only egregious runaways trip it                                  | `breakerConfig` (per-run)             |
+| Breaker: velocity min window             | `15000 ms`              | An early burst can't false-trip a short run                      | `breakerConfig` (per-run)             |
+| Breaker: repeat-policy-denied threshold  | `2`                     | Consecutive identical denial codes before halt                   | `breakerConfig` (per-run)             |
+| Session rotation watermark               | `85%` of context window | Rotate to a fresh session before exhausting context              | `maxRotations` (per-run)              |
+| Session rotation chain cap               | `3` successors          | Bounds the successor chain per task                              | `maxRotations` (per-run)              |
+| Approval TTL                             | `86400000 ms` (24 h)    | Abandoned pending approvals auto-expire                          | `CLAWBOO_APPROVAL_TTL_MS`             |
+| Approval reaper interval                 | `3600000 ms` (1 h)      | How often the reaper sweeps                                      | `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` |
+| MCP probe interval                       | `60000 ms`              | MCP liveness health-probe cadence                                | `CLAWBOO_MCP_PROBE_MS`                |
+| Worktree GC age                          | `72 h`                  | Reap worktrees older than this (if their task isn't locked)      | (fixed constant)                      |
+| Worktree GC max count                    | `25`                    | Reap oldest beyond this count                                    | (fixed constant)                      |
+| Board stale-task TTL                     | `3600000 ms` (60 min)   | "Nobody is watching" backstop for an orphaned `in_progress` task | `CLAWBOO_BOARD_STALE_TTL_MS`          |
+| Board stale sweep interval               | `300000 ms` (5 min)     | How often the backstop runs                                      | `CLAWBOO_BOARD_STALE_SWEEP_MS`        |
+| Board capped create: children per parent | `24`                    | Bounds an agent looping on raw board creation                    | (fixed constant)                      |
+| Board capped create: nesting depth       | `2`                     | The same ancestor-chain ceiling as the delegation depth cap      | (fixed constant)                      |
+| Board capped create: root rate           | `30 / 5 min`            | Bounds an agent looping on parentless `create_task`              | (fixed constant)                      |
 
 <Tip>
 Per-run overrides (`breakerConfig`, `maxRotations`, `disableMemoryAutoInject`) are fields on the `POST /api/runtimes/:id/run` body. Process-level overrides are env vars; see [Environment variables](/reference/environment-variables).
@@ -106,6 +109,10 @@ When a run approaches its context-window limit, the executor rotates to a fresh 
 - **`maxRotations: 3`**: at most three successor sessions per task, bounding a pathological loop.
 
 A runtime that reports no context window never rotates on the watermark. Override the chain cap per run with `maxRotations` on the run request.
+
+## Board creation caps
+
+Two ceilings bound raw board growth on the board's capped create path, reached through the [Tasks MCP](/reference/mcp-tools#create_subtask) create tools, where an attached runtime creates rows unsupervised: a parent may hold at most **24** non-dropped children, and a child is refused once its parent's ancestor chain reaches the **depth cap of 2** (both `DEFAULT_MAX_CHILDREN` and `DEFAULT_MAX_DEPTH` live in `@clawboo/governance`; the depth number is the one the orchestrator and the executor runner also enforce as `MAX_SPAWN_DEPTH`). The check and the insert share one `BEGIN IMMEDIATE` transaction, so concurrent runtimes cannot both pass the ceiling. Both are fixed constants with no env override, like the worktree GC limits: they are runaway bounds, not workflow limits, and an over-cap create comes back to the calling model as a tool-error it should not retry unchanged (after remediation — a dropped child, or the rate window rolling — a retry can succeed). Root creation is bounded separately by a rolling-window rate (**30 per 5 minutes**, `DEFAULT_MAX_ROOT_CREATES` / `DEFAULT_ROOT_CREATE_WINDOW_MS`), since a per-parent ceiling has no subject on a root task. The REST route, the UI, and the team-chat orchestrator write through the board repository directly and are deliberately uncapped, though the rows they create still count toward both measurements.
 
 ## Housekeeping timers: reapers, sweeps, and GC
 

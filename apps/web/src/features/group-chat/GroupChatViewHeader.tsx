@@ -72,7 +72,7 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
               {skillCount > 0 && ` · ${skillCount} skill${skillCount !== 1 ? 's' : ''}`}
             </span>
           ) : (
-            <span className="shrink-0 rounded-full bg-foreground/[0.04] px-2 py-0.5 text-[10px] font-medium leading-4 text-foreground/35">
+            <span className="shrink-0 rounded-full bg-foreground/[0.04] px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground">
               …
             </span>
           )}

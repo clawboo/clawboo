@@ -9,9 +9,9 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createDb, getSetting, type ClawbooDb } from '@clawboo/db'
+import { getSetting, type ClawbooDb } from '@clawboo/db'
 
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import { runtimeAgentFileKey } from '../runtimeAgentFileStore'
 import { RuntimeAgentSource } from '../runtimeAgentSource'
 
@@ -28,11 +28,18 @@ describe('RuntimeAgentSource (generic coding-runtime record source)', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
-    source = new RuntimeAgentSource({ getDbPath, runtimeId: 'claude-code' })
-    other = new RuntimeAgentSource({ getDbPath, runtimeId: 'hermes' })
-    db = createDb(getDbPath())
+    source = new RuntimeAgentSource({ getDb, runtimeId: 'claude-code' })
+    other = new RuntimeAgentSource({ getDb, runtimeId: 'hermes' })
+    db = getDb()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
+    // Drop the process-wide memo and this fixture's own handle before the
+    // sandbox is removed — otherwise each test leaves a live SQLite handle
+    // behind (and Windows refuses to rm a dir that still holds an open file).
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']

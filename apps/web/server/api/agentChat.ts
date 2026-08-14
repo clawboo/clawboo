@@ -4,7 +4,7 @@
 // stream (a pure DB-tail of `agent:<id>:native` + the live delta bus). OpenClaw
 // agents keep the Gateway 1:1 path; these routes 404 a non-native agent.
 
-import { chatMessages, createDb, listChatMessagesSince, type ClawbooDb } from '@clawboo/db'
+import { chatMessages, listChatMessagesSince, type ClawbooDb } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
 import {
@@ -13,7 +13,7 @@ import {
   nativeChatSessionKey,
   stopAgentChat,
 } from '../lib/agentChat/driveAgentChat'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
 import { subscribeChatDelta } from '../lib/teamChat/chatDeltaBus'
@@ -63,8 +63,7 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
     return
   }
   const body = req.body as
-    | { message?: unknown; displayText?: unknown; entryId?: unknown }
-    | undefined
+    { message?: unknown; displayText?: unknown; entryId?: unknown } | undefined
   const message = typeof body?.message === 'string' ? body.message.trim() : ''
   if (!message) {
     res.status(400).json({ error: 'message required' })
@@ -79,7 +78,7 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
       : message
   const entryId = typeof body?.entryId === 'string' ? body.entryId : `user-${Date.now()}`
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     if (!isNativeChatAgent(db, agentId)) {
       res.status(404).json({ error: 'agent is not a native conversational agent' })
       return
@@ -126,6 +125,11 @@ export function agentChatStreamGET(req: Request, res: Response): void {
   let cursor = Number(lastEventId ?? sinceParam)
   if (!Number.isFinite(cursor) || cursor < 0) cursor = 0
 
+  // Resolve the shared connection BEFORE advertising success: a failure here
+  // must surface as a real error response, not a 200 plus a ': connected'
+  // marker the client has already been told to trust.
+  const db = getDb()
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -136,7 +140,6 @@ export function agentChatStreamGET(req: Request, res: Response): void {
   res.flushHeaders?.()
 
   let closed = false
-  const db = createDb(getDbPath())
 
   const poll = (): void => {
     if (closed) return
@@ -187,11 +190,9 @@ export function agentChatStreamGET(req: Request, res: Response): void {
     clearInterval(keepalive)
     unsub()
     unsubStatus()
-    try {
-      db.$client.close()
-    } catch {
-      /* already closed / never opened */
-    }
+    // No DB handle to close: the tail poll reads through the process-wide shared
+    // connection (lib/db.ts getDb). Closing it here would kill SQLite for the
+    // WHOLE server the moment any one browser tab drops its stream.
   }
   req.on('close', cleanup)
   res.on('close', cleanup)

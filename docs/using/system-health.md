@@ -39,10 +39,10 @@ The toolbar shows a single rollup pill computed from the report's `fatal` and `d
 
 When the report has any failing check, a banner appears above the checklist:
 
-- **Fatal**: _"The install has a fatal problem."_ Clawboo has no upgrade/repair path, so the remedy is to reset `~/.clawboo` and re-run onboarding for a clean start.
+- **Fatal**: _"The install has a fatal problem."_ The failing check below says what to do; resetting `~/.clawboo` and re-running onboarding is the last resort.
 - **Degraded**: _"Running degraded."_ Some optional subsystems are unavailable; the rest of Clawboo works normally. The failing checks below tell you which.
 
-This split is intentional: almost everything **degrades** (the server keeps running) rather than being fatal. Only two failures are fatal: the [clawboo home](/appendices/glossary) is not writable, or the SQLite file fails its integrity check, because nothing works without them.
+This split is intentional: almost everything **degrades** (the server keeps running) rather than being fatal. Three failures are fatal: the [clawboo home](/appendices/glossary) is not writable, the SQLite file fails its integrity check, or its schema is short a column, because nothing works without them.
 
 ### The Checks checklist
 
@@ -54,7 +54,7 @@ Each entry in `report.checks[]` renders as a row with an icon, the humanized che
 | `vaultPerms`               | Secrets vault permissions | `secrets/` is `0700`, `master.key` is `0600`, proxy device identity is `0600` (POSIX only; skipped on Windows; "not yet created" on a fresh install) | degraded     |
 | `masterKeyBootSentinel`    | Master key                | A fixed sentinel encrypted on first boot decrypts on every later boot, proving the master key still works                                            | degraded     |
 | `databaseIntegrity`        | Database integrity        | SQLite opens and `PRAGMA integrity_check` returns `ok`                                                                                               | **fatal**    |
-| `databaseSchema`           | Database schema           | The core bootstrap tables (`teams`, `agents`, `settings`, `budgets`, `orchestration_events`, `tasks`) are present                                    | degraded     |
+| `databaseSchema`           | Database schema           | The core bootstrap tables are present, and no column the schema declares is missing from them                                                        | **fatal**    |
 | `apiPortFileMatches`       | API port file             | The on-disk api-port file matches the actual listening port (skipped pre-listen when no port is supplied)                                            | degraded     |
 | `mcpServersHealthy`        | MCP servers               | Each of the four MCP servers (`tasks`, `memory`, `tools`, `teamchat`) builds and answers a `tools/list` round-trip                                   | degraded     |
 | `openclawGatewayReachable` | OpenClaw Gateway          | The Gateway is reachable and synced (skipped if no Gateway is configured; a miss degrades to serving last-synced agents from SQLite)                 | degraded     |
@@ -120,7 +120,7 @@ curl -s http://localhost:18790/api/health | jq '.ok, .fatal, .degraded'
 ## Troubleshooting
 
 <Danger>
-**A fatal check means the install is broken.** Clawboo has no migration or repair path; a fatal `clawbooHomeWritable` or `databaseIntegrity` is not something the panel can fix. Reset `~/.clawboo` and re-run the onboarding wizard to start clean. (Back up the database first if you need its data.)
+**A fatal check means the install is broken.** A fatal `clawbooHomeWritable` or `databaseIntegrity` is not something the panel can fix. A fatal `databaseSchema` means the database is short something the current version needs: a core table, or a column that could not be added. Its `detail` names what is missing and the remedy, so follow that before resetting. When nothing there applies, reset `~/.clawboo` and re-run the onboarding wizard to start clean. (Back up the database first if you need its data.)
 </Danger>
 
 <Warning>

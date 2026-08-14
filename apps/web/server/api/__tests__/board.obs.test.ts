@@ -7,11 +7,11 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createDb, listEvents, readRoom, resolveRoomForTeam } from '@clawboo/db'
+import { listEvents, readRoom, resolveRoomForTeam } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import {
   boardClaimPOST,
   boardCommentPOST,
@@ -41,7 +41,7 @@ const req = (body: unknown, params: Record<string, string> = {}): Request =>
   ({ body, query: {}, params }) as unknown as Request
 
 function kindsInLog(): string[] {
-  return listEvents(createDb(getDbPath()), { limit: 1000 }).map((e) => e.kind)
+  return listEvents(getDb(), { limit: 1000 }).map((e) => e.kind)
 }
 
 describe('board REST → observability emits', () => {
@@ -55,6 +55,9 @@ describe('board REST → observability emits', () => {
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
@@ -126,12 +129,25 @@ describe('board REST → observability emits', () => {
 
     // Each non-status board mutation now narrates a `kind:'system'` line into the
     // team room (before this fix only status changes reflected).
-    const room = readRoom(createDb(getDbPath()), { roomId: resolveRoomForTeam('team1') })
+    const room = readRoom(getDb(), { roomId: resolveRoomForTeam('team1') })
     expect(room.length).toBeGreaterThanOrEqual(3)
     expect(room.every((r) => r.kind === 'system' && r.authorAgentId === 'clawboo')).toBe(true)
     const bodies = room.map((r) => r.body)
     expect(bodies.some((b) => /claimed by a1/.test(b))).toBe(true)
     expect(bodies.some((b) => /report up/.test(b))).toBe(true)
     expect(bodies.some((b) => /depends on/.test(b))).toBe(true)
+  })
+
+  it('PATCH executions/:execId with an unknown id → 404, and appends no event', () => {
+    const res = mockRes()
+    // `execId` is a raw path param, so an unknown one reaches the handler. It
+    // closes nothing, so reporting success would be a lie, and appending a
+    // completion would strand an uncorrelated lifecycle event in the log.
+    boardExecutionCompletePATCH(
+      req({ status: 'succeeded', costUsd: 0.01 }, { execId: 'no-such-exec' }),
+      res.res,
+    )
+    expect(res.statusCode()).toBe(404)
+    expect(kindsInLog().filter((k) => k === 'execution_completed')).toHaveLength(0)
   })
 })

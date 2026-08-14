@@ -38,8 +38,7 @@ const MEMORY_CONTENT_CAP = 160
 
 function readTeamName(db: ClawbooDb, teamId: string): string {
   const row = db.select({ name: teams.name }).from(teams).where(eq(teams.id, teamId)).get() as
-    | { name: string }
-    | undefined
+    { name: string } | undefined
   return row?.name ?? teamId
 }
 
@@ -148,7 +147,9 @@ async function buildMemoryBlock(db: ClawbooDb, teamId: string): Promise<string |
   if (teamFacts.length === 0) return null
   const lines = teamFacts.map((f) => {
     const content =
-      f.content.length > MEMORY_CONTENT_CAP ? f.content.slice(0, MEMORY_CONTENT_CAP) + '…' : f.content
+      f.content.length > MEMORY_CONTENT_CAP
+        ? f.content.slice(0, MEMORY_CONTENT_CAP) + '…'
+        : f.content
     return `- ${f.title}: ${content}`
   })
   return `Saved knowledge:\n${lines.join('\n')}`

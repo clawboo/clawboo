@@ -116,7 +116,7 @@ export function OnboardingPrimary({
       disabled={disabled}
       className={[
         'inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-[15px] font-semibold',
-        'bg-primary text-primary-foreground transition-[filter,transform] duration-150',
+        'bg-primary-solid text-primary-foreground transition-[filter,transform] duration-150',
         'hover:brightness-[1.06] active:scale-[0.985]',
         'disabled:pointer-events-none disabled:opacity-45',
         className,

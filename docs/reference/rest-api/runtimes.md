@@ -19,20 +19,23 @@ The `:id` path segment is validated against the runtime set on every route excep
 | POST   | `/api/runtimes/:id/install`           | Install the runtime CLI                                       | SSE     |
 | POST   | `/api/runtimes/:id/connect`           | Store a provider key in the encrypted vault                   | No      |
 | POST   | `/api/runtimes/:id/disconnect`        | Clear the stored credential                                   | No      |
-| POST   | `/api/runtimes/:id/healthcheck`       | Verify a pasted native provider key (no persistence)          | No      |
+| POST   | `/api/runtimes/:id/logout`            | Sign out an `oauth` runtime (runs the CLI's own `logout`)     | No      |
+| POST   | `/api/runtimes/:id/healthcheck`       | Verify a pasted or stored provider key (no persistence)       | No      |
 | POST   | `/api/runtimes/:id/run`               | Drive a board task on the runtime end to end                  | No      |
 | GET    | `/api/runtimes/openrouter/models`     | The live OpenRouter catalog (Hermes model picker)             | No      |
 | POST   | `/api/onboarding/seed-native-team`    | Mint a default native leader + specialist team                | No      |
 | POST   | `/api/onboarding/native-leader-model` | Record the chosen leader provider + model                     | No      |
+| GET    | `/api/onboarding/native-leader-model` | The recorded leader provider + model (nulls when unset)       | No      |
 | GET    | `/api/onboarding/state`               | Aggregated first-run signals in one call                      | No      |
 | GET    | `/api/providers`                      | List every provider with its connection state                 | No      |
 | POST   | `/api/providers/:id/connect`          | Store a provider key                                          | No      |
 | POST   | `/api/providers/:id/disconnect`       | Clear a stored provider key                                   | No      |
 | GET    | `/api/providers/:id/models`           | Live model list using the **stored** key                      | No      |
 | POST   | `/api/providers/:id/models`           | Live model list using a **pasted** (unsaved) key              | No      |
+| POST   | `/api/auth/cli-login/:tool`           | Drive a CLI's own OAuth sign-in and relay its output          | SSE     |
 
 <Info>
-`POST /api/runtimes/:id/install` is **Server-Sent Events**, not request/response. It is documented below with an event-stream catalog (event `type` → payload), not a JSON response body. A built-in runtime (`clawboo-native`) short-circuits with a plain JSON **400** before the stream opens.
+`POST /api/runtimes/:id/install` and `POST /api/auth/cli-login/:tool` are **Server-Sent Events**, not request/response. They are documented below with an event-stream catalog (event `type` → payload), not a JSON response body. For install, a built-in runtime (`clawboo-native`) short-circuits with a plain JSON **400** before the stream opens; for cli-login, an unknown `:tool` short-circuits with a plain JSON **404**.
 </Info>
 
 ---
@@ -79,6 +82,8 @@ Lists every runtime with its capabilities, live health, and install/auth status.
     envVar: string | null
     hasCredential: boolean
     hasVaultCredential: boolean
+    loggedIn: boolean // oauth runtimes only: an existing `codex login` was detected
+    codexAuth: boolean // hermes only: a ChatGPT-subscription login is present
     installCommand: string | null
     docsUrl: string
     connectionState: 'not-installed' | 'needs-auth' | 'needs-login' | 'ready' | 'unknown'
@@ -98,7 +103,7 @@ Lists every runtime with its capabilities, live health, and install/auth status.
 }
 ```
 
-`installed` is `true` for the built-in `clawboo-native` (it ships inside the server) and otherwise reflects whether `healthBin` resolves on `PATH` or a known user-install dir. `hasCredential` is presence-only; the secret value is never read into the response. `hasVaultCredential` is the same presence check but **vault-only** (via `getRuntimeSecret`): it ignores a key that resolves only from a bare `process.env` var, so it reflects a deliberate connect. The onboarding-landing decision (`GatewayBootstrap.hasConnectedRuntime`) reads `hasVaultCredential`, not `hasCredential`, so an env-var-only environment is not mistaken for a connected runtime. `connectionState` is derived as: `not-installed` if not installed; otherwise `ready` for `authKind: 'none'`, `needs-login` for `oauth` (Codex), and `ready`/`needs-auth` for `api-key` depending on `hasCredential`.
+`installed` is `true` for the built-in `clawboo-native` (it ships inside the server) and otherwise reflects whether `healthBin` resolves on `PATH` or a known user-install dir. `hasCredential` is presence-only; the secret value is never read into the response. `hasVaultCredential` is the same presence check but **vault-only** (via `getRuntimeSecret`): it ignores a key that resolves only from a bare `process.env` var, so it reflects a deliberate connect. The onboarding-landing decision (`GatewayBootstrap.hasConnectedRuntime`) reads `hasVaultCredential`, not `hasCredential`, so an env-var-only environment is not mistaken for a connected runtime. `connectionState` is derived as: `not-installed` if not installed; otherwise `ready` for `authKind: 'none'`, `ready`/`needs-login` for `oauth` (Codex) depending on whether an existing `codex login` is detected, and `ready`/`needs-auth` for `api-key` depending on `hasCredential`. `loggedIn` is true only for an installed `oauth` runtime whose terminal login was detected, and it is what flips that runtime's `connectionState` to `ready`. `codexAuth` is the Hermes-only ChatGPT-subscription signal (a usable `openai-codex` credential in `~/.hermes/auth.json`, which has no env var and no vault slot); it folds into `hasCredential`. Both are `false` for every other runtime.
 
 **`500 Internal Server Error`**: any failure constructing an adapter or probing health:
 
@@ -188,11 +193,17 @@ Stores a provider key in the encrypted vault and marks the runtime connected. Be
 
 ### Responses
 
-**`200 OK`**: `oauth` runtime (Codex): a key-less no-op returning the login command:
+**`200 OK`**: `oauth` runtime (Codex): a key-less branch that probes the existing terminal login and returns the current state plus the login command:
 
 ```ts
-{ ok: true, connectionState: 'needs-login', loginCommand: 'codex login' }
+{
+  ok: true,
+  connectionState: 'ready' | 'needs-login' | 'not-installed',
+  loginCommand: 'codex login',
+}
 ```
+
+`ready` when clawboo detects and reuses an existing `codex login`; `not-installed` when the CLI is absent; `needs-login` otherwise.
 
 **`200 OK`**: `authKind: 'none'`, or no `envVar`, or a keyless native provider (`provider: 'ollama'`): nothing stored, state re-derived:
 
@@ -255,12 +266,54 @@ curl -X POST http://localhost:18790/api/runtimes/hermes/disconnect
 
 ---
 
+## `POST /api/runtimes/:id/logout`
+
+Signs an `oauth` runtime (Codex) out by spawning the CLI's **own** `logout`; clawboo never deletes the vendor's tokens itself. The spawn is best-effort and the answer comes from a fresh `codex login status` re-probe, not from the child's exit code. An `api-key` runtime has no sign-out (use `/disconnect`).
+
+<Warning>
+This signs out the ChatGPT subscription that every tool on the machine shares, not only clawboo's view of it.
+</Warning>
+
+- **Path params**: `id` (runtime id; 404 on unknown).
+- **Request body**: none.
+
+### Responses
+
+**`404 Not Found`**: the runtime's `authKind` is not `oauth`:
+
+```json
+{ "error": "runtime '<id>' has no sign-out" }
+```
+
+**`400 Bad Request`**: the runtime's CLI binary does not resolve:
+
+```json
+{ "error": "<name> is not installed" }
+```
+
+**`200 OK`**: the re-probe result. `ok` is the inverse of the probed login state, so a sign-out that did not take reads `ok: false`:
+
+```ts
+{ ok: true, connectionState: 'needs-login' }  // signed out
+{ ok: false, connectionState: 'ready' }       // still logged in
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/runtimes/codex/logout
+```
+
+---
+
 ## `POST /api/runtimes/:id/healthcheck`
 
-Verifies a pasted provider key for the native runtime with a single authenticated GET to the provider's models/health endpoint, before seeding a team. The key is used for exactly one fetch; it is never persisted to the vault, never logged, and never echoed. A bad key or unreachable provider resolves to `{ ok: false, error }` (the handler does not throw into the request).
+Verifies a provider credential with a single authenticated GET to the provider's models/health endpoint, before anything commits to it. The key is used for exactly one fetch; it is never persisted to the vault, never logged, and never echoed. A bad key or unreachable provider resolves to `{ ok: false, error }` (the handler does not throw into the request).
+
+Every clawboo surface that accepts or reuses a credential calls this first: the onboarding connect step, the Providers hub, the runtime connect card, and the Providers manager's one-click **Use**.
 
 <Info>
-This route is native-only. Any other `:id` (still a valid runtime) returns **400**.
+This route is native-only. Any other `:id` (still a valid runtime) returns **400**. It probes a **provider**, not a runtime, so a surface holding a key for any other runtime verifies it by naming that key's provider here.
 </Info>
 
 - **Path params**: `id` (runtime id; 404 on unknown; **400** if not `clawboo-native`).
@@ -268,12 +321,16 @@ This route is native-only. Any other `:id` (still a valid runtime) returns **400
 
 ```ts
 {
-  provider?: string   // 'anthropic' | 'openai' | 'openrouter' | 'ollama'
-  apiKey?: string      // required for all providers except ollama
+  provider?: string   // 'anthropic' | 'openai' | 'openrouter' | 'ollama' |
+                      // 'google' | 'xai' | 'groq' | 'mistral' | 'together' |
+                      // 'cerebras' | 'moonshot'
+  apiKey?: string     // optional: omit to probe the key already stored for
+                      // `provider`. Required only when nothing is stored
+                      // (and never needed for keyless ollama).
 }
 ```
 
-Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/models`; `openai` → `https://api.openai.com/v1/models`; `openrouter` → `https://openrouter.ai/api/v1/models`; `ollama` → `<OLLAMA_BASE_URL>/api/tags` (keyless). The fetch is bounded by an 8-second timeout.
+Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/models`; `openai` → `https://api.openai.com/v1/models`; `openrouter` → `https://openrouter.ai/api/v1/models`; the extra OpenAI-compatible providers (`google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`) → that provider's own `<baseURL>/models`; `ollama` → `<OLLAMA_BASE_URL>/api/tags` (keyless). The fetch is bounded by an 8-second timeout.
 
 ### Responses
 
@@ -289,7 +346,7 @@ Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/model
 { "ok": false, "error": "unknown provider '<provider>'" }
 ```
 
-**`400 Bad Request`**: non-ollama provider with a blank `apiKey`:
+**`400 Bad Request`**: non-ollama provider with a blank `apiKey` **and** no key stored for it:
 
 ```json
 { "ok": false, "error": "apiKey is required" }
@@ -410,9 +467,34 @@ curl -X POST http://localhost:18790/api/runtimes/claude-code/run \
 
 ---
 
+## `GET /api/runtimes/openrouter/models`
+
+The live OpenRouter catalog behind the OpenRouter model pickers. It reads OpenRouter's public list endpoint (no key), keeps text-capable models, sorts them by label, and caches the result in-process for 30 minutes behind an 8-second fetch timeout.
+
+- **Path/query params**: none.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: the catalog. This route never errors: a failed, empty, or timed-out fetch falls back to the last good cache, and an empty array tells the client to fall back to its own hardcoded set:
+
+```ts
+{
+  models: Array<{ id: string; label: string }>
+}
+```
+
+### Example
+
+```bash
+curl http://localhost:18790/api/runtimes/openrouter/models
+```
+
+---
+
 ## `POST /api/onboarding/seed-native-team`
 
-Mints a default native team, a leader (`tasks` tool enabled, capable model) and a specialist (cheap model), so a first-run user who just connected a provider key lands in a working team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). The team row is inserted first (the agents' `teamId` FK requires it), the agents are created with that `teamId`, the leader is recorded, and the "Know Your Team" onboarding flags are pre-satisfied so the user lands straight in chat.
+Mints a default native team, a leader (capable model) and a specialist (cheap model), both with the Memory and Tools MCP and with Tasks and TeamChat deliberately off (the orchestration engine owns the board), so a first-run user who just connected a provider key lands in a working team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). The team row is inserted first (the agents' `teamId` FK requires it), the agents are created with that `teamId`, the leader is recorded, and the "Know Your Team" onboarding flags are pre-satisfied so the user lands straight in chat.
 
 <Note>
 This route is not under `/api/runtimes` and takes no `:id` segment. It is grouped here because it is the native runtime's first-run seed step.
@@ -423,16 +505,18 @@ This route is not under `/api/runtimes` and takes no `:id` segment. It is groupe
 
 ```ts
 {
-  provider?: string  // 'anthropic' | 'openai' | 'openrouter' | 'ollama'; default 'anthropic'
+  provider?: string  // 'anthropic' | 'openai' | 'openrouter' | 'ollama' |
+                     // 'google' | 'xai' | 'groq' | 'mistral' | 'together' |
+                     // 'cerebras' | 'moonshot'; default 'anthropic'
   model?: string     // optional leader-model override (the specialist keeps its default)
 }
 ```
 
-Per-provider model defaults: `anthropic` → leader `claude-sonnet-4-6` / specialist `claude-haiku-4-5`; `openai` → `gpt-4o` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`.
+Per-provider model defaults (leader = a capable model, specialist = a cheap one) come from `MODEL_DEFAULTS` in `apps/web/server/lib/runtimes/native/nativeProviderDefaults.ts`, which is the drift-free source: `anthropic` → `claude-sonnet-5` / `claude-haiku-4-5`; `openai` → `gpt-5.4` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`; `google` → `gemini-2.0-flash` (both tiers); `xai` → `grok-2-latest` (both tiers); `groq` → `llama-3.3-70b-versatile` / `llama-3.1-8b-instant`; `mistral` → `mistral-large-latest` / `mistral-small-latest`; `together` → `meta-llama/Llama-3.3-70B-Instruct-Turbo` (both tiers); `cerebras` → `llama-3.3-70b` (both tiers); `moonshot` → `moonshot-v1-32k` / `moonshot-v1-8k`.
 
 ### Responses
 
-**`400 Bad Request`**: `provider` is not one of the four known providers:
+**`400 Bad Request`**: `provider` is not one of the known native providers:
 
 ```json
 { "error": "unknown provider '<provider>'" }
@@ -457,6 +541,37 @@ curl -X POST http://localhost:18790/api/onboarding/seed-native-team \
   -H 'Content-Type: application/json' \
   -d '{"provider":"anthropic"}'
 ```
+
+---
+
+## Onboarding
+
+The three remaining `/api/onboarding/*` routes. Like `seed-native-team`, they take no `:id` segment and are grouped here because they are the native runtime's first-run surface.
+
+### `POST /api/onboarding/native-leader-model`
+
+Records the provider + model the user picked when connecting a native key, so the lazily-created universal Boo Zero runs on it instead of the auto-resolved per-provider default. Body `{ provider, model }`. The pick is also retro-applied to an existing native Boo Zero, best-effort: on a fresh install there is no Boo Zero yet, which is the normal case and not an error. Returns `{ ok: true }`. **400** `{ error: "unknown provider '<provider>'" }` when `provider` is not a known native provider, or `{ error: "model is required" }` when `model` is missing or blank. **500** `{ error }` if the setting cannot be written.
+
+### `GET /api/onboarding/native-leader-model`
+
+The recorded pick, read by the Runtimes panel's native provider manager so its "Default" tag and model dropdown reflect reality. Returns `{ provider, model }`, or `{ provider: null, model: null }` when nothing was ever recorded or the stored value does not parse. Never errors.
+
+### `GET /api/onboarding/state`
+
+The aggregated first-run signals in one call, so a thin client (desktop, mobile, npm) can decide wizard-vs-dashboard without re-running the browser's multi-call dance. Read-only; each field reuses the same detection the individual routes use:
+
+```ts
+{
+  configured: boolean // OpenClaw installed + `openclaw.json` + `.env` present
+  hasNative: boolean // at least one `clawboo-native` agent row
+  hasTeam: boolean // at least one team row
+  hasConnectedRuntime: boolean // see below
+}
+```
+
+`hasConnectedRuntime` is true when any runtime has a key in the vault (the `hasVaultCredential` signal `GET /api/runtimes` exposes), or when an existing `codex login` is detected, or when a Hermes ChatGPT-subscription login is present. Codex is the exception that needs the extra probes: it has no env var and no vault slot, so without them a subscription-only user would be re-trapped in the wizard on every reload.
+
+**500** `{ error }` on an unexpected throw.
 
 ---
 
@@ -487,6 +602,55 @@ Body `{ apiKey }`. The live model list using a **pasted, unsaved** key: this is 
 <Note>
 Only providers that support live enumeration return a non-empty `models` array; the rest return `{ models: [] }` by design. See [Connecting runtimes](/runtimes/connecting-runtimes) for the vault and the connection-state machine.
 </Note>
+
+---
+
+## `POST /api/auth/cli-login/:tool`
+
+The UI-driven "Sign in with ChatGPT". Spawns the official CLI's own login command locally and relays its user-facing output (device code, auth URL) over SSE. The OAuth exchange stays inside the vendor CLI, the human authorizes in a browser, and clawboo never touches the tokens. Only one login child runs per tool: a new request kills the previous tree first (Retry semantics), and the run is capped at 16 minutes because the CLIs' own device windows are 15.
+
+- **Path params**: `tool`, one of `codex`, `hermes`, `openclaw`.
+- **Request body**: none.
+
+### Responses
+
+**`404 Not Found`**: unknown `:tool`. This is plain JSON sent **before** the stream opens:
+
+```json
+{ "error": "unknown login tool: <tool>" }
+```
+
+**`200 OK` + `text/event-stream`**: otherwise the handler sets `Content-Type: text/event-stream`, flushes headers, and streams `data: <json>\n\n` frames. A plan that cannot be built (CLI not installed, or the OpenClaw flow on Windows) is reported as an `error` frame **inside** the stream, not as an HTTP error, so the UI can degrade to its copy-the-command fallback.
+
+#### Event catalog
+
+| `type`        | When                                                       | Payload fields                            |
+| ------------- | ---------------------------------------------------------- | ----------------------------------------- |
+| `progress`    | The login command is about to start                        | `step: 'starting'`, `message`             |
+| `output`      | Per non-empty stdout/stderr line (ANSI stripped)           | `line`                                    |
+| `device-code` | A device code was parsed out of the CLI's output           | `url`, `code`                             |
+| `auth-url`    | A browser auth URL was parsed out of the CLI's output      | `url`                                     |
+| `error`       | Plan failure, spawn failure, timeout, or user cancellation | `code`, `message`                         |
+| `complete`    | The sign-in finished (successfully or not)                 | `success`, `loggedIn`, optional `message` |
+
+The `error` `code` values:
+
+| `code`                 | Meaning                                              |
+| ---------------------- | ---------------------------------------------------- |
+| `NOT_INSTALLED`        | The tool's CLI does not resolve                      |
+| `UNSUPPORTED_PLATFORM` | The OpenClaw sign-in needs a real terminal (Windows) |
+| `SPAWN_THROW`          | The spawn call threw synchronously                   |
+| `SPAWN_ERROR`          | The child emitted an `error` event                   |
+| `TIMEOUT`              | The 16-minute cap elapsed                            |
+| `CANCELLED`            | The child was signalled or exited 130                |
+
+Completion is driven by **re-probing the real auth store** (polled every 3 seconds), never by the exit code alone: a browser flow can leave the CLI holding an unanswered prompt long after the credential has landed on disk. The moment the credential appears, the stream emits `complete` with `success: true, loggedIn: true` and the child tree is reaped. If the child exits without a usable credential, `complete` carries `success: false, loggedIn: false` and a `message` naming the terminal command to run by hand. Cancelling in the UI aborts the fetch, which closes the connection and kills the whole process tree.
+
+### Example
+
+```bash
+curl -N -X POST http://localhost:18790/api/auth/cli-login/codex
+```
 
 ---
 

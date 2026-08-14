@@ -6,44 +6,43 @@ on:
 
 concurrency:
   group: publish-${{ github.ref }}
-  cancel-in-progress: true
+  # NEVER cancel a release mid-flight. `changeset publish` pushes to npm and then
+  # creates the git tags; cancelling between those steps leaves a version live on
+  # npm with no tag behind it, which cannot be undone. Queue the next run instead --
+  # a superseded release is cheap, a desynced one is not.
+  cancel-in-progress: false
+
+# Least-privilege default, matching ci.yml and evals.yml. Any job added here
+# without its own `permissions:` block would otherwise inherit whatever the
+# repository-wide default happens to be — on the one workflow that holds
+# NPM_TOKEN and the OIDC token that signs npm provenance. The `publish` job
+# opts back up to the writes it genuinely needs.
+permissions:
+  contents: read
 
 jobs:
-  check:
-    name: Check for changesets
-    runs-on: ubuntu-latest
-    outputs:
-      has_changesets: ${{ steps.count.outputs.has_changesets }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Count changeset files
-        id: count
-        run: |
-          count=$(find .changeset -name '*.md' ! -name 'README.md' | wc -l | tr -d ' ')
-          echo "changeset_count=$count"
-          if [ "$count" -gt "0" ]; then
-            echo "has_changesets=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changesets=false" >> "$GITHUB_OUTPUT"
-          fi
-
+  # DELIBERATELY UNGATED: this job runs on every push to main, with no `if:` on
+  # whether .changeset/*.md files exist. A changeset gate is correct for the
+  # "open a Version PR" run but WRONG for the run that actually publishes — by
+  # then the Version PR has merged and Changesets has already consumed the .md
+  # files, so the gate would skip the very run that ships to npm.
+  # `changesets/action@v1` decides between the two phases internally; it only
+  # needs the job to run unconditionally. Do not add a changeset gate here.
   publish:
     name: Publish packages
     runs-on: ubuntu-latest
-    needs: [check]
     permissions:
       contents: write
       pull-requests: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -51,21 +50,49 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Auth the pinned-SHA upstream fetches (raises the GitHub rate limit to
-      # 5000/hr; the fetch helper also retries on a transient 429).
-      - run: pnpm verify:ingest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The clean-install smoke below drives the installed SPA in headless
+      # Chromium. Playwright has no postinstall hook, so the step above never
+      # fetches the browser — it has to be pulled explicitly. Mirrors the same
+      # step in ci.yml's e2e and smoke-test-bundle jobs.
+      - run: pnpm exec playwright install --with-deps chromium
+
+      # OFFLINE catalog gate. Checks the committed marketplace catalog against its
+      # committed integrity manifest — no upstream fetch, deliberately. The live
+      # re-derive used to run here, which meant an upstream repo being renamed or
+      # force-pushed (a non-retryable 404 by design) could hold up a release,
+      # including an urgent fix. The live check now runs in `verify-ingest.yml`
+      # (weekly cron + PRs touching the ingest scripts), off the release path.
+      - run: pnpm verify:catalog
 
       - run: pnpm build
 
+      # Re-run the rest of the PR gate before publishing, so the release path is
+      # a strict superset of the pull-request path. `typecheck` is the one that
+      # earns its place loudest: `pnpm build` is bundler-only (Vite + tsup, no
+      # `tsc`), so a type error sails straight through the build — this is the
+      # only step that would stop one reaching npm. Same belt-and-suspenders
+      # reasoning as the smoke below: the PR ran these, but a merge race or an
+      # upstream-changed lockfile can diverge PR-green from this commit.
+      #
+      # Placed before assemble-cli.sh so a failure costs no bundle work, and so
+      # no Turbo task can restore a stale apps/cli/dist over the assembly.
+      - run: pnpm lint
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
       - run: bash scripts/assemble-cli.sh
 
-      # Smoke-test the bundled CLI before publishing. Catches the class of
-      # bug that v0.1.1 (Cannot GET /) and v0.1.2 (Unauthorized via port
-      # collision) shipped broken on. Belt-and-suspenders even if the same
-      # test ran on the PR — race conditions or upstream-changed lockfiles
-      # could cause divergence.
+      # Smoke-test the artifact before publishing. This packs apps/cli and
+      # installs the tarball into a throwaway dir with a real `npm install`, so
+      # the very thing `changeset publish` is about to upload is what boots:
+      # the `files` whitelist, the published dependency closure, the packaged
+      # bins, the SPA, a stdio MCP handshake, and one real runtime dispatch.
+      # Catches the class of bug that v0.1.1 (Cannot GET /) and v0.1.2
+      # (Unauthorized via port collision) shipped broken on. Belt-and-suspenders
+      # even if the same test ran on the PR — race conditions or
+      # upstream-changed lockfiles could cause divergence.
       - run: pnpm test:clean-install
 
       - name: Create Release PR or Publish

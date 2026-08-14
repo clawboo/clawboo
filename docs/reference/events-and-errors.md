@@ -13,7 +13,7 @@ Both contracts live in `@clawboo/obs`, pure, browser-safe, zero runtime dependen
 | --------------------- | -------------------------------------- | ------------------------ | ------------------------------------- |
 | Event kinds           | `ORCHESTRATION_EVENT_KINDS` (`z.enum`) | 23 kinds                 | `packages/obs/src/events/schema.ts`   |
 | Correlation envelope  | `orchestrationEventSchema` (Zod)       | 13 fields                | `packages/obs/src/events/schema.ts`   |
-| Error classes         | `RUNTIME_ERROR_CLASSES`                | 7 classes                | `packages/obs/src/taxonomy/errors.ts` |
+| Error classes         | `RUNTIME_ERROR_CLASSES`                | 8 classes                | `packages/obs/src/taxonomy/errors.ts` |
 | Classifier            | `classifyError(code, message)`         | regex rules, first-match | `packages/obs/src/taxonomy/errors.ts` |
 | Harness-bug predicate | `isHarnessBug(cls)`                    | `Unknown` ⇒ `true`       | `packages/obs/src/taxonomy/errors.ts` |
 
@@ -232,7 +232,7 @@ A runtime / tool failure. The `errorClass` and `harnessBug` fields are filled at
 ```
 
 <Note>
-`errorClass` is typed `string` (not the `RuntimeErrorClass` union) because the executor runner also emits `PolicyDenied` for a brokered-tool denial, a non-fatal denial path that is not a runtime failure. Every other value is one of the seven [error classes](#error-taxonomy).
+`errorClass` is typed `string` (not the `RuntimeErrorClass` union) because the executor runner also emits `PolicyDenied` for a brokered-tool denial, a non-fatal denial path that is not a runtime failure. Every other value is one of the eight [error classes](#error-taxonomy).
 </Note>
 
 ### Spans
@@ -383,17 +383,18 @@ Every runtime / tool failure is classified: a failure is mapped to a baseline of
 
 ### Classes
 
-`RUNTIME_ERROR_CLASSES`, the seven members of `RuntimeErrorClass`:
+`RUNTIME_ERROR_CLASSES`, the eight members of `RuntimeErrorClass`:
 
-| Class           | Matches (case-insensitive)                                                                                                                                     | Harness bug? |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `RateLimited`   | `429`, `rate limit`, `too many requests`, `resource exhausted`, `quota`                                                                                        | No           |
-| `UserAborted`   | `abort`, `aborted`, `cancel(led)`, `sigint`, `sigterm`, `user aborted/cancel`                                                                                  | No           |
-| `Timeout`       | `timeout`, `timed out`, `etimedout`, `deadline exceeded`                                                                                                       | No           |
-| `UnexpectedEnv` | `enoent`, `eacces`, `eperm`, `einval`, `command not found`, `no such file`, `permission denied`, `not installed`, `module not found`, `cannot find module`     | No           |
-| `InvalidArgs`   | `400`, `422`, `invalid argument/param/input/request`, `bad request`, `validation`, `unprocessable`, `missing required`, `schema`, `malformed`                  | No           |
-| `ProviderError` | `500`/`502`/`503`/`504`, `provider error`, `upstream`, `overloaded`, `service unavailable`, `bad gateway`, `internal server error`, `api error`, `model error` | No           |
-| `Unknown`       | nothing matched (or an empty error string)                                                                                                                     | **Yes**      |
+| Class             | Matches (case-insensitive)                                                                                                                                                     | Harness bug? |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
+| `RateLimited`     | `429`, `rate limit`, `too many requests`, `resource exhausted`, `quota`                                                                                                        | No           |
+| `UserAborted`     | `abort`, `aborted`, `cancel(led)`, `sigint`, `sigterm`, `user aborted/cancel`                                                                                                  | No           |
+| `Timeout`         | `timeout`, `timed out`, `etimedout`, `deadline exceeded`                                                                                                                       | No           |
+| `UnexpectedEnv`   | `enoent`, `eacces`, `eperm`, `einval`, `espawn`, `command not found`, `no such file`, `permission denied`, `not installed`, `spawn `, `module not found`, `cannot find module` | No           |
+| `ContextOverflow` | `context overflow/length/window/limit`, `prompt`/`input` `(is) too large/long`, `maximum context`, `too many tokens`                                                           | No           |
+| `InvalidArgs`     | `400`, `422`, `invalid argument/param/input/request`, `bad request`, `validation`, `unprocessable`, `missing required`, `schema`, `malformed`                                  | No           |
+| `ProviderError`   | `500`/`502`/`503`/`504`, `provider error`, `upstream`, `overloaded`, `service unavailable`, `bad gateway`, `internal server error`, `api error`, `model error`                 | No           |
+| `Unknown`         | nothing matched (or an empty error string)                                                                                                                                     | **Yes**      |
 
 ### `classifyError(code, message)`
 
@@ -401,7 +402,7 @@ Every runtime / tool failure is classified: a failure is mapped to a baseline of
 function classifyError(code?: string | null, message?: string | null): RuntimeErrorClass
 ```
 
-Joins `code` and `message` into one haystack (`` `${code ?? ''} ${message ?? ''}` ``, trimmed). An empty haystack returns `Unknown`. Otherwise the rules are tried **in order, first match wins** (the order is `RateLimited` → `UserAborted` → `Timeout` → `UnexpectedEnv` → `InvalidArgs` → `ProviderError`), so the more specific / overloaded signals (rate-limit, abort) are checked before the broader provider / env buckets. No match returns `Unknown`.
+Joins `code` and `message` into one haystack (`` `${code ?? ''} ${message ?? ''}` ``, trimmed). An empty haystack returns `Unknown`. Otherwise the rules are tried **in order, first match wins** (the order is `RateLimited` → `UserAborted` → `Timeout` → `UnexpectedEnv` → `ContextOverflow` → `InvalidArgs` → `ProviderError`), so the more specific / overloaded signals (rate-limit, abort) are checked before the broader provider / env buckets. `ContextOverflow` sits deliberately before `InvalidArgs`: an oversized-input `400` is a context overflow, not a generic bad request. No match returns `Unknown`.
 
 ### `isHarnessBug(cls)`
 
@@ -413,7 +414,7 @@ Returns `true` only for `Unknown`. An unknown class is, by definition, a defect 
 
 ### Per-runtime baselines
 
-`BASELINE_EXPECTED_CLASSES` maps a runtime id to the classes whose mere occurrence is not an alert (only a spike in their rate would be). The baseline for `openclaw`, `claude-code`, `codex`, and `hermes` is identical, the six non-`Unknown` classes (`InvalidArgs`, `Timeout`, `ProviderError`, `RateLimited`, `UserAborted`, `UnexpectedEnv`). Any runtime not in the map (including `clawboo-native`) falls back to `GENERIC_BASELINE`, which is the same six classes. `Unknown` is never in a baseline; it always alerts.
+`BASELINE_EXPECTED_CLASSES` maps a runtime id to the classes whose mere occurrence is not an alert (only a spike in their rate would be). The baseline for `openclaw`, `claude-code`, `codex`, and `hermes` is identical, six classes (`InvalidArgs`, `Timeout`, `ProviderError`, `RateLimited`, `UserAborted`, `UnexpectedEnv`). Any runtime not in the map (including `clawboo-native`) falls back to `GENERIC_BASELINE`, which is those six **plus `ContextOverflow`** (seven). `Unknown` is never in any baseline; it always alerts.
 
 ```ts
 function isUnexpectedFor(runtime: string | null | undefined, cls: RuntimeErrorClass): boolean
@@ -422,7 +423,7 @@ function isUnexpectedFor(runtime: string | null | undefined, cls: RuntimeErrorCl
 `true` when `cls` is unexpected for the runtime: always `true` for `Unknown`, otherwise `true` when `cls` is not in that runtime's baseline.
 
 <Tip>
-Because `Unknown` is the only class outside every baseline, an `isUnexpectedFor(...)` of any non-`Unknown` class is currently always `false`. The per-runtime baselines exist so that a future divergence (a runtime that genuinely never rate-limits, say) can flag that class as anomalous without code changes.
+`Unknown` is not the only class outside a baseline. `ContextOverflow` is absent from all four named-runtime baselines but present in `GENERIC_BASELINE`, so `isUnexpectedFor('openclaw', 'ContextOverflow')` is `true` today while `isUnexpectedFor('clawboo-native', 'ContextOverflow')` is `false`. The other six non-`Unknown` classes are in every baseline, so they are never unexpected. The per-runtime map has already diverged once; it exists so further divergence (a runtime that genuinely never rate-limits, say) can flag a class as anomalous without code changes.
 </Tip>
 
 ---

@@ -17,10 +17,10 @@ import type { Request, Response } from 'express'
 import { eq } from 'drizzle-orm'
 
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
-import { createDb, getSetting, setSetting, teams } from '@clawboo/db'
+import { getSetting, setSetting, teams } from '@clawboo/db'
 
 import { getRegistry } from '../lib/agentSource'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { getTenantId } from '../lib/tenant'
 // Per-provider model picks live in the shared native-defaults helper (the native
 // AgentSource's provider auto-resolution uses the same map).
@@ -87,7 +87,7 @@ export function onboardingNativeLeaderModelPOST(req: Request, res: Response): vo
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     setSetting(db, SETTING_NATIVE_LEADER_MODEL, JSON.stringify({ provider, model }))
     // Retro-apply to the EXISTING native Boo Zero so the pick takes effect
     // immediately — the setting alone only reaches a FUTURE lazily-created leader
@@ -120,7 +120,7 @@ export function onboardingNativeLeaderModelPOST(req: Request, res: Response): vo
 // native provider manager so its "Default" tag + model dropdown reflect reality.
 export function onboardingNativeLeaderModelGET(_req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const raw = getSetting(db, SETTING_NATIVE_LEADER_MODEL)
     if (!raw) {
       res.json({ provider: null, model: null })
@@ -153,7 +153,7 @@ export async function onboardingSeedNativeTeamPOST(req: Request, res: Response):
   const specialistModel = models.specialist
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
     const teamId = crypto.randomUUID()
     const tenantId = getTenantId(req)

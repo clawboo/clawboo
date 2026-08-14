@@ -3,10 +3,10 @@ title: Known issues & limitations
 description: Code-verified list of Clawboo's genuine current limitations, deferrals, and dormant seams, not fixed bugs.
 ---
 
-This page lists the **genuine current limitations** of Clawboo v0.3.0. Every item is confirmed against current source; these are deliberate deferrals, dormant seams, and runtime-imposed constraints, **not** bugs awaiting a fix. Each entry states the impact and a workaround where one exists.
+This page lists the **genuine current limitations** of Clawboo v0.3.1. Every item is confirmed against current source; these are deliberate deferrals, dormant seams, and runtime-imposed constraints, **not** bugs awaiting a fix. Each entry states the impact and a workaround where one exists.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## Not on this list (already fixed)
@@ -70,9 +70,9 @@ This is a documented sub-decision of the onboarding bootstrap, not an accident; 
 
 ## 6. No per-process cap on concurrent `/api/obs/stream` subscriptions
 
-The observability live-tail (`GET /api/obs/stream`) is a Server-Sent Events stream. Each subscription opens a **fresh better-sqlite3 handle** plus two timers (a 750 ms DB-tail poll and a 20 s keep-alive). There is **no global counter or per-process limit** on how many of these streams can be open at once; every connection is independent and cleans up its own handle and timers only when the client disconnects.
+The observability live-tail (`GET /api/obs/stream`) is a Server-Sent Events stream. Each subscription holds two timers (a 750 ms DB-tail poll and a 20 s keep-alive) over the shared process-wide SQLite connection. There is **no global counter or per-process limit** on how many of these streams can be open at once; every stream is independent and clears its own timers only when the client disconnects.
 
-- **Impact**: a client (or many tabs) opening many concurrent obs streams holds one DB handle + two timers each, with nothing throttling the total. On the local-first single-user model this is fine, but it is an unbounded resource-exhaustion risk if Clawboo is exposed to many clients.
+- **Impact**: a client (or many tabs) opening many concurrent obs streams holds two timers each, with nothing throttling the total. (Each stream used to hold its own better-sqlite3 handle as well; that half is fixed — all streams now read through the one shared connection.) On the local-first single-user model this is fine, but it is an unbounded resource-exhaustion risk if Clawboo is exposed to many clients.
 - **Workaround**: this is a local-first deferral; behind a wider bind, front Clawboo with a reverse proxy that limits concurrent connections, and keep the [access gate](/operating/security) enabled. See [Observability dashboard](/using/observability-dashboard) and the [Observability API](/reference/rest-api/observability).
 
 ## See also
@@ -83,4 +83,4 @@ The observability live-tail (`GET /api/obs/stream`) is a Server-Sent Events stre
 - [Memory](/concepts/memory), shared MCP tier vs per-runtime private tier; OpenClaw global scope
 - [Architecture invariants](/concepts/architecture-invariants), local-first, registry of record
 - [Data & state](/operating/data-and-state), `CLAWBOO_HOME`, one instance per user
-- [Changelog](/appendices/changelog), release history (0.1.x → 0.3.0)
+- [Changelog](/appendices/changelog), release history (0.1.x → 0.3.1)

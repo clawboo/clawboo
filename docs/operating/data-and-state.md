@@ -1,11 +1,11 @@
 ---
 title: Data and state
-description: Where Clawboo stores everything, how to back it up, and how the hard-reset model works.
+description: Where Clawboo stores everything, how to back it up, how upgrades reach an existing database, and how to reset it.
 ---
 
 Use this page when you need to find Clawboo's data, back it up, move it, or wipe it. Clawboo keeps **all** of its own state under one directory (`~/.clawboo` by default). It also _reads_ OpenClaw's directory (`~/.openclaw`) for interop, but never writes there.
 
-There is no migration ladder. The SQLite schema is bootstrapped from inline `CREATE TABLE IF NOT EXISTS` DDL on every connect, so the reset model is "delete the database file"; see [Hard reset](#hard-reset). This is intentional for the pre-1.0 single-user product.
+There is no migration ladder. The SQLite schema is bootstrapped from an idempotent `CREATE TABLE IF NOT EXISTS` DDL block when a database is opened (once at boot for the server), and opening an older file also adds any columns it is missing, so a normal upgrade needs no action from you. Resetting is for wiping state, or for the rare schema change that is not additive; see [Hard reset](#hard-reset).
 
 ## The state directory
 
@@ -51,13 +51,13 @@ Backing up or resetting `~/.clawboo` never touches OpenClaw's data. The two dire
 
 ## The database
 
-`clawboo.db` is a single SQLite file holding **27 tables**. There is no separate Postgres, no external store, no migration ladder. The schema is applied by `createDb()`, which runs an inline `CREATE TABLE IF NOT EXISTS` block on every connection; that DDL is the _sole_ source of truth for the schema (the Drizzle `schema.ts` is the typed query layer over the same tables, never used to apply migrations). See the [database schema reference](/reference/database-schema) for the full table list and ERD.
+`clawboo.db` is a single SQLite file holding **27 tables**. There is no separate Postgres, no external store, no migration ladder. The schema is applied by `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`), an idempotent `CREATE TABLE IF NOT EXISTS` block that the server runs **once at boot**; `createDb()` is the batteries-included open-and-bootstrap form still used by one-shot processes (the MCP stdio bins, the eval harness, tests). That DDL is the _sole_ source of truth for the schema (the Drizzle `schema.ts` is the typed query layer over the same tables, never used to apply migrations). See the [database schema reference](/reference/database-schema) for the full table list and ERD.
 
 ### The database path
 
 The path you back up is `~/.clawboo/clawboo.db`. Two resolvers exist, for two consumers:
 
-- **`getDbPath()`** (`apps/web/server/lib/db.ts`) → `~/.clawboo/clawboo.db` via `resolveClawbooDir()`. This is the path the **Express server** uses everywhere. It honors `CLAWBOO_HOME`.
+- **`getDbPath()`** (`apps/web/server/lib/db.ts`) → `~/.clawboo/clawboo.db` via `resolveClawbooDir()`. This is the path the **Express server** uses everywhere. It honors `CLAWBOO_HOME`. The server opens it once through `getDb()` and reuses that one connection for the whole process lifetime; `closeDb()` on shutdown is the only thing that closes it.
 - **`defaultDbPath()`** (`@clawboo/db`) → `~/.openclaw/clawboo/clawboo.db`, with a `CLAWBOO_DB_PATH` override. This is used **only** by the MCP stdio bins (`clawboo-mcp-tasks`, `clawboo-mcp-memory`, `clawboo-mcp-tools`, `clawboo-mcp-teamchat`) that an external runtime may spawn out of process.
 
 <Info>
@@ -66,13 +66,13 @@ The two resolvers default to different paths. If an external runtime spawns a Cl
 
 ### WAL files
 
-`createDb()` opens the database in WAL (Write-Ahead Logging) mode with this pragma set:
+Every connection opens in WAL (Write-Ahead Logging) mode with this pragma set:
 
 ```ts
 journal_mode = WAL
 foreign_keys = ON
 synchronous = NORMAL
-busy_timeout = 1000 // wait up to 1s for the write lock
+busy_timeout = 250 // short on purpose — the app-level retry budget does the waiting
 wal_autocheckpoint = 50 // keep the WAL lean (~50-page passive checkpoints)
 ```
 
@@ -87,13 +87,18 @@ Both are normal SQLite artifacts. They matter for backups (below).
 
 Everything recoverable lives in `~/.clawboo`. A copy of the whole directory is a complete backup, and the simplest one.
 
+<Note>
+Every "stop the server first" step on this page is `clawboo stop`. Paths below are written as `~/.clawboo`; if you set `CLAWBOO_HOME`, substitute that directory. The launcher starts the dashboard server **detached**, so there is usually no terminal holding it and no Ctrl-C to press. `clawboo stop` finds the running instance through `~/.clawboo/api-port.txt` and terminates it; `clawboo restart` does the stop and the start in one step, reclaiming the same port when it is free after the stop (so an open browser tab reconnects); if something else has taken it, the successor falls back to normal port resolution. See the [CLI reference](/reference/cli#clawboo-stop).
+</Note>
+
 ### Quick backup (whole state dir)
 
 Stop the server first so writes are quiesced, then copy the directory:
 
 ```bash
-# stop the running Clawboo server (Ctrl-C in its terminal), then:
+clawboo stop
 cp -a ~/.clawboo ~/clawboo-backup-$(date +%Y%m%d)
+clawboo            # bring the dashboard back up
 ```
 
 This captures the database, settings, the encrypted vault (and its master key), the device identity, and any worktrees.
@@ -104,13 +109,14 @@ To back up just the data tables, copy the database **plus its WAL sidecars**. Wi
 
 ```bash
 # stop the server first, then copy all three:
+clawboo stop
 cp ~/.clawboo/clawboo.db     ~/clawboo.db.bak
 cp ~/.clawboo/clawboo.db-wal ~/clawboo.db-wal.bak 2>/dev/null || true
 cp ~/.clawboo/clawboo.db-shm ~/clawboo.db-shm.bak 2>/dev/null || true
 ```
 
 <Tip>
-The easiest single-file backup is the built-in `clawboo backup` command, which runs an online, checkpoint-consistent copy via better-sqlite3's `.backup()`. It's safe to run while the server is live and produces one file with no separate WAL sidecars:
+The easiest single-file backup is the built-in [`clawboo backup`](/reference/cli#clawboo-backup) command, which runs an online, checkpoint-consistent copy via better-sqlite3's `.backup()`. It's safe to run while the server is live and produces one file with no separate WAL sidecars:
 
 ```bash
 # write ./clawboo-backup-<timestamp>.db in the current directory
@@ -132,29 +138,36 @@ The vault is useless without its master key, and the master key is useless witho
 
 ### Restore
 
-Restore by copying the files back into `~/.clawboo` (with the server stopped). If you restore a database-only backup, restore the WAL sidecars too, or delete a stale `clawboo.db-wal` / `clawboo.db-shm` so SQLite re-creates them clean against the restored main file.
+Restore by copying the files back into `~/.clawboo` with the server stopped (`clawboo stop`), then bring it back with `clawboo`. If you restore a database-only backup, restore the WAL sidecars too, or delete a stale `clawboo.db-wal` / `clawboo.db-shm` so SQLite re-creates them clean against the restored main file.
 
 ## Hard reset
 
-There is no schema migration step. A schema change in Clawboo is a hard reset of the local database; `createDb()` re-bootstraps every table on the next connect. So "reset" means **delete the database file**.
+There is no schema migration step to run. Upgrading Clawboo brings an existing database up to the new schema when it opens it, adding any columns it is missing (see [Upgrading an existing database](/reference/database-schema#upgrading-an-existing-database)). A reset is for when you want the data gone, or after the rare schema change that is not additive, and means **deleting the database file**; the boot-time `ensureSchema()` bootstrap re-creates every table the next time the server opens it.
 
 ### Reset just the data (keep credentials and settings)
 
 ```bash
 # stop the server first, then delete the DB and its WAL sidecars:
+clawboo stop
 rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm
+clawboo
 ```
 
-The next time the server starts, `createDb()` recreates an empty, fully-bootstrapped schema. Your `settings.json` and the secrets vault are untouched.
+The next time the server starts, `ensureSchema()` recreates an empty, fully-bootstrapped schema. Your `settings.json` and the secrets vault are untouched.
 
 ### Full reset (everything)
 
 The clean-slate remedy, also what the boot probe recommends after a fatal failure, is to remove the whole state directory and re-run onboarding:
 
 ```bash
+clawboo stop
 rm -rf ~/.clawboo
 clawboo
 ```
+
+<Note>
+Stop the server **before** deleting the directory. A running server keeps writing to the deleted files through their open handles and re-creates `api-port.txt` and a fresh database underneath you, so the reset looks like it didn't take.
+</Note>
 
 <Warning>
 A full reset deletes your saved provider keys (the vault and its master key), the proxy device identity, all teams/agents/board/chat/memory data, and any task worktrees. This is safe for a pre-1.0 single-user install but is **destructive**; back up first if any of it matters.
@@ -162,17 +175,17 @@ A full reset deletes your saved provider keys (the vault and its master key), th
 
 ## How boot health checks your data
 
-On every start (and from the System Health surface via `GET /api/health`), Clawboo runs a **boot probe** that reports a per-check verdict. Two of its checks concern your data, and they are the only two checks that are **fatal** (the server cannot run without them); everything else _degrades_ (the server keeps serving and shows a banner):
+On every start (and from the System Health surface via `GET /api/health`), Clawboo runs a **boot probe** that reports a per-check verdict. Three of its checks concern your data, and those three are the only **fatal** ones (the server cannot run without them); everything else _degrades_ (the server keeps serving and shows a banner):
 
-| Check id                | What it does                                                                                              | Verdict                                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `clawbooHomeWritable`   | `mkdir -p` the state dir and assert write access                                                          | **Fatal** if not writable                                |
-| `databaseIntegrity`     | `PRAGMA integrity_check`; `ok` is healthy; any other string is corruption                                 | **Fatal** if the file can't be opened or fails the check |
-| `databaseSchema`        | Confirm the core tables exist (`teams`, `agents`, `settings`, `budgets`, `orchestration_events`, `tasks`) | Degrades if any are missing                              |
-| `vaultPerms`            | Assert `secrets/` is `0700` and `master.key` / `proxy-device-identity.json` are `0600` (POSIX only)       | Degrades if perms are too open                           |
-| `masterKeyBootSentinel` | Encrypt a sentinel on first boot, decrypt it on every later boot to prove the master key still works      | Degrades if the key changed                              |
+| Check id                | What it does                                                                                         | Verdict                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `clawbooHomeWritable`   | `mkdir -p` the state dir and assert write access                                                     | **Fatal** if not writable                                |
+| `databaseIntegrity`     | `PRAGMA integrity_check`; `ok` is healthy; any other string is corruption                            | **Fatal** if the file can't be opened or fails the check |
+| `databaseSchema`        | Confirm the core tables exist, and that no column the bootstrap DDL declares is missing from them    | **Fatal**; the detail names the missing columns          |
+| `vaultPerms`            | Assert `secrets/` is `0700` and `master.key` / `proxy-device-identity.json` are `0600` (POSIX only)  | Degrades if perms are too open                           |
+| `masterKeyBootSentinel` | Encrypt a sentinel on first boot, decrypt it on every later boot to prove the master key still works | Degrades if the key changed                              |
 
-Because a fatal boot failure means a broken install (a corrupt DB, or an unwritable home), the documented remedy is the [full reset](#full-reset) above. There is deliberately no repair/upgrade path; re-running onboarding against a clean `~/.clawboo` is the supported recovery.
+A fatal check means the install is broken in a way the probe cannot fix, so read its `detail` first: it says what is wrong and what to do. Upgrading is not one of those cases, because opening an older database adds any columns it is missing on its own. When nothing in the detail applies, the [full reset](#full-reset-everything) above and re-running onboarding against a clean `~/.clawboo` is the supported recovery.
 
 ## Verify it worked
 
@@ -191,11 +204,12 @@ Because a fatal boot failure means a broken install (a corrupt DB, or an unwrita
 </Warning>
 
 <Danger>
-**System Health shows `master key changed`.** The master key no longer decrypts the vault sentinel. If you rotated or lost `secrets/master.key` (or changed `CLAWBOO_SECRETS_MASTER_KEY`), saved runtime keys are unrecoverable; re-enter them in the Runtimes panel, or do a [full reset](#full-reset).
+**System Health shows `master key changed`.** The master key no longer decrypts the vault sentinel. If you rotated or lost `secrets/master.key` (or changed `CLAWBOO_SECRETS_MASTER_KEY`), saved runtime keys are unrecoverable; re-enter them in the Runtimes panel, or do a [full reset](#full-reset-everything).
 </Danger>
 
 ## See also
 
+- [CLI reference](/reference/cli): `clawboo backup`, `clawboo stop`, `clawboo restart`
 - [Configuration](/reference/configuration): `settings.json`, file and directory locations
 - [Environment variables](/reference/environment-variables): `CLAWBOO_HOME`, `CLAWBOO_DB_PATH`, `CLAWBOO_SECRETS_MASTER_KEY`, `OPENCLAW_STATE_DIR`
 - [Database schema](/reference/database-schema): the 27 tables and ERD

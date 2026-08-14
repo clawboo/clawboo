@@ -10,7 +10,6 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 
 import {
-  createDb,
   createTask,
   getBudget,
   listGovernanceAudit,
@@ -28,7 +27,7 @@ import type {
 } from '@clawboo/executor'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../db'
+import { getDb, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
 
 const execFileAsync = promisify(execFile)
@@ -111,6 +110,9 @@ describe('budget kill-switch (real board + real git worktree)', () => {
     repo = await initRepo()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
@@ -118,12 +120,11 @@ describe('budget kill-switch (real board + real git worktree)', () => {
   })
 
   function newTask(): string {
-    return createTask(createDb(getDbPath()), { title: 'spend', status: 'todo', teamId: 'team-1' })
-      .id
+    return createTask(getDb(), { title: 'spend', status: 'todo', teamId: 'team-1' }).id
   }
 
   it('auto-pauses + aborts the run when a cost event crosses the team budget', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 10, mode: 'cap' }) // $0.10 hard cap
     const taskId = newTask()
     const fake = new FakeCostAdapter(0.5) // 50¢ ≫ 10¢
@@ -147,7 +148,7 @@ describe('budget kill-switch (real board + real git worktree)', () => {
   })
 
   it('a warn-mode budget does NOT pause — it tracks + warns, the run completes', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     // Track-and-warn: a warn budget far below the spend. The run must finish.
     setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 10, mode: 'warn' })
     const taskId = newTask()
@@ -172,7 +173,7 @@ describe('budget kill-switch (real board + real git worktree)', () => {
   })
 
   it('a human resume (raise the cap) lets a re-run proceed', async () => {
-    const db = createDb(getDbPath())
+    const db = getDb()
     setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 10, mode: 'cap' })
     const taskId = newTask()
     await runTaskOnRuntime({

@@ -11,9 +11,9 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 
-import { agents, createDb, getBudget, getSetting, type ClawbooDb } from '@clawboo/db'
+import { agents, getBudget, getSetting, type ClawbooDb } from '@clawboo/db'
 
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import {
   loadAgentConfig,
   nativeConfigKey,
@@ -34,10 +34,17 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
-    source = new ClawbooNativeAgentSource({ getDbPath })
-    db = createDb(getDbPath())
+    source = new ClawbooNativeAgentSource({ getDb })
+    db = getDb()
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
+    // Drop the process-wide memo and this fixture's own handle before the
+    // sandbox is removed — otherwise each test leaves a live SQLite handle
+    // behind (and Windows refuses to rm a dir that still holds an open file).
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']
@@ -257,7 +264,11 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
     })
     // The returned record AND the raw agents row both carry the tenant.
     expect(a.tenantId).toBe('acme')
-    const row = db.select({ tenantId: agents.tenantId }).from(agents).where(eq(agents.id, a.id)).get()
+    const row = db
+      .select({ tenantId: agents.tenantId })
+      .from(agents)
+      .where(eq(agents.id, a.id))
+      .get()
     expect(row?.tenantId).toBe('acme')
     // The co-written AgentConfig blob + the minted budget row carry it too.
     expect(loadAgentConfig(db, a.id)?.tenantId).toBe('acme')
@@ -267,7 +278,11 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
   it('defaults tenantId to null when unspecified (byte-identical single-tenant no-op)', async () => {
     const a = await source.createAgent({ name: 'No Tenant Boo', execConfig: { budgetUsd: 2 } })
     expect(a.tenantId).toBeNull()
-    const row = db.select({ tenantId: agents.tenantId }).from(agents).where(eq(agents.id, a.id)).get()
+    const row = db
+      .select({ tenantId: agents.tenantId })
+      .from(agents)
+      .where(eq(agents.id, a.id))
+      .get()
     expect(row?.tenantId).toBeNull()
     expect(loadAgentConfig(db, a.id)?.tenantId).toBeNull()
     expect(getBudget(db, 'agent', a.id)?.tenantId).toBeNull()

@@ -164,7 +164,7 @@ Clawboo masks credential-looking content at two distinct boundaries, with two di
 - **Storage-layer scrub** (in `@clawboo/db`) masks secrets with `[REDACTED]` _before_ anything is persisted to SQLite, the audit log, or the observability event log.
 - **Display/log-layer redaction** (in `@clawboo/logger`, re-exported by the server) masks with a bullet string (`••••`) at two later boundaries: just before an API response body is sent, and inside the pino logger so every log record passes through it.
 
-The display redactor masks both credential-looking **keys** (a key containing `token`, `secret`, `password`, `api_key`, `authorization`, `bearer`, `credential`, `private_key`, `access_key`, or `cookie`) and credential-shaped **values** (PEM private-key blocks, `sk-`/`sk-ant-`/`sk-or-` API keys, GitHub/GitLab PATs, Slack tokens, AWS access-key IDs, Google API keys, `Bearer …` headers, and JWTs). Crucially, numeric telemetry survives: a `SAFE_COUNT_KEYS` allowlist (`inputTokens`, `outputTokens`, `totalTokens`, and similar token _counts_) is matched against the exact key name, so a token _count_ is never masked while a real credential under e.g. `accessToken` still is. Numbers, booleans, and `null` always pass through.
+The display redactor masks both credential-looking **keys** (a key containing `token`, `secret`, `password`, `passwd`, `api_key`, `authorization`, a bare `auth`, `bearer`, `credential`, `private_key`, `access_key`, or `cookie`) and credential-shaped **values** (PEM private-key blocks, `sk-`/`sk-ant-`/`sk-or-` API keys, GitHub/GitLab PATs, Slack tokens, AWS access-key IDs, Google API keys, `Bearer …` headers, and JWTs). Crucially, numeric telemetry survives: a `SAFE_COUNT_KEYS` allowlist covers two families, the token _counts_ (`inputTokens`, `outputTokens`, `totalTokens`, and similar) and `author`/`authors` (caught only by the pattern's bare `auth` alternative), each matched case-insensitively against the exact key name. So a token _count_ is never masked while a real credential under e.g. `accessToken` or `authorization` still is, and a near-miss like `authorId` is still redacted. Numbers, booleans, and `null` always pass through.
 
 It is applied at the API response sites that expose stored payloads: the observability events, traces, and graph projection; the governance audit summary; and the tools audit `argsSummary`/`resultSummary`, each of which runs the JSON-string `data`/`summary` field through `redactJsonString` before sending, and at the System Health endpoint, which runs the whole report through `redactObject`.
 
@@ -178,12 +178,12 @@ The honest summary: Clawboo is single-tenant and local-first today. If you keep 
 
 1. **Prefer not to widen the bind.** For local use, leave `HOST` unset. The dashboard is loopback-only and no token is needed.
 2. **If you must reach it remotely, tunnel rather than bind wide.** An SSH tunnel or a reverse proxy that terminates TLS and forwards to `127.0.0.1:<port>` keeps the bind loopback and adds a real transport-security and authentication layer in front. This is the recommended path.
-3. **If you do bind a non-loopback interface, set `STUDIO_ACCESS_TOKEN`.** Use a long random token from the safe charset (`[A-Za-z0-9._~-]`). The boot warning exists to catch the case where you forget; do not run a non-loopback bind without it.
+3. **If you do bind a non-loopback interface, set `STUDIO_ACCESS_TOKEN`.** Use a long random token from the safe charset (`[A-Za-z0-9._~-]`). The boot-time refusal exists to catch the case where you forget; do not run a non-loopback bind without it.
 4. **Terminate TLS in front of the dashboard** so the access cookie is sent with `Secure`. The gate only marks the cookie `Secure` when the request arrives over TLS (it detects this via `x-forwarded-proto: https`), so a terminating proxy that sets that header is what upgrades the cookie.
 5. **Treat the access token as a full-operator credential.** Everyone who has it can do everything. Rotate it by changing the env var and restarting; there is no per-user revocation.
 
 <Warning>
-A non-loopback bind with no access token is the single most dangerous misconfiguration: every `/api/*` route, including the ones that resolve provider keys into spawned runtimes, becomes reachable by anyone on the network. The boot-time `SECURITY:` warning is your signal that this has happened.
+A non-loopback bind with no access token is the single most dangerous misconfiguration: every `/api/*` route, including the ones that resolve provider keys into spawned runtimes, would be reachable by anyone on the network. That is why the server refuses to start, logging a `SECURITY: refusing to start` error and exiting with code 1. Only `CLAWBOO_ALLOW_INSECURE=1` downgrades that to a loud boot warning and keeps serving; if you see that warning, you opted in and the hole is open.
 </Warning>
 
 ## Design rationale and trade-offs
@@ -194,13 +194,13 @@ The trade-offs are equally plain: there is no multi-user authorization, the toke
 
 ## Boundaries and non-goals
 
-- **Single-tenant today.** There is no per-tenant isolation. The dormant `tenant_id` columns across the schema are a future seam; no per-tenant filtering or scoping is active in v0.3.0.
+- **Single-tenant today.** There is no per-tenant isolation. The dormant `tenant_id` columns across the schema are a future seam; no per-tenant filtering or scoping is active in v0.3.1.
 - **OpenClaw shared memory is registered globally.** Because OpenClaw agents are cross-team, Clawboo registers the shared [Memory](/concepts/memory) MCP server for the OpenClaw runtime at _global_ scope rather than per-run/per-team scope (the other four runtimes get per-run team scope). In a multi-tenant world that global registration would need narrowing; it is a documented multi-tenant deferral, not a leak in the single-tenant model Clawboo ships.
 - **Not a key-management service.** The vault stores one value per env-var, server-wide. Named profiles, per-team keys, and rotation tooling are future seams.
 - **Not multi-user.** The access gate is one shared secret with no accounts, roles, or scopes.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

@@ -31,9 +31,19 @@ New here? Welcome. The friendliest way in:
 2. Comment on the one you want ("I'd like to take this") and we will assign it to you. No need to ask twice.
 3. Follow **Setup** above, make your change on a branch, and open a PR. If you get stuck, say so in the issue. A half-finished PR with a question is completely welcome.
 
-Good starting areas that rarely need core changes: **new marketplace team templates**, **docs pages**, **a provider or runtime icon**, or **a test for an uncovered component**. If you are unsure whether an idea fits, open a [Discussion](https://github.com/clawboo/clawboo/discussions) first, before writing code.
+Good starting areas that rarely need core changes: **new marketplace team templates**, [**docs pages**](#documentation), **a provider or runtime icon**, or **a test for an uncovered component**. If you are unsure whether an idea fits, open a [Discussion](https://github.com/clawboo/clawboo/discussions) first, before writing code.
 
 New to the codebase? The [Internals map](https://docs.claw.boo/internals) is a guided tour of how the pieces fit together, and it flags "caution surfaces": files that encode load-bearing fixes worth reading before you change them.
+
+## Documentation
+
+The docs live in `docs/`, and that directory **is** the site: hand-edited Mintlify Markdown with no build step. Merging to `main` redeploys [docs.claw.boo](https://docs.claw.boo) as-is, so the files in your PR are exactly what ships.
+
+**Frontmatter is parsed as YAML, so quote any `title` or `description` value that contains a colon, or that starts with `@` or a backtick.** An unquoted `:` followed by a space parses as a nested mapping and Mintlify serves the page as a 404 instead of rendering it. Preview with `mint dev` (the Mintlify CLI, `npx mint dev` if you have not installed it) before opening a docs PR: a full build is what surfaces this, whereas `check-links` only validates links. `pnpm check:docs` catches it too, and runs as part of `pnpm lint` and CI.
+
+Either quote style is valid YAML; Prettier normalizes them to single quotes when the pre-commit hook formats your page. One sibling rule, same class of breakage: **never put a bare `%` in a body heading** — Mintlify URI-decodes headings into anchor slugs and fails the page on invalid percent-encoding. A `%` in prose is fine. `pnpm check:docs` enforces both.
+
+See [`docs/README.md`](./docs/README.md) for the rest of the workflow: the directory layout, adding a page to the `docs.json` navigation, previewing locally, and the Mintlify-flavored conventions these pages use.
 
 ## Branching
 
@@ -49,13 +59,21 @@ We use [GitHub Flow](https://docs.github.com/en/get-started/using-git/github-flo
 ```bash
 pnpm build                              # build all packages and apps
 pnpm typecheck                          # tsc --noEmit across the monorepo
-pnpm lint                               # ESLint flat config across all packages
+pnpm format:check                       # Prettier --check across the repo; fix with pnpm format
+pnpm lint                               # ESLint flat config across all packages, plus the docs frontmatter + heading checks
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright end-to-end tests (incl. board round-trip + eval smoke)
-pnpm assemble && pnpm test:clean-install  # bundle the CLI and smoke-test a clean install
+pnpm verify:catalog                     # offline: committed marketplace catalog vs. its integrity manifest
+pnpm verify:ingest                      # live: re-derive the catalog from the pinned upstream commits
+pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the tarball, and smoke-test it
+pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
 ```
 
-Run them locally before pushing to avoid back-and-forth.
+Run them locally before pushing to avoid back-and-forth. Every one of them runs as a CI job too.
+
+`pnpm e2e` needs a built workspace (`pnpm build` first) and a Chromium download (`pnpm exec playwright install chromium`). It sandboxes itself into a throwaway `$HOME`, so it never touches your real `~/.clawboo`.
+
+`pnpm test:clean-install` packs `apps/cli` and installs the tarball into a throwaway temp dir, so it needs network access for the `npm install`. It also drives the installed SPA in headless Chromium, so it needs the same `pnpm exec playwright install chromium` download as `pnpm e2e`. And it refuses to run while another Clawboo dashboard is listening on `18790`–`18809` (it would attach to that one instead of the tarball) — stop your `pnpm dev` server first.
 
 ---
 
@@ -65,11 +83,11 @@ Run them locally before pushing to avoid back-and-forth.
 
 Keep PRs focused. Split unrelated changes into separate PRs.
 
-Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines, you are on a different pnpm than the pinned `9.15.0`: run `corepack enable`, then `pnpm install`, and commit only the intended lockfile change.
+Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines, you are on a different pnpm than the pinned `9.15.0`: run `corepack enable`, then `pnpm install`, and commit only the intended lockfile change. (Dependency bumps mostly arrive on their own: Dependabot runs weekly with three grouped entries, one for the root workspace, one for `website/`, and one for the GitHub Actions pins, so you rarely need to touch the lockfile by hand. Major bumps, plus `better-sqlite3` and `ws`, deliberately come as their own PRs.)
 
 ### 2. Pass CI before requesting review
 
-Every PR must pass `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`. New surfaces should also pass `pnpm e2e`.
+Every PR must pass CI: `pnpm build`, `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a red check is a red check: fix it, or say in the PR why it is unrelated.
 
 ### 3. Add a changeset for user-facing changes
 
@@ -95,7 +113,9 @@ Add a test for anything you add. Unit logic goes in Vitest (`*.test.ts` in the n
 - **No `console.log`.** Log through `@clawboo/logger` (pino).
 - **Lucide icons only.** Never emoji in the UI.
 - **Theme tokens, never raw hex.** Use the CSS variables and Tailwind tokens (brand marks are the only exception).
-- **No migration ladder.** The SQLite schema is the inline `CREATE TABLE IF NOT EXISTS` DDL in `packages/db/src/db.ts` (there is no `drizzle/` directory, no `.sql` migrations, and no `db:migrate`/`db:generate`). Keep that DDL additive and idempotent; a schema change targets a fresh DB and locally means a hard reset of `~/.clawboo`, not an in-place migration. `schemaSource.test.ts` guards this posture.
+- **No migration ladder; keep new columns addable.** The SQLite schema is the `CREATE TABLE IF NOT EXISTS` DDL in `packages/db/src/schemaBootstrap.ts` (there is no `drizzle/` directory, no `.sql` migrations, and no `db:migrate`/`db:generate`). Keep that DDL additive and idempotent. `CREATE TABLE IF NOT EXISTS` skips the whole statement when the table already exists, so a new column would be a silent no-op on every existing database; `reconcileSchema` closes that by reading the column set back out of the same DDL and adding what an older file is missing. What it asks of you: a **new column on an existing table** must be addable, which means it may not use `PRIMARY KEY`, `UNIQUE`, or a `STORED` generated column; any `DEFAULT` must be a literal rather than an expression; a `NOT NULL` column must carry one; and a `REFERENCES` column must not have a non-NULL one. Break one of those and the build fails, because `schemaBaseline.ts` records the columns as of the last review and a test asserts everything added since can reach a database that already exists. That file needs no upkeep: a column added after the snapshot simply reads as new and is held to the rule, which is the rule anyway. Changing an existing column's type or constraints, or removing one, is still not an in-place upgrade. `schemaSource.test.ts` and `schemaReconcile.test.ts` guard this.
+- **Version every persisted client store.** The rule above is about the server's SQLite; the browser is the opposite case, because you cannot hard-reset a user's storage for them. So a zustand `persist` store sets **both** `version` and `migrate` — never one without the other. Without a `migrate`, bumping the version makes zustand log an error and merge `undefined`, silently discarding the rows it just read back; and `migrate` receives the _partialized_ shape and fires on any version mismatch, downgrades included. Keep the migrate a pure exported function with its own `*.test.ts` in the node project. (There is currently no `persist` store in the repo. For a trivial single value, the Atlas layout toggle in `features/graph/store.ts` shows the lighter pattern — validate on read with an exact match, fall back to the default — which is the right weight for one enum; note the graph store must _not_ become a `persist` store, because `persist` re-serializes on every `set` and that store mutates per drag frame.)
+- **Pollers pause when the tab is hidden.** A new interval-based refresh uses `useVisiblePolling` from `apps/web/src/lib/useVisiblePolling.ts`, not a bare `setInterval`, so a backgrounded tab stops hitting the local API and catches up once on return. A wall-clock grace or expiry timer is the exception (see `ChatPanel.tsx`) — pausing those changes behaviour, so they keep a plain interval and say why in a comment.
 - **Pure where it claims to be.** Policy and projection functions stay side-effect-free and unit-testable.
 - **No secrets in logs, responses, or storage.** A credential's presence may be shown (the env-var name plus true/false), never its value.
 
@@ -104,6 +124,8 @@ Add a test for anything you add. Unit logic goes in Vitest (`*.test.ts` in the n
 ## Release process (maintainers only)
 
 Releases are automated via the `publish.yml` GitHub Actions workflow: when changesets land on `main`, the Changesets action opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the changed packages to npm. No manual `npm publish` needed.
+
+Before it publishes, the workflow re-runs the whole PR gate — `pnpm verify:catalog`, `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, then `bash scripts/assemble-cli.sh` and `pnpm test:clean-install`. The catalog gate there is the OFFLINE one by design; the live upstream re-derive (`pnpm verify:ingest`) runs in its own `verify-ingest.yml` workflow, off the release path, so an upstream outage cannot hold up a release. `typecheck` matters most there: `pnpm build` is bundler-only and never runs `tsc`, so it is the only step that would stop a type error reaching npm.
 
 ---
 

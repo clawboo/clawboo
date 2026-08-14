@@ -15,7 +15,8 @@ import { useTeamStore } from '@/stores/team'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useTourStore } from '@/stores/tour'
 import { CAPABILITY_TOUR_FLAG, hasSeenFlag, markSeenFlag } from '@/lib/oneTimeFlag'
-import { useFocusTrap } from './useFocusTrap'
+import { useFocusTrap } from '@/features/shared/useFocusTrap'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 // ─── Step model ──────────────────────────────────────────────────────────────
 //
@@ -124,7 +125,7 @@ const STEPS: Step[] = [
     key: 'finish',
     variant: 'finish',
     title: "You're all set",
-    body: "Open Group Chat and tell Boo Zero what you need. It delegates to the right Boos and coordinates the work for you.",
+    body: 'Open Group Chat and tell Boo Zero what you need. It delegates to the right Boos and coordinates the work for you.',
   },
 ]
 
@@ -391,17 +392,8 @@ function TourOverlay({ onClose }: { onClose: () => void }) {
     if (cardRef.current) setCardH(cardRef.current.offsetHeight)
   }, [step, rect, vp])
 
-  // Esc closes the tour.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // Esc closes the tour, through the shared layer stack.
+  useDismissableLayer({ active: true, level: 'dialog', onEscape: onClose })
 
   const goNext = (): void => (isLast ? onClose() : setStep((s) => s + 1))
   const goBack = (): void => setStep((s) => Math.max(0, s - 1))
@@ -623,7 +615,7 @@ function CenterBody({
             type="button"
             onClick={onFinish}
             data-testid="tour-open-chat"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-solid px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
           >
             Open Group Chat <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />
           </button>
@@ -632,7 +624,7 @@ function CenterBody({
             type="button"
             onClick={onNext}
             data-testid="tour-next"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-solid px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
           >
             {isLast ? 'Done' : 'Start tour'}
             <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />
@@ -731,7 +723,7 @@ function SpotBody({
             type="button"
             onClick={onNext}
             data-testid="tour-next"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 text-[12.5px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-solid px-3.5 py-1.5 text-[12.5px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
           >
             {isLast ? 'Done' : 'Next'}
             {!isLast && <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />}

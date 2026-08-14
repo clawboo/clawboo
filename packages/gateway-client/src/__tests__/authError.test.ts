@@ -31,9 +31,7 @@ describe('isAuthConnectError', () => {
   })
 
   it('flags NOT_PAIRED surfaced only as a message (plain Error, no code)', () => {
-    expect(
-      isAuthConnectError(new Error('pairing required: device is not approved yet')),
-    ).toBe(true)
+    expect(isAuthConnectError(new Error('pairing required: device is not approved yet'))).toBe(true)
   })
 
   it('does NOT flag a transient Gateway-down error (keeps the fast backoff)', () => {
@@ -54,7 +52,11 @@ describe('authRetryAfterMs', () => {
   it('returns the Gateway-supplied retryAfterMs when present', () => {
     expect(
       authRetryAfterMs(
-        new GatewayResponseError({ code: 'INVALID_REQUEST', message: 'retry later', retryAfterMs: 30_000 }),
+        new GatewayResponseError({
+          code: 'INVALID_REQUEST',
+          message: 'retry later',
+          retryAfterMs: 30_000,
+        }),
       ),
     ).toBe(30_000)
   })

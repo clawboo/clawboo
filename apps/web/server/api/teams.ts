@@ -1,8 +1,8 @@
 import crypto from 'node:crypto'
 import type { Request, Response } from 'express'
-import { createDb, setSetting, teams, agents, settings } from '@clawboo/db'
+import { setSetting, teams, agents, settings } from '@clawboo/db'
 import { eq, inArray, like, sql } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { getRegistry } from '../lib/agentSource/registry'
 import { ensureNativeBooZero } from '../lib/teamChat/booZero'
 import { nativeTeamSessionKeysForTeamLike } from '../lib/teamChat/nativeTeamSession'
@@ -19,7 +19,7 @@ import { getTeamOrchestrator, hasTeamOrchestrator } from '../lib/teamChat/teamOr
 
 export function teamsGET(req: Request, res: Response): void {
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const includeArchived = req.query['includeArchived'] === 'true'
 
     const rows = db
@@ -103,7 +103,7 @@ export function teamsPOST(req: Request, res: Response): void {
   const id = typeof body.id === 'string' && UUID_RE.test(body.id) ? body.id : crypto.randomUUID()
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     db.insert(teams)
       .values({
@@ -172,7 +172,7 @@ export function teamsPATCH(req: Request, res: Response): void {
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     const existing = db.select().from(teams).where(eq(teams.id, teamId)).get()
     if (!existing) {
@@ -234,7 +234,7 @@ export function teamsDELETE(req: Request, res: Response): void {
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     // Orphan agents belonging to this team
     db.update(agents).set({ teamId: null }).where(eq(agents.teamId, teamId)).run()
@@ -281,7 +281,7 @@ export async function teamAgentPOST(req: Request, res: Response): Promise<void> 
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
 
     // Upsert: create the agent row if it doesn't exist, then set teamId
@@ -341,7 +341,7 @@ export function teamAgentDELETE(req: Request, res: Response): void {
   }
 
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
 
     db.update(agents).set({ teamId: null }).where(eq(agents.id, agentId)).run()
 
@@ -366,8 +366,7 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
     return
   }
   const body = req.body as
-    | { message?: unknown; targetAgentId?: unknown; entryId?: unknown }
-    | undefined
+    { message?: unknown; targetAgentId?: unknown; entryId?: unknown } | undefined
   const message = typeof body?.message === 'string' ? body.message.trim() : ''
   if (!message) {
     res.status(400).json({ error: 'message required' })
@@ -378,7 +377,7 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
   // user entry share one id → the thin client dedups by entryId (no double-render).
   const userEntryId = typeof body?.entryId === 'string' ? body.entryId : undefined
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     if (!resolveServerOrchestrated(db, teamId)) {
       res.status(404).json({ error: 'team is not server-orchestrated' })
       return
@@ -409,7 +408,7 @@ export function teamChatStopPOST(req: Request, res: Response): void {
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     if (!resolveServerOrchestrated(db, teamId)) {
       res.status(404).json({ error: 'team is not server-orchestrated' })
       return

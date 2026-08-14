@@ -13,7 +13,6 @@ import {
   agents,
   booZeroTeamBriefs,
   chatMessages,
-  createDb,
   createTask,
   SqliteMemoryStore,
   teams,
@@ -23,7 +22,7 @@ import { buildTeamSessionKey } from '@clawboo/team-orchestration'
 import type { Request, Response } from 'express'
 
 import { teamActivitySummaryGET } from '../../../api/teamActivity'
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import { buildTeamActivitySummary } from '../teamActivitySummary'
 
 const TEAM = 'team-1'
@@ -40,10 +39,13 @@ describe('buildTeamActivitySummary', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
-    db = createDb(getDbPath())
+    db = getDb()
     seq = 0
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']
@@ -98,16 +100,40 @@ describe('buildTeamActivitySummary', () => {
     createTask(db, { title: 'Write Zhihu long-form', status: 'in_progress', teamId: TEAM })
     // Saved team memory (team-scoped) + a global fact that must NOT leak in.
     const mem = new SqliteMemoryStore(db)
-    await mem.saveFact({ title: 'Brand voice', content: 'Playful, punchy, culturally fluent.', scope: { teamId: TEAM } })
+    await mem.saveFact({
+      title: 'Brand voice',
+      content: 'Playful, punchy, culturally fluent.',
+      scope: { teamId: TEAM },
+    })
     await mem.saveFact({ title: 'Global note', content: 'unrelated cross-team fact', scope: {} })
 
     const k1 = buildTeamSessionKey('m1', TEAM)
     const k2 = buildTeamSessionKey('m2', TEAM)
-    chat(k1, { kind: 'assistant', role: 'assistant', text: 'Weibo campaign draft is ready.', sessionKey: k1 })
-    chat(k2, { kind: 'meta', role: 'system', text: 'session note — should be dropped', sessionKey: k2 })
-    chat(k1, { kind: 'assistant', role: 'assistant', text: '[Team Update] batched status', sessionKey: k1 })
+    chat(k1, {
+      kind: 'assistant',
+      role: 'assistant',
+      text: 'Weibo campaign draft is ready.',
+      sessionKey: k1,
+    })
+    chat(k2, {
+      kind: 'meta',
+      role: 'system',
+      text: 'session note — should be dropped',
+      sessionKey: k2,
+    })
+    chat(k1, {
+      kind: 'assistant',
+      role: 'assistant',
+      text: '[Team Update] batched status',
+      sessionKey: k1,
+    })
     chat(k2, 'not-json{') // malformed — must be skipped, not sink the summary
-    chat(k2, { kind: 'assistant', role: 'assistant', text: 'Zhihu piece is 80% done.', sessionKey: k2 })
+    chat(k2, {
+      kind: 'assistant',
+      role: 'assistant',
+      text: 'Zhihu piece is 80% done.',
+      sessionKey: k2,
+    })
 
     const out = await buildTeamActivitySummary(db, TEAM)
     expect(out).not.toBeNull()

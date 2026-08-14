@@ -7,7 +7,7 @@
 // now impossible by construction. (The RuntimeConnectionCard connect state
 // machine itself is covered by the RTL step tests.)
 
-import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
+import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
 
 test.describe('Add-runtimes onboarding step', () => {
   test('seed native team → the add-runtimes surface is present → Continue → land in the working team', async ({
@@ -83,6 +83,10 @@ test.describe('Add-runtimes onboarding step', () => {
         body: JSON.stringify({ runtimes: [], available: [] }),
       })
     })
+
+    // Continue verifies the key before storing it — stub the probe so this stays
+    // offline (a fake key against the real provider would 401 and block).
+    await stubNativeHealthcheck(page)
 
     await page.goto('/')
 

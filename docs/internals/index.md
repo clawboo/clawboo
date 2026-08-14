@@ -52,7 +52,7 @@ The pages below go in rough reading order, from the build and the core traits do
 | [The event pipeline](/internals/event-pipeline)            | The `Bridge → Policy → Handler` internals that turn raw Gateway frames into Zustand dispatches.                                                                                 |
 | [Testing](/internals/testing)                              | The unit / e2e / clean-install / evals / ablation strategy and how the suites are organized.                                                                                    |
 | [Release process](/internals/release-process)              | Changesets, the publish workflow, and the clean-install gate that guards every release.                                                                                         |
-| [Codegen and ingestion](/internals/codegen-and-ingestion)  | The marketplace ingestion pipeline and the `verify:ingest` drift gate.                                                                                                          |
+| [Codegen and ingestion](/internals/codegen-and-ingestion)  | The marketplace ingestion pipeline, its offline integrity gate, the live `verify:ingest` drift check, and the catalog refresh runbook.                                          |
 | [Design system](/internals/design-system)                  | The token catalog, surface-elevation tiers, motion tokens, and theming.                                                                                                         |
 
 <Note>
@@ -68,7 +68,7 @@ These pages explain the *internals*. For the factual surface, every package's pu
 - **Shipping a release** → [Release process](/internals/release-process).
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

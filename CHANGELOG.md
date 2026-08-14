@@ -1,10 +1,75 @@
 # Changelog
 
-All notable changes to the `clawboo` product are documented here. The format follows
+All notable changes to the released `clawboo` product are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses [Changesets](https://github.com/changesets/changesets)
-to version the individual `@clawboo/*` libraries (see their per-package `CHANGELOG.md`).
+to version the one published package, the `clawboo` CLI. Every `@clawboo/*` library is
+`private: true` and is inlined into that CLI's bundle, so the machine-generated per-release history
+lives in [`apps/cli/CHANGELOG.md`](./apps/cli/CHANGELOG.md).
 
-## v0.2.0 - 2026-06-11
+## v0.3.1 - 2026-07-20
+
+A patch on top of native-first. Nothing architectural moved; the changes are the ones you feel while
+running a native team day to day.
+
+### Added
+
+- **Runtime provider manager.** The Runtimes panel's Manage view for Clawboo Native, OpenClaw, and
+  Hermes lists the LLM providers you have actually connected (synced with Settings → Providers),
+  each with per-provider connect / disconnect, one-click reconnect using an existing key, and a
+  default-model picker for Native.
+- **Live Working / Idle badges.** The sidebar agent and Group Chat status indicators update in real
+  time for native and server-orchestrated team runs and for native 1:1 chats, not only for OpenClaw
+  over a live Gateway.
+- **Two-layer team model picker.** Creating a team picks a provider first (only the connected ones),
+  then its model, and the trigger shows the exact default model that will run instead of an opaque
+  "Recommended".
+
+### Changed
+
+- Reconnecting Clawboo Native is no longer Anthropic-only; reconnect with any provider you have
+  already configured.
+- Onboarding's Add-runtimes step shows connected providers read-only, with a Back button to the
+  provider step where keys are added.
+
+### Fixed
+
+- **Replies no longer vanish.** Every streamed team-chat reply now commits to the transcript or is
+  cleanly cleared, so a delegating agent's message cannot disappear on the next update or on reload;
+  a native 1:1 reply that fails mid-stream is preserved instead of silently dropped.
+- A native runtime with no key now reads "Disconnected" with a "Set up in Runtimes" shortcut.
+- The sidebar mascot's hover tooltip appears promptly and reads "Boo Zero", matching what clicking
+  it opens.
+
+## v0.3.0 - 2026-07-15
+
+Native-first. v0.2.0 made Clawboo runtime-agnostic; v0.3.0 is what that unlocked. The first run
+needs one provider key and nothing else: no OpenClaw install, no Gateway, no external CLI. Every
+other runtime becomes something you add to a working setup rather than a prerequisite for having
+one.
+
+### Added
+
+- **Native-first onboarding.** Connect a provider key, optionally add Claude Code / Codex / Hermes /
+  OpenClaw, then deploy a real marketplace team.
+- **Providers hub** in Settings, with live per-provider model lists so the model picker offers what
+  your key can actually reach.
+- **Per-agent runtime and model pickers** in create-team, and an editable model on the agent view.
+  Runtimes that manage their own model show a note rather than a dropdown that cannot take effect.
+- **First-run capability tour**, a one-time, skippable spotlight over the real sidebar controls.
+- **Ghost Graph runtime badges, model orbitals, and MCP connector nodes**, so every agent surfaces
+  its attached MCP servers and built-ins.
+
+### Changed
+
+- **Native teams chat and delegate end to end.** A native leader hands work to teammates through a
+  structured delegate signal the engine observes, so the claim / run / report-up loop fires for
+  native teams exactly as it does for OpenClaw.
+- **Orchestration runs server-side**, per team, with the browser a thin client over REST and SSE, so
+  a cascade survives a tab close.
+- A degraded OpenClaw Gateway no longer blocks the dashboard: a non-blocking banner offers the
+  recovery that actually applies.
+
+## v0.2.0 - 2026-06-20
 
 The first liberated cut. Clawboo is now a TypeScript orchestrator for heterogeneous AI agent runtimes:
 native agents are built in, and OpenClaw, Claude Code, Codex, and Hermes join as peer teammates in one

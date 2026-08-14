@@ -1,12 +1,12 @@
 ---
 title: REST API overview
-description: Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 141 routes.
+description: Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 148 routes.
 ---
 
 The Clawboo dashboard server (`apps/web/server/index.ts`) is an Express app wrapped in a raw `http.Server` so it can also handle the WebSocket upgrade for the Gateway proxy. Every JSON route lives under `/api/`, is registered in one router (`apps/web/server/api/index.ts`), and returns the standard `{ error: string }` envelope on failure. This page covers the cross-cutting facts: base URL, the proxy, auth, body limits, the error shape, and the streaming endpoints, then links to the per-resource reference pages.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## Base URL
@@ -106,42 +106,46 @@ A handful of routes deviate from the bare `{ error }` shape, and those deviation
 
 ## Streaming endpoints (SSE)
 
-Three routes are **Server-Sent Events**, not request/response. They set `Content-Type: text/event-stream`, flush headers, and emit `data: <json>\n\n` frames. They are documented with an event-stream catalog (event `type` → payload) on their resource pages, not with a response body:
+Eight routes stream a Clawboo-shaped **Server-Sent Events** response, not request/response. (The four
+MCP session channels at `GET /api/mcp/*` are SSE too, but they carry MCP JSON-RPC rather than a Clawboo
+event catalog; see [Tools & MCP](/reference/rest-api/tools-and-mcp).) They set `Content-Type: text/event-stream`, flush headers, and emit `data: <json>\n\n` frames (the three live-tail routes prefix each persisted row with an `id:` cursor line, and the two chat streams add named `event:` frames on top). They are documented with an event-stream catalog (event `type` → payload) on their resource pages, not with a response body:
 
-| Route                                                                           | Resource page                                          |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `POST /api/system/install-openclaw`, `POST /api/system/gateway` (start/restart) | [System API](/reference/rest-api/system)               |
-| `POST /api/runtimes/:id/install`                                                | [Runtimes API](/reference/rest-api/runtimes)           |
-| `GET /api/obs/stream`                                                           | [Observability API](/reference/rest-api/observability) |
+| Route                                                                                                           | Resource page                                          |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `POST /api/system/install-openclaw`, `POST /api/system/gateway` (start/restart), `POST /api/system/self-update` | [System API](/reference/rest-api/system)               |
+| `POST /api/runtimes/:id/install`, `POST /api/auth/cli-login/:tool`                                              | [Runtimes API](/reference/rest-api/runtimes)           |
+| `GET /api/agents/:agentId/chat/stream`                                                                          | [Agents API](/reference/rest-api/agents)               |
+| `GET /api/teams/:id/chat/stream`                                                                                | [Teams API](/reference/rest-api/teams)                 |
+| `GET /api/obs/stream`                                                                                           | [Observability API](/reference/rest-api/observability) |
 
 ## Route index
 
-141 routes across 13 resource groups: **61 GET · 56 POST · 11 DELETE · 8 PATCH · 5 PUT**. Each group has a dedicated reference page.
+148 routes across 13 resource groups: **64 GET · 60 POST · 11 DELETE · 8 PATCH · 5 PUT**. Each group has a dedicated reference page.
 
-| Resource page                                      | Routes | What it covers                                                                                |
-| -------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------- |
-| [Settings & health](/reference/rest-api/settings)  | 4      | `/api/settings`, `/api/health`, `/api/health/recheck`                                         |
-| [Agents](/reference/rest-api/agents)               | 14     | `/api/agents*`: the registry of record, files, sessions, sync, model, 1:1 chat                |
-| [Teams](/reference/rest-api/teams)                 | 16     | `/api/teams*` (incl. chat + activity), `/api/team-rules/:teamId`, `/api/team-chat*`           |
-| [Board](/reference/rest-api/board)                 | 16     | `/api/board*`: tasks, claim, comments, executions, deps, worktree workspace                   |
-| [Runtimes](/reference/rest-api/runtimes)           | 15     | `/api/runtimes*`, `/api/providers*`, `/api/onboarding/*`                                      |
-| [Memory](/reference/rest-api/memory)               | 4      | `/api/memory*`: search, save, browse, provider                                                |
-| [Tools & MCP](/reference/rest-api/tools-and-mcp)   | 17     | `/api/tools*`, `/api/mcp/*` (the four MCP transports + attach config)                         |
-| [Governance](/reference/rest-api/governance)       | 7      | `/api/governance/*`, `/api/approvals`                                                         |
-| [Capabilities](/reference/rest-api/capabilities)   | 2      | `/api/capabilities`, `/api/capabilities/:action`                                              |
-| [Observability](/reference/rest-api/observability) | 8      | `/api/obs/*` (incl. SSE), `/api/eval/smoke`                                                   |
-| [Schedules](/reference/rest-api/schedules)         | 5      | `/api/schedules*`: the unified Routines + Gateway-cron surface                                |
-| [System](/reference/rest-api/system)               | 9      | `/api/system/*`: status, install, configure, auto-configure, gateway, models, device pairing  |
-| [Misc](/reference/rest-api/misc)                   | 24     | cost-records, chat-history, graph-layout, personality, skills, exec-settings, fleet, boo-zero |
+| Resource page                                      | Routes | What it covers                                                                                                          |
+| -------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------- |
+| [Settings & health](/reference/rest-api/settings)  | 4      | `/api/settings`, `/api/health`, `/api/health/recheck`                                                                   |
+| [Agents](/reference/rest-api/agents)               | 14     | `/api/agents*`: the registry of record, files, sessions, sync, model, 1:1 chat                                          |
+| [Teams](/reference/rest-api/teams)                 | 16     | `/api/teams*` (incl. chat + activity), `/api/team-rules/:teamId`, `/api/team-chat*`                                     |
+| [Board](/reference/rest-api/board)                 | 16     | `/api/board*`: tasks, claim, comments, executions, deps, worktree workspace                                             |
+| [Runtimes](/reference/rest-api/runtimes)           | 18     | `/api/runtimes*`, `/api/providers*`, `/api/onboarding/*`, `/api/auth/cli-login/:tool`                                   |
+| [Memory](/reference/rest-api/memory)               | 4      | `/api/memory*`: search, save, browse, provider                                                                          |
+| [Tools & MCP](/reference/rest-api/tools-and-mcp)   | 17     | `/api/tools*`, `/api/mcp/*` (the four MCP transports + attach config)                                                   |
+| [Governance](/reference/rest-api/governance)       | 7      | `/api/governance/*`, `/api/approvals`                                                                                   |
+| [Capabilities](/reference/rest-api/capabilities)   | 2      | `/api/capabilities`, `/api/capabilities/:action`                                                                        |
+| [Observability](/reference/rest-api/observability) | 8      | `/api/obs/*` (incl. SSE), `/api/eval/smoke`                                                                             |
+| [Schedules](/reference/rest-api/schedules)         | 5      | `/api/schedules*`: the unified Routines + Gateway-cron surface                                                          |
+| [System](/reference/rest-api/system)               | 11     | `/api/system/*`: status, install, configure, auto-configure, gateway, models, device pairing, self-version, self-update |
+| [Misc](/reference/rest-api/misc)                   | 26     | cost-records, chat-history, graph-layout, personality, skills, exec-settings, fleet, boo-zero                           |
 
 <Note>
-The route counts above sum to 141 and partition the full surface; every registered route belongs to exactly one resource page. The "Misc" page is the catch-all for the smaller UI-backing resources that do not warrant their own page.
+The route counts above sum to 148, matching the router exactly; every registered route belongs to one resource page. The "Misc" page is the catch-all for the smaller UI-backing resources that do not warrant their own page.
 </Note>
 
 ## See also
 
 - [Settings & health API](/reference/rest-api/settings), the one liveness surface that works with the Gateway down
-- [System API](/reference/rest-api/system), OpenClaw install/configure/gateway lifecycle (SSE)
+- [System API](/reference/rest-api/system), OpenClaw install/configure/gateway lifecycle (SSE), plus Clawboo's own self-version and self-update
 - [Runtimes API](/reference/rest-api/runtimes), the gold-standard per-route reference for this group
 - [Gateway & events](/concepts/gateway-and-events), the `/api/gateway/ws` proxy + the Bridge→Policy→Handler pipeline
 - [Security](/operating/security), access gate, device auth, redaction, exposing safely

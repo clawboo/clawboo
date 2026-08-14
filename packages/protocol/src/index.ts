@@ -13,8 +13,6 @@ const THINKING_TAG_RE = /<\s*\/?\s*(think(?:ing)?|analysis)\s*>/gi
 
 const ASSISTANT_PREFIX_RE = /^(?:\[\[reply_to_current\]\]|\[reply_to_current\])\s*(?:\|\s*)?/i
 
-const UI_METADATA_PREFIX_RE =
-  /^(?:Project path:|Workspace path:|A new session was started via \/new or \/reset)/i
 const HEARTBEAT_PROMPT_RE = /^Read HEARTBEAT\.md if it exists\b/i
 const HEARTBEAT_PATH_RE = /Heartbeat file path:/i
 
@@ -25,11 +23,6 @@ const RESET_PROMPT_RE = /^A new session was started via \/new or \/reset[\s\S]*?
 const SYSTEM_EVENT_BLOCK_RE = /^System:\s*\[[^\]]+\][\s\S]*?\n\s*\n/
 
 // ─── WeakMap caches (module-level, not exported) ──────────────────────────────
-
-const textCache = new WeakMap<object, string | null>()
-const thinkingCache = new WeakMap<object, string | null>()
-
-// ─── Parsed message types ─────────────────────────────────────────────────────
 
 export interface ToolCall {
   id?: string
@@ -72,11 +65,7 @@ export type TranscriptEntryKind = 'meta' | 'user' | 'assistant' | 'thinking' | '
 export type TranscriptEntryRole = 'user' | 'assistant' | 'tool' | 'system' | 'other'
 
 export type TranscriptEntrySource =
-  | 'local-send'
-  | 'runtime-chat'
-  | 'runtime-agent'
-  | 'history'
-  | 'legacy'
+  'local-send' | 'runtime-chat' | 'runtime-agent' | 'history' | 'legacy'
 
 export type TranscriptEntry = {
   entryId: string
@@ -89,39 +78,14 @@ export type TranscriptEntry = {
   timestampMs: number | null
   sequenceKey: number
   confirmed: boolean
+  /**
+   * Opaque per-entry id. NOT a content hash and not comparable across entries —
+   * every producer mints a fresh UUID (or reuses the `entryId`). Dedup keys off
+   * `entryId` and, in the web store, off an explicit content signature; nothing
+   * derives meaning from this field. Treat it as a spare slot, not an identity.
+   */
   fingerprint: string
 }
-
-export type TranscriptAppendMeta = {
-  source?: TranscriptEntrySource
-  runId?: string | null
-  sessionKey?: string
-  timestampMs?: number | null
-  role?: TranscriptEntryRole
-  kind?: TranscriptEntryKind
-  entryId?: string
-  confirmed?: boolean
-}
-
-export type BuildTranscriptEntriesFromLinesParams = {
-  lines: string[]
-  sessionKey: string
-  source: TranscriptEntrySource
-  runId?: string | null
-  startSequence?: number
-  defaultTimestampMs?: number | null
-  confirmed?: boolean
-  entryIdPrefix?: string
-}
-
-export type MergeTranscriptEntriesResult = {
-  entries: TranscriptEntry[]
-  mergedCount: number
-  confirmedCount: number
-  conflictCount: number
-}
-
-// ─── Agent file definitions ───────────────────────────────────────────────────
 
 export const AGENT_FILE_NAMES = [
   'AGENTS.md',
@@ -138,19 +102,6 @@ export type AgentFileName = (typeof AGENT_FILE_NAMES)[number]
 export interface AgentFileMeta {
   title: string
   hint: string
-}
-
-export type AgentFileState = {
-  content: string
-  exists: boolean
-}
-
-// Backward-compat shape
-export interface AgentFileDef {
-  filename: string
-  label: string
-  description: string
-  editable: boolean
 }
 
 export const AGENT_FILE_META: Record<AgentFileName, AgentFileMeta> = {
@@ -175,54 +126,6 @@ export const AGENT_FILE_PLACEHOLDERS: Record<AgentFileName, string> = {
 
 export const isAgentFileName = (value: string): value is AgentFileName =>
   AGENT_FILE_NAMES.includes(value as AgentFileName)
-
-export const createAgentFilesState = (): Record<AgentFileName, AgentFileState> =>
-  Object.fromEntries(
-    AGENT_FILE_NAMES.map((name) => [name, { content: '', exists: false }]),
-  ) as Record<AgentFileName, AgentFileState>
-
-// Backward-compat: keep AGENT_FILES alongside new exports
-export const AGENT_FILES: AgentFileDef[] = [
-  {
-    filename: 'SOUL.md',
-    label: 'Soul',
-    description: 'Agent personality and behavior',
-    editable: true,
-  },
-  {
-    filename: 'IDENTITY.md',
-    label: 'Identity',
-    description: 'Agent identity and role',
-    editable: true,
-  },
-  {
-    filename: 'TOOLS.md',
-    label: 'Tools',
-    description: 'Available tools and policies',
-    editable: true,
-  },
-  {
-    filename: 'AGENTS.md',
-    label: 'Agents',
-    description: 'Multi-agent routing and bindings',
-    editable: true,
-  },
-  {
-    filename: 'USER.md',
-    label: 'User',
-    description: 'User context and preferences',
-    editable: true,
-  },
-  {
-    filename: 'HEARTBEAT.md',
-    label: 'Heartbeat',
-    description: 'Wake schedule and targets',
-    editable: true,
-  },
-  { filename: 'MEMORY.md', label: 'Memory', description: 'Persistent memory', editable: false },
-]
-
-// ─── Text extraction helpers ──────────────────────────────────────────────────
 
 type MessageRecord = Record<string, unknown>
 
@@ -339,16 +242,6 @@ export const extractText = (message: unknown): string | null => {
   return null
 }
 
-export const extractTextCached = (message: unknown): string | null => {
-  if (!message || typeof message !== 'object') return extractText(message)
-  const obj = message as object
-  if (textCache.has(obj)) return textCache.get(obj) ?? null
-  const value = extractText(message)
-  textCache.set(obj, value)
-  return value
-}
-
-// Closed-tag only (no unclosed-open-tag streaming fallback)
 export function extractThinkingFromTaggedText(text: string): string {
   if (!text) return ''
   let result = ''
@@ -447,29 +340,6 @@ export const extractThinking = (message: unknown): string | null => {
   const tagged = extractThinkingFromTaggedStream(rawText)
   return tagged || null
 }
-
-export const extractThinkingCached = (message: unknown): string | null => {
-  if (!message || typeof message !== 'object') return extractThinking(message)
-  const obj = message as object
-  if (thinkingCache.has(obj)) return thinkingCache.get(obj) ?? null
-  const value = extractThinking(message)
-  thinkingCache.set(obj, value)
-  return value
-}
-
-export const formatThinkingMarkdown = (text: string): string => {
-  const trimmed = text.trim()
-  if (!trimmed) return ''
-  const lines = trimmed
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => `_${line}_`)
-  if (lines.length === 0) return ''
-  return `${TRACE_MARKDOWN_PREFIX}\n${lines.join('\n\n')}`
-}
-
-// ─── Tool extraction ──────────────────────────────────────────────────────────
 
 type ToolCallRecord = { id?: string; name?: string; arguments?: unknown }
 
@@ -588,11 +458,6 @@ export const isToolMarkdown = (line: string): boolean =>
   line.startsWith(TOOL_CALL_PREFIX) || line.startsWith(TOOL_RESULT_PREFIX)
 export const isMetaMarkdown = (line: string): boolean => line.startsWith(META_PREFIX)
 
-export const stripTraceMarkdown = (line: string): string => {
-  if (!isTraceMarkdown(line)) return line
-  return line.slice(TRACE_MARKDOWN_PREFIX.length).trimStart()
-}
-
 export const parseToolMarkdown = (line: string): ParsedToolMarkdown => {
   const kind = line.startsWith(TOOL_RESULT_PREFIX) ? 'result' : 'call'
   const prefix = kind === 'result' ? TOOL_RESULT_PREFIX : TOOL_CALL_PREFIX
@@ -603,10 +468,6 @@ export const parseToolMarkdown = (line: string): ParsedToolMarkdown => {
     label: labelLine?.trim() || (kind === 'result' ? 'Tool result' : 'Tool call'),
     body: rest.join('\n').trim(),
   }
-}
-
-export const buildAgentInstruction = (params: { message: string }): string => {
-  return params.message.trim()
 }
 
 export const formatMetaMarkdown = (meta: {
@@ -660,7 +521,6 @@ export const stripUiMetadata = (text: string): string => {
   return stripEnvelope(cleaned)
 }
 
-export const isUiMetadataPrefix = (text: string): boolean => UI_METADATA_PREFIX_RE.test(text)
 export const isHeartbeatPrompt = (text: string): boolean => {
   if (!text) return false
   const trimmed = text.trim()
@@ -721,330 +581,3 @@ export function parseMessage(raw: unknown): ParsedMessage {
 }
 
 // ─── Transcript v2 utilities ──────────────────────────────────────────────────
-
-const BUCKET_MS = 2_000
-
-const normalizeComparableText = (value: string): string => value.replace(/\s+/g, ' ').trim()
-
-export const fnv1a = (value: string): string => {
-  let hash = 0x811c9dc5
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0')
-}
-
-const toBucket = (timestampMs: number | null): string => {
-  if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs)) return 'none'
-  return String(Math.floor(timestampMs / BUCKET_MS))
-}
-
-const resolveKindRoleFromLine = (
-  line: string,
-  overrides?: { kind?: TranscriptEntryKind; role?: TranscriptEntryRole },
-): { kind: TranscriptEntryKind; role: TranscriptEntryRole } => {
-  if (overrides?.kind && overrides?.role) {
-    return { kind: overrides.kind, role: overrides.role }
-  }
-  if (overrides?.kind) {
-    const roleByKind: Record<TranscriptEntryKind, TranscriptEntryRole> = {
-      meta: 'other',
-      user: 'user',
-      assistant: 'assistant',
-      thinking: 'assistant',
-      tool: 'tool',
-    }
-    return { kind: overrides.kind, role: overrides.role ?? roleByKind[overrides.kind] }
-  }
-  if (isMetaMarkdown(line)) {
-    const parsed = parseMetaMarkdown(line)
-    const role = parsed?.role ?? overrides?.role ?? 'other'
-    return { kind: 'meta', role }
-  }
-  if (line.trim().startsWith('>')) {
-    return { kind: 'user', role: 'user' }
-  }
-  if (isTraceMarkdown(line)) {
-    return { kind: 'thinking', role: 'assistant' }
-  }
-  if (isToolMarkdown(line)) {
-    return { kind: 'tool', role: 'tool' }
-  }
-  return { kind: overrides?.kind ?? 'assistant', role: overrides?.role ?? 'assistant' }
-}
-
-const resolveTimestampForLine = (
-  line: string,
-  fallback: number | null,
-  explicit?: number | null,
-): number | null => {
-  if (typeof explicit === 'number' && Number.isFinite(explicit)) return explicit
-  if (isMetaMarkdown(line)) {
-    const parsed = parseMetaMarkdown(line)
-    if (parsed && typeof parsed.timestamp === 'number') return parsed.timestamp
-  }
-  return fallback
-}
-
-const buildFingerprint = (entry: {
-  role: TranscriptEntryRole
-  kind: TranscriptEntryKind
-  text: string
-  sessionKey: string
-  runId: string | null
-  timestampMs: number | null
-}): string => {
-  const normalized = normalizeComparableText(entry.text)
-  const seed = [
-    entry.role,
-    entry.kind,
-    normalized,
-    entry.sessionKey.trim(),
-    entry.runId?.trim() ?? '',
-    toBucket(entry.timestampMs),
-  ].join('|')
-  return fnv1a(seed)
-}
-
-const hasNumericTimestamp = (value: number | null): value is number =>
-  typeof value === 'number' && Number.isFinite(value)
-
-const compareEntries = (a: TranscriptEntry, b: TranscriptEntry): number => {
-  const aHasTs = hasNumericTimestamp(a.timestampMs)
-  const bHasTs = hasNumericTimestamp(b.timestampMs)
-  if (aHasTs && bHasTs) {
-    const aTs = a.timestampMs as number
-    const bTs = b.timestampMs as number
-    if (aTs !== bTs) return aTs - bTs
-  }
-  return a.sequenceKey - b.sequenceKey
-}
-
-const withUniqueEntryIds = (entries: TranscriptEntry[]): TranscriptEntry[] => {
-  const next: TranscriptEntry[] = []
-  const seen = new Set<string>()
-  for (const entry of entries) {
-    if (seen.has(entry.entryId)) continue
-    seen.add(entry.entryId)
-    next.push(entry)
-  }
-  return next
-}
-
-export const sortTranscriptEntries = (entries: TranscriptEntry[]): TranscriptEntry[] => {
-  const deduped = withUniqueEntryIds(entries)
-  return [...deduped].sort(compareEntries)
-}
-
-export const buildOutputLinesFromTranscriptEntries = (entries: TranscriptEntry[]): string[] =>
-  entries.map((entry) => entry.text)
-
-export const areTranscriptEntriesEqual = (
-  left: TranscriptEntry[],
-  right: TranscriptEntry[],
-): boolean => {
-  if (left.length !== right.length) return false
-  for (let i = 0; i < left.length; i += 1) {
-    const a = left[i]
-    const b = right[i]
-    if (!a || !b) return false
-    if (a.entryId !== b.entryId) return false
-    if (a.text !== b.text) return false
-    if (a.timestampMs !== b.timestampMs) return false
-    if (a.confirmed !== b.confirmed) return false
-  }
-  return true
-}
-
-export const createTranscriptEntryFromLine = (params: {
-  line: string
-  sessionKey: string
-  source: TranscriptEntrySource
-  sequenceKey: number
-  runId?: string | null
-  timestampMs?: number | null
-  fallbackTimestampMs?: number | null
-  role?: TranscriptEntryRole
-  kind?: TranscriptEntryKind
-  entryId?: string
-  confirmed?: boolean
-}): TranscriptEntry | null => {
-  const text = params.line
-  if (!text) return null
-  const sessionKey = params.sessionKey.trim()
-  if (!sessionKey) return null
-  const resolved = resolveKindRoleFromLine(text, { kind: params.kind, role: params.role })
-  const timestampMs = resolveTimestampForLine(
-    text,
-    params.fallbackTimestampMs ?? null,
-    params.timestampMs,
-  )
-  const runId = params.runId?.trim() || null
-  const fingerprint = buildFingerprint({
-    role: resolved.role,
-    kind: resolved.kind,
-    text,
-    sessionKey,
-    runId,
-    timestampMs,
-  })
-  const entryId =
-    params.entryId?.trim() ||
-    `${params.source}:${sessionKey}:${params.sequenceKey}:${resolved.kind}:${fingerprint}`
-  return {
-    entryId,
-    role: resolved.role,
-    kind: resolved.kind,
-    text,
-    sessionKey,
-    runId,
-    source: params.source,
-    timestampMs,
-    sequenceKey: params.sequenceKey,
-    confirmed: params.confirmed ?? params.source === 'history',
-    fingerprint,
-  }
-}
-
-export const buildTranscriptEntriesFromLines = ({
-  lines,
-  sessionKey,
-  source,
-  runId,
-  startSequence = 0,
-  defaultTimestampMs = null,
-  confirmed,
-  entryIdPrefix,
-}: BuildTranscriptEntriesFromLinesParams): TranscriptEntry[] => {
-  const entries: TranscriptEntry[] = []
-  let cursor = startSequence
-  let activeTimestamp = defaultTimestampMs
-  for (const line of lines) {
-    const parsedMeta = isMetaMarkdown(line) ? parseMetaMarkdown(line) : null
-    if (parsedMeta && typeof parsedMeta.timestamp === 'number') {
-      activeTimestamp = parsedMeta.timestamp
-    }
-    const entry = createTranscriptEntryFromLine({
-      line,
-      sessionKey,
-      source,
-      runId,
-      sequenceKey: cursor,
-      timestampMs: parsedMeta?.timestamp ?? undefined,
-      fallbackTimestampMs: activeTimestamp,
-      role: parsedMeta?.role,
-      kind: parsedMeta ? 'meta' : undefined,
-      confirmed,
-      entryId: entryIdPrefix ? `${entryIdPrefix}:${cursor}:${fnv1a(line)}` : undefined,
-    })
-    cursor += 1
-    if (!entry) continue
-    entries.push(entry)
-  }
-  return entries
-}
-
-const resolveCandidateTimestampDelta = (
-  candidate: TranscriptEntry,
-  target: TranscriptEntry,
-): number => {
-  if (!hasNumericTimestamp(candidate.timestampMs) || !hasNumericTimestamp(target.timestampMs)) {
-    return Number.MAX_SAFE_INTEGER
-  }
-  return Math.abs(candidate.timestampMs - target.timestampMs)
-}
-
-const findHistoryMatchCandidateIndex = (
-  existing: TranscriptEntry[],
-  historyEntry: TranscriptEntry,
-  matchedCandidateIndexes: Set<number>,
-): { index: number; conflict: boolean } | null => {
-  const normalizedTarget = normalizeComparableText(historyEntry.text)
-  const candidates: number[] = []
-  for (let i = 0; i < existing.length; i += 1) {
-    const candidate = existing[i]
-    if (!candidate) continue
-    if (matchedCandidateIndexes.has(i)) continue
-    if (candidate.sessionKey !== historyEntry.sessionKey) continue
-    if (candidate.kind !== historyEntry.kind || candidate.role !== historyEntry.role) continue
-    if (normalizeComparableText(candidate.text) !== normalizedTarget) continue
-    candidates.push(i)
-  }
-  if (candidates.length === 0) return null
-  if (candidates.length === 1) return { index: candidates[0]!, conflict: false }
-  let bestIndex = candidates[0]!
-  let bestDelta = resolveCandidateTimestampDelta(existing[bestIndex]!, historyEntry)
-  for (let i = 1; i < candidates.length; i += 1) {
-    const index = candidates[i]!
-    const candidate = existing[index]!
-    const delta = resolveCandidateTimestampDelta(candidate, historyEntry)
-    if (delta < bestDelta) {
-      bestIndex = index
-      bestDelta = delta
-      continue
-    }
-    if (delta === bestDelta && candidate.sequenceKey < existing[bestIndex]!.sequenceKey) {
-      bestIndex = index
-    }
-  }
-  return { index: bestIndex, conflict: true }
-}
-
-export const mergeTranscriptEntriesWithHistory = (params: {
-  existingEntries: TranscriptEntry[]
-  historyEntries: TranscriptEntry[]
-}): MergeTranscriptEntriesResult => {
-  const next = [...params.existingEntries]
-  const matchedCandidateIndexes = new Set<number>()
-  const byEntryId = new Map<string, number>()
-  for (let i = 0; i < next.length; i += 1) {
-    byEntryId.set(next[i]!.entryId, i)
-  }
-  let mergedCount = 0
-  let confirmedCount = 0
-  let conflictCount = 0
-
-  for (const historyEntry of params.historyEntries) {
-    const existingById = byEntryId.get(historyEntry.entryId)
-    if (typeof existingById === 'number') {
-      const current = next[existingById]!
-      next[existingById] = {
-        ...current,
-        confirmed: true,
-        timestampMs: historyEntry.timestampMs ?? current.timestampMs,
-      }
-      matchedCandidateIndexes.add(existingById)
-      continue
-    }
-
-    const matched = findHistoryMatchCandidateIndex(next, historyEntry, matchedCandidateIndexes)
-    if (matched) {
-      if (matched.conflict) conflictCount += 1
-      const current = next[matched.index]!
-      next[matched.index] = {
-        ...current,
-        confirmed: true,
-        timestampMs: historyEntry.timestampMs ?? current.timestampMs,
-        runId: current.runId ?? historyEntry.runId,
-      }
-      confirmedCount += 1
-      matchedCandidateIndexes.add(matched.index)
-      byEntryId.set(historyEntry.entryId, matched.index)
-      continue
-    }
-
-    const appendedIndex = next.length
-    next.push(historyEntry)
-    byEntryId.set(historyEntry.entryId, appendedIndex)
-    matchedCandidateIndexes.add(appendedIndex)
-    mergedCount += 1
-  }
-
-  return {
-    entries: sortTranscriptEntries(next),
-    mergedCount,
-    confirmedCount,
-    conflictCount,
-  }
-}

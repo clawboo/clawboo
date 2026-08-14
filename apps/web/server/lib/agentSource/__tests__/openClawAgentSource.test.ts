@@ -8,12 +8,12 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createDb, teams } from '@clawboo/db'
+import { agents, teams } from '@clawboo/db'
 import { GatewayResponseError } from '@clawboo/gateway-client'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getDbPath } from '../../db'
+import { getDb, resetDb } from '../../db'
 import {
   OpenClawAgentSource,
   type AgentListEntryLike,
@@ -110,7 +110,7 @@ class FakeGateway implements OpenClawClientLike {
 
 function makeSource(fake: FakeGateway): OpenClawAgentSource {
   return new OpenClawAgentSource({
-    getDbPath,
+    getDb,
     loadSettings: () => ({ gatewayUrl: 'ws://test:18789', gatewayToken: 'tok' }),
     makeClient: () => fake,
     connectOptions: () => ({}),
@@ -129,6 +129,13 @@ describe('OpenClawAgentSource', () => {
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
+    // Drop the process-wide memo and this fixture's own handle before the
+    // sandbox is removed — otherwise each test leaves a live SQLite handle
+    // behind (and Windows refuses to rm a dir that still holds an open file).
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     delete process.env['CLAWBOO_HOME']
@@ -167,7 +174,7 @@ describe('OpenClawAgentSource', () => {
 
     // Simulate clawboo-native edits (team assignment + personality) made by other
     // code paths AFTER the first sync.
-    const db = createDb(getDbPath())
+    const db = getDb()
     const now = Date.now()
     db.insert(teams)
       .values({
@@ -254,7 +261,7 @@ describe('OpenClawAgentSource', () => {
 
     // Seed the team the agent will join (agents.team_id has a real FK to teams).
     const now = Date.now()
-    createDb(getDbPath())
+    getDb()
       .insert(teams)
       .values({
         id: 'team-3',
@@ -296,7 +303,7 @@ describe('OpenClawAgentSource', () => {
   // ── register clawboo's shared MCP servers in the Gateway config ─────────────
   function makeSourceWithMcp(fake: FakeGateway, baseUrl: string | null): OpenClawAgentSource {
     return new OpenClawAgentSource({
-      getDbPath,
+      getDb,
       loadSettings: () => ({ gatewayUrl: 'ws://test:18789', gatewayToken: 'tok' }),
       makeClient: () => fake,
       connectOptions: () => ({}),
@@ -329,9 +336,7 @@ describe('OpenClawAgentSource', () => {
     expect(servers['clawboo-tasks']?.url).toContain('/api/mcp/tasks')
     // Anti-sub-agent enforcement: the sub-agent-spawning tools are denied at the
     // runtime level so a spawn-happy model can't bypass the team via sessions_spawn.
-    expect(merged.tools?.deny).toEqual(
-      expect.arrayContaining(['sessions_spawn', 'sessions_yield']),
-    )
+    expect(merged.tools?.deny).toEqual(expect.arrayContaining(['sessions_spawn', 'sessions_yield']))
     // TeamChat is DELIBERATELY NOT registered for OpenClaw (anti-spoof): a
     // process-wide URL can't carry a per-run author binding, so an unbound
     // team_chat_post tool would let an agent post as any author. OpenClaw's room

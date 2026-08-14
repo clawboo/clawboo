@@ -6,7 +6,6 @@
 import type { Request, Response } from 'express'
 
 import {
-  createDb,
   listBudgets,
   resumeBudget,
   resumeBudgetBody,
@@ -14,7 +13,7 @@ import {
   setBudgetLimit,
 } from '@clawboo/db'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 const SCOPES = ['agent', 'mission', 'team', 'tenant'] as const
 type ScopeName = (typeof SCOPES)[number]
@@ -23,7 +22,7 @@ const isScope = (v: unknown): v is ScopeName =>
 
 // GET /api/governance/budgets
 export function budgetsListGET(_req: Request, res: Response): void {
-  res.json({ budgets: listBudgets(createDb(getDbPath())) })
+  res.json({ budgets: listBudgets(getDb()) })
 }
 
 // POST /api/governance/budgets — { scope, scopeId, limitUsdCents, tenantId? } (set/raise a cap)
@@ -33,7 +32,7 @@ export function budgetsSetPOST(req: Request, res: Response): void {
     res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
     return
   }
-  res.json({ budget: setBudgetLimit(createDb(getDbPath()), parsed.data) })
+  res.json({ budget: setBudgetLimit(getDb(), parsed.data) })
 }
 
 // POST /api/governance/budgets/:scope/:scopeId/resume — human override / un-pause.
@@ -52,7 +51,7 @@ export function budgetsResumePOST(req: Request, res: Response): void {
     res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
     return
   }
-  const budget = resumeBudget(createDb(getDbPath()), scope, scopeId, parsed.data)
+  const budget = resumeBudget(getDb(), scope, scopeId, parsed.data)
   if (!budget) {
     res.status(404).json({ error: 'budget not found' })
     return

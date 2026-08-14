@@ -28,7 +28,7 @@ The number shortcuts cover the four sidebar work surfaces only: `Cmd/Ctrl+1` Atl
 
 ## The columns
 
-The board renders **seven columns**, one per task status, in lifecycle order:
+The board renders **seven status columns**, one per task status, in lifecycle order:
 
 | Column      | Status        | What it means                                    |
 | ----------- | ------------- | ------------------------------------------------ |
@@ -40,7 +40,11 @@ The board renders **seven columns**, one per task status, in lifecycle order:
 | Done        | `done`        | Terminal, completed                              |
 | Cancelled   | `cancelled`   | Terminal, abandoned                              |
 
+Ahead of those sits a **Needs approval** column, always the first column on the board. It is scoped to the team filter, collapses to a thin rail when there is nothing pending, and auto-expands the moment a request arrives. It is fed by its own poll rather than by `GET /api/board`, so a board outage never hides a pending, time-sensitive gate. See [Approvals](/using/approvals).
+
 Each column shows its label and a live count of the tasks in it. The panel header shows a total task count (`{N} tasks`) and polls `GET /api/board` every five seconds, so status changes and new tasks appear without a manual refresh. A **Refresh** button forces an immediate re-fetch.
+
+Those reads overlap on purpose (the poll, the Refresh button, and the reconcile that follows a manual create all share one path), so they are **sequenced**: a response may only update the board while it is still the newest read and no local change has been committed since it was issued. A read that resolves out of order is discarded and the next poll reconciles instead, so a card you just created or dragged is never briefly reverted by a request that was already in flight.
 
 Because the board is a live projection of agent activity — cards are created and moved by agents as they work — a one-line hint under the header (_"AI agents continuously create and move work. You can also manage tasks manually."_) sets that expectation up front. The manual path is real, though, and there are three ways to drive the board by hand: a **New task** button in the header opens a composer, each task's status is editable from its [detail drawer](#the-task-detail-drawer), and you can **drag a card between columns** (see below).
 
@@ -54,7 +58,7 @@ A genuinely empty board (loaded fine, zero tasks) shows one **"No tasks yet"** e
 
 ## Creating a task manually
 
-The header's **New task** button opens a small composer for adding work to the board by hand — the human counterpart to agent delegation. It collects a **title** (required), an optional **description**, a **team** (prefilled from the active team filter), and an initial **status** (**To do** by default, or **Backlog** for triage), then writes it through `POST /api/board`. On success the task appears on the board immediately (optimistically, then reconciled by the next poll) and a toast confirms it; a failed write keeps the composer open and toasts the error. Once on the board, a manually-created task is indistinguishable from a delegated one — an agent can claim and run it normally.
+The header's **New task** button opens a small composer for adding work to the board by hand — the human counterpart to agent delegation. It collects a **title** (required), an optional **description**, a **team** (prefilled from the active team filter), and an initial **status** (**To do** by default, or **Backlog** for triage), then writes it through `POST /api/board`. On success the task appears on the board immediately (optimistically, then reconciled by the next poll) and a toast confirms it; a poll that was already in flight when the task was created is discarded rather than blanking the new card. A failed write keeps the composer open and toasts the error. Once on the board, a manually-created task is indistinguishable from a delegated one — an agent can claim and run it normally.
 
 ## Moving a task by drag-and-drop
 
@@ -62,7 +66,7 @@ Each card has a **grip handle** (top-right, visible on hover or keyboard focus).
 
 - **Only legal moves are offered.** Mid-drag, columns the card can't legally transition to (per the [state machine](/concepts/the-board)) are dimmed and won't accept a drop; terminal cards (`done` / `cancelled`) and off-list **Other** cards aren't draggable at all.
 - **The agent-release guard still applies.** Dragging an _assigned_ task to **To do** — which unassigns its agent — asks for confirmation first, exactly as the drawer editor does.
-- **Optimistic + poll-safe.** The card moves instantly and is reconciled against the server; a rejected move (e.g. a `→ done` verification gate) rolls back with a toast, and an in-flight move isn't reverted by the five-second poll.
+- **Optimistic + poll-safe.** The card moves instantly and is reconciled against the server; a rejected move (e.g. a `→ done` verification gate) rolls back with a toast. Neither an in-flight move nor a just-committed one is reverted by the five-second poll, including a poll already in flight when the move landed.
 - **Keyboard and touch.** Focus a card's handle and press **Space** to pick it up, **arrow keys** to choose a column, **Space** to drop, **Escape** to cancel; touch drag is supported too.
 
 Clicking a card (rather than its handle) still opens the detail drawer — a click and a drag don't conflict.
@@ -73,7 +77,7 @@ Each task is a card showing its title plus a row of badges:
 
 - **Runtime badge**: the task's `assigneeRuntime` (the [runtime](/appendices/glossary) that owns the work), defaulting to `openclaw` when unset.
 - **Verification badge**: present only once a [verification](/concepts/verification) verdict is stored. The card parses the task's `verification` JSON and renders the verdict: `pass` (green), `fail` (red), or `debt` for `completed_with_debt` (amber).
-- **Cost**: the task's `costUsd`, formatted to three decimals (e.g. `$0.012`), shown only when a cost is recorded.
+- **Cost**: the task's `costUsd`, shown only when a cost is recorded. An exactly-zero cost reads `$0.000`; a sub-cent cost keeps four decimals (`$0.0004`) so a real charge is never rounded away; a cost of one cent or more shows cents (`$0.42`).
 - **Sub badge**: a "sub" marker when the task has a `parentTaskId` (it was spawned by a delegation).
 
 Click any card to open its detail drawer.
@@ -98,7 +102,7 @@ The drawer sections, top to bottom:
 
 The task's core fields: **Status**, **Assignee** (`assigneeAgentId`), **Runtime** (`assigneeRuntime`, default `openclaw`), **Cost** (`costUsd` to four decimals), and **Parent** (a truncated `parentTaskId`, shown only for subtasks).
 
-**Status** is an inline editor, not just a label: a dropdown that offers only the transitions the [state machine](/concepts/the-board) permits from the current status (so it never lets you pick a move the server would reject), writes through `PATCH /api/board/:taskId`, and updates optimistically — rolling back and toasting if the write is refused, with the message naming the cause (an illegal transition vs. the verification gate). Terminal tasks (`done` / `cancelled`) have no legal moves, so the control locks.
+**Status** is an inline editor, not just a label: a dropdown that offers only the transitions the [state machine](/concepts/the-board) permits from the current status (so it never lets you pick a move the server would reject), writes through `PATCH /api/board/:taskId`, and updates optimistically, rolling back and toasting if the write is refused, with the message naming the cause (an illegal transition vs. the verification gate). A committed change also moves the card to its new column on the board immediately rather than waiting for the five-second poll; it goes through the same shared commit path as [drag-and-drop](#moving-a-task-by-drag-and-drop), so a read already in flight can't snap the card back. Releasing a task to **To do** additionally clears its assignee, runtime, and stored verdict, so the card's verification badge disappears and its runtime badge falls back to `openclaw`, matching what the server writes. Terminal tasks (`done` / `cancelled`) have no legal moves, so the control locks.
 
 When a `→ done` is refused **specifically by the [verification](/concepts/verification) gate** (the task carries a non-promotable verdict), the editor doesn't dead-end: it offers a **"Complete anyway"** confirmation that re-submits with the server's `humanOverride`. That's the supported path for a human shipping despite a non-promotable verdict — and, like on the server, the override is **recorded in the audit log**. An _illegal_ transition can't be overridden this way (the override only bypasses the verification gate, not the state machine). This lives in the shared status-mutation path, so it works the same whether you change status from this drawer or by [dragging a card](#moving-a-task-by-drag-and-drop) to the Done column.
 

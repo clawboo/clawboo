@@ -1,6 +1,6 @@
 ---
 title: The agent model
-description: What a Boo is, how Boo Zero leads, and how a runtime-agnostic agent record maps onto the five runtime classes.
+description: What a Boo is, how Boo Zero leads, and how a runtime-agnostic agent record maps onto the five runtimes and the three runtime classes.
 ---
 
 A **Boo** is a single agent in Clawboo. Concretely it is an `AgentRecord`, a runtime-agnostic row in the agent [registry of record](/appendices/glossary). The record says _who exists_: a stable id, a display name, a status, an optional team, and, critically, a `runtime` field and a `participantKind`. The record does **not** contain the agent's execution loop. That belongs to a [runtime](/appendices/glossary), reached through the uniform `RuntimeAdapter` trait. The same Boo can be backed by any of Clawboo's five runtimes, and the team layer never branches on which one.
@@ -83,7 +83,7 @@ Boo Zero's identity is determined at hydration from live fleet data, so it can c
 Every `AgentRecord` and every `RuntimeAdapter` carries a `participantKind` of `'agent' | 'human'`. Today every participant is an `agent`; nothing in the shipped code branches on this field. It is a deliberate, reserved seam so that a person can later become a first-class task assignee, delegation target, or approver behind the **same** interface, without baking "executor == automated agent" into the trait, the board's assignee model, or the lifecycle event stream.
 
 <Info>
-`participantKind: 'human'` is a **future seam, not a shipped feature** in v0.3.0. There is no human-participant path yet. The field exists so the surrounding machinery (registry, board, events) doesn't have to be rewritten when one is added.
+`participantKind: 'human'` is a **future seam, not a shipped feature** in v0.3.1. There is no human-participant path yet. The field exists so the surrounding machinery (registry, board, events) doesn't have to be rewritten when one is added.
 </Info>
 
 ## How a Boo relates to a runtime
@@ -133,12 +133,12 @@ The cost is indirection: a Boo and its runtime are two layers, and a change to a
 ## Boundaries and non-goals
 
 - **A Boo is not its runtime.** The record carries a `runtime` tag and execution config, but the execution loop, the live session, and the runtime's private on-disk state belong to the runtime. The board references the agent by id; it does not own agent identity or session state.
-- **`participantKind: 'human'` is dormant.** No human-participant path exists in v0.3.0. The field is a seam.
+- **`participantKind: 'human'` is dormant.** No human-participant path exists in v0.3.1. The field is a seam.
 - **`tenantId` is dormant.** Every record carries a `tenantId`, but there is no active per-tenant scoping, a single implicit tenant today.
 - **Boo Zero is identified, not declared.** It is whatever the three-step priority resolves to at hydration, not a persisted leader flag. Change the runtime's default agent and Boo Zero can change.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

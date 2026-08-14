@@ -6,11 +6,11 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createApproval, createDb, recordSpend, resolveApproval } from '@clawboo/db'
+import { createApproval, recordSpend, resolveApproval } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDbPath } from '../../lib/db'
+import { getDb, resetDb } from '../../lib/db'
 import { budgetsListGET, budgetsResumePOST, budgetsSetPOST } from '../budgets'
 import { delegationApprovalPOST } from '../delegationApproval'
 import { governanceAuditGET } from '../governanceAudit'
@@ -44,6 +44,9 @@ describe('governance REST', () => {
     process.env['HOME'] = home
   })
   afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
@@ -90,7 +93,7 @@ describe('governance REST', () => {
       req({ body: { scope: 'agent', scopeId: 'over', limitUsdCents: 100, mode: 'cap' } }),
       mockRes().res,
     )
-    const db = createDb(getDbPath())
+    const db = getDb()
     recordSpend(db, 'agent', 'over', 150) // spent 150 > 100 → paused
 
     const bare = mockRes()
@@ -115,7 +118,7 @@ describe('governance REST', () => {
 
     // A prior allow_always for (leader, delegate:code) makes the gate resolve
     // immediately — no blocking wait (proves the sticky-scope short-circuit).
-    const db = createDb(getDbPath())
+    const db = getDb()
     const a = createApproval(db, { toolName: 'delegate:code', agentId: 'leader1', args: {} })
     resolveApproval(db, a.id, 'allow_always')
     const sticky = mockRes()

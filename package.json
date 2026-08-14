@@ -7,40 +7,47 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "test:coverage": "turbo test -- --coverage --coverage.reporter=text",
     "e2e": "playwright test",
     "assemble": "pnpm build && bash scripts/assemble-cli.sh",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "prepare": "husky",
     "ingest:marketplace": "tsx scripts/ingest-marketplace-content.ts",
+    "ingest:manifest": "tsx scripts/write-ingest-manifest.ts",
     "verify:ingest": "tsx scripts/verify-ingest.ts",
+    "verify:catalog": "tsx scripts/verify-catalog.ts",
+    "check:docs": "pnpm --filter @clawboo/docs check-frontmatter",
     "test:clean-install": "node scripts/test-clean-install.mjs",
-    "prepublish:check": "pnpm assemble && pnpm test:clean-install"
+    "test:bundle-externals": "node scripts/check-bundle-externals.mjs",
+    "prepublish:check": "pnpm verify:catalog && pnpm assemble && pnpm test:clean-install"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.27.0",
+    "@changesets/cli": "^2.31.1",
     "@eslint/js": "^9.0.0",
-    "@playwright/test": "^1.50.0",
+    "@playwright/test": "^1.62.1",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
-    "@testing-library/user-event": "^14.5.0",
+    "@testing-library/user-event": "^14.6.3",
     "@types/jest-axe": "^3.5.9",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.0",
+    "@vitest/coverage-v8": "3.2.4",
     "eslint": "^9.0.0",
-    "eslint-config-prettier": "^9.0.0",
+    "eslint-config-prettier": "^10.1.8",
     "husky": "^9.0.0",
     "jest-axe": "^10.0.0",
     "jsdom": "^25.0.0",
     "lint-staged": "^15.0.0",
-    "msw": "^2.7.0",
-    "prettier": "^3.4.0",
+    "msw": "^2.15.0",
+    "prettier": "^3.9.6",
     "tsup": "^8.4.0",
-    "tsx": "^4.19.0",
-    "turbo": "^2.3.0",
+    "tsx": "^4.23.10",
+    "turbo": "^2.10.8",
     "typescript": "^5.7.0",
-    "typescript-eslint": "^8.0.0",
-    "vitest": "^3.0.0",
-    "ws": "^8.18.0"
+    "typescript-eslint": "^8.66.0",
+    "vitest": "^3.2.7",
+    "ws": "^8.21.3"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs}": [
@@ -52,7 +59,7 @@
     ]
   },
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=22.12.0",
     "pnpm": ">=9.0.0"
   },
   "packageManager": "pnpm@9.15.0"

@@ -9,10 +9,9 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import type { Request, Response } from 'express'
 
 import { envVarForProvider } from '@clawboo/adapter-native'
-import { createDb } from '@clawboo/db'
 import { breakerConfigSchema } from '@clawboo/governance'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { runTaskOnRuntime } from '../lib/executorRunner'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { fetchOpenRouterModels } from '../lib/openrouterModels'
@@ -497,11 +496,15 @@ function resolveConnectEnvVar(d: RuntimeDescriptor, providerRaw: unknown): strin
 }
 
 // ─── POST /api/runtimes/clawboo-native/healthcheck ───────────────────────────
-// Body: { provider, apiKey }. A single authenticated GET to the provider's
-// lightweight models/health endpoint, to verify a pasted key BEFORE seeding a
-// team. The key is used for exactly one fetch — NEVER persisted to the vault,
-// NEVER logged, NEVER echoed in the response. Wrapped so a network failure /
-// bad key resolves to { ok: false, error } instead of throwing into the request.
+// Body: { provider, apiKey? }. A single authenticated GET to the provider's
+// lightweight models/health endpoint, to verify a credential BEFORE anything
+// commits to it. `apiKey` is optional: omit it to probe the key already stored
+// for that provider (what the one-click reuse surfaces do), pass one to probe a
+// key the user just typed. Either way it is used for exactly one fetch — NEVER
+// persisted to the vault, NEVER logged, NEVER echoed in the response. Wrapped so
+// a network failure / bad key resolves to { ok: false, error } instead of
+// throwing into the request. The route probes a PROVIDER, not a runtime, so any
+// surface holding a provider key can use it to check that key.
 interface ProviderProbe {
   url: string
   headers: (key: string) => Record<string, string>
@@ -562,10 +565,21 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
     res.status(400).json({ ok: false, error: `unknown provider '${provider}'` })
     return
   }
-  // Ollama is keyless; every other provider needs a key to test.
-  if (provider !== 'ollama' && !apiKey) {
-    res.status(400).json({ ok: false, error: 'apiKey is required' })
-    return
+  // Ollama is keyless. Every other provider needs a key — but not necessarily a
+  // PASTED one: with no `apiKey` in the body, fall back to the key already stored
+  // for that provider, so a surface that reconnects WITHOUT a re-paste (the
+  // Providers manager's one-click "Use") can verify it first. Deliberately the
+  // same unscoped resolve chain the connect route's keyless-REUSE branch uses.
+  // The resolved key is used for the one probe fetch below and, exactly like a
+  // pasted one, is never re-persisted, never logged, and never echoed back.
+  let probeKey = apiKey
+  if (provider !== 'ollama' && !probeKey) {
+    const envVar = envVarForProvider(provider)
+    probeKey = (envVar && resolveRuntimeKey(envVar)) || ''
+    if (!probeKey) {
+      res.status(400).json({ ok: false, error: 'apiKey is required' })
+      return
+    }
   }
 
   const controller = new AbortController()
@@ -573,7 +587,14 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
   try {
     const resp = await fetch(probe.url, {
       method: 'GET',
-      headers: probe.headers(apiKey),
+      headers: probe.headers(probeKey),
+      // Fail CLOSED on a redirect rather than following one. Every probe URL
+      // above is a hard-coded provider endpoint that never legitimately 3xxes,
+      // and the request carries a live credential: `fetch` only strips
+      // `Authorization` across origins, so Anthropic's custom `x-api-key` would
+      // ride a redirect to whatever host answered. A 3xx here means something is
+      // wrong, and reporting "couldn't reach" beats leaking the key to find out.
+      redirect: 'error',
       signal: controller.signal,
     })
     if (resp.ok) {
@@ -716,7 +737,7 @@ export async function runtimesRunPOST(req: Request, res: Response): Promise<void
 
   try {
     const result = await runTaskOnRuntime({
-      db: createDb(getDbPath()),
+      db: getDb(),
       makeAdapter: adapterFactoryFor(id),
       taskId,
       assigneeAgentId,

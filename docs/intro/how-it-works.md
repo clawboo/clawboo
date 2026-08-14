@@ -60,7 +60,7 @@ The port-discovery probe is signature-checked, not just a TCP test: the CLI does
 
 The SPA is just static files Express serves; in production any unmatched `GET` falls through to `index.html` so client-side routing works. Every API call the SPA makes is a **same-origin relative path** (`fetch('/api/board')`, `fetch('/api/settings')`, …); there is no hardcoded backend host in the browser. That keeps the architecture portable: wherever the server is reachable, the SPA reaches it.
 
-Sitting in front of every route is an optional **access gate**, active only when `STUDIO_ACCESS_TOKEN` is set. It folds the request path to lowercase before matching (so an uppercased `/API/settings` can't evade it), validates the token's character set, and, importantly, exempts a **loopback** `/api/mcp/*` request from the cookie requirement, because that path is the control plane a spawned runtime attaches to with its credentials scrubbed. A non-loopback bind with no token set triggers a loud security warning. See [security](/operating/security).
+Sitting in front of every route is an optional **access gate**, active only when `STUDIO_ACCESS_TOKEN` is set. It folds the request path to lowercase before matching (so an uppercased `/API/settings` can't evade it), validates the token's character set, and, importantly, exempts a **loopback** `/api/mcp/*` request from the cookie requirement, because that path is the control plane a spawned runtime attaches to with its credentials scrubbed. A non-loopback bind with no token set makes the server refuse to start (exit 1); running unauthenticated on a wide bind requires an explicit `CLAWBOO_ALLOW_INSECURE=1`, which downgrades the refusal to a loud warning. See [security](/operating/security).
 
 There is one non-HTTP path: the browser opens a WebSocket to the same-origin `/api/gateway/ws`, which the server proxies to the OpenClaw Gateway, injecting the upstream auth token and signing the device handshake server-side so the browser never holds a credential. That's the only way the browser reaches the Gateway. See [Gateway and events](/concepts/gateway-and-events).
 
@@ -68,7 +68,7 @@ There is one non-HTTP path: the browser opens a WebSocket to the same-origin `/a
 
 When a team delegates work, the work becomes a row in SQLite. The [board](/concepts/the-board), `tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes`, is the transactional substrate for all coordination. An agent picks up work by **atomically claiming** a task (a single conditional `UPDATE` that exactly one concurrent caller can win; a lost claim is a `409` the caller never retries), a run is recorded as an `execution_processes` ledger row, and the outcome lands back on the board. Refresh the page, restart the server, or run a dozen agents against the one database file; the board survives all of it, with a WAL-based contention recipe and two startup/interval reconciliation passes that recover crashed and abandoned work.
 
-SQLite is more than the board. The same database file is the agent [registry of record](/appendices/glossary) (synced from the Gateway), shared [memory](/concepts/memory), the [governance](/concepts/governance) ledger, and the observability [event log](/concepts/observability). There is **no migration ladder**; `createDb`'s inline `CREATE TABLE IF NOT EXISTS` DDL is the sole schema source, applied on every connection, so the file is immediately usable. A schema change is a hard reset, which is acceptable because all state is local and reproducible. See the [database schema](/reference/database-schema).
+SQLite is more than the board. The same database file is the agent [registry of record](/appendices/glossary) (synced from the Gateway), shared [memory](/concepts/memory), the [governance](/concepts/governance) ledger, and the observability [event log](/concepts/observability). There is **no migration ladder**; the `CREATE TABLE IF NOT EXISTS` DDL in `ensureSchema` is the sole schema source, applied once when a database is opened, so the file is immediately usable. Opening an older file also adds any columns it is missing, derived from that same DDL. See the [database schema](/reference/database-schema#upgrading-an-existing-database).
 
 ### 4. Runtimes execute through one seam, or over the live Gateway
 
@@ -99,13 +99,13 @@ Every coordination action, a task created, a delegation routed, a run started, a
 
 ## Boundaries and non-goals
 
-- **Not multi-machine in v0.3.0.** The stack is one local process. The `tenant_id` columns are a dormant seam, not active per-tenant scoping.
-- **Not a hosted product.** There is no cloud control plane, no account system, and no remote management surface beyond binding to a non-loopback interface (which requires an access token and triggers a warning).
+- **Not multi-machine in v0.3.1.** The stack is one local process. The `tenant_id` columns are a dormant seam, not active per-tenant scoping.
+- **Not a hosted product.** There is no cloud control plane, no account system, and no remote management surface beyond binding to a non-loopback interface (which requires an access token, or the server refuses to start).
 - **OpenClaw is special.** Four runtimes go through the uniform executor runner; OpenClaw is a connected substrate driven over a live WebSocket and refused by the runner, a deliberate asymmetry, not an inconsistency.
 - **This is the overview, not the spec.** Each layer here has a concept page with the real mechanics, and a reference page with the exact routes, shapes, and defaults. Follow the links.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

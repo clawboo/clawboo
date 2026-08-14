@@ -9,6 +9,7 @@ import type { ClassifiedEvent, EventHandlerHandle } from './types'
 export type {
   AgentEventPayload,
   AgentStatusPatch,
+  ChatCost,
   ChatEventPayload,
   ChatState,
   ClassifiedEvent,
@@ -17,23 +18,18 @@ export type {
   EventIntent,
   EventKind,
   EventPlane,
-  LifecyclePhase,
-  LifecycleTransition,
 } from './types'
 
 // ── Bridge ─────────────────────────────────────────────────────────────────
 
 export {
   classifyEvent,
-  dedupeRunLines,
   extractText,
   extractThinking,
   extractToolLines,
   isReasoningStream,
-  mergeRuntimeStream,
   parseAgentPayload,
   parseChatPayload,
-  resolveLifecyclePatch,
 } from './bridge'
 
 // ── Policy ─────────────────────────────────────────────────────────────────
@@ -41,7 +37,7 @@ export {
 export { derivePolicy } from './policy/index'
 export { decideAgentEvent } from './policy/agent'
 export { decideTrustEvent } from './policy/trust'
-export { decideWorkAgentEvent, decideWorkChatEvent } from './policy/work'
+export { deriveChatCost, decideWorkAgentEvent, decideWorkChatEvent } from './policy/work'
 
 // ── Handler ────────────────────────────────────────────────────────────────
 

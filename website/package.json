@@ -14,19 +14,19 @@
     "check": "astro check"
   },
   "dependencies": {
-    "@astrojs/react": "^4.2.0",
+    "@astrojs/react": "^6.0.2",
     "@astrojs/sitemap": "^3.2.1",
-    "@tailwindcss/vite": "^4.0.0",
+    "@tailwindcss/vite": "^4.3.3",
     "astro": "^5.2.0",
-    "framer-motion": "^11.18.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwindcss": "^4.0.0"
+    "framer-motion": "^13.0.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "sharp": "^0.33.5"
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "sharp": "^0.35.3"
   },
   "engines": {
     "node": ">=22"

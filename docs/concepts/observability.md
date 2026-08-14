@@ -11,7 +11,7 @@ This page explains what observability is and isn't, the shape of the event log a
 
 Observability is **derived from the orchestration log, never authored alongside it**. A surface does not maintain its own view-model that a writer keeps in sync; it folds the log on demand. The log is the source of truth for _what happened_; the [board](/concepts/the-board) is the source of truth for _current task state_; the [runtime](/appendices/glossary) owns _how an agent runs_. Observability watches all three and persists what it sees.
 
-It is **always on**. There is no feature flag and no opt-in. `createDb` bootstraps the `orchestration_events` table on every connection, the REST read surface serves unconditionally, and the local event log is the canonical trace store. OpenTelemetry export is the one piece that is opt-in: the OTel SDK is lazy-loaded only when an OTLP endpoint is configured, so a no-collector boot never even requires `@opentelemetry/*`.
+It is **always on**. There is no feature flag and no opt-in. The schema bootstrap creates the `orchestration_events` table at boot, the REST read surface serves unconditionally, and the local event log is the canonical trace store. OpenTelemetry export is the one piece that is opt-in: the OTel SDK is lazy-loaded only when an OTLP endpoint is configured, so a no-collector boot never even requires `@opentelemetry/*`.
 
 It is **best-effort by discipline**, not by accident. A failed event append must never throw on the orchestration hot path; the emit choke-point swallows append failures. The event schema validates the correlation envelope strictly but treats the per-kind `data` payload as an open record, so a minor data-shape drift in a producer can never cause an event to be dropped. Observability that loses events to capture its own bugs is worse than useless, so it is built to capture best-effort and never to fail loud on the path it observes.
 
@@ -120,17 +120,18 @@ A `zombie` is exactly what the board's orphan reconciliation reaps on the next r
 
 Every runtime or tool failure is classified into a baseline of **expected** classes; anything that doesn't match is `Unknown`, and an `Unknown` is treated as a **harness bug**: a defect in Clawboo, not in the user's prompt or the provider. Clawboo surfaces the unknown loudly rather than swallowing it.
 
-`classifyError(code, message)` runs an ordered list of regex rules over the combined error code and message. The order matters; more specific signals (rate-limit, user abort) are checked before the broader provider/environment buckets. The classes are:
+`classifyError(code, message)` runs an ordered list of regex rules over the combined error code and message. The order matters; more specific signals (rate-limit, user abort) are checked before the broader provider/environment buckets, and `ContextOverflow` sits deliberately before `InvalidArgs` so an oversized-input `400` classifies as a context overflow rather than a generic bad request. The classes are:
 
-| Class           | Matches (examples)                                           |
-| --------------- | ------------------------------------------------------------ |
-| `RateLimited`   | `429`, "rate limit", "too many requests", "quota"            |
-| `UserAborted`   | "abort", "cancelled", `SIGINT`, `SIGTERM`                    |
-| `Timeout`       | "timeout", "timed out", `ETIMEDOUT`, "deadline exceeded"     |
-| `UnexpectedEnv` | `ENOENT`, `EACCES`, "command not found", "module not found"  |
-| `InvalidArgs`   | `400`, `422`, "invalid argument", "validation", "malformed"  |
-| `ProviderError` | `500`–`504`, "upstream", "overloaded", "service unavailable" |
-| `Unknown`       | nothing matched                                              |
+| Class             | Matches (examples)                                                                     |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `RateLimited`     | `429`, "rate limit", "too many requests", "quota"                                      |
+| `UserAborted`     | "abort", "cancelled", `SIGINT`, `SIGTERM`                                              |
+| `Timeout`         | "timeout", "timed out", `ETIMEDOUT`, "deadline exceeded"                               |
+| `UnexpectedEnv`   | `ENOENT`, `EACCES`, "command not found", "module not found"                            |
+| `ContextOverflow` | "context length/window/limit", "prompt too long", "maximum context", "too many tokens" |
+| `InvalidArgs`     | `400`, `422`, "invalid argument", "validation", "malformed"                            |
+| `ProviderError`   | `500`–`504`, "upstream", "overloaded", "service unavailable"                           |
+| `Unknown`         | nothing matched                                                                        |
 
 `isHarnessBug(cls)` returns `true` exactly when the class is `Unknown`. When the executor runner sees an error event, it classifies the failure, writes an `error` event with `errorClass` and a `harnessBug` flag in `data`, and, if it's a harness bug, also raises an error-level structured-log alert via `alertHarnessBug`. The `GET /api/obs/errors?harnessBug=true` query is the alert feed; it also returns a running `harnessBugCount`.
 
@@ -158,7 +159,7 @@ The `@opentelemetry/api` namespace is sourced from `@opentelemetry/sdk-node`'s r
 
 `GET /api/obs/stream` is a Server-Sent-Events live tail of the log, scoped by team, task, or agent. It is a short-interval (750 ms) DB poll keyed on the `seq` cursor rather than an in-process emit hook; so it is **cross-process correct**: it catches writes from the MCP stdio bins, not just the in-process server. Each pushed event uses its `seq` as the SSE `id`, so an `EventSource` resumes from `Last-Event-ID` (or `?since=<seq>`) after a disconnect. Each event's `data` is redacted on the way out (see below).
 
-The stream opens a fresh `better-sqlite3` handle per connection and closes it on `req`/`res` close, so a long-lived or dropped stream doesn't leak a database handle.
+The tail polls through the process-wide shared SQLite connection (`getDb()`), resolved _before_ the `200` is written so an open failure surfaces as a real error response rather than a `200` plus a `: connected` marker the client has already been told to trust. Cleanup on `req`/`res` close clears only the poll and keepalive timers; it closes no database handle, because that handle belongs to the whole server and closing it when one tab drops its stream would kill SQLite for every other caller. There is no per-connection database handle to leak.
 
 ## Redaction on display
 
@@ -175,10 +176,10 @@ Keeping the event-log trace store _always on_ and the OTLP export _opt-in_ is th
 - **Not a metrics time-series database.** The log is an orchestration event stream, not Prometheus. `summarizeMetrics` aggregates over a queried window on demand; there is no retention policy, downsampling, or long-horizon storage tuned for time-series queries.
 - **Not the audit log.** The governance audit log is a separate, "most-recent-first" lineage feed for forensics; the orchestration log is `seq ASC` for replay. They mirror each other's insert-only / scrub discipline but serve different reads.
 - **OTLP export is opt-in, not bundled.** A lean bundled CLI degrades to event-log-only; the OTel SDK is only required when an OTLP endpoint is configured and the SDK is present.
-- **Single implicit tenant today.** `orchestration_events.tenant_id` is a dormant column; no per-tenant filtering is active in v0.3.0. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** `orchestration_events.tenant_id` is a dormant column; no per-tenant filtering is active in v0.3.1. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.3.0**, the current release.
+These docs describe Clawboo **v0.3.1**, the current release.
 </Note>
 
 ## See also

@@ -60,7 +60,7 @@ export function AgentModelControl({ runtime, ...selectorProps }: AgentModelContr
       {note ? (
         <span
           title={note.tip}
-          className="flex items-center whitespace-nowrap text-[11px] text-foreground/45"
+          className="flex items-center whitespace-nowrap text-[11px] text-muted-foreground"
           style={{ padding: '0 10px', maxWidth: 180 }}
         >
           {note.pill}

@@ -3,14 +3,15 @@
 // the optional "add runtimes" step → land in the dashboard with the team
 // showing. Native is the DEFAULT (no up-front runtime choice). Fully offline-
 // capable — the native connect route only writes the vault and the seed only
-// writes SQLite (no Gateway, no live provider call).
+// writes SQLite (no Gateway, and the one call that WOULD reach a provider, the
+// pre-advance key healthcheck, is route-stubbed; the spec asserts it ran).
 //
 // The OpenClaw / coding-agent runtime connect flows are covered by the RTL step
 // tests (ConfigureNativeStep / AddRuntimesStep / RuntimeConnectionCard) plus the
 // existing connected-dashboard e2e; their install-subprocess steps are fragile
 // to drive headlessly and are intentionally out of scope here.
 
-import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
+import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
 
 test.describe('Native onboarding', () => {
   test('fresh install → paste key → seed team → skip runtimes → land in dashboard', async ({
@@ -87,6 +88,11 @@ test.describe('Native onboarding', () => {
       })
     })
 
+    // Continue verifies the key before storing it; stub that probe so the run
+    // stays offline (a fake key against the real Anthropic API would 401 and
+    // correctly refuse to advance).
+    const healthcheck = await stubNativeHealthcheck(page)
+
     await page.goto('/')
 
     // Welcome → ConfigureNative directly (native is the default — no runtime pick).
@@ -105,6 +111,9 @@ test.describe('Native onboarding', () => {
     // anything was connected; nothing here can strand the user, so the old separate
     // Skip was removed), so connect nothing and continue.
     await expect(page.getByTestId('add-runtimes-step')).toBeVisible({ timeout: 10_000 })
+    // Reaching this step is proof the key was VERIFIED first — the real app ran
+    // the gate, not just the component test.
+    expect(healthcheck.calls()).toBe(1)
     await page.getByTestId('addruntimes-continue').click()
 
     // Team step: the marketplace opens. Pick a small starter team and deploy it —

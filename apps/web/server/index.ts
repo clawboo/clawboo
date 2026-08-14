@@ -7,11 +7,12 @@ import cors from 'cors'
 import { createAccessGate, createGatewayProxy, createOriginGuard } from '@clawboo/gateway-proxy'
 import { loadSettings } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
-import { createDb, reconcileOrphans, reconcileStaleInProgress, seedBuiltinTools } from '@clawboo/db'
+import { reconcileOrphans, reconcileStaleInProgress, seedBuiltinTools } from '@clawboo/db'
 
 import { apiRouter } from './api/index'
 import { attachIdentity } from './lib/auth'
-import { getDbPath } from './lib/db'
+import { closeDb, getDb } from './lib/db'
+import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { startMcpSupervisor } from './lib/mcpSupervisor'
 import { startApprovalReaper } from './lib/approvalReaper'
@@ -21,11 +22,12 @@ import { getRegistry } from './lib/agentSource'
 import {
   resolveApiPort,
   writeApiPortFile,
-  removeApiPortFile,
+  removeApiPortFileIfOwned,
   waitForPortFree,
 } from './lib/portUtils'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
+import { mountSpa } from './lib/serveSpa'
 
 // ── Loggers ─────────────────────────────────────────────────────────────────
 
@@ -233,18 +235,7 @@ async function main() {
 
   // Production: serve Vite build output as static SPA
   if (!dev) {
-    const uiDir = path.resolve(process.env['CLAWBOO_UI_DIR'] || path.join(__dirname, 'ui'))
-    app.use(express.static(uiDir))
-    // SPA catch-all: any unmatched GET serves index.html so client-side
-    // routing works. We use `app.use(handler)` rather than a wildcard pattern
-    // (`'/*splat'` / `'/{*splat}'`) — Express 5 + path-to-regexp v8 have
-    // subtle matching quirks around the bare `/` path that produced
-    // "Cannot GET /". `app.use` with no path matches every
-    // request by definition. Restricting to GET keeps non-GET 404s honest.
-    app.use((req, res, next) => {
-      if (req.method !== 'GET') return next()
-      res.sendFile(path.join(uiDir, 'index.html'))
-    })
+    mountSpa(app, process.env['CLAWBOO_UI_DIR'] || path.join(__dirname, 'ui'))
   }
 
   // ── HTTP server (raw, for WS upgrade handling) ────────────────────────────
@@ -269,13 +260,27 @@ async function main() {
     socket.destroy()
   })
 
+  // ── SQLite: open the process-wide connection + bootstrap the schema ─────────
+  // The server holds ONE connection for its whole lifetime (see lib/db.ts). Doing
+  // it here, before anything queries, makes the 88-statement DDL bootstrap a
+  // single deterministic boot step rather than a side effect of whichever request
+  // or background ticker happens to fire first. Best-effort: a failure here means
+  // the DB is unusable, which the boot probe reports as a FATAL `databaseIntegrity`
+  // / `databaseSchema` check on /api/health — the designed reporting channel — so
+  // we log and keep serving rather than exiting.
+  try {
+    getDb()
+  } catch (err) {
+    log.error({ err }, 'SQLite: could not open/bootstrap the database — see /api/health')
+  }
+
   // ── Durable board: orphan reconciliation ────────────────────────────────────
   // Any execution left 'running' belonged to a process that died with a previous
   // server. Mark them failed + release their tasks so nothing is stuck. The
   // recovery tombstone makes this idempotent (no infinite auto-resume).
   // Best-effort; never blocks boot.
   try {
-    const { reconciled } = reconcileOrphans(createDb(getDbPath()))
+    const { reconciled } = reconcileOrphans(getDb())
     if (reconciled > 0) {
       log.info({ reconciled }, 'Board: reconciled orphaned executions on startup')
     }
@@ -304,7 +309,7 @@ async function main() {
   // disabling a brokered tool is a silent no-op (setToolEnabled UPDATEs zero rows,
   // isToolEnabled falls back to true). Idempotent — a re-seed preserves a prior
   // user disable. Best-effort; never blocks boot.
-  safeStart('tools-registry-seed', () => seedBuiltinTools(createDb(getDbPath())))
+  safeStart('tools-registry-seed', () => seedBuiltinTools(getDb()))
 
   // ── Default-native Boo Zero ─────────────────────────────────────────────────
   // Ensure a native-first install has its runtime-neutral universal leader — a
@@ -313,9 +318,7 @@ async function main() {
   // native team member exists + a native key is connected + none is designated); a
   // no-op for a pure-OpenClaw / no-key install. Best-effort; never blocks boot.
   safeStart('native-boo-zero', () => {
-    void ensureNativeBooZero(createDb(getDbPath()), getRegistry().nativeSource).catch(
-      () => undefined,
-    )
+    void ensureNativeBooZero(getDb(), getRegistry().nativeSource).catch(() => undefined)
   })
 
   // ── MCP liveness supervisor ─────────────────────────────────────────────────
@@ -350,7 +353,7 @@ async function main() {
     const intervalMs = Number(process.env['CLAWBOO_BOARD_STALE_SWEEP_MS']) || 5 * 60_000
     const sweep = (): void => {
       try {
-        const { reconciled } = reconcileStaleInProgress(createDb(getDbPath()), ttlMs)
+        const { reconciled } = reconcileStaleInProgress(getDb(), ttlMs)
         if (reconciled > 0) log.info({ reconciled }, 'Board: released stale in_progress tasks')
       } catch (err) {
         log.error({ err }, 'Board: stale-task sweep failed (non-fatal)')
@@ -420,29 +423,65 @@ async function main() {
   // on this for correctness (the file is just a hint — the CLI probes the
   // port before opening the browser).
   //
-  // We also checkpoint the SQLite WAL so a naive single-file copy of
-  // `clawboo.db` captures all recent committed writes without the WAL
+  // `closeDb()` also checkpoints the SQLite WAL so a naive single-file copy
+  // of `clawboo.db` captures all recent committed writes without the WAL
   // sidecars. This is defense-in-depth only — the WAL is crash-safe and
   // recovered on the next open — so a checkpoint failure is logged and
   // never blocks shutdown or changes the exit code.
-  const cleanup = () => {
-    removeApiPortFile()
+  //
+  // This runs TWICE by construction: the signal handlers below call it and then
+  // call `process.exit(0)`, which fires the `'exit'` hook that calls it again.
+  // `closeDb()` is idempotent, and the flag keeps the port-file removal and the
+  // log from repeating.
+  let shutDown = false
+  const cleanup = (): void => {
+    if (shutDown) return
+    shutDown = true
+    // Reap spawned runtime children BEFORE we go. They are detached process-group
+    // leaders and are deliberately never unref'd, so they outlive this process —
+    // still spending against the provider while boot-time reconciliation hands
+    // their task to another runner (two live runs on one worktree).
     try {
-      const db = createDb(getDbPath())
-      db.$client.pragma('wal_checkpoint(TRUNCATE)')
-      db.$client.close()
+      const reaped = killLiveSubprocesses()
+      if (reaped > 0) log.info({ reaped }, 'Terminated running runtime subprocesses on shutdown')
+    } catch (err) {
+      log.warn({ err }, 'Failed to terminate runtime subprocesses on shutdown (non-fatal)')
+    }
+    // Only if the file still names OUR port: a second instance (auto-scan
+    // fallback, or a restart successor that has already rebound) may have
+    // rewritten it, and deleting that would strand a server that is still up.
+    removeApiPortFileIfOwned(port)
+    try {
+      closeDb()
     } catch (err) {
       log.warn({ err }, 'WAL checkpoint on shutdown failed (non-fatal)')
     }
   }
-  process.once('SIGINT', () => {
+  // A signal shutdown WAITS for the children to actually die before exiting.
+  // `cleanup()`'s reap only sends SIGTERM; killTree then schedules a SIGKILL
+  // escalation on a timer, and `process.exit(0)` would kill that timer with the
+  // process — so a child ignoring SIGTERM used to outlive the server. The wait is
+  // bounded (SHUTDOWN_WAIT_MS) so a hung child can never block the exit, and it
+  // never throws.
+  const gracefulExit = async (): Promise<void> => {
+    try {
+      const { signalled, exited } = await shutdownLiveSubprocesses()
+      if (signalled > 0) {
+        log.info({ signalled, exited }, 'Terminated running runtime subprocesses on shutdown')
+      }
+    } catch (err) {
+      log.warn({ err }, 'Failed to terminate runtime subprocesses on shutdown (non-fatal)')
+    }
     cleanup()
-    process.exit(0)
+  }
+  process.once('SIGINT', () => {
+    void gracefulExit().finally(() => process.exit(0))
   })
   process.once('SIGTERM', () => {
-    cleanup()
-    process.exit(0)
+    void gracefulExit().finally(() => process.exit(0))
   })
+  // Last-resort synchronous path (a `process.exit` from anywhere else): it cannot
+  // await, so it falls back to signalling without waiting.
   process.once('exit', cleanup)
 
   // Defensive graceful degradation: a background subsystem that rejects without a

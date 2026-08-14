@@ -108,6 +108,12 @@ export function projectGraph(events: readonly OrchestrationEvent[]): ProjectedGr
         t.teamId = ev.teamId ?? t.teamId
         if (d.parentTaskId) {
           t.parentTaskId = d.parentTaskId
+          // Materialise the parent too, the way the `dep_linked` branch below
+          // does for both of its endpoints, so every edge resolves to a node.
+          // A read of this log is a WINDOW, so a child's `task_created` can sit
+          // inside it while its parent's has already scrolled out; without this
+          // the projection emits an edge whose `source` is absent from `tasks`.
+          ensureTask(d.parentTaskId)
           addTaskEdge(d.parentTaskId, taskId, 'delegation')
         }
         break

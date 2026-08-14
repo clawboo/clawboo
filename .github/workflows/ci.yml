@@ -3,11 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
+    # Skips the matrix for prose-only merges. Note '**.md' already covers every
+    # docs page, so a docs-only merge still short-circuits here; what this list
+    # no longer skips is the docs site's non-Markdown files (docs.json,
+    # style.css, llms.txt). The pull_request trigger below has no paths-ignore
+    # and is the real gate: its Lint job runs the docs frontmatter check.
     paths-ignore:
       - '**.md'
       - 'LICENSE'
       - '.changeset/**'
-      - 'docs/**'
   pull_request:
     branches: [main]
 
@@ -26,16 +30,23 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      # Runs before `pnpm lint` because it takes seconds and needs no build,
+      # whereas `turbo lint` first builds every workspace dependency. Formatting
+      # is otherwise only applied by the lint-staged pre-commit hook, on staged
+      # files, so drift accumulates silently in anything nobody has touched.
+      # Fix a failure with `pnpm format`.
+      - run: pnpm format:check
 
       - run: pnpm lint
 
@@ -43,11 +54,11 @@ jobs:
     name: Typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -60,28 +71,109 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm test
+      # Same suites as `pnpm test`, plus a per-package coverage table in the job
+      # log. No threshold and no uploaded artifact — this is a visibility signal
+      # so uncovered surfaces stay noticeable, not a gate.
+      - run: pnpm test:coverage
+
+      # The real-concurrency suite is env-gated out of `pnpm test` because a
+      # worker thread gets no TS transform, so it needs @clawboo/db's BUILT dist.
+      # `turbo test` builds a package's DEPENDENCIES, not the package itself,
+      # hence the explicit build here.
+      #
+      # Not optional coverage: it is the ONLY guard on the guarded-create
+      # transaction. `createCappedSubtask` counts siblings and inserts inside one
+      # `BEGIN IMMEDIATE` because the Tasks MCP ships as a stdio bin (one OS
+      # process per attached runtime on the shared DB file). Move that count
+      # outside the transaction and this suite lands 20 children against a cap of
+      # 5, while every other check in this workflow still passes.
+      - run: pnpm --filter @clawboo/db build
+      - name: Real-concurrency suite (WAL contention, claim mutex, cap atomicity)
+        run: pnpm --filter @clawboo/db exec vitest run src/board/__tests__/board.contention.test.ts
+        env:
+          CLAWBOO_CONCURRENCY_TEST: '1'
+
+  # A cost-bounded cross-platform leg for the most platform-sensitive suites, so a
+  # Windows / macOS regression in runtime spawning, process-tree termination on
+  # abort, per-task git worktrees, or path handling is caught on a PR rather than
+  # only after a release. The full Vitest suite still runs Linux-only in `test`
+  # above; this runs just the highest-value packages — `packages/worktrees` (the
+  # real-git per-task worktree lifecycle) and `apps/web/server` (runtime spawning,
+  # boot probe, executor). `fail-fast: false` so Windows and macOS report
+  # independently. macOS is otherwise only exercised by `smoke-test-bundle`'s boot
+  # check; Windows adds the unit coverage its boot smoke lacks. Issue #75.
+  test-cross-platform:
+    name: Test (cross-platform)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # Matches smoke-test-bundle's budget: a cold Windows runner plus a from-source
+    # build of better-sqlite3's native binding is the slow part.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The scoped suites import @clawboo/* packages through their built dist/
+      # (there is no source export condition, and nothing builds dist during
+      # install). The Linux `test` job gets this for free from `turbo test`, which
+      # builds a package's dependencies first; here we invoke Vitest directly to
+      # scope to the platform-sensitive suites, so the dependency build is explicit.
+      - run: pnpm build
+
+      # packages/worktrees: the real-git, per-task worktree lifecycle that underpins
+      # every file-mutating task. Drives a real `git` binary via its gitHarness.
+      # `--fail-if-no-match` so a mistyped filter can't yield a green leg that ran nothing.
+      - run: pnpm --filter @clawboo/worktrees --fail-if-no-match exec vitest run
+
+      # apps/web/server (full node `server/` suite): runtime CLI spawning, process-tree
+      # abort, the boot probe, npm.cmd resolution and the which→where shim, and path
+      # handling. The `server/` filter excludes the jsdom UI tests, which live in src/.
+      #
+      # Runs on BOTH legs as of issue #140. It was macOS-only before, because on Windows
+      # the suite failed two independent ways, both fixed there:
+      #   1. A HOME-only sandbox. os.homedir() reads %USERPROFILE% on Windows and
+      #      ignores $HOME, so every suite resolved the runner's REAL home instead of
+      #      its temp dir and they all shared one clawboo.db, which is what produced
+      #      the cascading UNIQUE-constraint failures. Fixed at one seam, the Vitest
+      #      setup file server/__vitest__/setupHomedir.ts, rather than per suite.
+      #   2. A leaked SQLite handle. better-sqlite3 holds the DB file open and Windows
+      #      refuses to unlink an open file, so teardown threw EBUSY. The suites now
+      #      open through getDb() and call resetDb() before removing the sandbox dir.
+      # The dedicated platform.test.ts step this replaces is redundant now, since that
+      # file runs as part of the full suite here.
+      - run: pnpm --filter @clawboo/web --fail-if-no-match exec vitest run server/
 
   build:
     name: Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -90,56 +182,148 @@ jobs:
 
       - run: pnpm build
 
-  verify-ingest:
-    name: Verify marketplace ingest
+      # Assert on the emitted bundle that the ~4.4 MB marketplace catalog is still a
+      # deferred chunk and not preloaded by the entry. The unit guard
+      # (src/features/layout/__tests__/entryImportGraph.test.ts) checks the source
+      # import graph; this checks what Rollup actually did, which is the half that
+      # catches a named-but-still-eager chunk. Issue #83.
+      - run: node scripts/check-entry-chunk.mjs
+
+  verify-catalog:
+    name: Verify marketplace catalog integrity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      # Auth the pinned-SHA upstream fetches (raises the GitHub rate limit to
-      # 5000/hr; the fetch helper also retries on a transient 429).
-      - run: pnpm verify:ingest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # OFFLINE: checks the committed catalog against its committed integrity
+      # manifest (scripts/ingest-manifest.json). No token, no upstream fetch — so
+      # an upstream outage or rename can never redden a PR that didn't touch the
+      # catalog. The LIVE re-derive against the pinned upstream commits runs in
+      # `verify-ingest.yml` (weekly + on PRs that touch the ingest scripts).
+      - run: pnpm verify:catalog
 
   smoke-test-bundle:
     name: Smoke test bundled CLI (clean install simulation)
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 8
+    # The gate now packs a tarball and does a real `npm install` of it (which
+    # downloads/builds better-sqlite3's native binding) before booting the CLI,
+    # so the budget covers a cold registry and a cold Windows runner.
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
+      # The gate loads the installed SPA in headless Chromium. Playwright has no
+      # postinstall hook, so the step above never fetches the browser. Same step
+      # as the e2e job below; --with-deps installs the OS shared libraries that
+      # no npm package provides, and is a supported no-op on Windows and macOS.
+      - run: pnpm exec playwright install --with-deps chromium
+
       - run: pnpm assemble
 
-      # Simulates `npx clawboo` end-to-end against an isolated state dir,
-      # with a fake non-Clawboo listener on port 18791 (mimicking the
-      # OpenClaw Gateway auxiliary port that broke v0.1.2). Asserts the
-      # CLI's port-discovery correctly skips 18791, the SPA renders, the
-      # deep-route catch-all works, and /api/settings returns JSON.
+      # Simulates `npx clawboo` end-to-end: `pnpm pack`s apps/cli, installs the
+      # tarball into a throwaway temp dir with a real `npm install` (no
+      # workspace symlinks, so the published `files` whitelist and dependency
+      # closure are actually exercised), then runs every assertion against THAT
+      # install — the packaged bins, the externals-vs-dependencies static check,
+      # port discovery skipping a fake non-Clawboo listener on 18791 (the
+      # OpenClaw Gateway auxiliary port that broke v0.1.2), the SPA and its
+      # deep-route catch-all, /api/settings, the SPA actually BOOTING in headless
+      # Chromium, a stdio MCP `tools/list` handshake, one real runtime
+      # dispatch driven to `done`, and a second launch reusing an
+      # already-running dashboard instead of forking another server.
       #
-      # Runs on both ubuntu-latest and windows-latest. The Windows run is
-      # the regression gate for v0.1.4's Windows-compat fixes (npm.cmd
-      # resolution, which→where shim, netstat-based findProcessByPort).
+      # Runs on ubuntu-latest, windows-latest and macos-latest. Windows is the
+      # regression gate for v0.1.4's Windows-compat fixes (npm.cmd resolution,
+      # which→where shim, netstat-based findProcessByPort); macOS is a primary
+      # user OS that CI did not cover before.
       - run: pnpm test:clean-install
+
+  e2e:
+    name: E2E (Playwright)
+    # ubuntu only, unlike smoke-test-bundle's three-OS matrix. The webServer
+    # command in playwright.config.ts is POSIX shell syntax
+    # (`VAR=value cmd && VAR=value cmd`), which cmd.exe cannot parse; running
+    # the suite on Windows would need a cross-env wrapper first.
+    runs-on: ubuntu-latest
+    # Measured on this job's first green runs: under 4 minutes end to end
+    # (install ~4s warm, chromium ~23s, build ~76s, the suite itself ~111s).
+    # The margin on top covers a cold pnpm store and the two retries
+    # playwright.config.ts turns on under CI.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # chromium only: playwright.config.ts defines exactly one project.
+      # --with-deps is the part that matters on a bare runner — it installs the
+      # OS shared libraries headless Chromium needs, which no npm package does.
+      - run: pnpm exec playwright install --with-deps chromium
+
+      # Required, not an optimization. Every @clawboo/* package resolves only
+      # through its dist/ (there is no src export condition and no path alias to
+      # source), dist/ is gitignored, and nothing builds it during install —
+      # there is no postinstall anywhere in the workspace. Both halves of the
+      # Playwright webServer command, the Vite UI build and the tsx server boot,
+      # import those packages, so without this step the suite dies in webServer
+      # before the first test runs.
+      #
+      # This does mean `vite build` runs twice: once here as part of the web
+      # app's build, once inside webServer. Accepted — using the same `pnpm
+      # build` the Build job runs keeps the two jobs honest about the same
+      # graph, and the duplicate costs ~1-2 minutes.
+      - run: pnpm build
+
+      # 20 tests across 12 specs, single worker, in file order. The suite shares
+      # one server and one SQLite file, and 13-onboarding-codex deliberately
+      # reads state that specs 01-06 leave behind, so do not shard this or raise
+      # `workers`. No secrets and no provider keys: the gateway is a mock ws
+      # server, and every live-CLI probe is either route-mocked or bounded by an
+      # execFile timeout.
+      - run: pnpm e2e
+
+      # The HTML report plus any on-retry traces. Uploaded on success too, not
+      # just on failure: with `retries: 2` a test can fail and then pass, which
+      # leaves the job green while the report is the only record that it was
+      # flaky. `!cancelled()` rather than `always()` so a superseded run that
+      # got cancelled does not upload a half-written report.
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          # test-results/ only exists when a test retried or failed, and the
+          # default `warn` would flag its absence on every green run.
+          if-no-files-found: ignore

@@ -1,8 +1,9 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { useState, useCallback, useEffect, useId, useMemo } from 'react'
+import { motion } from 'framer-motion'
 import { ArrowLeft, CheckCircle2, X } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
 import { Button, IconButton } from '@/features/shared/Button'
+import { Modal } from '@/features/shared/Modal'
 import { Chip } from '@/features/shared/Chip'
 import { SearchInput } from '@/features/shared/SearchInput'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
@@ -148,7 +149,7 @@ type DeployProgress = { current: number; total: number; label: string }
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
-interface CreateTeamModalProps {
+export interface CreateTeamModalProps {
   isOpen: boolean
   onClose: () => void
   /** Called after the team is created; carries the new team's id (onboarding
@@ -194,6 +195,9 @@ export function CreateTeamModal({
   allowStartFromScratch = true,
   preferRuntime,
 }: CreateTeamModalProps) {
+  // One id shared by all four step headings — the dialog's accessible name
+  // follows whichever step is rendered.
+  const headingId = useId()
   const client = useConnectionStore((s) => s.client)
   const connStatus = useConnectionStore((s) => s.status)
   // OpenClaw's SERVER-side operator connection (registry health) — the thin-client
@@ -944,335 +948,345 @@ export function CreateTeamModal({
     onCreated,
   ])
 
+  // The early return is deliberate: it guards ~400 lines of grid render, so the
+  // modal body only mounts while open. `open` below is therefore always `true`
+  // (no exit animation, same as before this adopted <Modal>).
   if (!isOpen) return null
 
   return (
     <>
-      <AnimatePresence>
-        <motion.div
-          key="create-team-backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
-          style={{ background: 'var(--overlay-scrim)' }}
-          onClick={handleClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 8 }}
-            transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-            className={`relative w-full ${step === 'pick' ? 'max-w-4xl' : step === 'customize' ? 'max-w-2xl' : 'max-w-lg'} rounded-2xl border border-border bg-surface transition-all duration-200`}
-            style={{ boxShadow: 'var(--shadow-overlay)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Close button */}
-            {step !== 'deploy' && (
-              <div className="absolute right-3 top-3 z-10">
-                <IconButton label="Close" variant="ghost" size="sm" onClick={handleClose}>
-                  <X className="h-4 w-4" strokeWidth={2} />
-                </IconButton>
-              </div>
-            )}
+      <Modal
+        open
+        layer={50}
+        labelledBy={headingId}
+        // Exactly one <h2> renders per step, and all four carry `headingId`, so
+        // the dialog's accessible name tracks the step — which is what a screen
+        // reader user needs when a four-step flow swaps content in place.
+        focusKey={step}
+        // Belt-and-braces alongside handleClose's own `step === 'deploy'` guard:
+        // a deploy is a multi-write sequence that must not be abandoned midway.
+        dismissible={step !== 'deploy'}
+        onClose={handleClose}
+        scrimClassName="backdrop-blur-sm"
+        data-testid="create-team-modal"
+        panelClassName={`relative w-full ${step === 'pick' ? 'max-w-4xl' : step === 'customize' ? 'max-w-2xl' : 'max-w-lg'} rounded-2xl border border-border bg-surface transition-all duration-200`}
+        panelStyle={{ boxShadow: 'var(--shadow-overlay)' }}
+      >
+        {/* Close button */}
+        {step !== 'deploy' && (
+          <div className="absolute right-3 top-3 z-10">
+            <IconButton label="Close" variant="ghost" size="sm" onClick={handleClose}>
+              <X className="h-4 w-4" strokeWidth={2} />
+            </IconButton>
+          </div>
+        )}
 
-            {/* ─── Step: Pick Template ──────────────────────────────
+        {/* ─── Step: Pick Template ──────────────────────────────
                 The SAME team showcase as the Marketplace Teams tab (shared
                 filter primitives + TeamShowcaseGrid), so the first-run flow
                 reads exactly like the marketplace the user already loves. */}
-            {step === 'pick' && (
-              <div className="flex max-h-[85vh] flex-col overflow-hidden rounded-2xl">
-                {/* Header */}
-                <div className="px-6 pb-3 pt-6">
-                  <h2
-                    className="text-[18px] font-bold text-foreground"
-                    style={{ letterSpacing: '-0.01em' }}
-                  >
-                    Create a team
-                  </h2>
-                  <p className="mt-1 text-[13px] text-foreground/55">
-                    Deploy a curated team, or start one from scratch.
-                  </p>
-                </div>
+        {step === 'pick' && (
+          <div className="flex max-h-[85vh] flex-col overflow-hidden rounded-2xl">
+            {/* Header */}
+            <div className="px-6 pb-3 pt-6">
+              <h2
+                id={headingId}
+                className="text-[18px] font-bold text-foreground"
+                style={{ letterSpacing: '-0.01em' }}
+              >
+                Create a team
+              </h2>
+              <p className="mt-1 text-[13px] text-foreground/55">
+                Deploy a curated team, or start one from scratch.
+              </p>
+            </div>
 
-                {/* Filter bar (fixed) — search + category + source, same as the
+            {/* Filter bar (fixed) — search + category + source, same as the
                     Marketplace Teams tab. */}
-                <div className="flex flex-col gap-2.5 border-b border-border px-6 pb-3.5">
-                  <SearchInput
+            <div className="flex flex-col gap-2.5 border-b border-border px-6 pb-3.5">
+              <SearchInput
+                size="sm"
+                placeholder="Search teams…"
+                value={pickSearch}
+                onChange={setPickSearch}
+              />
+              <CollapsiblePillRow
+                aria-label="Filter teams by category"
+                options={pickCategoryOpts}
+                activeKey={pickCategory}
+                onSelect={(k) => setPickCategory(k as TemplateCategory | 'all')}
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {TEAM_SOURCE_ENTRIES.map((src) => (
+                  <Chip
+                    key={src.key}
                     size="sm"
-                    placeholder="Search teams…"
-                    value={pickSearch}
-                    onChange={setPickSearch}
-                  />
-                  <CollapsiblePillRow
-                    aria-label="Filter teams by category"
-                    options={pickCategoryOpts}
-                    activeKey={pickCategory}
-                    onSelect={(k) => setPickCategory(k as TemplateCategory | 'all')}
-                  />
-                  <div className="flex flex-wrap gap-1.5">
-                    {TEAM_SOURCE_ENTRIES.map((src) => (
-                      <Chip
-                        key={src.key}
-                        size="sm"
-                        active={pickSource === src.key}
-                        accent={src.key === 'all' ? undefined : src.color}
-                        onClick={() => setPickSource(src.key as TemplateSource | 'all')}
-                      >
-                        {src.key !== 'all' && (
-                          <span
-                            className="h-1.5 w-1.5 shrink-0 rounded-full"
-                            style={{ background: src.color }}
-                          />
-                        )}
-                        {src.label}
-                      </Chip>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Grid (scrollable) — the shared Marketplace team showcase */}
-                <div className="flex-1 overflow-y-auto p-6">
-                  <TeamShowcaseGrid
-                    teams={filteredPickTeams}
-                    onSelectTeam={handlePickProfile}
-                    onDetails={setDetailTemplate}
-                    onStartFromScratch={handlePickEmpty}
-                    showStartFromScratch={allowStartFromScratch}
-                    onClearFilters={() => {
-                      setPickSearch('')
-                      setPickCategory('all')
-                      setPickSource('all')
-                    }}
-                  />
-                </div>
+                    active={pickSource === src.key}
+                    accent={src.key === 'all' ? undefined : src.color}
+                    onClick={() => setPickSource(src.key as TemplateSource | 'all')}
+                  >
+                    {src.key !== 'all' && (
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ background: src.color }}
+                      />
+                    )}
+                    {src.label}
+                  </Chip>
+                ))}
               </div>
-            )}
+            </div>
 
-            {/* ─── Step: Customize ────────────────────────────────── */}
-            {step === 'customize' && (
-              <div className="flex max-h-[85vh] flex-col overflow-hidden rounded-2xl">
-                {/* Header (fixed) — the "Back to templates" arrow only makes
+            {/* Grid (scrollable) — the shared Marketplace team showcase */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <TeamShowcaseGrid
+                teams={filteredPickTeams}
+                onSelectTeam={handlePickProfile}
+                onDetails={setDetailTemplate}
+                onStartFromScratch={handlePickEmpty}
+                showStartFromScratch={allowStartFromScratch}
+                onClearFilters={() => {
+                  setPickSearch('')
+                  setPickCategory('all')
+                  setPickSource('all')
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ─── Step: Customize ────────────────────────────────── */}
+        {step === 'customize' && (
+          <div className="flex max-h-[85vh] flex-col overflow-hidden rounded-2xl">
+            {/* Header (fixed) — the "Back to templates" arrow only makes
                     sense when the pick step is part of THIS flow. When the modal
                     was opened directly on customize from the Marketplace (a
                     template Deploy or "Start from scratch"), there's no in-modal
                     picker to return to, so it's hidden (same as single-agent). */}
-                <div className="flex items-center gap-2 px-6 pb-4 pt-6">
-                  {!isSingleAgentMode && !initialProfile && !startBlank && (
-                    <IconButton
-                      label="Back to templates"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setStep('pick')}
-                    >
-                      <ArrowLeft className="h-4 w-4" strokeWidth={2} />
-                    </IconButton>
-                  )}
-                  <h2
-                    className="text-[18px] font-bold text-foreground"
-                    style={{ letterSpacing: '-0.01em' }}
-                  >
-                    {isSingleAgentMode ? 'Deploy agent' : 'Customize team'}
-                  </h2>
+            <div className="flex items-center gap-2 px-6 pb-4 pt-6">
+              {!isSingleAgentMode && !initialProfile && !startBlank && (
+                <IconButton
+                  label="Back to templates"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setStep('pick')}
+                >
+                  <ArrowLeft className="h-4 w-4" strokeWidth={2} />
+                </IconButton>
+              )}
+              <h2
+                id={headingId}
+                className="text-[18px] font-bold text-foreground"
+                style={{ letterSpacing: '-0.01em' }}
+              >
+                {isSingleAgentMode ? 'Deploy agent' : 'Customize team'}
+              </h2>
+            </div>
+
+            {/* Body (scrollable) */}
+            <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-6 pb-2">
+              {/* Name */}
+              <label className="block">
+                <span className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Name
+                </span>
+                <input
+                  type="text"
+                  value={teamName}
+                  onChange={(e) => setTeamName(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+                  placeholder="Team name"
+                />
+              </label>
+
+              {/* ── Team badge: the team's icon + color ── */}
+              <section className="flex flex-col gap-3">
+                <div>
+                  <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                    Team badge
+                  </h3>
+                  <p className="mt-1 text-[12px] text-foreground/50">
+                    Tap the badge to change its icon, then pick a color.
+                  </p>
                 </div>
-
-                {/* Body (scrollable) */}
-                <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-6 pb-2">
-                  {/* Name */}
-                  <label className="block">
-                    <span className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
-                      Name
+                <div className="flex items-center gap-3">
+                  {/* The icon picker IS the live badge (icon on the accent tint) */}
+                  <TeamIconPicker value={teamIcon} onChange={setTeamIcon} accentColor={teamColor} />
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                      Color
                     </span>
-                    <input
-                      type="text"
-                      value={teamName}
-                      onChange={(e) => setTeamName(e.target.value)}
-                      className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
-                      placeholder="Team name"
-                    />
-                  </label>
+                    <TeamAccentPicker value={teamColor} onChange={setTeamColor} />
+                  </div>
+                </div>
+              </section>
 
-                  {/* ── Team badge: the team's icon + color ── */}
-                  <section className="flex flex-col gap-3">
-                    <div>
-                      <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
-                        Team badge
-                      </h3>
-                      <p className="mt-1 text-[12px] text-foreground/50">
-                        Tap the badge to change its icon, then pick a color.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {/* The icon picker IS the live badge (icon on the accent tint) */}
-                      <TeamIconPicker
-                        value={teamIcon}
-                        onChange={setTeamIcon}
-                        accentColor={teamColor}
-                      />
-                      <div className="flex min-w-0 flex-1 flex-col gap-2">
-                        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/45">
-                          Color
-                        </span>
-                        <TeamAccentPicker value={teamColor} onChange={setTeamColor} />
-                      </div>
-                    </div>
-                  </section>
+              {/* ── Teammate colors + per-agent runtime: collection + live roster ── */}
+              <section className="flex flex-col gap-2.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                    Teammate colors
+                  </h3>
+                  {resolvedSelected.length > 0 && (
+                    <span className="font-data text-[10px] text-foreground/50">
+                      {resolvedSelected.length}{' '}
+                      {resolvedSelected.length === 1 ? 'teammate' : 'teammates'}
+                    </span>
+                  )}
+                </div>
+                <TeamColorCollectionPicker
+                  value={colorCollectionId}
+                  onChange={setColorCollectionId}
+                />
 
-                  {/* ── Teammate colors + per-agent runtime: collection + live roster ── */}
-                  <section className="flex flex-col gap-2.5">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
-                        Teammate colors
-                      </h3>
-                      {resolvedSelected.length > 0 && (
-                        <span className="font-data text-[10px] text-foreground/50">
-                          {resolvedSelected.length}{' '}
-                          {resolvedSelected.length === 1 ? 'teammate' : 'teammates'}
-                        </span>
-                      )}
-                    </div>
-                    <TeamColorCollectionPicker
-                      value={colorCollectionId}
-                      onChange={setColorCollectionId}
-                    />
-
-                    {resolvedSelected.length > 0 ? (
-                      <div className="mt-1 max-h-[220px] overflow-y-auto rounded-xl border border-border bg-foreground/[0.02] p-2">
-                        <div className="flex flex-col gap-0.5">
-                          {resolvedSelected.map((agent, i) => {
-                            const isLeaderRow = effectiveLeaderAgent?.id === agent.id
-                            const resolvedDefault = resolvedDefaultFor(agent.id)
-                            const overridden = agent.id in agentRuntimes
-                            const value = agentRuntimes[agent.id] ?? resolvedDefault.selected
-                            const degradedFrom = overridden ? null : resolvedDefault.degradedFrom
-                            const degradedLabel = degradedFrom
-                              ? (agentRuntimeOpts.find((o) => o.sourceId === degradedFrom)?.label ??
-                                degradedFrom)
-                              : null
-                            const showModel = runtimeHasModelPicker(value)
-                            return (
-                              <div
-                                key={agent.id}
-                                className="flex flex-col gap-1 rounded-lg px-1.5 py-1.5"
-                              >
-                                {/* Name + Leader flex on the left; the runtime + model
+                {resolvedSelected.length > 0 ? (
+                  <div className="mt-1 max-h-[220px] overflow-y-auto rounded-xl border border-border bg-foreground/[0.02] p-2">
+                    <div className="flex flex-col gap-0.5">
+                      {resolvedSelected.map((agent, i) => {
+                        const isLeaderRow = effectiveLeaderAgent?.id === agent.id
+                        const resolvedDefault = resolvedDefaultFor(agent.id)
+                        const overridden = agent.id in agentRuntimes
+                        const value = agentRuntimes[agent.id] ?? resolvedDefault.selected
+                        const degradedFrom = overridden ? null : resolvedDefault.degradedFrom
+                        const degradedLabel = degradedFrom
+                          ? (agentRuntimeOpts.find((o) => o.sourceId === degradedFrom)?.label ??
+                            degradedFrom)
+                          : null
+                        const showModel = runtimeHasModelPicker(value)
+                        return (
+                          <div
+                            key={agent.id}
+                            className="flex flex-col gap-1 rounded-lg px-1.5 py-1.5"
+                          >
+                            {/* Name + Leader flex on the left; the runtime + model
                                     pickers sit as a compact cluster on the right. The
                                     wider (max-w-2xl) modal keeps them on ONE line. */}
-                                <div className="flex items-center gap-2.5">
-                                  <BooAvatar seed={agent.name} size={24} tint={previewColors[i]} />
-                                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                                    <span className="min-w-0 truncate text-[13px] text-foreground/80">
-                                      {agent.name}
-                                    </span>
-                                    {isLeaderRow && (
-                                      <span className="shrink-0 rounded-md border border-border bg-foreground/[0.03] px-1.5 py-0.5 text-[10px] text-foreground/60">
-                                        Leader
-                                      </span>
-                                    )}
-                                  </div>
-                                  <RuntimeSelect
-                                    value={value}
-                                    options={agentRuntimeOpts}
-                                    onChange={(sid) => {
-                                      setAgentRuntimes((prev) => ({ ...prev, [agent.id]: sid }))
-                                      // A model id is runtime-specific (native vs OpenClaw
-                                      // catalogs differ), so clear any override when the
-                                      // runtime changes — a stale cross-runtime id must not leak.
-                                      setAgentModels((prev) => {
-                                        if (!(agent.id in prev)) return prev
-                                        const next = { ...prev }
-                                        delete next[agent.id]
-                                        return next
-                                      })
-                                    }}
-                                    onDisabledClick={handleRuntimeConnectClick}
-                                  />
-                                  {showModel && (
-                                    <MemberModelSelect
-                                      className="shrink-0"
-                                      style={{ width: 184 }}
-                                      data-testid="member-model-trigger"
-                                      aria-label={`Model for ${agent.name}`}
-                                      value={agentModels[agent.id] ?? ''}
-                                      onChange={(m) =>
-                                        setAgentModels((prev) => ({ ...prev, [agent.id]: m }))
-                                      }
-                                      groups={groupsForRuntime(
-                                        value,
-                                        nativeModelGroups,
-                                        openclawModelGroups,
-                                        hermesModelGroups,
-                                        connectedProviderSlugs,
-                                        codexReady,
-                                      )}
-                                      defaultModelId={defaultModelFor(
-                                        value,
-                                        openclawDefaultModel,
-                                        nativeDefaultModel,
-                                      )}
-                                      defaultProvider={defaultProviderFor(
-                                        value,
-                                        nativeDefaultProvider,
-                                      )}
-                                    />
-                                  )}
-                                </div>
-                                {degradedLabel && (
-                                  <p className="pl-[34px] text-[10.5px] text-foreground/45">
-                                    {degradedLabel} unavailable · using Clawboo Native
-                                  </p>
+                            <div className="flex items-center gap-2.5">
+                              <BooAvatar seed={agent.name} size={24} tint={previewColors[i]} />
+                              <div className="flex min-w-0 flex-1 items-center gap-2">
+                                <span className="min-w-0 truncate text-[13px] text-foreground/80">
+                                  {agent.name}
+                                </span>
+                                {isLeaderRow && (
+                                  <span className="shrink-0 rounded-md border border-border bg-foreground/[0.03] px-1.5 py-0.5 text-[10px] text-foreground/60">
+                                    Leader
+                                  </span>
                                 )}
                               </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-[12px] text-foreground/50">
-                        Teammates you add to this team will use these colors.
-                      </p>
-                    )}
-                  </section>
+                              <RuntimeSelect
+                                value={value}
+                                options={agentRuntimeOpts}
+                                onChange={(sid) => {
+                                  setAgentRuntimes((prev) => ({ ...prev, [agent.id]: sid }))
+                                  // A model id is runtime-specific (native vs OpenClaw
+                                  // catalogs differ), so clear any override when the
+                                  // runtime changes — a stale cross-runtime id must not leak.
+                                  setAgentModels((prev) => {
+                                    if (!(agent.id in prev)) return prev
+                                    const next = { ...prev }
+                                    delete next[agent.id]
+                                    return next
+                                  })
+                                }}
+                                onDisabledClick={handleRuntimeConnectClick}
+                              />
+                              {showModel && (
+                                <MemberModelSelect
+                                  className="shrink-0"
+                                  style={{ width: 184 }}
+                                  data-testid="member-model-trigger"
+                                  aria-label={`Model for ${agent.name}`}
+                                  value={agentModels[agent.id] ?? ''}
+                                  onChange={(m) =>
+                                    setAgentModels((prev) => ({ ...prev, [agent.id]: m }))
+                                  }
+                                  groups={groupsForRuntime(
+                                    value,
+                                    nativeModelGroups,
+                                    openclawModelGroups,
+                                    hermesModelGroups,
+                                    connectedProviderSlugs,
+                                    codexReady,
+                                  )}
+                                  defaultModelId={defaultModelFor(
+                                    value,
+                                    openclawDefaultModel,
+                                    nativeDefaultModel,
+                                  )}
+                                  defaultProvider={defaultProviderFor(value, nativeDefaultProvider)}
+                                />
+                              )}
+                            </div>
+                            {degradedLabel && (
+                              <p className="pl-[34px] text-[10.5px] text-muted-foreground">
+                                {degradedLabel} unavailable · using Clawboo Native
+                              </p>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[12px] text-foreground/50">
+                    Teammates you add to this team will use these colors.
+                  </p>
+                )}
+              </section>
 
-                  {error && <FormattedAlert tone="error">{error}</FormattedAlert>}
-                </div>
+              {error && <FormattedAlert tone="error">{error}</FormattedAlert>}
+            </div>
 
-                {/* Footer (fixed) — primary action always visible */}
-                <div className="border-t border-border px-6 py-4">
-                  <button
-                    type="button"
-                    data-testid="create-team-deploy"
-                    onClick={() => void handleConfirmCustomize()}
-                    disabled={!teamName.trim()}
-                    className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl text-[14px] font-semibold text-primary-foreground transition active:scale-[0.98] hover:brightness-110 disabled:pointer-events-none disabled:opacity-45"
-                    style={{ backgroundColor: teamColor, boxShadow: 'var(--shadow-raised)' }}
-                  >
-                    {isSingleAgentMode
-                      ? 'Create agent'
-                      : selectedProfile
-                        ? 'Deploy team'
-                        : 'Create team'}
-                  </button>
-                </div>
-              </div>
-            )}
+            {/* Footer (fixed) — primary action always visible */}
+            <div className="border-t border-border px-6 py-4">
+              <button
+                type="button"
+                data-testid="create-team-deploy"
+                onClick={() => void handleConfirmCustomize()}
+                disabled={!teamName.trim()}
+                // `text-white`, NOT `text-primary-foreground`: this button's fill
+                // is the user's chosen `teamColor`, not a brand token, so it has
+                // no business borrowing the label colour that is paired with
+                // `--primary-solid`. Same rendering, honest coupling.
+                className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl text-[14px] font-semibold text-white transition active:scale-[0.98] hover:brightness-110 disabled:pointer-events-none disabled:opacity-45"
+                style={{ backgroundColor: teamColor, boxShadow: 'var(--shadow-raised)' }}
+              >
+                {isSingleAgentMode
+                  ? 'Create agent'
+                  : selectedProfile
+                    ? 'Deploy team'
+                    : 'Create team'}
+              </button>
+            </div>
+          </div>
+        )}
 
-            {/* ─── Step: Deploy ───────────────────────────────────── */}
-            {step === 'deploy' && progress && (
-              <div className="flex flex-col items-center px-6 py-10">
-                <motion.div
-                  animate={{ rotate: [0, 10, -10, 0] }}
-                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-                  className="mb-4 text-4xl"
-                >
-                  {teamIcon}
-                </motion.div>
-                <h2
-                  className="mb-2 text-[18px] font-bold text-foreground"
-                  style={{ letterSpacing: '-0.01em' }}
-                >
-                  Deploying {teamName}
-                </h2>
+        {/* ─── Step: Deploy ─────────────────────────────────────
+            Gated on `step` alone, NOT on `progress`. The dialog's accessible
+            name comes from the one `headingId` heading rendered per step, and
+            the close control is hidden here — so a deploy step with no progress
+            yet would render an empty, unnamed dialog. Today `setStep('deploy')`
+            and the first `setProgress` batch into one render, but that holds
+            only while no `await` sits between them and the loop runs at least
+            once. The progress-dependent parts gate on `progress` individually. */}
+        {step === 'deploy' && (
+          <div className="flex flex-col items-center px-6 py-10">
+            <motion.div
+              animate={{ rotate: [0, 10, -10, 0] }}
+              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+              className="mb-4 text-4xl"
+            >
+              {teamIcon}
+            </motion.div>
+            <h2
+              id={headingId}
+              className="mb-2 text-[18px] font-bold text-foreground"
+              style={{ letterSpacing: '-0.01em' }}
+            >
+              Deploying {teamName}
+            </h2>
+            {progress && (
+              <>
                 <p className="mb-6 text-[13px] text-foreground/55">Creating {progress.label}…</p>
 
                 {/* Progress bar */}
@@ -1290,47 +1304,50 @@ export function CreateTeamModal({
                 <p className="font-data text-[11px] text-foreground/50">
                   {progress.current}/{progress.total} agents
                 </p>
-
-                {/* Safety-net error display (catch should reset to customize, but just in case) */}
-                {error && (
-                  <div className="mt-4 flex w-full max-w-xs flex-col items-center gap-2">
-                    <FormattedAlert tone="error">{error}</FormattedAlert>
-                    <Button variant="outline" size="sm" onClick={() => setStep('customize')}>
-                      Back
-                    </Button>
-                  </div>
-                )}
-              </div>
+              </>
             )}
 
-            {/* ─── Step: Complete ─────────────────────────────────── */}
-            {step === 'complete' && (
-              <div className="flex flex-col items-center px-6 py-10">
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                >
-                  <CheckCircle2
-                    className="mb-3 h-12 w-12"
-                    strokeWidth={1.5}
-                    style={{ color: 'var(--mint)' }}
-                  />
-                </motion.div>
-                <h2
-                  className="mb-1 text-[18px] font-bold text-foreground"
-                  style={{ letterSpacing: '-0.01em' }}
-                >
-                  Team deployed!
-                </h2>
-                <p className="text-[13px] text-foreground/55">{teamName} is ready to go.</p>
+            {/* Safety-net error display (catch should reset to customize, but just in case) */}
+            {error && (
+              <div className="mt-4 flex w-full max-w-xs flex-col items-center gap-2">
+                <FormattedAlert tone="error">{error}</FormattedAlert>
+                <Button variant="outline" size="sm" onClick={() => setStep('customize')}>
+                  Back
+                </Button>
               </div>
             )}
-          </motion.div>
-        </motion.div>
-      </AnimatePresence>
+          </div>
+        )}
 
-      {/* Template detail overlay */}
+        {/* ─── Step: Complete ─────────────────────────────────── */}
+        {step === 'complete' && (
+          <div className="flex flex-col items-center px-6 py-10">
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+            >
+              <CheckCircle2
+                className="mb-3 h-12 w-12"
+                strokeWidth={1.5}
+                style={{ color: 'var(--mint)' }}
+              />
+            </motion.div>
+            <h2
+              id={headingId}
+              className="mb-1 text-[18px] font-bold text-foreground"
+              style={{ letterSpacing: '-0.01em' }}
+            >
+              Team deployed!
+            </h2>
+            <p className="text-[13px] text-foreground/55">{teamName} is ready to go.</p>
+          </div>
+        )}
+      </Modal>
+
+      {/* Template detail overlay — a sibling <Modal> at a higher layer. It
+          registers its focus trap after this one, so it owns Escape and Tab
+          until it closes. */}
       {detailTemplate && (
         <TeamTemplateDetail
           template={detailTemplate}

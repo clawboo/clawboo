@@ -2,9 +2,13 @@
 // --motion-* tokens in globals.css). One home for the spring + stagger so the
 // same physics is reused everywhere instead of copy-pasted per component.
 //
-// Framer Motion respects `prefers-reduced-motion` at the framework level, so
-// these are safe to apply unconditionally — reduced-motion users get an
-// instant fade instead of the spring/stagger.
+// These are safe to apply unconditionally, but NOT for the reason this comment
+// used to give. Framer Motion does not honour `prefers-reduced-motion` on its
+// own — `MotionConfigContext` defaults to `reducedMotion: "never"`. What makes
+// them safe is the `<MotionConfig reducedMotion="user">` at the app root
+// (`app/providers.tsx`), which defers to the OS setting and suppresses the
+// transform side of these springs while leaving opacity intact. Remove that
+// provider and every spring below animates at full amplitude again.
 
 import type { Transition } from 'framer-motion'
 

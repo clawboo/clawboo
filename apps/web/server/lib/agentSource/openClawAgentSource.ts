@@ -12,7 +12,6 @@ import {
   agents,
   approvalHistory,
   costRecords,
-  createDb,
   getSetting,
   settings,
   teams,
@@ -78,7 +77,9 @@ export interface AgentListEntryLike {
 }
 
 export interface OpenClawAgentSourceDeps {
-  getDbPath: () => string
+  /** The shared process connection (a thunk, so a sandbox swap is picked up
+   *  per call — the registries are module singletons built once per test file). */
+  getDb: () => ClawbooDb
   loadSettings: () => { gatewayUrl?: string; gatewayToken?: string }
   /** Construct a fresh Gateway client (the registry injects the real one + signer). */
   makeClient: () => OpenClawClientLike
@@ -153,7 +154,7 @@ export class OpenClawAgentSource implements AgentSource {
   constructor(private readonly deps: OpenClawAgentSourceDeps) {}
 
   private db(): ClawbooDb {
-    return createDb(this.deps.getDbPath())
+    return this.deps.getDb()
   }
 
   private log(level: 'info' | 'warn' | 'error', obj: object, msg: string): void {
@@ -254,7 +255,9 @@ export class OpenClawAgentSource implements AgentSource {
       // is a top-level id array under `tools` (deny-wins). Re-asserted as the union
       // with any user-set deny entries so we never drop the user's own denials.
       const rawDeny = (snapshot.config?.tools?.deny ?? snapshot.tools?.deny) as unknown
-      const currentDeny = Array.isArray(rawDeny) ? rawDeny.filter((x): x is string => typeof x === 'string') : []
+      const currentDeny = Array.isArray(rawDeny)
+        ? rawDeny.filter((x): x is string => typeof x === 'string')
+        : []
       const desiredDeny = Array.from(new Set([...currentDeny, ...SUBAGENT_SPAWN_TOOLS]))
       const denyOk = SUBAGENT_SPAWN_TOOLS.every((t) => currentDeny.includes(t))
       const entry = (server: 'memory' | 'tasks') => ({

@@ -28,7 +28,7 @@ import { ArrowLeft, ArrowRight, Users } from 'lucide-react'
 
 import { NATIVE_STEPS } from '../StepIndicator'
 import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
-import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
+import { CreateTeamModalLazy } from '@/features/teams/CreateTeamModalLazy'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -92,7 +92,7 @@ export function SelectTeamStep({
         </div>
       </OnboardingScreen>
 
-      <CreateTeamModal
+      <CreateTeamModalLazy
         isOpen={browseOpen}
         onClose={() => setBrowseOpen(false)}
         onCreated={(teamId) => {

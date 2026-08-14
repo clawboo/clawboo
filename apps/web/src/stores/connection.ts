@@ -1,11 +1,34 @@
 import { create } from 'zustand'
-import type { GatewayClient } from '@clawboo/gateway-client'
+import type { ConnectionStatus as SocketStatus, GatewayClient } from '@clawboo/gateway-client'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-// Superset of @clawboo/gateway-client's ConnectionStatus — adds 'error' state
-// that the UI surfaces distinctly from transient 'disconnected'.
+// The live socket's own status (`disconnected` | `connecting` | `connected` |
+// `reconnecting`) plus an app-only `error` the UI surfaces distinctly from a
+// transient `disconnected`.
+//
+// DERIVED from the client's union rather than re-listing it, so the two cannot
+// drift: if the client ever gains a status, this follows automatically and the
+// exhaustive switch in `features/connection/connectionStatusDisplay.ts` fails to
+// compile until someone decides how to render it.
+//
+// `reconnecting` is mirrored from the live client by `useGatewayEvents`; see
+// `features/connection/socketStatusMirror.ts` for which transitions cross over.
 
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
+export type ConnectionStatus = SocketStatus | 'error'
+
+/**
+ * True while the app is inside a LIVE session — either connected, or connected
+ * with the socket transiently down and the client retrying on its own backoff.
+ *
+ * Every app-shell / overlay gate must use this rather than `=== 'connected'`, so
+ * a mid-session drop keeps the dashboard up instead of throwing the full-screen
+ * connect modal (or the onboarding wizard) over a working workspace. Gates that
+ * mean "the Gateway is usable RIGHT NOW" — deploying an OpenClaw team, sending on
+ * an OpenClaw chat, the Runtimes health row — deliberately stay strict.
+ */
+export function isSessionLive(status: ConnectionStatus): boolean {
+  return status === 'connected' || status === 'reconnecting'
+}
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 

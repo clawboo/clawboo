@@ -11,6 +11,7 @@ import { confirm } from '@/stores/confirm'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { TeamContextMenu } from '@/features/teams/TeamContextMenu'
 import { refreshTeamAgentsMd } from '@/lib/createAgent'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 // ─── RailTip ─────────────────────────────────────────────────────────────────
 
@@ -354,6 +355,14 @@ export function TeamSidebar() {
   const [mascotMenu, setMascotMenu] = useState<{ x: number; y: number } | null>(null)
   const mascotMenuRef = useRef<HTMLDivElement>(null)
 
+  // Escape and outside-press are arbitrated by the shared layer stack: only the
+  // topmost open layer reacts, so this dismisses alone.
+  useDismissableLayer({
+    active: mascotMenu !== null,
+    level: 'popover',
+    onEscape: () => setMascotMenu(null),
+  })
+
   useEffect(() => {
     if (!mascotMenu) return
     const handleMouseDown = (e: MouseEvent) => {
@@ -361,14 +370,9 @@ export function TeamSidebar() {
         setMascotMenu(null)
       }
     }
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMascotMenu(null)
-    }
     document.addEventListener('mousedown', handleMouseDown)
-    document.addEventListener('keydown', handleEscape)
     return () => {
       document.removeEventListener('mousedown', handleMouseDown)
-      document.removeEventListener('keydown', handleEscape)
     }
   }, [mascotMenu])
 

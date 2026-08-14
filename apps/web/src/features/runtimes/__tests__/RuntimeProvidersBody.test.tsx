@@ -35,6 +35,10 @@ function hub(connected: string[]): void {
   )
 }
 
+// "Use" verifies the STORED key before reconnecting on it (keyless — the route
+// resolves the saved key itself), so it needs a verdict here.
+const HEALTHCHECK = '/api/runtimes/clawboo-native/healthcheck'
+
 describe('RuntimeProvidersBody', () => {
   it('renders ONLY hub-connected providers (space-efficient) + the add-more footer', async () => {
     hub(['openrouter'])
@@ -59,10 +63,15 @@ describe('RuntimeProvidersBody', () => {
     expect(useSettingsModalStore.getState().view).toBe('providers')
   })
 
-  it('DISCONNECTED native: a hub-connected row offers one-click Use → the KEYLESS connect (provider only)', async () => {
+  it('DISCONNECTED native: a hub-connected row offers one-click Use → verify the saved key, then the KEYLESS connect (provider only)', async () => {
     hub(['openrouter'])
     const posts: unknown[] = []
+    let health: unknown = null
     server.use(
+      http.post(HEALTHCHECK, async ({ request }) => {
+        health = await request.json()
+        return HttpResponse.json({ ok: true })
+      }),
       http.post('/api/runtimes/clawboo-native/connect', async ({ request }) => {
         posts.push(await request.json())
         return HttpResponse.json({ ok: true, connectionState: 'ready' })
@@ -73,6 +82,38 @@ describe('RuntimeProvidersBody', () => {
     await userEvent.click(await screen.findByTestId('native-provider-use-openrouter'))
     await waitFor(() => expect(posts).toContainEqual({ provider: 'openrouter' }))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    // Keyless both ways: the probe names the provider and lets the server read the
+    // key it already holds — the key is never re-pasted, and never round-trips.
+    expect(health).toEqual({ provider: 'openrouter', apiKey: '' })
+  })
+
+  it('a REVOKED stored key blocks the reconnect; "Use anyway" overrides it', async () => {
+    hub(['openrouter'])
+    const posts: unknown[] = []
+    let healthchecks = 0
+    server.use(
+      http.post(HEALTHCHECK, () => {
+        healthchecks += 1
+        return HttpResponse.json({ ok: false, error: 'Invalid API key.' })
+      }),
+      http.post('/api/runtimes/clawboo-native/connect', async ({ request }) => {
+        posts.push(await request.json())
+        return HttpResponse.json({ ok: true, connectionState: 'ready' })
+      }),
+    )
+    const onChanged = vi.fn()
+    render(<RuntimeProvidersBody nativeReady={false} onChanged={onChanged} />)
+    await userEvent.click(await screen.findByTestId('native-provider-use-openrouter'))
+
+    // "Connected" only ever meant "a key exists" — this is where we find out it
+    // stopped working, instead of on the runtime's next run.
+    expect(await screen.findByText(/OpenRouter: Invalid API key\./)).toBeInTheDocument()
+    expect(posts).toEqual([])
+    expect(onChanged).not.toHaveBeenCalled()
+
+    await userEvent.click(screen.getByTestId('native-provider-use-anyway-openrouter'))
+    await waitFor(() => expect(posts).toContainEqual({ provider: 'openrouter' }))
+    expect(healthchecks).toBe(1)
   })
 
   it('READY native: the default provider shows the model dropdown; changing it saves the leader model', async () => {

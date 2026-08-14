@@ -39,7 +39,9 @@ export function Chip({
         'inline-flex items-center gap-1.5 rounded-full border font-medium transition-all duration-150',
         'cursor-pointer whitespace-nowrap',
         dims,
-        active ? '' : 'border-border text-foreground/65 hover:border-border-strong hover:text-foreground',
+        active
+          ? ''
+          : 'border-border text-foreground/65 hover:border-border-strong hover:text-foreground',
         className,
       ].join(' ')}
       style={

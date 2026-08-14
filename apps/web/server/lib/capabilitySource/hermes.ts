@@ -19,7 +19,7 @@ import {
   type CapabilitySource,
   type CapabilityWriteAction,
 } from '@clawboo/capability-registry'
-import { agents, createDb, type ClawbooDb } from '@clawboo/db'
+import { agents, type ClawbooDb } from '@clawboo/db'
 
 import { listNativeSkills } from '../runtimes/hermesSkills'
 import { buildRecord, builtinRollup, degradedStatus, okStatus } from './helpers'
@@ -78,15 +78,15 @@ async function readMcpConnectors(home: string): Promise<McpConnector[]> {
 export class HermesCapabilitySource implements CapabilitySource {
   readonly id = 'hermes' as const
 
-  constructor(private readonly deps: { getDbPath?: () => string; env?: NodeJS.ProcessEnv } = {}) {}
+  constructor(private readonly deps: { getDb?: () => ClawbooDb; env?: NodeJS.ProcessEnv } = {}) {}
 
   /** Live hermes agent ids (hermes-sourced, not archived) — the set a home dir
    *  must belong to. `null` when no db is wired (unit tests) or the db is
    *  unreadable → skip the filter (surface all homes, the legacy behaviour). */
   private liveHermesAgentIds(): Set<string> | null {
-    if (!this.deps.getDbPath) return null
+    if (!this.deps.getDb) return null
     try {
-      const db: ClawbooDb = createDb(this.deps.getDbPath())
+      const db: ClawbooDb = this.deps.getDb()
       const ids = new Set<string>()
       for (const a of db.select().from(agents).all()) {
         if (a.archivedAt != null) continue

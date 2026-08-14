@@ -44,12 +44,7 @@ export interface ProviderClient {
 }
 
 export type ProviderErrorCode =
-  | 'auth'
-  | 'rate_limit'
-  | 'overloaded'
-  | 'network'
-  | 'bad_request'
-  | 'unknown'
+  'auth' | 'rate_limit' | 'overloaded' | 'network' | 'bad_request' | 'unknown'
 
 export class ProviderError extends Error {
   constructor(

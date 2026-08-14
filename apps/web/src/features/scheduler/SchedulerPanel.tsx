@@ -7,7 +7,7 @@
 // can be scheduled only for a team task. Run-history + live firing come from the
 // record's nextRunAt/lastRunAt/status, refreshed on the same 8s cadence.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, Clock, Pause, Play, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 
@@ -18,6 +18,7 @@ import { EmptyState } from '@/features/shared/EmptyState'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Select } from '@/features/shared/Select'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { listAgents } from '@clawboo/control-client'
 import { formatRelative } from '@/lib/formatRelative'
@@ -31,8 +32,10 @@ import {
   type ScheduleRecord,
   type ScheduleSourceReadStatus,
 } from '@/lib/schedulesClient'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { useToastStore } from '@/stores/toast'
 import { confirm } from '@/stores/confirm'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 
 import { canScheduleOwnLife, formatScheduleLabel } from './scheduleHelpers'
 import { RuntimeGlyph } from '../runtimes/runtimeDepth'
@@ -186,7 +189,9 @@ function ScheduleRow({ rec, onChanged }: { rec: ScheduleRecord; onChanged: () =>
               void (async () => {
                 if (
                   !(await confirm({
-                    title: ownLife ? 'Delete this Gateway cron job?' : 'Delete this scheduled routine?',
+                    title: ownLife
+                      ? 'Delete this Gateway cron job?'
+                      : 'Delete this scheduled routine?',
                     message: ownLife
                       ? "It removes the agent's own scheduled wake on the OpenClaw Gateway."
                       : 'It is removed permanently.',
@@ -203,7 +208,7 @@ function ScheduleRow({ rec, onChanged }: { rec: ScheduleRecord; onChanged: () =>
           </IconButton>
         </div>
       ) : (
-        <span className="flex-shrink-0 font-mono text-[9.5px] uppercase tracking-[0.14em] text-foreground/40">
+        <span className="flex-shrink-0 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
           read-only
         </span>
       )}
@@ -264,19 +269,26 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
     if (!isOpenClaw && intent === 'own-life') setIntent('team-task')
   }, [isOpenClaw, intent])
 
-  // Close on Escape — capture phase so it beats the app-shell Esc handler
-  // (which would otherwise close the parent Settings modal instead of this
-  // dialog when the Scheduler panel is opened from Settings).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', onKey, true)
-    return () => document.removeEventListener('keydown', onKey, true)
-  }, [onClose])
+  // Close on Escape, through the shared layer stack. The stack consumes the key
+  // so it never reaches the app shell (which would otherwise close the parent
+  // Settings modal when the Scheduler is opened from Settings), and an open
+  // `<Select>` inside this dialog outranks it — so dismissing the Agent
+  // dropdown leaves the dialog and its typed label alone. Issue #95.
+  // `busy` guards both channels: a dismissal mid-create would unmount the dialog
+  // while the POST is still in flight, and `submit()`'s completion path would then
+  // toast and close against an unmounted tree. Matches NewTaskDialog.
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useDismissableLayer({
+    active: true,
+    level: 'dialog',
+    onEscape: () => {
+      if (!busy) onClose()
+    },
+    contains: (t) => !!dialogRef.current?.contains(t),
+    onPressOutside: () => {
+      if (!busy) onClose()
+    },
+  })
 
   async function submit(): Promise<void> {
     if (!selected) return
@@ -316,7 +328,6 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
   // modal's glass container). z above the settings scrim (z-70).
   return createPortal(
     <div
-      onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -329,10 +340,10 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-label="Create schedule"
         data-testid="schedule-dialog"
-        onClick={(e) => e.stopPropagation()}
         className="rounded-2xl border border-border bg-surface"
         style={{
           width: 'min(440px, 100%)',
@@ -427,12 +438,7 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
         <Field label="Runs">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {CRON_PRESETS.map((p) => (
-              <Chip
-                key={p.cron}
-                active={cron === p.cron}
-                onClick={() => setCron(p.cron)}
-                size="sm"
-              >
+              <Chip key={p.cron} active={cron === p.cron} onClick={() => setCron(p.cron)} size="sm">
                 {p.label}
               </Chip>
             ))}
@@ -469,7 +475,7 @@ function ScheduleDialog({ onClose, onCreated }: { onClose: () => void; onCreated
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-      <label className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+      <label className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </label>
       {children}
@@ -493,18 +499,26 @@ export function SchedulerPanel() {
   const [loaded, setLoaded] = useState(false)
   const [showDialog, setShowDialog] = useState(false)
 
+  const reads = useReadSequencer()
+
   const refresh = useCallback(async () => {
+    // Every row action (pause / resume / run-now) and the create dialog reconcile through
+    // this read, and the Refresh button races the 8s poll. Sequenced last-write-wins so a
+    // read issued before a toggle can't land after it and show the pre-toggle state.
+    const read = reads.beginRead()
     const view = await fetchSchedules()
-    setSchedules(view.schedules)
-    setSources(view.sources)
-    setLoaded(true)
-  }, [])
+    if (read.isCurrent()) {
+      setSchedules(view.schedules)
+      setSources(view.sources)
+    }
+    if (read.isNewestRead()) setLoaded(true)
+  }, [reads])
 
   useEffect(() => {
     void refresh()
-    const id = setInterval(() => void refresh(), 8000)
-    return () => clearInterval(id)
   }, [refresh])
+
+  useVisiblePolling(() => void refresh(), 8000)
 
   const groups = useMemo(
     () => [
@@ -561,7 +575,7 @@ export function SchedulerPanel() {
           {groups.map((g) => (
             <div key={g.domain}>
               <div style={{ marginBottom: 12 }}>
-                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                   {DOMAIN_META[g.domain].title}
                 </span>
                 <span style={{ marginLeft: 10 }} className="text-[11.5px] text-foreground/40">

@@ -6,6 +6,7 @@ import { UnsupportedCapabilityWriteError } from '@clawboo/capability-registry'
 import {
   agents,
   createDb,
+  getCapability,
   seedBuiltinTools,
   setToolEnabled,
   skills,
@@ -14,7 +15,7 @@ import {
 } from '@clawboo/db'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { recordToInsert } from '../mapper'
+import { recordToInsert, rowToRecord } from '../mapper'
 import { NativeCapabilitySource } from '../native'
 import { HermesCapabilitySource } from '../hermes'
 import { ClaudeCodeCapabilitySource } from '../claudeCode'
@@ -30,7 +31,14 @@ beforeEach(() => {
   dbPath = path.join(dir, 'test.db')
   db = createDb(dbPath)
 })
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
+afterEach(() => {
+  // This suite OWNS its connection (createDb at a fixture path), so resetDb()
+  // cannot reach it: that only evicts the getDb() memo. Windows refuses to
+  // remove a directory that still holds an open file, so close it before the
+  // rm. Mirrors the ownership rule in lib/db.ts. (#140)
+  db.$client.close()
+  rmSync(dir, { recursive: true, force: true })
+})
 
 function seedAgent(id: string, runtime: string, sourceId = 'openclaw'): void {
   const now = Date.now()
@@ -61,7 +69,7 @@ describe('NativeCapabilitySource', () => {
       })
       .run()
 
-    const { records, status } = await new NativeCapabilitySource({ getDbPath: () => dbPath }).read()
+    const { records, status } = await new NativeCapabilitySource({ getDb: () => db }).read()
     expect(status.ok).toBe(true)
     expect(
       records.some(
@@ -81,7 +89,7 @@ describe('NativeCapabilitySource', () => {
 
   it('install writes the skills table → the next read surfaces it (the managed-install proof)', async () => {
     seedAgent('a1', 'clawboo-native', 'clawboo-native')
-    const src = new NativeCapabilitySource({ getDbPath: () => dbPath })
+    const src = new NativeCapabilitySource({ getDb: () => db })
     const rec = await src.write({
       kind: 'install',
       spec: {
@@ -103,7 +111,7 @@ describe('NativeCapabilitySource', () => {
 
   it('install is supply-chain scanned — an injection-flagged install is blocked', async () => {
     seedAgent('a1', 'openclaw')
-    const src = new NativeCapabilitySource({ getDbPath: () => dbPath })
+    const src = new NativeCapabilitySource({ getDb: () => db })
     await expect(
       src.write({
         kind: 'install',
@@ -123,7 +131,7 @@ describe('NativeCapabilitySource', () => {
     // The dashboard side of the disable round-trip: the registry must be seeded for
     // setToolEnabled to land a row; then the native read reports it disabled.
     seedBuiltinTools(db)
-    const src = new NativeCapabilitySource({ getDbPath: () => dbPath })
+    const src = new NativeCapabilitySource({ getDb: () => db })
     const before = (await src.read()).records.find(
       (r) => r.source === 'brokered-mcp' && r.sourceKey === 'echo',
     )
@@ -188,7 +196,7 @@ describe('HermesCapabilitySource', () => {
     )
     seedAgent('h-live', 'hermes', 'hermes') // only h-live exists in the registry
 
-    const { records } = await new HermesCapabilitySource({ getDbPath: () => dbPath, env }).read()
+    const { records } = await new HermesCapabilitySource({ getDb: () => db, env }).read()
     const agentIds = new Set(records.filter((r) => r.agentId).map((r) => r.agentId))
     expect(agentIds.has('h-live')).toBe(true)
     expect(agentIds.has('h-dead')).toBe(false)
@@ -260,7 +268,7 @@ describe('OpenClawCapabilitySource', () => {
     const { client } = fakeClient(true, config)
     const { records, status } = await new OpenClawCapabilitySource({
       client,
-      getDbPath: () => dbPath,
+      getDb: () => db,
     }).read()
     expect(status.ok).toBe(true)
     const shell = records.find((r) => r.sourceKey === 'shell')
@@ -292,7 +300,7 @@ describe('OpenClawCapabilitySource', () => {
     const { client } = fakeClient(true, { hash: 'outer-hash', config })
     const { records } = await new OpenClawCapabilitySource({
       client,
-      getDbPath: () => dbPath,
+      getDb: () => db,
     }).read()
     expect(records.find((r) => r.sourceKey === 'mcp:clawboo-memory')).toBeDefined()
     expect(records.find((r) => r.sourceKey === 'mcp:vendor')).toBeDefined()
@@ -304,7 +312,7 @@ describe('OpenClawCapabilitySource', () => {
     const { client } = fakeClient(false, config)
     const { records, status } = await new OpenClawCapabilitySource({
       client,
-      getDbPath: () => dbPath,
+      getDb: () => db,
     }).read()
     expect(records).toEqual([])
     expect(status).toMatchObject({ ok: false, degraded: true, reason: 'gateway_disconnected' })
@@ -312,7 +320,7 @@ describe('OpenClawCapabilitySource', () => {
 
   it('enable drives config.patch (runtime-of-record) with the tool moved into tools.allow', async () => {
     const { client, calls } = fakeClient(true, config)
-    const src = new OpenClawCapabilitySource({ client, getDbPath: () => dbPath })
+    const src = new OpenClawCapabilitySource({ client, getDb: () => db })
     const { records } = await src.read()
     // Persist so the write path can resolve the row by id.
     upsertCapabilities(db, 'openclaw', records.map(recordToInsert))
@@ -326,5 +334,70 @@ describe('OpenClawCapabilitySource', () => {
     const tools = (JSON.parse(params.raw) as { tools: { allow: string[]; deny: string[] } }).tools
     expect(tools.allow).toContain('danger')
     expect(tools.deny).not.toContain('danger')
+  })
+
+  it('write() unwraps the config.get SNAPSHOT wrapper, so the existing tool policy is PRESERVED not replaced', async () => {
+    // The flat fixture above cannot catch this: a real Gateway nests the live
+    // config under `.config` (see the read() sibling test). Reading `tools` off the
+    // top level yields undefined, so allow/deny start EMPTY and the wholesale
+    // re-assert replaces the user's whole policy with just the toggled id, wiping
+    // the sessions_spawn/sessions_yield denies. It was unreachable behind the
+    // writable gate until #146 opened it, so this is the test that keeps it shut.
+    const { client, calls } = fakeClient(true, { hash: 'outer-hash', config })
+    const src = new OpenClawCapabilitySource({ client, getDb: () => db })
+    const { records } = await src.read()
+    upsertCapabilities(db, 'openclaw', records.map(recordToInsert))
+    const shell = records.find((r) => r.sourceKey === 'shell')!
+    await src.write({ kind: 'disable', id: shell.id })
+
+    const params = calls.find((c) => c.method === 'config.patch')!.params as {
+      raw: string
+      baseHash?: string
+    }
+    const tools = (JSON.parse(params.raw) as { tools: { allow: string[]; deny: string[] } }).tools
+    // `shell` moves allow -> deny; everything else the user had must survive.
+    expect(tools.allow).toEqual(['web'])
+    expect(tools.deny).toEqual(expect.arrayContaining(['danger', 'shell']))
+    // The hash lives on the OUTER snapshot, so unwrapping must not lose it.
+    expect(params.baseHash).toBe('outer-hash')
+  })
+
+  it('write() refuses a connector the source cannot write, and patches nothing', async () => {
+    // Pins the writability half of the guard. Without it, reducing the guard to the
+    // ownership check alone leaves the whole suite green while an mcp/plugin toggle
+    // silently rewrites tools.allow/deny using the connector's sourceKey.
+    const { client, calls } = fakeClient(true, config)
+    const src = new OpenClawCapabilitySource({ client, getDb: () => db })
+    const { records } = await src.read()
+    upsertCapabilities(db, 'openclaw', records.map(recordToInsert))
+    const vendor = records.find((r) => r.sourceKey === 'mcp:vendor')!
+    await expect(src.write({ kind: 'disable', id: vendor.id })).rejects.toBeInstanceOf(
+      UnsupportedCapabilityWriteError,
+    )
+    expect(calls.find((c) => c.method === 'config.patch')).toBeUndefined()
+  })
+
+  it('a tools.allow/deny row survives the DB round-trip as WRITABLE (the config.patch path stays reachable)', async () => {
+    // The test above proves the adapter CAN write a tool, but it resolves the row
+    // raw (getCapability, openclaw.ts:183), so it never exercises rowToRecord. The
+    // REST gate does (capabilities.ts:128), and that is where #146 lived: the
+    // derivation stamped every runtime-of-record OpenClaw extension non-writable,
+    // tools included, so the gate 422'd the one write the adapter supports.
+    // Starting from the REAL read(), not a hand-built buildRecord, is what makes
+    // this catch a future toolRecord() change to `kind`. An origin change flips
+    // isSourceWritable to its permissive branch instead, so the sibling read test
+    // above is what pins origin and manageability.
+    const { client } = fakeClient(true, config)
+    const { records } = await new OpenClawCapabilitySource({ client, getDb: () => db }).read()
+    upsertCapabilities(db, 'openclaw', records.map(recordToInsert))
+
+    const shell = records.find((r) => r.sourceKey === 'shell')!
+    const vendor = records.find((r) => r.sourceKey === 'mcp:vendor')!
+    const beta = records.find((r) => r.sourceKey === 'plugin:beta')!
+
+    expect(rowToRecord(getCapability(db, shell.id)!).writable).not.toBe(false)
+    // The connector + plugin rows the source genuinely cannot write stay gated.
+    expect(rowToRecord(getCapability(db, vendor.id)!).writable).toBe(false)
+    expect(rowToRecord(getCapability(db, beta.id)!).writable).toBe(false)
   })
 })

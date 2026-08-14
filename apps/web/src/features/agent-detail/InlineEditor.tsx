@@ -244,9 +244,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
               ].join(' ')}
             >
               {getTabLabel(tab)}
-              {dirty && (
-                <span className="h-[5px] w-[5px] shrink-0 rounded-full bg-amber" />
-              )}
+              {dirty && <span className="h-[5px] w-[5px] shrink-0 rounded-full bg-amber" />}
               <span
                 aria-hidden
                 className="absolute inset-x-0 -bottom-px h-0.5 rounded-full transition-opacity duration-150"
@@ -322,13 +320,13 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
             }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
+              <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                 Display name
               </h3>
               <DisplayNameEditor agentId={agentId} currentName={liveAgentName} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground/45">
+              <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                 Global brief
               </h3>
               <GlobalBriefEditor />
@@ -347,7 +345,7 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
       </div>
 
       {/* Footer */}
-      <div className="flex shrink-0 items-center justify-between border-t border-border bg-card px-3 py-1 font-mono text-[10px] tracking-wide text-foreground/35">
+      <div className="flex shrink-0 items-center justify-between border-t border-border bg-card px-3 py-1 font-mono text-[10px] tracking-wide text-muted-foreground">
         <span>
           {activeTab === 'personality'
             ? `${agentName} · Personality`

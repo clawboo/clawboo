@@ -44,6 +44,7 @@ import { assembleTiers } from '@clawboo/executor/tiers'
 import {
   checkCostCap,
   createBreakerState,
+  DEFAULT_MAX_DEPTH,
   isPolicyDenialCode,
   stepBreaker,
   toolSignature,
@@ -70,6 +71,7 @@ import { buildMemoryInjection } from './memoryInjection'
 import {
   alertHarnessBug,
   emitEvent,
+  logStructured,
   recordToolSpan,
   spanIdFor,
   withTaskSpan,
@@ -86,8 +88,19 @@ import {
   writeTaskHandoff,
 } from './worktrees'
 
-/** Single reduce point + bounded recursion: a task nested this deep is refused. */
-export const MAX_SPAWN_DEPTH = 2
+/**
+ * The DEEPEST legal task depth (a root is depth 0), shared with the creation-side
+ * caps via `@clawboo/governance` so the two can never drift to different numbers.
+ *
+ * Creation and dispatch read the same constant but compare it differently, and the
+ * difference is deliberate: a create is refused when the PARENT is already at the
+ * max (`parentDepth >= max`, so the child would be `max + 1`), while a dispatch is
+ * refused only when the task ITSELF is past it (`depth > max`). They used to both
+ * use `>=`, which meant the orchestrator happily created depth-2 tasks that this
+ * runner then refused forever as `too_deep` — a card that looked workable and could
+ * never run. The invariant now is: anything that can be created can be dispatched.
+ */
+export const MAX_SPAWN_DEPTH = DEFAULT_MAX_DEPTH
 
 // Serializes dispatch per PERSISTENT identity home (keyed on the home path). Two
 // concurrent runs of the same (runtime, agent) would otherwise spawn two
@@ -145,7 +158,15 @@ export interface RunTaskInput {
 export type RunTaskResult =
   | {
       ok: false
-      reason: 'not_found' | 'conflict' | 'too_deep' | 'connected_substrate' | 'budget_paused'
+      reason:
+        | 'not_found'
+        | 'conflict'
+        | 'too_deep'
+        | 'connected_substrate'
+        | 'budget_paused'
+        // Isolation was required for a file-mutating task but could not be
+        // provisioned; the run is refused rather than executed un-isolated.
+        | 'workspace_unavailable'
     }
   | {
       ok: true
@@ -186,14 +207,35 @@ function formatResumeContext(r: ResumeState): string {
   return parts.join('\n\n')
 }
 
+/**
+ * Outcome of acquiring a workspace.
+ *
+ * `cwd: null` with `ok: true` is a LEGITIMATE no-worktree run (a runtime that
+ * doesn't do worktrees, or read-only research/review work that mutates no files).
+ * `ok: false` means isolation was REQUIRED for this task but could not be
+ * provided — the caller must fail the run rather than fall back to the server's
+ * own working directory, which is what the drivers inherit when `cwd` is null.
+ */
+type WorkspaceOutcome =
+  { ok: true; cwd: string | null; resume: ResumeState | null } | { ok: false; reason: string }
+
 /** Acquire a worktree for the run — reuse an existing one (cross-runtime resume) or provision fresh. */
 async function acquireWorkspace(
   taskId: string,
   caps: Capabilities,
   repoPath: string | null | undefined,
   kind: string,
-): Promise<{ cwd: string | null; resume: ResumeState | null }> {
-  if (!caps.worktrees) return { cwd: null, resume: null }
+): Promise<WorkspaceOutcome> {
+  // `worktrees: false` means the runtime MANAGES ITS OWN workspace, not that it
+  // has none. The only adapter that declares it is OpenClaw, a connected
+  // substrate that runs inside its Gateway-owned workspace and is refused by
+  // this runner before the claim (see the `connected_substrate` guard). Every
+  // SPAWNED runtime declares `worktrees: true` and is therefore covered by the
+  // file-mutating refusal further down, which is the case that matters: those
+  // inherit this process's cwd when `cwd` is null. Keep this branch permissive —
+  // refusing here guards an unreachable path and breaks the `worktrees: false`
+  // fakes that let runner tests skip git setup.
+  if (!caps.worktrees) return { ok: true, cwd: null, resume: null }
 
   const existing = await getTaskWorkspace(taskId)
   if (existing.ok && existing.workspace?.worktreePath) {
@@ -207,7 +249,7 @@ async function acquireWorkspace(
       existing.workspace.status === 'stale' ||
       !existsSync(wtPath) ||
       (repoPath ? !(await isWorktreeRegistered(repoPath, wtPath)) : false)
-    if (!reaped) return { cwd: wtPath, resume: existing.resume }
+    if (!reaped) return { ok: true, cwd: wtPath, resume: existing.resume }
     if (repoPath) {
       const resumed = await resumeTaskWorkspace(taskId, { repoPath })
       if (resumed.ok) {
@@ -217,21 +259,39 @@ async function acquireWorkspace(
         } catch {
           resume = null
         }
-        return { cwd: resumed.worktree.worktreePath, resume }
+        return { ok: true, cwd: resumed.worktree.worktreePath, resume }
       }
     }
   }
 
-  if (!repoPath || isolationForTask(kind) !== 'worktree') return { cwd: null, resume: null }
+  // Read-only work (research / review) mutates no files, so it legitimately runs
+  // without a worktree.
+  if (isolationForTask(kind) !== 'worktree') return { ok: true, cwd: null, resume: null }
+
+  // From here the task DOES mutate files, so isolation is mandatory. Returning a
+  // null cwd here would hand the driver the server's own working directory —
+  // which the drivers run in with permission gates bypassed. Fail instead.
+  if (!repoPath) {
+    return {
+      ok: false,
+      reason:
+        'This task changes files, so it needs an isolated git worktree, but no repository path was provided for it.',
+    }
+  }
   const prov = await provisionTaskWorkspace(taskId, { repoPath, kind })
-  if (!prov.ok) return { cwd: null, resume: null }
+  if (!prov.ok) {
+    return {
+      ok: false,
+      reason: `Could not provision an isolated git worktree for this task at ${repoPath}.`,
+    }
+  }
   let resume: ResumeState | null = null
   try {
     resume = await reconstructState(prov.worktree.worktreePath)
   } catch {
     resume = null
   }
-  return { cwd: prov.worktree.worktreePath, resume }
+  return { ok: true, cwd: prov.worktree.worktreePath, resume }
 }
 
 /**
@@ -250,6 +310,10 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
   const parentTaskId = !input.parentTraceparent
     ? (getTask(input.db, input.taskId)?.parentTaskId ?? null)
     : null
+  // Tracks whether the atomic claim landed, so an UNEXPECTED throw below can put
+  // the task back instead of leaving it wedged in `in_progress` until the stale
+  // sweep. Every expected outcome already releases on its own path.
+  const claimState: ClaimState = { claimed: false }
   const run = (): Promise<RunTaskResult> =>
     withTaskSpan(
       {
@@ -261,7 +325,7 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
         parentTraceparent: input.parentTraceparent ?? null,
         parentSpanId: parentTaskId ? spanIdFor(parentTaskId) : null,
       },
-      (span) => runTaskInner(input, span),
+      (span) => runTaskInner(input, span, claimState),
     )
 
   // Probe capabilities once (constructing the adapter is side-effect-free — no
@@ -275,10 +339,50 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
     resolveRuntimeIntegration(probe.capabilities()).home.kind === 'persistent'
       ? runtimeIdentityHomePath(probe.id, input.assigneeAgentId)
       : null
-  return homeKey ? homeDispatchMutex.run(homeKey, run) : run()
+  try {
+    return await (homeKey ? homeDispatchMutex.run(homeKey, run) : run())
+  } catch (err) {
+    // Safety net for an UNEXPECTED throw (a driver blowing up, a disk error mid-run):
+    // without this the task keeps its claim and sits `in_progress` with no runner
+    // behind it until the stale sweep. Release so it is retryable, then rethrow —
+    // the failure itself is still the caller's to handle.
+    if (claimState.claimed) {
+      try {
+        // ONLY release a task that is still mid-run. A throw can also happen after
+        // the run reached a terminal state (e.g. writing the handoff on the success
+        // path); releasing then would resurrect a finished task and clear its
+        // verification verdict, which is worse than the stranded claim we're fixing.
+        // Close the execution row first: releasing the task without it leaves an
+        // orphaned `running` execution that only boot-time reconciliation clears.
+        if (claimState.execId) {
+          completeExecutionProcess(input.db, claimState.execId, {
+            status: 'failed',
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+        if (input.db && getTask(input.db, input.taskId)?.status === 'in_progress') {
+          releaseTask(input.db, input.taskId)
+        }
+      } catch {
+        // Best effort — never mask the original error with a cleanup failure.
+      }
+    }
+    throw err
+  }
 }
 
-async function runTaskInner(input: RunTaskInput, span: SpanCtx): Promise<RunTaskResult> {
+/** Mutable run state shared with `runTaskInner` (see the safety net above). */
+interface ClaimState {
+  claimed: boolean
+  /** Set once the execution row exists, so an unexpected throw can close it. */
+  execId?: string
+}
+
+async function runTaskInner(
+  input: RunTaskInput,
+  span: SpanCtx,
+  claimState: ClaimState = { claimed: false },
+): Promise<RunTaskResult> {
   const { db, taskId, assigneeAgentId } = input
   const compact = input.compact ?? defaultCompact
   const maxDepth = input.maxSpawnDepth ?? MAX_SPAWN_DEPTH
@@ -293,8 +397,10 @@ async function runTaskInner(input: RunTaskInput, span: SpanCtx): Promise<RunTask
   const task = getTask(db, taskId)
   if (!task) return { ok: false, reason: 'not_found' }
 
-  // Bounded recursion via the board ancestor chain (single reduce point).
-  if (getAncestors(db, taskId).length >= maxDepth) return { ok: false, reason: 'too_deep' }
+  // Bounded recursion via the board ancestor chain (single reduce point). `>` not
+  // `>=`: a task sitting exactly AT the ceiling is the deepest legal one, and the
+  // creation caps already guarantee nothing deeper exists. See MAX_SPAWN_DEPTH.
+  if (getAncestors(db, taskId).length > maxDepth) return { ok: false, reason: 'too_deep' }
 
   // Probe static capabilities (no driver is created until start()).
   const probe = input.makeAdapter({})
@@ -327,12 +433,18 @@ async function runTaskInner(input: RunTaskInput, span: SpanCtx): Promise<RunTask
   // Atomic claim — a lost claim is a conflict and is NEVER retried.
   const claim = claimTask(db, taskId, assigneeAgentId, runtimeId)
   if (!claim.ok) return { ok: false, reason: 'conflict' }
+  // From here the task is ours; an unexpected throw must release it (see the
+  // safety net in runTaskOnRuntime).
+  claimState.claimed = true
 
   const exec = createExecutionProcess(db, {
     taskId,
     executorType: runtimeId,
     runReason: degr.resumeViaHandoff ? 'resume-via-handoff' : 'run',
   })
+  // Share it with the outer safety net so an unexpected throw can close the row
+  // instead of leaving it `running` with no runner behind it.
+  claimState.execId = exec.id
   emitEvent(db, {
     kind: 'execution_started',
     traceId: span.traceId,
@@ -345,7 +457,31 @@ async function runTaskInner(input: RunTaskInput, span: SpanCtx): Promise<RunTask
   })
 
   const kind = input.kind ?? 'code'
-  const { cwd, resume } = await acquireWorkspace(taskId, caps, input.repoPath, kind)
+  const workspace = await acquireWorkspace(taskId, caps, input.repoPath, kind)
+
+  // Isolation was required but unavailable. Running now would execute the agent
+  // in the SERVER's own working directory with permission gates bypassed, so the
+  // run is refused and the task released for a human to fix the repo path.
+  if (!workspace.ok) {
+    addComment(db, taskId, `[blocked: no isolation] ${workspace.reason}`, 'system')
+    completeExecutionProcess(db, exec.id, {
+      status: 'failed',
+      error: `workspace_unavailable: ${workspace.reason}`,
+    })
+    emitEvent(db, {
+      kind: 'execution_completed',
+      traceId: span.traceId,
+      spanId: span.spanId,
+      taskId,
+      teamId: task.teamId,
+      agentId: assigneeAgentId,
+      runtime: runtimeId,
+      data: { execId: exec.id, status: 'failed', error: 'workspace_unavailable' },
+    })
+    releaseTask(db, taskId)
+    return { ok: false, reason: 'workspace_unavailable' }
+  }
+  const { cwd, resume } = workspace
 
   // Memory auto-injection: seed the most-relevant facts for the task into the
   // VOLATILE tier (cache-safe — never the cached prefix, per the KV-cache
@@ -525,6 +661,11 @@ async function runTaskInner(input: RunTaskInput, span: SpanCtx): Promise<RunTask
     inputTokens = 0
     outputTokens = 0
     doneReason = 'error'
+    // Whether the runtime reported ANY spend for this pass. Codex and Hermes only
+    // emit a cost event `if (ev.usage)`, so a CLI output-format drift silently
+    // yields zero recorded spend — the budget ledger would then under-count real
+    // money with no signal at all. Surfaced after the loop.
+    let sawSpend = false
 
     for await (const ev of adapter.events(run)) {
       if (ev.kind === 'text-delta') {
@@ -545,6 +686,7 @@ async function runTaskInner(input: RunTaskInput, span: SpanCtx): Promise<RunTask
                 })
               : 0
         const costEstimated = ev.costUsd == null
+        sawSpend = true
         costUsd = usd
         if (ev.usage) {
           inputTokens = ev.usage.inputTokens
@@ -714,13 +856,39 @@ async function runTaskInner(input: RunTaskInput, span: SpanCtx): Promise<RunTask
       } else if (ev.kind === 'done') {
         doneReason = ev.reason
         summary = ev.summary || lastText
-        if (ev.costUsd != null) costUsd = ev.costUsd
+        if (ev.costUsd != null) {
+          sawSpend = true
+          costUsd = ev.costUsd
+        }
         if (ev.usage) {
           inputTokens = ev.usage.inputTokens
           outputTokens = ev.usage.outputTokens
         }
         break
       }
+    }
+
+    // A pass that finished its stream without reporting spend means the budget
+    // ledger under-counts this run. Codex and Hermes emit a cost event only
+    // `if (ev.usage)`, so a change in a CLI's output format stops spend reaching
+    // the ledger without failing anything. An aborted pass is excluded: it may
+    // legitimately not have billed.
+    if (!sawSpend && doneReason !== 'aborted') {
+      logStructured({
+        level: 'warn',
+        component: 'executorRunner',
+        action: 'spend_unreported',
+        correlationId: span.traceId,
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        error:
+          'Run finished without reporting any usage or cost, so no spend was recorded. ' +
+          'Budgets and caps under-count for this run; suspect a runtime output-format change.',
+        output: { doneReason },
+      })
     }
 
     // External cancel forces the aborted terminal regardless of how the runtime

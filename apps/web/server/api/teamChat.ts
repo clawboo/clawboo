@@ -3,10 +3,10 @@
 // TeamChat MCP server). Shares the same `team_chat` table the MCP server writes
 // (one source of truth). Cursor read so the UI can poll incrementally.
 
-import { createDb, readRoom, resolveRoomForTeam } from '@clawboo/db'
+import { readRoom, resolveRoomForTeam } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { releaseRoom, tryAcquireRoom } from '../lib/teamChat/roomLock'
 import { runTeamExchange } from '../lib/teamChat/runTeamExchange'
@@ -28,7 +28,7 @@ export function teamChatGET(req: Request, res: Response): void {
     }
     const sinceSeq = typeof q['sinceSeq'] === 'string' ? Number(q['sinceSeq']) : 0
     const limit = typeof q['limit'] === 'string' ? Number(q['limit']) : undefined
-    const posts = readRoom(createDb(getDbPath()), {
+    const posts = readRoom(getDb(), {
       roomId,
       sinceSeq: Number.isFinite(sinceSeq) ? sinceSeq : 0,
       ...(limit && Number.isFinite(limit) ? { limit } : {}),
@@ -74,7 +74,7 @@ export async function teamChatExchangePOST(req: Request, res: Response): Promise
     // The runtime adapters attach their MCP client to THIS server's /api/mcp/* —
     // a server-trusted loopback URL, never the client-supplied Host header.
     const result = await runTeamExchange({
-      db: createDb(getDbPath()),
+      db: getDb(),
       teamId,
       stimulus: typeof body['stimulus'] === 'string' ? body['stimulus'] : null,
       mcpBaseUrl: loopbackMcpBaseUrl(req),

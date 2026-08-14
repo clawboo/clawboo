@@ -42,8 +42,9 @@ import {
 } from './steps'
 import { NATIVE_STEPS } from './StepIndicator'
 import { OnboardingPrimary, OnboardingScreen } from './OnboardingScreen'
-import { useFocusTrap } from './useFocusTrap'
+import { isTopmostTrap, useFocusTrap } from '@/features/shared/useFocusTrap'
 import { SkyAtmosphere } from '@/features/atmosphere'
+import { preloadCreateTeamModal } from '@/features/teams/CreateTeamModalLazy'
 import { connectGatewayFromSettings } from '@/lib/gatewayConnect'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -197,7 +198,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
           onClick={onContinue}
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.97 }}
-          className="welcome-cta flex items-center gap-2.5 h-[52px] px-9 rounded-xl bg-accent font-semibold text-[15px] text-primary-foreground shadow-[0_0_36px_rgb(var(--primary-rgb) / 0.45)] transition hover:brightness-110 active:scale-[0.98]"
+          className="welcome-cta flex items-center gap-2.5 h-[52px] px-9 rounded-xl bg-primary-solid font-semibold text-[15px] text-primary-foreground shadow-[0_0_36px_rgb(var(--primary-rgb) / 0.45)] transition hover:brightness-110 active:scale-[0.98]"
         >
           Get Started
           <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
@@ -489,6 +490,14 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
     }
   }, [client])
 
+  // `SelectTeamStep` opens the team marketplace the instant it mounts, and that modal
+  // is lazy so the ~4.4 MB agent catalog stays off the SPA's entry chunk (issue #83).
+  // Warm it here: the user spends several seconds on addRuntimes, so by the time they
+  // continue the chunk is already in the module cache and the step renders instantly.
+  useEffect(() => {
+    if (step === 'addRuntimes') preloadCreateTeamModal()
+  }, [step])
+
   // ── addRuntimes finished (Continue) — advance to team selection.
   const handleAddRuntimesDone = useCallback(() => {
     goTo('selectTeam')
@@ -555,10 +564,15 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
   // The wizard is a mandatory full-screen modal. Trap + restore focus, and let
   // Escape retreat one step (never dismiss — there is no app behind it).
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useFocusTrap(dialogRef, step)
+  const trapToken = useFocusTrap(dialogRef, step)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      // A dialog opened ON TOP of the wizard (SelectTeamStep mounts
+      // CreateTeamModal) owns Escape — otherwise one press would both close that
+      // dialog and retreat a wizard step. stopPropagation can't arbitrate: both
+      // listeners sit on `window` in the bubble phase.
+      if (!isTopmostTrap(trapToken.current)) return
       const back = BACK_STEP[step]
       if (!back) return
       // Retreating out of the OpenClaw detour (back to addRuntimes) abandons it —
@@ -568,7 +582,7 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [step, goTo, resetGatewayClient])
+  }, [step, goTo, resetGatewayClient, trapToken])
 
   // Animate direction based on step progression
   const isForward = STEP_INDEX[step] >= STEP_INDEX[prevStep]
@@ -587,6 +601,10 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
       role="dialog"
       aria-modal="true"
       aria-label="Set up Clawboo"
+      // On the wizard ROOT, not a step: the clean-install smoke waits for this
+      // to prove a fresh install actually reaches the onboarding surface, and
+      // anchoring it here keeps that gate stable across step redesigns.
+      data-testid="onboarding-wizard"
       // Focusable so the focus-trap's root fallback can land focus inside the
       // dialog on a control-less step (an element without tabindex isn't a
       // valid focus target → focus would stay on <body>).

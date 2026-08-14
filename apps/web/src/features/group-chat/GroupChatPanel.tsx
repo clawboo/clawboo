@@ -8,6 +8,7 @@ import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useBoardStore } from '@/stores/board'
 import { useBooZeroStore, isBooZeroEligibleForTeam } from '@/stores/booZero'
+import { connectionStatusTone } from '@/features/connection/connectionStatusDisplay'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import { parseMention } from './parseMention'
 import { useTeamChatStream } from './useTeamChatStream'
@@ -23,7 +24,9 @@ import {
   MetaMessageCard,
   MessageComposer,
   useChatAutoScroll,
+  useRenderWindow,
   JumpToLatestButton,
+  LoadEarlierButton,
   isFollowupBlock,
   blockMarginClass,
   type MessageComposerHandle,
@@ -31,6 +34,7 @@ import {
 import { AgentChips } from './AgentChips'
 import { BoardTaskCard } from './BoardTaskCard'
 import { stripDelegationBlocks, stripPlanBlocks } from './delegationTags'
+import { blockKey, blockTimestamp, describeBlock } from './announceBlock'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 import { Sparkles, X } from 'lucide-react'
@@ -69,6 +73,7 @@ export function GroupChatPanel({
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
   const agents = useFleetStore((s) => s.agents)
   const connectionStatus = useConnectionStore((s) => s.status)
+  const connectionTone = connectionStatusTone(connectionStatus)
   const transcripts = useChatStore((s) => s.transcripts)
   const streamingTextMap = useChatStore((s) => s.streamingText)
   // Subscribe to stream-start timestamps so live StreamingCards can position
@@ -252,6 +257,88 @@ export function GroupChatPanel({
     [blocks],
   )
 
+  // ── A11y: announce COMMITTED messages only ────────────────────────────────
+  // The transcript is a log, not a live region. Marking the scroll container
+  // aria-live would fire on every token of an in-flight stream (StreamingCard
+  // re-renders per delta) and re-read whole turns as blocks regroup — a
+  // screen-reader firehose. Instead: one sr-only sentence, recomputed only when
+  // a NEW committed block lands at the END of `topLevelBlocks`.
+  const nameFor = useCallback(
+    (agentId: string | null) => (agentId ? (agentLookup.get(agentId)?.name ?? 'Agent') : 'Agent'),
+    [agentLookup],
+  )
+  const [announcement, setAnnouncement] = useState<{ key: string; text: string } | null>(null)
+  const announceRef = useRef<{ count: number; key: string }>({ count: 0, key: '' })
+  const openedAtRef = useRef(Date.now())
+
+  // A team switch swaps the whole timeline. Re-baseline instead of reading out
+  // the last message of the room we just walked into. Declared BEFORE the
+  // announce effect so it runs first within the same commit.
+  useEffect(() => {
+    announceRef.current = { count: 0, key: '' }
+    openedAtRef.current = Date.now()
+    setAnnouncement(null)
+  }, [teamId])
+
+  useEffect(() => {
+    const n = topLevelBlocks.length
+    const prev = announceRef.current
+    const last = n > 0 ? topLevelBlocks[n - 1] : null
+    const key = last ? blockKey(last) : ''
+    // Nothing about the tail moved — a fleet status patch, a scroll, a board
+    // tick. Bail before touching state so an unrelated re-render can't
+    // re-announce the same message.
+    if (n === prev.count && key === prev.key) return
+    announceRef.current = { count: n, key }
+    if (!last) return
+    // Persisted history and the SSE connect-replay both arrive as a bulk jump,
+    // and either way their entries predate the panel opening. Both gates,
+    // because a reconnect can replay recent turns with timestamps after mount.
+    if (n - prev.count > 1) return
+    if (blockTimestamp(last) < openedAtRef.current) return
+    const text = describeBlock(last, nameFor, agentIdFromSessionKey)
+    if (text) setAnnouncement({ key, text })
+  }, [topLevelBlocks, nameFor, teamId])
+
+  // Author-grouping + stable keys, resolved ONCE per transcript change. Streams
+  // and board tasks take no part in the Slack/Discord author-grouping rhythm, so
+  // this is keyed on `topLevelBlocks` ALONE — a streamed token does not re-walk
+  // the transcript. Precomputing here is what lets a WINDOWED slice render
+  // identically to the full list: the render map below becomes a pure per-item
+  // function with no loop-carried state.
+  //
+  // Deliberately resolves only the pure `agentIdFromSessionKey` parse, NOT
+  // `agentLookup.get(...)` — that map reallocates on every fleet status patch
+  // and would drag this walk back onto the per-chat-tick path.
+  const blockMeta = useMemo(() => {
+    const meta: {
+      key: string
+      ownerAgentId: string | null
+      isFollowup: boolean
+      marginClass: string
+    }[] = []
+    let prevBlock: (typeof topLevelBlocks)[number] | null = null
+    let prevOwnerAgentId: string | null = null
+    for (let i = 0; i < topLevelBlocks.length; i++) {
+      const block = topLevelBlocks[i]!
+      let ownerAgentId: string | null = null
+      if (block.kind === 'assistant-turn') {
+        const firstEntry = block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
+        ownerAgentId = firstEntry ? agentIdFromSessionKey(firstEntry.sessionKey) : null
+      }
+      const isFollowup = isFollowupBlock(prevBlock, block, prevOwnerAgentId, ownerAgentId)
+      meta.push({
+        key: block.kind === 'assistant-turn' ? `turn-${block.anchorEntryId}` : block.entry.entryId,
+        ownerAgentId,
+        isFollowup,
+        marginClass: blockMarginClass(i, isFollowup),
+      })
+      prevBlock = block
+      prevOwnerAgentId = ownerAgentId
+    }
+    return meta
+  }, [topLevelBlocks])
+
   // ── Load persisted history for all participants (team-scoped sessionKeys) ──
   // Populates the merged transcript view on team-open. (The SSE stream also
   // full-replays committed turns on connect; this covers the render before the
@@ -363,6 +450,10 @@ export function GroupChatPanel({
   // nothing is actively streaming, the cascade has settled → flip Stop back to Send.
   // Each frame refreshes `lastActivityRef` (via `bumpActivity`), so a multi-step
   // cascade keeps the window alive across the gaps between turns.
+  //
+  // Deliberately a bare interval, NOT `useVisiblePolling`: this is a wall-clock
+  // grace window, not a poll. Suspending it in a hidden tab would freeze the
+  // composer on "Stop" until the user came back.
   useEffect(() => {
     if (!serverBusy) return
     const id = setInterval(() => {
@@ -404,7 +495,14 @@ export function GroupChatPanel({
     [boardTasksMap],
   )
   type RenderItem =
-    | { kind: 'block'; block: (typeof topLevelBlocks)[number]; ts: number; tieKey: number }
+    | {
+        kind: 'block'
+        block: (typeof topLevelBlocks)[number]
+        /** Index into `topLevelBlocks` / `blockMeta`. Survives windowing. */
+        blockIdx: number
+        ts: number
+        tieKey: number
+      }
     | { kind: 'stream'; stream: (typeof activeStreams)[number]; ts: number; tieKey: number }
     | { kind: 'board-task'; task: (typeof boardTaskList)[number]; ts: number; tieKey: number }
   const renderItems = useMemo<RenderItem[]>(() => {
@@ -418,7 +516,7 @@ export function GroupChatPanel({
     const items: RenderItem[] = []
     for (let i = 0; i < topLevelBlocks.length; i++) {
       const block = topLevelBlocks[i]!
-      items.push({ kind: 'block', block, ts: blockTs(block), tieKey: i })
+      items.push({ kind: 'block', block, blockIdx: i, ts: blockTs(block), tieKey: i })
     }
     for (const stream of activeStreams) {
       // Streams sort AFTER committed blocks with the same timestamp because
@@ -444,6 +542,48 @@ export function GroupChatPanel({
     })
     return items
   }, [topLevelBlocks, activeStreams, boardTaskList])
+
+  // ── Bounded render window ─────────────────────────────────────────────────
+  // `resetKey: teamId` is load-bearing — `TeamSpaceSplit` renders this panel
+  // WITHOUT a `key` prop, so a team switch changes props without remounting.
+  const { hiddenCount, loadEarlier } = useRenderWindow({
+    total: renderItems.length,
+    resetKey: teamId,
+    scrollRef,
+    atBottom,
+  })
+
+  // An ACTIVE stream must always render — a card that vanished mid-generation
+  // would read as a dropped reply. Streams sort by `streamStartedAt`, so a
+  // long-running one is chronologically OLD and can fall above the window.
+  //
+  // HOISTED, not clamped. Widening the window down to the stream (the previous
+  // `floor:` approach) is unbounded: a stream that has outlived every retained
+  // block sits at index 0 and mounts the entire ~500×participants timeline —
+  // exactly the cost this window exists to avoid. Hoisting keeps the bound
+  // absolute at `limit + <active streams>`.
+  //
+  // Nothing is lost by not clamping. The floor only ever fired when the stream
+  // was MORE than a full window from the end, and in that case its "in place"
+  // slot was already scrolled far out of view — so it bought a 2,000-node render
+  // to position a card the reader could not see. Hoisted, it renders at the top
+  // of the visible region, which IS its correct position relative to every item
+  // on screen.
+  const { visibleItems, hoistedStreams } = useMemo(() => {
+    if (hiddenCount === 0) return { visibleItems: renderItems, hoistedStreams: 0 }
+    const hoisted = renderItems.slice(0, hiddenCount).filter((it) => it.kind === 'stream')
+    return {
+      visibleItems:
+        hoisted.length === 0
+          ? renderItems.slice(hiddenCount)
+          : [...hoisted, ...renderItems.slice(hiddenCount)],
+      hoistedStreams: hoisted.length,
+    }
+  }, [renderItems, hiddenCount])
+
+  // Hoisted streams are ON SCREEN, so they are not "earlier messages" the
+  // affordance can reveal — counting them would overstate what is hidden.
+  const earlierCount = hiddenCount - hoistedStreams
 
   // The composer's busy signal stays the SSE activity window: fleet statuses now DO
   // track server-orchestrated runs (the SSE `status` frames patch them for the
@@ -572,6 +712,13 @@ export function GroupChatPanel({
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div data-testid="group-chat-panel" className="flex h-full flex-col">
+      {/* Polite announcement of each COMMITTED message — never the live stream
+          (see the derivation above). The inner key remounts the text node so two
+          identical consecutive messages still register as a mutation. */}
+      <span role="status" aria-live="polite" className="sr-only" data-testid="group-chat-announcer">
+        {announcement && <span key={announcement.key}>{announcement.text}</span>}
+      </span>
+
       {/* Header is owned by `GroupChatViewHeader` when embedded. */}
       {!embedded && (
         <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-3">
@@ -587,12 +734,26 @@ export function GroupChatPanel({
             <h2 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-foreground">
               {team?.name ?? 'Group Chat'}
             </h2>
-            <p className="font-data text-[10px] text-foreground/45">
+            <p className="font-data text-[10px] text-muted-foreground">
               {teamAgents.length} agent{teamAgents.length !== 1 ? 's' : ''}
             </p>
           </div>
+          {/* Shell connection dot. Team chat itself is server-orchestrated (it
+              keeps sending through a Gateway drop), so this only REPORTS the
+              socket — the composer is deliberately not gated on it. */}
           <span
-            className={`h-2 w-2 shrink-0 rounded-full ${connectionStatus === 'connected' ? 'bg-mint' : 'bg-foreground/25'}`}
+            // `role="img"` is load-bearing: aria-label is only honoured on an
+            // element whose role supports naming, and this dot has no text of
+            // its own — on a bare span the label would be dropped entirely.
+            role="img"
+            aria-label={`Connection: ${connectionStatus}`}
+            className={`h-2 w-2 shrink-0 rounded-full ${
+              connectionTone === 'live'
+                ? 'bg-mint'
+                : connectionTone === 'warn'
+                  ? 'bg-amber/80 animate-pulse'
+                  : 'bg-foreground/25'
+            }`}
           />
         </div>
       )}
@@ -601,6 +762,7 @@ export function GroupChatPanel({
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={scrollRef}
+          data-testid="group-chat-scroll"
           className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
           onScroll={handleScroll}
         >
@@ -651,102 +813,84 @@ export function GroupChatPanel({
             </div>
           ) : (
             <div className="flex flex-col pb-2">
-              {(() => {
-                // Track previous BLOCK across the loop (not previous stream)
-                // so the same-author follow-up grouping survives stream
-                // interruptions. Streams are always rendered with the
-                // "new section" margin — they don't participate in the
-                // Slack/Discord/iMessage author-grouping rhythm.
-                let prevBlock: (typeof topLevelBlocks)[number] | null = null
-                let prevOwnerAgentId: string | null = null
-                let blockIdx = -1
-                const lastBlockSeenIdx = topLevelBlocks.length - 1
+              {earlierCount > 0 && (
+                <LoadEarlierButton hiddenCount={earlierCount} onClick={loadEarlier} />
+              )}
 
-                return renderItems.map((item, i) => {
-                  if (item.kind === 'stream') {
-                    const stream = item.stream
-                    return (
-                      <div
-                        key={`stream-wrap-${stream.agentId}-${stream.sessionKey}`}
-                        className={i === 0 ? '' : 'mt-7'}
-                      >
-                        <StreamingCard
-                          text={stream.text}
-                          agentId={stream.agentId}
-                          agentName={stream.agentName}
-                        />
-                      </div>
-                    )
-                  }
-                  if (item.kind === 'board-task') {
-                    return (
-                      <div key={`board-task-${item.task.id}`} className={i === 0 ? '' : 'mt-3'}>
-                        <BoardTaskCard task={item.task} />
-                      </div>
-                    )
-                  }
-                  blockIdx += 1
-                  const block = item.block
-                  let currentOwnerAgentId: string | null = null
-                  if (block.kind === 'assistant-turn') {
-                    const firstEntry =
-                      block.assistant ?? block.thinking[0] ?? block.tools[0] ?? null
-                    currentOwnerAgentId = firstEntry
-                      ? agentIdFromSessionKey(firstEntry.sessionKey)
-                      : null
-                  }
-                  const isFollowup = isFollowupBlock(
-                    prevBlock,
-                    block,
-                    prevOwnerAgentId,
-                    currentOwnerAgentId,
-                  )
-                  // Use `i === 0` (timeline position) for the "first item
-                  // has no top margin" check; `blockIdx` only matters for
-                  // the followup-vs-new-author choice.
-                  const margin = i === 0 ? '' : blockMarginClass(blockIdx, isFollowup)
-                  prevBlock = block
-                  prevOwnerAgentId = currentOwnerAgentId
-
-                  if (block.kind === 'meta') {
-                    return (
-                      <div key={block.entry.entryId} className={margin}>
-                        <MetaMessageCard entry={block.entry} />
-                      </div>
-                    )
-                  }
-                  if (block.kind === 'user') {
-                    const targetId = agentIdFromSessionKey(block.entry.sessionKey)
-                    const targetAgent = targetId ? agentLookup.get(targetId) : null
-                    return (
-                      <div key={block.entry.entryId} className={margin}>
-                        <UserMessageCard
-                          entry={block.entry}
-                          targetAgentName={targetAgent?.name}
-                          knownAgentNames={knownAgentNames}
-                        />
-                      </div>
-                    )
-                  }
-                  const ownerAgent = currentOwnerAgentId
-                    ? agentLookup.get(currentOwnerAgentId)
-                    : null
+              {/* Author grouping, stable keys and margins all come from
+                `blockMeta`, which was resolved over the FULL block list — so a
+                windowed slice renders exactly as the whole timeline would.
+                Streams and board tasks always get the "new section" margin;
+                they don't participate in the author-grouping rhythm. */}
+              {visibleItems.map((item, idx) => {
+                // Slice-local first-item rule: identical to the pre-window
+                // `i === 0` check when nothing is hidden, and the correct top
+                // spacing under the Load-earlier control when something is.
+                if (item.kind === 'stream') {
+                  const stream = item.stream
                   return (
-                    <div key={`turn-${blockIdx}`} className={margin}>
-                      <AssistantTurnCard
-                        block={block}
-                        agentId={ownerAgent?.id ?? 'unknown'}
-                        agentName={ownerAgent?.name ?? 'Agent'}
-                        streaming={
-                          running && blockIdx === lastBlockSeenIdx && activeStreams.length === 0
-                        }
-                        teamId={teamId}
-                        isFollowup={isFollowup}
+                    <div
+                      key={`stream-wrap-${stream.agentId}-${stream.sessionKey}`}
+                      className={idx === 0 ? '' : 'mt-7'}
+                    >
+                      <StreamingCard
+                        text={stream.text}
+                        agentId={stream.agentId}
+                        agentName={stream.agentName}
                       />
                     </div>
                   )
-                })
-              })()}
+                }
+                if (item.kind === 'board-task') {
+                  return (
+                    <div key={`board-task-${item.task.id}`} className={idx === 0 ? '' : 'mt-3'}>
+                      <BoardTaskCard task={item.task} />
+                    </div>
+                  )
+                }
+                const block = item.block
+                const meta = blockMeta[item.blockIdx]
+                if (!meta) return null
+                const margin = idx === 0 ? '' : meta.marginClass
+
+                if (block.kind === 'meta') {
+                  return (
+                    <div key={meta.key} className={margin}>
+                      <MetaMessageCard entry={block.entry} />
+                    </div>
+                  )
+                }
+                if (block.kind === 'user') {
+                  const targetId = agentIdFromSessionKey(block.entry.sessionKey)
+                  const targetAgent = targetId ? agentLookup.get(targetId) : null
+                  return (
+                    <div key={meta.key} className={margin}>
+                      <UserMessageCard
+                        entry={block.entry}
+                        targetAgentName={targetAgent?.name}
+                        knownAgentNames={knownAgentNames}
+                      />
+                    </div>
+                  )
+                }
+                const ownerAgent = meta.ownerAgentId ? agentLookup.get(meta.ownerAgentId) : null
+                return (
+                  <div key={meta.key} className={margin}>
+                    <AssistantTurnCard
+                      block={block}
+                      agentId={ownerAgent?.id ?? 'unknown'}
+                      agentName={ownerAgent?.name ?? 'Agent'}
+                      streaming={
+                        running &&
+                        item.blockIdx === topLevelBlocks.length - 1 &&
+                        activeStreams.length === 0
+                      }
+                      teamId={teamId}
+                      isFollowup={meta.isFollowup}
+                    />
+                  </div>
+                )
+              })}
 
               <div ref={bottomRef} aria-hidden />
             </div>

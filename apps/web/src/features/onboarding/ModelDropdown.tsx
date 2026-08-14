@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 export interface ModelDropdownOption {
   id: string
@@ -98,24 +99,22 @@ export function ModelDropdown({
 
   // Outside-click / Escape close + reposition on scroll / resize. Scroll uses
   // capture so it catches the wizard's inner overflow-y-auto scroller too.
+  // Escape and outside-press are arbitrated by the shared layer stack: only the
+  // topmost open layer reacts, so this dismisses alone.
+  useDismissableLayer({
+    active: open,
+    level: 'popover',
+    onEscape: () => setOpen(false),
+    contains: (t) => !!triggerRef.current?.contains(t) || !!menuRef.current?.contains(t),
+    onPressOutside: () => setOpen(false),
+  })
+
   useEffect(() => {
     if (!open) return
-    const onPointerDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return
-      setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
     const onReflow = () => computePosition()
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKey)
     window.addEventListener('resize', onReflow)
     window.addEventListener('scroll', onReflow, true)
     return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKey)
       window.removeEventListener('resize', onReflow)
       window.removeEventListener('scroll', onReflow, true)
     }

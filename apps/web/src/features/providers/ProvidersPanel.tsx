@@ -3,6 +3,12 @@
 // every runtime on its provider (Clawboo Native, Claude Code, Hermes, OpenClaw).
 // A key value is never displayed — only per-provider connection status.
 //
+// Save VERIFIES the key against its provider before storing it, so a typo or a
+// revoked key fails here rather than on some agent's next run. A refused key
+// stays in the field with the reason and a "Save anyway" override. Providers we
+// have no probe for (the ones clawboo only mirrors to OpenClaw) save unchecked —
+// never block on a check we can't run.
+//
 // This panel is ALSO the home of the ChatGPT subscription (a dedicated row, not
 // a key): signing in here (via the Codex CLI's own browser login) is how clawboo
 // KNOWS the subscription exists — the runtime surfaces (Hermes / OpenClaw setup)
@@ -16,12 +22,15 @@ import {
   disconnectProvider,
   fetchProviders,
   fetchRuntimes,
+  healthcheckNativeKey,
   type ProviderStatus,
 } from '@clawboo/control-client'
 
+import { canHealthcheckProvider } from '@/lib/nativeProviders'
 import { PROVIDER_CATALOG, type ProviderCatalogEntry } from '@/lib/providerCatalog'
 import { ProviderIcon } from '@/features/onboarding/ProviderIcon'
 import { ChatGptSignIn } from '@/features/runtimes/ChatGptSignIn'
+import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Button } from '@/features/shared/Button'
 import { StatusPill } from '@/features/shared/StatusPill'
@@ -45,26 +54,45 @@ function ProviderRow({
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [busy, setBusy] = useState(false)
+  // The reason the pre-save check refused this key. Kept in the row (not a toast)
+  // because it needs to sit next to the field being fixed AND host the override.
+  const [verifyFail, setVerifyFail] = useState<string | null>(null)
   const addToast = useToastStore((s) => s.addToast)
 
   const connected = status?.connected ?? false
 
-  const handleSave = useCallback(async () => {
-    const key = apiKey.trim()
-    if (!key) return
-    setBusy(true)
-    const r = await connectProvider(entry.id, key)
-    setBusy(false)
-    if (r.ok) {
-      addToast({ message: `${entry.name} connected`, type: 'success' })
-      setApiKey('')
-      setEditing(false)
-      setShowKey(false)
-      onChanged()
-    } else {
-      addToast({ message: r.error ?? 'Failed to save key', type: 'error' })
-    }
-  }, [apiKey, entry, addToast, onChanged])
+  const handleSave = useCallback(
+    async (opts?: { skipVerify?: boolean }) => {
+      const key = apiKey.trim()
+      if (!key) return
+      setBusy(true)
+      setVerifyFail(null)
+      // Verify the key before it lands in the vault (and OpenClaw's config), so a
+      // typo or a revoked key is caught while it's still on screen. Providers we
+      // have no probe for save exactly as before — never block on a check we
+      // can't run.
+      if (!opts?.skipVerify && canHealthcheckProvider(entry.id)) {
+        const h = await healthcheckNativeKey(entry.id, key)
+        if (!h.ok) {
+          setBusy(false)
+          setVerifyFail(h.error ?? 'Could not verify the key.')
+          return
+        }
+      }
+      const r = await connectProvider(entry.id, key)
+      setBusy(false)
+      if (r.ok) {
+        addToast({ message: `${entry.name} connected`, type: 'success' })
+        setApiKey('')
+        setEditing(false)
+        setShowKey(false)
+        onChanged()
+      } else {
+        addToast({ message: r.error ?? 'Failed to save key', type: 'error' })
+      }
+    },
+    [apiKey, entry, addToast, onChanged],
+  )
 
   const handleDisconnect = useCallback(async () => {
     const ok = await confirm({
@@ -107,6 +135,7 @@ function ProviderRow({
               setEditing(false)
               setApiKey('')
               setShowKey(false)
+              setVerifyFail(null)
             }}
           >
             Cancel
@@ -133,51 +162,80 @@ function ProviderRow({
       </div>
 
       {editing && (
-        <div className="flex items-center gap-2 pl-[50px]">
-          <div className="relative flex-1">
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && apiKey.trim()) void handleSave()
-              }}
-              placeholder={entry.placeholder}
-              autoFocus
-              spellCheck={false}
-              autoComplete="off"
-              aria-label={`${entry.name} API key`}
-              className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 pr-11 font-mono text-[13px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
-            />
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label={showKey ? 'Hide API key' : 'Show API key'}
-              onClick={() => setShowKey((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer rounded-md border-none bg-transparent p-1 text-foreground/40 transition-colors hover:text-foreground/70"
+        <div className="flex flex-col gap-2 pl-[50px]">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={apiKey}
+                onChange={(e) => {
+                  setApiKey(e.target.value)
+                  setVerifyFail(null) // a different key deserves a fresh check
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && apiKey.trim()) void handleSave()
+                }}
+                placeholder={entry.placeholder}
+                autoFocus
+                spellCheck={false}
+                autoComplete="off"
+                aria-label={`${entry.name} API key`}
+                className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 pr-11 font-mono text-[13px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-label={showKey ? 'Hide API key' : 'Show API key'}
+                onClick={() => setShowKey((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer rounded-md border-none bg-transparent p-1 text-foreground/40 transition-colors hover:text-foreground/70"
+              >
+                {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            {entry.keyUrl && (
+              <a
+                href={entry.keyUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex shrink-0 items-center gap-1 text-[12px] font-medium text-primary underline-offset-2 hover:underline"
+              >
+                Get a key <ExternalLink size={11} />
+              </a>
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!apiKey.trim()}
+              loading={busy}
+              onClick={() => void handleSave()}
             >
-              {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
+              Save
+            </Button>
           </div>
-          {entry.keyUrl && (
-            <a
-              href={entry.keyUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="inline-flex shrink-0 items-center gap-1 text-[12px] font-medium text-primary underline-offset-2 hover:underline"
+
+          {/* The key didn't answer — say why, next to the field that fixes it,
+              and offer the deliberate override for a provider this machine
+              simply can't reach right now. */}
+          {verifyFail && (
+            <div
+              className="flex items-center gap-2"
+              data-testid={`provider-${entry.id}-verify-failed`}
             >
-              Get a key <ExternalLink size={11} />
-            </a>
+              <FormattedAlert tone="error" className="flex-1">
+                <span className="font-semibold">Key didn&rsquo;t verify</span> &mdash; fix it or
+                save anyway. {verifyFail}
+              </FormattedAlert>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                data-testid={`provider-${entry.id}-save-anyway`}
+                onClick={() => void handleSave({ skipVerify: true })}
+              >
+                Save anyway
+              </Button>
+            </div>
           )}
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!apiKey.trim()}
-            loading={busy}
-            onClick={() => void handleSave()}
-          >
-            Save
-          </Button>
         </div>
       )}
     </div>
@@ -216,12 +274,14 @@ function ChatGptSubscriptionRow({
             {connected && <StatusPill tone="success" label="Connected" />}
           </div>
           {!connected && (
-            <div className="mt-0.5 truncate text-[11px] text-foreground/45">No API key needed</div>
+            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+              No API key needed
+            </div>
           )}
         </div>
 
         {connected ? (
-          <span className="text-[11px] text-foreground/40">Managed by the Codex CLI</span>
+          <span className="text-[11px] text-muted-foreground">Managed by the Codex CLI</span>
         ) : expanded ? (
           <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>
             Cancel

@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 
 import { ToolApprovalQueue } from '@/features/approvals/ToolApprovalQueue'
+import { useReadSequencer } from '@/lib/useReadSequencer'
 import { useToastStore } from '@/stores/toast'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
@@ -31,6 +32,7 @@ import { SegmentedControl } from '@/features/shared/SegmentedControl'
 import { Select } from '@/features/shared/Select'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import {
   listAudit,
   listBudgets,
@@ -89,9 +91,7 @@ const STATUS_PILL: Record<Budget['status'], StatusTone> = {
 const SECTION_LABEL = 'font-mono text-[11px] font-semibold uppercase tracking-[0.14em]'
 
 function SectionKicker({ children }: { children: ReactNode }) {
-  return (
-    <div className={`${SECTION_LABEL} text-foreground/45`}>{children}</div>
-  )
+  return <div className={`${SECTION_LABEL} text-foreground/45`}>{children}</div>
 }
 
 // Card shell — the shared premium surface (rounded-2xl, hairline border, raised
@@ -130,14 +130,11 @@ function BudgetRow({ b, onChanged }: { b: Budget; onChanged: () => void }) {
           <span className="font-data rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] text-foreground/60">
             {b.scope}
           </span>
-          <span
-            className="font-data truncate text-[13px] text-foreground"
-            title={b.scopeId}
-          >
+          <span className="font-data truncate text-[13px] text-foreground" title={b.scopeId}>
             {b.scopeId}
           </span>
           {b.tenantId && (
-            <span className="font-data text-[11px] text-foreground/40">
+            <span className="font-data text-[11px] text-muted-foreground">
               · tenant {b.tenantId}
             </span>
           )}
@@ -180,14 +177,9 @@ function BudgetRow({ b, onChanged }: { b: Budget; onChanged: () => void }) {
             / {dollars(b.limitUsdCents)}
           </span>
         </span>
-        <span className="font-data text-[12px] text-foreground/50">
-          {pct.toFixed(0)}%
-        </span>
+        <span className="font-data text-[12px] text-foreground/50">{pct.toFixed(0)}%</span>
       </div>
-      <div
-        className="overflow-hidden rounded-full bg-foreground/[0.08]"
-        style={{ height: 6 }}
-      >
+      <div className="overflow-hidden rounded-full bg-foreground/[0.08]" style={{ height: 6 }}>
         <div style={{ width: `${pct}%`, height: '100%', background: STATUS_TONE[b.status] }} />
       </div>
 
@@ -284,36 +276,51 @@ export function GovernancePanel() {
   // Default posture is track-and-warn (a hard cap is the explicit opt-in).
   const [newMode, setNewMode] = useState<BudgetMode>('warn')
 
+  // Budgets and the audit log are independent polls over independent state, so each gets
+  // its own sequencer — a budget write must not invalidate an in-flight audit read.
+  const budgetReads = useReadSequencer()
+  const auditReads = useReadSequencer()
+
   const refreshBudgets = useCallback(async () => {
+    const read = budgetReads.beginRead()
     const r = await listBudgets()
-    if (r.ok) {
-      setBudgets(r.budgets)
-      setBudgetsOk(true)
-    } else if (!budgetsLoadedRef.current) {
-      // Initial-load failure → error/retry. A transient poll failure after a
-      // good load keeps the last good snapshot (no blank-to-error flicker).
-      setBudgets([])
-      setBudgetsOk(false)
+    // Every budget write (create, raise cap, resume) reconciles through this read. A poll
+    // already in flight when one lands answers with the PRE-write rows, so applying it
+    // would show the old cap for up to 5s right after a success toast.
+    if (read.isCurrent()) {
+      if (r.ok) {
+        setBudgets(r.budgets)
+        setBudgetsOk(true)
+      } else if (!budgetsLoadedRef.current) {
+        // Initial-load failure → error/retry. A transient poll failure after a
+        // good load keeps the last good snapshot (no blank-to-error flicker).
+        setBudgets([])
+        setBudgetsOk(false)
+      }
     }
-    budgetsLoadedRef.current = true
-  }, [])
+    if (read.isNewestRead()) budgetsLoadedRef.current = true
+  }, [budgetReads])
 
   const refreshAudit = useCallback(async () => {
-    setAudit(
-      await listAudit({
-        agentId: auditAgent.trim() || undefined,
-        eventType: auditType || undefined,
-        since: auditSince ? Date.now() - auditSince : undefined,
-        limit: 200,
-      }),
-    )
-  }, [auditAgent, auditType, auditSince])
+    const read = auditReads.beginRead()
+    const rows = await listAudit({
+      agentId: auditAgent.trim() || undefined,
+      eventType: auditType || undefined,
+      since: auditSince ? Date.now() - auditSince : undefined,
+      limit: 200,
+    })
+    // The agent filter is an undebounced text input, so every keystroke fires a read.
+    // Applied by arrival order, the response for an earlier prefix can land last and
+    // leave the table showing rows that contradict the filter box.
+    if (!read.isCurrent()) return
+    setAudit(rows)
+  }, [auditAgent, auditType, auditSince, auditReads])
 
   useEffect(() => {
     void refreshBudgets()
-    const id = setInterval(() => void refreshBudgets(), 5000)
-    return () => clearInterval(id)
   }, [refreshBudgets])
+
+  useVisiblePolling(() => void refreshBudgets(), 5000)
 
   useEffect(() => {
     void refreshAudit()
@@ -371,10 +378,7 @@ export function GovernancePanel() {
                 </FormattedAlert>
               </div>
             ) : budgets.length === 0 ? (
-              <div
-                className="rounded-2xl border border-border bg-surface"
-                style={cardStyle}
-              >
+              <div className="rounded-2xl border border-border bg-surface" style={cardStyle}>
                 <EmptyState
                   icon={Wallet}
                   title="No budgets yet"
@@ -477,10 +481,7 @@ export function GovernancePanel() {
           {/* Approval queue (shared with the Approvals panel) */}
           <section className="flex flex-col gap-3">
             <SectionKicker>Approval queue</SectionKicker>
-            <div
-              className="rounded-2xl border border-border bg-surface p-2"
-              style={cardStyle}
-            >
+            <div className="rounded-2xl border border-border bg-surface p-2" style={cardStyle}>
               <ToolApprovalQueue showEmpty />
             </div>
           </section>
@@ -557,9 +558,7 @@ export function GovernancePanel() {
                         {a.agentId.slice(0, 10)}
                       </span>
                     )}
-                    <span className="truncate text-foreground/60">
-                      {summarize(a.summary)}
-                    </span>
+                    <span className="truncate text-foreground/60">{summarize(a.summary)}</span>
                     {a.tenantId && (
                       <span className="font-data whitespace-nowrap text-foreground/35">
                         · {a.tenantId}

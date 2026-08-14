@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useApprovalsStore, type ApprovalRequest } from '@/stores/approvals'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
+import { useReadSequencer } from '@/lib/useReadSequencer'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 
 // A pending MCP tool-call / delegation approval (from GET /api/tools/approvals).
 // Distinct from the OpenClaw exec `ApprovalRequest` — different fields + a different
@@ -43,25 +45,34 @@ export function useToolApprovals(): {
   refetch: () => Promise<void>
 } {
   const [tool, setTool] = useState<ToolApproval[]>([])
+  // The 3s poll and `resolveTool`'s optimistic removal write the same list, so reads are
+  // sequenced last-write-wins. Without it, a poll already in flight when a decision is
+  // made lands afterwards and RESURRECTS the card that was just resolved — a reappearing
+  // gate on a time-sensitive prompt, which invites a second click on a decision already
+  // sent. See useReadSequencer.
+  const reads = useReadSequencer()
 
   const refetch = useCallback(async () => {
+    const read = reads.beginRead()
     try {
       const r = await fetch('/api/tools/approvals?status=pending')
       const body = r.ok ? ((await r.json()) as { approvals?: ToolApproval[] }) : { approvals: [] }
+      if (!read.isCurrent()) return // predates a resolve, or superseded by a newer read
       setTool(body.approvals ?? [])
     } catch {
       /* best-effort — the next poll reconciles */
     }
-  }, [])
+  }, [reads])
 
   useEffect(() => {
     void refetch()
-    const id = setInterval(() => void refetch(), POLL_MS)
-    return () => clearInterval(id)
   }, [refetch])
+
+  useVisiblePolling(() => void refetch(), POLL_MS)
 
   const resolveTool = useCallback(
     async (id: string, decision: ToolDecision) => {
+      reads.commitLocalWrite() // any read already in flight still lists this approval
       setTool((prev) => prev.filter((a) => a.id !== id)) // optimistic removal
       try {
         await fetch(`/api/tools/approvals/${id}/resolve`, {
@@ -74,7 +85,7 @@ export function useToolApprovals(): {
       }
       void refetch()
     },
-    [refetch],
+    [refetch, reads],
   )
 
   return { tool, resolveTool, refetch }

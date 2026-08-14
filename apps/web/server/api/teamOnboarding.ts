@@ -9,9 +9,9 @@
 // SOUL.md persistence).
 
 import type { Request, Response } from 'express'
-import { chatMessages, createDb, getSetting, setSetting } from '@clawboo/db'
+import { chatMessages, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
 import { like } from 'drizzle-orm'
-import { getDbPath } from '../lib/db'
+import { getDb } from '../lib/db'
 
 interface OnboardingState {
   agentsIntroduced: boolean
@@ -34,7 +34,7 @@ function settingsKey(teamId: string): string {
  *  "Know Your Team" onboarding flow. (Post-S08b there is no agent-intro parade, so a
  *  genuinely new team has no chat until the user sends its first message, which happens
  *  only after the gate — so this cleanly distinguishes "used" from "brand-new".) */
-function hasTeamChatActivity(db: ReturnType<typeof createDb>, teamId: string): boolean {
+function hasTeamChatActivity(db: ClawbooDb, teamId: string): boolean {
   const row = db
     .select({ id: chatMessages.id })
     .from(chatMessages)
@@ -44,10 +44,7 @@ function hasTeamChatActivity(db: ReturnType<typeof createDb>, teamId: string): b
   return row != null
 }
 
-export function readOnboardingState(
-  db: ReturnType<typeof createDb>,
-  teamId: string,
-): OnboardingState {
+export function readOnboardingState(db: ClawbooDb, teamId: string): OnboardingState {
   const raw = getSetting(db, settingsKey(teamId))
   if (!raw) return { ...DEFAULT_STATE }
   try {
@@ -71,7 +68,7 @@ export function teamOnboardingGET(req: Request, res: Response): void {
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const state = readOnboardingState(db, teamId)
     // A team that already has chat history has clearly been used — don't re-gate it
     // behind the "Know Your Team" onboarding. Report it as onboarded (read-time
@@ -115,7 +112,7 @@ export function teamOnboardingPATCH(req: Request, res: Response): void {
     return
   }
   try {
-    const db = createDb(getDbPath())
+    const db = getDb()
     const current = readOnboardingState(db, teamId)
     const next: OnboardingState = {
       agentsIntroduced:

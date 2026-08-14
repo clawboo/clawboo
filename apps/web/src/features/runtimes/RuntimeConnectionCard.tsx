@@ -6,6 +6,11 @@
 //     → needs-auth (paste key) | needs-login (codex login + Re-check)
 //     → connecting → ready (Re-check + Disconnect[panel])   (+ error / unknown)
 //
+// Connect VERIFIES the pasted key against its provider before writing it to the
+// vault, so a typo'd or revoked key fails here instead of on this runtime's first
+// run. A refused key offers "Connect anyway" — the provider may just be
+// unreachable from this machine, which must never strand anyone.
+//
 // With `hideHeader` (the list host) it carries NO name/status header, no brand
 // tile (the row owns them) — just the status-specific inputs + the one action
 // the current state needs. Reuses the onboarding InstallStep SSE-terminal pattern
@@ -37,12 +42,14 @@ import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import {
   connectRuntime,
   disconnectRuntime,
+  healthcheckNativeKey,
   installRuntime,
   type ConnectionState,
   type RuntimeStatus,
 } from '@clawboo/control-client'
 
 import { confirm } from '@/stores/confirm'
+import { nativeProviderForEnvVar } from '@/lib/nativeProviders'
 import { RuntimeIcon } from './RuntimeBrand'
 import type { RuntimeCatalogEntry } from './runtimeCatalog'
 
@@ -116,6 +123,10 @@ export function RuntimeConnectionCard({
   const [keyInput, setKeyInput] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Set only when the PRE-CONNECT healthcheck refused the key — that's the one
+  // failure the user can deliberately override (an install/connect failure stored
+  // nothing, so there is nothing to push past).
+  const [verifyFailed, setVerifyFailed] = useState(false)
   const controllerRef = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
 
@@ -179,11 +190,28 @@ export function RuntimeConnectionCard({
     })
   }
 
-  async function handleConnect(): Promise<void> {
-    if (!keyInput.trim()) return
+  async function handleConnect(opts?: { skipVerify?: boolean }): Promise<void> {
+    const key = keyInput.trim()
+    if (!key) return
     setBusy(true)
     setError(null)
-    const r = await connectRuntime(entry.id, keyInput.trim())
+    setVerifyFailed(false)
+    // Verify the key BEFORE it reaches the vault, so a typo or a revoked key
+    // surfaces here rather than on this runtime's first run. The healthcheck
+    // probes a PROVIDER, so name the one this runtime's env-var slot belongs to;
+    // `null` means we have no probe for it — connect as before rather than
+    // blocking on a check we can't perform.
+    const provider = opts?.skipVerify ? null : nativeProviderForEnvVar(entry.envVar)
+    if (provider) {
+      const h = await healthcheckNativeKey(provider, key)
+      if (!h.ok) {
+        setBusy(false)
+        setError(h.error ?? 'Could not verify the key.')
+        setVerifyFailed(true)
+        return
+      }
+    }
+    const r = await connectRuntime(entry.id, key)
     if (!r.ok) {
       setBusy(false)
       setError(r.error ?? 'Failed to save the key')
@@ -329,7 +357,10 @@ export function RuntimeConnectionCard({
               data-testid={`runtime-${entry.id}-key`}
               type={showKey ? 'text' : 'password'}
               value={keyInput}
-              onChange={(e) => setKeyInput(e.target.value)}
+              onChange={(e) => {
+                setKeyInput(e.target.value)
+                setVerifyFailed(false) // a different key deserves a fresh check
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void handleConnect()
               }}
@@ -495,6 +526,20 @@ export function RuntimeConnectionCard({
             onClick={display === 'needs-auth' ? () => void handleConnect() : handleInstall}
           >
             Retry
+          </Button>
+        )}
+
+        {/* The deliberate override for a key we couldn't verify — the provider
+            may simply be unreachable from here, and that must not strand anyone. */}
+        {verifyFailed && display === 'needs-auth' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            data-testid={`runtime-${entry.id}-connect-anyway`}
+            onClick={() => void handleConnect({ skipVerify: true })}
+          >
+            Connect anyway
           </Button>
         )}
       </div>
