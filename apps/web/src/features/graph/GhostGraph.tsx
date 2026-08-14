@@ -72,6 +72,11 @@ interface ContextMenuState {
   agentName: string
 }
 
+// Camera easing for every animated viewport move (fitView / zoom buttons) —
+// the JS twin of the app's signature cubic-bezier(0.32, 0.72, 0, 1): fast
+// start, long soft landing. (easeOutQuart is the closest analytic curve.)
+const easePremium = (t: number) => 1 - Math.pow(1 - t, 4)
+
 // Where to open the Boo context menu when there are no pointer coordinates (the
 // keyboard path). The node element is the 280 x 280 transparent envelope, so its
 // top-left sits ~80px away from anything the user can see; anchor on the
@@ -437,7 +442,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       const state = useGraphStore.getState()
       void fitView({
         padding: 0.04,
-        duration: 250,
+        duration: 320,
+        ease: easePremium,
         maxZoom: 1.5,
         nodes: pickFittableNodes(state.nodes, state.expandedBooNodeIds),
       })
@@ -644,11 +650,18 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       }
       savePositions(nextPositions)
 
-      // Initialize physics particles from layouted positions
-      requestAnimationFrame(() => {
+      // Rebuild physics from the layouted positions SYNCHRONOUSLY (same JS
+      // tick as setNodes above). Deferring this to a rAF — the previous
+      // arrangement — opened a one-frame window where an already-queued
+      // physics frame wrote stale pre-layout particle positions back over
+      // the fresh layout, silently reverting it. Then wake gently so any
+      // orbital overlap left by the geometric layout resolves as a soft
+      // organic settle instead of staying frozen.
+      {
         const current = useGraphStore.getState()
         graphPhysics.initialize(current.nodes, current.edges)
-      })
+        graphPhysics.wake(0.25)
+      }
 
       requestAnimationFrame(() => {
         // Tight padding gives Boos visual prominence; maxZoom caps the fit so
@@ -658,7 +671,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         const state = useGraphStore.getState()
         void fitView({
           padding: 0.04,
-          duration: 500,
+          duration: 650,
+          ease: easePremium,
           maxZoom: 1.5,
           nodes: pickFittableNodes(state.nodes, state.expandedBooNodeIds),
         })
@@ -708,6 +722,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   const onNodeClick: NodeMouseHandler<Node> = useCallback((_event, node) => {
     if (node.type === 'boo') {
       useGraphStore.getState().toggleBooNodeExpanded(node.id)
+      // Reheat the physics so a freshly-expanded fan resolves any overlaps
+      // with neighbouring clusters organically (collapsed children are
+      // excluded from cross-cluster collisions until revealed).
+      graphPhysics.wake()
     }
   }, [])
 
@@ -746,6 +764,9 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       // marks the node selected, which is what enables its arrow-key move. We
       // only add the expand/collapse the pointer path already has.
       useGraphStore.getState().toggleBooNodeExpanded(node.id)
+      // Reheat physics exactly as the pointer path does — otherwise a fan
+      // expanded from the keyboard never relaxes against its neighbours.
+      graphPhysics.wake()
       return
     }
 
@@ -964,9 +985,14 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       }
       if (e.type !== 'skill' && e.type !== 'resource') return e
       // Skill / resource edges always have the parent Boo as `source`.
-      const shouldBeHidden = !expandedBooNodeIds.has(e.source)
-      if (e.hidden === shouldBeHidden) return e
-      return { ...e, hidden: shouldBeHidden }
+      // Visibility is animated INSIDE the edge component (OrbitalEdge draws
+      // the path out of the Boo / retracts it on collapse), so edges stay
+      // mounted with `data.isVisible` instead of React Flow's `hidden`
+      // (which unmounts instantly — no retract animation possible).
+      const isVisible = expandedBooNodeIds.has(e.source)
+      const current = (e.data as { isVisible?: boolean } | undefined)?.isVisible
+      if (current === isVisible && !e.hidden) return e
+      return { ...e, hidden: false, data: { ...e.data, isVisible } }
     })
   }, [edges, expandedBooNodeIds])
 
@@ -1192,12 +1218,20 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           borderRadius: 12,
         }}
       >
-        <BarBtn icon={ZoomOut} label="Zoom out" onClick={() => void zoomOut({ duration: 200 })} />
-        <BarBtn icon={ZoomIn} label="Zoom in" onClick={() => void zoomIn({ duration: 200 })} />
+        <BarBtn
+          icon={ZoomOut}
+          label="Zoom out"
+          onClick={() => void zoomOut({ duration: 220, ease: easePremium })}
+        />
+        <BarBtn
+          icon={ZoomIn}
+          label="Zoom in"
+          onClick={() => void zoomIn({ duration: 220, ease: easePremium })}
+        />
         <BarBtn
           icon={Maximize2}
           label="Fit to view"
-          onClick={() => void fitView({ padding: 0.2, duration: 300 })}
+          onClick={() => void fitView({ padding: 0.2, duration: 550, ease: easePremium })}
         />
         <BarDivider />
         <BarBtn
@@ -1267,7 +1301,25 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
             'shift plus F10, or alt plus enter for agent actions. Press escape to deselect.',
         }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="var(--canvas-dot)" />
+        {/* Two-layer dot grid (micro + sparse macro) — the Linear/Obsidian
+            depth treatment: the fine grid carries scale, the sparse layer
+            adds a faint constellation beneath it. Both use the theme's
+            canvas-dot color so the effect stays subliminal. */}
+        <Background
+          id="ghost-dots-micro"
+          variant={BackgroundVariant.Dots}
+          gap={32}
+          size={1}
+          color="var(--canvas-dot)"
+        />
+        <Background
+          id="ghost-dots-macro"
+          variant={BackgroundVariant.Dots}
+          gap={160}
+          size={2}
+          offset={1}
+          color="var(--canvas-dot)"
+        />
         {showMiniMap && (
           <MiniMap
             // Float ABOVE the bottom-right viewport bar (40px tall + 12px inset

@@ -120,6 +120,15 @@ export interface SkillNodeData extends Record<string, unknown> {
   /** The model's provider brand (for the ProviderIcon glyph); null = no clawboo-known model. */
   providerId?: ProviderId | null
   /**
+   * Position of this orbital within its parent Boo's full fan (skills first,
+   * then resources), stamped by `computeOrbitalPositions`. Drives the
+   * peacock expand stagger — children sweep out of the Boo in arc order
+   * instead of a random hash order. Absent for non-orbital consumers.
+   */
+  orbitIndex?: number
+  /** Total orbital count in the parent Boo's fan (see `orbitIndex`). */
+  orbitCount?: number
+  /**
    * Set (in place of `providerId`) when clawboo doesn't know the agent's model —
    * codex / claude-code run on their account/SDK default, and OpenClaw's model
    * isn't populated. The chip then shows the RUNTIME glyph + a "default" label so
@@ -146,6 +155,10 @@ export interface ResourceNodeData extends Record<string, unknown> {
   isVisible?: boolean
   /** Capability availability → greyed when false (see SkillNodeData.available). */
   available?: boolean
+  /** See `SkillNodeData.orbitIndex` — peacock expand stagger order. */
+  orbitIndex?: number
+  /** See `SkillNodeData.orbitCount`. */
+  orbitCount?: number
 }
 
 // ─── Team-root node ──────────────────────────────────────────────────────────

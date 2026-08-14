@@ -74,6 +74,11 @@ function distributeOnArc(
   children: GraphNode[],
   radiusRange: { min: number; max: number },
   savedPositions: LayoutData['positions'],
+  // Peacock stagger metadata: this arc's children are indices
+  // [orbitIndexOffset, orbitIndexOffset + children.length) within the parent
+  // Boo's full fan of `orbitCount` orbitals (skills ring + resources ring).
+  orbitIndexOffset: number,
+  orbitCount: number,
 ): GraphNode[] {
   const count = children.length
   if (count === 0) return []
@@ -86,6 +91,10 @@ function distributeOnArc(
   const staleThreshold = radiusRange.max * 2
 
   return children.map((node, i) => {
+    // Stamp the fan position (drives the peacock expand sweep order) on every
+    // branch — including saved-position children, which still animate.
+    const orbitData = { ...node.data, orbitIndex: orbitIndexOffset + i, orbitCount }
+
     // Respect user-dragged positions — but discard stale ones from previous layouts
     const saved = savedPositions[node.id]
     if (saved) {
@@ -95,7 +104,7 @@ function distributeOnArc(
       const savedCy = saved.y + nodeH / 2
       const dist = Math.sqrt((parentCenter.x - savedCx) ** 2 + (parentCenter.y - savedCy) ** 2)
       if (dist <= staleThreshold) {
-        return { ...node, position: saved }
+        return { ...node, position: saved, data: orbitData } as GraphNode
       }
       // Stale saved position (e.g. from old layout) — fall through to orbital
     }
@@ -118,7 +127,7 @@ function distributeOnArc(
     const x = parentCenter.x + Math.cos(angle) * radius - nodeW / 2
     const y = parentCenter.y + Math.sin(angle) * radius - nodeH / 2
 
-    return { ...node, position: { x, y } }
+    return { ...node, position: { x, y }, data: orbitData } as GraphNode
   })
 }
 
@@ -171,13 +180,24 @@ export function computeOrbitalPositions(
       y: booNode.position.y + BOO_HALF_H,
     }
     const base = awayAngle(booNode.position, centroid)
+    const fanCount = children.skills.length + children.resources.length
 
-    // Skills: inner arc
+    // Skills: inner arc (fan indices 0..skills-1)
     result.push(
-      ...distributeOnArc(parentCenter, base, children.skills, SKILL_RADIUS, savedPositions),
+      ...distributeOnArc(
+        parentCenter,
+        base,
+        children.skills,
+        SKILL_RADIUS,
+        savedPositions,
+        0,
+        fanCount,
+      ),
     )
 
     // Resources: outer arc with slight angular offset to avoid stacking
+    // (fan indices continue after the skills so the peacock sweep flows
+    // inner ring → outer ring in one motion)
     const resourceOffset = children.skills.length > 0 ? 0.15 : 0
     result.push(
       ...distributeOnArc(
@@ -186,6 +206,8 @@ export function computeOrbitalPositions(
         children.resources,
         RESOURCE_RADIUS,
         savedPositions,
+        children.skills.length,
+        fanCount,
       ),
     )
   }

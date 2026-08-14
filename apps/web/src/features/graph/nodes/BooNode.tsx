@@ -1,7 +1,7 @@
 import { memo, useRef, type MutableRefObject } from 'react'
 import { Handle, Position, useConnection } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import type { BooNodeData } from '../types'
 import { useGraphStore } from '../store'
@@ -149,14 +149,18 @@ const centerHandleStyle: React.CSSProperties = {
   background: 'transparent',
 }
 
-// CSS transition for the wrapper size + border-radius morph.
+// CSS transition for the wrapper size + border-radius morph. The
+// cubic-bezier(0.32, 0.72, 0, 1) curve is the app's signature "premium"
+// ease-out (same one the activity dock slide uses) — a fast start with a
+// long, soft landing. Opacity (the hover-cascade dim) rides the same curve
+// slightly longer so dimming reads as a fade, not a flick.
 const SHAPE_TRANSITION =
-  'width 0.28s cubic-bezier(0.4, 0, 0.2, 1), ' +
-  'height 0.28s cubic-bezier(0.4, 0, 0.2, 1), ' +
-  'border-radius 0.28s cubic-bezier(0.4, 0, 0.2, 1), ' +
+  'width 0.32s cubic-bezier(0.32, 0.72, 0, 1), ' +
+  'height 0.32s cubic-bezier(0.32, 0.72, 0, 1), ' +
+  'border-radius 0.32s cubic-bezier(0.32, 0.72, 0, 1), ' +
   'background 0.2s ease, ' +
   'border-color 0.15s ease, ' +
-  'opacity 0.2s ease'
+  'opacity 0.3s cubic-bezier(0.32, 0.72, 0, 1)'
 
 // ─── BooNode ─────────────────────────────────────────────────────────────────
 
@@ -167,6 +171,8 @@ export const BooNode = memo(function BooNode({
 }: NodeProps<Node<BooNodeData, 'boo'>>) {
   const { agentId, name, status } = data
   const floatRef = useFloatingMotion(agentId, 'boo', dragging)
+  // Decorative hover lift — dropped under reduced motion (see SkillNode).
+  const reduceMotion = useReducedMotion()
   const showCard = status === 'running'
   // Runtime brand badge — shown on every Boo (Atlas + team graph + agent-detail
   // MiniGraph) so the agent's runtime is legible at a glance.
@@ -194,15 +200,17 @@ export const BooNode = memo(function BooNode({
   const lastSeenAt = agent?.lastSeenAt ?? null
   const lastSeenLabel = !showCard ? formatLastSeen(lastSeenAt) : null
 
-  // Fine-grained activity verb. Single-value subscriptions so we
-  // only re-render when this agent's stream or transcript ticks.
+  // Fine-grained activity verb. Single-value subscriptions so we only
+  // re-render when THIS agent's stream or transcript ticks — subscribing to
+  // the whole `transcripts` map re-rendered every Boo on every streaming
+  // token of every agent, which visibly dragged the canvas during live runs.
   const sk = agent?.sessionKey ?? null
   const streamingText = useChatStore((s) => (sk ? (s.streamingText.get(sk) ?? null) : null))
-  const transcripts = useChatStore((s) => s.transcripts)
+  const transcript = useChatStore((s) => (sk ? (s.transcripts.get(sk) ?? null) : null))
   const activityVerb = agent
     ? getActivityVerb({
         agent,
-        transcripts,
+        transcripts: sk && transcript ? new Map([[sk, transcript]]) : null,
         streamingTexts: sk ? new Map([[sk, streamingText ?? '']]) : null,
       })
     : (STATUS_LABEL[status] ?? 'idle')
@@ -249,14 +257,18 @@ export const BooNode = memo(function BooNode({
   const handleMouseLeave = () => setHoveredNodeId(null)
 
   return (
+    // STATIC footprint — never transformed. React Flow measures each handle's
+    // bounds ONCE, so anything that moves an ancestor of a handle desynchronises
+    // the edge anchor from the visual: the Boo would bob while its edges stayed
+    // put. The idle float is therefore applied to an INNER wrapper (below) that
+    // holds only the visible Boo, leaving this box — and the center handles
+    // anchored to its middle — perfectly still. Same split SkillNode /
+    // ResourceNode use for their orbital tiles.
     <div
-      ref={floatRef}
       style={{
         width: BOO_FOOTPRINT,
         height: BOO_FOOTPRINT,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        position: 'relative', // containing block for the static center handles
         // The empty area around the morph wrapper shouldn't intercept clicks,
         // hover, or drag events. Only the rendered Boo shape (the inner
         // motion.div) re-enables pointer events. The CSS rule on
@@ -265,177 +277,199 @@ export const BooNode = memo(function BooNode({
         pointerEvents: 'none',
       }}
     >
-      <motion.div
-        className="group"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        animate={{ boxShadow }}
-        transition={
-          glow?.pulse ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.4 }
-        }
+      {/* Floating layer — centers the Boo inside the footprint and carries the
+          idle bob transform. Fills the footprint so the centering matches what
+          the static box used to do. */}
+      <div
+        ref={floatRef}
         style={{
-          width: showCard ? BOO_CARD_WIDTH : booW,
-          height: showCard ? BOO_CARD_HEIGHT : booH,
-          position: 'relative',
-          cursor: 'pointer',
-          pointerEvents: 'auto',
-          borderRadius: showCard ? 12 : '50%',
-          background: showCard ? 'var(--card)' : 'transparent',
-          // Card always uses the same subtle outline regardless of selection
-          // state — the selection-thickening was visually inconsistent with
-          // the now-removed circle ring and didn't add information.
-          border: showCard ? '1px solid var(--border)' : 'none',
-          opacity: isHighlighted ? 1 : 0.22,
-          transition: SHAPE_TRANSITION,
-          // 'visible' (not 'hidden') so children rendering outside the
-          // immediate bounding box (e.g. circle-shape's name + status that sit
-          // BELOW the avatar) aren't clipped at the rounded corner.
-          overflow: 'visible',
-          display: showCard ? 'flex' : 'block',
-          flexDirection: showCard ? 'column' : undefined,
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          pointerEvents: 'none',
         }}
       >
-        {/* ── Approval pulse — adapts shape via borderRadius ──────────────── */}
-        {hasPendingApproval && (
-          <motion.div
-            animate={{
-              opacity: [0.6, 1, 0.6],
-              boxShadow: [
-                '0 0 0 0 rgb(var(--amber-rgb) / 0.55)',
-                '0 0 0 4px rgba(251,191,36,0)',
-                '0 0 0 0 rgb(var(--amber-rgb) / 0.55)',
-              ],
-            }}
-            transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
-            style={{
-              position: 'absolute',
-              inset: -2,
-              borderRadius: showCard ? 14 : '50%',
-              border: '2px solid var(--amber)',
-              pointerEvents: 'none',
-              zIndex: 1,
-            }}
-          />
-        )}
+        <motion.div
+          className="group"
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          animate={{ boxShadow }}
+          whileHover={reduceMotion ? undefined : { scale: 1.03 }}
+          transition={{
+            // Per-value transitions: the glow pulse must never leak its
+            // Infinity-repeat config onto the hover scale spring.
+            boxShadow: glow?.pulse
+              ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' }
+              : { duration: 0.4 },
+            scale: { type: 'spring', stiffness: 380, damping: 26 },
+          }}
+          style={{
+            width: showCard ? BOO_CARD_WIDTH : booW,
+            height: showCard ? BOO_CARD_HEIGHT : booH,
+            position: 'relative',
+            cursor: 'pointer',
+            pointerEvents: 'auto',
+            borderRadius: showCard ? 12 : '50%',
+            background: showCard ? 'var(--card)' : 'transparent',
+            // Card always uses the same subtle outline regardless of selection
+            // state — the selection-thickening was visually inconsistent with
+            // the now-removed circle ring and didn't add information.
+            border: showCard ? '1px solid var(--border)' : 'none',
+            opacity: isHighlighted ? 1 : 0.22,
+            transition: SHAPE_TRANSITION,
+            // 'visible' (not 'hidden') so children rendering outside the
+            // immediate bounding box (e.g. circle-shape's name + status that sit
+            // BELOW the avatar) aren't clipped at the rounded corner.
+            overflow: 'visible',
+            display: showCard ? 'flex' : 'block',
+            flexDirection: showCard ? 'column' : undefined,
+          }}
+        >
+          {/* ── Approval pulse — adapts shape via borderRadius ──────────────── */}
+          {hasPendingApproval && (
+            <motion.div
+              animate={{
+                opacity: [0.6, 1, 0.6],
+                boxShadow: [
+                  '0 0 0 0 rgb(var(--amber-rgb) / 0.55)',
+                  '0 0 0 4px rgba(251,191,36,0)',
+                  '0 0 0 0 rgb(var(--amber-rgb) / 0.55)',
+                ],
+              }}
+              transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+              style={{
+                position: 'absolute',
+                inset: -2,
+                borderRadius: showCard ? 14 : '50%',
+                border: '2px solid var(--amber)',
+                pointerEvents: 'none',
+                zIndex: 1,
+              }}
+            />
+          )}
 
-        {/* Event-sourced live status pip. Only the actionable
+          {/* Event-sourced live status pip. Only the actionable
             states render a pip; idle / no-activity shows nothing, so an idle
             agent's appearance is unchanged. */}
-        {obsStatus && obsStatus !== 'idle' && (
-          <div
-            title={`live: ${obsStatus}`}
-            style={{
-              position: 'absolute',
-              top: -3,
-              right: -3,
-              width: 9,
-              height: 9,
-              borderRadius: '50%',
-              background:
-                obsStatus === 'working'
-                  ? 'var(--mint)'
-                  : obsStatus === 'stalled'
-                    ? 'var(--amber)'
-                    : 'var(--primary)',
-              boxShadow: '0 0 0 2px var(--surface)',
-              pointerEvents: 'none',
-              zIndex: 3,
-            }}
-          />
-        )}
+          {obsStatus && obsStatus !== 'idle' && (
+            <div
+              title={`live: ${obsStatus}`}
+              style={{
+                position: 'absolute',
+                top: -3,
+                right: -3,
+                width: 9,
+                height: 9,
+                borderRadius: '50%',
+                background:
+                  obsStatus === 'working'
+                    ? 'var(--mint)'
+                    : obsStatus === 'stalled'
+                      ? 'var(--amber)'
+                      : 'var(--primary)',
+                boxShadow: '0 0 0 2px var(--surface)',
+                pointerEvents: 'none',
+                zIndex: 3,
+              }}
+            />
+          )}
 
-        {/* Selection ring removed — the previous red ring around a clicked
+          {/* Selection ring removed — the previous red ring around a clicked
             Boo had no functional purpose; the agent-detail navigation
             happens through the right-click context menu / sidebar. */}
 
-        {/* Boo Zero needs no badge — the reserved OpenClaw-red tint plus the
+          {/* Boo Zero needs no badge — the reserved OpenClaw-red tint plus the
             slightly larger size (see `baseSize` / `booW` above) already mark
             it as the universal team leader. The earlier crown badge was a
             third visual cue layered on top, which read as decorative noise.
             See `boo-avatar/src/index.ts` for the tint reservation. */}
 
-        {showCard ? (
-          <CardContent
-            agentId={agentId}
-            name={name}
-            selected={selected}
-            status={status}
-            activityVerb={activityVerb}
-            cardStatusColor={cardStatusColor}
-            lastSeenLabel={lastSeenLabel}
-            runtime={runtime}
-            avatarFlip={avatarFlip}
-            nameFlip={nameFlip}
-            statusFlip={statusFlip}
+          {showCard ? (
+            <CardContent
+              agentId={agentId}
+              name={name}
+              selected={selected}
+              status={status}
+              activityVerb={activityVerb}
+              cardStatusColor={cardStatusColor}
+              lastSeenLabel={lastSeenLabel}
+              runtime={runtime}
+              avatarFlip={avatarFlip}
+              nameFlip={nameFlip}
+              statusFlip={statusFlip}
+            />
+          ) : (
+            <CircleContent
+              agentId={agentId}
+              name={name}
+              selected={selected}
+              status={status}
+              activityVerb={activityVerb}
+              booW={booW}
+              booH={booH}
+              cardStatusColor={cardStatusColor}
+              lastSeenLabel={lastSeenLabel}
+              runtime={runtime}
+              avatarFlip={avatarFlip}
+              nameFlip={nameFlip}
+              statusFlip={statusFlip}
+            />
+          )}
+
+          {/* ── Interactive handles (visible on hover / connect) ────────────── */}
+          <Handle
+            type="target"
+            position={Position.Top}
+            className={
+              isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }
+            style={isConnecting || connectMode ? handleConnecting : handleBase}
           />
-        ) : (
-          <CircleContent
-            agentId={agentId}
-            name={name}
-            selected={selected}
-            status={status}
-            activityVerb={activityVerb}
-            booW={booW}
-            booH={booH}
-            cardStatusColor={cardStatusColor}
-            lastSeenLabel={lastSeenLabel}
-            runtime={runtime}
-            avatarFlip={avatarFlip}
-            nameFlip={nameFlip}
-            statusFlip={statusFlip}
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            className={
+              isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }
+            style={isConnecting || connectMode ? handleConnecting : handleBase}
           />
-        )}
+          <Handle
+            type="source"
+            id="right"
+            position={Position.Right}
+            className={
+              isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }
+            style={isConnecting || connectMode ? handleConnecting : handleBase}
+          />
+        </motion.div>
+      </div>
 
-        {/* ── Interactive handles (visible on hover / connect) ────────────── */}
-        <Handle
-          type="target"
-          position={Position.Top}
-          className={
-            isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }
-          style={isConnecting || connectMode ? handleConnecting : handleBase}
-        />
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          className={
-            isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }
-          style={isConnecting || connectMode ? handleConnecting : handleBase}
-        />
-        <Handle
-          type="source"
-          id="right"
-          position={Position.Right}
-          className={
-            isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }
-          style={isConnecting || connectMode ? handleConnecting : handleBase}
-        />
+      {/* ── Center handles — invisible, for edge path routing only ──────── */}
+      {/* Anchored on the STATIC footprint (outside BOTH the floating layer
+          and the morph wrapper) so edge endpoints stay glued to the node's
+          geometric center: the idle bob and the circle↔card morph move the
+          visual, never the edge anchor — the anchor sits safely behind the
+          visible Boo shape at all times.
 
-        {/* ── Center handles — invisible, for edge path routing only ──────── */}
-        {/* See useGraphData.ts:330–336 for the handle-canonical caveat:
-            'center' is SOURCE-type, 'center-target' is TARGET-type — never
-            swap them when flipping edge source/target during the parent→child
-            edge rewrite.
+          See useGraphData.ts:330–336 for the handle-canonical caveat:
+          'center' is SOURCE-type, 'center-target' is TARGET-type — never
+          swap them when flipping edge source/target during the parent→child
+          edge rewrite.
 
-            Source uses `Position.Bottom`: in our layered DOWN org chart,
-            edges depart from the leader DOWNWARD to children below. With
-            `Position.Top` (the previous setup), React Flow's smooth-step
-            routed the edge UP from the source first, made an elbow ABOVE
-            the leader, then descended to the child — putting the
-            horizontal segment way above the leader Boo instead of between
-            leader and child where an org chart expects it. With Bottom +
-            Top the elbow lands at the midpoint between source and target,
-            the natural T-junction shape. */}
-        <Handle id="center" type="source" position={Position.Bottom} style={centerHandleStyle} />
-        <Handle
-          id="center-target"
-          type="target"
-          position={Position.Top}
-          style={centerHandleStyle}
-        />
-      </motion.div>
+          Source uses `Position.Bottom`: in our layered DOWN org chart,
+          edges depart from the leader DOWNWARD to children below. With
+          `Position.Top` (the previous setup), React Flow's smooth-step
+          routed the edge UP from the source first, made an elbow ABOVE
+          the leader, then descended to the child — putting the
+          horizontal segment way above the leader Boo instead of between
+          leader and child where an org chart expects it. With Bottom +
+          Top the elbow lands at the midpoint between source and target,
+          the natural T-junction shape. */}
+      <Handle id="center" type="source" position={Position.Bottom} style={centerHandleStyle} />
+      <Handle id="center-target" type="target" position={Position.Top} style={centerHandleStyle} />
     </div>
   )
 })
