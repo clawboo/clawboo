@@ -1,40 +1,65 @@
-// Peacock-feather expand / collapse animation for orbital children
-// (skill + resource nodes) in the Ghost Graph.
+// Peacock-feather expand / collapse for orbital children (skill + resource
+// nodes) in the Ghost Graph.
 //
 // When a Boo is single-clicked, its orbital children's `data.isVisible`
-// flips between true and false. This hook returns Framer-Motion props
-// that animate each child node from "behind the Boo" (scale 0, offset
-// toward parent center) to its orbital position — and back when collapsed.
+// flips. This hook returns Framer-Motion props that animate each child
+// FROM the parent Boo's center TO its orbital position (and back into the
+// Boo on collapse) — a true "burst out of the agent" motion, not just a
+// scale-in-place. The translate delta is computed against the parent's
+// LIVE position (via React Flow's internal node lookup), so the burst
+// originates from wherever the Boo actually is — even mid-drag or while
+// physics is settling.
 //
-// The animation is staggered per-node via a deterministic hash of the
-// node ID so the children appear in a fan-like sweep rather than all at
-// once. Hash-based stagger keeps the visual feel without requiring an
-// external "index" passed through node data.
+// Stagger: children sweep out in ARC ORDER (`data.orbitIndex`, stamped by
+// `computeOrbitalPositions` — inner skill ring first, then the resource
+// ring), producing a directed fan sweep instead of the old random
+// hash-bucket order. Collapse runs a fast reverse sweep so the fan folds
+// back into the Boo.
 //
 // MiniGraph and any consumer that doesn't set `data.isVisible` gets the
-// "always visible" treatment automatically (treated as undefined → true).
+// "always visible" treatment automatically (undefined → static, no motion).
 
 import { useMemo } from 'react'
+import { useInternalNode } from '@xyflow/react'
+import { useReducedMotion } from 'framer-motion'
 import type { Transition } from 'framer-motion'
 
-// FNV-1a-ish 32-bit hash for the stagger delay. Same approach used elsewhere
-// in `useFloatingMotion` for deterministic per-node motion params.
-function hashString(s: string): number {
-  let h = 0x811c9dc5
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i)
-    h = Math.imul(h, 0x01000193)
+// Matches BOO_FOOTPRINT in `nodes/BooNode.tsx` — fallback when the parent's
+// measured size isn't available yet.
+const BOO_FOOTPRINT = 280
+
+// Expand sweep: total budget for the fan, clamped per-step so tiny fans
+// still stagger visibly and huge fans don't take forever.
+const EXPAND_SWEEP_TOTAL_S = 0.36
+const EXPAND_STEP_MIN_S = 0.028
+const EXPAND_STEP_MAX_S = 0.06
+// Collapse: quick reverse sweep — the fan folds back into the Boo.
+const COLLAPSE_STEP_S = 0.014
+
+/** Per-child delay within the peacock sweep. Shared with the orbital edges
+ *  so an edge draws in sync with its node's arrival. */
+export function orbitStaggerDelay(
+  orbitIndex: number | undefined,
+  orbitCount: number | undefined,
+  expanding: boolean,
+): number {
+  const count = Math.max(orbitCount ?? 1, 1)
+  const index = Math.min(Math.max(orbitIndex ?? 0, 0), count - 1)
+  if (expanding) {
+    const step = Math.min(
+      EXPAND_STEP_MAX_S,
+      Math.max(EXPAND_STEP_MIN_S, EXPAND_SWEEP_TOTAL_S / Math.max(count - 1, 1)),
+    )
+    return index * step
   }
-  return h >>> 0
+  return (count - 1 - index) * COLLAPSE_STEP_S
 }
 
-const STAGGER_BUCKETS = 8 // number of stagger groups (0 .. 7 × 50ms)
-const STAGGER_STEP_MS = 50
-
 interface PeacockMotionProps {
-  /** Pass to the wrapping `motion.div`. */
-  initial: { opacity: number; scale: number }
-  animate: { opacity: number; scale: number }
+  /** Pass to the wrapping `motion.div`. `initial: false` = no mount replay —
+   *  a node mounting collapsed simply *is* at the parent, invisible. */
+  initial: false
+  animate: { x: number; y: number; opacity: number; scale: number }
   transition: Transition
   /**
    * `pointer-events` toggle so collapsed nodes don't intercept clicks
@@ -43,52 +68,119 @@ interface PeacockMotionProps {
   pointerEvents: 'auto' | 'none'
 }
 
-/**
- * Returns Framer-Motion `initial` / `animate` / `transition` for a peacock
- * expand-collapse on `isVisible` flip. When `isVisible` is `undefined`
- * (e.g. MiniGraph), behaves as "always visible" with no transition.
- */
-export function usePeacockTransition(
-  nodeId: string,
-  isVisible: boolean | undefined,
-): PeacockMotionProps {
+export interface PeacockArgs {
+  nodeId: string
+  isVisible: boolean | undefined
+  /** Owning agent id (`data.agentIds[0]`) — resolves the parent Boo node. */
+  parentAgentId: string | null | undefined
+  /** This node's absolute flow position (NodeProps.positionAbsoluteX/Y). */
+  positionAbsoluteX: number
+  positionAbsoluteY: number
+  /** Visual disc size — the translate delta targets the disc center. */
+  selfSize: number
+  orbitIndex?: number
+  orbitCount?: number
+}
+
+export function usePeacockTransition({
+  isVisible,
+  parentAgentId,
+  positionAbsoluteX,
+  positionAbsoluteY,
+  selfSize,
+  orbitIndex,
+  orbitCount,
+}: PeacockArgs): PeacockMotionProps {
+  // Subscribe to the parent Boo's live position so the burst origin tracks
+  // it through drags and physics settles. Hook is called unconditionally
+  // (dummy id when there's no parent / no visibility tracking).
+  const parentNode = useInternalNode(
+    isVisible !== undefined && parentAgentId ? `boo-${parentAgentId}` : '__peacock_none__',
+  )
+
+  // Reduced motion: keep the END STATE (position, opacity, scale) exactly as
+  // it would be, but drop the travel — the fan appears/disappears instantly
+  // instead of sweeping out of the Boo. Same principle the graph's RAF loops
+  // follow (`@/lib/prefersReducedMotion`): the graph stays correct, only the
+  // animation goes. Framer's hook is the component-side half of that contract.
+  const reduceMotion = useReducedMotion()
+
+  const parentX = parentNode
+    ? parentNode.internals.positionAbsolute.x + (parentNode.measured?.width ?? BOO_FOOTPRINT) / 2
+    : null
+  const parentY = parentNode
+    ? parentNode.internals.positionAbsolute.y + (parentNode.measured?.height ?? BOO_FOOTPRINT) / 2
+    : null
+
   return useMemo(() => {
     // MiniGraph / any consumer that doesn't track visibility: render plainly,
     // no animation.
     if (isVisible === undefined) {
       return {
-        initial: { opacity: 1, scale: 1 },
-        animate: { opacity: 1, scale: 1 },
+        initial: false as const,
+        animate: { x: 0, y: 0, opacity: 1, scale: 1 },
         transition: { duration: 0 },
-        pointerEvents: 'auto',
+        pointerEvents: 'auto' as const,
       }
     }
 
-    const stagger = (hashString(nodeId) % STAGGER_BUCKETS) * STAGGER_STEP_MS
+    // Offset from this node's orbital spot to the parent Boo's center — the
+    // collapsed resting point. Falls back to "in place" if the parent isn't
+    // resolvable (shouldn't happen for real orbitals).
+    const deltaX = parentX !== null ? parentX - (positionAbsoluteX + selfSize / 2) : 0
+    const deltaY = parentY !== null ? parentY - (positionAbsoluteY + selfSize / 2) : 0
+
+    const delay = reduceMotion ? 0 : orbitStaggerDelay(orbitIndex, orbitCount, isVisible)
+
+    if (reduceMotion) {
+      return {
+        initial: false as const,
+        animate: isVisible
+          ? { x: 0, y: 0, opacity: 1, scale: 1 }
+          : { x: deltaX, y: deltaY, opacity: 0, scale: 0.25 },
+        transition: { duration: 0 },
+        pointerEvents: (isVisible ? 'auto' : 'none') as 'auto' | 'none',
+      }
+    }
+
+    if (isVisible) {
+      return {
+        initial: false as const,
+        animate: { x: 0, y: 0, opacity: 1, scale: 1 },
+        transition: {
+          type: 'spring',
+          stiffness: 340,
+          damping: 27,
+          mass: 0.9,
+          delay,
+          opacity: { duration: 0.18, delay },
+        } satisfies Transition,
+        pointerEvents: 'auto' as const,
+      }
+    }
 
     return {
-      // We render once at the orbital target (set by computeOrbitalPositions),
-      // and Framer Motion animates the visual "appear from behind the Boo"
-      // by tweening scale + opacity. We deliberately don't translate (x/y) —
-      // the spring on `scale` pinned at the node's center already produces
-      // the "bursting from the parent" feel without us computing per-node
-      // offsets toward the parent Boo. This keeps the animation stable when
-      // the parent Boo is being dragged during the transition.
-      initial: { opacity: 0, scale: 0 },
-      animate: {
-        opacity: isVisible ? 1 : 0,
-        scale: isVisible ? 1 : 0,
-      },
+      initial: false as const,
+      animate: { x: deltaX, y: deltaY, opacity: 0, scale: 0.25 },
       transition: {
         type: 'spring',
-        stiffness: 240,
-        damping: 22,
-        // Stagger only on expand (when visible); collapse should be quick
-        // and synchronous so the visual clutter clears immediately.
-        delay: isVisible ? stagger / 1000 : 0,
-        opacity: isVisible ? { duration: 0.18, delay: stagger / 1000 } : { duration: 0.12 },
-      },
-      pointerEvents: isVisible ? 'auto' : 'none',
+        stiffness: 420,
+        damping: 36,
+        mass: 0.8,
+        delay,
+        opacity: { duration: 0.14, delay: delay + 0.05 },
+      } satisfies Transition,
+      pointerEvents: 'none' as const,
     }
-  }, [nodeId, isVisible])
+  }, [
+    isVisible,
+    parentX,
+    parentY,
+    positionAbsoluteX,
+    positionAbsoluteY,
+    selfSize,
+    orbitIndex,
+    orbitCount,
+    reduceMotion,
+  ])
 }

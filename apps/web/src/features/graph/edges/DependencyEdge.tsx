@@ -68,6 +68,13 @@ const STROKE_WIDTH = 1.5
 const STROKE_WIDTH_SELECTED = 2.5
 const TRUNK_CORNER_RADIUS = 12
 
+// Trunk-and-branches assumes all siblings sit on ONE ELK row. When their Y
+// values diverge beyond this tolerance (user dragged a child away, stale
+// saved positions from an older layout), the trunk geometry degenerates into
+// giant crossing rectangles — so past the tolerance every edge falls back to
+// its own smooth-step path instead.
+const TRUNK_COPLANAR_TOLERANCE = 40
+
 // Build the LEFT half of the trunk leader's path: source vertical → left
 // horizontal → left arc → leftmost branch. One continuous subpath so the
 // stroke flows smoothly through every join. Marker lands at the leftmost
@@ -185,11 +192,29 @@ export const DependencyEdge = memo(function DependencyEdge({
     stroke,
     strokeWidth,
     fill: 'none',
-    transition: 'stroke 0.15s, stroke-width 0.15s, opacity 0.2s ease',
+    strokeLinecap: 'round' as const,
+    // Signature ease on the hover-cascade dim/brighten so edges fade as one
+    // system with the nodes instead of snapping.
+    transition: 'stroke 0.2s, stroke-width 0.2s, opacity 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
     opacity,
     pointerEvents: opacity > 0 ? ('auto' as const) : ('none' as const),
   }
   const markerEnd = opacity > 0 ? 'url(#dependency-arrow)' : undefined
+
+  // Soft under-glow when this edge belongs to the hovered cluster — the
+  // routing lights up as one system. Rendered as a wider low-opacity twin
+  // path beneath each visible subpath (always mounted so it can FADE).
+  const glowOpacity = isConnectedToHovered ? 0.1 : 0
+  const glowStyle = {
+    stroke: 'var(--primary)',
+    strokeWidth: 7,
+    fill: 'none',
+    strokeLinecap: 'round' as const,
+    opacity: glowOpacity,
+    transition: 'opacity 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+    pointerEvents: 'none' as const,
+  }
+  const glowPath = (d: string, key: string) => <path key={key} d={d} style={glowStyle} />
 
   // ── Branch: secondary collaboration edge — bezier curve so it visually
   // distinguishes from the primary structural backbone.
@@ -213,8 +238,21 @@ export const DependencyEdge = memo(function DependencyEdge({
     )
   }
 
+  // Shared-row check for the trunk system (see TRUNK_COPLANAR_TOLERANCE).
+  // Non-coplanar siblings fall through to the per-edge smooth-step branch.
+  let siblingsCoplanar = false
+  if (isTrunkParticipant && siblings.length >= 2) {
+    let minY = Infinity
+    let maxY = -Infinity
+    for (const s of siblings) {
+      if (s.y < minY) minY = s.y
+      if (s.y > maxY) maxY = s.y
+    }
+    siblingsCoplanar = maxY - minY <= TRUNK_COPLANAR_TOLERANCE
+  }
+
   // ── Branch: trunk leader for a parent with 2+ siblings.
-  if (isTrunkLeader && siblings.length >= 2) {
+  if (isTrunkLeader && siblings.length >= 2 && siblingsCoplanar) {
     const sorted = [...siblings].sort((a, b) => a.x - b.x)
     const leftmost = sorted[0]!
     const rightmost = sorted[sorted.length - 1]!
@@ -234,6 +272,9 @@ export const DependencyEdge = memo(function DependencyEdge({
 
     return (
       <>
+        {glowPath(leftPath, `${id}-left-glow`)}
+        {glowPath(rightPath, `${id}-right-glow`)}
+        {leaderMiddlePath ? glowPath(leaderMiddlePath, `${id}-mid-glow`) : null}
         <BaseEdge id={`${id}-left`} path={leftPath} markerEnd={markerEnd} style={baseStyle} />
         <BaseEdge id={`${id}-right`} path={rightPath} markerEnd={markerEnd} style={baseStyle} />
         {leaderMiddlePath ? (
@@ -249,7 +290,7 @@ export const DependencyEdge = memo(function DependencyEdge({
   }
 
   // ── Branch: trunk follower — middle child's sharp T-junction descent.
-  if (isTrunkFollower && siblings.length >= 2) {
+  if (isTrunkFollower && siblings.length >= 2 && siblingsCoplanar) {
     const sorted = [...siblings].sort((a, b) => a.x - b.x)
     const leftmostId = sorted[0]!.id
     const rightmostId = sorted[sorted.length - 1]!.id
@@ -261,7 +302,12 @@ export const DependencyEdge = memo(function DependencyEdge({
     }
     const elbowY = (sourceY + sorted[0]!.y) / 2
     const middlePath = buildMiddleBranchPath(targetX, targetY, elbowY)
-    return <BaseEdge id={id} path={middlePath} markerEnd={markerEnd} style={baseStyle} />
+    return (
+      <>
+        {glowPath(middlePath, `${id}-glow`)}
+        <BaseEdge id={id} path={middlePath} markerEnd={markerEnd} style={baseStyle} />
+      </>
+    )
   }
 
   // ── Branch: radial Atlas — primary edges radiate from BZ outward and from
@@ -273,7 +319,12 @@ export const DependencyEdge = memo(function DependencyEdge({
   // noise at the convergence point without conveying direction.
   if (isRadial) {
     const [straight] = getStraightPath({ sourceX, sourceY, targetX, targetY })
-    return <BaseEdge id={id} path={straight} style={baseStyle} />
+    return (
+      <>
+        {glowPath(straight, `${id}-glow`)}
+        <BaseEdge id={id} path={straight} style={baseStyle} />
+      </>
+    )
   }
 
   // ── Branch: single-child primary edge — standard smooth-step (no
@@ -287,5 +338,10 @@ export const DependencyEdge = memo(function DependencyEdge({
     targetPosition,
     borderRadius: TRUNK_CORNER_RADIUS,
   })
-  return <BaseEdge id={id} path={smooth} markerEnd={markerEnd} style={baseStyle} />
+  return (
+    <>
+      {glowPath(smooth, `${id}-glow`)}
+      <BaseEdge id={id} path={smooth} markerEnd={markerEnd} style={baseStyle} />
+    </>
+  )
 })

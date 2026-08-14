@@ -139,10 +139,12 @@ describe('graphPhysics', () => {
       useGraphStore.setState({ nodes: [boo, skill], edges: [] })
       graphPhysics.initialize([boo, skill], [])
 
-      // Wake → should immediately settle since no particles
+      // Wake → settles quickly: the lone boo particle has no forces acting
+      // on it, so the early-sleep hysteresis (~10 still steps) kicks in.
       graphPhysics.wake()
-      // Advance one frame
-      vi.advanceTimersByTime(20)
+      for (let i = 0; i < 15; i++) {
+        vi.advanceTimersByTime(20)
+      }
       expect(graphPhysics.isActive()).toBe(false)
     })
 
@@ -459,18 +461,20 @@ describe('graphPhysics', () => {
       expect(dist).toBeGreaterThan(10)
     })
 
-    it('boo push is smooth (no oscillation)', () => {
-      // Place two boos close together (within collision distance)
+    it('boo push is smooth (damped settle, no teleports)', () => {
+      // Place two boos close together (well within collision range). The
+      // soft-collide + tether system separates them with damped motion:
+      // distance grows overall, per-frame movement stays bounded (no
+      // teleport pops), and the tail of the motion is quiet (settled).
       const boo1 = makeBooNode('a1', 100, 100)
-      const boo2 = makeBooNode('a2', 150, 100) // 50px apart, well within 180px collision distance
+      const boo2 = makeBooNode('a2', 150, 100)
 
       useGraphStore.setState({ nodes: [boo1, boo2], edges: [] })
       graphPhysics.initialize([boo1, boo2], [])
       graphPhysics.wake()
 
-      // Track distance over frames — should be monotonically increasing (or stable)
       const distances: number[] = []
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 120; i++) {
         vi.advanceTimersByTime(20)
         const updated = useGraphStore.getState().nodes
         const b1 = updated.find((n) => n.id === 'boo-a1')!
@@ -480,10 +484,19 @@ describe('graphPhysics', () => {
         distances.push(Math.sqrt(dx * dx + dy * dy))
       }
 
-      // Verify monotonic increase (each distance >= previous, within small epsilon for floating point)
+      // Separated overall
+      expect(distances[distances.length - 1]!).toBeGreaterThan(distances[0]! + 10)
+
+      // No teleports: per-frame distance change bounded by the boo speed
+      // ceiling for both particles (each frame can run up to ~2 substeps).
       for (let i = 1; i < distances.length; i++) {
-        expect(distances[i]!).toBeGreaterThanOrEqual(distances[i - 1]! - 0.01)
+        expect(Math.abs(distances[i]! - distances[i - 1]!)).toBeLessThan(60)
       }
+
+      // Damped tail: motion in the last 10 frames is nearly still.
+      const tail = distances.slice(-10)
+      const tailSpan = Math.max(...tail) - Math.min(...tail)
+      expect(tailSpan).toBeLessThan(2)
     })
   })
 

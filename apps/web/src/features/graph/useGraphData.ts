@@ -363,14 +363,34 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
   // THIS team" from a stale count left over from Atlas / a previous team.
   const scopeKey = scope === 'atlas' ? 'atlas' : `team:${selectedTeamId ?? 'none'}`
   useEffect(() => {
-    // Preserve positions already assigned by ELK or user drag
+    // Preserve positions already assigned by ELK or user drag, AND the
+    // orbit-stagger stamps (`orbitIndex` / `orbitCount`) assigned by
+    // computeOrbitalPositions. Structural rebuilds replace node data
+    // wholesale; without carrying the stamps forward, any rebuild that
+    // keeps the node count unchanged (capabilities refetch, reconnect)
+    // silently degrades the peacock arc sweep to an all-at-once pop —
+    // the layout effect only re-stamps when the node count changes.
     const { nodes: existingNodes } = useGraphStore.getState()
     const positions = new Map(existingNodes.map((n) => [n.id, n.position]))
+    const orbitStamps = new Map(
+      existingNodes.map((n) => {
+        const d = n.data as { orbitIndex?: number; orbitCount?: number }
+        return [n.id, { orbitIndex: d.orbitIndex, orbitCount: d.orbitCount }] as const
+      }),
+    )
 
-    const nodesWithPositions = rawNodes.map((n) => ({
-      ...n,
-      position: positions.get(n.id) ?? n.position,
-    }))
+    const nodesWithPositions = rawNodes.map((n) => {
+      const stamps = orbitStamps.get(n.id)
+      const keepStamps =
+        (n.type === 'skill' || n.type === 'resource') && stamps?.orbitIndex !== undefined
+      return {
+        ...n,
+        position: positions.get(n.id) ?? n.position,
+        data: keepStamps
+          ? { ...n.data, orbitIndex: stamps.orbitIndex, orbitCount: stamps.orbitCount }
+          : n.data,
+      }
+    })
 
     useGraphStore.getState().setNodes(nodesWithPositions as GraphNode[])
     useGraphStore.getState().setEdges(rawEdges)
@@ -919,12 +939,15 @@ export function buildGraphElements(
   // Boo Zero → team-lead synthetic edge.
   //
   // Forest fallback when Boo Zero is absent (atlas with no Boo Zero, OR
-  // team scope without a Boo Zero AND without a team-internal lead): we
-  // union per-root BFS results so each disconnected sub-tree gets its
-  // own clean primary backbone. In atlas this means one BFS per team's
-  // internal lead; in team scope we keep the single-root behavior (or
-  // skip the filter when there's no valid root, treating all edges as
-  // primary — the historical fallback).
+  // team scope without a displayable Boo Zero AND without a team-internal
+  // lead): we union per-root BFS results so each disconnected sub-tree
+  // gets its own clean primary backbone. In atlas this means one BFS per
+  // team's internal lead. In team scope, Boo Zero is the universal leader
+  // of every team, so no other root is ever fabricated — when neither a
+  // displayable BZ nor an internal lead exists, the team renders as a
+  // flat row of peers (no primary edges; see the flat-peers branch
+  // below). The "no root → every edge is primary" fallback survives only
+  // for the all-agents-no-team peek, which intentionally shows everything.
   const orderedDepEdges =
     scope === 'atlas' || booZeroAgent
       ? [
@@ -978,10 +1001,27 @@ export function buildGraphElements(
       parentMap.set(edge.target, edge.source)
     }
   } else if (treeRoots.length === 0) {
-    // No root → treat every dependency edge as primary (historical
-    // fallback used by the all-agents-no-team peek).
-    primaryEdgeIds = new Set(depEdges.map((e) => e.id))
-    parentMap = new Map<string, string>()
+    if (scope === 'team' && selectedTeamId) {
+      // Team with no displayable root. Boo Zero is the universal leader of
+      // EVERY team, so the hierarchy root is always BZ (with the internal
+      // lead, when one exists, sitting under it) — but BZ can be barred
+      // from THIS team's scoped view by `isBooZeroEligibleForTeam` (a
+      // team-bound Boo Zero must never leak into another team's views).
+      // With no displayable BZ and no internal lead we must NOT fabricate
+      // a leader: render the members as a flat row of peers with NO
+      // primary hierarchy. Their AGENTS.md routing stays fully available
+      // as hover-revealed secondary edges. (The old fallback marked every
+      // dependency edge primary, which fed dense mesh routing — the
+      // marketplace agency templates — straight to ELK and produced a
+      // scattered cascade under a lattice of crossing trunk lines.)
+      primaryEdgeIds = new Set()
+      parentMap = new Map<string, string>()
+    } else {
+      // No root → treat every dependency edge as primary (historical
+      // fallback used by the all-agents-no-team peek).
+      primaryEdgeIds = new Set(depEdges.map((e) => e.id))
+      parentMap = new Map<string, string>()
+    }
   } else {
     primaryEdgeIds = new Set()
     parentMap = new Map<string, string>()

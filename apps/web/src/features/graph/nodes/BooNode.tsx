@@ -1,7 +1,7 @@
 import { memo, useRef, type MutableRefObject } from 'react'
 import { Handle, Position, useConnection } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import type { BooNodeData } from '../types'
 import { useGraphStore } from '../store'
@@ -149,14 +149,18 @@ const centerHandleStyle: React.CSSProperties = {
   background: 'transparent',
 }
 
-// CSS transition for the wrapper size + border-radius morph.
+// CSS transition for the wrapper size + border-radius morph. The
+// cubic-bezier(0.32, 0.72, 0, 1) curve is the app's signature "premium"
+// ease-out (same one the activity dock slide uses) — a fast start with a
+// long, soft landing. Opacity (the hover-cascade dim) rides the same curve
+// slightly longer so dimming reads as a fade, not a flick.
 const SHAPE_TRANSITION =
-  'width 0.28s cubic-bezier(0.4, 0, 0.2, 1), ' +
-  'height 0.28s cubic-bezier(0.4, 0, 0.2, 1), ' +
-  'border-radius 0.28s cubic-bezier(0.4, 0, 0.2, 1), ' +
+  'width 0.32s cubic-bezier(0.32, 0.72, 0, 1), ' +
+  'height 0.32s cubic-bezier(0.32, 0.72, 0, 1), ' +
+  'border-radius 0.32s cubic-bezier(0.32, 0.72, 0, 1), ' +
   'background 0.2s ease, ' +
   'border-color 0.15s ease, ' +
-  'opacity 0.2s ease'
+  'opacity 0.3s cubic-bezier(0.32, 0.72, 0, 1)'
 
 // ─── BooNode ─────────────────────────────────────────────────────────────────
 
@@ -167,6 +171,8 @@ export const BooNode = memo(function BooNode({
 }: NodeProps<Node<BooNodeData, 'boo'>>) {
   const { agentId, name, status } = data
   const floatRef = useFloatingMotion(agentId, 'boo', dragging)
+  // Decorative hover lift — dropped under reduced motion (see SkillNode).
+  const reduceMotion = useReducedMotion()
   const showCard = status === 'running'
   // Runtime brand badge — shown on every Boo (Atlas + team graph + agent-detail
   // MiniGraph) so the agent's runtime is legible at a glance.
@@ -194,15 +200,17 @@ export const BooNode = memo(function BooNode({
   const lastSeenAt = agent?.lastSeenAt ?? null
   const lastSeenLabel = !showCard ? formatLastSeen(lastSeenAt) : null
 
-  // Fine-grained activity verb. Single-value subscriptions so we
-  // only re-render when this agent's stream or transcript ticks.
+  // Fine-grained activity verb. Single-value subscriptions so we only
+  // re-render when THIS agent's stream or transcript ticks — subscribing to
+  // the whole `transcripts` map re-rendered every Boo on every streaming
+  // token of every agent, which visibly dragged the canvas during live runs.
   const sk = agent?.sessionKey ?? null
   const streamingText = useChatStore((s) => (sk ? (s.streamingText.get(sk) ?? null) : null))
-  const transcripts = useChatStore((s) => s.transcripts)
+  const transcript = useChatStore((s) => (sk ? (s.transcripts.get(sk) ?? null) : null))
   const activityVerb = agent
     ? getActivityVerb({
         agent,
-        transcripts,
+        transcripts: sk && transcript ? new Map([[sk, transcript]]) : null,
         streamingTexts: sk ? new Map([[sk, streamingText ?? '']]) : null,
       })
     : (STATUS_LABEL[status] ?? 'idle')
@@ -254,6 +262,7 @@ export const BooNode = memo(function BooNode({
       style={{
         width: BOO_FOOTPRINT,
         height: BOO_FOOTPRINT,
+        position: 'relative', // containing block for the static center handles
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -270,9 +279,15 @@ export const BooNode = memo(function BooNode({
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         animate={{ boxShadow }}
-        transition={
-          glow?.pulse ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.4 }
-        }
+        whileHover={reduceMotion ? undefined : { scale: 1.03 }}
+        transition={{
+          // Per-value transitions: the glow pulse must never leak its
+          // Infinity-repeat config onto the hover scale spring.
+          boxShadow: glow?.pulse
+            ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' }
+            : { duration: 0.4 },
+          scale: { type: 'spring', stiffness: 380, damping: 26 },
+        }}
         style={{
           width: showCard ? BOO_CARD_WIDTH : booW,
           height: showCard ? BOO_CARD_HEIGHT : booH,
@@ -412,30 +427,31 @@ export const BooNode = memo(function BooNode({
           }
           style={isConnecting || connectMode ? handleConnecting : handleBase}
         />
-
-        {/* ── Center handles — invisible, for edge path routing only ──────── */}
-        {/* See useGraphData.ts:330–336 for the handle-canonical caveat:
-            'center' is SOURCE-type, 'center-target' is TARGET-type — never
-            swap them when flipping edge source/target during the parent→child
-            edge rewrite.
-
-            Source uses `Position.Bottom`: in our layered DOWN org chart,
-            edges depart from the leader DOWNWARD to children below. With
-            `Position.Top` (the previous setup), React Flow's smooth-step
-            routed the edge UP from the source first, made an elbow ABOVE
-            the leader, then descended to the child — putting the
-            horizontal segment way above the leader Boo instead of between
-            leader and child where an org chart expects it. With Bottom +
-            Top the elbow lands at the midpoint between source and target,
-            the natural T-junction shape. */}
-        <Handle id="center" type="source" position={Position.Bottom} style={centerHandleStyle} />
-        <Handle
-          id="center-target"
-          type="target"
-          position={Position.Top}
-          style={centerHandleStyle}
-        />
       </motion.div>
+
+      {/* ── Center handles — invisible, for edge path routing only ──────── */}
+      {/* Anchored on the STATIC footprint (not the morphing/floating
+          wrapper) so edge endpoints stay glued to the node's geometric
+          center: the idle bob and the circle↔card morph move the visual,
+          never the edge anchor — the anchor sits safely behind the visible
+          Boo shape at all times.
+
+          See useGraphData.ts:330–336 for the handle-canonical caveat:
+          'center' is SOURCE-type, 'center-target' is TARGET-type — never
+          swap them when flipping edge source/target during the parent→child
+          edge rewrite.
+
+          Source uses `Position.Bottom`: in our layered DOWN org chart,
+          edges depart from the leader DOWNWARD to children below. With
+          `Position.Top` (the previous setup), React Flow's smooth-step
+          routed the edge UP from the source first, made an elbow ABOVE
+          the leader, then descended to the child — putting the
+          horizontal segment way above the leader Boo instead of between
+          leader and child where an org chart expects it. With Bottom +
+          Top the elbow lands at the midpoint between source and target,
+          the natural T-junction shape. */}
+      <Handle id="center" type="source" position={Position.Bottom} style={centerHandleStyle} />
+      <Handle id="center-target" type="target" position={Position.Top} style={centerHandleStyle} />
     </div>
   )
 })

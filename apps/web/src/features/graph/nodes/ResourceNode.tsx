@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import {
   Cable,
   Database,
@@ -67,8 +67,11 @@ export const ResourceNode = memo(function ResourceNode({
   id: nodeId,
   data,
   dragging,
+  positionAbsoluteX,
+  positionAbsoluteY,
 }: NodeProps<Node<ResourceNodeData, 'resource'>>) {
-  const { name, fullName, serviceKind, isVisible, available, enabled } = data
+  const { name, fullName, serviceKind, isVisible, available, enabled, agentIds } = data
+  const { orbitIndex, orbitCount } = data
   // Unavailable OR policy-disabled → greyed (matches SkillNode + the dashboard).
   const greyed = available === false || enabled === false
   const Icon = SERVICE_ICON[serviceKind ?? 'generic'] ?? Cable
@@ -76,90 +79,125 @@ export const ResourceNode = memo(function ResourceNode({
   // skill tiles in the same orbital fan, so a static tile next to gently
   // bobbing siblings would read as frozen/broken, not calm.
   const floatRef = useFloatingMotion(nodeId, 'skill', dragging)
+  // See SkillNode: decorative hover/tap spring, dropped under reduced motion.
+  const reduceMotion = useReducedMotion()
 
   // Hover cascade — dim when another node is hovered
   const isHighlighted = useGraphStore(
     (s) => s.hoveredNodeId === null || (s.highlightedNodeIds?.has(nodeId) ?? false),
   )
 
-  // Peacock-feather expand / collapse synchronised with the parent Boo's
-  // toggle. `usePeacockTransition` returns no-op props when `isVisible` is
-  // undefined (MiniGraph context) so the node renders normally there.
-  const peacock = usePeacockTransition(nodeId, isVisible)
+  // Peacock-feather expand / collapse — springs out FROM the parent Boo's
+  // live center in arc order (see usePeacockTransition). Returns no-op
+  // props when `isVisible` is undefined (MiniGraph context).
+  const peacock = usePeacockTransition({
+    nodeId,
+    isVisible,
+    parentAgentId: agentIds?.[0] ?? null,
+    positionAbsoluteX,
+    positionAbsoluteY,
+    selfSize: CIRCLE,
+    orbitIndex,
+    orbitCount,
+  })
 
   const tooltipBase = fullName && fullName !== name ? `${name} — ${fullName}` : name
   return (
-    <motion.div
-      initial={peacock.initial}
-      animate={peacock.animate}
-      transition={peacock.transition}
-      style={{
-        transformOrigin: 'center center',
-        pointerEvents: peacock.pointerEvents,
-      }}
-    >
-      <div ref={floatRef}>
-        <div
-          title={
-            greyed
-              ? `${tooltipBase} — ${enabled === false ? 'disabled' : 'unavailable'}`
-              : `${tooltipBase} · attached MCP server`
-          }
-          style={{
-            width: CIRCLE,
-            height: CIRCLE,
-            position: 'relative',
-            overflow: 'visible',
-            opacity: greyed ? (isHighlighted ? 0.5 : 0.16) : isHighlighted ? 1 : 0.22,
-            filter: greyed ? 'grayscale(1)' : undefined,
-            transition: 'opacity 0.2s ease, filter 0.2s ease',
-          }}
-        >
-          {/* The tile disc — opaque violet-tinted surface (the connector accent). */}
+    // Static root: the center Handle lives here, OUTSIDE the animated /
+    // floating wrappers, so edges anchor to the stable geometric center.
+    <div style={{ width: CIRCLE, height: CIRCLE, position: 'relative' }}>
+      <motion.div
+        initial={peacock.initial}
+        animate={peacock.animate}
+        transition={peacock.transition}
+        style={{
+          width: CIRCLE,
+          height: CIRCLE,
+          transformOrigin: 'center center',
+          pointerEvents: peacock.pointerEvents,
+        }}
+      >
+        <div ref={floatRef}>
           <div
+            title={
+              greyed
+                ? `${tooltipBase} — ${enabled === false ? 'disabled' : 'unavailable'}`
+                : `${tooltipBase} · attached MCP server`
+            }
             style={{
               width: CIRCLE,
               height: CIRCLE,
-              borderRadius: '50%',
-              background: `color-mix(in srgb, ${VIOLET} 15%, var(--surface))`,
-              border: `1.5px solid color-mix(in srgb, ${VIOLET} 65%, transparent)`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: `0 2px 8px color-mix(in srgb, ${VIOLET} 20%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.07)`,
+              position: 'relative',
+              overflow: 'visible',
+              opacity: greyed ? (isHighlighted ? 0.5 : 0.16) : isHighlighted ? 1 : 0.22,
+              filter: greyed ? 'grayscale(1)' : undefined,
+              transition: 'opacity 0.3s cubic-bezier(0.32, 0.72, 0, 1), filter 0.3s ease',
             }}
           >
-            <Icon size={20} strokeWidth={2} aria-hidden style={{ color: VIOLET }} />
+            {/* The tile disc — opaque violet-tinted surface (the connector
+              accent). Hover lifts it with a small spring scale, matching
+              the SkillNode micro-interaction. */}
+            <motion.div
+              whileHover={reduceMotion ? undefined : { scale: 1.08 }}
+              whileTap={reduceMotion ? undefined : { scale: 0.94 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+              style={{
+                width: CIRCLE,
+                height: CIRCLE,
+                borderRadius: '50%',
+                background: `color-mix(in srgb, ${VIOLET} 15%, var(--surface))`,
+                border: `1.5px solid color-mix(in srgb, ${VIOLET} 65%, transparent)`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: `0 2px 8px color-mix(in srgb, ${VIOLET} 20%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.07)`,
+              }}
+            >
+              <Icon size={20} strokeWidth={2} aria-hidden style={{ color: VIOLET }} />
+            </motion.div>
+
+            {/* Name below the disc — theme foreground (the accent lives on the tile). */}
+            <div
+              style={{
+                position: 'absolute',
+                top: CIRCLE + 6,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                fontSize: 11,
+                fontWeight: 500,
+                color: 'var(--foreground)',
+                whiteSpace: 'nowrap',
+                maxWidth: 104,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                textAlign: 'center',
+                letterSpacing: '0.02em',
+              }}
+            >
+              {name}
+            </div>
           </div>
-
-          {/* Name below the disc — theme foreground (the accent lives on the tile). */}
-          <div
-            style={{
-              position: 'absolute',
-              top: CIRCLE + 6,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              fontSize: 11,
-              fontWeight: 500,
-              color: 'var(--foreground)',
-              whiteSpace: 'nowrap',
-              maxWidth: 104,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              textAlign: 'center',
-              letterSpacing: '0.02em',
-            }}
-          >
-            {name}
-          </div>
-
-          {/* Left handle — target for incoming edges from BooNodes */}
-          <Handle type="target" position={Position.Left} style={handleStyle} />
-
-          {/* Center handle — invisible, for edge path routing only */}
-          <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />
         </div>
-      </div>
-    </motion.div>
+      </motion.div>
+
+      {/* Left handle — target for incoming edges from BooNodes. Lives on the
+          STATIC root (see SkillNode's static-root-handles note): handle
+          bounds are measured once at mount, so a handle inside the
+          collapsed peacock transform would register far from the tile.
+          Visibility rides a CSS fade tied to the peacock state. */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        style={{
+          ...handleStyle,
+          opacity: isVisible === false ? 0 : 1,
+          pointerEvents: isVisible === false ? 'none' : undefined,
+          transition: 'opacity 0.2s ease',
+        }}
+      />
+
+      {/* Center handle — invisible, edge routing only. */}
+      <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />
+    </div>
   )
 })
