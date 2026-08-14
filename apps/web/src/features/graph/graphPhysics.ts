@@ -531,34 +531,40 @@ function pinNode(nodeId: string): void {
 
 function unpinNode(nodeId: string): void {
   const p = particleMap.get(nodeId)
-  if (p) {
-    p.pinned = false
-    // Sync position from store (user dragged the node there).
-    const node = useGraphStore.getState().nodes.find((n) => n.id === nodeId)
-    if (node) {
-      p.x = node.position.x
-      p.y = node.position.y
-    }
-    // Hand the pointer velocity to the particle — a flick glides.
-    let vx = p.pinVX * RELEASE_VELOCITY_SCALE
-    let vy = p.pinVY * RELEASE_VELOCITY_SCALE
-    const speedSq = vx * vx + vy * vy
-    if (speedSq > RELEASE_MAX_SPEED * RELEASE_MAX_SPEED) {
-      const scale = RELEASE_MAX_SPEED / Math.sqrt(speedSq)
-      vx *= scale
-      vy *= scale
-    }
-    p.vx = vx
-    p.vy = vy
-    // A dropped Boo adopts the exact DROP POINT as its tether anchor — the
-    // release glide overshoots, then rubber-bands home. Anchoring at the
-    // drop point (not the glide endpoint) keeps the settled position in
-    // agreement with the position persisted at drag-stop.
-    if (p.kind === 'boo') {
-      p.anchorX = p.x + p.halfW
-      p.anchorY = p.y + p.halfH
-    }
+  // No particle → nothing to release, so nothing to relax. Returning here
+  // (rather than falling through to the reheat below) keeps a drag of a
+  // node the simulation doesn't own — an orphan skill / resource with no
+  // parent edge, which `initialize` skips — from waking the loop and
+  // nudging every unrelated node on the canvas.
+  if (!p) return
+
+  p.pinned = false
+  // Sync position from store (user dragged the node there).
+  const node = useGraphStore.getState().nodes.find((n) => n.id === nodeId)
+  if (node) {
+    p.x = node.position.x
+    p.y = node.position.y
   }
+  // Hand the pointer velocity to the particle — a flick glides.
+  let vx = p.pinVX * RELEASE_VELOCITY_SCALE
+  let vy = p.pinVY * RELEASE_VELOCITY_SCALE
+  const speedSq = vx * vx + vy * vy
+  if (speedSq > RELEASE_MAX_SPEED * RELEASE_MAX_SPEED) {
+    const scale = RELEASE_MAX_SPEED / Math.sqrt(speedSq)
+    vx *= scale
+    vy *= scale
+  }
+  p.vx = vx
+  p.vy = vy
+  // A dropped Boo adopts the exact DROP POINT as its tether anchor — the
+  // release glide overshoots, then rubber-bands home. Anchoring at the
+  // drop point (not the glide endpoint) keeps the settled position in
+  // agreement with the position persisted at drag-stop.
+  if (p.kind === 'boo') {
+    p.anchorX = p.x + p.halfW
+    p.anchorY = p.y + p.halfH
+  }
+
   // Cool down naturally (release keeps some heat so the settle is visible).
   alphaTarget = 0
   alpha = Math.max(alpha, ALPHA_WAKE)

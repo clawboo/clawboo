@@ -319,6 +319,25 @@ describe('graphPhysics', () => {
       expect(updated.position.y).toBe(500)
     })
 
+    it('does NOT wake the loop for a node the simulation does not own', () => {
+      // An orphan skill (no parent edge) gets no particle — `initialize`
+      // skips it. Dragging it must not reheat the sim and nudge unrelated
+      // nodes. Regression guard for the unpinNode early-return.
+      const boo = makeBooNode('a1', 0, 0)
+      const skill = makeSkillNode('a1', 'bash', 200, 0)
+      const orphan = makeSkillNode('a1', 'orphan', 400, 400)
+      const edge = makeSkillEdge('a1', 'bash') // NOTE: no edge for `orphan`
+
+      const nodes = [boo, skill, orphan]
+      useGraphStore.setState({ nodes, edges: [edge] })
+      graphPhysics.initialize(nodes, [edge])
+      expect(graphPhysics.isActive()).toBe(false)
+
+      graphPhysics.pinNode('skill-a1-orphan')
+      graphPhysics.unpinNode('skill-a1-orphan')
+      expect(graphPhysics.isActive()).toBe(false)
+    })
+
     it('unpinNode restarts the simulation', () => {
       const boo = makeBooNode('a1', 0, 0)
       const skill = makeSkillNode('a1', 'bash', 200, 0)

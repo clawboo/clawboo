@@ -257,15 +257,18 @@ export const BooNode = memo(function BooNode({
   const handleMouseLeave = () => setHoveredNodeId(null)
 
   return (
+    // STATIC footprint — never transformed. React Flow measures each handle's
+    // bounds ONCE, so anything that moves an ancestor of a handle desynchronises
+    // the edge anchor from the visual: the Boo would bob while its edges stayed
+    // put. The idle float is therefore applied to an INNER wrapper (below) that
+    // holds only the visible Boo, leaving this box — and the center handles
+    // anchored to its middle — perfectly still. Same split SkillNode /
+    // ResourceNode use for their orbital tiles.
     <div
-      ref={floatRef}
       style={{
         width: BOO_FOOTPRINT,
         height: BOO_FOOTPRINT,
         position: 'relative', // containing block for the static center handles
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
         // The empty area around the morph wrapper shouldn't intercept clicks,
         // hover, or drag events. Only the rendered Boo shape (the inner
         // motion.div) re-enables pointer events. The CSS rule on
@@ -274,167 +277,182 @@ export const BooNode = memo(function BooNode({
         pointerEvents: 'none',
       }}
     >
-      <motion.div
-        className="group"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        animate={{ boxShadow }}
-        whileHover={reduceMotion ? undefined : { scale: 1.03 }}
-        transition={{
-          // Per-value transitions: the glow pulse must never leak its
-          // Infinity-repeat config onto the hover scale spring.
-          boxShadow: glow?.pulse
-            ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' }
-            : { duration: 0.4 },
-          scale: { type: 'spring', stiffness: 380, damping: 26 },
-        }}
+      {/* Floating layer — centers the Boo inside the footprint and carries the
+          idle bob transform. Fills the footprint so the centering matches what
+          the static box used to do. */}
+      <div
+        ref={floatRef}
         style={{
-          width: showCard ? BOO_CARD_WIDTH : booW,
-          height: showCard ? BOO_CARD_HEIGHT : booH,
-          position: 'relative',
-          cursor: 'pointer',
-          pointerEvents: 'auto',
-          borderRadius: showCard ? 12 : '50%',
-          background: showCard ? 'var(--card)' : 'transparent',
-          // Card always uses the same subtle outline regardless of selection
-          // state — the selection-thickening was visually inconsistent with
-          // the now-removed circle ring and didn't add information.
-          border: showCard ? '1px solid var(--border)' : 'none',
-          opacity: isHighlighted ? 1 : 0.22,
-          transition: SHAPE_TRANSITION,
-          // 'visible' (not 'hidden') so children rendering outside the
-          // immediate bounding box (e.g. circle-shape's name + status that sit
-          // BELOW the avatar) aren't clipped at the rounded corner.
-          overflow: 'visible',
-          display: showCard ? 'flex' : 'block',
-          flexDirection: showCard ? 'column' : undefined,
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          pointerEvents: 'none',
         }}
       >
-        {/* ── Approval pulse — adapts shape via borderRadius ──────────────── */}
-        {hasPendingApproval && (
-          <motion.div
-            animate={{
-              opacity: [0.6, 1, 0.6],
-              boxShadow: [
-                '0 0 0 0 rgb(var(--amber-rgb) / 0.55)',
-                '0 0 0 4px rgba(251,191,36,0)',
-                '0 0 0 0 rgb(var(--amber-rgb) / 0.55)',
-              ],
-            }}
-            transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
-            style={{
-              position: 'absolute',
-              inset: -2,
-              borderRadius: showCard ? 14 : '50%',
-              border: '2px solid var(--amber)',
-              pointerEvents: 'none',
-              zIndex: 1,
-            }}
-          />
-        )}
+        <motion.div
+          className="group"
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          animate={{ boxShadow }}
+          whileHover={reduceMotion ? undefined : { scale: 1.03 }}
+          transition={{
+            // Per-value transitions: the glow pulse must never leak its
+            // Infinity-repeat config onto the hover scale spring.
+            boxShadow: glow?.pulse
+              ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' }
+              : { duration: 0.4 },
+            scale: { type: 'spring', stiffness: 380, damping: 26 },
+          }}
+          style={{
+            width: showCard ? BOO_CARD_WIDTH : booW,
+            height: showCard ? BOO_CARD_HEIGHT : booH,
+            position: 'relative',
+            cursor: 'pointer',
+            pointerEvents: 'auto',
+            borderRadius: showCard ? 12 : '50%',
+            background: showCard ? 'var(--card)' : 'transparent',
+            // Card always uses the same subtle outline regardless of selection
+            // state — the selection-thickening was visually inconsistent with
+            // the now-removed circle ring and didn't add information.
+            border: showCard ? '1px solid var(--border)' : 'none',
+            opacity: isHighlighted ? 1 : 0.22,
+            transition: SHAPE_TRANSITION,
+            // 'visible' (not 'hidden') so children rendering outside the
+            // immediate bounding box (e.g. circle-shape's name + status that sit
+            // BELOW the avatar) aren't clipped at the rounded corner.
+            overflow: 'visible',
+            display: showCard ? 'flex' : 'block',
+            flexDirection: showCard ? 'column' : undefined,
+          }}
+        >
+          {/* ── Approval pulse — adapts shape via borderRadius ──────────────── */}
+          {hasPendingApproval && (
+            <motion.div
+              animate={{
+                opacity: [0.6, 1, 0.6],
+                boxShadow: [
+                  '0 0 0 0 rgb(var(--amber-rgb) / 0.55)',
+                  '0 0 0 4px rgba(251,191,36,0)',
+                  '0 0 0 0 rgb(var(--amber-rgb) / 0.55)',
+                ],
+              }}
+              transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+              style={{
+                position: 'absolute',
+                inset: -2,
+                borderRadius: showCard ? 14 : '50%',
+                border: '2px solid var(--amber)',
+                pointerEvents: 'none',
+                zIndex: 1,
+              }}
+            />
+          )}
 
-        {/* Event-sourced live status pip. Only the actionable
+          {/* Event-sourced live status pip. Only the actionable
             states render a pip; idle / no-activity shows nothing, so an idle
             agent's appearance is unchanged. */}
-        {obsStatus && obsStatus !== 'idle' && (
-          <div
-            title={`live: ${obsStatus}`}
-            style={{
-              position: 'absolute',
-              top: -3,
-              right: -3,
-              width: 9,
-              height: 9,
-              borderRadius: '50%',
-              background:
-                obsStatus === 'working'
-                  ? 'var(--mint)'
-                  : obsStatus === 'stalled'
-                    ? 'var(--amber)'
-                    : 'var(--primary)',
-              boxShadow: '0 0 0 2px var(--surface)',
-              pointerEvents: 'none',
-              zIndex: 3,
-            }}
-          />
-        )}
+          {obsStatus && obsStatus !== 'idle' && (
+            <div
+              title={`live: ${obsStatus}`}
+              style={{
+                position: 'absolute',
+                top: -3,
+                right: -3,
+                width: 9,
+                height: 9,
+                borderRadius: '50%',
+                background:
+                  obsStatus === 'working'
+                    ? 'var(--mint)'
+                    : obsStatus === 'stalled'
+                      ? 'var(--amber)'
+                      : 'var(--primary)',
+                boxShadow: '0 0 0 2px var(--surface)',
+                pointerEvents: 'none',
+                zIndex: 3,
+              }}
+            />
+          )}
 
-        {/* Selection ring removed — the previous red ring around a clicked
+          {/* Selection ring removed — the previous red ring around a clicked
             Boo had no functional purpose; the agent-detail navigation
             happens through the right-click context menu / sidebar. */}
 
-        {/* Boo Zero needs no badge — the reserved OpenClaw-red tint plus the
+          {/* Boo Zero needs no badge — the reserved OpenClaw-red tint plus the
             slightly larger size (see `baseSize` / `booW` above) already mark
             it as the universal team leader. The earlier crown badge was a
             third visual cue layered on top, which read as decorative noise.
             See `boo-avatar/src/index.ts` for the tint reservation. */}
 
-        {showCard ? (
-          <CardContent
-            agentId={agentId}
-            name={name}
-            selected={selected}
-            status={status}
-            activityVerb={activityVerb}
-            cardStatusColor={cardStatusColor}
-            lastSeenLabel={lastSeenLabel}
-            runtime={runtime}
-            avatarFlip={avatarFlip}
-            nameFlip={nameFlip}
-            statusFlip={statusFlip}
-          />
-        ) : (
-          <CircleContent
-            agentId={agentId}
-            name={name}
-            selected={selected}
-            status={status}
-            activityVerb={activityVerb}
-            booW={booW}
-            booH={booH}
-            cardStatusColor={cardStatusColor}
-            lastSeenLabel={lastSeenLabel}
-            runtime={runtime}
-            avatarFlip={avatarFlip}
-            nameFlip={nameFlip}
-            statusFlip={statusFlip}
-          />
-        )}
+          {showCard ? (
+            <CardContent
+              agentId={agentId}
+              name={name}
+              selected={selected}
+              status={status}
+              activityVerb={activityVerb}
+              cardStatusColor={cardStatusColor}
+              lastSeenLabel={lastSeenLabel}
+              runtime={runtime}
+              avatarFlip={avatarFlip}
+              nameFlip={nameFlip}
+              statusFlip={statusFlip}
+            />
+          ) : (
+            <CircleContent
+              agentId={agentId}
+              name={name}
+              selected={selected}
+              status={status}
+              activityVerb={activityVerb}
+              booW={booW}
+              booH={booH}
+              cardStatusColor={cardStatusColor}
+              lastSeenLabel={lastSeenLabel}
+              runtime={runtime}
+              avatarFlip={avatarFlip}
+              nameFlip={nameFlip}
+              statusFlip={statusFlip}
+            />
+          )}
 
-        {/* ── Interactive handles (visible on hover / connect) ────────────── */}
-        <Handle
-          type="target"
-          position={Position.Top}
-          className={
-            isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }
-          style={isConnecting || connectMode ? handleConnecting : handleBase}
-        />
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          className={
-            isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }
-          style={isConnecting || connectMode ? handleConnecting : handleBase}
-        />
-        <Handle
-          type="source"
-          id="right"
-          position={Position.Right}
-          className={
-            isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }
-          style={isConnecting || connectMode ? handleConnecting : handleBase}
-        />
-      </motion.div>
+          {/* ── Interactive handles (visible on hover / connect) ────────────── */}
+          <Handle
+            type="target"
+            position={Position.Top}
+            className={
+              isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }
+            style={isConnecting || connectMode ? handleConnecting : handleBase}
+          />
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            className={
+              isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }
+            style={isConnecting || connectMode ? handleConnecting : handleBase}
+          />
+          <Handle
+            type="source"
+            id="right"
+            position={Position.Right}
+            className={
+              isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }
+            style={isConnecting || connectMode ? handleConnecting : handleBase}
+          />
+        </motion.div>
+      </div>
 
       {/* ── Center handles — invisible, for edge path routing only ──────── */}
-      {/* Anchored on the STATIC footprint (not the morphing/floating
-          wrapper) so edge endpoints stay glued to the node's geometric
-          center: the idle bob and the circle↔card morph move the visual,
-          never the edge anchor — the anchor sits safely behind the visible
-          Boo shape at all times.
+      {/* Anchored on the STATIC footprint (outside BOTH the floating layer
+          and the morph wrapper) so edge endpoints stay glued to the node's
+          geometric center: the idle bob and the circle↔card morph move the
+          visual, never the edge anchor — the anchor sits safely behind the
+          visible Boo shape at all times.
 
           See useGraphData.ts:330–336 for the handle-canonical caveat:
           'center' is SOURCE-type, 'center-target' is TARGET-type — never
