@@ -28,6 +28,9 @@ export { RuntimeRegistry } from './registry'
 export type { AsyncQueue } from './async-queue'
 export { createAsyncQueue } from './async-queue'
 
+export type { IdleTimeoutOpts } from './idleTimeout'
+export { DEFAULT_RUN_SILENT_TIMEOUT_MS, IDLE_ABORT_GRACE_MS, withIdleTimeout } from './idleTimeout'
+
 export type { RotationTrigger, RotationHandoff, RotateSessionOpts } from './session-rotation'
 export {
   shouldRotate,

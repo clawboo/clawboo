@@ -38,6 +38,11 @@ export interface NativeDriverDeps {
  *  narrative, never load-bearing. `opts` lets a caller persist a user-facing
  *  META notice instead (e.g. driveAgentChat surfacing a failed run's reason —
  *  a keyless/errored turn must never just silently not respond). */
+/** Reserved `writeContext` key whose value routes into the LIVE conversation's
+ *  input queue (mid-run peer signal) instead of a cwd file drop. Namespaced so
+ *  it can never collide with a real handoff/context filename. */
+export const NATIVE_SIGNAL_CONTEXT_KEY = '.clawboo/signal'
+
 export function persistNativeChatEntry(
   db: ClawbooDb,
   agentId: string,
@@ -177,6 +182,15 @@ export function createNativeDriver(
       else pendingModel = model
     },
     async writeContext(key: string, value: string): Promise<void> {
+      // The reserved SIGNAL key routes INTO the live conversation instead of the
+      // filesystem: the text lands on the conversation's input queue and is read
+      // at its next turn iteration — mid-run peer delivery, the seam the
+      // orchestrator's `signalAgent` pushes through. Every other key keeps the
+      // file-drop contract shared with the CLI runtimes.
+      if (key === NATIVE_SIGNAL_CONTEXT_KEY) {
+        conversation?.enqueueUserMessage(value)
+        return
+      }
       if (!ctx.cwd) return
       const target = path.join(ctx.cwd, key)
       await mkdir(path.dirname(target), { recursive: true })

@@ -19,6 +19,7 @@ import path from 'node:path'
 import {
   claimTask,
   createDb,
+  createExecutionProcess,
   createTask,
   getTask,
   listTasks,
@@ -98,6 +99,11 @@ class RealCascadeBoard implements CascadeBoard {
   getTask(taskId: string): Promise<TaskDetail | null> {
     return this.real.getTask(taskId)
   }
+  listExecutions(
+    taskId: string,
+  ): Promise<Array<{ id: string; status: string; executorType?: string }> | null> {
+    return this.real.listExecutions(taskId)
+  }
   async createExecution(taskId: string, executorType: string): Promise<ExecutionRef | null> {
     const ref = await this.real.createExecution(taskId, executorType)
     if (ref) this.execCount += 1
@@ -154,6 +160,10 @@ class RealCascadeBoard implements CascadeBoard {
       sourceDelegationId: input.sourceDelegationId ?? undefined,
     })
     claimTask(this.db, t.id, input.assigneeAgentId)
+    // A refresh scenario has a live run behind the row — resume() only attaches
+    // in_progress tasks with a RUNNING execution (claimed-but-runless rows are
+    // deliberately skipped, they'd start an unrefreshable watchdog clock).
+    createExecutionProcess(this.db, { taskId: t.id, executorType: 'openclaw' })
     return t.id
   }
   dispose(): void {

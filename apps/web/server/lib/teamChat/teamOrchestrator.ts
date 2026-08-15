@@ -13,7 +13,7 @@
 // loop breakers) are UNCHANGED — they live inside the ported engine.
 
 import { compactToolResultMarkdown } from '@clawboo/compaction'
-import { agents, teams, type ClawbooDb } from '@clawboo/db'
+import { agents, enqueueInbox, teams, type ClawbooDb } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import {
   agentIdFromSessionKey,
@@ -34,6 +34,7 @@ import { booZeroForTeam, ensureNativeBooZero } from './booZero'
 import { auditCapHit } from './capHitAudit'
 import { publishChatDelta } from './chatDeltaBus'
 import { persistTeamChatEntry } from './persistTeamChatEntry'
+import { NATIVE_SIGNAL_CONTEXT_KEY } from '../runtimes/native/nativeDriver'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
 import { createServerDeliver, type RunEntry } from './serverDeliver'
@@ -44,6 +45,22 @@ const DEFAULT_MAX_FANOUT = 8
 const SWEEP_INTERVAL_MS = 30_000
 const IDLE_TTL_MS = 30 * 60_000
 const EVICT_SCAN_MS = 5 * 60_000
+/**
+ * Hard ceiling for the quiescence gate. A run registers itself for its whole
+ * lifetime, so "a run is in flight" normally protects a working cascade from
+ * eviction — but a run that HANGS (no terminal, no events, nothing to time it
+ * out yet) would keep that registration forever and make the instance immortal:
+ * never evicted, holding its sweep interval and engine for the life of the
+ * process. Past this ceiling an instance is evicted even while it looks busy.
+ *
+ * Safe because the idle clock is refreshed by every observed run event: a
+ * genuinely-working cascade never ages toward this at all, so the only thing it
+ * can reap is a run that has been completely silent for two hours.
+ */
+const HARD_TTL_MS = 4 * IDLE_TTL_MS
+/** Window in which an identical alert for the same agent is logged but not
+ *  re-posted to the transcript (one problem ⇒ one chat line). */
+const ALERT_DEDUPE_MS = 60_000
 
 export interface EnqueueUserMessageInput {
   stimulus: string
@@ -60,6 +77,16 @@ export interface TeamOrchestrator {
   enqueueUserMessage(input: EnqueueUserMessageInput): Promise<void>
   /** User Stop: bump the stop generation + abort in-flight runs → clean release. */
   stop(): void
+  /** Re-attach durable in-flight work + fire anything ready (the engine's
+   *  `resume()`): the server dispatch pump's entry point. Idempotent — tracked
+   *  sessions are skipped and the atomic claim-409 arbitrates double-fires. */
+  pump(): Promise<void>
+  /** Ambient mid-run push: deliver a short signal INTO an agent's live run via
+   *  the adapter's writeContext seam (the native driver routes the reserved key
+   *  into the conversation's input queue, read at its next turn iteration).
+   *  Best-effort no-op when the agent has no live run — durable delivery is the
+   *  mailbox's job, not this seam's. */
+  signalAgent(agentId: string, text: string): void
   /** Tear down timers + the engine (idle eviction / shutdown). */
   dispose(): void
 }
@@ -68,6 +95,9 @@ interface Instance {
   orchestrator: TeamOrchestrator
   touch(): void
   getLastActivity(): number
+  /** No run in flight — safe to evict. A cascade the user walked away from is
+   *  NOT quiescent, so the idle-TTL scan can never dispose it mid-work. */
+  isQuiescent(): boolean
   dispose(): void
 }
 
@@ -131,6 +161,8 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
   }
 
   const abortMap = new Map<string, RunEntry>()
+  /** `(agent, alert text)` → last surfaced-at, so one problem is one chat line. */
+  const alertsSeen = new Map<string, number>()
   const nudge = createNudgeQueue({
     onWedge: (sk) => {
       // A session whose turn boundary was never observed (a lost terminal): abort
@@ -152,7 +184,18 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     mcpBaseUrl,
     nudge,
     abortMap,
-    onEvent: (sk, ev) => engineRef.current!.onEvent(sk, ev),
+    onEvent: (sk, ev) => {
+      // ENGINE ACTIVITY IS ACTIVITY. The idle clock used to advance only on a
+      // USER message, so a long autonomous cascade — the exact "kick it off and
+      // walk away" case — looked idle and was evicted mid-flight at IDLE_TTL_MS.
+      // Every observed run event now refreshes it, so an instance ages out only
+      // when the TEAM is genuinely quiet, not when the human is.
+      touch()
+      return engineRef.current!.onEvent(sk, ev)
+    },
+    // Deliberately does NOT `touch()`: a closing session is the END of activity,
+    // and refreshing the clock here would push out the eviction of an instance
+    // whose runs have all finished — the case the idle TTL exists to reclaim.
     onSessionClosed: (sk) => engineRef.current!.onSessionClosed(sk),
     taskForSession: (sk) => engineRef.current!.taskForSession(sk),
     persistTurn: (sk, text) => {
@@ -178,6 +221,15 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     publishStatus: (agentId, status) => publishAgentStatus(teamId, { agentId, status }),
   })
 
+  // A run registers in `abortMap` only AFTER `adapter.start` resolves — behind a
+  // mkdir, a mutex acquire and process spawn. `touch()`ing at the CALL means the
+  // clock is fresh for that whole window, so an eviction scan can't land on a
+  // delivery that is in flight but not yet trackable.
+  const trackedDeliver: typeof deliver = (sk, agentId, task) => {
+    touch()
+    return deliver(sk, agentId, task)
+  }
+
   const engine = createBoardOrchestrator({
     teamId,
     board: createServerBoardClient(db),
@@ -185,9 +237,53 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     leaderAgentId: () => resolveLeaderId(db, teamId),
     sessionKeyForAgent: (id) => buildTeamSessionKey(id, teamId),
     agentIdForSession: (sk) => agentIdFromSessionKey(sk),
-    deliver,
+    deliver: trackedDeliver,
     stopGen: () => serverStopGen,
-    narrate: (sk, text) => {
+    narrate: (sk, text, kind) => {
+      // An `alert` is a coordination FAILURE the recipient will never otherwise
+      // learn about (task updates whose delivery exhausted its retries). It is
+      // exempt from the tracelog-only rule below — a dropped update that only
+      // ever reached `log.debug` is precisely how a cascade goes quiet without
+      // anyone noticing. Surface it in the transcript.
+      if (kind === 'alert') {
+        const alertAgentId = agentIdFromSessionKey(sk)
+        // One line per problem, not per victim: a fan-out that fails delivery to
+        // several sessions raises the same alert repeatedly, and a wall of
+        // identical notices is its own kind of silence. Log every occurrence,
+        // persist the first of each within the window.
+        const dedupeKey = `${alertAgentId ?? '?'}::${text}`
+        const now = Date.now()
+        const lastAt = alertsSeen.get(dedupeKey)
+        const isRepeat = lastAt !== undefined && now - lastAt < ALERT_DEDUPE_MS
+        alertsSeen.set(dedupeKey, now)
+        for (const [k, ts] of alertsSeen) if (now - ts > ALERT_DEDUPE_MS) alertsSeen.delete(k)
+        if (alertAgentId && !isRepeat) {
+          try {
+            persistTeamChatEntry(db, {
+              teamId,
+              agentId: alertAgentId,
+              text,
+              role: 'system',
+              kind: 'meta',
+            })
+          } catch (err) {
+            log.error({ err, teamId, agentId: alertAgentId }, 'team alert persist failed')
+          }
+          // Durable copy: the chat line informs the HUMAN; the mailbox row makes
+          // the AGENT hear it too (next digest / MCP piggyback), and it survives
+          // eviction and restarts.
+          try {
+            enqueueInbox(db, { agentId: alertAgentId, teamId, kind: 'alert', body: text })
+          } catch (err) {
+            log.error({ err, teamId, agentId: alertAgentId }, 'team alert inbox write failed')
+          }
+        }
+        log.warn(
+          { teamId, agentId: alertAgentId, alert: text, suppressed: isRepeat },
+          'team coordination alert',
+        )
+        return
+      }
       // Board→leader reflections (the per-task "✓ <agent> completed" marker + the
       // batched "[Task Update]" envelope) are INTERNAL orchestration signals, not
       // user-facing chat. The board task CARD is the completion surface (its status
@@ -217,6 +313,13 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     // has fired this callback since the caps shipped; nothing was wired to it, so
     // `eventType=cap_hit` was always empty in the audit feed.
     onCapHit: (info) => auditCapHit(db, teamId, info, DEFAULT_MAX_FANOUT),
+    // Failed-delegation runs are ABORTED, not just board-failed: the watchdog /
+    // session-close path kills the live process so a failed task never leaves a
+    // zombie run behind it.
+    abortSession: (sk) => {
+      const e = abortMap.get(sk)
+      if (e) void e.adapter.abort(e.run).catch(() => undefined)
+    },
     // Risky-delegation approval gate (parity with the retired browser binding): a
     // destructive/secret-touching delegation is surfaced on the leader's approval
     // queue (the DB-mediated `tool_call_approvals` handshake) before it runs; on
@@ -329,14 +432,77 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       // failure).
       serverStopGen++
       for (const [, e] of abortMap) void e.adapter.abort(e.run).catch(() => undefined)
+      // Queued (not-yet-started) deliveries must die with the Stop too: a
+      // markIdle after the aborts would otherwise FLUSH them into brand-new
+      // post-Stop runs. Dropping them loses nothing durable — task updates and
+      // alerts live in the mailbox now, and stopped work is tombstoned below.
+      nudge.reset()
+      // Durable Stop: write the cancelled markers NOW, independent of whether the
+      // aborts' terminals ever land (a restart mid-stop must not let the pump
+      // refire the halted cascade as "infra death").
+      void engine.markStopped().catch((err: unknown) => {
+        log.error({ err, teamId }, 'team-orchestrator markStopped failed')
+      })
       touch()
+    },
+    async pump(): Promise<void> {
+      await ready // never race the Boo-Zero bootstrap / initial resume
+      await engine.resume()
+    },
+    signalAgent(agentId: string, text: string): void {
+      const sk = buildTeamSessionKey(agentId, teamId)
+      const entry = abortMap.get(sk)
+      if (!entry) return // no live run — the mailbox/digest covers delivery
+      void entry.adapter
+        .writeContext(entry.run, NATIVE_SIGNAL_CONTEXT_KEY, text)
+        .catch(() => undefined)
     },
     dispose(): void {
       clearInterval(sweep)
       serverStopGen++
+      // Tearing down with runs still in flight (process shutdown — idle eviction
+      // is now quiescence-gated and cannot land here) parks work rather than
+      // vaporizing it: the aborts below are async, and `engine.reset()` clears
+      // `sessionToTask` synchronously, so the resulting `done:aborted` terminals
+      // arrive at an engine that no longer knows their task and no-op. Nobody
+      // would ever learn the cascade stopped. Say so in the transcript FIRST —
+      // the board rows stay `in_progress` and the engine's `resume()` re-attaches
+      // them when the team is next opened.
+      const stranded = [...abortMap.keys()]
+        .map((sk) => agentIdFromSessionKey(sk))
+        .filter((id): id is string => id !== null)
+      if (stranded.length > 0) {
+        // Whole block in the try: `knownAgents` / `resolveLeaderId` are DB reads,
+        // and dispose runs during shutdown (and from the eviction loop, where a
+        // throw would skip every remaining team). A best-effort notice must never
+        // be the thing that breaks teardown.
+        try {
+          const roster = knownAgents(db, teamId)
+          const names = stranded.map((id) => roster.find((a) => a.id === id)?.name ?? id)
+          persistTeamChatEntry(db, {
+            teamId,
+            agentId: resolveLeaderId(db, teamId) ?? stranded[0]!,
+            text:
+              `Parked mid-task work for ${names.join(', ')}. ` +
+              'Their tasks stay on the board and resume when you reopen this team.',
+            role: 'system',
+            kind: 'meta',
+          })
+        } catch (err) {
+          log.error({ err, teamId }, 'team-orchestrator park notice failed')
+        }
+      }
       for (const [, e] of abortMap) void e.adapter.abort(e.run).catch(() => undefined)
       abortMap.clear()
       engine.reset()
+      // NOT `nudge.drain()`. The queue's drain fires each queued `send` closure,
+      // and in THIS host a send is `serverDeliver`'s closure — it builds an
+      // adapter and starts a brand-new agent run. Draining here would spawn runs
+      // whose events reach an already-reset engine and whose handles are absent
+      // from the just-cleared abort map: unobservable, unstoppable work started
+      // by teardown. A queued `[Task Update]` is dropped instead; making it
+      // survive requires the durable mailbox (it must outlive the process, which
+      // an in-memory flush can't do regardless).
       nudge.reset()
     },
   }
@@ -345,6 +511,9 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     orchestrator,
     touch,
     getLastActivity: () => lastActivityAt,
+    // A live run registers itself in `abortMap` for its whole lifetime, so an
+    // empty map is exactly "nothing running".
+    isQuiescent: () => abortMap.size === 0,
     dispose: () => orchestrator.dispose(),
   }
 }
@@ -376,19 +545,52 @@ export function resetTeamOrchestrators(): void {
   instances.clear()
 }
 
-// Soft idle-TTL eviction: a team orchestrator idle past IDLE_TTL_MS is disposed
-// (timers cleared, engine reset); a later message re-instantiates it + re-resumes.
-const evictScan = setInterval(() => {
-  const now = Date.now()
+/**
+ * One pass of the soft idle-TTL eviction: a team orchestrator idle past
+ * `IDLE_TTL_MS` is disposed (timers cleared, engine reset); a later message
+ * re-instantiates it and re-resumes from the board.
+ *
+ * QUIESCENCE-GATED: an instance with a run in flight is never evicted, however
+ * long the HUMAN has been away — eviction is for abandoned instances, not busy
+ * ones. Previously only a user message refreshed the clock, so kicking off a
+ * long cascade and walking away (the product's whole premise) got every
+ * delegate aborted mid-work at the 30-minute mark with nobody told. `onEvent`
+ * now also refreshes it, making this gate belt-and-braces: it holds even if a
+ * run somehow emits no events at all.
+ *
+ * Exported for tests; the interval below is the only production caller.
+ */
+export function evictIdleOrchestrators(now: number = Date.now()): number {
+  let evicted = 0
   for (const [teamId, inst] of instances) {
-    if (now - inst.getLastActivity() > IDLE_TTL_MS) {
-      try {
-        inst.dispose()
-      } catch (err) {
-        log.error({ err, teamId }, 'team-orchestrator eviction dispose failed')
-      }
-      instances.delete(teamId)
+    if (!shouldEvictInstance(now - inst.getLastActivity(), inst.isQuiescent())) continue
+    try {
+      inst.dispose()
+    } catch (err) {
+      log.error({ err, teamId }, 'team-orchestrator eviction dispose failed')
     }
+    instances.delete(teamId)
+    evicted++
   }
-}, EVICT_SCAN_MS)
+  return evicted
+}
+
+/**
+ * The eviction policy, as a pure predicate.
+ *
+ * - Under the idle TTL: keep. (Every observed run event refreshes the clock, so
+ *   a working cascade never gets here.)
+ * - Over the TTL and quiescent: evict — the normal reclaim of an abandoned team.
+ * - Over the TTL but busy: keep, UNTIL `HARD_TTL_MS`. Sparing busy instances is
+ *   what stops a walked-away-from cascade being killed mid-flight; the ceiling is
+ *   what stops a hung run (no terminal, no events) from pinning its orchestrator
+ *   forever. Reaching it means total silence for `HARD_TTL_MS`, which a live run
+ *   cannot do.
+ */
+export function shouldEvictInstance(idleForMs: number, quiescent: boolean): boolean {
+  if (idleForMs <= IDLE_TTL_MS) return false
+  return quiescent || idleForMs > HARD_TTL_MS
+}
+
+const evictScan = setInterval(() => evictIdleOrchestrators(), EVICT_SCAN_MS)
 evictScan.unref?.()

@@ -24,13 +24,19 @@ import {
   agents,
   getAncestors,
   getSetting,
+  listUndeliveredInbox,
+  markInboxDelivered,
   recordSpend,
+  renderInboxDigest,
   setSetting,
+  startTaskHeartbeat,
   updateTaskFields,
   type ClawbooDb,
 } from '@clawboo/db'
 import {
+  DEFAULT_RUN_SILENT_TIMEOUT_MS,
   resolveRuntimeIntegration,
+  withIdleTimeout,
   type RunHandle,
   type RuntimeAdapter,
   type RuntimeEvent,
@@ -41,7 +47,7 @@ import { isTeamSessionKey, type NudgeQueue } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource/registry'
-import { homeDispatchMutex } from '../executorRunner'
+import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { emitEvent } from '../obs'
 import { connectedAgentKey, connectedAgentMutex } from '../routines/openclawDispatch'
 import { adapterFactoryFor } from '../runtimes'
@@ -304,8 +310,25 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       if (!persistTurn) return false
       return persistTurn(sessionKey, text) !== false
     }
+    // Drain idle guard: a wedged adapter iterator must not hang this drain (and
+    // with it the agent's home mutex + the engine's view of the session) forever.
+    // Silence past the ceiling aborts the run; the abort surfaces `done:aborted`
+    // (→ the engine fails the delegation with a notice, since no user Stop is in
+    // effect), and a stream silent through the grace ends → `onSessionClosed`
+    // fails it with "ended before reporting". Either way, someone is told.
+    const silentMs =
+      Number(process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']) || DEFAULT_RUN_SILENT_TIMEOUT_MS
     try {
-      for await (const ev of adapter.events(run) as AsyncIterable<RuntimeEvent>) {
+      for await (const ev of withIdleTimeout(adapter.events(run) as AsyncIterable<RuntimeEvent>, {
+        idleMs: silentMs,
+        onIdle: async () => {
+          try {
+            await adapter.abort(run)
+          } catch {
+            /* the guard's grace window ends the stream regardless */
+          }
+        },
+      })) {
         if (ev.kind === 'text-delta' && ev.channel !== 'reasoning') {
           // Tolerate BOTH delta conventions so the running text is never garbled:
           // native emits INCREMENTAL chunks, but the OpenClaw adapter emits CUMULATIVE
@@ -485,9 +508,23 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // child turn). See `contextPreamble.ts`. A leader / user-facing turn (no board
     // task) also gets the native-leader behavioral coordination block; a delegated
     // child (isTaskRun) is a worker turn and does not.
-    const teamContext = isTeamSessionKey(targetSessionKey)
+    const baseTeamContext = isTeamSessionKey(targetSessionKey)
       ? buildServerTeamContext(db, teamId, targetAgentId, !isTaskRun)
       : null
+    // Since-you-were-away digest: undelivered mailbox rows (executor-path task
+    // updates, parked/undeliverable alerts, peer signals) ride the VOLATILE
+    // context of the agent's next run, so currency is a property of the runner,
+    // not of the agent remembering to poll. Rows are marked delivered only once
+    // the run actually STARTS (a failed start keeps them for the next attempt);
+    // the exactly-once guard in markInboxDelivered arbitrates racing channels.
+    const inboxRows = isTeamSessionKey(targetSessionKey)
+      ? listUndeliveredInbox(db, targetAgentId, { teamId, limit: 20 })
+      : []
+    const rendered = renderInboxDigest(inboxRows)
+    // Only the rows that actually FIT the render get marked (below) — a row
+    // truncated out of the budget was not delivered and rides the next digest.
+    const digestIds = rendered.includedIds
+    const teamContext = [baseTeamContext, rendered.text].filter(Boolean).join('\n\n') || null
     // Route through the nudge queue: idle session → send now; busy session →
     // FIFO-enqueue for the next turn boundary (never interrupts an in-flight run).
     return nudge.deliver(
@@ -675,6 +712,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               return
             }
             abortMap.set(targetSessionKey, { adapter, run })
+            // The run started with the digest in its context — mark the rows
+            // that were RENDERED delivered (first-winner guard handles a racing
+            // channel; truncated-out rows stay undelivered by design).
+            if (digestIds.length > 0) {
+              try {
+                markInboxDelivered(db, digestIds, 'digest')
+              } catch {
+                /* best-effort; undelivered rows simply ride the next digest */
+              }
+            }
             // Left-pane liveness: the run is in flight — flip the agent's badge to
             // Working the moment its run starts (the drain flips it back on the
             // terminal). Delegated children get this too, so a cascade shows every
@@ -700,15 +747,33 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // alone only knows THIS orchestrator's sessions. The two are mutually
           // exclusive (connected has no homeDir; persistent is not connected).
           const job = connectedKey
-            ? () => connectedAgentMutex.run(connectedKey, runJob)
+            ? () =>
+                connectedAgentMutex.run(connectedKey, runJob, {
+                  acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS,
+                })
             : capturedHomeDir
-              ? () => homeDispatchMutex.run(capturedHomeDir, runJob)
+              ? () =>
+                  homeDispatchMutex.run(capturedHomeDir, runJob, {
+                    acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS,
+                  })
               : runJob
-          void job().catch((e: unknown) => {
-            // runJob settles `started`/`failStart` itself; this catch only guards an
-            // unexpected throw before/around that so it isn't an unhandled rejection.
-            failStart(e instanceof Error ? e : new Error(String(e)))
-          })
+          // TIMER-DRIVEN liveness beat spanning the run's whole ownership window:
+          // the mutex WAIT (legitimately up to HOME_MUTEX_ACQUIRE_MS behind a
+          // sibling run), adapter start, and every silent stretch of the drain.
+          // Beat = this process owns the delivery; the interval dies with the
+          // process, which is exactly what the minutes-scale stale sweep reads.
+          // Delegated task runs only (a leader/user turn has no task row).
+          const beatTaskId = taskForSession(targetSessionKey)
+          const stopBeat = beatTaskId
+            ? startTaskHeartbeat(db, beatTaskId, { assigneeAgentId: targetAgentId })
+            : (): void => undefined
+          void job()
+            .catch((e: unknown) => {
+              // runJob settles `started`/`failStart` itself; this catch only guards an
+              // unexpected throw before/around that so it isn't an unhandled rejection.
+              failStart(e instanceof Error ? e : new Error(String(e)))
+            })
+            .finally(() => stopBeat())
         }),
     )
   }

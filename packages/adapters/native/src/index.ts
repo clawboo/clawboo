@@ -5,6 +5,8 @@ export {
   agentConfigSchema,
   parseAgentConfig,
   envVarForProvider,
+  isFrozenTeamToolset,
+  COORDINATION_TOOLSET,
   NATIVE_PROVIDER_ENV_VARS,
   DEFAULT_AGENT_CONFIG,
   DEFAULT_MAX_TURNS,

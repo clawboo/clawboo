@@ -12,7 +12,7 @@ This section is for the person who runs the Clawboo server, on a laptop, a share
 | [Deployment](/operating/deployment)                   | How the CLI launches the bundled server, port resolution and the `18790` auto-fallback window, the state directory, and dev vs. production boots.                                                                                   |
 | [Security](/operating/security)                       | The default loopback bind, the access gate (case-folded, charset-validated, with a loopback `/api/mcp/*` exemption), server-side device auth, the encrypted vault, display-layer redaction, and how to expose the dashboard safely. |
 | [MCP servers](/operating/mcp-servers)                 | The four MCP servers (tasks, memory, tools, teamchat) as teammates: the in-process Streamable HTTP transport, the bundled stdio bins, attach config, and per-run scoping.                                                           |
-| [Data & state](/operating/data-and-state)             | The SQLite database (27 tables, no migration ladder), the `~/.clawboo` file and directory layout, the boot probe, and how to back up or hard-reset.                                                                                 |
+| [Data & state](/operating/data-and-state)             | The SQLite database (28 tables, no migration ladder), the `~/.clawboo` file and directory layout, the boot probe, and how to back up or hard-reset.                                                                                 |
 | [Production defaults](/operating/production-defaults) | The shipped posture: budgets in warn mode, circuit-breaker defaults, approval TTLs, GC windows, and the rationale for each.                                                                                                         |
 
 ## Operator concerns at a glance
@@ -31,7 +31,7 @@ When you need the exact value rather than the framing, go to the reference clust
 - [Environment variables](/reference/environment-variables), every `CLAWBOO_*`, `OPENCLAW_*`, and provider variable Clawboo reads (`CLAWBOO_HOME`, `CLAWBOO_API_PORT`, `STUDIO_ACCESS_TOKEN`, `CLAWBOO_SECRETS_MASTER_KEY`, and the rest).
 - [CLI](/reference/cli), `clawboo` and the bundled MCP stdio bins.
 - [REST API overview](/reference/rest-api/index), base URL, the access-gate behavior on every route, and the error envelope.
-- [Database schema](/reference/database-schema), the 27 tables and their relationships.
+- [Database schema](/reference/database-schema), the 28 tables and their relationships.
 
 ## See also
 

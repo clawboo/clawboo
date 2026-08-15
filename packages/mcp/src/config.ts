@@ -51,8 +51,10 @@ export interface AttachConfigInput {
 /**
  * The HTTP attach URL for a server. The shared Memory server carries the run's
  * scope as query params (`scopeTeamId` / `scopeAgentId` / `scopeTenantId`) so its
- * session binds to the team/agent; tasks/tools stay bare. Exported so a driver
- * that builds URLs inline (Codex) stays in lockstep with `buildAttachConfig`.
+ * session binds to the team/agent; Tasks carries `scopeTeamId` so its board READS
+ * are team-bound; TeamChat carries the room + author identity; tools stays bare.
+ * Exported so a driver that builds URLs inline (Codex) stays in lockstep with
+ * `buildAttachConfig`.
  */
 export function mcpHttpUrl(
   httpBaseUrl: string,
@@ -67,6 +69,14 @@ export function mcpHttpUrl(
     if (scope.teamId) p.set('scopeTeamId', scope.teamId)
     if (scope.agentId) p.set('scopeAgentId', scope.agentId)
     if (scope.tenantId) p.set('scopeTenantId', scope.tenantId)
+  } else if (server === 'tasks') {
+    // Tasks: the run's TEAM, so a bare `list_tasks` returns this team's board.
+    // An agent is never told its own teamId, so an unbound bare call would hand
+    // it every team's tasks — useless for "don't duplicate a teammate's work".
+    // Reads only; the write tools are unaffected. The agentId enables the
+    // mid-run inbox piggyback (undelivered mailbox rows ride tool responses).
+    if (scope.teamId) p.set('scopeTeamId', scope.teamId)
+    if (scope.agentId) p.set('scopeAgentId', scope.agentId)
   } else if (server === 'teamchat') {
     // TeamChat: the run's room + AUTHOR IDENTITY (anti-spoof). The URL is
     // clawboo-written config, so the runtime can't post as a peer it isn't.
@@ -76,7 +86,7 @@ export function mcpHttpUrl(
     // AttachScope.delegate for why scope alone must not).
     if (scope.delegate) p.set('delegate', '1')
   } else {
-    return base // tasks / tools stay bare
+    return base // tools stays bare
   }
   const q = p.toString()
   return q ? `${base}?${q}` : base

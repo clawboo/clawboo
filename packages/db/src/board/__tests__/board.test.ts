@@ -29,6 +29,10 @@ import {
   getTask,
   linkDep,
   listTasks,
+  completeExecutionProcess,
+  heartbeatTask,
+  isLedgerAutoFireable,
+  listTeamsWithFireableDelegations,
   reconcileOrphans,
   reconcileStaleInProgress,
   TaskDependencyCycleError,
@@ -124,14 +128,15 @@ describe('refresh-survival', () => {
 })
 
 describe('orphan reconciliation', () => {
-  it('a running exec on restart → failed + tombstoned, task released; second pass is a no-op', () => {
+  it('a STALE running exec on restart → failed + tombstoned, task released; second pass is a no-op', () => {
     const t = createTask(db, { title: 'orphan', teamId: 'team1' })
     claimTask(db, t.id, 'agent-a') // → in_progress
     const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'openclaw' }) // → running
 
-    // Simulate restart.
+    // Simulate restart. Negative staleAfterMs = "everything has missed its
+    // beats" (the same idiom as the stale-sweep test), so the row is reaped.
     const reopened = createDb(dbPath)
-    const r1 = reconcileOrphans(reopened)
+    const r1 = reconcileOrphans(reopened, { staleAfterMs: -10_000 })
     expect(r1.reconciled).toBe(1)
 
     const execRow = reopened
@@ -147,9 +152,23 @@ describe('orphan reconciliation', () => {
     expect(taskAfter?.assigneeAgentId).toBeNull()
 
     // Idempotent: the tombstone prevents infinite auto-resume.
-    const r2 = reconcileOrphans(reopened)
+    const r2 = reconcileOrphans(reopened, { staleAfterMs: -10_000 })
     expect(r2.reconciled).toBe(0)
     expect(getTask(reopened, t.id)?.status).toBe('todo')
+  })
+
+  it('a STILL-BEATING running exec is NOT reaped (live sibling process / fast restart)', () => {
+    // A second clawboo process on the same state dir — or the old server's
+    // drains during a fast dev restart — keeps heartbeating its tasks. The boot
+    // pass must not murder those runs; only a run that stopped beating is dead.
+    const t = createTask(db, { title: 'alive elsewhere', teamId: 'team1' })
+    claimTask(db, t.id, 'agent-a') // fresh claim = fresh beat clock
+    createExecutionProcess(db, { taskId: t.id, executorType: 'codex' })
+
+    const reopened = createDb(dbPath)
+    expect(reconcileOrphans(reopened).reconciled).toBe(0)
+    expect(getTask(reopened, t.id)?.status).toBe('in_progress')
+    expect(getTask(reopened, t.id)?.assigneeAgentId).toBe('agent-a')
   })
 })
 
@@ -196,6 +215,73 @@ describe('downstream-chain recovery + stale sweep', () => {
       .where(eq(executionProcesses.id, ex.id))
       .get() as { status: string }
     expect(exRow.status).toBe('timed_out')
+  })
+
+  it('the sweep skips an in_progress task with NO running execution (human-parked card)', () => {
+    // A card a human dragged to in_progress has no drain beating it — it must
+    // never be snapped back to todo by the beat-based TTL.
+    const t = createTask(db, { title: 'manually parked' })
+    claimTask(db, t.id, 'human-1')
+    expect(reconcileStaleInProgress(db, -10_000).reconciled).toBe(0)
+    expect(getTask(db, t.id)!.status).toBe('in_progress')
+  })
+
+  it('listTeamsWithFireableDelegations: ready + policy-clean only', () => {
+    // Fireable: todo, :agent:-marked, deps satisfied, ledger clean.
+    const fireable = createTask(db, {
+      title: 'fireable',
+      teamId: 'T1',
+      sourceDelegationId: 'r1:deleg:agent:a1:reflectTo:leader',
+    })
+    void fireable
+    // Not fireable: user-stopped (cancelled tombstone).
+    const stopped = createTask(db, {
+      title: 'stopped',
+      teamId: 'T2',
+      sourceDelegationId: 'r2:deleg:agent:a2:reflectTo:leader',
+    })
+    const ex = createExecutionProcess(db, { taskId: stopped.id, executorType: 'openclaw' })
+    completeExecutionProcess(db, ex.id, { status: 'cancelled' })
+    // Not fireable: dep-blocked plan tail.
+    const blocker = createTask(db, { title: 'blocker', teamId: 'T3' })
+    const tail = createTask(db, {
+      title: 'tail',
+      teamId: 'T3',
+      sourceDelegationId: 'r3:plan:1:agent:a3:reflectTo:leader',
+    })
+    linkDep(db, tail.id, blocker.id)
+    // No marker at all (human card) — never pump-relevant.
+    createTask(db, { title: 'manual', teamId: 'T4' })
+
+    expect(listTeamsWithFireableDelegations(db)).toEqual(['T1'])
+  })
+
+  it('isLedgerAutoFireable: trailing streak resets on success; cancelled and running park', () => {
+    const s = (statuses: string[]) => statuses.map((st, i) => ({ id: `e${i}`, status: st }))
+    expect(isLedgerAutoFireable([])).toBe(true)
+    expect(isLedgerAutoFireable(s(['failed', 'timed_out']))).toBe(true) // 2 trailing < 3
+    expect(isLedgerAutoFireable(s(['failed', 'failed', 'timed_out']))).toBe(false) // capped
+    expect(isLedgerAutoFireable(s(['failed', 'failed', 'succeeded', 'failed']))).toBe(true) // reset
+    expect(isLedgerAutoFireable(s(['failed', 'cancelled']))).toBe(false) // user Stop
+    expect(isLedgerAutoFireable(s(['running']))).toBe(false) // owned
+  })
+
+  it('heartbeatTask keeps a driven run out of the sweep, and only touches in_progress', () => {
+    const t = createTask(db, { title: 'long build' })
+    claimTask(db, t.id, 'agent-x')
+    createExecutionProcess(db, { taskId: t.id, executorType: 'codex' })
+    const before = getTask(db, t.id)!.updatedAt
+    heartbeatTask(db, t.id)
+    expect(getTask(db, t.id)!.updatedAt).toBeGreaterThanOrEqual(before)
+    // A beating run survives a TTL that would sweep a silent one.
+    expect(reconcileStaleInProgress(db, 60_000).reconciled).toBe(0)
+    expect(getTask(db, t.id)!.status).toBe('in_progress')
+
+    // A beat must never resurrect freshness on a task that left in_progress.
+    updateStatus(db, t.id, 'in_review')
+    const released = getTask(db, t.id)!.updatedAt
+    heartbeatTask(db, t.id)
+    expect(getTask(db, t.id)!.updatedAt).toBe(released)
   })
 })
 

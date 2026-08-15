@@ -22,9 +22,11 @@ import {
   getAncestors,
   recordSpend,
   releaseTask,
+  startTaskHeartbeat,
   updateStatus,
   type BudgetScope,
   type ClawbooDb,
+  type CompleteExecOutcome,
   type DbAgent,
   type DbScheduledRun,
 } from '@clawboo/db'
@@ -110,7 +112,7 @@ async function dispatchConnectedSubstrateInner(
   input: ConnectedDispatchInput,
   gatewayAgentId: string,
 ): Promise<RoutineDispatchOutcome> {
-  const { db, run, template, taskId, client } = input
+  const { db, run, taskId } = input
 
   const missionId = missionRootId(db, taskId)
   // Pre-flight cap gate: a paused CAP budget blocks the NEXT fire. The connected
@@ -130,6 +132,36 @@ async function dispatchConnectedSubstrateInner(
       : { ok: false, taskId, error: `claim failed: ${claim.reason ?? 'unknown'}` }
   }
 
+  // The task is ours from here, so it has to BEAT for as long as this drain owns
+  // it. The stale sweep releases an `in_progress` task whose `updatedAt` has not
+  // moved within the TTL (3 min), and this drain legitimately runs up to
+  // `watchdogMs()` (10 min default) without otherwise touching the row. Without a
+  // beat the sweep reclaims a task that is still being worked, and the real
+  // completion then lands on a ledger row the sweep already closed as `timed_out`
+  // — which `completeExecutionProcess` refuses, leaving the ledger, the obs stream
+  // and the card disagreeing. This is the THIRD claiming drain; the executor
+  // runner and the team orchestrator's serverDeliver already beat.
+  const stopBeat = startTaskHeartbeat(db, taskId, { assigneeAgentId: run.agentId })
+  try {
+    return await drainClaimedRoutineRun(input, gatewayAgentId, missionId)
+  } finally {
+    stopBeat()
+  }
+}
+
+/**
+ * The post-claim half of a connected-substrate dispatch: open the ledger row,
+ * drive the Gateway to a terminal, and settle the board. Split out of its caller
+ * purely so the liveness beat can wrap it in ONE `finally` that covers every exit
+ * path, including a throw.
+ */
+async function drainClaimedRoutineRun(
+  input: ConnectedDispatchInput,
+  gatewayAgentId: string,
+  missionId: string,
+): Promise<RoutineDispatchOutcome> {
+  const { db, run, template, taskId, client } = input
+
   const exec = createExecutionProcess(db, {
     taskId,
     executorType: 'openclaw',
@@ -144,6 +176,25 @@ async function dispatchConnectedSubstrateInner(
     tenantId: run.tenantId,
     data: { execId: exec.id, executorType: 'openclaw', runReason: 'routine' },
   })
+
+  // Close the ledger row and emit the obs completion that pairs with the
+  // `execution_started` above. The emit is CONDITIONAL on the close winning: a
+  // terminal ledger row is immutable (first terminal wins), so a row something
+  // else already closed refuses this one and returns null — and emitting anyway
+  // would put a `succeeded` on the obs stream for a run the ledger records as
+  // timed out. `serverBoardClient` and `api/board` guard the same way.
+  const settleExec = (outcome: CompleteExecOutcome, data: Record<string, unknown>): void => {
+    if (!completeExecutionProcess(db, exec.id, outcome)) return
+    emitEvent(db, {
+      kind: 'execution_completed',
+      taskId,
+      teamId: run.teamId,
+      agentId: run.agentId,
+      runtime: 'openclaw',
+      tenantId: run.tenantId,
+      data: { execId: exec.id, ...data },
+    })
+  }
 
   const adapter: ConnectedAdapterLike = input.makeAdapter
     ? input.makeAdapter(client)
@@ -176,17 +227,8 @@ async function dispatchConnectedSubstrateInner(
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    completeExecutionProcess(db, exec.id, { status: 'failed', error: message })
+    settleExec({ status: 'failed', error: message }, { status: 'failed', error: message })
     releaseTask(db, taskId)
-    emitEvent(db, {
-      kind: 'execution_completed',
-      taskId,
-      teamId: run.teamId,
-      agentId: run.agentId,
-      runtime: 'openclaw',
-      tenantId: run.tenantId,
-      data: { execId: exec.id, status: 'failed', error: message },
-    })
     return { ok: false, taskId, error: `gateway dispatch failed: ${message}` }
   }
 
@@ -275,20 +317,11 @@ async function dispatchConnectedSubstrateInner(
       `Auto-paused: ${stopForBudget} budget reached. Raise the cap (or resume) to continue.`,
       'system',
     )
-    completeExecutionProcess(db, exec.id, {
-      status: 'cancelled',
-      error: `budget_paused:${stopForBudget}`,
-    })
+    settleExec(
+      { status: 'cancelled', error: `budget_paused:${stopForBudget}` },
+      { status: 'cancelled', error: `budget_paused:${stopForBudget}` },
+    )
     releaseTask(db, taskId)
-    emitEvent(db, {
-      kind: 'execution_completed',
-      taskId,
-      teamId: run.teamId,
-      agentId: run.agentId,
-      runtime: 'openclaw',
-      tenantId: run.tenantId,
-      data: { execId: exec.id, status: 'cancelled', error: `budget_paused:${stopForBudget}` },
-    })
     return { ok: false, taskId, error: `auto-paused (budget: ${stopForBudget})` }
   }
 
@@ -297,17 +330,11 @@ async function dispatchConnectedSubstrateInner(
     const error = timedOut
       ? 'watchdog timeout — no terminal event from the Gateway'
       : (lastError ?? 'event stream ended without a terminal')
-    completeExecutionProcess(db, exec.id, { status: timedOut ? 'timed_out' : 'failed', error })
+    settleExec(
+      { status: timedOut ? 'timed_out' : 'failed', error },
+      { status: timedOut ? 'timed_out' : 'failed', error },
+    )
     releaseTask(db, taskId)
-    emitEvent(db, {
-      kind: 'execution_completed',
-      taskId,
-      teamId: run.teamId,
-      agentId: run.agentId,
-      runtime: 'openclaw',
-      tenantId: run.tenantId,
-      data: { execId: exec.id, status: timedOut ? 'timed_out' : 'failed', error },
-    })
     return { ok: false, taskId, error }
   }
 
@@ -371,7 +398,10 @@ async function dispatchConnectedSubstrateInner(
         )
       }
     }
-    completeExecutionProcess(db, exec.id, {
+    // Not `settleExec` here: the obs completion has to stay BELOW the audit and
+    // the status write, so the close and its emit are split. `closed` carries
+    // whether this run actually won the ledger row through to both.
+    const closed = completeExecutionProcess(db, exec.id, {
       status: 'succeeded',
       summary,
       costUsd: terminal.costUsd ?? null,
@@ -402,37 +432,37 @@ async function dispatchConnectedSubstrateInner(
     // stayed in_review).
     const doneRes = updateStatus(db, taskId, 'done', { humanOverride: true })
     if (!doneRes.ok) {
-      addComment(db, taskId, `Could not finalize task (${doneRes.reason ?? 'unknown'}).`, 'system')
+      addComment(
+        db,
+        taskId,
+        closed
+          ? `Could not finalize task (${doneRes.reason ?? 'unknown'}).`
+          : `This run finished successfully, but its execution had already been closed by something else (a stale-task sweep, or an abort), so the task could not be marked done (${doneRes.reason ?? 'unknown'}). The work is real; check the board before re-running it.`,
+        'system',
+      )
     }
-    emitEvent(db, {
-      kind: 'execution_completed',
-      taskId,
-      teamId: run.teamId,
-      agentId: run.agentId,
-      runtime: 'openclaw',
-      tenantId: run.tenantId,
-      data: {
-        execId: exec.id,
-        status: 'succeeded',
-        costUsd: terminal.costUsd ?? null,
-        inputTokens: terminal.usage?.inputTokens,
-        outputTokens: terminal.usage?.outputTokens,
-      },
-    })
+    if (closed) {
+      emitEvent(db, {
+        kind: 'execution_completed',
+        taskId,
+        teamId: run.teamId,
+        agentId: run.agentId,
+        runtime: 'openclaw',
+        tenantId: run.tenantId,
+        data: {
+          execId: exec.id,
+          status: 'succeeded',
+          costUsd: terminal.costUsd ?? null,
+          inputTokens: terminal.usage?.inputTokens,
+          outputTokens: terminal.usage?.outputTokens,
+        },
+      })
+    }
     return { ok: true, taskId }
   }
 
   const error = `run ${terminal.reason}: ${terminal.summary || lastError || '(no output)'}`
-  completeExecutionProcess(db, exec.id, { status: 'failed', error })
+  settleExec({ status: 'failed', error }, { status: 'failed', error })
   releaseTask(db, taskId)
-  emitEvent(db, {
-    kind: 'execution_completed',
-    taskId,
-    teamId: run.teamId,
-    agentId: run.agentId,
-    runtime: 'openclaw',
-    tenantId: run.tenantId,
-    data: { execId: exec.id, status: 'failed', error },
-  })
   return { ok: false, taskId, error }
 }

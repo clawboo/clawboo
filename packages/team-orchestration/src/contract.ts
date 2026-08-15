@@ -23,8 +23,10 @@ import type { RuntimeEvent } from '@clawboo/executor'
 import {
   createBoardOrchestrator,
   DELEGATION_IDLE_TIMEOUT_MS,
+  MAX_AUTO_FIRES,
   MAX_DELEGATION_FAILURES,
   MAX_SPAWN_DEPTH,
+  OPEN_TOOL_CALL_TIMEOUT_MS,
   REFLECT_WINDOW_MS,
   type BoardChange,
   type DelegationSignal,
@@ -123,6 +125,19 @@ function toolCallEvent(runId: string, name: string, input: unknown): RuntimeEven
     seq: 1,
   }
 }
+function toolResultEvent(runId: string, name: string): RuntimeEvent {
+  return {
+    kind: 'tool-result',
+    toolCallId: 'tc',
+    name,
+    output: 'ok',
+    isError: false,
+    runId,
+    sessionId: null,
+    ts: 1,
+    seq: 1,
+  }
+}
 
 type DelegationResolution = 'allow_once' | 'allow_always' | 'deny' | 'expired' | 'timeout'
 interface HarnessOpts {
@@ -152,6 +167,19 @@ const deliveredTo = (
 ): string[] => delivered.filter((d) => d.agentId === agentId).map((d) => d.task)
 const idsOf = (board: CascadeBoard): string[] => board.created.map((t) => t.id)
 
+/** A task's ledger, asserting the read SUCCEEDED. `listExecutions` returns null
+ *  when the ledger cannot be read, which every caller must treat as "unknown"
+ *  rather than "empty" — so a contract test that silently accepted null would be
+ *  asserting against the wrong thing. Fail loudly here instead. */
+const ledgerOf = async (
+  board: CascadeBoard,
+  taskId: string,
+): Promise<Array<{ id: string; status: string; executorType?: string }>> => {
+  const execs = await board.listExecutions(taskId)
+  expect(execs).not.toBeNull()
+  return execs!
+}
+
 // ─── The contract ─────────────────────────────────────────────────────────────
 
 /** Register the full cascade-invariant suite against an injected board. Call at the
@@ -164,6 +192,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     delivered: Delivered[]
     changes: BoardChange[]
     narrations: { sessionKey: string; text: string }[]
+    aborted: string[]
     orchestrator: ReturnType<typeof createBoardOrchestrator>
   } {
     const board = harness.makeBoard()
@@ -171,7 +200,9 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     const delivered: Delivered[] = []
     const changes: BoardChange[] = []
     const narrations: { sessionKey: string; text: string }[] = []
+    const aborted: string[] = []
     const orchestrator = createBoardOrchestrator({
+      abortSession: (sessionKey) => aborted.push(sessionKey),
       teamId: 't1',
       board,
       known: () => KNOWN,
@@ -193,7 +224,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         : {}),
       ...(opts?.now ? { now: opts.now } : {}),
     })
-    return { board, delivered, changes, narrations, orchestrator }
+    return { board, delivered, changes, narrations, aborted, orchestrator }
   }
 
   // Fake timers gate ONLY the reflection batcher's debounce; the board calls
@@ -543,11 +574,14 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.statusUpdates).not.toContainEqual({ taskId: t1, status: 'done' })
     })
 
-    it('an aborted child done closes the execution as cancelled', async () => {
+    it('a NON-STOP aborted done closes the execution as failed (cancelled = user intent only)', async () => {
+      // An abort that reaches failForSession is a wedge/guard kill, not a clean
+      // user Stop (those route through releaseClaimed) — it must ledger as
+      // infrastructure death so the fire policy keeps the task refireable.
       const { board, orchestrator } = await delegate(makeHarness())
       await orchestrator.onEvent(sk('a2'), failedDoneEvent('r2', 'aborted', ''))
       const t1 = idsOf(board)[0]!
-      expect(board.completed[0]!.outcome.status).toBe('cancelled')
+      expect(board.completed[0]!.outcome.status).toBe('failed')
       expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
     })
 
@@ -600,6 +634,169 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       clock += DELEGATION_IDLE_TIMEOUT_MS - 1
       await orchestrator.sweepStaleSessions()
       expect(board.statusUpdates.some((s) => s.status === 'blocked')).toBe(false)
+    })
+
+    it('the watchdog ABORTS the zombie run it fails — never just the board row', async () => {
+      let clock = 1_000
+      const h = makeHarness({ now: () => clock })
+      await delegate(h)
+      const { aborted, orchestrator } = h
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      // The failed delegation's live run was killed, not left burning invisibly.
+      expect(aborted).toEqual([sk('a2')])
+    })
+
+    it('an OPEN tool call earns the longer idle allowance (a silent build is not dead)', async () => {
+      let clock = 1_000
+      const h = makeHarness({ now: () => clock })
+      await delegate(h)
+      const { board, orchestrator } = h
+
+      // The delegate enters one long tool call (a build/test) and goes silent.
+      await orchestrator.onEvent(sk('a2'), toolCallEvent('r2', 'run_command', { cmd: 'build' }))
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      // NOT failed at the 8-min window — the call is still open.
+      expect(board.statusUpdates.some((s) => s.status === 'blocked')).toBe(false)
+
+      // But the allowance is a ceiling, not immunity.
+      clock += OPEN_TOOL_CALL_TIMEOUT_MS
+      await orchestrator.sweepStaleSessions()
+      const t1 = idsOf(board)[0]!
+      expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
+      expect(board.completed[0]!.outcome.status).toBe('timed_out')
+    })
+
+    it('a tool RESULT closes the window — silence after it gets the normal timeout', async () => {
+      let clock = 1_000
+      const h = makeHarness({ now: () => clock })
+      await delegate(h)
+      const { board, orchestrator } = h
+
+      await orchestrator.onEvent(sk('a2'), toolCallEvent('r2', 'run_command', { cmd: 'build' }))
+      await orchestrator.onEvent(sk('a2'), toolResultEvent('r2', 'run_command'))
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      const t1 = idsOf(board)[0]!
+      expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
+    })
+
+    it('a result that lands after the task was released is preserved as a comment', async () => {
+      const h = makeHarness()
+      await delegate(h)
+      const { board, delivered, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+
+      // The server stale-sweep releases the task out from under the (still
+      // tracked) session — the next `done` must not fake-complete it, but the
+      // work itself must survive.
+      board.forceRelease(t1)
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Here is the finished patch'))
+      expect(board.statusUpdates).not.toContainEqual({ taskId: t1, status: 'done' })
+      expect(
+        board.comments.some(
+          (c) =>
+            c.taskId === t1 && /late result/i.test(c.body) && c.body.includes('finished patch'),
+        ),
+      ).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)[0]!.task).toMatch(/preserved as a comment/i)
+    })
+
+    it('the pump re-fires a sweep-released delegation after an engine restart', async () => {
+      const h = makeHarness()
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(1)
+
+      // The process died: the sweep timed out the run and released the task
+      // (exactly reconcileStaleInProgress's two writes); the engine's memory is
+      // gone.
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
+      board.forceRelease(t1)
+      orchestrator.reset()
+      // The server dispatch pump rebuilds the engine and pumps it.
+      await orchestrator.resume()
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(2)
+      expect(board.statusOf(t1)).toBe('in_progress')
+    })
+
+    it('a user-STOPPED delegation is never auto-refired by the pump', async () => {
+      const h = makeHarness()
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+
+      // The Stop path's durable trace: the exec completes `cancelled`, the task
+      // releases to todo (releaseClaimed's exact writes).
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'cancelled' })
+      board.forceRelease(t1)
+      orchestrator.reset()
+      await orchestrator.resume()
+      // The pump saw the cancelled last run and left it alone — a human re-queues.
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(1)
+      expect(board.statusOf(t1)).toBe('todo')
+    })
+
+    it('markStopped makes a Stop durable — tracked AND not-yet-fired work survives a restart stopped', async () => {
+      const h = makeHarness()
+      const { board, orchestrator } = h
+      // Two delegations to one agent: A fires immediately, B defers (serial).
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          '<delegate to="@Bug Boo">task A</delegate><delegate to="@Bug Boo">task B</delegate>',
+        ),
+      )
+      const [tA, tB] = idsOf(board)
+
+      // User hits Stop: the host aborts runs AND calls markStopped. The durable
+      // trace must exist NOW — not after the abort terminals land.
+      await orchestrator.markStopped()
+      const execsA = await ledgerOf(board, tA!)
+      expect(execsA[execsA.length - 1]!.status).toBe('cancelled')
+      const execsB = await ledgerOf(board, tB!)
+      expect(execsB[execsB.length - 1]!.status).toBe('cancelled')
+
+      // Restart (abort terminals never landed): the pump must not refire either.
+      board.forceRelease(tA!)
+      orchestrator.reset()
+      await orchestrator.resume()
+      expect(board.claims.filter((id) => id === tA)).toHaveLength(1)
+      expect(board.claims.filter((id) => id === tB)).toHaveLength(0)
+    })
+
+    it('a permafailing delegation stops being auto-fed at MAX_AUTO_FIRES', async () => {
+      const h = makeHarness()
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+
+      // Fail-and-release cycles (infra death, not user Stop) until the ledger
+      // holds MAX_AUTO_FIRES executions.
+      for (;;) {
+        const execs = await ledgerOf(board, t1)
+        if (execs.length >= MAX_AUTO_FIRES) break
+        const last = execs[execs.length - 1]!
+        await board.completeExecution(last.id, { status: 'timed_out' })
+        board.forceRelease(t1)
+        orchestrator.reset()
+        await orchestrator.resume()
+      }
+      const fires = board.claims.filter((id) => id === t1).length
+      // One more release cycle: the cap holds, no further fire.
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
+      board.forceRelease(t1)
+      orchestrator.reset()
+      await orchestrator.resume()
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(fires)
+      expect(board.statusOf(t1)).toBe('todo')
     })
 
     it('onSessionClosed fails a still-in-flight delegation; later calls are no-ops', async () => {
@@ -804,6 +1001,9 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(deliveredTo(delivered, 'a2')).toEqual(['task A'])
 
       await orchestrator.onEvent(sk('a2'), doneEvent('rA', 'A done'))
+      // The follow-up for the SAME agent defers one macrotask (the completing
+      // drain still holds the agent's home mutex when the pump runs inline).
+      await vi.advanceTimersByTimeAsync(1)
       expect(deliveredTo(delivered, 'a2')).toEqual(['task A', 'task B'])
 
       await orchestrator.onEvent(sk('a2'), doneEvent('rB', 'B done'))

@@ -34,7 +34,7 @@ import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource'
 import { budgetPreflight } from '../budgetPreflight'
-import { homeDispatchMutex } from '../executorRunner'
+import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { emitEvent } from '../obs'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { adapterFactoryFor } from '../runtimes'
@@ -275,7 +275,8 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
         turnIndex,
       )
     // Persistent runtimes serialize on the per-home mutex (shared with the executor).
-    if (homeDir) return homeDispatchMutex.run(homeDir, turn)
+    if (homeDir)
+      return homeDispatchMutex.run(homeDir, turn, { acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS })
     // A CONNECTED (OpenClaw) turn serializes on the SAME per-gateway-agent mutex the
     // routine dispatcher uses, so a chat turn and a routine fire never open two
     // overlapping Gateway sessions on one physical agent. Ephemeral runtimes need none.

@@ -185,7 +185,7 @@ The repo requires Node `>=22` and pnpm `>=9` (`packageManager` pins `pnpm@9.15.0
 
 `@clawboo/db` exposes exactly one script: `db:studio` (`drizzle-kit studio`, a read-only browser over the dev DB). There is **no `db:migrate` and no `db:generate`**; both were removed.
 
-The reason is the schema model: Clawboo has **no migration ladder**. The schema is created by `ensureSchema`'s `CREATE TABLE IF NOT EXISTS` DDL (`packages/db/src/schemaBootstrap.ts`); that DDL is the _sole_ schema-creation source for all 27 tables. `schema.ts` is the Drizzle **type** layer used for typed queries, never to apply migrations. Upgrading an existing file is handled by `reconcileSchema`, which is derived from that same DDL rather than generated, so there is still nothing to generate or migrate.
+The reason is the schema model: Clawboo has **no migration ladder**. The schema is created by `ensureSchema`'s `CREATE TABLE IF NOT EXISTS` DDL (`packages/db/src/schemaBootstrap.ts`); that DDL is the _sole_ schema-creation source for all 28 tables. `schema.ts` is the Drizzle **type** layer used for typed queries, never to apply migrations. Upgrading an existing file is handled by `reconcileSchema`, which is derived from that same DDL rather than generated, so there is still nothing to generate or migrate.
 
 A unit test (`schemaSource.test.ts`) guards this posture two ways: it builds a real in-memory DB via `createDb()` and asserts every `schema.ts` table and its column set matches the live DDL (catching drift between the type layer and the bootstrap), and it asserts the package ships no `db:migrate`/`db:generate` scripts, no `drizzle` entry in `files`, and no migration-ladder directory on disk. `drizzle.config.ts` remains only so `drizzle-kit studio` can find the schema.
 
@@ -209,5 +209,5 @@ The test layout follows the monorepo shape. Each library has its own `vitest.con
 - [Testing](/internals/testing), unit / component / e2e / clean-install / evals strategy
 - [Release process](/internals/release-process), Changesets, `publish.yml`, and the clean-install gate
 - [Codegen and ingestion](/internals/codegen-and-ingestion), the marketplace ingest + `verify:ingest` gate
-- [Database schema](/reference/database-schema), the 27 tables created by `createDb`'s DDL
+- [Database schema](/reference/database-schema), the 28 tables created by `createDb`'s DDL
 - [Internals overview](/internals/index), the contributor map

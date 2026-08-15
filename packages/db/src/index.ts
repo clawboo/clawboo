@@ -110,6 +110,8 @@ export * from './routines'
 
 // ── team_chat — the mixed-runtime peer-chat room substrate ─────
 export * from './teamChat'
+// ── Durable agent mailbox (the delivery plane) ──
+export * from './inbox'
 
 // ── chat_messages — the durable transcript tail (live team-chat SSE) ──
 export * from './chat'

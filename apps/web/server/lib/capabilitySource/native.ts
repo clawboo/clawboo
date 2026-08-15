@@ -168,7 +168,28 @@ export class NativeCapabilitySource implements CapabilitySource {
       const server = row.sourceKey.replace(/^mcp:/, '') as (typeof NATIVE_MCP_SERVERS)[number]
       if (!NATIVE_MCP_SERVERS.includes(server)) unsupported('native', action.kind)
       const config = loadAgentConfigOrDefault(db, row.agentId)
-      config.tools[server] = enable
+      // Re-enabling `tasks` on a TEAM agent restores the READ surface, never full
+      // write access. This panel is a binary toggle, and on a team the board
+      // WRITES are engine-owned — a model-issued create_task/claim_task races the
+      // orchestrator's claims (409) or orphans a task nothing dispatches. A plain
+      // `true` would silently hand that back the first time someone toggled the
+      // row off and on.
+      //
+      // A TEAMLESS agent has no orchestrator to race, so that rationale does not
+      // apply to it: coercing there would permanently downgrade a solo agent that
+      // legitimately held full board access, with no way back through the UI.
+      const teamId =
+        server === 'tasks'
+          ? ((
+              db
+                .select({ teamId: agents.teamId })
+                .from(agents)
+                .where(eq(agents.id, row.agentId))
+                .get() as { teamId: string | null } | undefined
+            )?.teamId ?? null)
+          : null
+      if (server === 'tasks' && teamId) config.tools.tasks = enable ? 'read' : false
+      else config.tools[server] = enable
       saveAgentConfig(db, config)
       appendAudit(db, {
         agentId: row.agentId,

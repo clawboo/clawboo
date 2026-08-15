@@ -102,7 +102,13 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
   if (handlers) return handlers
   kickEmbedResolve()
   handlers = {
-    tasks: createStreamableHttpHandlers(() => createTasksServer(getDb())),
+    // Tasks binds the run's TEAM (same `scopeTeamId` param the Memory server
+    // reads) so board READS are team-scoped — an agent is never told its own
+    // teamId, so a bare `list_tasks` must mean "my team's board", not "every
+    // team's". Writes are unaffected; unbound (no scope) stays board-wide.
+    tasks: createStreamableHttpHandlers((req) =>
+      createTasksServer(getDb(), { boundScope: parseBoundScope(req) }),
+    ),
     memory: createStreamableHttpHandlers((req) =>
       createMemoryServer(getDb(), cachedEmbed, { boundScope: parseBoundScope(req) }),
     ),

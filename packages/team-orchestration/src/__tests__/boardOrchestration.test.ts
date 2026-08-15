@@ -131,6 +131,21 @@ class FakeBoard implements CascadeBoard {
   async completeExecution(execId: string, outcome: CompleteExecutionOutcome): Promise<void> {
     this.completed.push({ execId, outcome })
   }
+  async listExecutions(
+    taskId: string,
+  ): Promise<Array<{ id: string; status: string; executorType?: string }>> {
+    // Derive the ledger from the recorded calls: every exec opened for the task,
+    // in id order; a completed one carries its outcome status, else 'running'.
+    // Engine-created execs are 'openclaw' (fireTask/spawn), matching the real
+    // board — resume()'s ownership gate keys on it.
+    const rows: Array<{ id: string; status: string; executorType?: string }> = []
+    for (const [id, tid] of this.execs) {
+      if (tid !== taskId) continue
+      const done = this.completed.find((c) => c.execId === id)
+      rows.push({ id, status: done ? done.outcome.status : 'running', executorType: 'openclaw' })
+    }
+    return rows
+  }
   async linkDep(taskId: string, dependsOnTaskId: string): Promise<boolean> {
     const list = this.depMap.get(taskId) ?? []
     list.push(dependsOnTaskId)
@@ -202,6 +217,10 @@ class FakeBoard implements CascadeBoard {
       sourceDelegationId: input.sourceDelegationId,
       assigneeAgentId: input.assigneeAgentId,
     })
+    // A refresh scenario has a live run behind the row — resume() only attaches
+    // in_progress tasks with a RUNNING execution (mirrors the real wrapper).
+    const execId = `exec-${++this.execN}`
+    this.execs.set(execId, id)
     return id
   }
   dispose(): void {

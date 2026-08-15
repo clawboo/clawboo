@@ -190,5 +190,5 @@ These docs describe Clawboo **v0.3.1**, the current release.
 - [The board](/concepts/the-board): the durable substrate the server integration and eval suites drive
 - [Executor runner](/internals/executor-runner): the claim→run→verify→handoff flow the all-on integration test exercises
 - [Codegen and ingestion](/internals/codegen-and-ingestion): the offline `verify:catalog` gate that runs beside these suites, and the live `verify:ingest` check that runs weekly
-- [Database schema](/reference/database-schema): the 27 tables the schema-source guard pins
+- [Database schema](/reference/database-schema): the 28 tables the schema-source guard pins
 - [Glossary](/appendices/glossary): canonical term definitions

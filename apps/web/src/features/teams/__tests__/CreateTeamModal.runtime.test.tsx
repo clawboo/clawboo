@@ -287,7 +287,7 @@ describe('CreateTeamModal per-agent runtime selector', () => {
 })
 
 describe('CreateTeamModal deploy', () => {
-  it('Gateway offline: deploys every agent native (degraded) with tasks:false + tier-aware modelTier; team POST carries serverOrchestrated', async () => {
+  it("Gateway offline: deploys every agent native (degraded) with tasks:'read' + tier-aware modelTier; team POST carries serverOrchestrated", async () => {
     let teamBody: Record<string, unknown> | undefined
     server.use(...baseHandlers((b) => (teamBody = b as Record<string, unknown>)))
     renderModal()
@@ -299,15 +299,20 @@ describe('CreateTeamModal deploy', () => {
     // The team POST requested server-orchestration.
     expect(teamBody?.['serverOrchestrated']).toBe(true)
 
-    // Leader: native + LEADER prompt + tasks:false + modelTier leader.
+    // Leader: native + LEADER prompt + tasks:'read' + modelTier leader. The board
+    // is READ-ONLY for the leader (the engine owns writes: a model-issued
+    // create_task/claim_task would race its claims), but it must be able to SEE
+    // the board it presides over — and the team room is on, which is what drives
+    // the conversation's automatic peer-inbox pull.
     const leaderCall = createAgentMock.mock.calls.find((c) => c[0] === 'Team Lead')!
     expect(leaderCall[2]).toBe('clawboo-native')
     const leaderExec = leaderCall[3] as unknown as {
       systemPrompt: string
-      tools: { tasks: boolean }
+      tools: { tasks: boolean | 'read'; teamchat: boolean }
       modelTier: string
     }
-    expect(leaderExec.tools.tasks).toBe(false)
+    expect(leaderExec.tools.tasks).toBe('read')
+    expect(leaderExec.tools.teamchat).toBe(true)
     expect(leaderExec.modelTier).toBe('leader')
     expect(leaderExec.systemPrompt).toContain('delegate')
     expect(leaderExec.systemPrompt).not.toContain('<delegate')

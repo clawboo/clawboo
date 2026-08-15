@@ -27,6 +27,7 @@ import {
 } from '@clawboo/db'
 import { z } from 'zod'
 
+import { withInboxPiggyback } from '../piggyback'
 import {
   buildServer,
   jsonResult,
@@ -86,7 +87,40 @@ function createDenial(result: GuardedCreateResult, parentTaskId?: string): McpTo
   return textResult(`parent not found: ${parentTaskId}`, true, result.reason)
 }
 
-export function createTasksServer(db: ClawbooDb): Server {
+/** The board's read surface — the half that is safe to attach to an agent that
+ *  must not mutate the board (team runs, where claims/status are engine-owned:
+ *  a model-issued `create_task`/`claim_task` would race the engine's writes or
+ *  orphan a task no dispatcher runs). */
+const READ_ONLY_TOOL_NAMES = new Set(['list_tasks', 'get_task'])
+
+export interface TasksServerOptions {
+  /** Serve only {@link READ_ONLY_TOOL_NAMES} — board reads, no mutations. */
+  readOnly?: boolean
+  /**
+   * The run's authoritative team, bound by clawboo at attach time — the Tasks
+   * analog of the Memory server's `boundScope` and TeamChat's `boundIdentity`.
+   * When set, `list_tasks` is forced to this team (the model's own `teamId` arg
+   * is ignored, so it can't widen its visibility) and `get_task` refuses a task
+   * belonging to another team.
+   *
+   * Load-bearing for more than isolation: the team preamble never tells an agent
+   * its own teamId, so an agent told to "check the board before you start" calls
+   * `list_tasks` with no argument. Unbound, that returns every team's tasks —
+   * the opposite of the "don't duplicate a teammate's work" purpose. Bound, the
+   * bare call is exactly right.
+   *
+   * Omitted — or a null/absent `teamId`, i.e. a run with no team at all ⇒
+   * board-wide (the raw stdio bin / an external attach / a teamless task).
+   *
+   * `agentId` (when bound) additionally enables the mid-run inbox piggyback:
+   * the calling agent's undelivered mailbox rows ride each tool response.
+   */
+  boundScope?: { teamId?: string | null; agentId?: string | null }
+}
+
+export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Server {
+  // Normalize null → undefined so "no team" reads as unbound everywhere below.
+  const boundTeamId = opts?.boundScope?.teamId ?? undefined
   const claimHandler = (args: Record<string, unknown>) => {
     const result = claimTask(
       db,
@@ -106,14 +140,19 @@ export function createTasksServer(db: ClawbooDb): Server {
   const tools: ToolDef[] = [
     {
       name: 'list_tasks',
-      description: 'List board tasks. Pass ready=true for only claimable (deps satisfied) work.',
+      description: boundTeamId
+        ? "List your team's board tasks. Pass ready=true for only claimable (deps satisfied) work."
+        : 'List board tasks. Pass ready=true for only claimable (deps satisfied) work.',
       inputSchema: z.object({
         teamId: z.string().optional(),
         status: STATUS.optional(),
         ready: z.boolean().optional(),
       }),
       handler: (args) => {
-        const teamId = optStr(args['teamId'])
+        // The binding wins outright: a bound run's `teamId` arg is ignored, so
+        // the model can neither widen past its team nor probe another one (the
+        // same anti-spoof semantic as TeamChat's bound identity).
+        const teamId = boundTeamId ?? optStr(args['teamId'])
         const tasks =
           args['ready'] === true
             ? getReadyTasks(db, { teamId })
@@ -129,6 +168,9 @@ export function createTasksServer(db: ClawbooDb): Server {
         const id = str(args['taskId'])
         const task = getTask(db, id)
         if (!task) return textResult(`not found: ${id}`, true)
+        // Out-of-team reads are refused as not-found: a bound run must not be
+        // able to probe another team's board by guessing ids.
+        if (boundTeamId && task.teamId !== boundTeamId) return textResult(`not found: ${id}`, true)
         return jsonResult({ task, comments: getComments(db, id), ancestors: getAncestors(db, id) })
       },
     },
@@ -275,5 +317,12 @@ export function createTasksServer(db: ClawbooDb): Server {
     },
   ]
 
-  return buildServer('clawboo-tasks', tools)
+  const active =
+    opts?.readOnly === true ? tools.filter((t) => READ_ONLY_TOOL_NAMES.has(t.name)) : tools
+  // Mid-run inbox piggyback for a bound calling agent (see ../piggyback.ts).
+  const boundAgentId = opts?.boundScope?.agentId ?? undefined
+  return buildServer(
+    'clawboo-tasks',
+    boundAgentId ? withInboxPiggyback(active, db, boundAgentId, new Set()) : active,
+  )
 }

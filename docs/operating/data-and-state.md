@@ -23,7 +23,7 @@ Every file Clawboo owns:
 
 | Path (under `~/.clawboo/`)         | What it is                                                                                                                                | Resolved by                    |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `clawboo.db`                       | The SQLite database, the agent registry of record, board, memory, chat history, settings, governance, the event log, and more (27 tables) | `getDbPath()`                  |
+| `clawboo.db`                       | The SQLite database, the agent registry of record, board, memory, chat history, settings, governance, the event log, and more (28 tables) | `getDbPath()`                  |
 | `clawboo.db-wal`, `clawboo.db-shm` | SQLite Write-Ahead Log sidecars (created automatically; see [WAL files](#wal-files))                                                      | SQLite (WAL mode)              |
 | `settings.json`                    | Gateway URL + token, optional studio access token, first-run dismissal timestamp                                                          | `resolveSettingsPath()`        |
 | `api-port.txt`                     | The port the running server bound to (a discovery hint for the CLI and the Vite proxy)                                                    | `getApiPortFilePath()`         |
@@ -51,7 +51,7 @@ Backing up or resetting `~/.clawboo` never touches OpenClaw's data. The two dire
 
 ## The database
 
-`clawboo.db` is a single SQLite file holding **27 tables**. There is no separate Postgres, no external store, no migration ladder. The schema is applied by `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`), an idempotent `CREATE TABLE IF NOT EXISTS` block that the server runs **once at boot**; `createDb()` is the batteries-included open-and-bootstrap form still used by one-shot processes (the MCP stdio bins, the eval harness, tests). That DDL is the _sole_ source of truth for the schema (the Drizzle `schema.ts` is the typed query layer over the same tables, never used to apply migrations). See the [database schema reference](/reference/database-schema) for the full table list and ERD.
+`clawboo.db` is a single SQLite file holding **28 tables**. There is no separate Postgres, no external store, no migration ladder. The schema is applied by `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`), an idempotent `CREATE TABLE IF NOT EXISTS` block that the server runs **once at boot**; `createDb()` is the batteries-included open-and-bootstrap form still used by one-shot processes (the MCP stdio bins, the eval harness, tests). That DDL is the _sole_ source of truth for the schema (the Drizzle `schema.ts` is the typed query layer over the same tables, never used to apply migrations). See the [database schema reference](/reference/database-schema) for the full table list and ERD.
 
 ### The database path
 
@@ -212,6 +212,6 @@ A fatal check means the install is broken in a way the probe cannot fix, so read
 - [CLI reference](/reference/cli): `clawboo backup`, `clawboo stop`, `clawboo restart`
 - [Configuration](/reference/configuration): `settings.json`, file and directory locations
 - [Environment variables](/reference/environment-variables): `CLAWBOO_HOME`, `CLAWBOO_DB_PATH`, `CLAWBOO_SECRETS_MASTER_KEY`, `OPENCLAW_STATE_DIR`
-- [Database schema](/reference/database-schema): the 27 tables and ERD
+- [Database schema](/reference/database-schema): the 28 tables and ERD
 - [Security](/operating/security): the encrypted vault, redaction, and safe exposure
 - [Deployment](/operating/deployment): ports, the bundled server, and the CLI

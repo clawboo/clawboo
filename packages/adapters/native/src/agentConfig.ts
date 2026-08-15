@@ -54,8 +54,10 @@ export const agentConfigSchema = z.object({
     memory: z.boolean(),
     /** Tools MCP / managed capability broker. */
     tools: z.boolean(),
-    /** Tasks MCP / the durable board. */
-    tasks: z.boolean(),
+    /** Tasks MCP / the durable board. `'read'` attaches only the read tools
+     *  (list_tasks/get_task) — board visibility without racing the engine's
+     *  writes (claims/status stay engine-owned for team runs). */
+    tasks: z.union([z.boolean(), z.literal('read')]),
     /** TeamChat MCP — post + listen in the shared team room as a named peer. */
     teamchat: z.boolean(),
     /** Additional MCP service refs (reserved). */
@@ -93,7 +95,11 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   primaryProvider: 'anthropic',
   primaryModel: 'claude-haiku-4-5',
   envVar: 'ANTHROPIC_API_KEY',
-  tools: { memory: true, tools: true, tasks: true, teamchat: true },
+  // Board access defaults to READ. This config is also the fallback whenever a
+  // stored blob is missing or corrupt, and a team agent silently falling back to
+  // full board writes would race the orchestrator's claims — the exact failure
+  // the read surface exists to prevent. Full write access must be deliberate.
+  tools: { memory: true, tools: true, tasks: 'read', teamchat: true },
   participantKind: 'agent',
   maxTurns: DEFAULT_MAX_TURNS,
   budgetUsd: null,
@@ -101,6 +107,38 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   updatedAt: 0,
   tenantId: null,
 }
+
+/**
+ * The exact tool surface the pre-overhaul product paths (onboarding seed,
+ * CreateTeamModal, native Boo Zero) froze onto every agent they created. It
+ * disabled the whole coordination plane: `teamchat:false` made the
+ * conversation's peer-inbox pull a permanent no-op, and `tasks:false` left the
+ * leader unable to read the board it presides over. The original rationale (a
+ * leader `create_task`/`claim_task` would race the engine) only ever justified
+ * withholding WRITES.
+ *
+ * Predicate only — the ONE-SHOT repair that consumes it lives in the host
+ * (`upgradeFrozenToolsets`), which persists the result. Deliberately NOT applied
+ * on every load: that would be a permanent override, silently re-imposing itself
+ * on a user who later turns these off on purpose.
+ */
+export function isFrozenTeamToolset(tools: AgentConfig['tools']): boolean {
+  // ONLY the two coordination axes. `memory` / `tools` are orthogonal and are
+  // user-toggleable from the Capabilities panel, so including them would skip
+  // repair for anyone who had ever turned the memory MCP off. `teamchat` has no
+  // UI at all — nothing but the pre-overhaul product paths could have written
+  // `teamchat: false`, which is what makes this signature safe to act on.
+  return tools.tasks === false && tools.teamchat === false
+}
+
+/** The coordination-capable surface a frozen toolset is repaired to: board
+ *  reads (writes stay engine-owned) plus the team room. */
+export const COORDINATION_TOOLSET = {
+  memory: true,
+  tools: true,
+  tasks: 'read',
+  teamchat: true,
+} as const satisfies AgentConfig['tools']
 
 /** Parse a stored JSON blob; null (and a logged-by-caller fallback to the
  *  default) on corrupt/invalid content — a bad blob must never crash a run. */

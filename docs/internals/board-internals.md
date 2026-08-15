@@ -218,11 +218,13 @@ Two recovery passes keep the board from accumulating stuck work, one for crashes
 
 **`reconcileStaleInProgress` runs at boot and on an interval.** It is the backstop for an `in_progress` task left behind by a server restart or a crash, after the orchestrator that owned it is gone. A task that is `in_progress`, not dropped, whose `updatedAt` predates a TTL cutoff, **and** whose execution is still `running` is timed out (the exec → `timed_out`) and released to `todo`. The server wires it as one immediate sweep plus a `setInterval(...).unref()` loop.
 
-<Danger>
-`tasks.updatedAt` is **not** a liveness signal: no execution heartbeat bumps the task row mid-run; `updatedAt` is written only on status/claim mutations. So the stale TTL is deliberately *generous* (`60` minutes by default, tunable via `CLAWBOO_BOARD_STALE_TTL_MS`; the sweep interval is `CLAWBOO_BOARD_STALE_SWEEP_MS`, default `5` minutes).
+<Info>
+`tasks.updatedAt` **is** a liveness signal. Every drain that claims a task also beats it: `startTaskHeartbeat` bumps `updatedAt` every `TASK_HEARTBEAT_MS` (30 seconds) for as long as the run owns the task, and the beat is a timer, not a side effect of events, so a silent-but-alive run keeps beating. That turns the sweep from an hour-scale guess into a minutes-scale fact, so the TTL is `3` minutes by default (six missed beats), tunable via `CLAWBOO_BOARD_STALE_TTL_MS`; the sweep interval is `CLAWBOO_BOARD_STALE_SWEEP_MS`, default `60` seconds.
 
-The **primary** mechanism is the orchestrator's own idle watchdog: the per-team server orchestrator sweeps every 30 seconds and fails any delegate silent past `DELEGATION_IDLE_TIMEOUT_MS` (8 minutes), so a genuinely hung delegate is caught long before the stale TTL fires. Because that watchdog is server-side, it keeps running whether or not a browser is open. The stale sweep exists only to catch tasks orphaned by a **server** restart or crash; set the TTL well beyond any realistic single delegate turn or a long-but-active run gets falsely swept.
-</Danger>
+The beat is what makes the short TTL safe, so **a drain that claims a task without beating it will have its live work swept**. There are three: the executor runner, the team orchestrator's `serverDeliver`, and the routines dispatcher. Any new one must beat too.
+
+The orchestrator's own idle watchdog is still the first responder for a delegate that goes quiet: the per-team server orchestrator sweeps every 30 seconds and fails any delegate silent past `DELEGATION_IDLE_TIMEOUT_MS` (8 minutes). Because that watchdog is server-side, it keeps running whether or not a browser is open.
+</Info>
 
 ## The no-migration-ladder model
 

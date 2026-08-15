@@ -23,7 +23,7 @@ import {
 import { usdToFractionalCents } from '@clawboo/governance'
 import { eq } from 'drizzle-orm'
 
-import { homeDispatchMutex } from '../executorRunner'
+import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
@@ -253,6 +253,11 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
   // A persistent-home runtime (native) serializes on the home mutex — held across
   // the whole drain so a concurrent executor run / routine / team turn for the same
   // (runtime, agent) can't overlap its session / native state.db.
-  const job = capturedHomeDir ? () => homeDispatchMutex.run(capturedHomeDir, runJob) : runJob
+  const job = capturedHomeDir
+    ? () =>
+        homeDispatchMutex.run(capturedHomeDir, runJob, {
+          acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS,
+        })
+    : runJob
   await job().catch(() => undefined)
 }

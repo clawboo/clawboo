@@ -15,9 +15,11 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
 import { agents, setSetting, teams, type ClawbooDb } from '@clawboo/db'
 
 import { getDb, resetDb } from '../../db'
+import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
 import { buildServerTeamContext } from '../contextPreamble'
 
 const LEADER_BLOCK = '[Leading this team' // shared framing (native AND coding leaders)
@@ -25,6 +27,7 @@ const CODING_LEADER_TOOL = 'team_delegate' // the coding leader block's tool (MC
 const WORKER_BLOCK = '[Your task'
 const OPENCLAW_BLOCK = '[How this team works'
 const ABOUT_USER = '[About the User]'
+const AWARENESS_BLOCK = '[Staying in sync with your teammates]'
 
 describe('buildServerTeamContext coordination blocks', () => {
   let home: string
@@ -132,6 +135,57 @@ describe('buildServerTeamContext coordination blocks', () => {
     expect(ctx).toContain(ABOUT_USER)
     expect(ctx).not.toContain(WORKER_BLOCK)
     expect(ctx).not.toContain(LEADER_BLOCK)
+  })
+
+  it('teaches the team room to a native agent that has it', () => {
+    saveAgentConfig(db, {
+      ...DEFAULT_AGENT_CONFIG,
+      id: 'nlead',
+      tools: { memory: true, tools: true, tasks: 'read', teamchat: true },
+    })
+    const ctx = buildServerTeamContext(db, 'T', 'nlead', true) ?? ''
+    expect(ctx).toContain(AWARENESS_BLOCK)
+    expect(ctx).toContain('team_chat_post')
+    expect(ctx).toContain('team_chat_subscribe')
+    expect(ctx).toContain('list_tasks')
+  })
+
+  it('stays silent for a native agent whose room is switched OFF', () => {
+    // Naming a tool the run does not have is worse than saying nothing — the
+    // model calls it and gets an unknown-tool error.
+    saveAgentConfig(db, {
+      ...DEFAULT_AGENT_CONFIG,
+      id: 'nlead',
+      tools: { memory: true, tools: true, tasks: false, teamchat: false },
+    })
+    expect(buildServerTeamContext(db, 'T', 'nlead', true) ?? '').not.toContain(AWARENESS_BLOCK)
+  })
+
+  it('teaches the room to a native agent with NO stored config (the run path defaults it on)', () => {
+    // The run resolves config with `loadAgentConfigOrDefault`, whose default has
+    // `teamchat: true` — so the room really is attached and must be taught.
+    expect(buildServerTeamContext(db, 'T', 'nwork', false) ?? '').toContain(AWARENESS_BLOCK)
+  })
+
+  it('teaches the team room to coding runtimes (MCP-attached + bound on team runs)', () => {
+    // Both roles: a worker needs the room as much as a leader — it is how it
+    // learns what changed while it was busy.
+    expect(buildServerTeamContext(db, 'T', 'hlead', true) ?? '').toContain(AWARENESS_BLOCK)
+    expect(buildServerTeamContext(db, 'T', 'hlead', false) ?? '').toContain(AWARENESS_BLOCK)
+  })
+
+  it('never names the ROOM tools to an OpenClaw agent — it deliberately has none', () => {
+    // TeamChat is not registered in the Gateway config: that config is
+    // process-wide, so a static URL can't carry a per-run author binding, and an
+    // unbound team_chat_post would let an agent post as ANY author. OpenClaw room
+    // participation is server-mediated instead. The BOARD tools are registered,
+    // so those are still taught — the two axes are gated independently.
+    for (const isLeader of [true, false]) {
+      const ctx = buildServerTeamContext(db, 'T', 'ocagent', isLeader) ?? ''
+      expect(ctx).not.toContain('team_chat_post')
+      expect(ctx).not.toContain('team_chat_subscribe')
+      expect(ctx).toContain('list_tasks')
+    }
   })
 
   it('OpenClaw WORKER turn: delegate-protocol block + worker guardrail, NO [About the User]', () => {

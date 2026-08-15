@@ -494,7 +494,28 @@ const SCHEMA_DDL = `
       seq             INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_team_chat_room_seq ON team_chat (room_id, seq);
-    CREATE INDEX IF NOT EXISTS idx_team_chat_team ON team_chat (team_id);`
+    CREATE INDEX IF NOT EXISTS idx_team_chat_team ON team_chat (team_id);
+
+    -- ── Durable per-agent mailbox — the delivery plane (see src/inbox.ts) ──
+    -- A row is a notification an agent must eventually receive (an executor-path
+    -- task update, a parked/undeliverable alert, a peer signal). Consumed by
+    -- whichever channel reaches the agent first — the run-seed digest or the MCP
+    -- tool-response piggyback — each stamping delivered_at + delivered_via.
+    -- Undelivered rows survive eviction and restart: a restart is a pause, and
+    -- the agent catches up from its mailbox rather than from luck.
+    CREATE TABLE IF NOT EXISTS agent_inbox (
+      id              TEXT    PRIMARY KEY,
+      team_id         TEXT,
+      agent_id        TEXT    NOT NULL,
+      kind            TEXT    NOT NULL,
+      body            TEXT    NOT NULL,
+      task_id         TEXT,
+      created_at      INTEGER NOT NULL,
+      delivered_at    INTEGER,
+      delivered_via   TEXT,
+      tenant_id       TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_inbox_pending ON agent_inbox (agent_id, delivered_at);`
 
 /**
  * Bring the database up to the schema above, so the file is immediately usable

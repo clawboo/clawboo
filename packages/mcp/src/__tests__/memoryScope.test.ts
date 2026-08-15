@@ -130,10 +130,13 @@ describe('Memory MCP — scrub on write', () => {
 })
 
 describe('scoped attach URL helpers', () => {
-  it('mcpHttpUrl appends scope to the Memory URL only', () => {
-    expect(mcpHttpUrl('http://h:1', 'tasks', { teamId: 'T', agentId: 'A' })).toBe(
-      'http://h:1/api/mcp/tasks',
-    )
+  it('mcpHttpUrl appends the right scope per server', () => {
+    // Tasks binds the TEAM (scoping board READS: a bare `list_tasks` means "my
+    // team's board") and the AGENT (enabling the mid-run inbox piggyback).
+    const tasks = mcpHttpUrl('http://h:1', 'tasks', { teamId: 'T', agentId: 'A' })
+    expect(tasks).toBe('http://h:1/api/mcp/tasks?scopeTeamId=T&scopeAgentId=A')
+    // No scope ⇒ bare (raw stdio / external attach stays board-wide).
+    expect(mcpHttpUrl('http://h:1', 'tasks')).toBe('http://h:1/api/mcp/tasks')
     expect(mcpHttpUrl('http://h:1', 'tools', { teamId: 'T' })).toBe('http://h:1/api/mcp/tools')
     const mem = mcpHttpUrl('http://h:1', 'memory', { teamId: 'T', agentId: 'A' })
     expect(mem.startsWith('http://h:1/api/mcp/memory?')).toBe(true)
@@ -143,7 +146,7 @@ describe('scoped attach URL helpers', () => {
     expect(mcpHttpUrl('http://h:1', 'memory')).toBe('http://h:1/api/mcp/memory')
   })
 
-  it('buildAttachConfig carries the run scope onto the Memory server URL', () => {
+  it('buildAttachConfig carries the run scope onto the Memory and Tasks URLs', () => {
     const cfg = buildAttachConfig({
       runtime: 'claude-code',
       server: 'memory',
@@ -152,7 +155,7 @@ describe('scoped attach URL helpers', () => {
       scope: { teamId: 'T' },
     })
     expect(JSON.stringify(cfg.structured)).toContain('scopeTeamId=T')
-    // Tasks stays bare even with a scope present.
+    // Tasks carries the team too, so its board reads are team-bound.
     const tasks = buildAttachConfig({
       runtime: 'claude-code',
       server: 'tasks',
@@ -160,6 +163,15 @@ describe('scoped attach URL helpers', () => {
       httpBaseUrl: 'http://h:1',
       scope: { teamId: 'T' },
     })
-    expect(JSON.stringify(tasks.structured)).not.toContain('scopeTeamId')
+    expect(JSON.stringify(tasks.structured)).toContain('scopeTeamId=T')
+    // Tools stays bare — it has no scoped surface.
+    const tools = buildAttachConfig({
+      runtime: 'claude-code',
+      server: 'tools',
+      transport: 'http',
+      httpBaseUrl: 'http://h:1',
+      scope: { teamId: 'T' },
+    })
+    expect(JSON.stringify(tools.structured)).not.toContain('scopeTeamId')
   })
 })

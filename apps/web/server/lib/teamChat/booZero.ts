@@ -183,7 +183,9 @@ export async function ensureNativeBooZero(
           ? { primaryProvider: chosen.provider, primaryModel: chosen.model, envVar: chosen.envVar }
           : {}),
         systemPrompt: NATIVE_BOO_ZERO_PROMPT,
-        tools: { memory: true, tools: true, tasks: false, teamchat: false },
+        // Read-only board + team room, matching the team agents (Boo Zero is
+        // team-less today, so teamchat attaches only once it gains a team scope).
+        tools: { memory: true, tools: true, tasks: 'read', teamchat: true },
         participantKind: 'agent',
         budgetUsd: null,
       },

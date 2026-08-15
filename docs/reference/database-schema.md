@@ -1,11 +1,11 @@
 ---
 title: Database schema reference
-description: The 27 SQLite tables Clawboo persists, their columns, indexes, and how the schema is bootstrapped without a migration ladder.
+description: The 28 SQLite tables Clawboo persists, their columns, indexes, and how the schema is bootstrapped without a migration ladder.
 ---
 
 Clawboo persists all of its durable state in one local SQLite file. This page documents every table defined in `packages/db/src/schema.ts`: purpose, key columns, indexes, and foreign keys, plus how the schema is created and where the file lives.
 
-There are **27 tables**. They cluster by subsystem: the agent/team **registry of record**, the durable **board**, the **memory** store, the **tools** broker, **governance**, the **observability** event log, the **capability** inventory, and the **team-chat** room substrate. The `memory_facts_fts` FTS5 virtual table (and its shadow tables) are not in the table count; they are raw DDL in `createDb`, not modellable in `schema.ts`.
+There are **28 tables**. They cluster by subsystem: the agent/team **registry of record**, the durable **board**, the **memory** store, the **tools** broker, **governance**, the **observability** event log, the **capability** inventory, and the **team-chat** room substrate. The `memory_facts_fts` FTS5 virtual table (and its shadow tables) are not in the table count; they are raw DDL in `createDb`, not modellable in `schema.ts`.
 
 <Info>
 There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`) is the **sole** schema-creation source. `schema.ts` is the Drizzle type layer over the same tables, used for typed queries, never to apply migrations. Upgrading in place adds columns an older database is missing, derived from that same DDL; changing or removing an existing column is still a reset. See [Schema source of truth](#schema-source-of-truth--no-migration-ladder) below.
@@ -342,11 +342,18 @@ The durable group-chat room substrate for mixed-runtime peer chat: every team me
 `team_chat` carries no `tenant_id` column. The room query is kept tenant-scopable via `team_id`, but the dormant multi-tenant column is not yet present on this table.
 </Note>
 
+### `agent_inbox`
+
+The durable per-agent mailbox: the delivery plane that makes a coordination notice survive whatever happens to the agent it is aimed at. A row is something the agent must eventually receive, written by a board-lifecycle subscriber or the orchestrator. Delivery is exactly-once across channels rather than per channel: whichever channel reaches the agent first claims the row and stamps `delivered_at` with its own name in `delivered_via`, so a digest racing a mid-run piggyback cannot render the same notice twice. Undelivered rows outlive orchestrator eviction and server restarts, which is what makes a restart a pause instead of amnesia.
+
+- **Columns**: `id` (PK, text), `team_id`, `agent_id` (not null, the recipient), `kind` (not null; `task_update` = a delegated or executor task reached a terminal, `alert` = a coordination failure such as a parked or delivery-exhausted task, `signal` = an ambient FYI), `body` (not null), `task_id`, `created_at` (not null), `delivered_at` (null while pending), `delivered_via` (`digest` | `mcp` | `signal`), `tenant_id`.
+- **Indexes**: `idx_agent_inbox_pending` on `(agent_id, delivered_at)`, which is the pending-rows read every delivery channel makes.
+
 ---
 
 ## FTS5 search: `memory_facts_fts`
 
-`memory_facts` full-text search rides a companion FTS5 virtual table, `memory_facts_fts`, declared as raw DDL in `createDb` (Drizzle cannot model a virtual table, so it is not in `schema.ts` and not counted among the 27 tables). It mirrors `title`, `content`, and an unindexed `fact_id`, kept in sync by three triggers:
+`memory_facts` full-text search rides a companion FTS5 virtual table, `memory_facts_fts`, declared as raw DDL in `createDb` (Drizzle cannot model a virtual table, so it is not in `schema.ts` and not counted among the 28 tables). It mirrors `title`, `content`, and an unindexed `fact_id`, kept in sync by three triggers:
 
 - `memory_facts_ai`: `AFTER INSERT`: copies the new row into the FTS index.
 - `memory_facts_ad`: `AFTER DELETE`: removes the FTS row.

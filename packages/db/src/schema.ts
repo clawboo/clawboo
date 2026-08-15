@@ -736,6 +736,38 @@ export type DbCapabilityInsert = typeof capabilities.$inferInsert
 // (`subscribe`) is stable. `teamId` is on every row and the room query is kept
 // tenant-scopable (no tenant_id column yet — the dormant multi-tenant seam). The
 // board stays canonical: a post NEVER mutates the board.
+// agent_inbox — the DURABLE per-agent mailbox (the coordination overhaul's
+// delivery plane). A row is a notification an agent must eventually receive:
+// an executor-path task update, a parked/undeliverable alert, a peer signal.
+// Rows are written by bus subscribers / the orchestrator and consumed by ANY
+// channel that touches the agent first — the context digest at run seed, the
+// MCP tool-response piggyback mid-run — each marking delivered_at + the channel
+// in delivered_via. Undelivered rows survive eviction and restarts: a restart
+// is a pause, and the agent catches up from its mailbox, not from luck.
+export const agentInbox = sqliteTable(
+  'agent_inbox',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id'),
+    /** The recipient. */
+    agentId: text('agent_id').notNull(),
+    // 'task_update' = a delegated/executor task reached a terminal ·
+    // 'alert' = a coordination failure (parked, delivery-exhausted) ·
+    // 'signal' = an FYI peer event worth ambient delivery.
+    kind: text('kind').notNull(),
+    body: text('body').notNull(),
+    taskId: text('task_id'),
+    createdAt: integer('created_at').notNull(),
+    deliveredAt: integer('delivered_at'),
+    /** Which channel delivered it ('digest' | 'mcp' | 'signal'). */
+    deliveredVia: text('delivered_via'),
+    tenantId: text('tenant_id'),
+  },
+  (t) => [index('idx_agent_inbox_pending').on(t.agentId, t.deliveredAt)],
+)
+
+export type DbAgentInboxRow = typeof agentInbox.$inferSelect
+
 export const teamChat = sqliteTable(
   'team_chat',
   {

@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventFrame } from '@clawboo/gateway-client'
 import type { RuntimeEvent } from '@clawboo/executor'
 import {
@@ -20,6 +20,7 @@ import {
   getTask,
   listExecutions,
   listGovernanceAudit,
+  reconcileStaleInProgress,
   recordSpend,
   registerScheduledRun,
   setBudgetLimit,
@@ -606,5 +607,52 @@ describe('dispatchConnectedSubstrate', () => {
       client: new FakeOperatorClient() as unknown as OperatorClientLike,
     })
     expect(outcome).toMatchObject({ ok: true, taskId })
+  })
+
+  it('heartbeats the task while it drains, so the stale sweep cannot reclaim live work', async () => {
+    // This is the third claiming drain, and the stale sweep's short TTL is only
+    // safe because every claiming drain proves liveness. Without a beat here, a
+    // routine turn longer than the TTL (this drain runs up to a 10-min watchdog)
+    // is swept mid-flight: the exec goes `timed_out`, the task is released to
+    // `todo`, and the real completion then finds an already-terminal ledger row.
+    const STALE_TTL_MS = 3 * 60_000
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const agentRow = seedAgent()
+      const run = seedRoutine(agentRow.id)
+      const taskId = seedTask()
+      const client = new FakeOperatorClient()
+      const sessionKey = `agent:gw-${agentRow.id}:clawboo-routine-${run.id}`
+
+      const dispatchPromise = dispatchConnectedSubstrate({
+        db,
+        run,
+        template: TEMPLATE,
+        agentRow,
+        taskId,
+        client: client as unknown as OperatorClientLike,
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(getTask(db, taskId)?.status).toBe('in_progress')
+
+      // A long but perfectly healthy run: no board write of its own for well
+      // past the TTL, only heartbeats. The watchdog (10 min) stays clear.
+      await vi.advanceTimersByTimeAsync(STALE_TTL_MS + 30_000)
+
+      expect(reconcileStaleInProgress(db, STALE_TTL_MS).reconciled).toBe(0)
+      expect(getTask(db, taskId)?.status).toBe('in_progress')
+      expect(listExecutions(db, taskId)[0]?.status).toBe('running')
+
+      client.emit(
+        chatFrame(sessionKey, 'final', {
+          message: { role: 'assistant', content: 'took a while, but done' },
+        }),
+      )
+      await expect(dispatchPromise).resolves.toMatchObject({ ok: true, taskId })
+      expect(getTask(db, taskId)?.status).toBe('done')
+      expect(listExecutions(db, taskId)[0]?.status).toBe('succeeded')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

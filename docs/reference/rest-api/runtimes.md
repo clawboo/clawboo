@@ -494,7 +494,7 @@ curl http://localhost:18790/api/runtimes/openrouter/models
 
 ## `POST /api/onboarding/seed-native-team`
 
-Mints a default native team, a leader (capable model) and a specialist (cheap model), both with the Memory and Tools MCP and with Tasks and TeamChat deliberately off (the orchestration engine owns the board), so a first-run user who just connected a provider key lands in a working team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). The team row is inserted first (the agents' `teamId` FK requires it), the agents are created with that `teamId`, the leader is recorded, and the "Know Your Team" onboarding flags are pre-satisfied so the user lands straight in chat.
+Mints a default native team, a leader (capable model) and a specialist (cheap model), both with the Memory and Tools MCP, TeamChat, and read-only Tasks (board writes stay engine-owned), so a first-run user who just connected a provider key lands in a working team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). The team row is inserted first (the agents' `teamId` FK requires it), the agents are created with that `teamId`, the leader is recorded, and the "Know Your Team" onboarding flags are pre-satisfied so the user lands straight in chat.
 
 <Note>
 This route is not under `/api/runtimes` and takes no `:id` segment. It is grouped here because it is the native runtime's first-run seed step.
