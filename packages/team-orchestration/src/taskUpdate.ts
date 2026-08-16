@@ -51,7 +51,28 @@ function taskFailureLabel(outcome?: TaskUpdateOutcome): string | null {
  * instead of waiting forever (the anti-blind-retry framing from the
  * observability literature).
  */
-export function buildTaskUpdateMessage(items: TaskUpdateItem[]): string {
+/** Delegations this recipient is STILL waiting on, for the header line. */
+export interface OutstandingDelegation {
+  /** Assignee name, so the reader knows who to chase. */
+  by: string
+  /** Task title, truncated by the caller if long. */
+  title?: string
+}
+
+/**
+ * `outstanding` is the cardinality half of reply-threads, and deliberately only
+ * that. A delegator batching three answers has no way today to tell "all three
+ * are in" from "one is in and two are still running", so it either waits on work
+ * that already finished or synthesizes a partial answer as if it were complete.
+ * One header line fixes that without a thread id, a new verb, or a column: the
+ * information is already on the board, it was just never rendered.
+ *
+ * Omitted or empty renders NOTHING, so an existing call is byte-identical.
+ */
+export function buildTaskUpdateMessage(
+  items: TaskUpdateItem[],
+  outstanding: OutstandingDelegation[] = [],
+): string {
   if (items.length === 0) return ''
   const failures = items.filter((i) => isTaskFailure(i.outcome))
   const plural = items.length === 1 ? 'task' : 'tasks'
@@ -59,6 +80,16 @@ export function buildTaskUpdateMessage(items: TaskUpdateItem[]): string {
     `[Task Update] — ${items.length} ${plural} on the board reached a terminal state (not a fresh user message).`,
     'These are board-sourced results. Synthesize across them ONLY when the user is waiting on a combined answer, or when you need a unified takeaway to drive the next step. Do NOT acknowledge them individually.',
   ]
+  if (outstanding.length > 0) {
+    const named = outstanding
+      .slice(0, 3)
+      .map((o) => (o.title ? `${o.by} ("${o.title}")` : o.by))
+      .join(', ')
+    const more = outstanding.length > 3 ? `, and ${outstanding.length - 3} more` : ''
+    headerLines.push(
+      `Still outstanding: ${outstanding.length} — ${named}${more}. These have NOT reported yet, so do not treat the results below as the complete picture.`,
+    )
+  }
   if (failures.length > 0) {
     headerLines.push(
       `⚠ ${failures.length} of these did NOT complete (the ⚠ entries below). Decide what to do next — retry, reassign to another teammate, or tell the user it failed and why. Do NOT keep silently waiting on them.`,

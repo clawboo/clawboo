@@ -70,3 +70,28 @@ export function saveChatLeaderState(
   const safe = redactObject(state) as ChatLeaderState
   setSetting(db, key(roomId, agentId), JSON.stringify(safe))
 }
+
+/**
+ * Advance ONLY the room cursor, leaving every other field as it was.
+ *
+ * Two paths deliver room posts to the same agent: the browser exchange
+ * (`dispatchChatTurn`, which clocks out a whole state) and the server-orchestrated
+ * run (`serverDeliver`, which only ever learns "these posts were handed over").
+ * They share one cursor on purpose, since it answers a single question, so the
+ * orchestrated side must not clobber the exchange's session id or summary by
+ * writing a full state it does not own.
+ *
+ * MONOTONIC: never moves the cursor backwards. A concurrent writer that already
+ * advanced past `seq` has delivered more, not less, and rewinding would re-deliver
+ * posts the agent has seen.
+ */
+export function advanceChatLeaderSeq(
+  db: ClawbooDb,
+  roomId: string,
+  agentId: string,
+  seq: number,
+): void {
+  const prior = loadChatLeaderState(db, roomId, agentId)
+  if (seq <= prior.lastSeenSeq) return
+  saveChatLeaderState(db, roomId, agentId, { ...prior, lastSeenSeq: seq })
+}

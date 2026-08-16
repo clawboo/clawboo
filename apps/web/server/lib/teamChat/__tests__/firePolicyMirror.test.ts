@@ -113,3 +113,29 @@ describe('sweep TTL vs the engine idle watchdog', () => {
     expect(DEFAULT_STALE_TTL_MS).toBeLessThan(DELEGATION_IDLE_TIMEOUT_MS)
   })
 })
+
+// ─── Control capabilities, declared rather than assumed ──────────────────────
+// `signalAgent` used to call `writeContext` on whatever runtime happened to be
+// live. On a spawned CLI that writes a file into the run's cwd and on OpenClaw it
+// sets a Gateway agent file; neither reaches the model mid-run. The call resolved
+// either way, so the failure was invisible: it read as delivery in the logs while
+// delivering nothing. `steerable` makes that a declared fact, and absence means no.
+describe('steerable is declared honestly', () => {
+  it('only the native runtime claims mid-run steering', async () => {
+    const [{ NativeAdapter }, { CodexAdapter }, { ClaudeCodeAdapter }] = await Promise.all([
+      import('@clawboo/adapter-native'),
+      import('@clawboo/adapter-codex'),
+      import('@clawboo/adapter-claude-code'),
+    ])
+    // `capabilities()` is a static declaration about the runtime, so it must not
+    // need a driver. A throwing factory proves that as a side effect.
+    const noDriver = (): never => {
+      throw new Error('capabilities() must not construct a driver')
+    }
+    // The native driver routes the reserved key into the conversation queue.
+    expect(new NativeAdapter(noDriver).capabilities().steerable).toBe(true)
+    // The spawn drivers write a cwd file nothing reads back.
+    expect(new CodexAdapter(noDriver).capabilities().steerable).toBe(false)
+    expect(new ClaudeCodeAdapter(noDriver).capabilities().steerable).toBe(false)
+  })
+})

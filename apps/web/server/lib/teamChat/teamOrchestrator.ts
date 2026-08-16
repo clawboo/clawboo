@@ -474,6 +474,13 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       const sk = buildTeamSessionKey(agentId, teamId)
       const entry = abortMap.get(sk)
       if (!entry) return // no live run — the mailbox/digest covers delivery
+      // ASK, don't hope. On a non-steerable runtime `writeContext` still resolves,
+      // it just writes somewhere no model reads: a cwd file for the spawned CLIs,
+      // a Gateway agent file for OpenClaw. Calling it there looks like delivery in
+      // the logs while delivering nothing, which is worse than not calling it —
+      // the durable mailbox is what actually reaches those runtimes, and it has
+      // already recorded this notice by the time we get here.
+      if (!entry.adapter.capabilities().steerable) return
       void entry.adapter
         .writeContext(entry.run, NATIVE_SIGNAL_CONTEXT_KEY, text)
         .catch(() => undefined)

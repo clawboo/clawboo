@@ -1259,6 +1259,48 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(refl.some((r) => r.sessionKey === sk('leader'))).toBe(false)
     })
 
+    it('a batched reflection tells the delegator what is STILL outstanding', async () => {
+      // Two delegations from one turn, one answer. Without the count the leader
+      // cannot tell "both are in" from "one is in and one is still running", so it
+      // either waits on finished work or synthesizes a partial answer as complete.
+      const h = makeHarness()
+      const { board, delivered, orchestrator } = h
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          '<delegate to="@Bug Boo">fix the parser</delegate>' +
+            '<delegate to="@Design Boo">draft the empty state</delegate>',
+        ),
+      )
+      expect(idsOf(board)).toHaveLength(2)
+
+      // Only Bug Boo reports.
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'parser fixed'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+      const refl = reflections(delivered).find((r) => r.sessionKey === sk('leader'))
+      expect(refl).toBeDefined()
+      expect(refl!.task).toMatch(/Still outstanding: 1/)
+      expect(refl!.task).toContain('Design Boo')
+    })
+
+    it('says nothing about outstanding work when everything has reported', async () => {
+      // The quiet case has to stay quiet: a header line on every single-delegation
+      // reflection would be noise on the most common path.
+      const h = makeHarness()
+      const { delivered, orchestrator } = h
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'),
+      )
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const refl = reflections(delivered)[0]
+      expect(refl).toBeDefined()
+      expect(refl!.task).not.toMatch(/Still outstanding/)
+    })
+
     it('resume attaches ONLY a live engine-owned run: a runless row is skipped', async () => {
       // Claimed but with no running exec (mid-handoff). Attaching would start an
       // 8-minute watchdog clock nothing can refresh, so the task would be failed

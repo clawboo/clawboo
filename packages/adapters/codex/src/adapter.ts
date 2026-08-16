@@ -43,6 +43,8 @@ export class CodexAdapter implements RuntimeAdapter {
       // runtime headless, where the CLI run passes --dangerously-bypass-approvals-and-sandbox.
       // Isolation for those runs comes from the per-task worktree instead.
       toolApproval: true,
+      // See claude-code: the spawn driver writes a cwd file nothing reads back.
+      steerable: false,
       models: ['gpt-5-codex', 'gpt-5', 'o4-mini'],
       // Native-preservation seam: a wrapped one-shot with a PERSISTENT per-identity
       // CODEX_HOME — the change that gives a Codex LEADER conversational continuity

@@ -19,7 +19,11 @@ import type { RuntimeEvent } from '@clawboo/executor'
 import { checkDepthCap, checkFanoutCap, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
 
 import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
-import { buildTaskUpdateMessage, type TaskUpdateOutcome } from './taskUpdate'
+import {
+  buildTaskUpdateMessage,
+  type OutstandingDelegation,
+  type TaskUpdateOutcome,
+} from './taskUpdate'
 
 import {
   parseStructuredDelegations,
@@ -1053,7 +1057,29 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       // A Stop mid-flush suppresses the remaining groups' narration AND delivery —
       // the user halted; don't append stale [Task Update]s or re-amplify after Stop.
       if (deps.stopGen() !== startGen) return
-      const message = buildTaskUpdateMessage(group)
+      // What is this recipient STILL waiting on? Read off the board rather than
+      // tracked in memory, so it survives a restart and counts work fired by any
+      // path. Not-yet-terminal means `todo` or `in_progress`: a `blocked` task is
+      // not going to report on its own, and counting it would tell the delegator
+      // to keep waiting on something that needs a human.
+      const outstanding: OutstandingDelegation[] = []
+      const toAgentId = deps.agentIdForSession(toSk)
+      if (toAgentId) {
+        const settled = new Set(group.map((i) => i.title ?? ''))
+        for (const t of await deps.board.listTasks(deps.teamId).catch(() => [])) {
+          const sdid = typeof t.sourceDelegationId === 'string' ? t.sourceDelegationId : ''
+          if (sdidReflectTo(sdid) !== toAgentId) continue
+          if (t.status !== 'todo' && t.status !== 'in_progress') continue
+          const title = typeof t.title === 'string' ? t.title : undefined
+          // A task in this very batch is reporting now, not outstanding.
+          if (title && settled.has(title)) continue
+          outstanding.push({
+            by: nameOf(sdidAgent(sdid)),
+            ...(title ? { title: title.length > 60 ? title.slice(0, 60) + '…' : title } : {}),
+          })
+        }
+      }
+      const message = buildTaskUpdateMessage(group, outstanding)
       // Visible narration (board→chat) + context delivery to the recipient. The
       // narration is the user-facing signal even if the delivery itself fails.
       deps.narrate?.(toSk, message)

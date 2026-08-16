@@ -51,6 +51,20 @@ export interface Capabilities {
    * "board runs are approval-gated".
    */
   toolApproval: boolean
+  /**
+   * Text written with `writeContext` reaches the MODEL during the run it is
+   * written into.
+   *
+   * OPTIONAL, and absence means NO: a host must not inject into a run whose
+   * adapter makes no claim. Declaring only what is true is the whole point, since
+   * an aspirational capability is worse than an absent one. The native runtime
+   * routes the reserved signal key straight into the conversation's input queue,
+   * so the model reads it at its next turn iteration. The spawned CLIs write a
+   * file into the run's cwd, which nothing reads back, and OpenClaw sets an agent
+   * file the running session does not re-read. For those, mid-run delivery is a
+   * fiction and the durable mailbox is the real channel.
+   */
+  steerable?: boolean
   /** Model identifiers this runtime can use (may be empty when unknown). */
   models: string[]
   /**

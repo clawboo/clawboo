@@ -32,6 +32,7 @@ import {
   startTaskHeartbeat,
   updateTaskFields,
   type ClawbooDb,
+  resolveRoomForTeam,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import {
@@ -60,6 +61,8 @@ import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { buildServerTeamContext } from './contextPreamble'
 import { nativeTeamSessionSettingKey, teamResumeEligible } from './nativeTeamSession'
+import { buildPeerCatchup } from './peerCatchup'
+import { advanceChatLeaderSeq, loadChatLeaderState } from './leaderState'
 
 const log = createLogger('server-deliver')
 
@@ -533,7 +536,22 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // Only the rows that actually FIT the render get marked (below) — a row
     // truncated out of the budget was not delivered and rides the next digest.
     const digestIds = rendered.includedIds
-    const teamContext = [baseTeamContext, rendered.text].filter(Boolean).join('\n\n') || null
+    // Ambient room catch-up: what teammates SAID while this agent was not running.
+    // The mailbox above carries what clawboo generates (task terminals, alerts);
+    // this carries peer speech, which nothing on this path used to read. The
+    // native in-run pull baselines to the room head, so it can never recover a
+    // post older than the run — without this, an agent that was idle when a
+    // teammate spoke simply never hears it. Cursor advances at run START, below.
+    const roomId = isTeamSessionKey(targetSessionKey) ? resolveRoomForTeam(teamId) : null
+    const catchup = roomId
+      ? buildPeerCatchup(db, {
+          roomId,
+          agentId: targetAgentId,
+          sinceSeq: loadChatLeaderState(db, roomId, targetAgentId).lastSeenSeq,
+        })
+      : { text: null, throughSeq: null }
+    const teamContext =
+      [baseTeamContext, catchup.text, rendered.text].filter(Boolean).join('\n\n') || null
     // Route through the nudge queue: idle session → send now; busy session →
     // FIFO-enqueue for the next turn boundary (never interrupts an in-flight run).
     return nudge.deliver(
@@ -721,6 +739,20 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               return
             }
             abortMap.set(targetSessionKey, { adapter, run })
+            // The run STARTED with the catch-up in its context, so the cursor may
+            // advance — and only now. Advancing at render time would let a failed
+            // start eat the posts, which is the same rule the digest follows one
+            // block below. Only through the last post that actually fit.
+            if (roomId && catchup.throughSeq !== null) {
+              try {
+                advanceChatLeaderSeq(db, roomId, targetAgentId, catchup.throughSeq)
+              } catch (err) {
+                log.error(
+                  { err, roomId, agentId: targetAgentId },
+                  'peer catch-up cursor advance failed',
+                )
+              }
+            }
             // The run started with the digest in its context — mark the rows
             // that were RENDERED delivered (first-winner guard handles a racing
             // channel; truncated-out rows stay undelivered by design).

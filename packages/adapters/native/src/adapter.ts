@@ -44,6 +44,10 @@ export class NativeAdapter implements RuntimeAdapter {
       worktrees: true,
       resume: true,
       toolApproval: true,
+      // TRUE, and the only one: `writeContext` with the reserved signal key is
+      // routed into the conversation's input queue, so the model reads it at its
+      // next turn iteration (see the native driver).
+      steerable: true,
       // Routable surface, not an exhaustive list — AgentConfig picks the model;
       // any provider-supported id works.
       models: ['claude-haiku-4-5', 'claude-sonnet-4-6', 'gpt-4o-mini', 'gpt-4o'],
