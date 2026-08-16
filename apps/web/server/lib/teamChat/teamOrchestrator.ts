@@ -87,6 +87,11 @@ export interface TeamOrchestrator {
    *  Best-effort no-op when the agent has no live run — durable delivery is the
    *  mailbox's job, not this seam's. */
   signalAgent(agentId: string, text: string): void
+  /** An out-of-band release (stale sweep, orphan reap, a human moving the card)
+   *  freed a task this engine may still have mapped to a session. Forget it, so
+   *  the ready-pump can re-fire the work and the idle watchdog stops owning a run
+   *  nobody is driving. Refused while a live run still holds the session. */
+  detachTask(taskId: string): boolean
   /** Tear down timers + the engine (idle eviction / shutdown). */
   dispose(): void
 }
@@ -236,6 +241,12 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     known: () => knownAgents(db, teamId),
     leaderAgentId: () => resolveLeaderId(db, teamId),
     sessionKeyForAgent: (id) => buildTeamSessionKey(id, teamId),
+    // "A live run owns this session" answered from the map that already tracks
+    // exactly that, rather than a marker kept for this one question: `abortMap`
+    // is populated only after `adapter.start` resolves and cleared on BOTH the
+    // terminal and the no-terminal paths, so it cannot strand a permanent busy
+    // that would make `detachTask` refuse forever.
+    isSessionBusy: (sk) => abortMap.has(sk),
     agentIdForSession: (sk) => agentIdFromSessionKey(sk),
     deliver: trackedDeliver,
     stopGen: () => serverStopGen,
@@ -344,7 +355,14 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
 
   // Idle watchdog: fail a delegate gone silent past the engine's
   // DELEGATION_IDLE_TIMEOUT_MS so the leader is never left standing.
-  const sweep = setInterval(() => void engine.sweepStaleSessions(), SWEEP_INTERVAL_MS)
+  const sweep = setInterval(() => {
+    // A rejected sweep used to be a bare `void` — an unhandled rejection with no
+    // trace. The watchdog is the only thing that fails a silent delegate, so its
+    // failing silently is precisely the case an operator needs to see.
+    engine
+      .sweepStaleSessions()
+      .catch((err: unknown) => log.error({ err, teamId }, 'idle-watchdog sweep failed'))
+  }, SWEEP_INTERVAL_MS)
   sweep.unref?.()
 
   const orchestrator: TeamOrchestrator = {
@@ -448,6 +466,9 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     async pump(): Promise<void> {
       await ready // never race the Boo-Zero bootstrap / initial resume
       await engine.resume()
+    },
+    detachTask(taskId: string): boolean {
+      return engine.detachTask(taskId)
     },
     signalAgent(agentId: string, text: string): void {
       const sk = buildTeamSessionKey(agentId, teamId)

@@ -33,6 +33,7 @@ import {
   updateTaskFields,
   type ClawbooDb,
 } from '@clawboo/db'
+import { createLogger } from '@clawboo/logger'
 import {
   DEFAULT_RUN_SILENT_TIMEOUT_MS,
   resolveRuntimeIntegration,
@@ -59,6 +60,8 @@ import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { buildServerTeamContext } from './contextPreamble'
 import { nativeTeamSessionSettingKey, teamResumeEligible } from './nativeTeamSession'
+
+const log = createLogger('server-deliver')
 
 /** clawboo's own in-process runtime — the only one that uses the native leader
  *  session-resume pointer (mirrors driveAgentChat's native-only 1:1 continuity). */
@@ -453,8 +456,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         } else nudge.markBusy(sessionKey)
         try {
           await onEvent(sessionKey, ev)
-        } catch {
-          // A single bad event must not kill the observer.
+        } catch (err) {
+          // A single bad event must not kill the observer — but it must not be
+          // invisible either: this is the engine refusing an event, which is how
+          // a cascade stops advancing for no apparent reason.
+          log.error({ err, sessionKey, kind: ev.kind }, 'engine rejected a run event')
         }
         if (terminal) {
           sawTerminal = true
@@ -479,8 +485,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       publishStatus?.(agentId, 'idle')
       try {
         await onSessionClosed(sessionKey)
-      } catch {
-        // best-effort
+      } catch (err) {
+        // Best-effort, but logged: this is the path that fails an in-flight
+        // delegation when its observer dies, so a throw here leaves the leader
+        // waiting on a delegate that will never report.
+        log.error({ err, sessionKey }, 'onSessionClosed failed after a dead stream')
       }
     }
   }

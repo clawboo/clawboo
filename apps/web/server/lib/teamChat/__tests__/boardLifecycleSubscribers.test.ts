@@ -22,21 +22,31 @@ import {
   createTask,
   listUndeliveredInbox,
   releaseTask,
+  updateStatus,
   resetBoardLifecycleListeners,
   teams,
 } from '@clawboo/db'
 
+/** Ordered log of what the subscribers asked the orchestrator to do. The order
+ *  records that the synchronous detach lands before the debounced pump. */
+const calls: string[] = []
 const pumped: string[] = []
+let resident = false
 vi.mock('../teamOrchestrator', () => ({
   getTeamOrchestrator: (teamId: string) => ({
     pump: async () => {
+      calls.push(`pump:${teamId}`)
       pumped.push(teamId)
+    },
+    detachTask: (taskId: string) => {
+      calls.push(`detach:${taskId}`)
+      return true
     },
     signalAgent: () => undefined,
   }),
-  // No live orchestrator: the mailbox row is the delivery of record, and this
-  // suite is about the durable half, not the ambient signal.
-  hasTeamOrchestrator: () => false,
+  // Flipped per test: most of this suite is about the durable mailbox half,
+  // where no orchestrator is resident.
+  hasTeamOrchestrator: () => resident,
 }))
 
 const { getDb, resetDb } = await import('../../db')
@@ -56,6 +66,8 @@ describe('board lifecycle subscribers', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     pumped.length = 0
+    calls.length = 0
+    resident = false
     const db = getDb()
     const now = Date.now()
     db.insert(teams)
@@ -131,6 +143,51 @@ describe('board lifecycle subscribers', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('a RELEASE detaches the task synchronously, so the debounced pump sees it freed', async () => {
+    // The detach must be SYNCHRONOUS. The pump is debounced by 2 s, so a
+    // synchronous detach is always already done by the time it runs; debouncing
+    // the detach too would let the pump read a session map that still pins the
+    // task. This asserts that effect, not the source order of the two blocks —
+    // the debounce makes source order irrelevant.
+    resident = true
+    vi.useFakeTimers()
+    try {
+      const db = getDb()
+      const t = createTask(db, {
+        title: 'released mid-cascade',
+        teamId: TEAM,
+        sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
+      })
+      claimTask(db, t.id, 'a2')
+      calls.length = 0
+      releaseTask(db, t.id)
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(calls).toEqual([`detach:${t.id}`, `pump:${TEAM}`])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a status change to todo or cancelled also detaches (a human moving the card)', () => {
+    resident = true
+    const db = getDb()
+    const t = createTask(db, { title: 'dragged', teamId: TEAM })
+    claimTask(db, t.id, 'a2')
+    calls.length = 0
+    updateStatus(db, t.id, 'todo')
+    expect(calls).toContain(`detach:${t.id}`)
+  })
+
+  it('does NOT build an orchestrator just to detach when none is resident', () => {
+    resident = false
+    const db = getDb()
+    const t = createTask(db, { title: 'nobody home', teamId: TEAM })
+    claimTask(db, t.id, 'a2')
+    calls.length = 0
+    releaseTask(db, t.id)
+    expect(calls.filter((c) => c.startsWith('detach:'))).toEqual([])
   })
 
   it('an EXECUTOR-path terminal writes a durable mailbox row for the delegator', () => {

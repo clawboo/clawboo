@@ -312,6 +312,19 @@ export interface BoardOrchestratorDeps {
   deliver: (targetSessionKey: string, targetAgentId: string, task: string) => Promise<void>
   /** Monotonic stop generation; in-flight work bails when it changes. */
   stopGen: () => number
+  /**
+   * Is THIS process actively driving a run on `sessionKey` right now? Consulted
+   * only by {@link BoardOrchestrator.detachTask}, which must never free a session
+   * that still has a live run: freeing it would let the ready-pump start a SECOND
+   * concurrent run on it, breaking the one-run-per-session invariant.
+   *
+   * The host answers from the same map it already uses for liveness (the server's
+   * `abortMap`), rather than a marker maintained for this question alone — that
+   * map is populated only after `adapter.start` resolves and cleared on BOTH the
+   * terminal and no-terminal paths, so it cannot leak a permanent "busy" that
+   * would make detach refuse forever. Omitted ⇒ never busy.
+   */
+  isSessionBusy?: (sessionKey: string) => boolean
   /** A board mutation the orchestrator made (projection-store feed). Optional. */
   onBoardChange?: (change: BoardChange) => void
   /** Append a visible narration entry to a session's transcript. Optional. */
@@ -393,6 +406,26 @@ export interface BoardOrchestrator {
    * dispose/shutdown — parked work is promised to resume.
    */
   markStopped(): Promise<void>
+  /**
+   * Forget the session currently tracking `taskId`, because the task was
+   * released OUT OF BAND — by the stale sweep, an orphan reap, or a human moving
+   * the card. Without this the engine keeps a session mapped to work nobody is
+   * running: `fireTask` refuses every re-fire on `sessionToTask.has(...)`, and
+   * the idle watchdog eventually fails a task no process owns, cancelling its
+   * dependents. Both are permanent, and both read to the user as the delegate
+   * going silent.
+   *
+   * REFUSES (returns false) while the host reports a live run on that session —
+   * see `isSessionBusy`. Returns false too when no session is tracking the task,
+   * which is the common case and not an error.
+   *
+   * Deliberately NOT the same thing as gating `resume()`'s attach: `markStopped`
+   * iterates `sessionToTask` to tombstone tracked work, so refusing to attach
+   * after a restart would make a user Stop a silent no-op for the whole sweep
+   * window. Detaching on the release keeps that arm populated until the board
+   * itself says the work is no longer owned.
+   */
+  detachTask(taskId: string): boolean
   /** Drop all in-memory tracking + timers (team switch / teardown). */
   reset(): void
 }
@@ -499,6 +532,29 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     sessionStartGen.has(sessionKey) && sessionStartGen.get(sessionKey) !== deps.stopGen()
 
   /** Drop all in-memory tracking for a session's current task. */
+  /** See {@link BoardOrchestrator.detachTask}. */
+  const detachTask = (taskId: string): boolean => {
+    let found: string | null = null
+    for (const [sessionKey, tid] of sessionToTask) {
+      if (tid === taskId) {
+        found = sessionKey
+        break
+      }
+    }
+    if (!found) return false
+    // A live run still owns this session; freeing it would let the pump start a
+    // second one beside it. The run's own terminal will release it shortly, and
+    // a task released underneath a live run already degrades to the documented
+    // late-result comment path.
+    if (deps.isSessionBusy?.(found)) return false
+    forgetSession(found)
+    // The exec this task was tracking is whatever closed it (the sweep's
+    // `timed_out`). Keeping the id would let a later terminal complete a row that
+    // is already terminal — refused, but misleading.
+    taskToExec.delete(taskId)
+    return true
+  }
+
   const forgetSession = (sessionKey: string): void => {
     sessionToTask.delete(sessionKey)
     sessionStartGen.delete(sessionKey)
@@ -926,7 +982,21 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       if (completingSessionKey && targetSk === completingSessionKey) {
         const t = setTimeout(() => {
           deferredFires.delete(t)
-          void fireTask(task.id, agentId, description)
+          // Deferred out of a mid-terminal drain, so nothing is awaiting this:
+          // a rejection here would be an unhandled one, and the delegation it
+          // was meant to start would simply never happen, silently.
+          void fireTask(task.id, agentId, description).catch((err: unknown) => {
+            const leaderId = deps.leaderAgentId()
+            const leaderSk = leaderId ? deps.sessionKeyForAgent(leaderId) : null
+            if (leaderSk)
+              deps.narrate?.(
+                leaderSk,
+                `A queued delegation to ${nameOf(agentId)} could not be started: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+                'alert',
+              )
+          })
         }, 0)
         ;(t as { unref?: () => void }).unref?.()
         deferredFires.add(t)
@@ -1453,6 +1523,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     onSessionClosed,
     resume,
     markStopped,
+    detachTask,
     taskForSession: (sessionKey) => sessionToTask.get(sessionKey) ?? null,
     reset() {
       // Best-effort: deliver any pending reflection BEFORE tearing down, so a

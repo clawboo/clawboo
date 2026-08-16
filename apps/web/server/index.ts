@@ -375,6 +375,12 @@ async function main() {
   // the fake-complete and parks the result as a task comment.) 3 min default
   // (6 missed beats); tune with CLAWBOO_BOARD_STALE_TTL_MS. Best-effort, unref'd.
   safeStart('board-stale-sweep', () => {
+    // KEEP THIS BELOW `DELEGATION_IDLE_TIMEOUT_MS` (8 min). The sweep is what
+    // publishes `task_released`, which is what detaches a stale session from the
+    // engine (see boardLifecycleSubscribers). If the TTL is tuned past the idle
+    // watchdog, the watchdog reaches a phantom session FIRST, fails the task to
+    // `blocked` and cancel-chains its dependents — the exact permanent stall the
+    // detach exists to prevent. A guard test pins the relationship.
     const ttlMs = Number(process.env['CLAWBOO_BOARD_STALE_TTL_MS']) || 3 * 60_000
     const intervalMs = Number(process.env['CLAWBOO_BOARD_STALE_SWEEP_MS']) || 60_000
     const sweep = (): void => {

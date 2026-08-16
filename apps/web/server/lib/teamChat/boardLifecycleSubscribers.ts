@@ -94,7 +94,35 @@ export function registerBoardLifecycleSubscribers(opts: { mcpBaseUrl: string | n
       if (patch) publishBoardChange(ev.teamId, { id: ev.taskId, ...patch, updatedAt: Date.now() })
     }
 
-    // 2. Wake-on-work — delegation-derived work appearing outside a live
+    // 2a. DETACH-ON-RELEASE — a task freed out of band (the stale sweep, an
+    // orphan reap, a human moving the card) may still be mapped to a session by
+    // a RESIDENT engine. Until that mapping is dropped, `fireTask` refuses every
+    // re-fire and the idle watchdog eventually fails a task no process is
+    // running, cancelling its dependents.
+    //
+    // What is load-bearing is that this stays SYNCHRONOUS. The pump is debounced
+    // by PUMP_DEBOUNCE_MS, so any detach performed in this handler necessarily
+    // runs first; debouncing the detach as well would reopen the window and let a
+    // pump read a session map that still pins the task. (Source order relative to
+    // `schedulePump` below therefore does NOT matter — do not add a test that
+    // pretends it does.) Only touch an ALREADY-resident engine: building one just
+    // to tell it to forget something it never knew is pure cost.
+    if (
+      ev.teamId &&
+      (ev.kind === 'task_released' ||
+        (ev.kind === 'status_changed' && (ev.status === 'todo' || ev.status === 'cancelled')))
+    ) {
+      const teamId = ev.teamId
+      if (hasTeamOrchestrator(teamId)) {
+        try {
+          getTeamOrchestrator(teamId, { mcpBaseUrl: opts.mcpBaseUrl }).detachTask(ev.taskId)
+        } catch (err) {
+          log.error({ err, taskId: ev.taskId, teamId }, 'detach-on-release failed')
+        }
+      }
+    }
+
+    // 2b. Wake-on-work — delegation-derived work appearing outside a live
     // engine's own flow gets its team pumped within seconds.
     if (
       ev.teamId &&

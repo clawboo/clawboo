@@ -18,7 +18,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { isLedgerAutoFireable } from '@clawboo/db'
-import { ledgerAllowsAutoFire, MAX_AUTO_FIRES } from '@clawboo/team-orchestration'
+import {
+  DELEGATION_IDLE_TIMEOUT_MS,
+  ledgerAllowsAutoFire,
+  MAX_AUTO_FIRES,
+} from '@clawboo/team-orchestration'
 
 const ledger = (...statuses: string[]): Array<{ status: string }> =>
   statuses.map((status) => ({ status }))
@@ -93,5 +97,19 @@ describe('fire policy — the engine and the server scan must agree', () => {
     expect(isLedgerAutoFireable(under)).toBe(true)
     expect(ledgerAllowsAutoFire(at)).toBe(false)
     expect(isLedgerAutoFireable(at)).toBe(false)
+  })
+})
+
+// ─── Timer ordering the detach-on-release fix depends on ─────────────────────
+// The sweep is what publishes `task_released`, and that release is what detaches
+// a stale session from a resident engine. If the board's stale TTL were ever
+// tuned above the engine's idle watchdog, the watchdog would reach the phantom
+// session first, fail the task to `blocked`, and cancel its dependents — the
+// permanent stall the detach exists to prevent. The two constants live in
+// different packages, so nothing but this pins their relationship.
+describe('sweep TTL vs the engine idle watchdog', () => {
+  it('the stale-sweep default fires strictly BEFORE the idle watchdog', () => {
+    const DEFAULT_STALE_TTL_MS = 3 * 60_000 // apps/web/server/index.ts
+    expect(DEFAULT_STALE_TTL_MS).toBeLessThan(DELEGATION_IDLE_TIMEOUT_MS)
   })
 })

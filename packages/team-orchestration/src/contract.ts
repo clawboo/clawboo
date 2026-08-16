@@ -170,6 +170,8 @@ interface HarnessOpts {
   sessionKeyForAgent?: (id: string) => string | null
   /** When set, `deliver` rejects for these target agent ids (delivery-failure tests). */
   deliverRejectsFor?: Set<string>
+  /** Sessions the HOST reports as having a live run (the server's abortMap). */
+  busySessions?: Set<string>
 }
 
 type Delivered = { sessionKey: string; agentId: string; task: string }
@@ -228,6 +230,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         delivered.push({ sessionKey, agentId, task })
       },
       stopGen: opts?.stopGen ?? (() => 0),
+      isSessionBusy: (sessionKey) => opts?.busySessions?.has(sessionKey) ?? false,
       onBoardChange: (c) => changes.push(c),
       narrate: (sessionKey, text) => narrations.push({ sessionKey, text }),
       ...(opts?.caps ? { caps: opts.caps } : {}),
@@ -736,6 +739,86 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       await orchestrator.resume()
       expect(board.claims.filter((id) => id === t1)).toHaveLength(2)
       expect(board.statusOf(t1)).toBe('in_progress')
+    })
+
+    it('an out-of-band release DETACHES the session, so a RESIDENT engine can re-fire it', async () => {
+      // Every other sweep-release scenario calls `reset()` first, which clears
+      // `sessionToTask` and hides this entirely. The real ordering has no reset:
+      // the engine is still resident (a user message, or the boot pump waking it)
+      // when the sweep releases the task underneath it. `fireTask` then refuses
+      // forever on `sessionToTask.has(targetSk)`, the 8-minute watchdog later
+      // moves the task to `blocked`, and its dependents are cancelled — a
+      // permanent stall caused by the restart, reported as the delegate going
+      // silent.
+      const h = makeHarness()
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(1)
+      // The engine is tracking this session RIGHT NOW. That is the precondition.
+      expect(orchestrator.taskForSession(sk('a2'))).toBe(t1)
+
+      // The sweep's exact two writes, with the engine still live.
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
+      board.forceRelease(t1)
+      // In production the release publishes `task_released` on the board lifecycle
+      // bus and the app-side subscriber makes exactly this call, before pumping
+      // (see boardLifecycleSubscribers). The engine has no bus of its own, so the
+      // contract states the wiring it depends on explicitly.
+      expect(orchestrator.detachTask(t1)).toBe(true)
+
+      await orchestrator.resume()
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(2)
+      expect(board.statusOf(t1)).toBe('in_progress')
+    })
+
+    it('detach REFUSES while a live run still owns the session (no second concurrent run)', async () => {
+      // One run per session is load-bearing. If a release detached a session that
+      // still has a run streaming on it, the ready-pump would claim the task again
+      // and start a SECOND run beside the first. The host answers this from the
+      // same map it uses for liveness, so a refusal can never become permanent.
+      const busy = new Set([sk('a2')])
+      const h = makeHarness({ busySessions: busy })
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+
+      board.forceRelease(t1)
+      expect(orchestrator.detachTask(t1)).toBe(false)
+      await orchestrator.resume()
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(1) // no second fire
+
+      // The late terminal still takes the documented late-result path, because the
+      // mapping was preserved: the work is recorded, not fake-completed.
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Here is the finished patch'))
+      expect(board.statusUpdates).not.toContainEqual({ taskId: t1, status: 'done' })
+      expect(board.comments.some((c) => c.taskId === t1 && /late result/i.test(c.body))).toBe(true)
+      // The terminal itself then frees the session, so nothing is left pinned:
+      // the refusal delays the detach, it does not replace it.
+      expect(orchestrator.taskForSession(sk('a2'))).toBeNull()
+    })
+
+    it('a released task no longer pins its session, so the watchdog cannot fail it', async () => {
+      // The downstream half of the same bug: while the stale mapping survives, the
+      // idle watchdog still owns the session and fails a task nobody is running,
+      // which cancel-chains every dependent step of the plan.
+      let clock = 1_000
+      const h = makeHarness({ now: () => clock })
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
+      board.forceRelease(t1)
+      orchestrator.detachTask(t1)
+
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      // Detached ⇒ the watchdog has nothing to fail. Without the detach this is
+      // `blocked`, which is terminal for the chain hanging off it.
+      expect(board.statusOf(t1)).not.toBe('blocked')
     })
 
     it('a user-STOPPED delegation is never auto-refired by the pump', async () => {
