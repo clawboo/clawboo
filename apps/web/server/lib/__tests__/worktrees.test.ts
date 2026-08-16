@@ -22,6 +22,8 @@ import {
   getWorkspaceForTask,
   listActiveWorkspaces,
   setTaskVerification,
+  getTaskVerification,
+  getComments,
   updateStatus,
   updateWorkspaceStatus,
 } from '@clawboo/db'
@@ -235,6 +237,58 @@ describe('server worktree orchestrator (real git + real board)', () => {
     const db = getDb()
     expect(getTask(db, taskId)?.status).toBe('in_progress')
     expect(getWorkspaceForTask(db, taskId)?.status).toBe('active')
+  })
+
+  it('the SECOND failing verification exhausts the budget and blocks, instead of parking in_progress', async () => {
+    // The old terminal was `in_progress` forever: the board reads that as
+    // "someone is working on this" while nobody is, so the card sits in a column
+    // implying progress with no one told. `blocked` is the needs-human terminal.
+    // With the default budget (2 attempts) this is the second complete.
+    const taskId = newClaimedCodeTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error('expected a workspace')
+    await writeFile(path.join(prov.worktree.worktreePath, 'feature.ts'), 'export const x = 1\n')
+
+    const db = getDb()
+    const first = await actOnTaskWorkspace(taskId, 'complete')
+    if (!first.ok || first.action !== 'complete') throw new Error('expected complete')
+    expect(first.taskStatus).toBe('in_progress') // a fix cycle remains
+    expect(getTaskVerification(db, taskId)?.status).toBe('fail')
+
+    // The fix attempt fails the same way; the budget is now spent.
+    await writeFile(path.join(prov.worktree.worktreePath, 'feature.ts'), 'export const x = 2\n')
+    const second = await actOnTaskWorkspace(taskId, 'complete')
+    if (!second.ok || second.action !== 'complete') throw new Error('expected complete')
+    expect(second.taskStatus).toBe('blocked')
+    expect(getTask(db, taskId)?.status).toBe('blocked')
+    expect(getTaskVerification(db, taskId)?.attempts).toHaveLength(2)
+    expect(getComments(db, taskId).some((c) => /fix loop is exhausted/i.test(c.body))).toBe(true)
+
+    // `blocked -> todo` is one legal move, and it clears the verdict so a
+    // re-queued task is not gated by the failure a human just reviewed.
+    expect(updateStatus(db, taskId, 'todo').ok).toBe(true)
+    expect(getTaskVerification(db, taskId)).toBeNull()
+  })
+
+  it('a repeat complete on an EXHAUSTED task does not burn another verification attempt', async () => {
+    // `blocked -> in_review` is not a legal transition. Unchecked, the entry
+    // write failed silently and the gate ran anyway: another critic call, another
+    // row on the attempts array, on a task already routed to a human.
+    const taskId = newClaimedCodeTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error('expected a workspace')
+    await writeFile(path.join(prov.worktree.worktreePath, 'feature.ts'), 'export const x = 1\n')
+    const db = getDb()
+    await actOnTaskWorkspace(taskId, 'complete')
+    await actOnTaskWorkspace(taskId, 'complete')
+    expect(getTask(db, taskId)?.status).toBe('blocked')
+    const attemptsAfterExhaustion = getTaskVerification(db, taskId)?.attempts.length
+    expect(attemptsAfterExhaustion).toBe(2)
+
+    const again = await actOnTaskWorkspace(taskId, 'complete')
+    expect(again.ok).toBe(true)
+    expect(getTask(db, taskId)?.status).toBe('blocked')
+    expect(getTaskVerification(db, taskId)?.attempts).toHaveLength(attemptsAfterExhaustion!)
   })
 
   it('refuses to provision a worktree for read-only research work', async () => {

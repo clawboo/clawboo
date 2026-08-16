@@ -12,9 +12,11 @@ import {
   appendAudit,
   expireStaleApprovals,
   getTask,
+  getTaskVerification,
   unblockTask,
   type ClawbooDb,
 } from '@clawboo/db'
+import { isVerdictPromotable } from '@clawboo/governance'
 
 import { getDb } from './db'
 import { emitEvent } from './obs'
@@ -60,7 +62,14 @@ export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {})
     })
     if (row.taskId) {
       const task = getTask(db, row.taskId)
-      if (task?.status === 'blocked') {
+      // Only unblock a task THIS approval blocked. `blocked` has more than one
+      // cause now: verification exhaustion routes here too, and `unblockTask` is
+      // `updateStatus(-> todo)`, which nulls the verification cell. Without this
+      // check an unrelated approval expiring somewhere else would silently clear a
+      // failing verdict and re-queue work a human was asked to look at.
+      const verdict = getTaskVerification(db, row.taskId)
+      const blockedByVerification = verdict !== null && !isVerdictPromotable(verdict)
+      if (task?.status === 'blocked' && !blockedByVerification) {
         unblockTask(db, row.taskId)
         unblocked.push(row.taskId)
       }

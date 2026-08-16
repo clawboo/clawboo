@@ -71,7 +71,7 @@ import {
 } from '@clawboo/worktrees'
 
 import { budgetPreflight } from './budgetPreflight'
-import { notifyVerificationParked } from './teamChat/inboxNotices'
+import { verifyMaxAttempts } from './verification'
 import { DEFAULTS } from './defaults'
 import { describeDegradations, planDegradations } from './degradation'
 import { buildMemoryGuidance } from './memoryGuidance'
@@ -388,20 +388,20 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
     // from inside the mutex-holding run; KeyedMutex is not reentrant, so cycle 1
     // queued behind its own caller, waited out the acquire timeout, and threw —
     // the quality loop never ran once on a persistent-home runtime.)
-    const maxFix = Number(process.env['CLAWBOO_MAX_FIX_CYCLES']) || 1
+    //
+    // The bound comes from `verifyMaxAttempts()`, the SAME reader the verdict uses,
+    // so the loop and the policy can no longer disagree about when the budget is
+    // spent (they did: 1 here against 3 there, which made exhaustion unreachable).
+    // It is a belt, not the brake: exhaustion now yields a `blocked` terminal, and
+    // `needsVerifyFix` is only set for an `in_progress` one, so the loop ends on
+    // its own. Parking is announced where that terminal is decided
+    // (`actOnTaskWorkspace`), unconditionally — not here, where it depended on a
+    // status write having succeeded.
+    const maxFix = Math.max(0, verifyMaxAttempts() - 1)
     let cycle = 0
     while (result.ok && result.needsVerifyFix && cycle < maxFix) {
       cycle++
       result = await runOnce({ ...input, fixCycle: cycle })
-    }
-    if (result.ok && result.needsVerifyFix) {
-      const t = getTask(input.db, input.taskId)
-      notifyVerificationParked(
-        input.db,
-        input.taskId,
-        t?.teamId ?? null,
-        `Verification failed ${cycle + 1}× on “${t?.title ?? input.taskId}” — the fix loop is exhausted and the task is parked in_progress. Review the verification comments on the board.`,
-      )
     }
     return result
   } catch (err) {

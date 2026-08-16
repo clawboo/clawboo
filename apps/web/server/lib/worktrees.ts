@@ -26,7 +26,6 @@ import {
   type DbWorkspace,
 } from '@clawboo/db'
 import type { RuntimeAdapter } from '@clawboo/executor'
-import { isVerdictPromotable } from '@clawboo/governance'
 import {
   completeWorktree,
   diffStat,
@@ -55,7 +54,8 @@ import {
 
 import { getDb } from './db'
 import type { RuntimeRunContext } from './runtimes'
-import { verifyTask } from './verification'
+import { verifyMaxAttempts, verifyTask } from './verification'
+import { notifyVerificationParked } from './teamChat/inboxNotices'
 
 /**
  * Worktree root for a repo — under the clawboo state dir, namespaced by a hash
@@ -336,7 +336,21 @@ export async function actOnTaskWorkspace(
   }
 
   // Verify ON + dirty diff: land in_review, run the verification gate, then gate `done`.
-  updateStatus(db, taskId, 'in_review')
+  // CHECKED: `blocked -> in_review` is not a legal transition, so a repeat complete
+  // on a task the exhaustion terminal already blocked would silently stay blocked
+  // here and then burn another critic call and grow the attempts array while
+  // returning ok. Refuse instead, and say why.
+  const enter = updateStatus(db, taskId, 'in_review')
+  if (!enter.ok) {
+    const current = getTask(db, taskId)?.status ?? 'unknown'
+    return {
+      ok: true,
+      action: 'complete',
+      complete,
+      taskStatus: current,
+      ...(current === 'blocked' ? { verified: 'fail' as const } : {}),
+    }
+  }
   const verdict = await verifyTask({
     db,
     taskId,
@@ -354,25 +368,45 @@ export async function actOnTaskWorkspace(
     // The intrinsic gate sees a promotable (`pass`) verdict and allows it.
     const r = updateStatus(db, taskId, 'done')
     taskStatus = r.ok ? 'done' : (getTask(db, taskId)?.status ?? 'in_review')
-  } else if (verdict.status === 'completed_with_debt' && isVerdictPromotable(verdict)) {
-    // Debt over a GREEN deterministic gate (unresolved critic findings only) may
-    // land — the intrinsic gate treats it as promotable.
-    const r = updateStatus(db, taskId, 'done')
-    taskStatus = r.ok ? 'done' : (getTask(db, taskId)?.status ?? 'in_review')
-  } else if (verdict.status === 'completed_with_debt') {
-    // Debt over a RED deterministic gate (a failing build/test gate exhausted the
-    // fix loop) is NOT auto-promotable — route to a human instead of silently
-    // shipping. The intrinsic gate would also block `done` here; making it
-    // `blocked` is the explicit needs-human terminal.
+  } else if (
+    verdict.status === 'completed_with_debt' ||
+    verdict.attempts.length >= verifyMaxAttempts()
+  ) {
+    // EXHAUSTION IS A HUMAN TERMINAL, and it is checked BEFORE any debt branch on
+    // purpose. `completed_with_debt` is only ever produced AT exhaustion, and the
+    // old "debt over a green gate may land" rule would have auto-promoted it to
+    // `done` — but a green deterministic gate with a `fail` verdict means the
+    // CRITIC raised a blocking finding (security, crash, data-loss,
+    // wrong-algorithm, missing-AC). Auto-landing those is precisely the outcome
+    // this ordering exists to prevent. Only a clean `pass` promotes, so DEBT
+    // lands here too rather than in its own branch: it is produced only at
+    // exhaustion, and the old "debt over a green gate may promote" rule is the
+    // hazard above.
+    //
+    // `in_progress` was the old terminal here, and it is a lie the board believes:
+    // it reads as "someone is working on this" while nobody is, so the card sits
+    // in a column implying progress with no one told. `blocked` is the needs-human
+    // terminal, and `blocked -> todo` is one legal move that clears the verdict
+    // when a human re-queues it.
     const r = updateStatus(db, taskId, 'blocked')
+    taskStatus = r.ok ? 'blocked' : (getTask(db, taskId)?.status ?? 'in_review')
     addComment(
       db,
       taskId,
-      'Verification debt with a failing deterministic gate — routed to blocked for human review (a red build/test gate is not auto-promotable).',
+      `Verification failed ${verdict.attempts.length}× and the fix loop is exhausted — routed to blocked for human review. See the verification comments above for what failed.`,
       'system',
     )
-    taskStatus = r.ok ? 'blocked' : (getTask(db, taskId)?.status ?? 'in_review')
+    // UNCONDITIONAL: the delegator has to hear this whether or not the status
+    // write landed. Tying the notice to a successful transition is how an
+    // exhausted task goes silent in exactly the case a human is needed.
+    notifyVerificationParked(
+      db,
+      taskId,
+      getTask(db, taskId)?.teamId ?? null,
+      `Verification failed ${verdict.attempts.length}× on “${getTask(db, taskId)?.title ?? taskId}” and the fix loop is exhausted. The task is blocked for review.`,
+    )
   } else {
+    // Retries remain: back to `in_progress` so the fix cycle can re-dispatch it.
     const r = updateStatus(db, taskId, 'in_progress')
     taskStatus = r.ok ? 'in_progress' : (getTask(db, taskId)?.status ?? 'in_review')
   }

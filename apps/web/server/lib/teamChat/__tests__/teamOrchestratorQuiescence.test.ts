@@ -88,11 +88,15 @@ describe('eviction scan — quiescence wiring', () => {
   })
 
   it('SPARES a busy instance past the idle TTL — the walked-away-from cascade', () => {
+    // Anchor the clock BEFORE the instance exists: its lastActivity is stamped
+    // during construction, so a later `Date.now() + HARD_TTL_MS` sits a few ms
+    // PAST the ceiling and the at-the-boundary assertion flakes.
+    const t0 = Date.now()
     getTeamOrchestrator('T')
     expect(hasTeamOrchestrator('T')).toBe(true)
     // Well past the idle TTL, and still not evicted: the run in flight wins.
-    expect(evictIdleOrchestrators(Date.now() + IDLE_TTL_MS + 1)).toBe(0)
-    expect(evictIdleOrchestrators(Date.now() + HARD_TTL_MS)).toBe(0)
+    expect(evictIdleOrchestrators(t0 + IDLE_TTL_MS + 1)).toBe(0)
+    expect(evictIdleOrchestrators(t0 + HARD_TTL_MS)).toBe(0)
     expect(hasTeamOrchestrator('T')).toBe(true)
   })
 

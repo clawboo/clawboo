@@ -10,8 +10,10 @@ import {
   createDb,
   createTask,
   getTask,
+  getTaskVerification,
   listEvents,
   listGovernanceAudit,
+  setTaskVerification,
   type ClawbooDb,
 } from '@clawboo/db'
 
@@ -68,5 +70,105 @@ describe('approval-TTL reaper', () => {
     const r = reapStaleApprovals(db, { ttlMs: 5 })
     expect(r.expired).toHaveLength(1)
     expect(r.unblocked).toEqual([])
+  })
+})
+
+describe('approval-TTL reaper — verification guard', () => {
+  let db: ClawbooDb
+  beforeEach(() => {
+    db = createDb(':memory:')
+  })
+
+  it('does NOT unblock a task blocked by a FAILING verification verdict', async () => {
+    // `blocked` has more than one cause since verification exhaustion routes here.
+    // `unblockTask` is `updateStatus(-> todo)`, which nulls the verification cell,
+    // so without this guard an unrelated approval expiring elsewhere silently
+    // clears a failing verdict and re-queues work a human was asked to look at.
+    const task = createTask(db, { title: 'failed verification', status: 'blocked', teamId: 't1' })
+    setTaskVerification(db, task.id, {
+      status: 'fail',
+      attempts: [
+        {
+          attempt: 1,
+          at: Date.now(),
+          deterministic: {
+            command: 'pnpm test',
+            exitCode: 1,
+            passed: false,
+            stdoutTail: '',
+            stderrTail: '',
+            durationMs: 12,
+            timedOut: false,
+          },
+          critic: {
+            ran: false,
+            findings: [],
+            reviewerRuntime: null,
+            reviewerModel: null,
+            reviewedSha: null,
+          },
+          status: 'fail',
+          structuredError: null,
+        },
+      ],
+      debtNotes: [],
+      updatedAt: Date.now(),
+    })
+    const approval = createApproval(db, {
+      toolName: 'delegate:code',
+      agentId: 'leader-1',
+      args: {},
+      taskId: task.id,
+    })
+    await sleep(20)
+
+    const r = reapStaleApprovals(db, { ttlMs: 5 })
+    expect(r.expired).toEqual([approval.id]) // the approval still expires…
+    expect(r.unblocked).toEqual([]) // …but the task is not laundered
+    expect(getTask(db, task.id)?.status).toBe('blocked')
+    expect(getTaskVerification(db, task.id)?.status).toBe('fail') // verdict intact
+  })
+
+  it('still unblocks a task whose verdict is PROMOTABLE (not a verification block)', async () => {
+    const task = createTask(db, { title: 'gated on approval', status: 'blocked', teamId: 't1' })
+    setTaskVerification(db, task.id, {
+      status: 'pass',
+      attempts: [
+        {
+          attempt: 1,
+          at: Date.now(),
+          deterministic: {
+            command: 'pnpm test',
+            exitCode: 0,
+            passed: true,
+            stdoutTail: '',
+            stderrTail: '',
+            durationMs: 12,
+            timedOut: false,
+          },
+          critic: {
+            ran: false,
+            findings: [],
+            reviewerRuntime: null,
+            reviewerModel: null,
+            reviewedSha: null,
+          },
+          status: 'pass',
+          structuredError: null,
+        },
+      ],
+      debtNotes: [],
+      updatedAt: Date.now(),
+    })
+    createApproval(db, {
+      toolName: 'delegate:code',
+      agentId: 'leader-1',
+      args: {},
+      taskId: task.id,
+    })
+    await sleep(20)
+
+    expect(reapStaleApprovals(db, { ttlMs: 5 }).unblocked).toEqual([task.id])
+    expect(getTask(db, task.id)?.status).toBe('todo')
   })
 })
