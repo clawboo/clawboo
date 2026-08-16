@@ -207,6 +207,12 @@ A fatal check means the install is broken in a way the probe cannot fix, so read
 **System Health shows `master key changed`.** The master key no longer decrypts the vault sentinel. If you rotated or lost `secrets/master.key` (or changed `CLAWBOO_SECRETS_MASTER_KEY`), saved runtime keys are unrecoverable; re-enter them in the Runtimes panel, or do a [full reset](#full-reset-everything).
 </Danger>
 
+## One-shot upgrades on first boot after an update
+
+Some releases have to repair data that already exists, because nothing else rewrites a stored row. These run once, record that they ran, and never reverse a later deliberate change.
+
+**Coordination toolset repair.** Native agents created before the coordination overhaul were frozen with the Tasks and TeamChat MCP servers switched off, which disables the coordination plane those agents are now expected to use: the peer-inbox pull becomes a no-op and a leader cannot read the board it presides over. On the first boot after upgrading, existing native agents get those two axes turned back on (Tasks read-only, TeamChat on), leaving every other tool toggle exactly as you set it. A settings flag records that the pass ran, so turning either back off afterwards sticks. A failure is logged and retried on the next boot rather than being silently skipped.
+
 ## See also
 
 - [CLI reference](/reference/cli): `clawboo backup`, `clawboo stop`, `clawboo restart`

@@ -296,9 +296,12 @@ export interface CompleteWorkspaceOpts {
  * - **pause** → commit + drop worktree + keep branch (workspace stays active, resumable).
  * - **complete** → empty diff cleans up the worktree + branch and the task goes
  *   `done`. A non-empty diff goes `in_review`; then the verification gate runs (deterministic build/test/lint + an optional read-only
- *   critic) and only a `pass` verdict promotes `in_review → done` (a `fail` reverts
- *   to `in_progress` with a structured fix note; `completed_with_debt` proceeds to
- *   `done` so the loop never deadlocks). Flag-off, the original behavior is verbatim.
+ *   critic) and ONLY a `pass` verdict promotes `in_review → done`. A `fail` with
+ *   attempts still left reverts to `in_progress` with a structured fix note; a
+ *   spent attempt budget, and `completed_with_debt` in any form, route to
+ *   `blocked` for a human. Nothing else reaches `done` on this path: a green gate
+ *   with a failing verdict means the critic raised a BLOCKING finding, and
+ *   auto-landing those is the outcome this routing exists to prevent.
  *   Task transitions are best-effort (skipped if the state machine disallows them).
  */
 export async function actOnTaskWorkspace(

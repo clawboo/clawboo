@@ -79,7 +79,7 @@ These docs describe Clawboo **v0.3.1**, the current release.
 
 **critic**: the read-only independent reviewer that runs on a green gate when a diff is risky or large. It emits structured findings; a blocking finding turns the attempt into a `fail` and routes the fix back. See [verification](/concepts/verification).
 
-**completed_with_debt**: a verification status reserved for a green deterministic gate left with unresolved (non-blocking) critic findings after the fix loop is exhausted, so the task never deadlocks. It is promotable to `done` only when the latest attempt's deterministic gate was green; it never covers a failing build or test. See [verification](/concepts/verification).
+**completed_with_debt**: the verdict written when the verification attempt budget is spent and the last attempt still failed, with the open items recorded as `debtNotes`. It covers a red deterministic gate as well as an unresolved blocking critic finding. The board's `→ done` gate still treats it as promotable over a green gate, but the worktree completion path does not: an exhausted fix loop routes the task to `blocked` for a human. See [verification](/concepts/verification).
 
 ## Governance
 

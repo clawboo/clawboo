@@ -92,8 +92,10 @@ function structuredErrorFor(det: DeterministicResult, critic: CriticVerdict): St
 /**
  * Run the gate + critic for a task currently in `in_review`, persist the typed
  * verdict, and return it. Does NOT change the task status — the caller
- * (`actOnTaskWorkspace`) maps `pass → done`, `fail → in_progress`,
- * `completed_with_debt → done` (debt bypasses the gate by policy).
+ * (`actOnTaskWorkspace`) maps `pass → done`, `fail` with attempts remaining →
+ * `in_progress`, and both an exhausted budget and `completed_with_debt` →
+ * `blocked`. Debt does NOT bypass the gate: it is produced only at exhaustion,
+ * and exhaustion is a human terminal.
  */
 /** Fix cycles when `CLAWBOO_MAX_FIX_CYCLES` is unset. */
 const DEFAULT_FIX_CYCLES = 1

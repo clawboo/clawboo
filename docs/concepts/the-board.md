@@ -68,7 +68,7 @@ The transition table is the single authority on what is legal. It is declared ex
 A few rules are worth calling out:
 
 - **Same-status is an idempotent no-op** and always allowed, so re-emitting a transition does no harm.
-- **`in_progress → todo` is the release path.** A task can fall back to `todo` to be re-claimed; doing so clears the assignee (and the assignee runtime), so the [atomic claim](#the-atomic-claim) can re-acquire it. It also clears the stored verification verdict, because releasing for re-claim is a cross-runtime rebind boundary; a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion.
+- **`in_progress → todo` is the release path.** A task can fall back to `todo` to be re-claimed; doing so clears the assignee (and the assignee runtime), so the [atomic claim](#the-atomic-claim) can re-acquire it. It also clears the stored verification verdict, because releasing for re-claim is a cross-runtime rebind boundary; a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion. The release also detaches the task from any resident team orchestrator still mapping it to a session, since that mapping would otherwise keep refusing the re-claim.
 - **`in_progress` and `in_review` are "locked" statuses.** While a task is in one of them it is actively owned, and its assignee must not be reassigned.
 
 Status changes go through one function that enforces the table against the freshly read row, inside a write transaction, so a stale pre-check from a concurrent caller can never sneak through. A REST-layer pre-check, if any, is only fast-fail ergonomics; the transactional check is the real gate. An illegal transition returns a `409` from the REST layer.
@@ -148,7 +148,7 @@ Because `better-sqlite3` is fully synchronous, the retry uses a synchronous, non
 
 Two recovery passes keep the board from accumulating stuck work: one for crashes, one for abandonment.
 
-**Orphan reconciliation runs once at startup.** Any execution row still marked `running` belonged to a process that died with the previous server. The pass marks each such execution `failed`, sets a `recovery_tombstone` so a second pass is a no-op (no infinite auto-resume), and releases its task back to `todo` so a fresh claim can pick it up. It runs in a single `BEGIN IMMEDIATE` transaction and never blocks boot.
+**Orphan reconciliation runs once at startup, and it is liveness-aware.** An execution row still marked `running` is reaped only when its task has stopped beating, meaning `updated_at` older than the same TTL the stale sweep uses. A still-beating row belongs to a live process, such as a second Clawboo on the same state dir or the previous server's drains during a fast restart, so it is spared. Each reaped execution is marked `failed`, gets a `recovery_tombstone` so a second pass is a no-op (no infinite auto-resume), and has its task released back to `todo` so a fresh claim can pick it up. A run that truly died but is not yet stale at boot keeps missing beats and is released by the interval sweep below once the TTL has passed. It runs in a single `BEGIN IMMEDIATE` transaction and never blocks boot.
 
 **Stale-task reconciliation runs on an interval.** It releases an `in_progress` task whose owner has stopped proving it is alive. A task that is `in_progress`, whose `updated_at` is older than the TTL, and whose execution is still `running` is timed out and released to `todo`. A boot pass plus a periodic interval cover both startup and steady state.
 

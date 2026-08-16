@@ -483,7 +483,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/executions \
 
 ## `PATCH /api/board/executions/:execId`
 
-Closes out an execution row with its outcome and an optional token/cost ledger. The handler emits an `execution_completed` event carrying the run's `taskId`, `teamId`, `agentId` and `runtime`, recovered from the closed row, so the event correlates with the `execution_started` it pairs with. An unknown `execId` closes nothing and returns `404` without appending an event.
+Closes out an execution row with its outcome and an optional token/cost ledger. The handler emits an `execution_completed` event carrying the run's `taskId`, `teamId`, `agentId` and `runtime`, recovered from the closed row, so the event correlates with the `execution_started` it pairs with. A terminal ledger row is immutable, so only a still-`running` execution can be closed: an `execId` that is unknown, or whose row some other path already closed, closes nothing and returns `404` without appending an event.
 
 - **Path params**: `execId`.
 - **Request body** (validated by `completeExecutionBody`):
@@ -516,7 +516,7 @@ Closes out an execution row with its outcome and an optional token/cost ledger. 
 { "ok": true }
 ```
 
-**`404 Not Found`**: no execution row matched `execId`; nothing was closed and no event was appended:
+**`404 Not Found`**: no still-`running` execution row matched `execId`, either because the id is unknown or because the row is already terminal (most often the stale sweep closed it as `timed_out`). Nothing was closed and no event was appended, and this 404 is data rather than a transient error to retry:
 
 ```json
 { "error": "execution not found" }
@@ -791,7 +791,7 @@ curl http://localhost:18790/api/board/<task-id>/workspace
 Pauses or completes a task's worktree.
 
 - **`pause`**: commit any uncommitted work, drop the worktree, keep the branch (the workspace stays `active` and resumable).
-- **`complete`**: an empty diff cleans up the worktree + branch and drives the task to `done` (an empty diff has no deliverable, so the verification gate is intentionally bypassed). A non-empty diff lands the task in `in_review`, runs the verification gate, then gates `→done`: a `pass` (or a `completed_with_debt` over a green deterministic gate) promotes to `done`; debt over a red deterministic gate routes to `blocked` (with a system comment); a `fail` reverts to `in_progress`. SoR bookkeeping files are excluded from the diff (a session that only wrote its own progress/handoff is still "empty").
+- **`complete`**: an empty diff cleans up the worktree + branch and drives the task to `done` (an empty diff has no deliverable, so the verification gate is intentionally bypassed). A non-empty diff lands the task in `in_review`, runs the verification gate, then gates `→done`: only a `pass` promotes to `done`; a `fail` with attempts left reverts to `in_progress`; a `fail` at the attempt budget, and `completed_with_debt`, both route to `blocked` with a system comment and an inbox notice to the delegator. A repeat `complete` on an already-`blocked` task cannot re-enter `in_review`, so it returns the task's current status with `verified: 'fail'` and does not re-run the gate. SoR bookkeeping files are excluded from the diff (a session that only wrote its own progress/handoff is still "empty").
 
 - **Path params**: `taskId`.
 - **Request body** (validated by `workspaceActionBody`):

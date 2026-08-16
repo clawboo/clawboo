@@ -58,7 +58,7 @@ interface AgentConfig {
   tools: {
     memory: boolean // Memory MCP (shared facts)
     tools: boolean // Tools MCP / managed capability broker
-    tasks: boolean // Tasks MCP / the durable board
+    tasks: boolean | 'read' // Tasks MCP / the durable board; 'read' attaches only list_tasks + get_task
     teamchat: boolean // TeamChat MCP — post + listen as a named peer
     custom?: string[] // reserved
   }
@@ -71,7 +71,7 @@ interface AgentConfig {
 }
 ```
 
-When the assigned agent id has no stored config (for example a board task assigned to an arbitrary id), the run falls back to a default config: provider `anthropic`, model `claude-haiku-4-5`, all four shared MCP tools on, `maxTurns` 16. The provider key still resolves through the host's vault chain.
+When the assigned agent id has no stored config (for example a board task assigned to an arbitrary id), the run falls back to a default config: provider `anthropic`, model `claude-haiku-4-5`, `maxTurns` 16, and Memory, Tools and TeamChat on with Tasks attached read-only. Board writes are deliberate, never a fallback: a team agent silently defaulting to full board access would race the orchestrator's claims. The provider key still resolves through the host's vault chain.
 
 A native agent is created through the native AgentSource; there is no Gateway and no provider SDK call at creation. The id is minted as `native-<slug>-<6 chars>`, the `AgentConfig` rides the registry input's `execConfig` (with `SOUL.md` as the `systemPrompt` fallback), and if `budgetUsd` is set, an agent-scope hard-cap budget is created at the same time.
 

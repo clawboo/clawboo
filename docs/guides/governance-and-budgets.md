@@ -180,7 +180,7 @@ To resolve one, open the **Approval queue** in the Governance panel (the _same_ 
 The client-side delegation-approval call **fails closed**. If the approval endpoint is unreachable, the request maps to `timeout`, a non-approving resolution, never `allow_once`. The whole point of the gate is human sign-off for a destructive action, so an unreachable endpoint must not auto-approve. Only *risky* delegations reach this path, so the strictness can never deadlock ordinary team work.
 </Info>
 
-A forgotten approval **times out rather than deadlocks**: each approval carries an `expiresAt`, the waiter has its own deadline, and a durable TTL reaper atomically expires abandoned pending approvals on an interval (and unblocks the linked board task). The TTL is configurable via `CLAWBOO_APPROVAL_TTL_MS`; see [environment variables](/reference/environment-variables).
+A forgotten approval **times out rather than deadlocks**: each approval carries an `expiresAt`, the waiter has its own deadline, and a durable TTL reaper atomically expires abandoned pending approvals on an interval (and unblocks the linked board task, unless a non-promotable verification verdict is what holds it `blocked`). The TTL is configurable via `CLAWBOO_APPROVAL_TTL_MS`; see [environment variables](/reference/environment-variables).
 
 ## Verify it worked
 

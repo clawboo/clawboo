@@ -118,16 +118,18 @@ Two ceilings bound raw board growth on the board's capped create path, reached t
 
 Several best-effort background passes run at boot and on an interval. None blocks boot; all are unref'd. They are env-overridable except the worktree GC limits (fixed constants).
 
-**Approval reaper.** Abandoned pending approvals expire after `CLAWBOO_APPROVAL_TTL_MS` (default 24 h) and any task they blocked is unblocked. The reaper runs one pass at boot plus a singleton interval set by `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` (default 1 h).
+**Approval reaper.** Abandoned pending approvals expire after `CLAWBOO_APPROVAL_TTL_MS` (default 24 h) and any task they blocked is unblocked, except a task carrying a non-promotable verification verdict, which stays `blocked` for its human. The reaper runs one pass at boot plus a singleton interval set by `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` (default 1 h).
 
 **MCP liveness supervisor.** The in-process MCP servers are pre-warmed at boot and health-probed every `CLAWBOO_MCP_PROBE_MS` (default 60 s), rebuilding on failure with backoff.
 
 **Worktree GC.** At boot, stale worktrees are reaped: those older than 72 h, plus the oldest beyond a 25-count limit, but only if their task is not locked (`in_progress` / `in_review`), and commit-before-drop means no uncommitted work is lost. The 72 h age and 25 count are fixed constants in `@clawboo/worktrees`.
 
+**Board dispatch pump.** Delegation-derived work no longer waits for a user message. The pump scans for teams holding fireable delegations or undelivered mailbox rows and wakes their orchestrator, 10 s after boot and then every `CLAWBOO_DISPATCH_PUMP_MS` (default 60 s). The board lifecycle bus already pushes on every relevant mutation, so this interval is the durable backstop and the boot-resume path rather than the primary trigger. A task whose last run was `cancelled` is never auto-fired: that is the durable marker of a user Stop, and only a human re-queues it.
+
 **Board stale-task sweep.** Releases an `in_progress` task whose owner has stopped proving it is alive. It runs one pass at boot plus an interval set by `CLAWBOO_BOARD_STALE_SWEEP_MS` (default 60 s), releasing a task whose `updatedAt` is older than `CLAWBOO_BOARD_STALE_TTL_MS` (default 3 min). The short TTL is safe because `updatedAt` is a real liveness signal: every drain that claims a task heartbeats the row every 30 s on a timer for as long as it owns it, so 3 minutes is six missed beats. The orchestrator's own 8-minute idle watchdog (swept every 30 s, server-side) still covers the different case of a delegate that is alive but has gone quiet.
 
 <Warning>
-The TTL is only as trustworthy as the heartbeat. A drain that claims a task without beating it will have its live work swept mid-run, so if you add a code path that claims a board task, give it a `startTaskHeartbeat` too. Lowering the TTL below a few beat intervals has the same effect.
+The TTL is only as trustworthy as the heartbeat. A drain that claims a task without beating it will have its live work swept mid-run, so if you add a code path that claims a board task, give it a `startTaskHeartbeat` too. Lowering the TTL below a few beat intervals has the same effect. The TTL also has a ceiling: keep it, plus the sweep interval, under the orchestrator's 8-minute idle watchdog. The sweep is what publishes `task_released`, and that release is what detaches a stale session from the engine, so a TTL tuned past that window lets the watchdog reach the phantom session first, fail the task to `blocked`, and cancel its dependent plan steps.
 </Warning>
 
 ## See also

@@ -35,7 +35,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Scheduling](concepts/scheduling.md): Routines — Clawboo's durable team-task scheduler, its rebuildable ticker, the two cron domains, the one-firing-owner invariant, and the error-halts policy.
 - [Teams and planes](concepts/teams-and-planes.md): How teams group agents, and the split between the shared coordination plane and each runtime's private plane.
 - [The board](concepts/the-board.md): Clawboo's durable, transactional task-coordination substrate — state machine, atomic claim, dependencies, and crash recovery.
-- [Verification](concepts/verification.md): Builder≠judge — a deterministic gate plus an independent read-only critic that make "done" mean verified, with completed_with_debt as a graceful exit.
+- [Verification](concepts/verification.md): Builder≠judge — a deterministic gate plus an independent read-only critic that make "done" mean verified, with an exhausted fix loop routed to blocked for a human.
 - [Worktrees and handoff](concepts/worktrees-and-handoff.md): The per-task git-worktree system-of-record and the runtime-agnostic AGENT_HANDOFF.json that lets one runtime pick up another's work.
 
 ## Runtimes

@@ -70,7 +70,7 @@ Each independent delegation runs through `spawn`, which is the DERIVE step of th
 2. Refuse if the same `(target, task)` has already failed `MAX_DELEGATION_FAILURES` (3) times in a row, a code-level loop breaker the model's own judgement can't override.
 3. Refuse if the source task is already at the [depth cap](#the-depth-cap).
 4. If the delegation is risky (a heuristic flags destructive/external verbs), surface it on the leader's approval queue and proceed only on `allow_once` / `allow_always`.
-5. Create the board task (recording `parentTaskId` and a `sourceDelegationId` that encodes the delegator and, when deferred, the target), then atomically claim it, open an execution row, and deliver the task message.
+5. Create the board task (recording `parentTaskId` and a `sourceDelegationId` that encodes the delegator and the target on every delegation, deferred or not, so the target stays recoverable from the durable row after a sweep or an orphan release), then atomically claim it, open an execution row, and deliver the task message.
 
 A claim that comes back `{ ok: false }` is a `409`, someone else owns the work, and is **never retried**, the same rule the board itself follows.
 
@@ -102,12 +102,12 @@ Two or more structured delegations in one turn fire as parallel tasks. A per-tur
 
 The orchestrator's hardest job is making sure a delegating agent is never "left standing", waiting forever for an answer that will never come. Every way a delegate can fail to deliver a result is handled and reflected:
 
-| Failure               | How it's detected                                                      | What happens                                                                    |
-| --------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Errored / out of room | a `done` with `reason` `error` / `max_turns`, or a fatal `error` event | task → `blocked`, execution closed `failed`, failure reflected to the delegator |
-| Went silent           | the idle watchdog (8 min, refreshed on every observed event)           | task → `blocked` (timed-out), failure reflected                                 |
-| Session dropped       | the per-session observer ended outside teardown                        | task → `blocked`, failure reflected                                             |
-| Can't be delivered    | the nudge-queue rejects the send                                       | task failed immediately, delegator told                                         |
+| Failure               | How it's detected                                                                                                     | What happens                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Errored / out of room | a `done` with `reason` `error` / `max_turns`, or a fatal `error` event                                                | task → `blocked`, execution closed `failed`, failure reflected to the delegator |
+| Went silent           | the idle watchdog (8 min, refreshed on every observed event; 24 min while the delegate is still inside one tool call) | task → `blocked` (timed-out), the live run aborted, failure reflected           |
+| Session dropped       | the per-session observer ended outside teardown                                                                       | task → `blocked`, failure reflected                                             |
+| Can't be delivered    | the nudge-queue rejects the send                                                                                      | task failed immediately, delegator told                                         |
 
 When a task is blocked by failure, its downstream plan steps can never become ready, so the orchestrator cancels the still-pending (`todo` / `backlog`) transitive dependents and rolls them into the reflection; the delegator learns the whole chain stalled, not just one step. A failure reflection is a `[Task Update]` entry marked "DID NOT COMPLETE" with the reason, telling the leader to retry, reassign, or report the failure rather than keep waiting.
 

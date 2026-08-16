@@ -554,7 +554,7 @@ curl -X POST http://localhost:18790/api/teams/<team-id>/chat \
 
 ## `POST /api/teams/:id/chat/stop`
 
-User Stop. Bumps the orchestrator's stop generation **synchronously** (before any await), then aborts every in-flight run through its runtime adapter. In-flight engine work bails at its next checkpoint, and because the generation changed, the resulting aborted terminals are read as a clean Stop rather than a failure: each claimed task is released back to `todo`, with no `blocked` status, no dependent cancellation, and no failure reflection to the delegator. Same server-orchestration gate as the ingest route.
+User Stop. Bumps the orchestrator's stop generation **synchronously** (before any await), then aborts every in-flight run through its runtime adapter. In-flight engine work bails at its next checkpoint, and because the generation changed, the resulting aborted terminals are read as a clean Stop rather than a failure: each claimed task is released back to `todo`, with no `blocked` status, no dependent cancellation, and no failure reflection to the delegator. The Stop is made durable in the same call, independently of whether those aborted terminals ever land: queued-but-unsent deliveries are dropped, and every tracked run plus every not-yet-fired ready delegation gets a `cancelled` execution row. That marker is what keeps the board dispatch pump from re-firing the halted cascade. Same server-orchestration gate as the ingest route.
 
 - **Path params**: `id` (team id).
 - **Request body**: none.
@@ -586,7 +586,7 @@ User Stop. Bumps the orchestrator's stop generation **synchronously** (before an
 ```
 
 <Note>
-Stopping a team with no live orchestrator (never started this process, or idle-evicted after 30 minutes) is a no-op that still returns `{ "ok": true }`.
+Stopping a team with no live orchestrator (never started this process, or idle-evicted after 30 minutes with no run in flight) is a no-op that still returns `{ "ok": true }`.
 </Note>
 
 ### Example
@@ -631,14 +631,14 @@ then emits a `: connected` comment frame, flushes any rows already past the curs
 
 ### Event catalog
 
-| Frame           | When                                             | Shape                                                                                        |
-| --------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `: connected`   | Immediately on open                              | SSE comment (ignored by `EventSource`)                                                       |
-| _(unnamed)_     | Per committed transcript row (poll every 750 ms) | `id: <row id>` line + `data: <TranscriptEntry json>` line                                    |
-| `event: delta`  | Per live assistant-text delta                    | `{ sessionKey, runId, text }`; `text` is the FULL running text so far (replace, not append)  |
-| `event: board`  | Per board mutation the orchestrator makes        | `{ id, title?, status?, assigneeAgentId?, parentTaskId?, createdAt?, updatedAt?, summary? }` |
-| `event: status` | Per run boundary, plus a snapshot on connect     | `{ agentId, status: 'running' \| 'idle' \| 'error' }`                                        |
-| `: keepalive`   | Every 20 s while open                            | SSE comment (keeps the connection warm)                                                      |
+| Frame           | When                                                                                                                                  | Shape                                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `: connected`   | Immediately on open                                                                                                                   | SSE comment (ignored by `EventSource`)                                                       |
+| _(unnamed)_     | Per committed transcript row (poll every 750 ms)                                                                                      | `id: <row id>` line + `data: <TranscriptEntry json>` line                                    |
+| `event: delta`  | Per live assistant-text delta                                                                                                         | `{ sessionKey, runId, text }`; `text` is the FULL running text so far (replace, not append)  |
+| `event: board`  | Per board mutation on this team, from any write path (the orchestrator, the executor runner, a Tasks MCP tool, the stale sweep, REST) | `{ id, title?, status?, assigneeAgentId?, parentTaskId?, createdAt?, updatedAt?, summary? }` |
+| `event: status` | Per run boundary, plus a snapshot on connect                                                                                          | `{ agentId, status: 'running' \| 'idle' \| 'error' }`                                        |
+| `: keepalive`   | Every 20 s while open                                                                                                                 | SSE comment (keeps the connection warm)                                                      |
 
 Only the unnamed frames carry an `id:`, so only they move the resume cursor. A client reconciles any board change it missed across a reconnect with a `GET /api/board` reload.
 

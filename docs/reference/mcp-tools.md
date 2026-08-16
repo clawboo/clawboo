@@ -5,7 +5,7 @@ description: The four clawboo-hosted MCP servers (tasks, memory, tools, teamchat
 
 Clawboo hosts four MCP servers over the shared SQLite substrate, exposed to consuming runtimes over two transports: a stdio bin per server, and an in-process Streamable HTTP mount at `/api/mcp/<name>`. Each server is a thin protocol façade over a `@clawboo/db` service core, the same database file the API server and every spawned runtime read and write, so a tool call from an externally-spawned agent and a UI action land on one store.
 
-This page lists each server, its `tools/list` name and version, and every tool it exposes with the tool's name, one-line description, and zod input schema. Two servers (memory, teamchat) carry an authoritative connection-bound scope that the calling model cannot override: the anti-spoof binding, covered per server below.
+This page lists each server, its `tools/list` name and version, and every tool it exposes with the tool's name, one-line description, and zod input schema. Three servers (tasks, memory, teamchat) carry an authoritative connection-bound scope that the calling model cannot override: the anti-spoof binding, covered per server below.
 
 <Note>
 Servers are built with the low-level MCP SDK `Server` + `setRequestHandler` API, not `McpServer.registerTool`. Each tool's zod object is converted to JSON Schema for `tools/list` by a small in-package converter; non-optional fields appear in the schema's `required` array. The reported server version for all four is `0.1.0`.
@@ -15,7 +15,7 @@ Servers are built with the low-level MCP SDK `Server` + `setRequestHandler` API,
 
 | Server                       | `tools/list` name  | Tools                             | Service core                             | Bound scope                     |
 | ---------------------------- | ------------------ | --------------------------------- | ---------------------------------------- | ------------------------------- |
-| [Tasks](#tasks-server)       | `clawboo-tasks`    | 12                                | durable board repository                 | n/a                             |
+| [Tasks](#tasks-server)       | `clawboo-tasks`    | 12 (2 in read-only mode)          | durable board repository                 | `boundScope` (team; reads only) |
 | [Memory](#memory-server)     | `clawboo-memory`   | 3                                 | `SqliteMemoryStore` (facts + procedures) | `boundScope` (team/agent)       |
 | [Tools](#tools-server)       | `clawboo-tools`    | 4 builtin (availability-filtered) | tool broker                              | n/a                             |
 | [TeamChat](#teamchat-server) | `clawboo-teamchat` | 2 (+1 when orchestrator-driven)   | `team_chat` room substrate               | `boundIdentity` (author + room) |
@@ -31,7 +31,7 @@ Servers are built with the low-level MCP SDK `Server` + `setRequestHandler` API,
 
 ## Tasks server
 
-`createTasksServer(db)` → `clawboo-tasks`. A protocol façade over the durable board so any runtime can coordinate on the same kanban board. The atomic claim surfaces a conflict as a tool-error the model must not retry (the "never retry a 409" rule).
+`createTasksServer(db, opts?)` → `clawboo-tasks`. A protocol façade over the durable board so any runtime can coordinate on the same kanban board. The atomic claim surfaces a conflict as a tool-error the model must not retry (the "never retry a 409" rule). `opts.readOnly` serves only `list_tasks` and `get_task`, which is how a team agent gets board visibility without racing the engine's claims.
 
 A few tools return a tool-error (`isError: true`) rather than throwing: `get_task` on an unknown id, `claim_task` / `assign_task` on a conflict, `update_task_status` / `block_task` / `unblock_task` on an illegal state-machine transition, `link_task` on a dependency cycle, and `create_task` / `create_subtask` when the parent is unknown, the parent is already at its child-count or depth ceiling, or the root-creation rate is exhausted.
 
@@ -347,7 +347,8 @@ Over HTTP, the authoritative bindings ride query params on the attach URL the se
 
 - **Memory**: `scopeTeamId` / `scopeAgentId` / `scopeTenantId` set the run's visibility scope (`boundScope`).
 - **TeamChat**: `roomTeamId` / `postAuthorAgentId` set the room and post author (`boundIdentity`); an added `delegate=1` marks the session orchestrator-driven and exposes [`team_delegate`](#team_delegate). Clawboo writes that param on orchestrator-driven team runs and nowhere else: an external attach must not add it, because nothing is observing the tool-call there and the delegation would silently no-op.
-- **Tasks / Tools**: no scope params; the URL stays bare.
+- **Tasks**: `scopeTeamId` / `scopeAgentId` bind the run's board reads to its team (`boundScope`); `scopeAgentId` also carries the mid-run inbox piggyback.
+- **Tools**: no scope params; the URL stays bare.
 
 When these params are absent (an external attach, or the stdio bins), the server is unbound and the model supplies scope/identity in args.
 

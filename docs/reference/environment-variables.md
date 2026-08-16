@@ -56,7 +56,7 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, 
 | `CLAWBOO_BOARD_STALE_SWEEP_MS`         | Operational tuning | `60000` (60 s)                   | board stale-task sweep                  |
 | `CLAWBOO_DISPATCH_PUMP_MS`             | Operational tuning | `60000` (60 s)                   | board dispatch pump                     |
 | `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`        | Operational tuning | `600000` (10 min)                | per-identity dispatch mutex             |
-| `CLAWBOO_MAX_FIX_CYCLES`               | Operational tuning | `1`                              | executor verification fix loop          |
+| `CLAWBOO_MAX_FIX_CYCLES`               | Operational tuning | `1` (2 attempts)                 | `verifyMaxAttempts()`                   |
 | `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | Operational tuning | `1800000` (30 min)               | drain idle guard                        |
 | `CLAWBOO_ROUTINE_DISPATCH_DEADLINE_MS` | Operational tuning | `900000` (15 min)                | routine dispatch deadline               |
 | `CLAWBOO_APPROVAL_TTL_MS`              | Operational tuning | `86400000` (24 h)                | approval reaper                         |
@@ -302,7 +302,7 @@ These tune the always-on background services that run at server boot. Each is pa
 ### `CLAWBOO_BOARD_STALE_TTL_MS`
 
 - **Read by**: the board stale-task sweep in `apps/web/server/index.ts`.
-- **Purpose**: the TTL after which an `in_progress` board task whose `updatedAt` predates the window (and whose execution is still running) is timed out and released to `todo`. `updatedAt` is a real liveness signal: every claiming drain heartbeats the task row every 30 seconds while it owns it, so the default is six missed beats. Raise it if you run a drain that cannot beat; lowering it below a few beat intervals will sweep live work.
+- **Purpose**: the TTL after which an `in_progress` board task whose `updatedAt` predates the window (and whose execution is still running) is timed out and released to `todo`. `updatedAt` is a real liveness signal: every claiming drain heartbeats the task row every 30 seconds while it owns it, so the default is six missed beats. Lowering it below a few beat intervals will sweep live work. Raising it has a ceiling: the sweep is what publishes `task_released`, and that release is what detaches a stale session from a resident team orchestrator, so keep this TTL plus `CLAWBOO_BOARD_STALE_SWEEP_MS` under the engine's 8-minute idle watchdog (`DELEGATION_IDLE_TIMEOUT_MS`, a compile-time constant with no environment override). Past that window the watchdog reaches a phantom engine-driven delegation first, fails its task to `blocked` and cancels its dependent plan steps, which is the permanent stall the detach exists to prevent.
 - **Default**: `180000` (3 minutes).
 
 ### `CLAWBOO_BOARD_STALE_SWEEP_MS`
@@ -325,8 +325,8 @@ These tune the always-on background services that run at server boot. Each is pa
 
 ### `CLAWBOO_MAX_FIX_CYCLES`
 
-- **Read by**: the verification fix loop in `apps/web/server/lib/executorRunner.ts`.
-- **Purpose**: how many times a task whose verification FAILED is re-dispatched to the same runtime with the verdict attached before it is parked `in_progress` and the team is told. Each cycle re-acquires the home mutex. Set to `0` to disable the fix loop.
+- **Read by**: `verifyMaxAttempts()` in `apps/web/server/lib/verification/index.ts`, the single reader, shared by the executor's re-dispatch loop and the exhaustion terminal in `worktrees.ts`. It counts FIX cycles, so the attempt budget is one more than it.
+- **Purpose**: how many times a task whose verification FAILED is re-dispatched to the same runtime with the verdict attached before the fix loop is exhausted. Each cycle re-acquires the home mutex. Set to `0` to disable the fix loop (a single attempt). An exhausted loop routes the task to `blocked`, the needs-human terminal, and the delegator is told unconditionally.
 - **Default**: `1`.
 
 ### `CLAWBOO_RUN_SILENT_TIMEOUT_MS`
@@ -344,7 +344,7 @@ These tune the always-on background services that run at server boot. Each is pa
 ### `CLAWBOO_APPROVAL_TTL_MS`
 
 - **Read by**: the approval reaper (`approvalReaper.ts`).
-- **Purpose**: the staleness window after which a forgotten `pending` tool-call approval is auto-expired (and any linked blocked task unblocked). Idempotent across passes.
+- **Purpose**: the staleness window after which a forgotten `pending` tool-call approval is auto-expired (and any linked blocked task unblocked, unless a non-promotable verification verdict is what holds it `blocked`). Idempotent across passes.
 - **Default**: `86400000` (24 hours).
 
 ### `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS`

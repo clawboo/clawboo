@@ -20,10 +20,10 @@ The engine is deps-injected: the board, delivery, narration, and cost all arrive
 
 ### The engine (`boardOrchestration.ts`)
 
-| Signature                                              | Contract                                                                                                                                                                                       |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createBoardOrchestrator(deps: BoardOrchestratorDeps)` | Build an orchestrator. Deps supply the board, `deliver`, the known agents, the leader, `narrate`, `onBoardChange`, caps, and the stop generation.                                              |
-| `extractSignals(...): ExtractedSignals`                | Pull typed delegation signals from a terminal turn: a `delegate` / `sessions_send` tool-call, or a `<delegate to="@Name">` / `<plan>` directive. **Typed signals only, never prose scraping.** |
+| Signature                                              | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createBoardOrchestrator(deps: BoardOrchestratorDeps)` | Build an orchestrator. Deps supply the board, `deliver`, the known agents, the leader, `narrate`, `onBoardChange`, caps, the stop generation, and `isSessionBusy`. The orchestrator it returns also exposes `detachTask(taskId)`, which a host calls when a task was released out of band (the stale sweep, an orphan reap, a human moving the card) so the engine stops holding a session against work nobody runs; it returns `false` while a live run still owns that session. |
+| `extractSignals(...): ExtractedSignals`                | Pull typed delegation signals from a terminal turn: a `delegate` / `sessions_send` tool-call, or a `<delegate to="@Name">` / `<plan>` directive. **Typed signals only, never prose scraping.**                                                                                                                                                                                                                                                                                    |
 
 Key constants, each a load-bearing invariant:
 
@@ -36,7 +36,7 @@ Key constants, each a load-bearing invariant:
 
 ### The board seam (`boardClient.ts`)
 
-The `BoardClient` interface plus `CreateTaskInput`, `BoardTask`, `ClaimResult`, `TaskDetail`, `ExecutionRef`, `CompleteExecutionOutcome`. `ClaimReason` is `'conflict' | 'not_found' | 'error'`.
+The `BoardClient` interface plus `CreateTaskInput`, `BoardTask`, `ClaimResult`, `TaskDetail`, `ExecutionRef`, `ExecutionSummary`, `CompleteExecutionOutcome`. `listExecutions` returns `ExecutionSummary[] | null`, and `null` means the ledger could not be READ, which a caller must treat as "unknown, do nothing this pass" rather than collapsing into `[]`: an empty ledger is the strongest evidence a task is fireable, so a transient read failure would turn a user-Stopped delegation into an auto-fired one. `ClaimReason` is `'conflict' | 'not_found' | 'error'`.
 
 <Note>
 A `'conflict'` claim means another worker won the race. It is **data, never an error to retry**: the atomic claim is the concurrency primitive, so a 409 is never retried.
@@ -66,7 +66,7 @@ The matchers are deliberately **drift-tolerant**: the reliable anchor is the clo
 
 ### The contract suite (`./contract`)
 
-`runCascadeContract(harness)` exports the ~42 cascade scenarios (stop-clean-release, the idle watchdog, `sessionToTask` 1:1 serialize-don't-orphan, reflect batching, the fan-out cap, plan-dep cancel-on-fail, loop breakers, dedupe, claim-409-never-retried). `CascadeBoard` keeps scenarios board-agnostic.
+`runCascadeContract(harness)` exports the 59 cascade scenarios (stop-clean-release, the idle watchdog and its open-tool-call allowance, `sessionToTask` 1:1 serialize-don't-orphan, reflect batching, the fan-out cap, plan-dep cancel-on-fail, loop breakers, dedupe, claim-409-never-retried, detach-on-release, `markStopped`, and the pump's ledger fire policy). `CascadeBoard` keeps scenarios board-agnostic.
 
 It runs against **both** the in-package `FakeBoard` (proving the cascade logic) and the real `serverBoardClient` over SQLite (proving the invariants hold against the real state machine), so a FakeBoard-vs-real divergence is caught.
 
