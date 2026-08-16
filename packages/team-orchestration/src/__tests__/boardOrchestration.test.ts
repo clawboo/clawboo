@@ -21,7 +21,7 @@ import type {
   ExecutionRef,
   TaskDetail,
 } from '../boardClient'
-import { runCascadeContract, type CascadeBoard } from '../contract'
+import { runCascadeContract, type CascadeBoard, type SeedExecState } from '../contract'
 
 // ─── FakeBoard — the in-memory reference implementation ───────────────────────
 
@@ -49,6 +49,8 @@ class FakeBoard implements CascadeBoard {
   statusUpdates: { taskId: string; status: string }[] = []
   claims: string[] = []
   execs = new Map<string, string>()
+  /** execId → executorType, when it is NOT the engine's own 'openclaw' fire. */
+  execTypes = new Map<string, string>()
   completed: { execId: string; outcome: CompleteExecutionOutcome }[] = []
   created: BoardTask[] = []
   forceClaimConflict = false
@@ -142,7 +144,11 @@ class FakeBoard implements CascadeBoard {
     for (const [id, tid] of this.execs) {
       if (tid !== taskId) continue
       const done = this.completed.find((c) => c.execId === id)
-      rows.push({ id, status: done ? done.outcome.status : 'running', executorType: 'openclaw' })
+      rows.push({
+        id,
+        status: done ? done.outcome.status : 'running',
+        executorType: this.execTypes.get(id) ?? 'openclaw',
+      })
     }
     return rows
   }
@@ -206,6 +212,7 @@ class FakeBoard implements CascadeBoard {
     title: string
     sourceDelegationId: string | null
     assigneeAgentId: string
+    exec?: SeedExecState
   }): string {
     const id = `task-${++this.taskN}`
     this.tasks.set(id, {
@@ -217,10 +224,14 @@ class FakeBoard implements CascadeBoard {
       sourceDelegationId: input.sourceDelegationId,
       assigneeAgentId: input.assigneeAgentId,
     })
-    // A refresh scenario has a live run behind the row — resume() only attaches
-    // in_progress tasks with a RUNNING execution (mirrors the real wrapper).
-    const execId = `exec-${++this.execN}`
-    this.execs.set(execId, id)
+    // A refresh scenario normally has a live ENGINE run behind the row; the
+    // other two shapes exist so the resume guards are actually exercised.
+    const exec = input.exec ?? 'running-openclaw'
+    if (exec !== 'none') {
+      const execId = `exec-${++this.execN}`
+      this.execs.set(execId, id)
+      if (exec === 'running-executor') this.execTypes.set(execId, 'codex')
+    }
     return id
   }
   dispose(): void {

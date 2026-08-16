@@ -54,6 +54,35 @@ export const DELEGATION_IDLE_TIMEOUT_MS = 8 * 60_000
  *  process-restart safe, unlike the in-memory failure breaker it complements. */
 export const MAX_AUTO_FIRES = 3
 
+/**
+ * The ledger side of the fire policy (mirrored by @clawboo/db's
+ * `isLedgerAutoFireable` for the server pump's scan — the two MUST agree, and a
+ * contract test asserts they do over one shared fixture table):
+ *   • empty ledger → never delivered (fresh, deferred, MCP-created) → fire;
+ *   • last run `running` → someone owns it → leave it;
+ *   • last run `cancelled` → the user STOPPED it → never auto-refire
+ *     (a human re-queues it deliberately);
+ *   • TRAILING streak of consecutive non-succeeded runs ≥ MAX_AUTO_FIRES →
+ *     permafailing → park (a success in between resets the streak);
+ *   • otherwise (timed_out / failed / orphaned) → infra death, not intent →
+ *     re-fire.
+ *
+ * Pure and module-scoped rather than a closure: it depends on nothing but its
+ * argument, and the mirror can only be tested if both halves are reachable.
+ */
+export function ledgerAllowsAutoFire(execs: Array<{ status: string }>): boolean {
+  if (execs.length === 0) return true
+  const last = execs[execs.length - 1]!.status
+  if (last === 'running' || last === 'cancelled') return false
+  let trailing = 0
+  for (let i = execs.length - 1; i >= 0; i--) {
+    const s = execs[i]!.status
+    if (s === 'succeeded' || s === 'cancelled') break
+    trailing += 1
+  }
+  return trailing < MAX_AUTO_FIRES
+}
+
 /** The idle allowance while a delegate sits INSIDE one tool call (call seen, no
  *  result yet). A build/test/install can legitimately run silent far past the
  *  8-min window — the runtime emits `tool-call`, then nothing until the result —
@@ -841,31 +870,6 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         `Could not deliver the step to ${nameOf(agentId)} (the message was rejected).`,
       )
     }
-  }
-
-  /**
-   * The ledger side of the fire policy (mirrored by @clawboo/db's
-   * `isLedgerAutoFireable` for the server pump's scan — the two MUST agree):
-   *   • empty ledger → never delivered (fresh, deferred, MCP-created) → fire;
-   *   • last run `running` → someone owns it → leave it;
-   *   • last run `cancelled` → the user STOPPED it → never auto-refire
-   *     (a human re-queues it deliberately);
-   *   • TRAILING streak of consecutive non-succeeded runs ≥ MAX_AUTO_FIRES →
-   *     permafailing → park (a success in between resets the streak);
-   *   • otherwise (timed_out / failed / orphaned) → infra death, not intent →
-   *     re-fire.
-   */
-  function ledgerAllowsAutoFire(execs: Array<{ status: string }>): boolean {
-    if (execs.length === 0) return true
-    const last = execs[execs.length - 1]!.status
-    if (last === 'running' || last === 'cancelled') return false
-    let trailing = 0
-    for (let i = execs.length - 1; i >= 0; i--) {
-      const s = execs[i]!.status
-      if (s === 'succeeded' || s === 'cancelled') break
-      trailing += 1
-    }
-    return trailing < MAX_AUTO_FIRES
   }
 
   /** Tasks already alerted as parked (cap-hit) — one alert per engine lifetime. */

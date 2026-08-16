@@ -40,6 +40,8 @@ import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardCl
 // synchronous (the fake reads its Map; the real wrapper reads the DB / recorded
 // calls); control methods simulate external actors (a stale-sweep release, a
 // pre-seeded resumable task) portably across both boards.
+export type SeedExecState = 'none' | 'running-openclaw' | 'running-executor'
+
 export interface CascadeBoard extends BoardClient {
   /** Tasks created via `createTask`, in call order (source of dynamic ids). */
   readonly created: readonly BoardTask[]
@@ -76,6 +78,18 @@ export interface CascadeBoard extends BoardClient {
     title: string
     sourceDelegationId: string | null
     assigneeAgentId: string
+    /**
+     * The ledger state behind the seeded row. Defaults to `running-openclaw`, a
+     * live ENGINE-owned run, which is the only shape `resume()` may attach.
+     *   - `none`: claimed but runless (mid-handoff) — attaching starts an 8-min
+     *     watchdog clock nothing refreshes, so it is a guaranteed false `blocked`.
+     *   - `running-executor`: a live run owned by the EXECUTOR runner, whose
+     *     events the engine never sees — attaching would fail a healthy
+     *     heartbeat-governed run at 8 minutes.
+     * Both must be SKIPPED. Before this option existed both fakes hardcoded a
+     * running `openclaw` exec, so deleting either guard failed nothing.
+     */
+    exec?: SeedExecState
   }): string
   /** Release any held resource (temp DB). */
   dispose?(): void | Promise<void>
@@ -1160,6 +1174,62 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const refl = reflections(delivered)
       expect(refl.some((r) => r.sessionKey === sk('a2'))).toBe(true)
       expect(refl.some((r) => r.sessionKey === sk('leader'))).toBe(false)
+    })
+
+    it('resume attaches ONLY a live engine-owned run: a runless row is skipped', async () => {
+      // Claimed but with no running exec (mid-handoff). Attaching would start an
+      // 8-minute watchdog clock nothing can refresh, so the task would be failed
+      // to `blocked` for no reason. It must be left alone.
+      let clock = 1_000
+      const { board, orchestrator } = makeHarness({ now: () => clock })
+      const t = board.seedInProgress({
+        title: 'claimed but runless',
+        sourceDelegationId: 'rX:deleg:reflectTo:leader',
+        assigneeAgentId: 'a3',
+        exec: 'none',
+      })
+      await orchestrator.resume()
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      // Never attached ⇒ the watchdog cannot see it ⇒ it is untouched.
+      expect(board.statusOf(t)).toBe('in_progress')
+      expect(board.statusUpdates.filter((u) => u.taskId === t)).toEqual([])
+    })
+
+    it('resume attaches ONLY a live engine-owned run: an EXECUTOR-owned run is skipped', async () => {
+      // A running exec the executor runner owns (codex/claude-code/native one-shot).
+      // The engine never observes its events, so attaching would falsely fail a
+      // perfectly healthy heartbeat-governed run at the 8-minute mark.
+      let clock = 1_000
+      const { board, orchestrator } = makeHarness({ now: () => clock })
+      const t = board.seedInProgress({
+        title: 'executor-owned run',
+        sourceDelegationId: 'rX:deleg:reflectTo:leader',
+        assigneeAgentId: 'a3',
+        exec: 'running-executor',
+      })
+      await orchestrator.resume()
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(t)).toBe('in_progress')
+      expect(board.statusUpdates.filter((u) => u.taskId === t)).toEqual([])
+    })
+
+    it('resume DOES attach an engine-owned run (the guards are not just "skip everything")', async () => {
+      // The positive control for the two skips above. Without it, deleting the
+      // attach entirely would also make them pass.
+      let clock = 1_000
+      const { board, orchestrator } = makeHarness({ now: () => clock })
+      const t = board.seedInProgress({
+        title: 'engine-owned run',
+        sourceDelegationId: 'rX:deleg:reflectTo:leader',
+        assigneeAgentId: 'a3',
+        exec: 'running-openclaw',
+      })
+      await orchestrator.resume()
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(t)).toBe('blocked')
     })
   })
 }

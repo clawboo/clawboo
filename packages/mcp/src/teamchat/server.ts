@@ -196,7 +196,10 @@ export function createTeamChatServer(db: ClawbooDb, opts: TeamChatServerOptions 
   // machine-parsed (the native conversation JSON.parses it) and its OWN job is
   // already peer delivery.
   const served = bound
-    ? withInboxPiggyback(tools, db, bound.agentId, new Set(['team_chat_subscribe']))
+    ? withInboxPiggyback(tools, db, bound.agentId, {
+        teamId: bound.teamId,
+        skipNames: new Set(['team_chat_subscribe']),
+      })
     : tools
   return buildServer('clawboo-teamchat', served)
 }

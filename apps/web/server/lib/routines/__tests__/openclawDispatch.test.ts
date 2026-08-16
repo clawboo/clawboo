@@ -18,6 +18,7 @@ import {
   createTask,
   getComments,
   getTask,
+  listEvents,
   listExecutions,
   listGovernanceAudit,
   reconcileStaleInProgress,
@@ -607,6 +608,50 @@ describe('dispatchConnectedSubstrate', () => {
       client: new FakeOperatorClient() as unknown as OperatorClientLike,
     })
     expect(outcome).toMatchObject({ ok: true, taskId })
+  })
+
+  it('a ledger row closed out from under the drain is NOT re-reported as succeeded', async () => {
+    // The obs stream and the ledger must never disagree. A terminal ledger row is
+    // immutable, so if something else closed this exec (a stale sweep, an abort)
+    // the drain's own close LOSES and returns null — and the paired
+    // `execution_completed` must be suppressed with it. Emitting anyway would put
+    // `succeeded` on the dashboard for a run the ledger records as timed out.
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    const client = new FakeOperatorClient()
+    const sessionKey = `agent:gw-${agentRow.id}:clawboo-routine-${run.id}`
+
+    const dispatchPromise = dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: client as unknown as OperatorClientLike,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    // The stale sweep reaches the ledger first, through its real path: it closes
+    // the running exec as `timed_out` AND releases the task to `todo`.
+    expect(listExecutions(db, taskId)[0]?.status).toBe('running')
+    expect(reconcileStaleInProgress(db, -10_000).reconciled).toBe(1)
+
+    // Now the real run finishes successfully.
+    client.emit(
+      chatFrame(sessionKey, 'final', {
+        message: { role: 'assistant', content: 'finished anyway' },
+      }),
+    )
+    await dispatchPromise
+
+    // The ledger keeps the FIRST terminal…
+    expect(listExecutions(db, taskId)[0]?.status).toBe('timed_out')
+    // …and the obs stream does not contradict it.
+    const completed = listEvents(db, { taskId, kinds: ['execution_completed'] })
+    expect(completed).toHaveLength(0)
+    // The operator is still told, on the card, that the result was stranded.
+    expect(getComments(db, taskId).some((c) => c.body.includes('already been closed'))).toBe(true)
   })
 
   it('heartbeats the task while it drains, so the stale sweep cannot reclaim live work', async () => {

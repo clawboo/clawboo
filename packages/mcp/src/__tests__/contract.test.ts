@@ -11,6 +11,7 @@ import {
   DEFAULT_MAX_DEPTH,
   DEFAULT_MAX_ROOT_CREATES,
   enqueueInbox,
+  listUndeliveredInbox,
   listPendingApprovals,
   listTasks,
   resolveApproval,
@@ -130,6 +131,41 @@ describe('Tasks MCP', () => {
     expect(first[1]).toContain('X finished') // delivered with this result…
     const second = await allBlocks()
     expect(second.join('')).not.toContain('X finished') // …exactly once
+  })
+
+  it('the piggyback is TEAM-SCOPED: another team’s row never rides this run', async () => {
+    // An agent can hold rows for more than one team. A team-bound session must
+    // deliver only its own team's, or a run scoped to A leaks B's coordination
+    // traffic into its context.
+    enqueueInbox(db, { agentId: 'a1', teamId: 'A', kind: 'task_update', body: 'ALPHA update' })
+    enqueueInbox(db, { agentId: 'a1', teamId: 'B', kind: 'task_update', body: 'BRAVO update' })
+    const boundToA = await connectInMemory(
+      createTasksServer(db, { readOnly: true, boundScope: { teamId: 'A', agentId: 'a1' } }),
+    )
+    const res = await boundToA.callTool({ name: 'list_tasks', arguments: {} })
+    const text = ((res.content ?? []) as Array<{ type: string; text?: string }>)
+      .map((c) => c.text ?? '')
+      .join('')
+    expect(text).toContain('ALPHA update')
+    expect(text).not.toContain('BRAVO update')
+    // B's row is untouched, so B's own session still delivers it.
+    expect(listUndeliveredInbox(db, 'a1', { teamId: 'B' }).map((r) => r.body)).toEqual([
+      'BRAVO update',
+    ])
+  })
+
+  it('a TEAMLESS row still rides a team-bound run (this is its only channel)', async () => {
+    // The digest is strictly team-scoped by design, so scoping the piggyback the
+    // same way would strand a teamless row forever. It widens to team-or-null.
+    enqueueInbox(db, { agentId: 'a1', kind: 'alert', body: 'NO TEAM alert' })
+    const boundToA = await connectInMemory(
+      createTasksServer(db, { readOnly: true, boundScope: { teamId: 'A', agentId: 'a1' } }),
+    )
+    const res = await boundToA.callTool({ name: 'list_tasks', arguments: {} })
+    const text = ((res.content ?? []) as Array<{ type: string; text?: string }>)
+      .map((c) => c.text ?? '')
+      .join('')
+    expect(text).toContain('NO TEAM alert')
   })
 
   it('stays board-wide when unbound (raw stdio / external attach)', async () => {

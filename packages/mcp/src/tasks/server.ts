@@ -323,6 +323,6 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   const boundAgentId = opts?.boundScope?.agentId ?? undefined
   return buildServer(
     'clawboo-tasks',
-    boundAgentId ? withInboxPiggyback(active, db, boundAgentId, new Set()) : active,
+    boundAgentId ? withInboxPiggyback(active, db, boundAgentId, { teamId: boundTeamId }) : active,
   )
 }

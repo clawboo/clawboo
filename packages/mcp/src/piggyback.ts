@@ -15,14 +15,30 @@ import type { ToolDef } from './shared'
 
 const PIGGYBACK_LIMIT = 5
 
+export interface PiggybackOptions {
+  /**
+   * The session's bound team. REQUIRED for correctness on a team-bound session:
+   * an agent can hold rows for more than one team, and without it this channel
+   * hands another team's notices to a run scoped to this one. Teamless rows are
+   * still delivered (see `includeTeamless` in `listUndeliveredInbox`), because
+   * the team-scoped digest cannot deliver them and this is their only channel.
+   * Omitted only for an unbound session, which is board-wide by definition.
+   */
+  teamId?: string | null
+  /** Tools whose entire output is machine-parsed, so a trailing block breaks them. */
+  skipNames?: ReadonlySet<string>
+}
+
 /** Wrap `tools` so each successful call appends the bound agent's undelivered
  *  mailbox rows as a trailing content block (and marks them delivered). */
 export function withInboxPiggyback(
   tools: ToolDef[],
   db: ClawbooDb,
   agentId: string,
-  skipNames: ReadonlySet<string>,
+  opts: PiggybackOptions = {},
 ): ToolDef[] {
+  const skipNames = opts.skipNames ?? new Set<string>()
+  const teamId = opts.teamId ?? undefined
   return tools.map((tool) => {
     if (skipNames.has(tool.name)) return tool
     return {
@@ -31,7 +47,11 @@ export function withInboxPiggyback(
         const res = await tool.handler(args)
         if (res.isError) return res
         try {
-          const rows = listUndeliveredInbox(db, agentId, { limit: PIGGYBACK_LIMIT })
+          const rows = listUndeliveredInbox(db, agentId, {
+            teamId,
+            includeTeamless: true,
+            limit: PIGGYBACK_LIMIT,
+          })
           if (rows.length === 0) return res
           const wonIds = new Set(
             markInboxDelivered(

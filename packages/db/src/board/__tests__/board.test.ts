@@ -7,7 +7,7 @@ import { eq, sql as dsql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, type ClawbooDb } from '../../db'
-import { executionProcesses, type DbTask } from '../../schema'
+import { executionProcesses, tasks, type DbTask } from '../../schema'
 import {
   addComment,
   cancelDependents,
@@ -267,21 +267,39 @@ describe('downstream-chain recovery + stale sweep', () => {
   })
 
   it('heartbeatTask keeps a driven run out of the sweep, and only touches in_progress', () => {
-    const t = createTask(db, { title: 'long build' })
-    claimTask(db, t.id, 'agent-x')
-    createExecutionProcess(db, { taskId: t.id, executorType: 'codex' })
-    const before = getTask(db, t.id)!.updatedAt
-    heartbeatTask(db, t.id)
-    expect(getTask(db, t.id)!.updatedAt).toBeGreaterThanOrEqual(before)
-    // A beating run survives a TTL that would sweep a silent one.
-    expect(reconcileStaleInProgress(db, 60_000).reconciled).toBe(0)
-    expect(getTask(db, t.id)!.status).toBe('in_progress')
+    // Two identical claimed runs, both aged past the TTL. The ONLY difference is
+    // that one beats. Anything less than this passes with `heartbeatTask` stubbed
+    // to a no-op: a freshly-created task is younger than any sane TTL, so the
+    // sweep would have spared it either way.
+    const beating = createTask(db, { title: 'long build' })
+    const silent = createTask(db, { title: 'dead build' })
+    for (const t of [beating, silent]) {
+      claimTask(db, t.id, 'agent-x')
+      createExecutionProcess(db, { taskId: t.id, executorType: 'codex' })
+    }
+    const TTL_MS = 60_000
+    const aged = Date.now() - 10 * TTL_MS
+    db.update(tasks)
+      .set({ updatedAt: aged })
+      .where(dsql`${tasks.id} IN (${beating.id}, ${silent.id})`)
+      .run()
+    expect(getTask(db, beating.id)!.updatedAt).toBe(aged)
+
+    heartbeatTask(db, beating.id)
+    // STRICTLY advanced, not merely "not older": a no-op beat leaves it at `aged`.
+    expect(getTask(db, beating.id)!.updatedAt).toBeGreaterThan(aged)
+    expect(getTask(db, silent.id)!.updatedAt).toBe(aged)
+
+    // One sweep, one difference: the beat is what saves the task.
+    expect(reconcileStaleInProgress(db, TTL_MS).reconciled).toBe(1)
+    expect(getTask(db, beating.id)!.status).toBe('in_progress')
+    expect(getTask(db, silent.id)!.status).toBe('todo')
 
     // A beat must never resurrect freshness on a task that left in_progress.
-    updateStatus(db, t.id, 'in_review')
-    const released = getTask(db, t.id)!.updatedAt
-    heartbeatTask(db, t.id)
-    expect(getTask(db, t.id)!.updatedAt).toBe(released)
+    updateStatus(db, beating.id, 'in_review')
+    const released = getTask(db, beating.id)!.updatedAt
+    heartbeatTask(db, beating.id)
+    expect(getTask(db, beating.id)!.updatedAt).toBe(released)
   })
 })
 

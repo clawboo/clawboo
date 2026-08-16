@@ -38,26 +38,30 @@ function manualSource<T>(): {
 }
 
 describe('withIdleTimeout', () => {
-  it('passes events through and ends with the source (never trips while flowing)', async () => {
+  it('the window is IDLE-reset, not a total budget: a long streaming run never trips', async () => {
+    // Total elapsed (~100 ms) deliberately EXCEEDS idleMs (40 ms), while every
+    // individual gap (~20 ms) stays under it. A total-budget implementation trips
+    // here; only a per-event re-arm survives. (An earlier version of this test ran
+    // 60 ms against a 200 ms window, which both implementations passed.)
     const src = manualSource<number>()
     const seen: number[] = []
     let idled = false
     const consume = (async () => {
       for await (const v of withIdleTimeout(src.iterable, {
-        idleMs: 200,
+        idleMs: 40,
         onIdle: () => {
           idled = true
         },
       }))
         seen.push(v)
     })()
-    for (const v of [1, 2, 3]) {
+    for (const v of [1, 2, 3, 4, 5]) {
       src.push(v)
-      await sleep(20) // well under idleMs — the timer re-arms per event
+      await sleep(20) // under idleMs individually; 5 x 20 is well over it in total
     }
     src.end()
     await consume
-    expect(seen).toEqual([1, 2, 3])
+    expect(seen).toEqual([1, 2, 3, 4, 5])
     expect(idled).toBe(false)
   })
 

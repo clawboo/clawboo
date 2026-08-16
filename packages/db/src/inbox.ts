@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm'
 
 import type { ClawbooDb } from './db'
 import { withWriteRetry } from './board/contention'
@@ -39,14 +39,29 @@ export function enqueueInbox(db: ClawbooDb, input: EnqueueInboxInput): DbAgentIn
   return row
 }
 
-/** Undelivered rows for an agent, oldest first (optionally team-scoped). */
+/**
+ * Undelivered rows for an agent, oldest first (optionally team-scoped).
+ *
+ * `includeTeamless` widens a team-scoped read to also return rows with no team.
+ * A caller that scopes to a team WITHOUT it can never deliver a teamless row, so
+ * whichever channel is the last resort for those rows must pass it. Today that is
+ * the MCP piggyback: the digest is strictly team-scoped by design (its context
+ * block belongs to one team's run), and a teamless row would otherwise sit
+ * undelivered forever.
+ */
 export function listUndeliveredInbox(
   db: ClawbooDb,
   agentId: string,
-  opts?: { teamId?: string | null; limit?: number },
+  opts?: { teamId?: string | null; includeTeamless?: boolean; limit?: number },
 ): DbAgentInboxRow[] {
   const conds = [eq(agentInbox.agentId, agentId), isNull(agentInbox.deliveredAt)]
-  if (opts?.teamId) conds.push(eq(agentInbox.teamId, opts.teamId))
+  if (opts?.teamId) {
+    conds.push(
+      opts.includeTeamless
+        ? or(eq(agentInbox.teamId, opts.teamId), isNull(agentInbox.teamId))!
+        : eq(agentInbox.teamId, opts.teamId),
+    )
+  }
   return db
     .select()
     .from(agentInbox)

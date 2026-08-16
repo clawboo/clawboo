@@ -6,6 +6,7 @@ import {
   listAgentsWithUndeliveredInbox,
   listUndeliveredInbox,
   markInboxDelivered,
+  renderInboxDigest,
 } from '../../inbox'
 import { onBoardLifecycle, resetBoardLifecycleListeners, type BoardLifecycleEvent } from '../events'
 import {
@@ -176,6 +177,45 @@ describe('agent inbox (durable mailbox)', () => {
     expect(wonMcp).toEqual([])
     expect(listUndeliveredInbox(db, 'lead')).toHaveLength(0)
     void a
+  })
+
+  it('renderInboxDigest: only the rows that FIT are marked delivered', () => {
+    // The exactly-once contract lives on this return value. A caller must mark
+    // ONLY `includedIds`; a row truncated out of the budget was not delivered and
+    // has to ride the next digest, so returning every id silently drops notices.
+    for (const n of [1, 2, 3])
+      enqueueInbox(db, { agentId: 'lead', kind: 'signal', body: `msg${n}` })
+    const rows = listUndeliveredInbox(db, 'lead')
+    expect(rows).toHaveLength(3)
+
+    // A budget that fits the header plus exactly one line.
+    const oneLine = '[While you were away]'.length + '- msg1'.length + 1
+    const tight = renderInboxDigest(rows, oneLine)
+    expect(tight.includedIds).toEqual([rows[0]!.id])
+    expect(tight.text).toContain('msg1')
+    expect(tight.text).not.toContain('msg2')
+
+    // Marking only the included row leaves the rest pending for the next pass.
+    markInboxDelivered(db, tight.includedIds, 'digest')
+    expect(listUndeliveredInbox(db, 'lead').map((r) => r.body)).toEqual(['msg2', 'msg3'])
+  })
+
+  it('renderInboxDigest: empty input renders nothing, and an over-long row is truncated', () => {
+    expect(renderInboxDigest([])).toEqual({ text: null, includedIds: [] })
+
+    const long = 'x'.repeat(1_000)
+    enqueueInbox(db, { agentId: 'lead', kind: 'alert', body: long })
+    const rendered = renderInboxDigest(listUndeliveredInbox(db, 'lead'))
+    expect(rendered.includedIds).toHaveLength(1) // truncated, still delivered
+    expect(rendered.text!).toContain('…')
+    expect(rendered.text!.length).toBeLessThan(long.length)
+
+    // A budget too small even for one line renders nothing and marks nothing,
+    // rather than emitting a header with no content.
+    expect(renderInboxDigest(listUndeliveredInbox(db, 'lead'), 5)).toEqual({
+      text: null,
+      includedIds: [],
+    })
   })
 
   it('lists agents holding undelivered mail (the boot-resume scan)', () => {
