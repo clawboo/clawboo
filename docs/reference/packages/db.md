@@ -178,6 +178,21 @@ One of those re-exports crosses a package boundary: the board **state machine** 
 | `readRoom`           | `(db, input: ReadRoomInput) => DbTeamChat[]` | Cursor read in `seq` order; `excludeAuthorId` IS the per-poster echo guard.              |
 | `roomMaxSeq`         | `(db, roomId) => number`                     | Unfiltered head `seq` of a room (0 when empty).                                          |
 
+**Durable mailbox (`inbox.ts`)**
+
+Agent-bound notifications that survive eviction and restarts, delivered by whichever channel touches the agent first.
+
+| Export                           | Signature                                                   | Contract                                                                                                                                                                                                      |
+| -------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enqueueInbox`                   | `(db, input: EnqueueInboxInput) => DbAgentInboxRow`         | Append a notification. `kind` is `'task_update' \| 'alert' \| 'signal'`.                                                                                                                                      |
+| `listUndeliveredInbox`           | `(db, agentId, opts?) => DbAgentInboxRow[]`                 | Undelivered rows, oldest first. `opts.includeTeamless` widens a team-scoped read to also return rows with no team; a caller that scopes without it can never deliver a teamless row.                          |
+| `markInboxDelivered`             | `(db, ids, via: InboxChannel) => string[]`                  | Guarded on still-undelivered, so two channels racing the same rows record exactly one delivery. Returns the ids **this** call won, which is what the caller may render.                                       |
+| `packInboxRows`                  | `(rows, budgetChars) => { bodies, includedIds, usedChars }` | Packs oldest-first, stopping at the first row that does not fit. **The delivery guarantee lives here:** mark only `includedIds`. `usedChars` is what a second section has left to spend from the same budget. |
+| `splitInboxByAddressing`         | `(rows) => { addressed, ambient }`                          | `signal` is ambient; `task_update` and `alert` are requests. Feeds the turn envelope's two channels.                                                                                                          |
+| `renderInboxDigest`              | `(rows, budgetChars?) => { text, includedIds }`             | One flat `[While you were away]` block over `packInboxRows`.                                                                                                                                                  |
+| `listAgentsWithUndeliveredInbox` | `(db) => …`                                                 | The boot-resume scan.                                                                                                                                                                                         |
+| `INBOX_BUDGET_CHARS`             | `4000`                                                      | The mailbox's total context ceiling for one run. Exported so every caller spends the **same** budget; a per-caller copy is how the bound quietly doubles.                                                     |
+
 **Chat transcript tail (`chat/*`)**
 
 | Export                   | Signature                                                       | Contract                                                                                                                                                                        |

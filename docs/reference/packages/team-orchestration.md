@@ -56,6 +56,18 @@ The matchers are deliberately **drift-tolerant**: the reliable anchor is the clo
 
 `buildTaskUpdateMessage(items)` renders the batched leader stimulus. `TaskUpdateOutcome` is `'done' | 'error' | 'aborted' | 'timeout' | 'max_turns'`; a non-`done` outcome renders as a "did not complete" entry, so the leader is told to decide rather than wait.
 
+### Turn origin (`turnOrigin.ts`)
+
+`TurnOrigin` is `{ kind: 'human' } | { kind: 'delegation'; fromAgentId } | { kind: 'system' }`, stamped by whoever asks for a turn and passed as `deliver`'s fourth argument. It is required rather than inferred: the host used to work out whether a turn was a delegated worker's or the user-facing leader's by asking the engine whether the session still held a task, and that answer goes stale the moment `completeForSession` forgets the session.
+
+`classifyTurn({ origin, targetAgentId, leaderAgentId, hasBoardTask })` returns a `TurnFraming` of three independent booleans: `isWorker` (executing a delegated task), `isLeader` (the team's reduce point, a property of who the agent is), and `isUserFacing` (this turn's reply reaches the human, so it may carry the user's self-intro). `HUMAN_TURN` and `SYSTEM_TURN` are singletons for the two payload-free variants. `schedule` is deliberately not a variant: routines dispatch through their own path and never reach `deliver`.
+
+### Turn envelope (`turnEnvelope.ts`)
+
+`buildTurnEnvelope({ ambient, addressed })` frames a run's waiting context as two channels with different authority: **addressed** items are routed to this agent and need a response; **ambient** items are evidence about the state of the work and carry no authority to change the task, the policies, or the Team Rules. Addressed renders first so a long ambient block cannot bury the ask, and an empty section is omitted entirely so a quiet turn adds zero tokens (returns `null`).
+
+Section membership is clawboo's decision, taken from provenance (the mailbox row's `kind`, and which reader produced the item) and **never** from the text, so a peer's message can never promote itself out of the ambient half. The builder frames items without touching them, which is what keeps `formatPeerPost`'s safety-critical `isUser=false` token intact.
+
 ### Session keys (`sessionUtils.ts`)
 
 `buildTeamSessionKey(agentId, teamId)`, `agentIdFromSessionKey`, `isTeamSessionKey`.
