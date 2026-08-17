@@ -28,9 +28,16 @@ import { parseDirectives, startDelayMs, type Directive } from './directives'
 
 export const MOCK_RUNTIME_ID = 'clawboo-mock'
 
+/** Ceiling on any single injected sleep. `clampMs` already bounds the parsed
+ *  value, but the bound belongs next to the thing it protects: the duration
+ *  reaches here from directive text, and a reader of this line should not have
+ *  to trust a clamp two modules away. */
+const MAX_SLEEP_MS = 10 * 60_000
+
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
-    const t = setTimeout(resolve, ms)
+    const bounded = Number.isFinite(ms) ? Math.min(Math.max(0, ms), MAX_SLEEP_MS) : 0
+    const t = setTimeout(resolve, bounded)
     ;(t as { unref?: () => void }).unref?.()
     signal?.addEventListener(
       'abort',

@@ -123,3 +123,25 @@ describe('MockAdapter', () => {
     expect(seen[0]).toMatchObject({ reason: 'success' })
   })
 })
+
+describe('directive parsing after the ReDoS-shape fix', () => {
+  // CodeQL flagged the old `/^\s*!(\w+)\s*(.*)$/` as polynomial ReDoS: `\s*`
+  // and `.*` both match a space, so they overlap. Measured, V8 handles it fine
+  // (3ms on four million spaces), so this was a PATTERN finding rather than an
+  // exploitable one, and no timing assertion here would bind. What is worth
+  // pinning is that removing the ambiguity did not change what the parser does.
+  it('splits a directive from its argument exactly as before', () => {
+    expect(parseDirectives('!loop 5')).toEqual([{ kind: 'loop', times: 5 }])
+    expect(parseDirectives('  !ok hello there')).toEqual([{ kind: 'ok', text: 'hello there' }])
+    expect(parseDirectives('!ok')).toEqual([{ kind: 'ok', text: 'ok' }])
+    expect(parseDirectives('!ok' + ' '.repeat(200))).toEqual([{ kind: 'ok', text: 'ok' }])
+    expect(parseDirectives('not a directive')).toEqual([])
+    expect(parseDirectives('text\n!error boom\nmore')).toEqual([{ kind: 'error', message: 'boom' }])
+  })
+
+  it('an unbounded ask for silence is still clamped', () => {
+    const [d] = parseDirectives('!silent 999999999')
+    expect(d).toMatchObject({ kind: 'silent' })
+    expect((d as { ms: number }).ms).toBe(10 * 60_000)
+  })
+})

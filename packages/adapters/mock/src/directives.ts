@@ -55,10 +55,16 @@ const clampMs = (raw: string | undefined, fallback: number): number => {
 export function parseDirectives(input: string): Directive[] {
   const out: Directive[] = []
   for (const line of input.split('\n')) {
-    const m = /^\s*!(\w+)\s*(.*)$/.exec(line)
+    // Match only the HEAD, then slice the remainder. The obvious
+    // `/^\s*!(\w+)\s*(.*)$/` is a polynomial-ReDoS shape: `\s*` and `.*` both
+    // match a space, so the engine backtracks across that seam on a line of
+    // many spaces. Directive text is agent-authored, so it is exactly the input
+    // that should not be able to pick the parser's running time. Bounded
+    // quantifiers plus a slice removes the ambiguity instead of tuning it.
+    const m = /^[ \t]{0,16}!(\w{1,32})/.exec(line)
     if (!m) continue
     const word = m[1] ?? ''
-    const arg = (m[2] ?? '').trim()
+    const arg = line.slice(m[0].length).trim()
     switch (word.toLowerCase()) {
       case 'ok':
         out.push({ kind: 'ok', text: arg || 'ok' })
