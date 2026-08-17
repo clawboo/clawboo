@@ -96,7 +96,7 @@ jobs:
       - run: pnpm test:clean-install
 
       - name: Create Release PR or Publish
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
           publish: pnpm changeset publish
           commit: 'chore: version packages'
