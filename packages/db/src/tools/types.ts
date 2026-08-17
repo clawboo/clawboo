@@ -67,6 +67,11 @@ export type InspectorDecision =
   | { kind: 'deny'; reason: string }
   | { kind: 'require_approval'; message: string }
   | { kind: 'rewrite'; args: Record<string, unknown> }
+  /** Allow the call, but RECORD what a stricter reading would have refused. For a
+   *  gate whose false positives cost more than its true positives, this is the
+   *  honest middle: the audit row shows what would have been denied without the
+   *  work actually being blocked. */
+  | { kind: 'observe'; reason: string }
 
 export type Inspector = (
   call: ToolCall,
@@ -81,6 +86,11 @@ export interface AvailabilityResult {
 
 /** The resolved chain outcome (args may have been rewritten in-place). */
 export type ChainOutcome =
-  | { decision: 'allow'; args: Record<string, unknown> }
+  | { decision: 'allow'; args: Record<string, unknown>; observations?: string[] }
   | { decision: 'deny'; reason: string }
-  | { decision: 'require_approval'; message: string; args: Record<string, unknown> }
+  | {
+      decision: 'require_approval'
+      message: string
+      args: Record<string, unknown>
+      observations?: string[]
+    }

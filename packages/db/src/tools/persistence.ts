@@ -35,9 +35,16 @@ function sleep(ms: number): Promise<void> {
 export interface AuditBeforeInput {
   toolName: string
   agentId?: string | null
-  decision: 'allow' | 'deny' | 'require_approval' | 'rewrite'
+  /** `observe` = the call RAN, and a stricter reading of a gate would have
+   *  refused it. The row is the only place that record exists, so filtering the
+   *  audit on it is how the false-positive rate gets measured before anyone
+   *  argues about tightening the gate. */
+  decision: 'allow' | 'deny' | 'require_approval' | 'rewrite' | 'observe'
   args: unknown
   tenantId?: string | null
+  /** What the gate would have refused, for an `observe` row. Lands in
+   *  `resultSummary`, which is otherwise null on a `before` row. */
+  note?: string | null
 }
 
 export function writeAuditBefore(db: ClawbooDb, input: AuditBeforeInput): string {
@@ -52,7 +59,7 @@ export function writeAuditBefore(db: ClawbooDb, input: AuditBeforeInput): string
         phase: 'before',
         decision: input.decision,
         argsSummary: scrubArgsSummary(input.args),
-        resultSummary: null,
+        resultSummary: input.note ?? null,
         isError: 0,
         tenantId: input.tenantId ?? null,
         createdAt: Date.now(),
