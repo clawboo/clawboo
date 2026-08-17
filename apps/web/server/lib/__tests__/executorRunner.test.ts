@@ -11,7 +11,7 @@
 // and the REST gating 404 when no runtime flag is set.
 
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -28,6 +28,7 @@ import {
   completeExecutionProcess,
   createExecutionProcess,
   createTask,
+  getWorkspaceForTask,
   getBudget,
   getComments,
   getTask,
@@ -212,6 +213,60 @@ describe('executor runner (real board + real git worktree)', () => {
     // delivered on `opts.context` in full.)
     expect(ctx.indexOf('# Task: Implement the thing')).toBe(0)
     expect(ctx.indexOf('interrupted')).toBeGreaterThan(ctx.indexOf('do it'))
+  })
+
+  it('records the unknown outcome in the DURABLE handoff, not just the prompt', async () => {
+    // The prompt note reaches the agent about to redo the work. The handoff is
+    // what a LATER cross-runtime pickup reads, and it wrote `[]` unconditionally,
+    // so the interruption was dropped the moment the run clocked out. Silence
+    // there reads as "it did not happen".
+    const db = getDb()
+    const taskId = newCodeTask()
+    const prior = createExecutionProcess(db, { taskId, executorType: 'codex' })
+    completeExecutionProcess(db, prior.id, {
+      status: 'timed_out',
+      error: 'stale: no heartbeat within the watchdog window',
+    })
+
+    const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'carried on')
+    await runTaskOnRuntime({
+      db,
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+      keepForResume: true, // pause, so the handoff is the deliverable
+    })
+
+    const ws = getWorkspaceForTask(db, taskId)
+    expect(ws?.worktreePath).toBeTruthy()
+    const raw = await readFile(path.join(String(ws!.worktreePath), 'AGENT_HANDOFF.json'), 'utf8')
+    const handoff = JSON.parse(raw) as { brokenOrUnverified: string[] }
+    expect(handoff.brokenOrUnverified.join('\n')).toMatch(/UNKNOWN/)
+    expect(handoff.brokenOrUnverified.join('\n')).toMatch(/no heartbeat/)
+
+    // And an UNINTERRUPTED task's handoff stays clean. `brokenOrUnverified` is
+    // read as a to-do list by whoever picks the worktree up; an entry on every
+    // pause would train the reader to skip the field.
+    const cleanTaskId = newCodeTask()
+    await runTaskOnRuntime({
+      db,
+      makeAdapter: () => new FakeRunnerAdapter('codex', FULL_CAPS, 'paused'),
+      taskId: cleanTaskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+      keepForResume: true,
+    })
+    const cleanWs = getWorkspaceForTask(db, cleanTaskId)
+    const cleanRaw = await readFile(
+      path.join(String(cleanWs!.worktreePath), 'AGENT_HANDOFF.json'),
+      'utf8',
+    )
+    expect((JSON.parse(cleanRaw) as { brokenOrUnverified: string[] }).brokenOrUnverified).toEqual(
+      [],
+    )
   })
 
   it('a CLEAN first attempt gets no interruption note (no noise)', async () => {

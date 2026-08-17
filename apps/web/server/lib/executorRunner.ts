@@ -629,12 +629,13 @@ async function runTaskInner(
   // ledger row and nothing ever showed that to anybody, so a re-dispatch started
   // cold and could redo a side effect the dead attempt had already performed.
   // Suppressed on a fix cycle (that re-dispatch carries its own verdict note).
+  // EXCLUDE this run's own row. It was opened moments ago and is still
+  // `running`, so leaving it in makes the newest attempt look like an ordinary
+  // in-flight one and the previous crash is never seen.
+  const priorAttempts = classifyAttempts(listExecutions(db, taskId).filter((e) => e.id !== exec.id))
   const resumeNote =
     buildResumeNote({
-      // EXCLUDE this run's own row. It was opened moments ago and is still
-      // `running`, so leaving it in makes the newest attempt look like an
-      // ordinary in-flight one and the previous crash is never seen.
-      attempts: classifyAttempts(listExecutions(db, taskId).filter((e) => e.id !== exec.id)),
+      attempts: priorAttempts,
       hasWorktree: Boolean(getWorkspaceForTask(db, taskId)),
       ...(input.fixCycle ? { fixCycle: input.fixCycle } : {}),
     }) ?? ''
@@ -1314,7 +1315,20 @@ async function runTaskInner(
         handoffFrom: assigneeAgentId,
         runtime: runtimeId,
         completedSubtasks: input.keepForResume ? [] : [reported],
-        brokenOrUnverified: [],
+        // An interrupted attempt is recorded as UNKNOWN rather than dropped.
+        // Silence reads as "it did not happen", which is how a cross-runtime
+        // pickup ends up redoing a side effect the dead attempt already
+        // performed. Carry the prior handoff's own list too: this run
+        // reconstructed it from the worktree, and rewriting `[]` over it loses
+        // everything an earlier runtime flagged.
+        brokenOrUnverified: [
+          ...(priorAttempts.lastKind === 'crash'
+            ? [
+                `A previous attempt was interrupted (${priorAttempts.lastCrashReason ?? 'no reason recorded'}) and the outcome of whatever it was doing is UNKNOWN — verify before redoing anything with a side effect.`,
+              ]
+            : []),
+          ...(resume?.broken ?? []),
+        ],
         nextBestStep: input.keepForResume ? reported : '',
         commands: { init: './init.sh', verify: '', start: '' },
         evidence: {},
