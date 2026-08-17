@@ -8,6 +8,7 @@
 import { ClaudeCodeAdapter } from '@clawboo/adapter-claude-code'
 import { CodexAdapter } from '@clawboo/adapter-codex'
 import { HermesAdapter } from '@clawboo/adapter-hermes'
+import { MockAdapter } from '@clawboo/adapter-mock'
 import { NativeAdapter } from '@clawboo/adapter-native'
 import type { HealthResult, RuntimeAdapter } from '@clawboo/executor'
 
@@ -15,7 +16,12 @@ import { resolveRuntimeBin } from '../platform'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { createClaudeCodeDriver } from './claudeCodeDriver'
 import { createCodexDriver } from './codexDriver'
-import { getDescriptor, NON_OPENCLAW_RUNTIME_IDS, type NonOpenClawRuntimeId } from './descriptor'
+import {
+  getDescriptor,
+  mockRuntimeEnabled,
+  NON_OPENCLAW_RUNTIME_IDS,
+  type NonOpenClawRuntimeId,
+} from './descriptor'
 import { createHermesDriver } from './hermesDriver'
 import { createNativeDriver } from './native'
 import type { RuntimeRunContext } from './types'
@@ -24,9 +30,15 @@ export type { RuntimeRunContext } from './types'
 // Re-export the runtime id surface from the descriptor (single source of truth).
 export { NON_OPENCLAW_RUNTIME_IDS, type NonOpenClawRuntimeId } from './descriptor'
 
-/** The non-OpenClaw runtime ids (all always available). */
+/**
+ * The non-OpenClaw runtime ids. The four real ones are always available; the
+ * fault-injection harness appears ONLY behind its env flag, so a normal install
+ * never lists it, never offers it in the UI, and never routes work to it.
+ */
 export function enabledRuntimeIds(): NonOpenClawRuntimeId[] {
-  return [...NON_OPENCLAW_RUNTIME_IDS]
+  const ids = [...NON_OPENCLAW_RUNTIME_IDS]
+  if (mockRuntimeEnabled()) ids.push('clawboo-mock')
+  return ids
 }
 
 function cliHealth(bin: string | null): () => Promise<HealthResult> {
@@ -73,6 +85,10 @@ export function adapterFactoryFor(id: NonOpenClawRuntimeId): RuntimeAdapterFacto
       return (ctx) => new HermesAdapter((opts) => createHermesDriver(opts, ctx), health)
     case 'clawboo-native':
       return (ctx) => new NativeAdapter((opts) => createNativeDriver(opts, ctx), nativeKeyHealth)
+    case 'clawboo-mock':
+      // No driver and no run context: the harness synthesizes its whole event
+      // stream from directives in the message.
+      return () => new MockAdapter()
   }
 }
 

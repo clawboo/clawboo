@@ -7,14 +7,29 @@
 
 import { NATIVE_PROVIDER_ENV_VARS } from '@clawboo/adapter-native'
 
-export type NonOpenClawRuntimeId = 'claude-code' | 'codex' | 'hermes' | 'clawboo-native'
+export type NonOpenClawRuntimeId =
+  'claude-code' | 'codex' | 'hermes' | 'clawboo-native' | 'clawboo-mock'
 
+/**
+ * The runtimes a normal install offers. `clawboo-mock` is deliberately ABSENT:
+ * it is a fault-injection harness, and `enabledRuntimeIds()` adds it only behind
+ * an env flag. Keeping it out of this list is what stops it appearing in the UI,
+ * in `GET /api/runtimes`, and in anything that enumerates real runtimes.
+ */
 export const NON_OPENCLAW_RUNTIME_IDS: readonly NonOpenClawRuntimeId[] = [
   'claude-code',
   'codex',
   'hermes',
   'clawboo-native',
 ]
+
+/** Set `CLAWBOO_ENABLE_MOCK_RUNTIME=1` to expose the fault-injecting runtime. */
+export const MOCK_RUNTIME_ENV = 'CLAWBOO_ENABLE_MOCK_RUNTIME'
+
+/** True only when the operator explicitly opted in. */
+export function mockRuntimeEnabled(): boolean {
+  return process.env[MOCK_RUNTIME_ENV] === '1'
+}
 
 export type RuntimeAuthKind = 'api-key' | 'oauth' | 'none'
 
@@ -111,6 +126,23 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
     // driver maps whichever key is present to the matching `--provider` flag.
     altEnvVars: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'],
     docsUrl: 'https://pypi.org/project/hermes-agent/',
+    headlessAuth: true,
+  },
+  'clawboo-mock': {
+    id: 'clawboo-mock',
+    name: 'Mock (fault injection)',
+    // A test harness that ships with the server and executes nothing: every
+    // event it emits is synthesized. Present so coordination failures (silence,
+    // a crash, an unresolved tool call, a slow start) can be reproduced through
+    // the REAL drain and executor paths instead of only against a unit double.
+    healthBin: null,
+    packageManager: null,
+    pkg: null,
+    installCommand: null,
+    builtIn: true,
+    authKind: 'none',
+    envVar: null,
+    docsUrl: 'https://github.com/clawboo/clawboo',
     headlessAuth: true,
   },
   'clawboo-native': {

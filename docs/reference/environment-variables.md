@@ -55,6 +55,7 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, 
 | `CLAWBOO_BOARD_STALE_TTL_MS`           | Operational tuning | `180000` (3 min)                 | board stale-task sweep                  |
 | `CLAWBOO_BOARD_STALE_SWEEP_MS`         | Operational tuning | `60000` (60 s)                   | board stale-task sweep                  |
 | `CLAWBOO_DISPATCH_PUMP_MS`             | Operational tuning | `60000` (60 s)                   | board dispatch pump                     |
+| `CLAWBOO_ENABLE_MOCK_RUNTIME`          | Testing            | (unset)                          | runtime registry (fault-injection)      |
 | `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`        | Operational tuning | `600000` (10 min)                | per-identity dispatch mutex             |
 | `CLAWBOO_MAX_FIX_CYCLES`               | Operational tuning | `1` (2 attempts)                 | `verifyMaxAttempts()`                   |
 | `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | Operational tuning | `1800000` (30 min)               | drain idle guard                        |
@@ -310,6 +311,12 @@ These tune the always-on background services that run at server boot. Each is pa
 - **Read by**: the board stale-task sweep in `apps/web/server/index.ts`.
 - **Purpose**: the interval between stale-task sweeps. One pass also runs at boot. The timer is `.unref()`'d so it never holds the process open.
 - **Default**: `60000` (60 seconds).
+
+### `CLAWBOO_ENABLE_MOCK_RUNTIME`
+
+- **Read by**: the runtime registry (`apps/web/server/lib/runtimes/descriptor.ts`).
+- **Purpose**: set to exactly `1` to expose `clawboo-mock`, a fault-injecting runtime used to reproduce coordination failures (silence, a crash, an unresolved tool call, a slow start) through the real drain and executor paths. It executes nothing: every event it emits is synthesized from directives in the task text. Any other value, including other truthy-looking ones, leaves it hidden, so a normal install never lists it in the UI or in `GET /api/runtimes`.
+- **Default**: unset (the runtime is absent).
 
 ### `CLAWBOO_DISPATCH_PUMP_MS`
 
