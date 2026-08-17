@@ -69,6 +69,7 @@ import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { buildServerTeamContext } from './contextPreamble'
 import { nativeTeamSessionSettingKey, teamResumeEligible } from './nativeTeamSession'
+import { getMcpAttachSecret } from '../mcpAttachSecret'
 import { buildPeerCatchup } from './peerCatchup'
 import { advanceChatLeaderSeq, loadChatLeaderState } from './leaderState'
 
@@ -545,64 +546,71 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const baseTeamContext = isTeamSessionKey(targetSessionKey)
       ? buildServerTeamContext(db, teamId, targetAgentId, framing)
       : null
-    // Since-you-were-away digest: undelivered mailbox rows (executor-path task
-    // updates, parked/undeliverable alerts, peer signals) ride the VOLATILE
-    // context of the agent's next run, so currency is a property of the runner,
-    // not of the agent remembering to poll. Rows are marked delivered only once
-    // the run actually STARTS (a failed start keeps them for the next attempt);
-    // the exactly-once guard in markInboxDelivered arbitrates racing channels.
-    const inboxRows = isTeamSessionKey(targetSessionKey)
-      ? listUndeliveredInbox(db, targetAgentId, { teamId, limit: 20 })
-      : []
-    // Routed by `kind`, which the mailbox has carried since it shipped and nothing
-    // read: a `task_update` is a result to synthesize and an `alert` is a failure
-    // to act on — both are requests. A `signal` is a peer speaking in passing.
-    const split = splitInboxByAddressing(inboxRows)
-    // ONE budget across both sections, spent on the addressed half first. Rendering
-    // each half against its own 4000 would double the ceiling the mailbox was
-    // capped at, which is how a digest starts crowding out the instruction.
-    const packedAddressed = packInboxRows(split.addressed, INBOX_BUDGET_CHARS)
-    const packedAmbient = packInboxRows(
-      split.ambient,
-      INBOX_BUDGET_CHARS - packedAddressed.usedChars,
-    )
-    // Only the rows that actually FIT get marked (below) — a row truncated out of
-    // the budget was not delivered and rides the next digest. The union is taken
-    // from both packs, so splitting the render cannot silently over-mark.
-    const digestIds = [...packedAddressed.includedIds, ...packedAmbient.includedIds]
-    // Ambient room catch-up: what teammates SAID while this agent was not running.
-    // The mailbox above carries what clawboo generates (task terminals, alerts);
-    // this carries peer speech, which nothing on this path used to read. The
-    // native in-run pull baselines to the room head, so it can never recover a
-    // post older than the run — without this, an agent that was idle when a
-    // teammate spoke simply never hears it. Cursor advances at run START, below.
-    const roomId = isTeamSessionKey(targetSessionKey) ? resolveRoomForTeam(teamId) : null
-    const catchup = roomId
-      ? buildPeerCatchup(db, {
-          roomId,
-          agentId: targetAgentId,
-          sinceSeq: loadChatLeaderState(db, roomId, targetAgentId).lastSeenSeq,
-        })
-      : { text: null, throughSeq: null }
-    // The two channels. Peer posts lead the ambient section: they are what
-    // teammates actually said, whereas a signal row is usually clawboo's echo of
-    // the same event. Section membership comes from provenance (`kind`, and which
-    // reader produced the item) — NEVER from the text, so a peer's message can
-    // never talk its way into the addressed half.
-    const envelope = buildTurnEnvelope({
-      addressed: packedAddressed.bodies.length ? [{ text: packedAddressed.bodies.join('\n') }] : [],
-      ambient: [
-        ...(catchup.text ? [{ text: catchup.text }] : []),
-        ...(packedAmbient.bodies.length ? [{ text: packedAmbient.bodies.join('\n') }] : []),
-      ],
-    })
-    const teamContext = [baseTeamContext, envelope].filter(Boolean).join('\n\n') || null
+    // WHAT IS WAITING is read when the run actually STARTS, never at `deliver`
+    // time. `nudge.deliver` FIFO-queues behind a busy session, so reading here in
+    // the outer scope meant two stacked deliveries both read the same undelivered
+    // rows and the same cursor — neither had begun — and both carried the same
+    // digest and the same peer posts. `markInboxDelivered` stops the double
+    // bookkeeping; it cannot un-bake duplicated context. It also meant anything
+    // arriving while the delivery sat in the queue was missed, which is the exact
+    // opposite of "currency is a property of the runner".
+    const renderWaiting = (): {
+      teamContext: string | null
+      digestIds: string[]
+      roomId: string | null
+      throughSeq: number | null
+    } => {
+      const inboxRows = isTeamSessionKey(targetSessionKey)
+        ? listUndeliveredInbox(db, targetAgentId, { teamId, limit: 20 })
+        : []
+      // Routed by `kind`, which the mailbox has carried since it shipped and
+      // nothing read: a `task_update` is a result to synthesize and an `alert` is
+      // a failure to act on. A `signal` is a peer speaking in passing.
+      const split = splitInboxByAddressing(inboxRows)
+      // ONE budget across both sections, spent on the addressed half first.
+      const packedAddressed = packInboxRows(split.addressed, INBOX_BUDGET_CHARS)
+      const packedAmbient = packInboxRows(
+        split.ambient,
+        INBOX_BUDGET_CHARS - packedAddressed.usedChars,
+      )
+      const roomId = isTeamSessionKey(targetSessionKey) ? resolveRoomForTeam(teamId) : null
+      const catchup = roomId
+        ? buildPeerCatchup(db, {
+            roomId,
+            agentId: targetAgentId,
+            sinceSeq: loadChatLeaderState(db, roomId, targetAgentId).lastSeenSeq,
+          })
+        : { text: null, throughSeq: null }
+      // Section membership comes from provenance (`kind`, and which reader produced
+      // the item), NEVER from the text.
+      const envelope = buildTurnEnvelope({
+        addressed: packedAddressed.bodies.length
+          ? [{ text: packedAddressed.bodies.join('\n') }]
+          : [],
+        ambient: [
+          ...(catchup.text ? [{ text: catchup.text }] : []),
+          ...(packedAmbient.bodies.length ? [{ text: packedAmbient.bodies.join('\n') }] : []),
+        ],
+      })
+      return {
+        teamContext: [baseTeamContext, envelope].filter(Boolean).join('\n\n') || null,
+        // Only rows that actually FIT get marked — a row truncated out of the
+        // budget was not delivered and rides the next digest.
+        digestIds: [...packedAddressed.includedIds, ...packedAmbient.includedIds],
+        roomId,
+        throughSeq: catchup.throughSeq,
+      }
+    }
+
     // Route through the nudge queue: idle session → send now; busy session →
     // FIFO-enqueue for the next turn boundary (never interrupts an in-flight run).
     return nudge.deliver(
       targetSessionKey,
       () =>
         new Promise<void>((started, failStart) => {
+          // Rendered HERE: this runs when the queue releases the delivery, so the
+          // context reflects state at start time rather than at enqueue time.
+          const { teamContext, digestIds, roomId, throughSeq } = renderWaiting()
           // Resolve the agent's registry row up front — the runtime tags obs, and (for
           // a connected substrate) the row's gateway id keys the cross-subsystem mutex.
           // NEVER read the task's `assigneeRuntime` (the engine hardcodes 'openclaw'
@@ -729,7 +737,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 // exposes the `team_delegate` signal tool (how a coding-runtime LEADER
                 // delegates; the engine's DELEGATE_TOOL_NAME_RE branch turns the call
                 // into a board task). executorRunner runs never set it.
-                memoryScope: { teamId, agentId: targetAgentId, delegate: true },
+                memoryScope: {
+                  teamId,
+                  agentId: targetAgentId,
+                  delegate: true,
+                  attachSecret: getMcpAttachSecret(db),
+                },
                 ...(homeDir ? { homeDir } : {}),
                 ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
               }
@@ -789,9 +802,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // advance — and only now. Advancing at render time would let a failed
             // start eat the posts, which is the same rule the digest follows one
             // block below. Only through the last post that actually fit.
-            if (roomId && catchup.throughSeq !== null) {
+            if (roomId && throughSeq !== null) {
               try {
-                advanceChatLeaderSeq(db, roomId, targetAgentId, catchup.throughSeq)
+                advanceChatLeaderSeq(db, roomId, targetAgentId, throughSeq)
               } catch (err) {
                 log.error(
                   { err, roomId, agentId: targetAgentId },

@@ -34,6 +34,7 @@ import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource'
 import { budgetPreflight } from '../budgetPreflight'
+import { MutexAcquireTimeoutError } from '@clawboo/worktrees'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { emitEvent } from '../obs'
 import type { RuntimeRunContext } from '../runtimes/types'
@@ -276,7 +277,17 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
       )
     // Persistent runtimes serialize on the per-home mutex (shared with the executor).
     if (homeDir)
-      return homeDispatchMutex.run(homeDir, turn, { acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS })
+      return homeDispatchMutex
+        .run(homeDir, turn, { acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS })
+        .catch((err: unknown) => {
+          // ONE participant's home being wedged must not end the exchange for
+          // everyone else. `runExchange` awaits this without a catch, so an
+          // acquire timeout rejected before the remaining participants were ever
+          // dispatched. Same shape as the unresolved-runtime case above: this
+          // speaker contributes nothing and the round carries on.
+          if (err instanceof MutexAcquireTimeoutError) return { obligations: [] }
+          throw err
+        })
     // A CONNECTED (OpenClaw) turn serializes on the SAME per-gateway-agent mutex the
     // routine dispatcher uses, so a chat turn and a routine fire never open two
     // overlapping Gateway sessions on one physical agent. Ephemeral runtimes need none.

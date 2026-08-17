@@ -75,6 +75,7 @@ class FakeAdapter implements RuntimeAdapter {
   startCalls = 0
   aborted = 0
   lastStartOpts: StartOpts | null = null
+  startOptsLog: StartOpts[] = []
   constructor(
     private readonly gen: (run: RunHandle) => AsyncIterable<RuntimeEvent>,
     private readonly onStart?: () => void,
@@ -89,6 +90,7 @@ class FakeAdapter implements RuntimeAdapter {
   async start(_t: TaskHandle, opts: StartOpts): Promise<RunHandle> {
     this.startCalls += 1
     this.lastStartOpts = opts
+    this.startOptsLog.push(opts)
     this.onStart?.()
     return { adapterId: this.id, sessionKey: opts.sessionKey, runId: null }
   }
@@ -855,6 +857,61 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     expect(ctx).not.toContain('a peer FYI that must wait its turn')
     // …and therefore was never marked delivered. It rides the next run.
     expect(listUndeliveredInbox(db, 'a1', { teamId: 'T' }).map((r) => r.id)).toContain(fyi.id)
+  })
+
+  it('a QUEUED delivery renders from state at START, not at enqueue time', async () => {
+    // `nudge.deliver` FIFO-queues a delivery behind a busy session. The mailbox
+    // read, the split/pack, the peer catch-up and the envelope all ran at
+    // `deliver()` time, before the queue, so two deliveries stacked on one session
+    // both read the SAME undelivered rows and the same cursor: neither had begun.
+    // markInboxDelivered stops the double bookkeeping but cannot stop the same
+    // context being baked into both runs.
+    const now = Date.now()
+    db.insert(teams)
+      .values({ id: 'T', name: 'T', icon: '🚀', color: '#e94560', createdAt: now, updatedAt: now })
+      .run()
+    db.insert(agents)
+      .values([
+        { id: 'a1', name: 'Coder', gatewayId: 'a1', teamId: 'T', createdAt: now, updatedAt: now },
+        { id: 'a2', name: 'Bug Boo', gatewayId: 'a2', teamId: 'T', createdAt: now, updatedAt: now },
+      ])
+      .run()
+    enqueueInbox(db, {
+      agentId: 'a1',
+      teamId: 'T',
+      kind: 'task_update',
+      body: 'ONLY-ONE-RUN-SHOULD-SEE-THIS',
+    })
+
+    const gate = deferred()
+    let call = 0
+    const adapter = new FakeAdapter((run) => {
+      call += 1
+      if (call === 1)
+        return (async function* () {
+          await gate.promise
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'one' }
+        })()
+      return (async function* () {
+        yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'two' }
+      })()
+    })
+    const w = wire(adapter)
+    // BOTH calls before either closure has marked anything. Awaiting the first
+    // would let it mark the row before the second even reads, which hides the bug.
+    const p1 = w.deliver(SK, 'a1', 'one', HUMAN_TURN)
+    const p2 = w.deliver(SK, 'a1', 'two', HUMAN_TURN) // FIFO-queued behind run 1
+    await p1
+    gate.resolve()
+    for (let i = 0; i < 8; i++) await tick()
+    await p2
+    for (let i = 0; i < 4; i++) await tick()
+
+    expect(adapter.startOptsLog).toHaveLength(2)
+    const seen = adapter.startOptsLog.filter((o) =>
+      (o.context ?? '').includes('ONLY-ONE-RUN-SHOULD-SEE-THIS'),
+    )
+    expect(seen).toHaveLength(1) // exactly one run carries the row, not both
   })
 
   it('a quiet turn adds NO envelope at all', async () => {

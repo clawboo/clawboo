@@ -30,6 +30,8 @@ import { runtimeIdentityHomePath } from '../runtimes/identityHome'
 import { persistNativeChatEntry } from '../runtimes/native/nativeDriver'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
+import { MutexAcquireTimeoutError } from '@clawboo/worktrees'
+import { getMcpAttachSecret } from '../mcpAttachSecret'
 import { publishAgentStatus } from '../teamChat/agentStatusBus'
 import { publishChatDelta } from '../teamChat/chatDeltaBus'
 
@@ -143,7 +145,7 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
       resume: homeDir ? priorSessionId : null,
       mcpBaseUrl,
       // A 1:1 chat has no team — agent + global memory scope.
-      memoryScope: { teamId: null, agentId },
+      memoryScope: { teamId: null, agentId, attachSecret: getMcpAttachSecret(db) },
       ...(homeDir ? { homeDir } : {}),
       ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
     }
@@ -259,5 +261,20 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
           acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS,
         })
     : runJob
-  await job().catch(() => undefined)
+  await job().catch((err: unknown) => {
+    // An ACQUIRE timeout means `runJob` never ran at all: no 'running' status, no
+    // delta, no persisted row. Swallowing it recreates the exact silent
+    // non-response the fatalError branch above exists to prevent, except with
+    // nothing on screen to explain it. Every other rejection stays swallowed —
+    // `runJob` owns its own reporting and has already surfaced the reason.
+    if (err instanceof MutexAcquireTimeoutError) {
+      persistNativeChatEntry(
+        db,
+        agentId,
+        'This agent was busy with another run and did not pick the message up in time. Send it again.',
+        { kind: 'meta', role: 'system' },
+      )
+      publishAgentStatus(sessionKey, { agentId, status: 'idle' })
+    }
+  })
 }

@@ -77,6 +77,7 @@ import {
 } from '@clawboo/worktrees'
 
 import { budgetPreflight } from './budgetPreflight'
+import { getMcpAttachSecret } from './mcpAttachSecret'
 import { buildResumeNote } from './resumeNote'
 import { verifyMaxAttempts } from './verification'
 import { DEFAULTS } from './defaults'
@@ -548,20 +549,24 @@ async function runTaskInner(
   // run is refused and the task released for a human to fix the repo path.
   if (!workspace.ok) {
     addComment(db, taskId, `[blocked: no isolation] ${workspace.reason}`, 'system')
-    completeExecutionProcess(db, exec.id, {
+    // BIND the result. `completeExecutionProcess` refuses (returns null) when
+    // the row is already terminal — a stale sweep got there first. Emitting
+    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: 'failed',
       error: `workspace_unavailable: ${workspace.reason}`,
     })
-    emitEvent(db, {
-      kind: 'execution_completed',
-      traceId: span.traceId,
-      spanId: span.spanId,
-      taskId,
-      teamId: task.teamId,
-      agentId: assigneeAgentId,
-      runtime: runtimeId,
-      data: { execId: exec.id, status: 'failed', error: 'workspace_unavailable' },
-    })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: { execId: exec.id, status: 'failed', error: 'workspace_unavailable' },
+      })
     releaseTask(db, taskId)
     return { ok: false, reason: 'workspace_unavailable' }
   }
@@ -701,7 +706,11 @@ async function runTaskInner(
     mcpBaseUrl: input.mcpBaseUrl ?? null,
     // The run's authoritative memory scope — bound onto the shared Memory MCP so
     // saves are team-shared + reads team-limited (matches the injection scope).
-    memoryScope: { teamId: task.teamId ?? null, agentId: assigneeAgentId },
+    memoryScope: {
+      teamId: task.teamId ?? null,
+      agentId: assigneeAgentId,
+      attachSecret: getMcpAttachSecret(db),
+    },
     homeDir,
     ...(input.apiKeyEnv ? { apiKeyEnv: input.apiKeyEnv } : {}),
   }
@@ -1179,30 +1188,34 @@ async function runTaskInner(
       `Auto-paused: ${stopForBudget} budget reached. Raise the cap (or resume) to continue.`,
       'system',
     )
-    completeExecutionProcess(db, exec.id, {
+    // BIND the result. `completeExecutionProcess` refuses (returns null) when
+    // the row is already terminal — a stale sweep got there first. Emitting
+    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: 'cancelled',
       error: `budget_paused:${stopForBudget}`,
       costUsd,
       inputTokens,
       outputTokens,
     })
-    emitEvent(db, {
-      kind: 'execution_completed',
-      traceId: span.traceId,
-      spanId: span.spanId,
-      taskId,
-      teamId: task.teamId,
-      agentId: assigneeAgentId,
-      runtime: runtimeId,
-      data: {
-        execId: exec.id,
-        status: 'cancelled',
-        error: `budget_paused:${stopForBudget}`,
-        costUsd,
-        inputTokens,
-        outputTokens,
-      },
-    })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: {
+          execId: exec.id,
+          status: 'cancelled',
+          error: `budget_paused:${stopForBudget}`,
+          costUsd,
+          inputTokens,
+          outputTokens,
+        },
+      })
     releaseTask(db, taskId)
     return {
       ok: true,
@@ -1244,30 +1257,34 @@ async function runTaskInner(
       `[stopped: ${reason}] ${stopForBreaker.detail} Released to todo for re-planning.`,
       'system',
     )
-    completeExecutionProcess(db, exec.id, {
+    // BIND the result. `completeExecutionProcess` refuses (returns null) when
+    // the row is already terminal — a stale sweep got there first. Emitting
+    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: 'cancelled',
       error: `circuit_broken:${reason}`,
       costUsd,
       inputTokens,
       outputTokens,
     })
-    emitEvent(db, {
-      kind: 'execution_completed',
-      traceId: span.traceId,
-      spanId: span.spanId,
-      taskId,
-      teamId: task.teamId,
-      agentId: assigneeAgentId,
-      runtime: runtimeId,
-      data: {
-        execId: exec.id,
-        status: 'cancelled',
-        error: `circuit_broken:${reason}`,
-        costUsd,
-        inputTokens,
-        outputTokens,
-      },
-    })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: {
+          execId: exec.id,
+          status: 'cancelled',
+          error: `circuit_broken:${reason}`,
+          costUsd,
+          inputTokens,
+          outputTokens,
+        },
+      })
     releaseTask(db, taskId)
     return {
       ok: true,
@@ -1294,23 +1311,27 @@ async function runTaskInner(
 
   if (success) {
     addComment(db, taskId, reported, 'agent', assigneeAgentId)
-    completeExecutionProcess(db, exec.id, {
+    // BIND the result. `completeExecutionProcess` refuses (returns null) when
+    // the row is already terminal — a stale sweep got there first. Emitting
+    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: 'succeeded',
       summary: reported,
       costUsd,
       inputTokens,
       outputTokens,
     })
-    emitEvent(db, {
-      kind: 'execution_completed',
-      traceId: span.traceId,
-      spanId: span.spanId,
-      taskId,
-      teamId: task.teamId,
-      agentId: assigneeAgentId,
-      runtime: runtimeId,
-      data: { execId: exec.id, status: 'succeeded', costUsd, inputTokens, outputTokens },
-    })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: { execId: exec.id, status: 'succeeded', costUsd, inputTokens, outputTokens },
+      })
     if (cwd) {
       // Persist the run's native session id (best-effort) so the next SAME-
       // runtime dispatch can resume it natively. The `!== sessionKey` filter
@@ -1389,40 +1410,48 @@ async function runTaskInner(
       if (promoted.ok) {
         status = 'done'
       } else {
-        // Released/reassigned out from under this run (a stale sweep, a human
-        // requeue): a todo→done is illegal and must not be ghosted as success.
-        // Preserve the work as a comment and report the board's real status.
-        addComment(
-          db,
-          taskId,
-          `[late result — the task had been released before this run finished] ${safeSummary || '(no output)'}`,
-          'system',
-        )
+        // `updateStatus` refuses for THREE different reasons and they are not the
+        // same story. `illegal_transition` is the release/requeue case. But
+        // `verification_required` means the gate held the promotion — the task was
+        // never released, and saying so is simply false. `not_found` means the row
+        // is gone. One message for all three misreports two of them, and this
+        // comment is the durable record a human reads later.
+        const why =
+          promoted.reason === 'verification_required'
+            ? 'the verification gate has not passed it'
+            : promoted.reason === 'not_found'
+              ? 'the task no longer exists'
+              : 'the task had been released before this run finished'
+        addComment(db, taskId, `[late result — ${why}] ${safeSummary || '(no output)'}`, 'system')
         status = getTask(db, taskId)?.status ?? 'todo'
       }
     }
   } else {
     addComment(db, taskId, `Run ${doneReason}: ${safeSummary || '(no output)'}`, 'system')
-    completeExecutionProcess(db, exec.id, {
+    // BIND the result. `completeExecutionProcess` refuses (returns null) when
+    // the row is already terminal — a stale sweep got there first. Emitting
+    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: doneReason === 'aborted' ? 'cancelled' : 'failed',
       error: safeSummary || doneReason,
       costUsd,
     })
-    emitEvent(db, {
-      kind: 'execution_completed',
-      traceId: span.traceId,
-      spanId: span.spanId,
-      taskId,
-      teamId: task.teamId,
-      agentId: assigneeAgentId,
-      runtime: runtimeId,
-      data: {
-        execId: exec.id,
-        status: doneReason === 'aborted' ? 'cancelled' : 'failed',
-        error: safeSummary || doneReason,
-        costUsd,
-      },
-    })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: {
+          execId: exec.id,
+          status: doneReason === 'aborted' ? 'cancelled' : 'failed',
+          error: safeSummary || doneReason,
+          costUsd,
+        },
+      })
     if (doneReason === 'error') {
       // A terminal `done{reason:'error'}` carries no code — classify the message;
       // an unmappable failure is an UNKNOWN class → a harness bug → alert (AC5).

@@ -61,3 +61,14 @@ describe('KeyedMutex', () => {
     await expect(m.run('k', async () => 'ran', { acquireTimeoutMs: 500 })).resolves.toBe('ran')
   })
 })
+
+describe('the acquire timeout is catchable by name', () => {
+  it('MutexAcquireTimeoutError is re-exported from the package barrel', async () => {
+    // The acquire timeout shipped without a barrel export, so the one rejection
+    // class the mutex can produce was unreachable to consumers. Both callers
+    // swallowed it as a generic error, which is how a wedged home became a silent
+    // non-response in 1:1 chat and an aborted round in a team exchange.
+    const barrel = await import('../index')
+    expect(barrel.MutexAcquireTimeoutError).toBe(MutexAcquireTimeoutError)
+  })
+})

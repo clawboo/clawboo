@@ -109,3 +109,36 @@ describe('withIdleTimeout', () => {
     expect(seen).toEqual([])
   })
 })
+
+describe('releasing the source cannot leave a floating rejection', () => {
+  it('a rejecting return() is caught, not left unhandled', async () => {
+    // The `finally` releases the source with `void it.return?.(undefined)`. A
+    // bare `void` attaches no rejection handler, so an iterator whose `return`
+    // throws produced an unhandled rejection — which ends the process under
+    // Node's default. Verified in isolation: bare void reports the rejection,
+    // the `.catch` form reports none.
+    const unhandled: unknown[] = []
+    const onUnhandled = (e: unknown): void => {
+      unhandled.push(e)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      const src: AsyncIterable<number> = {
+        [Symbol.asyncIterator]: () => ({
+          next: async () => ({ value: 1, done: false }),
+          return: async () => {
+            throw new Error('return() blew up')
+          },
+        }),
+      }
+      for await (const v of withIdleTimeout(src, { idleMs: 1_000, onIdle: () => {} })) {
+        void v
+        break // triggers the finally, and therefore `it.return()`
+      }
+      await new Promise((r) => setTimeout(r, 60))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+})

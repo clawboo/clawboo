@@ -13,41 +13,89 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
 import { releaseRoom, tryAcquireRoom } from '../../lib/teamChat/roomLock'
+import { mcpHttpUrl } from '@clawboo/mcp'
+
+import { getMcpAttachSecret, resetMcpAttachSecretCache } from '../../lib/mcpAttachSecret'
 import { parseTeamChatBinding } from '../mcp'
 import { teamChatExchangePOST, teamChatGET } from '../teamChat'
 
 const req = (url: string): IncomingMessage => ({ url }) as IncomingMessage
 
-describe('parseTeamChatBinding (anti-spoof URL binding)', () => {
-  it('parses room team + author from the URL query', () => {
-    expect(
-      parseTeamChatBinding(req('/api/mcp/teamchat?roomTeamId=tm1&postAuthorAgentId=boo-1')),
-    ).toEqual({
+describe('parseTeamChatBinding (anti-spoof URL binding, now SIGNED)', () => {
+  let prevHome: string | undefined
+  let dir: string
+  beforeAll(() => {
+    prevHome = process.env['CLAWBOO_HOME']
+    dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-tcbind-'))
+    process.env['CLAWBOO_HOME'] = dir
+    resetMcpAttachSecretCache()
+  })
+  afterAll(() => {
+    resetDb()
+    resetMcpAttachSecretCache()
+    if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevHome
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // The URL used to be the whole authority ("clawboo writes it, the model can't
+  // change it") — true only while the runtime uses the config it was handed. A
+  // coding runtime can edit its own home, so the binding now requires the
+  // `scopeSig` HMAC clawboo's producers put on every teamchat attach URL.
+  const signedTeamchatUrl = (scope: {
+    teamId: string
+    agentId: string
+    delegate?: boolean
+  }): string =>
+    mcpHttpUrl('http://127.0.0.1:1', 'teamchat', {
+      ...scope,
+      attachSecret: getMcpAttachSecret(getDb()),
+    }).replace('http://127.0.0.1:1', '')
+
+  it('honours a clawboo-signed binding end to end (producer → parser)', () => {
+    const url = signedTeamchatUrl({ teamId: 'tm1', agentId: 'boo-1' })
+    expect(parseTeamChatBinding(req(url))).toEqual({
       agentId: 'boo-1',
       teamId: 'tm1',
       roomId: resolveRoomForTeam('tm1'),
     })
   })
 
-  it('parses delegate=1 (an orchestrator-driven run) into the binding; absent ⇒ off', () => {
-    // Written EXCLUSIVELY by serverDeliver — exposes the `team_delegate` signal
-    // tool. A merely team-scoped session (an executorRunner board-task run) omits
-    // it, so the tool stays hidden where nothing observes delegation.
-    expect(
-      parseTeamChatBinding(
-        req('/api/mcp/teamchat?roomTeamId=tm1&postAuthorAgentId=boo-1&delegate=1'),
-      ),
-    ).toEqual({
+  it('parses a SIGNED delegate=1 into the binding; absent ⇒ off', () => {
+    const url = signedTeamchatUrl({ teamId: 'tm1', agentId: 'boo-1', delegate: true })
+    expect(parseTeamChatBinding(req(url))).toEqual({
       agentId: 'boo-1',
       teamId: 'tm1',
       roomId: resolveRoomForTeam('tm1'),
       delegate: true,
     })
     const without = parseTeamChatBinding(
-      req('/api/mcp/teamchat?roomTeamId=tm1&postAuthorAgentId=boo-1'),
+      req(signedTeamchatUrl({ teamId: 'tm1', agentId: 'boo-1' })),
     )
     expect(without).toBeDefined()
     expect(without!.delegate).toBeUndefined()
+  })
+
+  it('an UNSIGNED binding is refused — the pre-fix identity-spoof surface', () => {
+    expect(
+      parseTeamChatBinding(req('/api/mcp/teamchat?roomTeamId=tm1&postAuthorAgentId=boo-1')),
+    ).toBeUndefined()
+  })
+
+  it('appending delegate=1 to a signed NON-delegate URL breaks the signature', () => {
+    // delegate is a PRIVILEGE and lives inside the HMAC: a team-scoped run must
+    // not be able to grant itself the team_delegate tool by editing its config.
+    const url = signedTeamchatUrl({ teamId: 'tm1', agentId: 'boo-1' }) + '&delegate=1'
+    expect(parseTeamChatBinding(req(url))).toBeUndefined()
+  })
+
+  it('swapping the AUTHOR on a signed URL breaks the signature (anti-impersonation)', () => {
+    const url = signedTeamchatUrl({ teamId: 'tm1', agentId: 'boo-1' }).replace(
+      'postAuthorAgentId=boo-1',
+      'postAuthorAgentId=victim',
+    )
+    expect(url).toContain('victim')
+    expect(parseTeamChatBinding(req(url))).toBeUndefined()
   })
 
   it('returns undefined when either binding param is missing (unbound)', () => {

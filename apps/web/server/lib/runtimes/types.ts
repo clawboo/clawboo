@@ -45,6 +45,10 @@ export interface RuntimeRunContext {
     agentId?: string | null
     tenantId?: string | null
     delegate?: boolean
+    /** Signs the attach URL's scope (never serialized itself) — see
+     *  `@clawboo/mcp` attachAuth. Without it the server refuses the claimed
+     *  identity and serves the session unbound. */
+    attachSecret?: string | null
   } | null
   /** Extra env for a spawned subprocess (provider API keys, isolated HOME, …). */
   apiKeyEnv?: Record<string, string>

@@ -121,7 +121,28 @@ export interface TasksServerOptions {
 export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Server {
   // Normalize null → undefined so "no team" reads as unbound everywhere below.
   const boundTeamId = opts?.boundScope?.teamId ?? undefined
+  /**
+   * Refuse a WRITE to a task outside the bound team.
+   *
+   * `boundScope.teamId` guarded `list_tasks` and `get_task` and nothing else, so
+   * on a bound session served without `readOnly` a model could claim, release,
+   * re-status, block, comment on or link another team's task by guessing an id —
+   * while `get_task` refused to show it the same id. Reads were isolated and
+   * writes were board-wide.
+   *
+   * Returns the SAME "not found" as a read, so the guard leaks nothing: a bound
+   * run cannot tell a hidden task from an absent one by probing either surface.
+   */
+  const outOfTeam = (taskId: string): McpToolResult | null => {
+    if (!boundTeamId) return null
+    const t = getTask(db, taskId)
+    if (t && t.teamId === boundTeamId) return null
+    return textResult(`not found: ${taskId}`, true)
+  }
+
   const claimHandler = (args: Record<string, unknown>) => {
+    const denied = outOfTeam(str(args['taskId']))
+    if (denied) return denied
     const result = claimTask(
       db,
       str(args['taskId']),
@@ -245,6 +266,8 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       description: 'Release an in-progress task back to todo.',
       inputSchema: z.object({ taskId: z.string() }),
       handler: (args) => {
+        const denied = outOfTeam(str(args['taskId']))
+        if (denied) return denied
         releaseTask(db, str(args['taskId']))
         return textResult(`released: ${str(args['taskId'])}`)
       },
@@ -254,6 +277,8 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       description: 'Transition a task status (state-machine enforced; illegal transitions error).',
       inputSchema: z.object({ taskId: z.string(), status: STATUS }),
       handler: (args) => {
+        const denied = outOfTeam(str(args['taskId']))
+        if (denied) return denied
         const r = updateStatus(db, str(args['taskId']), str(args['status']) as TaskStatus)
         return r.ok ? jsonResult(r.task) : textResult(`status change failed: ${r.reason}`, true)
       },
@@ -263,6 +288,8 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       description: 'Mark a task blocked.',
       inputSchema: z.object({ taskId: z.string() }),
       handler: (args) => {
+        const denied = outOfTeam(str(args['taskId']))
+        if (denied) return denied
         const r = blockTask(db, str(args['taskId']))
         return r.ok ? jsonResult(r.task) : textResult(`block failed: ${r.reason}`, true)
       },
@@ -272,6 +299,8 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       description: 'Unblock a task (back to todo).',
       inputSchema: z.object({ taskId: z.string() }),
       handler: (args) => {
+        const denied = outOfTeam(str(args['taskId']))
+        if (denied) return denied
         const r = unblockTask(db, str(args['taskId']))
         return r.ok ? jsonResult(r.task) : textResult(`unblock failed: ${r.reason}`, true)
       },
@@ -285,8 +314,10 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         authorAgentId: z.string().optional(),
         authorType: z.enum(['agent', 'user', 'system']).optional(),
       }),
-      handler: (args) =>
-        jsonResult(
+      handler: (args) => {
+        const denied = outOfTeam(str(args['taskId']))
+        if (denied) return denied
+        return jsonResult(
           addComment(
             db,
             str(args['taskId']),
@@ -294,7 +325,8 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
             (optStr(args['authorType']) as 'agent' | 'user' | 'system' | undefined) ?? 'agent',
             optStr(args['authorAgentId']),
           ),
-        ),
+        )
+      },
     },
     {
       name: 'link_task',
@@ -302,6 +334,11 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         'Make taskId depend on dependsOnTaskId (it stays unready until the dependency is done).',
       inputSchema: z.object({ taskId: z.string(), dependsOnTaskId: z.string() }),
       handler: (args) => {
+        // BOTH ends: linking across the boundary would leak the existence of an
+        // out-of-team task through the dependency graph even if neither id is
+        // otherwise readable.
+        const denied = outOfTeam(str(args['taskId'])) ?? outOfTeam(str(args['dependsOnTaskId']))
+        if (denied) return denied
         try {
           linkDep(db, str(args['taskId']), str(args['dependsOnTaskId']))
         } catch (error) {

@@ -78,6 +78,8 @@ export async function* withIdleTimeout<T>(
     }
   } finally {
     // End-of-consumption (including a caller break/throw): release the source.
-    void it.return?.(undefined)
+    // `.catch` matters: a rejecting `return` implementation is otherwise a
+    // floating rejection, the same class of defect as the carried pull above.
+    void it.return?.(undefined)?.catch(() => undefined)
   }
 }

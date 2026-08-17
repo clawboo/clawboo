@@ -26,11 +26,17 @@ import {
   type McpServerName,
   type McpTransport,
   type TeamChatBoundIdentity,
+  verifyAttachScope,
+  type SignableScope,
 } from '@clawboo/mcp'
 import type { Request, Response } from 'express'
 
 import { getDb, getDbPath } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
+import { getMcpAttachSecret } from '../lib/mcpAttachSecret'
+import { createLogger } from '@clawboo/logger'
+
+const log = createLogger('mcp-attach')
 import { emitEvent } from '../lib/obs/emit'
 
 // The memory server wants an embedding provider; resolve once (a network probe)
@@ -47,6 +53,33 @@ function kickEmbedResolve(): void {
     .catch(() => {
       cachedEmbed = null
     })
+}
+
+/**
+ * Is this URL's claimed scope actually one clawboo issued?
+ *
+ * The params alone used to BE the authority — "the URL is clawboo-written
+ * config, so the runtime can't spoof it" — which holds only while the runtime
+ * uses the config it was handed. A coding runtime has shell access to its own
+ * home: it can edit `scopeAgentId` (and have another agent's mailbox marked
+ * delivered via the piggyback), `scopeTeamId` (and read another team's board),
+ * or append `delegate=1` (and gain the team_delegate tool). The attach URL now
+ * carries `scopeSig`, an HMAC over the semantic fields under a per-install
+ * secret the spawned process can never read.
+ *
+ * Absent or wrong signature ⇒ the claimed identity is REFUSED and the session
+ * is served UNBOUND — fail closed on identity, while a bare external attach
+ * (which never carried scope) keeps working unchanged.
+ */
+function verifiedScope(params: URLSearchParams, scope: SignableScope): boolean {
+  const sig = params.get('scopeSig')
+  if (!sig) {
+    log.warn({ scope }, 'mcp attach scope carried no signature — serving unbound')
+    return false
+  }
+  const ok = verifyAttachScope(getMcpAttachSecret(getDb()), scope, sig)
+  if (!ok) log.warn({ scope }, 'mcp attach scope signature INVALID — serving unbound')
+  return ok
 }
 
 /** Read the run's authoritative scope from the Memory attach URL query params
@@ -66,6 +99,7 @@ export function parseBoundScope(req?: IncomingMessage): MemoryScope | undefined 
   const agentId = params.get('scopeAgentId')
   const tenantId = params.get('scopeTenantId')
   if (!teamId && !agentId && !tenantId) return undefined
+  if (!verifiedScope(params, { teamId, agentId, tenantId, delegate: false })) return undefined
   return {
     ...(teamId ? { teamId } : {}),
     ...(agentId ? { agentId } : {}),
@@ -89,6 +123,10 @@ export function parseTeamChatBinding(req?: IncomingMessage): TeamChatBoundIdenti
   const teamId = params.get('roomTeamId')
   const agentId = params.get('postAuthorAgentId')
   if (!teamId || !agentId) return undefined
+  // `delegate` is INSIDE the signature: it is a privilege, not an address, and a
+  // team-scoped run appending `delegate=1` to its signed URL must not verify.
+  if (!verifiedScope(params, { teamId, agentId, delegate: params.get('delegate') === '1' }))
+    return undefined
   // `delegate=1` is written EXCLUSIVELY by serverDeliver (an orchestrator-driven
   // run) — it exposes the `team_delegate` signal tool on this session. A merely
   // team-scoped session (e.g. an executorRunner board-task run) must not get it:
@@ -205,6 +243,24 @@ export function mcpConfigGET(req: Request, res: Response): void {
     const binDir = process.env['CLAWBOO_MCP_BIN_DIR']
     const binPath = binDir ? path.join(binDir, `${server}.js`) : undefined
 
+    // Optional scope: emit a SIGNED bound URL. Scope params are only honoured
+    // when signed now, so the copy-paste snippet must be minted here — the one
+    // place that has the secret — rather than hand-assembled from the docs. The
+    // request reaching this endpoint already implies local access, which is the
+    // same trust that could read the DB directly; the secret itself still never
+    // leaves the server.
+    const scopeTeamId = typeof req.query['scopeTeamId'] === 'string' ? req.query['scopeTeamId'] : ''
+    const scopeAgentId =
+      typeof req.query['scopeAgentId'] === 'string' ? req.query['scopeAgentId'] : ''
+    const scope =
+      scopeTeamId || scopeAgentId
+        ? {
+            ...(scopeTeamId ? { teamId: scopeTeamId } : {}),
+            ...(scopeAgentId ? { agentId: scopeAgentId } : {}),
+            attachSecret: getMcpAttachSecret(getDb()),
+          }
+        : undefined
+
     res.json({
       ok: true,
       config: buildAttachConfig({
@@ -214,6 +270,7 @@ export function mcpConfigGET(req: Request, res: Response): void {
         httpBaseUrl,
         binPath,
         dbPath: getDbPath(),
+        ...(scope ? { scope } : {}),
       }),
     })
   } catch (err) {

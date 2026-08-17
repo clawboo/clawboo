@@ -45,6 +45,7 @@ import type { RuntimeRunContext } from '../runtimes/types'
 import type { ChatTurnOutcome } from './exchange'
 import { loadChatLeaderState, saveChatLeaderState } from './leaderState'
 import type { ChatParticipant } from './selectNextSpeaker'
+import { getMcpAttachSecret } from '../mcpAttachSecret'
 
 export interface DispatchChatTurnDeps {
   db: ClawbooDb
@@ -173,7 +174,7 @@ export async function dispatchChatTurn(
     model: null,
     resume,
     mcpBaseUrl: deps.mcpBaseUrl ?? null,
-    memoryScope: { teamId, agentId },
+    memoryScope: { teamId, agentId, attachSecret: getMcpAttachSecret(deps.db) },
     ...(deps.homeDir ? { homeDir: deps.homeDir } : {}),
     ...(deps.apiKeyEnv ? { apiKeyEnv: deps.apiKeyEnv } : {}),
   }

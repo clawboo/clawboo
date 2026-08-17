@@ -35,6 +35,7 @@ import {
   getComments,
   getTask,
   listEvents,
+  listExecutions,
   listGovernanceAudit,
   setBudgetLimit,
 } from '@clawboo/db'
@@ -81,6 +82,9 @@ const FULL_CAPS: Capabilities = {
 class FakeRunnerAdapter implements RuntimeAdapter {
   readonly participantKind = 'agent' as const
   startedOpts: StartOpts | null = null
+  /** Test seam: run something at the instant the adapter starts, e.g. close the
+   *  ledger row out from under the run exactly as the stale sweep does. */
+  onStart: (() => void) | null = null
 
   constructor(
     readonly id: string,
@@ -97,6 +101,7 @@ class FakeRunnerAdapter implements RuntimeAdapter {
   }
   async start(_t: TaskHandle, opts: StartOpts): Promise<RunHandle> {
     this.startedOpts = opts
+    this.onStart?.()
     return { adapterId: this.id, sessionKey: opts.sessionKey, runId: null }
   }
   events(run: RunHandle): AsyncIterable<RuntimeEvent> {
@@ -309,6 +314,46 @@ describe('executor runner (real board + real git worktree)', () => {
     // Both rendered → both marked, from the one union.
     expect(listUndeliveredInbox(db, 'codex-1', { teamId: 'team-1' })).toEqual([])
     expect([update.id, fyi.id]).toHaveLength(2)
+  })
+
+  it('a refused ledger close emits NO execution_completed, and names the real reason', async () => {
+    // Two findings in one path. (a) completeExecutionProcess returns null when the
+    // row is already terminal — a stale sweep got there first — and the emit fired
+    // regardless, telling obs "succeeded" while the ledger said "timed_out".
+    // (b) updateStatus refuses for three different reasons and all three were
+    // reported to the board as "the task had been released", which is false for
+    // the verification gate.
+    const db = getDb()
+    const taskId = newCodeTask()
+    const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'done at last')
+
+    // Close this run's ledger row out from under it, mid-flight, exactly as the
+    // stale sweep does.
+    fake.onStart = () => {
+      const live = listExecutions(db, taskId).find((e) => e.status === 'running')
+      if (live)
+        completeExecutionProcess(db, live.id, {
+          status: 'timed_out',
+          error: 'stale: no heartbeat within the watchdog window',
+        })
+    }
+    await runTaskOnRuntime({
+      db,
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+    })
+
+    // The ledger keeps the sweep's verdict…
+    expect(listExecutions(db, taskId).map((e) => e.status)).toContain('timed_out')
+    expect(listExecutions(db, taskId).map((e) => e.status)).not.toContain('succeeded')
+    // …and obs was not told a different story.
+    const completed = listEvents(db, { taskId }).filter(
+      (e) => e.kind === 'execution_completed' && String(e.data ?? '').includes('succeeded'),
+    )
+    expect(completed).toEqual([])
   })
 
   it('a CLEAN first attempt gets no interruption note (no noise)', async () => {
