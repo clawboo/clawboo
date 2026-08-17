@@ -19,6 +19,7 @@ export {
   legalTargets,
 } from '@clawboo/board-core'
 export type { TaskStatus } from '@clawboo/board-core'
+export * from './attempts'
 export * from './events'
 export * from './repository'
 export * from './contention'

@@ -25,6 +25,8 @@ import { HermesAdapter, type HermesDriver, type HermesNativeEvent } from '@clawb
 import { resolveClawbooDir } from '@clawboo/config'
 import {
   claimTask,
+  completeExecutionProcess,
+  createExecutionProcess,
   createTask,
   getBudget,
   getComments,
@@ -171,6 +173,59 @@ describe('executor runner (real board + real git worktree)', () => {
     expect(result.summary).toContain('Implemented and verified')
     // The runner injected an MCP availability note into the prompt context.
     expect(fake.startedOpts?.context ?? '').toContain('MCP')
+  })
+
+  it('a re-dispatch after an INTERRUPTED attempt is told, and told what is unknown', async () => {
+    // The tombstone strings the recovery writers have always produced were read
+    // back to nobody, so a re-dispatch started cold and could redo a side effect
+    // the dead attempt had already performed.
+    const db = getDb()
+    const taskId = newCodeTask()
+    // A prior attempt that was killed mid-run, WITH evidence it did something.
+    const prior = createExecutionProcess(db, { taskId, executorType: 'codex' })
+    completeExecutionProcess(db, prior.id, {
+      status: 'timed_out',
+      error: 'stale: no heartbeat within the watchdog window',
+      afterCommit: 'abc1234',
+    })
+
+    const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'picked up where it left off')
+    const result = await runTaskOnRuntime({
+      db,
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+    })
+    expect(result.ok).toBe(true)
+    const ctx = fake.startedOpts?.context ?? ''
+    expect(ctx).toMatch(/interrupted/i)
+    expect(ctx).toMatch(/no heartbeat/) // the actual tombstone reason
+    expect(ctx).toMatch(/outcome .* is unknown/i)
+
+    // And it rides the CONTEXT tier, never the STABLE one. The stable tier is the
+    // prefix-cached part, so a per-attempt note there would bust the cache on
+    // every run of every task. `assembleTiers` emits stable first, so the note
+    // appearing after the task block is what proves it is not in the prefix.
+    // (Asserting on `opts.message` would prove nothing: the assembled prompt is
+    // delivered on `opts.context` in full.)
+    expect(ctx.indexOf('# Task: Implement the thing')).toBe(0)
+    expect(ctx.indexOf('interrupted')).toBeGreaterThan(ctx.indexOf('do it'))
+  })
+
+  it('a CLEAN first attempt gets no interruption note (no noise)', async () => {
+    const taskId = newCodeTask()
+    const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'done')
+    await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+    })
+    expect(fake.startedOpts?.context ?? '').not.toMatch(/interrupted/i)
   })
 
   it('refuses a second claim with 409 and never retries', async () => {

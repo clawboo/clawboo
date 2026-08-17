@@ -21,6 +21,9 @@ import {
   getAncestors,
   getTask,
   getTaskVerification,
+  classifyAttempts,
+  getWorkspaceForTask,
+  listExecutions,
   listUndeliveredInbox,
   renderInboxDigest,
   markInboxDelivered,
@@ -71,6 +74,7 @@ import {
 } from '@clawboo/worktrees'
 
 import { budgetPreflight } from './budgetPreflight'
+import { buildResumeNote } from './resumeNote'
 import { verifyMaxAttempts } from './verification'
 import { DEFAULTS } from './defaults'
 import { describeDegradations, planDegradations } from './degradation'
@@ -620,6 +624,21 @@ async function runTaskInner(
       })()
     : ''
 
+  // Interrupted-work note: the PREVIOUS attempt's tombstone, read back to the one
+  // agent that can act on it. A killed run leaves `orphaned:` / `stale:` on its
+  // ledger row and nothing ever showed that to anybody, so a re-dispatch started
+  // cold and could redo a side effect the dead attempt had already performed.
+  // Suppressed on a fix cycle (that re-dispatch carries its own verdict note).
+  const resumeNote =
+    buildResumeNote({
+      // EXCLUDE this run's own row. It was opened moments ago and is still
+      // `running`, so leaving it in makes the newest attempt look like an
+      // ordinary in-flight one and the previous crash is never seen.
+      attempts: classifyAttempts(listExecutions(db, taskId).filter((e) => e.id !== exec.id)),
+      hasWorktree: Boolean(getWorkspaceForTask(db, taskId)),
+      ...(input.fixCycle ? { fixCycle: input.fixCycle } : {}),
+    }) ?? ''
+
   // Since-you-were-away digest: undelivered mailbox rows for this assignee ride
   // the run's context; marked delivered only after the run actually starts.
   const inboxRows = listUndeliveredInbox(db, assigneeAgentId, {
@@ -633,7 +652,9 @@ async function runTaskInner(
   const assemblePrompt = (handoffNote: string): string =>
     assembleTiers({
       stable: `# Task: ${task.title}\n\n${task.description ?? ''}`,
-      context: [baseContext, fixNote, handoffNote, inboxDigest].filter(Boolean).join('\n\n'),
+      context: [baseContext, resumeNote, fixNote, handoffNote, inboxDigest]
+        .filter(Boolean)
+        .join('\n\n'),
       volatile: memoryBlock,
     }).prompt
 
