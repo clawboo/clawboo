@@ -32,6 +32,7 @@ import {
   detectDelegationIntent,
   type SessionsSendParams,
 } from './delegationTags'
+import { SYSTEM_TURN, type TurnOrigin } from './turnOrigin'
 
 /**
  * A source task at this ancestor-depth (or deeper) may not spawn children —
@@ -312,8 +313,20 @@ export interface BoardOrchestratorDeps {
   sessionKeyForAgent: (agentId: string) => string | null
   /** Recover the agentId that owns a sessionKey. */
   agentIdForSession: (sessionKey: string) => string | null
-  /** Deliver a message to a session (nudge-queued adapter.start under the hood). */
-  deliver: (targetSessionKey: string, targetAgentId: string, task: string) => Promise<void>
+  /**
+   * Deliver a message to a session (nudge-queued adapter.start under the hood).
+   *
+   * `origin` is REQUIRED, not inferred: the host used to work out whether a turn
+   * was a delegated worker's or the user-facing leader's by asking this engine
+   * whether the session still had a task, and that answer goes stale the instant
+   * `completeForSession` forgets the session. See {@link TurnOrigin}.
+   */
+  deliver: (
+    targetSessionKey: string,
+    targetAgentId: string,
+    task: string,
+    origin: TurnOrigin,
+  ) => Promise<void>
   /** Monotonic stop generation; in-flight work bails when it changes. */
   stopGen: () => number
   /**
@@ -765,7 +778,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       return task.id
     }
     try {
-      await deps.deliver(targetSk, signal.targetAgentId, signal.task)
+      await deps.deliver(targetSk, signal.targetAgentId, signal.task, {
+        kind: 'delegation',
+        fromAgentId: reflectTargetFor(task.id),
+      })
     } catch {
       // Delivery rejected (the agent never received the task) — fail it now rather
       // than waiting out the 8-minute watchdog.
@@ -922,7 +938,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       return
     }
     try {
-      await deps.deliver(targetSk, agentId, description)
+      await deps.deliver(targetSk, agentId, description, {
+        kind: 'delegation',
+        fromAgentId: reflectTargetFor(taskId),
+      })
     } catch {
       await failForSession(
         targetSk,
@@ -1086,7 +1105,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       const toId = deps.agentIdForSession(toSk)
       if (toId) {
         try {
-          await deps.deliver(toSk, toId, message)
+          await deps.deliver(toSk, toId, message, SYSTEM_TURN)
         } catch {
           // Delivery rejected (a transient chat.send failure) — re-queue for a
           // bounded retry rather than silently dropping the recipient's update

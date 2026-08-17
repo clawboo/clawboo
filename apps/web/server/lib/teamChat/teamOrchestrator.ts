@@ -20,6 +20,7 @@ import {
   buildTeamSessionKey,
   createBoardOrchestrator,
   createNudgeQueue,
+  HUMAN_TURN,
   type BoardOrchestrator,
   type KnownAgent,
 } from '@clawboo/team-orchestration'
@@ -203,6 +204,10 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     // whose runs have all finished — the case the idle TTL exists to reclaim.
     onSessionClosed: (sk) => engineRef.current!.onSessionClosed(sk),
     taskForSession: (sk) => engineRef.current!.taskForSession(sk),
+    // The SAME resolution the engine uses for its reduce point, so "who leads" has
+    // one answer whether the question comes from the reflection router or from the
+    // prompt builder.
+    leaderAgentId: () => resolveLeaderId(db, teamId),
     persistTurn: (sk, text) => {
       const agentId = agentIdFromSessionKey(sk)
       if (!agentId) return false
@@ -230,9 +235,9 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
   // mkdir, a mutex acquire and process spawn. `touch()`ing at the CALL means the
   // clock is fresh for that whole window, so an eviction scan can't land on a
   // delivery that is in flight but not yet trackable.
-  const trackedDeliver: typeof deliver = (sk, agentId, task) => {
+  const trackedDeliver: typeof deliver = (sk, agentId, task, origin) => {
     touch()
-    return deliver(sk, agentId, task)
+    return deliver(sk, agentId, task, origin)
   }
 
   const engine = createBoardOrchestrator({
@@ -420,7 +425,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
           kind: 'meta',
         })
       }
-      await deliver(sk, targetId, stimulus).catch(async (err: unknown) => {
+      await deliver(sk, targetId, stimulus, HUMAN_TURN).catch(async (err: unknown) => {
         log.error({ err, teamId, targetId }, 'team-orchestrator user-turn delivery failed')
         if (isOperatorDown(err)) {
           const recovered = await getRegistry()
@@ -428,7 +433,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
             .catch(() => false)
           if (recovered) {
             // Operator is back — retry the SAME turn transparently.
-            await deliver(sk, targetId, stimulus).catch((retryErr: unknown) => {
+            await deliver(sk, targetId, stimulus, HUMAN_TURN).catch((retryErr: unknown) => {
               log.error(
                 { err: retryErr, teamId, targetId },
                 'team-orchestrator retry after reconnect failed',

@@ -45,7 +45,12 @@ import {
 } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
 import { classifyError, isHarnessBug } from '@clawboo/obs'
-import { isTeamSessionKey, type NudgeQueue } from '@clawboo/team-orchestration'
+import {
+  classifyTurn,
+  isTeamSessionKey,
+  type NudgeQueue,
+  type TurnOrigin,
+} from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource/registry'
@@ -90,6 +95,10 @@ export interface ServerDeliverDeps {
   onSessionClosed: (sessionKey: string) => Promise<void>
   /** The engine's `taskForSession` — used to attribute a delegated run's mission spend. */
   taskForSession: (sessionKey: string) => string | null
+  /** The team's reduce point. Read fresh (membership changes), and the ONLY thing
+   *  that decides whether a turn is framed as the lead's — being the leader is a
+   *  property of the agent, not of whether a task happens to still be tracked. */
+  leaderAgentId: () => string | null
   /** Persist a run's terminal turn text for chat-history observability (a seed for
    *  the unified writer). Optional — omitted in tests that only assert the wiring.
    *  May return whether the entry actually reached the transcript: an explicit
@@ -160,6 +169,7 @@ function missionRootId(db: ClawbooDb, taskId: string): string {
 /** Build the engine's `deliver(targetSessionKey, targetAgentId, message)`. */
 export function createServerDeliver(deps: ServerDeliverDeps) {
   const { db, teamId, mcpBaseUrl, nudge, abortMap, onEvent, onSessionClosed, taskForSession } = deps
+  const leaderAgentId = deps.leaderAgentId
   const persistTurn = deps.persistTurn
   const publishDelta = deps.publishDelta
   const publishStatus = deps.publishStatus
@@ -501,6 +511,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     targetSessionKey: string,
     targetAgentId: string,
     message: string,
+    origin: TurnOrigin,
   ): Promise<void> {
     // Live-roster context for a team run so the agent knows its teammates by name
     // (the `delegate` tool resolves the assignee against this same roster). Built
@@ -515,13 +526,21 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // resume (only the leader / user-facing turn resumes; a child keeps its own
     // executor-handoff continuity) AND the native-leader coordination block below.
     const isTaskRun = taskForSession(targetSessionKey) != null
+    // What this turn IS — three answers, from the caller's stated `origin` plus the
+    // two durable facts (who leads, does this session hold a task). It used to be
+    // `!isTaskRun` for all three, which is why a turn arriving after a worker's
+    // task was forgotten was framed as the team lead's.
+    const framing = classifyTurn({
+      origin,
+      targetAgentId,
+      leaderAgentId: leaderAgentId(),
+      hasBoardTask: isTaskRun,
+    })
     // Volatile-tier team context: rules + the user's self-intro + the live roster
     // (the single choke point covers the user's leader turn AND every delegated
-    // child turn). See `contextPreamble.ts`. A leader / user-facing turn (no board
-    // task) also gets the native-leader behavioral coordination block; a delegated
-    // child (isTaskRun) is a worker turn and does not.
+    // child turn). See `contextPreamble.ts`.
     const baseTeamContext = isTeamSessionKey(targetSessionKey)
-      ? buildServerTeamContext(db, teamId, targetAgentId, !isTaskRun)
+      ? buildServerTeamContext(db, teamId, targetAgentId, framing)
       : null
     // Since-you-were-away digest: undelivered mailbox rows (executor-path task
     // updates, parked/undeliverable alerts, peer signals) ride the VOLATILE

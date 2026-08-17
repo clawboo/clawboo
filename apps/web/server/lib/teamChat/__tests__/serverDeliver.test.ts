@@ -33,6 +33,7 @@ import type {
 import { createNudgeQueue, type NudgeQueue } from '@clawboo/team-orchestration'
 
 import { getDb, resetDb } from '../../db'
+import { HUMAN_TURN, SYSTEM_TURN } from '@clawboo/team-orchestration'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
 
 const CAPS: Capabilities = {
@@ -169,6 +170,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
         closed.push(sk)
       },
       taskForSession: () => opts?.taskId ?? null,
+      leaderAgentId: () => 'leader',
       persistTurn: (sk, text) => {
         persisted.push({ sk, text })
         // Default (undefined) counts as persisted — the legacy-stub contract; an
@@ -198,7 +200,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     )
     const w = wire(adapter)
 
-    await w.deliver(SK, 'a1', 'hello')
+    await w.deliver(SK, 'a1', 'hello', HUMAN_TURN)
     // deliver resolved after start — the run is tracked but the drain is still gated.
     expect(adapter.startCalls).toBe(1)
     expect(w.abortMap.has(SK)).toBe(true)
@@ -231,7 +233,10 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter, { taskId: 'task-1' })
-    await w.deliver(SK, 'a1', 'write a poem')
+    await w.deliver(SK, 'a1', 'write a poem', {
+      kind: 'delegation',
+      fromAgentId: 'leader',
+    })
     for (let i = 0; i < 4; i++) await tick()
     // The terminal still flows through the engine (the board lifecycle owns it)…
     expect(w.events.map((e) => e.kind)).toEqual(['text-delta', 'done'])
@@ -271,7 +276,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter) // no taskId → a leader / user-facing session
-    await w.deliver(SK, 'leader', 'ask 2 teammates for a poem')
+    await w.deliver(SK, 'leader', 'ask 2 teammates for a poem', HUMAN_TURN)
     for (let i = 0; i < 5; i++) await tick()
     // The old delegation-turn suppression is RETIRED: it made prose the user had
     // already watched streaming disappear (nothing ever replaced the StreamingCard).
@@ -292,7 +297,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       )
     // Leader / user-facing turn.
     const leader = wire(mk())
-    await leader.deliver(SK, 'a1', 'hello')
+    await leader.deliver(SK, 'a1', 'hello', HUMAN_TURN)
     for (let i = 0; i < 4; i++) await tick()
     expect(leader.statuses).toEqual([
       { agentId: 'a1', status: 'running' },
@@ -300,7 +305,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     ])
     // Delegated child: chat-invisible, but the left-pane badge still tracks it.
     const child = wire(mk(), { taskId: 'task-1' })
-    await child.deliver(SK, 'a1', 'subtask')
+    await child.deliver(SK, 'a1', 'subtask', { kind: 'delegation', fromAgentId: 'leader' })
     for (let i = 0; i < 4; i++) await tick()
     expect(child.statuses).toEqual([
       { agentId: 'a1', status: 'running' },
@@ -327,7 +332,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter)
-    await w.deliver(SK, 'a1', 'hi')
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
     for (let i = 0; i < 4; i++) await tick()
     // What the user watched streaming survives the failure as a committed turn…
     expect(w.persisted).toEqual([{ sk: SK, text: 'partial answer' }])
@@ -344,7 +349,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter)
-    await w.deliver(SK, 'a1', 'hi')
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
     for (let i = 0; i < 5; i++) await tick()
     expect(w.persisted).toEqual([{ sk: SK, text: 'Hello' }])
   })
@@ -363,7 +368,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     )
     // persistTurn returns false — the write-time control-token/refusal drop.
     const w = wire(adapter, { persistReturns: false })
-    await w.deliver(SK, 'a1', 'hi')
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
     for (let i = 0; i < 4; i++) await tick()
     expect(w.deltas.map((d) => d.text)).toEqual(['Sorry, no.', ''])
   })
@@ -381,7 +386,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter)
-    await w.deliver(SK, 'a1', 'hi')
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
     await tick()
     await tick()
     expect(w.closed).toEqual([SK])
@@ -428,8 +433,8 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     })
     const w = wire(adapter, { firstDoneGate: doneGate.promise })
 
-    await w.deliver(SK, 'a1', 'one') // run 1 in flight (nudge marked the session busy)
-    const p2 = w.deliver(SK, 'a1', 'two') // queued behind run 1
+    await w.deliver(SK, 'a1', 'one', HUMAN_TURN) // run 1 in flight (nudge marked the session busy)
+    const p2 = w.deliver(SK, 'a1', 'two', HUMAN_TURN) // queued behind run 1
     gate1.resolve() // run 1 reaches its terminal → evict run 1 + markIdle → run 2 flushed
     for (let i = 0; i < 6; i++) await tick()
     // Run 2 started while run 1 still awaits its slow onEvent(done)…
@@ -453,7 +458,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       },
     )
     const w = wire(adapter)
-    await expect(w.deliver(SK, 'a1', 'hi')).rejects.toThrow('boom')
+    await expect(w.deliver(SK, 'a1', 'hi', HUMAN_TURN)).rejects.toThrow('boom')
     expect(w.abortMap.has(SK)).toBe(false)
   })
 
@@ -473,7 +478,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter)
-    await w.deliver(SK, 'a1', 'hi')
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
     for (let i = 0; i < 6; i++) await tick()
 
     // REPLACE semantics: each delta carries the FULL running text; reasoning excluded.
@@ -514,7 +519,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter)
-    await w.deliver(SK, 'a1', 'poem')
+    await w.deliver(SK, 'a1', 'poem', HUMAN_TURN)
     for (let i = 0; i < 6; i++) await tick()
     // The published running text tracks the cumulative snapshots WITHOUT repetition
     // (the "We plantWe plant…" garble came from `+=`-ing cumulative deltas).
@@ -541,7 +546,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter)
-    await w.deliver(SK, 'a1', 'spendy')
+    await w.deliver(SK, 'a1', 'spendy', HUMAN_TURN)
     await tick()
     await tick()
     expect(adapter.aborted).toBeGreaterThanOrEqual(1)
@@ -579,7 +584,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter)
-    await w.deliver(SK, 'a1', 'do the thing') // SK = agent:a1:team:T (recipient a1)
+    await w.deliver(SK, 'a1', 'do the thing', HUMAN_TURN) // SK = agent:a1:team:T (recipient a1)
     await tick()
     expect(adapter.lastStartOpts?.context).toContain('Coder')
     expect(adapter.lastStartOpts?.context).not.toContain('Team Lead') // the recipient is excluded
@@ -623,7 +628,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter)
-    await w.deliver(SK, 'a1', 'do the thing')
+    await w.deliver(SK, 'a1', 'do the thing', HUMAN_TURN)
     await tick()
     const ctx = adapter.lastStartOpts?.context ?? ''
     expect(ctx).toContain('[Team Rules — set by the user, authoritative]')
@@ -632,6 +637,83 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     expect(ctx).toContain('I am a PM')
     expect(ctx).toContain('Coder') // roster still present
     expect(ctx).not.toContain('Team Lead') // recipient still excluded
+  })
+
+  it('a SYSTEM turn to a non-leader is not dressed up as the team lead', async () => {
+    // THE BUG. `completeForSession` forgets a worker's session on its terminal, so
+    // the next thing delivered there — a late [Task Update] from a sub-task, an
+    // alert, a peer signal — found no task and was framed as the leader's turn:
+    // "You are the LEAD of this team" plus the user's personal intro, handed to an
+    // agent that is neither leading nor talking to anyone.
+    const now = Date.now()
+    db.insert(teams)
+      .values({
+        id: 'T',
+        name: 'Team T',
+        icon: '🚀',
+        color: '#e94560',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    db.insert(agents)
+      .values([
+        {
+          id: 'leader',
+          name: 'Team Lead',
+          gatewayId: 'leader',
+          teamId: 'T',
+          runtime: 'clawboo-native',
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: 'a1',
+          name: 'Coder',
+          gatewayId: 'a1',
+          teamId: 'T',
+          runtime: 'clawboo-native',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ])
+      .run()
+    setSetting(
+      db,
+      'team-onboarding:T',
+      JSON.stringify({ agentsIntroduced: true, userIntroduced: true, userIntroText: 'I am a PM' }),
+    )
+    const mk = () =>
+      new FakeAdapter((run) =>
+        (async function* () {
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+        })(),
+      )
+
+    // `taskForSession` returns null: the task this agent was running is over.
+    const worker = mk()
+    await wire(worker).deliver(SK, 'a1', '[Task Update] a sub-task finished', SYSTEM_TURN)
+    await tick()
+    const workerCtx = worker.lastStartOpts?.context ?? ''
+    expect(workerCtx).not.toContain('[About the User]')
+    expect(workerCtx).not.toContain('I am a PM')
+    expect(workerCtx).not.toContain('[Leading this team')
+    expect(workerCtx).toContain('Team Lead') // it still sees the roster
+
+    // The SAME message to the actual leader keeps both: its synthesis of a
+    // reflection is what the user reads, so withholding the intro there would
+    // trade one bug for another.
+    const lead = mk()
+    await wire(lead).deliver(
+      'agent:leader:team:T',
+      'leader',
+      '[Task Update] a sub-task finished',
+      SYSTEM_TURN,
+    )
+    await tick()
+    const leadCtx = lead.lastStartOpts?.context ?? ''
+    expect(leadCtx).toContain('[About the User]')
+    expect(leadCtx).toContain('[Leading this team')
   })
 
   it('OpenClaw (connected substrate): a done-with-no-cost estimates spend + tool events hit obs', async () => {
@@ -693,7 +775,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       connectedCaps,
     )
     const w = wire(adapter)
-    await w.deliver(OC_SK, 'oc1', 'do the thing')
+    await w.deliver(OC_SK, 'oc1', 'do the thing', HUMAN_TURN)
     for (let i = 0; i < 6; i++) await tick()
 
     // The terminal-done estimate recorded spend (a connected substrate emits no cost events).

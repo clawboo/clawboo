@@ -18,6 +18,7 @@
 // `getSetting` so this module depends only on `@clawboo/db` (no lib→api inversion).
 
 import { agents, getSetting, type ClawbooDb } from '@clawboo/db'
+import type { TurnFraming } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 
 import { loadAgentConfigOrDefault } from '../runtimes/native/agentConfigStore'
@@ -158,25 +159,31 @@ const CODING_RUNTIMES = new Set(['codex', 'claude-code', 'hermes'])
 
 /** The coordination block(s) for a team run, or null when none is needed. Composed:
  *  OpenClaw agents get the delegate-protocol + anti-sub-agent block (any turn); a NATIVE
- *  LEADER / user-facing turn gets the behavioral-guidance block; a CODING-runtime LEADER
- *  turn gets the `team_delegate` leader block (its ONLY instruction channel — without it
- *  a Codex/Claude Code/Hermes leader is never told it leads or how to delegate); ANY
- *  worker (a delegated child, `!isLeaderTurn`, any runtime) additionally gets the worker
- *  guardrail (can't-reach-user / assume-and-note / report-to-lead); and every turn whose
- *  run actually has the room and/or board tools gets the awareness block naming them
- *  (`awareness`, pre-composed by the caller from real availability). Blocks are joined. */
+ *  LEADER turn gets the behavioral-guidance block; a CODING-runtime LEADER turn gets the
+ *  `team_delegate` leader block (its ONLY instruction channel — without it a
+ *  Codex/Claude Code/Hermes leader is never told it leads or how to delegate); a WORKER
+ *  (a delegated child, any runtime) additionally gets the worker guardrail
+ *  (can't-reach-user / assume-and-note / report-to-lead); and every turn whose run
+ *  actually has the room and/or board tools gets the awareness block naming them
+ *  (`awareness`, pre-composed by the caller from real availability). Blocks are joined.
+ *
+ *  `isLeader` and `isWorker` are SEPARATE inputs, not one boolean and its negation.
+ *  They used to be, and the two turns that are neither then got the wrong one: a
+ *  specialist the user @mentioned was told "You are the LEAD of this team", and an
+ *  agent whose task had just finished was told the same on the next system message
+ *  it received. Both of those turns want the roster and the rules and NEITHER block. */
 function coordinationBlockFor(
   runtime: string | null,
-  isLeaderTurn: boolean,
+  framing: { isLeader: boolean; isWorker: boolean },
   awareness: string | null,
 ): string | null {
   const blocks: string[] = []
   if (runtime === 'openclaw') blocks.push(OPENCLAW_COORDINATION_BLOCK)
-  else if (runtime === 'clawboo-native' && isLeaderTurn)
+  else if (runtime === 'clawboo-native' && framing.isLeader)
     blocks.push(NATIVE_LEADER_COORDINATION_BLOCK)
-  else if (runtime && CODING_RUNTIMES.has(runtime) && isLeaderTurn)
+  else if (runtime && CODING_RUNTIMES.has(runtime) && framing.isLeader)
     blocks.push(CODING_LEADER_COORDINATION_BLOCK)
-  if (!isLeaderTurn) blocks.push(WORKER_COORDINATION_BLOCK)
+  if (framing.isWorker) blocks.push(WORKER_COORDINATION_BLOCK)
   if (awareness) blocks.push(awareness)
   return blocks.length > 0 ? blocks.join('\n\n') : null
 }
@@ -218,27 +225,31 @@ export function buildServerTeamContext(
   db: ClawbooDb,
   teamId: string,
   selfAgentId: string,
-  isLeaderTurn: boolean,
+  framing: TurnFraming,
 ): string | null {
   const rulesContent = readTeamRulesContent(db, teamId).trim()
   const rulesBlock = rulesContent
     ? `[Team Rules — set by the user, authoritative]\n${rulesContent}\n[End Team Rules]`
     : null
 
-  // The user's self-intro rides ONLY the leader / user-facing turn. A delegated child
-  // (worker) does not talk to the user, and handing it the user's personal intro is
-  // what made a worker treat its task as a conversation and address "the boss".
-  const introText = isLeaderTurn ? readUserIntroText(db, teamId).trim() : ''
+  // The user's self-intro rides ONLY a turn whose reply the user actually reads: a
+  // human's direct interlocutor, and the leader (whose synthesis of a reflection is
+  // written for the user even though clawboo triggered the turn). Handing it to an
+  // agent that cannot reach the user is what made a worker treat its task as a
+  // conversation and address "the boss".
+  const introText = framing.isUserFacing ? readUserIntroText(db, teamId).trim() : ''
   const aboutUserBlock = introText ? `[About the User]\n${introText}\n[End About the User]` : null
 
   const rosterBlock = buildRosterLine(db, teamId, selfAgentId)
   // The coordination rules come AFTER the roster (so the teammate names are in view):
   // OpenClaw agents get the delegate-protocol block; a native LEADER turn gets the
-  // behavioral-guidance block; a native worker turn gets nothing.
+  // behavioral-guidance block; a worker gets the guardrail; a turn that is neither
+  // (an @mentioned specialist, an idle agent receiving a system message) gets both
+  // the roster and the rules and neither block.
   const runtime = readAgentRuntime(db, selfAgentId)
   const coordinationBlock = coordinationBlockFor(
     runtime,
-    isLeaderTurn,
+    framing,
     buildAwarenessBlock(
       hasTeamRoom(db, selfAgentId, runtime),
       hasBoardRead(db, selfAgentId, runtime),

@@ -32,6 +32,7 @@ import {
   type DelegationSignal,
   type KnownAgent,
 } from './boardOrchestration'
+import type { TurnOrigin } from './turnOrigin'
 import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
 
 // ─── The board-agnostic inspection + control surface ──────────────────────────
@@ -174,7 +175,7 @@ interface HarnessOpts {
   busySessions?: Set<string>
 }
 
-type Delivered = { sessionKey: string; agentId: string; task: string }
+type Delivered = { sessionKey: string; agentId: string; task: string; origin: TurnOrigin }
 const reflections = (delivered: Delivered[]): Delivered[] =>
   delivered.filter((d) => d.task.startsWith('[Task Update]'))
 const deliveredTo = (
@@ -225,9 +226,9 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       leaderAgentId: () => 'leader',
       sessionKeyForAgent: opts?.sessionKeyForAgent ?? ((id) => sk(id)),
       agentIdForSession,
-      deliver: async (sessionKey, agentId, task) => {
+      deliver: async (sessionKey, agentId, task, origin) => {
         if (opts?.deliverRejectsFor?.has(agentId)) throw new Error('delivery rejected')
-        delivered.push({ sessionKey, agentId, task })
+        delivered.push({ sessionKey, agentId, task, origin })
       },
       stopGen: opts?.stopGen ?? (() => 0),
       isSessionBusy: (sessionKey) => opts?.busySessions?.has(sessionKey) ?? false,
@@ -348,7 +349,14 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.taskCount()).toBe(1)
       expect(board.claims).toHaveLength(1)
       expect(board.execCount).toBe(1)
-      expect(delivered).toEqual([{ sessionKey: sk('a2'), agentId: 'a2', task: 'fix it' }])
+      expect(delivered).toEqual([
+        {
+          sessionKey: sk('a2'),
+          agentId: 'a2',
+          task: 'fix it',
+          origin: { kind: 'delegation', fromAgentId: 'leader' },
+        },
+      ])
     })
 
     it('drives the full cascade from a `delegate` tool-call (native signal): create → claim → deliver → report-up → [Task Update]', async () => {
@@ -362,7 +370,14 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.taskCount()).toBe(1)
       expect(board.claims).toHaveLength(1)
       expect(board.execCount).toBe(1)
-      expect(delivered).toEqual([{ sessionKey: sk('a2'), agentId: 'a2', task: 'fix it' }])
+      expect(delivered).toEqual([
+        {
+          sessionKey: sk('a2'),
+          agentId: 'a2',
+          task: 'fix it',
+          origin: { kind: 'delegation', fromAgentId: 'leader' },
+        },
+      ])
       // The child completes → status done + a report-up comment.
       await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Fixed it — patched auth.ts.'))
       const t1 = idsOf(board)[0]!
@@ -545,6 +560,24 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(
         narrations.some((n) => n.sessionKey === sk('leader') && n.text.startsWith('[Task Update]')),
       ).toBe(true)
+    })
+
+    it('stamps WHY each turn is happening, so the host never has to guess', async () => {
+      // The host used to work this out from `taskForSession`, which goes stale the
+      // instant `completeForSession` forgets the session — so a reflection landing
+      // on an agent whose own task had just finished was framed as the team lead's
+      // turn, complete with the leader coordination block and the user's intro.
+      const { delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+      )
+      const task = delivered.find((d) => d.agentId === 'a2')!
+      expect(task.origin).toEqual({ kind: 'delegation', fromAgentId: 'leader' })
+
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'A is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)[0]!.origin).toEqual({ kind: 'system' })
     })
 
     it('a leader done emits no board mutation and no reflection (echo-loop guard)', async () => {
