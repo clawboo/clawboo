@@ -3,7 +3,7 @@
 // The directives exist to reproduce failures the coordination work actually hit,
 // so each test names the seam it is for rather than just asserting a shape.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { MockAdapter, MOCK_RUNTIME_ID } from '../adapter'
 import { parseDirectives, startDelayMs } from '../directives'
@@ -137,6 +137,37 @@ describe('directive parsing after the ReDoS-shape fix', () => {
     expect(parseDirectives('!ok' + ' '.repeat(200))).toEqual([{ kind: 'ok', text: 'ok' }])
     expect(parseDirectives('not a directive')).toEqual([])
     expect(parseDirectives('text\n!error boom\nmore')).toEqual([{ kind: 'error', message: 'boom' }])
+  })
+
+  it('the !abort hold-open survives past the directive clamp', async () => {
+    // A regression I introduced and the suite could not catch: clamping inside
+    // `sleep` also capped this, so a run meant to hang until something aborts it
+    // ended itself after ten minutes. Real time cannot show that, so this drives
+    // the clock forward past the cap.
+    vi.useFakeTimers()
+    try {
+      const adapter = new MockAdapter()
+      const run = await adapter.start(
+        {} as never,
+        {
+          agentId: 'a1',
+          sessionKey: 'agent:a1:team:T',
+          message: '!abort',
+        } as never,
+      )
+      let terminal: string | null = null
+      const drain = (async () => {
+        for await (const ev of adapter.events(run)) if (ev.kind === 'done') terminal = ev.kind
+      })()
+      await vi.advanceTimersByTimeAsync(11 * 60_000) // past MAX_DIRECTIVE_SLEEP_MS
+      expect(terminal).toBeNull() // still held open, as the directive promises
+      await adapter.abort(run)
+      await vi.advanceTimersByTimeAsync(10)
+      await drain
+      expect(terminal).toBe('done')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('an unbounded ask for silence is still clamped', () => {

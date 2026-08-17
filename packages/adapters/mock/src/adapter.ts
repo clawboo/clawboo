@@ -28,16 +28,19 @@ import { parseDirectives, startDelayMs, type Directive } from './directives'
 
 export const MOCK_RUNTIME_ID = 'clawboo-mock'
 
-/** Ceiling on any single injected sleep. `clampMs` already bounds the parsed
- *  value, but the bound belongs next to the thing it protects: the duration
- *  reaches here from directive text, and a reader of this line should not have
- *  to trust a clamp two modules away. */
-const MAX_SLEEP_MS = 10 * 60_000
+/** Ceiling on a DIRECTIVE-SUPPLIED sleep. `clampMs` already bounds the parsed
+ *  value; this is the bound at the point of use, applied to the tainted value
+ *  itself rather than inside `sleep`. Clamping inside `sleep` also capped the
+ *  `!abort` hold-open below, which is a trusted constant and is supposed to run
+ *  until something aborts it. */
+const MAX_DIRECTIVE_SLEEP_MS = 10 * 60_000
+
+const boundedDirectiveMs = (ms: number): number =>
+  Number.isFinite(ms) && ms > 0 ? Math.min(ms, MAX_DIRECTIVE_SLEEP_MS) : 0
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
-    const bounded = Number.isFinite(ms) ? Math.min(Math.max(0, ms), MAX_SLEEP_MS) : 0
-    const t = setTimeout(resolve, bounded)
+    const t = setTimeout(resolve, ms)
     ;(t as { unref?: () => void }).unref?.()
     signal?.addEventListener(
       'abort',
@@ -91,7 +94,7 @@ export class MockAdapter implements RuntimeAdapter {
     // Deliberately BEFORE the handle exists: a caller waiting on `start` is
     // holding whatever lock it acquired, which is exactly what `!slowstart` is
     // for. The abort path cannot help here because there is nothing to abort yet.
-    if (delay > 0) await sleep(delay)
+    if (delay > 0) await sleep(boundedDirectiveMs(delay))
     const run: RunHandle = {
       adapterId: this.id,
       sessionKey: opts.sessionKey,
@@ -121,7 +124,7 @@ export class MockAdapter implements RuntimeAdapter {
             // rejection rather than a terminal — the case a `finally` must cover.
             throw new Error('mock runtime: injected crash from events()')
           case 'silent':
-            await sleep(d.ms, aborter.signal)
+            await sleep(boundedDirectiveMs(d.ms), aborter.signal)
             break
           case 'toolcall':
             // No matching tool-result, on purpose: this is what earns the longer
