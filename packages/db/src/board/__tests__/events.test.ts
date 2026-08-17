@@ -6,7 +6,9 @@ import {
   listAgentsWithUndeliveredInbox,
   listUndeliveredInbox,
   markInboxDelivered,
+  packInboxRows,
   renderInboxDigest,
+  splitInboxByAddressing,
 } from '../../inbox'
 import { onBoardLifecycle, resetBoardLifecycleListeners, type BoardLifecycleEvent } from '../events'
 import {
@@ -198,6 +200,33 @@ describe('agent inbox (durable mailbox)', () => {
     // Marking only the included row leaves the rest pending for the next pass.
     markInboxDelivered(db, tight.includedIds, 'digest')
     expect(listUndeliveredInbox(db, 'lead').map((r) => r.body)).toEqual(['msg2', 'msg3'])
+  })
+
+  it('splitInboxByAddressing: a signal is ambient, everything else is a request', () => {
+    // `kind` carried this distinction since the mailbox shipped and nothing read
+    // it, so a task result the agent had to synthesize and a peer's passing FYI
+    // arrived in the same undifferentiated bullet list.
+    enqueueInbox(db, { agentId: 'lead', kind: 'task_update', body: 'a finished' })
+    enqueueInbox(db, { agentId: 'lead', kind: 'alert', body: 'delivery failed' })
+    enqueueInbox(db, { agentId: 'lead', kind: 'signal', body: 'starting on the schema' })
+    const { addressed, ambient } = splitInboxByAddressing(listUndeliveredInbox(db, 'lead'))
+    expect(addressed.map((r) => r.body)).toEqual(['a finished', 'delivery failed'])
+    expect(ambient.map((r) => r.body)).toEqual(['starting on the schema'])
+  })
+
+  it('packInboxRows: usedChars is what a second section has left to spend', () => {
+    // The envelope renders two sections from ONE budget. If `usedChars` did not
+    // report the real spend, the second section would get a fresh ceiling and the
+    // mailbox's 4000-char bound would quietly become 8000.
+    for (const n of [1, 2, 3])
+      enqueueInbox(db, { agentId: 'lead', kind: 'signal', body: `msg${n}` })
+    const rows = listUndeliveredInbox(db, 'lead')
+    const twoLines = ('- msg1'.length + 1) * 2
+    const first = packInboxRows(rows, twoLines)
+    expect(first.bodies).toEqual(['- msg1', '- msg2'])
+    expect(first.usedChars).toBe(twoLines)
+    // Nothing left: the third row is not rendered and so is not marked.
+    expect(packInboxRows(rows.slice(2), twoLines - first.usedChars).includedIds).toEqual([])
   })
 
   it('renderInboxDigest: empty input renders nothing, and an over-long row is truncated', () => {

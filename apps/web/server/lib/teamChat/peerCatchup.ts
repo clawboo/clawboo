@@ -27,7 +27,11 @@ export const CATCHUP_BUDGET_CHARS = 4_000
 const POST_MAX_CHARS = 800
 
 export interface PeerCatchup {
-  /** The block to prepend to the run context, or null when there is nothing to say. */
+  /** The wrapped posts, or null when there is nothing to say. NO header of its
+   *  own: this is one item inside the turn envelope's ambient section, which
+   *  supplies the framing. It used to carry `[While you were away, your teammates
+   *  said]`, which sat next to the mailbox digest's near-identical
+   *  `[While you were away]` and told the reader nothing about which to act on. */
   text: string | null
   /** The highest `seq` actually RENDERED. The caller advances the cursor to this
    *  and no further: a post dropped for budget was not delivered and must ride the
@@ -47,9 +51,8 @@ export function renderPeerCatchup(
   budgetChars = CATCHUP_BUDGET_CHARS,
 ): PeerCatchup {
   if (posts.length === 0) return { text: null, throughSeq: null }
-  const header = '[While you were away, your teammates said]'
   const blocks: string[] = []
-  let used = header.length
+  let used = 0
   let throughSeq: number | null = null
   for (const post of posts) {
     const body =
@@ -65,7 +68,7 @@ export function renderPeerCatchup(
     throughSeq = post.seq
   }
   if (blocks.length === 0) return { text: null, throughSeq: null }
-  return { text: `${header}\n${blocks.join('\n\n')}`, throughSeq }
+  return { text: blocks.join('\n\n'), throughSeq }
 }
 
 /** Read + render in one call. Returns nothing when the agent is up to date. */

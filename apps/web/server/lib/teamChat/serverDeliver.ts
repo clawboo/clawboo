@@ -27,7 +27,9 @@ import {
   listUndeliveredInbox,
   markInboxDelivered,
   recordSpend,
-  renderInboxDigest,
+  INBOX_BUDGET_CHARS,
+  packInboxRows,
+  splitInboxByAddressing,
   setSetting,
   startTaskHeartbeat,
   updateTaskFields,
@@ -46,6 +48,7 @@ import {
 import { usdToFractionalCents } from '@clawboo/governance'
 import { classifyError, isHarnessBug } from '@clawboo/obs'
 import {
+  buildTurnEnvelope,
   classifyTurn,
   isTeamSessionKey,
   type NudgeQueue,
@@ -551,10 +554,22 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const inboxRows = isTeamSessionKey(targetSessionKey)
       ? listUndeliveredInbox(db, targetAgentId, { teamId, limit: 20 })
       : []
-    const rendered = renderInboxDigest(inboxRows)
-    // Only the rows that actually FIT the render get marked (below) — a row
-    // truncated out of the budget was not delivered and rides the next digest.
-    const digestIds = rendered.includedIds
+    // Routed by `kind`, which the mailbox has carried since it shipped and nothing
+    // read: a `task_update` is a result to synthesize and an `alert` is a failure
+    // to act on — both are requests. A `signal` is a peer speaking in passing.
+    const split = splitInboxByAddressing(inboxRows)
+    // ONE budget across both sections, spent on the addressed half first. Rendering
+    // each half against its own 4000 would double the ceiling the mailbox was
+    // capped at, which is how a digest starts crowding out the instruction.
+    const packedAddressed = packInboxRows(split.addressed, INBOX_BUDGET_CHARS)
+    const packedAmbient = packInboxRows(
+      split.ambient,
+      INBOX_BUDGET_CHARS - packedAddressed.usedChars,
+    )
+    // Only the rows that actually FIT get marked (below) — a row truncated out of
+    // the budget was not delivered and rides the next digest. The union is taken
+    // from both packs, so splitting the render cannot silently over-mark.
+    const digestIds = [...packedAddressed.includedIds, ...packedAmbient.includedIds]
     // Ambient room catch-up: what teammates SAID while this agent was not running.
     // The mailbox above carries what clawboo generates (task terminals, alerts);
     // this carries peer speech, which nothing on this path used to read. The
@@ -569,8 +584,19 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           sinceSeq: loadChatLeaderState(db, roomId, targetAgentId).lastSeenSeq,
         })
       : { text: null, throughSeq: null }
-    const teamContext =
-      [baseTeamContext, catchup.text, rendered.text].filter(Boolean).join('\n\n') || null
+    // The two channels. Peer posts lead the ambient section: they are what
+    // teammates actually said, whereas a signal row is usually clawboo's echo of
+    // the same event. Section membership comes from provenance (`kind`, and which
+    // reader produced the item) — NEVER from the text, so a peer's message can
+    // never talk its way into the addressed half.
+    const envelope = buildTurnEnvelope({
+      addressed: packedAddressed.bodies.length ? [{ text: packedAddressed.bodies.join('\n') }] : [],
+      ambient: [
+        ...(catchup.text ? [{ text: catchup.text }] : []),
+        ...(packedAmbient.bodies.length ? [{ text: packedAmbient.bodies.join('\n') }] : []),
+      ],
+    })
+    const teamContext = [baseTeamContext, envelope].filter(Boolean).join('\n\n') || null
     // Route through the nudge queue: idle session → send now; busy session →
     // FIFO-enqueue for the next turn boundary (never interrupts an in-flight run).
     return nudge.deliver(

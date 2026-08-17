@@ -28,6 +28,8 @@ import {
   completeExecutionProcess,
   createExecutionProcess,
   createTask,
+  enqueueInbox,
+  listUndeliveredInbox,
   getWorkspaceForTask,
   getBudget,
   getComments,
@@ -267,6 +269,46 @@ describe('executor runner (real board + real git worktree)', () => {
     expect((JSON.parse(cleanRaw) as { brokenOrUnverified: string[] }).brokenOrUnverified).toEqual(
       [],
     )
+  })
+
+  it('splits the mailbox into addressed and ambient on the EXECUTOR path too', async () => {
+    // The same mailbox must not render two different ways depending on which path
+    // woke the agent. This path had no test at all for the digest, so the split
+    // going in here is asserted rather than assumed.
+    const db = getDb()
+    const taskId = newCodeTask()
+    const update = enqueueInbox(db, {
+      agentId: 'codex-1',
+      teamId: 'team-1',
+      kind: 'task_update',
+      body: 'your sub-task finished: parser done',
+    })
+    const fyi = enqueueInbox(db, {
+      agentId: 'codex-1',
+      teamId: 'team-1',
+      kind: 'signal',
+      body: 'Design Boo is touching the same file',
+    })
+
+    const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'ok')
+    await runTaskOnRuntime({
+      db,
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+    })
+    const ctx = fake.startedOpts?.context ?? ''
+    const addressedAt = ctx.indexOf('[Addressed to you')
+    const ambientAt = ctx.indexOf('[Ambient')
+    expect(addressedAt).toBeGreaterThan(-1)
+    expect(ambientAt).toBeGreaterThan(addressedAt)
+    expect(ctx.slice(addressedAt, ambientAt)).toContain('parser done')
+    expect(ctx.slice(ambientAt)).toContain('touching the same file')
+    // Both rendered → both marked, from the one union.
+    expect(listUndeliveredInbox(db, 'codex-1', { teamId: 'team-1' })).toEqual([])
+    expect([update.id, fyi.id]).toHaveLength(2)
   })
 
   it('a CLEAN first attempt gets no interruption note (no noise)', async () => {

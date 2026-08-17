@@ -25,7 +25,9 @@ import {
   getWorkspaceForTask,
   listExecutions,
   listUndeliveredInbox,
-  renderInboxDigest,
+  INBOX_BUDGET_CHARS,
+  packInboxRows,
+  splitInboxByAddressing,
   markInboxDelivered,
   recordRotation,
   recordSpend,
@@ -64,6 +66,7 @@ import {
   type BreakerTrip,
 } from '@clawboo/governance'
 import { classifyError, isHarnessBug } from '@clawboo/obs'
+import { buildTurnEnvelope } from '@clawboo/team-orchestration'
 import {
   isolationForTask,
   isWorktreeRegistered,
@@ -646,10 +649,25 @@ async function runTaskInner(
     teamId: task.teamId ?? null,
     limit: 20,
   })
-  // Only rendered rows get marked delivered — truncated-out rows ride the next
-  // digest (the mailbox's delivery guarantee lives in renderInboxDigest).
-  const renderedDigest = renderInboxDigest(inboxRows)
-  const inboxDigest = renderedDigest.text ?? ''
+  // Split by addressing, exactly as the team-chat path does. The SAME mailbox
+  // must not render two different ways depending on which path woke the agent —
+  // that is how an agent learns that one framing means something and the other
+  // does not. One budget across both sections; only rendered rows get marked
+  // (the delivery guarantee lives in packInboxRows).
+  const inboxSplit = splitInboxByAddressing(inboxRows)
+  const packedAddressed = packInboxRows(inboxSplit.addressed, INBOX_BUDGET_CHARS)
+  const packedAmbient = packInboxRows(
+    inboxSplit.ambient,
+    INBOX_BUDGET_CHARS - packedAddressed.usedChars,
+  )
+  const renderedDigest = {
+    includedIds: [...packedAddressed.includedIds, ...packedAmbient.includedIds],
+  }
+  const inboxDigest =
+    buildTurnEnvelope({
+      addressed: packedAddressed.bodies.length ? [{ text: packedAddressed.bodies.join('\n') }] : [],
+      ambient: packedAmbient.bodies.length ? [{ text: packedAmbient.bodies.join('\n') }] : [],
+    }) ?? ''
   const assemblePrompt = (handoffNote: string): string =>
     assembleTiers({
       stable: `# Task: ${task.title}\n\n${task.description ?? ''}`,

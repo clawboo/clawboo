@@ -15,8 +15,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   agents,
+  enqueueInbox,
   getBudget,
   listEvents,
+  listUndeliveredInbox,
+  postToRoom,
+  resolveRoomForTeam,
   setBudgetLimit,
   setSetting,
   teams,
@@ -714,6 +718,176 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     const leadCtx = lead.lastStartOpts?.context ?? ''
     expect(leadCtx).toContain('[About the User]')
     expect(leadCtx).toContain('[Leading this team')
+  })
+
+  it('splits what is waiting into ADDRESSED and AMBIENT, and marks only what it rendered', async () => {
+    // Before the envelope this arrived as two blocks with near-identical headers —
+    // `[While you were away, your teammates said]` and `[While you were away]` —
+    // and nothing said which of them, or the instruction, the agent was supposed
+    // to act on. A peer saying "stop, I already fixed that" read as ignorable.
+    const now = Date.now()
+    db.insert(teams)
+      .values({
+        id: 'T',
+        name: 'Team T',
+        icon: '🚀',
+        color: '#e94560',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    db.insert(agents)
+      .values([
+        { id: 'a1', name: 'Coder', gatewayId: 'a1', teamId: 'T', createdAt: now, updatedAt: now },
+        { id: 'a2', name: 'Bug Boo', gatewayId: 'a2', teamId: 'T', createdAt: now, updatedAt: now },
+      ])
+      .run()
+    // Two requests and one FYI, all in the same mailbox.
+    const update = enqueueInbox(db, {
+      agentId: 'a1',
+      teamId: 'T',
+      kind: 'task_update',
+      body: 'Bug Boo finished: patched auth.ts',
+    })
+    const alert = enqueueInbox(db, {
+      agentId: 'a1',
+      teamId: 'T',
+      kind: 'alert',
+      body: 'Could not deliver a task update to Design Boo',
+    })
+    const signal = enqueueInbox(db, {
+      agentId: 'a1',
+      teamId: 'T',
+      kind: 'signal',
+      body: 'Design Boo started on the schema',
+    })
+    // And a teammate actually spoke while this agent was idle.
+    postToRoom(db, {
+      roomId: resolveRoomForTeam('T'),
+      teamId: 'T',
+      authorAgentId: 'a2',
+      body: 'stop, I already fixed that',
+      kind: 'peer',
+    })
+
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+      })(),
+    )
+    await wire(adapter).deliver(SK, 'a1', 'do the thing', HUMAN_TURN)
+    await tick()
+    const ctx = adapter.lastStartOpts?.context ?? ''
+
+    const addressedAt = ctx.indexOf('[Addressed to you')
+    const ambientAt = ctx.indexOf('[Ambient')
+    expect(addressedAt).toBeGreaterThan(-1)
+    expect(ambientAt).toBeGreaterThan(addressedAt) // the ask is not buried
+
+    // Requests land in the addressed half…
+    const addressedBlock = ctx.slice(addressedAt, ambientAt)
+    expect(addressedBlock).toContain('patched auth.ts')
+    expect(addressedBlock).toContain('Could not deliver a task update')
+    // …and the FYI plus the peer's own words land in the ambient half, with the
+    // safety-critical wrapper intact.
+    const ambientBlock = ctx.slice(ambientAt)
+    expect(ambientBlock).toContain('Design Boo started on the schema')
+    expect(ambientBlock).toContain('stop, I already fixed that')
+    expect(ambientBlock).toContain('isUser=false')
+    expect(ambientBlock).toContain('from=a2')
+
+    // Every row that was rendered is marked — across BOTH sections, from one
+    // budget. Splitting the render must not lose half the delivery record.
+    expect(listUndeliveredInbox(db, 'a1', { teamId: 'T' })).toEqual([])
+    expect([update.id, alert.id, signal.id]).toHaveLength(3)
+  })
+
+  it('spends ONE budget across both sections — a section is not a fresh 4000 chars', async () => {
+    // Rendering each half against its own ceiling would silently double the cap
+    // the mailbox was bounded at, and the digest would start crowding out the
+    // instruction it is supposed to accompany.
+    const now = Date.now()
+    db.insert(teams)
+      .values({
+        id: 'T',
+        name: 'Team T',
+        icon: '🚀',
+        color: '#e94560',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    db.insert(agents)
+      .values([
+        { id: 'a1', name: 'Coder', gatewayId: 'a1', teamId: 'T', createdAt: now, updatedAt: now },
+      ])
+      .run()
+    // Twelve requests at the 400-char per-row cap = ~4800 chars of addressed
+    // content, which overruns the 4000 budget on its own.
+    for (let i = 0; i < 12; i++) {
+      enqueueInbox(db, {
+        agentId: 'a1',
+        teamId: 'T',
+        kind: 'task_update',
+        body: `u${i} `.padEnd(500, 'x'),
+      })
+    }
+    // At the per-row cap too, so the leftover after the addressed half (4000 minus
+    // the nine 404-char lines that fit = 364) cannot hold it. Under a per-section
+    // budget it would have had a fresh 4000 and rendered.
+    const fyi = enqueueInbox(db, {
+      agentId: 'a1',
+      teamId: 'T',
+      kind: 'signal',
+      body: 'a peer FYI that must wait its turn '.padEnd(500, 'z'),
+    })
+
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+      })(),
+    )
+    await wire(adapter).deliver(SK, 'a1', 'do the thing', HUMAN_TURN)
+    await tick()
+    const ctx = adapter.lastStartOpts?.context ?? ''
+
+    // The addressed half ate the budget, so the ambient row was never rendered…
+    expect(ctx).not.toContain('a peer FYI that must wait its turn')
+    // …and therefore was never marked delivered. It rides the next run.
+    expect(listUndeliveredInbox(db, 'a1', { teamId: 'T' }).map((r) => r.id)).toContain(fyi.id)
+  })
+
+  it('a quiet turn adds NO envelope at all', async () => {
+    // The most common case by far. A "(none)" section on every turn would be a
+    // permanent tax for the mechanism.
+    const now = Date.now()
+    db.insert(teams)
+      .values({
+        id: 'T',
+        name: 'Team T',
+        icon: '🚀',
+        color: '#e94560',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    db.insert(agents)
+      .values([
+        { id: 'a1', name: 'Coder', gatewayId: 'a1', teamId: 'T', createdAt: now, updatedAt: now },
+        { id: 'a2', name: 'Bug Boo', gatewayId: 'a2', teamId: 'T', createdAt: now, updatedAt: now },
+      ])
+      .run()
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+      })(),
+    )
+    await wire(adapter).deliver(SK, 'a1', 'do the thing', HUMAN_TURN)
+    await tick()
+    const ctx = adapter.lastStartOpts?.context ?? ''
+    expect(ctx).not.toContain('[Ambient')
+    expect(ctx).not.toContain('[Addressed to you')
+    expect(ctx).toContain('Bug Boo') // the roster still rides it
   })
 
   it('OpenClaw (connected substrate): a done-with-no-cost estimates spend + tool events hit obs', async () => {
