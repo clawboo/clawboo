@@ -175,6 +175,23 @@ export function isRuntimeId(id: string): id is NonOpenClawRuntimeId {
   return (NON_OPENCLAW_RUNTIME_IDS as readonly string[]).includes(id)
 }
 
+/**
+ * May the host route a team run to this runtime?
+ *
+ * `isRuntimeId` is the STATIC list, which deliberately excludes the mock harness
+ * so it never appears in the UI or in `GET /api/runtimes` unflagged. Gating
+ * delivery on that list too meant the flag exposed the runtime everywhere EXCEPT
+ * the orchestrated path, the one thing the harness exists to exercise. A team
+ * turn to a mock agent failed with "not server-orchestrated yet" while the
+ * executor path, which resolves through `adapterFactoryFor`, ran it fine.
+ *
+ * Same env flag, so a normal install is unchanged: without it this is exactly
+ * `isRuntimeId`.
+ */
+export function isOrchestratableRuntimeId(id: string): id is NonOpenClawRuntimeId {
+  return isRuntimeId(id) || (mockRuntimeEnabled() && id === 'clawboo-mock')
+}
+
 /** The runtime's connection state, derived without exposing any secret value. */
 export type RuntimeConnectionState =
   'not-installed' | 'needs-auth' | 'needs-login' | 'ready' | 'unknown'

@@ -61,7 +61,7 @@ import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { emitEvent } from '../obs'
 import { connectedAgentKey, connectedAgentMutex } from '../routines/openclawDispatch'
 import { adapterFactoryFor } from '../runtimes'
-import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
+import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
 import { estimateRunCostUsd } from '../runtimes/estimateCost'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
@@ -658,10 +658,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               : null
           } else {
             const runtime = resolvedRuntime
-            // native + the coding runtimes (claude-code / codex / hermes) via
-            // `isRuntimeId`, PLUS OpenClaw (the connected substrate, converged here).
-            // A truly-unknown runtime fails cleanly so the engine reflects it.
-            if (!runtime || (!isRuntimeId(runtime) && runtime !== 'openclaw')) {
+            // native + the coding runtimes (claude-code / codex / hermes), PLUS
+            // OpenClaw (the connected substrate, converged here) and the mock
+            // harness when its env flag is set. A truly-unknown runtime fails
+            // cleanly so the engine reflects it.
+            if (!runtime || (!isOrchestratableRuntimeId(runtime) && runtime !== 'openclaw')) {
               failStart(
                 new Error(`runtime '${runtime ?? 'unknown'}' is not server-orchestrated yet`),
               )
