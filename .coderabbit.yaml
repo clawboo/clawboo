@@ -1,0 +1,20 @@
+# CodeRabbit configuration.
+#
+# The OSS plan caps a review at 100 files, counted AFTER these filters run (the
+# skip message reports "files selected for processing", which is the post-filter
+# number). So a large PR can still be reviewed by narrowing what is in scope
+# rather than by splitting the branch.
+#
+# PASS 1 (this file as it stands): source only, 74 files. Docs and tests are out
+# of scope, not because they do not matter, but because prose and test bodies are
+# the cheapest things to review by hand and the most expensive to spend a capped
+# review on.
+#
+# PASS 2: comment out the two test exclusions below, push, and comment
+# `@coderabbitai full review`. That scopes the next pass to the tests.
+reviews:
+  path_filters:
+    - '!docs/**'
+    - '!**/__tests__/**'
+    - '!**/*.test.ts'
+    - '!tests/e2e/**'
