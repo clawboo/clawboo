@@ -35,12 +35,21 @@ export const MOCK_RUNTIME_ID = 'clawboo-mock'
  *  until something aborts it. */
 const MAX_DIRECTIVE_SLEEP_MS = 10 * 60_000
 
-const boundedDirectiveMs = (ms: number): number =>
-  Number.isFinite(ms) && ms > 0 ? Math.min(ms, MAX_DIRECTIVE_SLEEP_MS) : 0
+/** Hold until the signal aborts. NOT a sleep: expressing "wait indefinitely" as
+ *  a 24-hour `setTimeout` was a timer nobody ever wanted to fire, and it is what
+ *  forced `sleep` to accept an unbounded duration so the constant could pass
+ *  through. With no timer here, every `setTimeout` in this file is bounded. */
+const untilAborted = (signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    signal.addEventListener('abort', () => resolve(), { once: true })
+  })
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
-    const t = setTimeout(resolve, ms)
+    // Bounded AT the timer. Directive text reaches this, so the ceiling has to be
+    // visible here rather than inferred across a call boundary.
+    const t = setTimeout(resolve, Math.min(Math.max(0, ms || 0), MAX_DIRECTIVE_SLEEP_MS))
     ;(t as { unref?: () => void }).unref?.()
     signal?.addEventListener(
       'abort',
@@ -94,7 +103,7 @@ export class MockAdapter implements RuntimeAdapter {
     // Deliberately BEFORE the handle exists: a caller waiting on `start` is
     // holding whatever lock it acquired, which is exactly what `!slowstart` is
     // for. The abort path cannot help here because there is nothing to abort yet.
-    if (delay > 0) await sleep(boundedDirectiveMs(delay))
+    if (delay > 0) await sleep(delay)
     const run: RunHandle = {
       adapterId: this.id,
       sessionKey: opts.sessionKey,
@@ -124,7 +133,7 @@ export class MockAdapter implements RuntimeAdapter {
             // rejection rather than a terminal — the case a `finally` must cover.
             throw new Error('mock runtime: injected crash from events()')
           case 'silent':
-            await sleep(boundedDirectiveMs(d.ms), aborter.signal)
+            await sleep(d.ms, aborter.signal)
             break
           case 'toolcall':
             // No matching tool-result, on purpose: this is what earns the longer
@@ -166,7 +175,7 @@ export class MockAdapter implements RuntimeAdapter {
           case 'abort':
             // Hold the stream open until someone aborts. The idle guard or the
             // watchdog is what should end this, never the adapter itself.
-            await sleep(24 * 60 * 60_000, aborter.signal)
+            await untilAborted(aborter.signal)
             yield { ...base(), kind: 'done', reason: 'aborted', summary: 'mock run aborted' }
             return
           case 'ok':
