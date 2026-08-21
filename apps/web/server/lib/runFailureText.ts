@@ -9,6 +9,8 @@
 // Shared by the 1:1 chat drain (`agentChat/driveAgentChat.ts`) and the team-chat
 // drain (`teamChat/serverDeliver.ts`) so the two surfaces cannot drift.
 
+import { getDescriptor, isRuntimeId } from './runtimes/descriptor'
+
 /**
  * A run whose stream died without ever reaching a terminal (a dropped connection,
  * a crashed harness). There is no reason to report because the runtime never gave
@@ -17,13 +19,26 @@
 export const RUN_ENDED_WITHOUT_RESULT =
   'The run ended without reporting a result. The connection to the runtime may have dropped; try sending again.'
 
-/** The message to show for a failed run, given whatever reason the runtime gave. */
-export function runFailureText(errorMessage: string | null | undefined): string {
+/**
+ * The message to show for a failed run, given whatever reason the runtime gave.
+ *
+ * `runtime` names the runtime that failed, so the remediation points at the one
+ * the user actually has to fix. Team delivery drives four runtimes through this,
+ * and only the native one raises the missing-key error today, but a hardcoded
+ * destination would quietly start misdirecting the moment another one did.
+ */
+export function runFailureText(
+  errorMessage: string | null | undefined,
+  runtime?: string | null,
+): string {
   // `routeCall` throws "no provider key available (checked ANTHROPIC_API_KEY and
   // fallbacks)" when the agent's configured slot is empty, which is a setup
   // problem the user can fix rather than an error they should read raw.
   if (/no provider key/i.test(errorMessage ?? '')) {
-    return 'Clawboo Native has no provider key connected. Open Settings → Runtimes → Clawboo Native to connect a provider.'
+    const name = runtime && isRuntimeId(runtime) ? getDescriptor(runtime).name : null
+    return name
+      ? `${name} has no provider key connected. Open Settings → Runtimes → ${name} to connect a provider.`
+      : 'This runtime has no provider key connected. Open Settings → Runtimes to connect a provider.'
   }
   return `The run failed: ${errorMessage ?? 'unknown error'}`
 }

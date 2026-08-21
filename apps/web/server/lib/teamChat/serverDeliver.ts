@@ -433,7 +433,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // every runtime reports both as `done: 'aborted'`.
           if (chatVisible && !doneText.trim()) {
             const killed = takeServerAbortReason()
-            if (killed) deps.persistMeta?.(sessionKey, runFailureText(killed))
+            if (killed) deps.persistMeta?.(sessionKey, runFailureText(killed, obs.runtime))
           }
           // Cost fallback for a runtime that reports no USD (OpenClaw's Gateway, Codex,
           // Hermes): a char-based ESTIMATE so the task ledger + budget cap aren't stuck
@@ -496,7 +496,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // through the same wording). Deliberately NOT `persistedTurn`: a system
             // notice is not the agent's turn, and nothing streamed, so the clearing
             // delta below is not in play either.
-            else deps.persistMeta?.(sessionKey, runFailureText(ev.message))
+            else deps.persistMeta?.(sessionKey, runFailureText(ev.message, obs.runtime))
           }
           // Stream-without-commit belt: a turn that streamed live tokens but persisted
           // nothing (pure silent delegation, a write-time drop, an insert error) gets
@@ -555,12 +555,19 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       // delegation instead of leaving the leader waiting on a dead observer. The
       // dead stream never commits, so drop any lingering StreamingCard + flip the
       // left-pane badge back.
-      if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
-      // Nothing was committed and no terminal ever explained why, which is the
-      // same silence a failed run used to produce: the user sent a message and
-      // simply never heard back. Say so. A deliberate stop does NOT land here,
-      // because every runtime reports an abort as a clean `done` terminal.
+      // Commit whatever the user already watched streaming, exactly as the
+      // fatal-error terminal does. A dead stream is not a reason to throw away
+      // real content: without this the reply visibly vanishes and is replaced by
+      // a notice saying nothing came back, when something did.
+      if (chatVisible && !persistedTurn && acc.trim()) persistedTurn = tryPersist(acc)
+      // Only a run that produced NOTHING needs its silence explained. No terminal
+      // ever said why, and the user simply never heard back. A deliberate stop
+      // does not land here, because every runtime reports an abort as a clean
+      // `done` terminal.
       if (chatVisible && !persistedTurn) deps.persistMeta?.(sessionKey, RUN_ENDED_WITHOUT_RESULT)
+      // Ordered last: a partial committed just above replaces the StreamingCard on
+      // its own, so only a turn that truly committed nothing needs clearing.
+      if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
       abortMap.delete(sessionKey)
       nudge.markIdle(sessionKey)
       publishStatus?.(agentId, 'idle')

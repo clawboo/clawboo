@@ -417,6 +417,31 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     expect(w.persisted).toEqual([])
   })
 
+  it('a dead stream COMMITS the partial the user watched instead of replacing it with a notice', async () => {
+    // The fatal-error terminal already does this. A stream that just stops has to
+    // agree: the text was on screen, and clearing it to say "nothing came back"
+    // both loses real content and contradicts what the user saw.
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'text-delta',
+          text: 'half an answer',
+          channel: 'assistant',
+        }
+        // Iterator ends here: no done, no error.
+      })(),
+    )
+    const w = wire(adapter)
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+
+    expect(w.persisted).toEqual([{ sk: SK, text: 'half an answer' }])
+    expect(w.metas).toEqual([])
+    // The committed card replaces the StreamingCard, so no clearing delta.
+    expect(w.deltas.filter((d) => d.text === '')).toEqual([])
+  })
+
   it('a committed turn followed by a dead stream posts no notice', async () => {
     // The turn arrived; the stream dying afterwards is not the user's problem.
     const adapter = new FakeAdapter((run) =>
@@ -544,9 +569,13 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     await tick()
     expect(w.closed).toEqual([SK])
     expect(w.abortMap.has(SK)).toBe(false)
-    // The dead stream never commits — the client's StreamingCard is cleared (the
-    // empty-text sentinel) and the badge flips back to idle.
-    expect(w.deltas.at(-1)?.text).toBe('')
+    // The partial the user watched is COMMITTED rather than cleared. This used to
+    // assert the opposite (an empty-text sentinel that dropped the StreamingCard),
+    // which threw away text that was on screen; the fatal-error terminal always
+    // committed the same partial, so the two paths disagreed about identical
+    // content. The committed card replaces the StreamingCard on its own.
+    expect(w.persisted).toEqual([{ sk: SK, text: 'partial' }])
+    expect(w.deltas.at(-1)?.text).toBe('partial')
     expect(w.statuses.at(-1)).toEqual({ agentId: 'a1', status: 'idle' })
   })
 
