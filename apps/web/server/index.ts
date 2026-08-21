@@ -44,8 +44,12 @@ import { mountSpa } from './lib/serveSpa'
  *  so one mistyped value became either an instant mass-reap (negative TTL) or a
  *  1ms hot timer loop (negative interval clamped by setInterval). */
 function positiveIntEnv(name: string, fallback: number): number {
+  // Bounded ABOVE too: Node clamps a timer delay past 2^31-1 ms down to 1ms, so
+  // an oversized value would become the exact hot loop this helper exists to
+  // prevent. ~24.8 days is beyond any sane duration here; take the fallback.
+  const MAX_TIMER_MS = 2_147_483_647
   const n = Number(process.env[name])
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback
+  return Number.isFinite(n) && n >= 1 && n <= MAX_TIMER_MS ? Math.floor(n) : fallback
 }
 
 // ── Loggers ─────────────────────────────────────────────────────────────────

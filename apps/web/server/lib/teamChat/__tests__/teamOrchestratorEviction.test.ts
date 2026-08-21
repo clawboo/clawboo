@@ -118,8 +118,15 @@ describe('teamOrchestrator idle eviction', () => {
   })
 
   it('does not evict exactly at the TTL boundary (strictly greater)', () => {
+    // Anchor the clock BEFORE construction. `getTeamOrchestrator` stamps
+    // lastActivityAt inside it, so reading Date.now() afterwards races the
+    // stamp: one elapsed millisecond (routine under CI coverage load) makes the
+    // delta strictly greater than the TTL and the eviction is CORRECT, failing
+    // the test. With t0 <= lastActivityAt, t0 + TTL is always at-or-before the
+    // boundary, which is exactly the property under test.
+    const t0 = Date.now()
     getTeamOrchestrator('T')
-    expect(evictIdleOrchestrators(Date.now() + IDLE_TTL_MS)).toBe(0)
+    expect(evictIdleOrchestrators(t0 + IDLE_TTL_MS)).toBe(0)
     expect(hasTeamOrchestrator('T')).toBe(true)
   })
 
