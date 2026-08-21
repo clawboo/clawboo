@@ -5,7 +5,7 @@ import express from 'express'
 import cors from 'cors'
 
 import { createAccessGate, createGatewayProxy, createOriginGuard } from '@clawboo/gateway-proxy'
-import { loadSettings } from '@clawboo/config'
+import { loadSettings, resolveBasePath } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 import {
   listAgentsWithUndeliveredInbox,
@@ -37,6 +37,7 @@ import {
 } from './lib/portUtils'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
+import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { mountSpa } from './lib/serveSpa'
 
 /** A duration env var, defaulted and BOUNDED to a positive integer. The bare
@@ -77,6 +78,18 @@ const resolvePathname = (url: string | undefined): string => {
   return (idx === -1 ? raw : raw.slice(0, idx)) || '/'
 }
 
+const GATEWAY_WS_PATH = '/api/gateway/ws'
+
+/**
+ * The Gateway proxy route, in either spelling. WS upgrades bypass the Express
+ * middleware stack, so the base-path strip never runs on them: a browser served
+ * under `/clawboo` connects to `/clawboo/api/gateway/ws`, while the loopback
+ * control plane still uses the root path. Exact matches only, so no other path
+ * can reach the proxy.
+ */
+const isGatewayWsPath = (pathname: string, basePath: string): boolean =>
+  pathname === GATEWAY_WS_PATH || (basePath !== '' && pathname === `${basePath}${GATEWAY_WS_PATH}`)
+
 /** Parse a comma-separated env var into a trimmed, non-empty list. */
 const parseCsvEnv = (raw: string | undefined): string[] =>
   String(raw ?? '')
@@ -89,6 +102,21 @@ const parseCsvEnv = (raw: string | undefined): string[] =>
 async function main() {
   const dev = process.argv.includes('--dev')
   const hostname = resolveHost()
+
+  // The URL prefix the whole app is served under ('' = the origin root, the
+  // default). Refuse to start on a malformed value rather than silently serving
+  // at the root: an operator who set it has a proxy pointing here, and a quiet
+  // fallback would look like a broken deployment instead of a bad setting.
+  const basePathResult = resolveBasePath(process.env)
+  if (!basePathResult.ok) {
+    log.error(
+      { value: process.env['CLAWBOO_BASE_PATH'] },
+      `SECURITY/CONFIG: CLAWBOO_BASE_PATH is invalid (${basePathResult.reason}). ` +
+        'Use a path like /clawboo, or unset it to serve at the root.',
+    )
+    process.exit(1)
+  }
+  const basePath = basePathResult.basePath
 
   // If we were launched as a self-restart successor by an in-app update, the
   // exiting parent still holds the API port for a brief moment. Wait for it to
@@ -113,6 +141,9 @@ async function main() {
 
   const accessGate = createAccessGate({
     token: process.env['STUDIO_ACCESS_TOKEN'],
+    // Scopes the operator cookie to the mount and prefixes the post-exchange
+    // redirect, so sharing an origin with another app does not share the cookie.
+    basePath,
   })
 
   // ── Same-origin guard (CSWSH / DNS-rebinding / cross-site CSRF) ────────────
@@ -179,7 +210,7 @@ async function main() {
       return { url: settings.gatewayUrl, token: settings.gatewayToken }
     },
     allowWs: (req) => {
-      if (resolvePathname(req.url) !== '/api/gateway/ws') return false
+      if (!isGatewayWsPath(resolvePathname(req.url), basePath)) return false
       // Same-origin guard first (CSWSH), then the optional token gate.
       if (!originGuard.allowUpgrade(req)) return false
       if (!accessGate.allowUpgrade(req)) return false
@@ -204,6 +235,13 @@ async function main() {
   // header — a forged Host must never redirect a runtime's Tasks/Memory/Tools/TeamChat
   // traffic. Mirrors the `http://127.0.0.1:${port}` the boot/ticker callers use.
   app.locals['apiPort'] = port
+
+  // Base-path strip, BEFORE the origin guard, and nothing may be mounted ahead
+  // of it. The guards below decide what to protect with `startsWith('/api/')` and
+  // fail OPEN otherwise, so they must only ever see root-form paths; stripping
+  // here is what lets them keep their existing checks and cover the prefixed
+  // surface too. A pass-through when no prefix is configured.
+  app.use(createBasePathMiddleware(basePath))
 
   // Same-origin guard — FIRST, before body parsing / CORS / the access gate, so a
   // cross-origin (CSWSH/rebinding/CSRF) /api/* request is 403'd before any work.
@@ -244,8 +282,10 @@ async function main() {
     const start = Date.now()
     res.on('finish', () => {
       const url = req.originalUrl ?? req.url
-      // Skip high-frequency static asset requests
-      if (url.startsWith('/assets/') || url.startsWith('/fonts/')) return
+      // Skip high-frequency static asset requests. `originalUrl` keeps the mount
+      // prefix, so the test allows for it.
+      const rel = basePath && url.startsWith(basePath) ? url.slice(basePath.length) : url
+      if (rel.startsWith('/assets/') || rel.startsWith('/fonts/')) return
       const durationMs = Date.now() - start
       const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info'
       reqLog[level]({ method: req.method, url, status: res.statusCode, durationMs })
@@ -258,7 +298,9 @@ async function main() {
 
   // Production: serve Vite build output as static SPA
   if (!dev) {
-    mountSpa(app, process.env['CLAWBOO_UI_DIR'] || path.join(__dirname, 'ui'))
+    // Requests arrive with the prefix already stripped; `basePath` is passed only
+    // so the served shell can advertise its own mount point.
+    mountSpa(app, process.env['CLAWBOO_UI_DIR'] || path.join(__dirname, 'ui'), basePath)
   }
 
   // ── HTTP server (raw, for WS upgrade handling) ────────────────────────────
@@ -268,7 +310,11 @@ async function main() {
   // ── WebSocket upgrade routing ─────────────────────────────────────────────
 
   server.on('upgrade', (req, socket, head) => {
-    if (resolvePathname(req.url) === '/api/gateway/ws') {
+    // The raw upgrade handler runs OUTSIDE Express, so the base-path middleware
+    // never sees these and the prefix is still present. Accept both spellings:
+    // the prefixed one a browser under the mount sends, and the root one the
+    // loopback control plane uses.
+    if (isGatewayWsPath(resolvePathname(req.url), basePath)) {
       // Same-origin guard on the WS upgrade (CSWSH). Reply 403 before handing off
       // so a rejected handshake gets a real response, not a bare socket teardown.
       // `socket.end(...)` flushes the response bytes before the FIN.
@@ -468,7 +514,9 @@ async function main() {
 
   server.listen(port, hostname, () => {
     const hostForBrowser = hostname === '0.0.0.0' || hostname === '::' ? 'localhost' : hostname
-    const browserUrl = `http://${hostForBrowser}:${port}`
+    // Trailing slash under a mount so the shell's relative assets resolve without
+    // relying on the redirect (which is there for hand-typed URLs).
+    const browserUrl = `http://${hostForBrowser}:${port}${basePath ? `${basePath}/` : ''}`
 
     // Publish the chosen port for external tools (CLI, Vite proxy fallback,
     // e2e helpers). Best-effort: if writing fails, downstream consumers can

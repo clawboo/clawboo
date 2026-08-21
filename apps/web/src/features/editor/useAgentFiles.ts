@@ -1,4 +1,4 @@
-import { readAgentFile, writeAgentFile } from '@clawboo/control-client'
+import { apiFetch, readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AGENT_FILE_NAMES, type AgentFileName } from '@clawboo/protocol'
 import { useConnectionStore } from '@/stores/connection'
@@ -88,7 +88,7 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
         // Strip stale personality block from SOUL.md and re-merge from SQLite
         const soulRaw = next['SOUL.md']?.content ?? ''
         try {
-          const res = await fetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
+          const res = await apiFetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
           const data = (await res.json()) as { values: unknown }
           if (data.values && isPersonalityValues(data.values)) {
             const base = stripPersonalityBlock(soulRaw)
@@ -114,7 +114,7 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
 
     void (async () => {
       try {
-        const res = await fetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
+        const res = await apiFetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
         const data = (await res.json()) as { values: unknown }
         if (data.values && isPersonalityValues(data.values)) {
           const currentSoul = filesRef.current['SOUL.md']?.content ?? ''

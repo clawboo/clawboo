@@ -12,6 +12,7 @@ import { PanelHeader } from '@/features/shared/PanelHeader'
 import { type StatusTone } from '@/features/shared/StatusPill'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import {
+  apiFetch,
   fetchRegistryHealth,
   fetchRuntimes,
   recheckRuntime,
@@ -58,7 +59,7 @@ function McpAttach({ runtimeId }: { runtimeId: string }) {
     setOpen(next)
     if (next && snippet === null) {
       try {
-        const r = await fetch(
+        const r = await apiFetch(
           `/api/mcp/config?runtime=${encodeURIComponent(runtimeId)}&server=tasks&transport=http`,
         )
         const body = (await r.json()) as unknown
@@ -201,7 +202,7 @@ export function RuntimesPanel() {
     // OpenClaw's own ChatGPT-subscription oauth profile (defensive: false on any
     // error). `codexAuth.profile` is the ACTUAL profile, distinct from a bare
     // codex-CLI login (which only OFFERS the path).
-    const cfg = (await fetch('/api/system/openclaw-config')
+    const cfg = (await apiFetch('/api/system/openclaw-config')
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null)) as { config?: unknown; codexAuth?: { profile?: boolean } } | null
     if (!read.isCurrent()) return

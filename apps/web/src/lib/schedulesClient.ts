@@ -10,6 +10,7 @@ import type {
   ScheduleSourceReadStatus,
   ScheduleUpdatePatch,
 } from '@clawboo/scheduler'
+import { apiFetch } from '@clawboo/control-client'
 
 export type { ScheduleRecord, ScheduleSourceReadStatus } from '@clawboo/scheduler'
 
@@ -20,7 +21,7 @@ export interface SchedulesView {
 
 export async function fetchSchedules(): Promise<SchedulesView> {
   try {
-    const res = await fetch('/api/schedules')
+    const res = await apiFetch('/api/schedules')
     if (!res.ok) return { schedules: [], sources: [] }
     const body = (await res.json()) as Partial<SchedulesView>
     return { schedules: body.schedules ?? [], sources: body.sources ?? [] }
@@ -53,7 +54,7 @@ function fail(err: unknown): ScheduleActionResult {
 
 async function send(url: string, method: string, body?: object): Promise<ScheduleActionResult> {
   try {
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
       method,
       ...(body
         ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }

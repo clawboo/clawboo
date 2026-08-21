@@ -30,6 +30,7 @@ import {
   isLocalGatewayUrl,
   resolveProxyGatewayUrl,
 } from '@clawboo/gateway-client'
+import { apiFetch } from '@clawboo/control-client'
 import {
   DetectStep,
   InstallStep,
@@ -155,7 +156,7 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
             animate={{ y: [0, -14, 0] }}
             transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
           >
-            <img src="/logo.svg" alt="Clawboo" width={84} height={77} />
+            <img src="logo.svg" alt="Clawboo" width={84} height={77} />
           </motion.div>
         </div>
 
@@ -233,7 +234,7 @@ function ConnectStep({
 
   // Pre-fill from persisted settings (in case user ran npx clawboo first)
   useEffect(() => {
-    fetch('/api/settings')
+    apiFetch('/api/settings')
       .then((r) => r.json() as Promise<{ gatewayUrl?: string; hasToken?: boolean }>)
       .then((data) => {
         if (data.gatewayUrl?.trim()) setUrl(data.gatewayUrl.trim())
@@ -269,7 +270,7 @@ function ConnectStep({
       // If the user left the placeholder dots, omit gatewayToken so we don't
       // overwrite a previously saved real token with an empty string.
       const tokenChanged = token !== '••••••••'
-      await fetch('/api/settings', {
+      await apiFetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

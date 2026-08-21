@@ -7,6 +7,7 @@
 // null/false result, never throw) and 409-aware: a claim conflict means
 // "someone else won" and MUST NOT be retried.
 
+import { apiFetch } from '@clawboo/control-client'
 import type { BoardClient, BoardTask, TaskDetail, ExecutionRef } from '@clawboo/team-orchestration'
 
 export type {
@@ -25,7 +26,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' } as const
 export const boardClient: BoardClient = {
   async createTask(input) {
     try {
-      const r = await fetch('/api/board', {
+      const r = await apiFetch('/api/board', {
         method: 'POST',
         headers: JSON_HEADERS,
         body: JSON.stringify(input),
@@ -40,7 +41,7 @@ export const boardClient: BoardClient = {
 
   async claim(taskId, assigneeAgentId, assigneeRuntime) {
     try {
-      const r = await fetch(`/api/board/${encodeURIComponent(taskId)}/claim`, {
+      const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}/claim`, {
         method: 'POST',
         headers: JSON_HEADERS,
         body: JSON.stringify({ assigneeAgentId, assigneeRuntime }),
@@ -65,7 +66,7 @@ export const boardClient: BoardClient = {
 
   async addComment(taskId, body, authorType = 'system', authorAgentId) {
     try {
-      await fetch(`/api/board/${encodeURIComponent(taskId)}/comments`, {
+      await apiFetch(`/api/board/${encodeURIComponent(taskId)}/comments`, {
         method: 'POST',
         headers: JSON_HEADERS,
         body: JSON.stringify({ body, authorType, authorAgentId }),
@@ -77,7 +78,7 @@ export const boardClient: BoardClient = {
 
   async getTask(taskId) {
     try {
-      const r = await fetch(`/api/board/${encodeURIComponent(taskId)}`)
+      const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}`)
       if (!r.ok) return null
       return (await r.json()) as TaskDetail
     } catch {
@@ -87,7 +88,7 @@ export const boardClient: BoardClient = {
 
   async createExecution(taskId, executorType) {
     try {
-      const r = await fetch(`/api/board/${encodeURIComponent(taskId)}/executions`, {
+      const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}/executions`, {
         method: 'POST',
         headers: JSON_HEADERS,
         body: JSON.stringify({ executorType }),
@@ -102,7 +103,7 @@ export const boardClient: BoardClient = {
 
   async completeExecution(execId, outcome) {
     try {
-      await fetch(`/api/board/executions/${encodeURIComponent(execId)}`, {
+      await apiFetch(`/api/board/executions/${encodeURIComponent(execId)}`, {
         method: 'PATCH',
         headers: JSON_HEADERS,
         body: JSON.stringify(outcome),
@@ -114,7 +115,7 @@ export const boardClient: BoardClient = {
 
   async linkDep(taskId, dependsOnTaskId) {
     try {
-      const r = await fetch(`/api/board/${encodeURIComponent(taskId)}/deps`, {
+      const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}/deps`, {
         method: 'POST',
         headers: JSON_HEADERS,
         body: JSON.stringify({ dependsOnTaskId }),
@@ -127,7 +128,7 @@ export const boardClient: BoardClient = {
 
   async getReadyTasks(teamId) {
     try {
-      const r = await fetch(`/api/board?teamId=${encodeURIComponent(teamId)}&ready=true`)
+      const r = await apiFetch(`/api/board?teamId=${encodeURIComponent(teamId)}&ready=true`)
       if (!r.ok) return []
       const body = (await r.json()) as { tasks?: BoardTask[] }
       return body.tasks ?? []
@@ -138,7 +139,7 @@ export const boardClient: BoardClient = {
 
   async listExecutions(taskId) {
     try {
-      const r = await fetch(`/api/board/${encodeURIComponent(taskId)}/executions`)
+      const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}/executions`)
       // `null`, not `[]` — an unreachable server means the ledger is UNKNOWN, and
       // an empty ledger is what tells the fire policy a task may auto-fire. See
       // the note on BoardClient.listExecutions.
@@ -158,7 +159,7 @@ export const boardClient: BoardClient = {
 
   async listTasks(teamId) {
     try {
-      const r = await fetch(`/api/board?teamId=${encodeURIComponent(teamId)}`)
+      const r = await apiFetch(`/api/board?teamId=${encodeURIComponent(teamId)}`)
       if (!r.ok) return []
       const body = (await r.json()) as { tasks?: BoardTask[] }
       return body.tasks ?? []
@@ -169,7 +170,7 @@ export const boardClient: BoardClient = {
 
   async cancelDependents(taskId) {
     try {
-      const r = await fetch(`/api/board/${encodeURIComponent(taskId)}/cancel-dependents`, {
+      const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}/cancel-dependents`, {
         method: 'POST',
         headers: JSON_HEADERS,
       })
@@ -196,7 +197,7 @@ export interface BoardFetchResult {
 export async function fetchBoardResult(teamId?: string): Promise<BoardFetchResult> {
   try {
     const url = teamId ? `/api/board?teamId=${encodeURIComponent(teamId)}` : '/api/board'
-    const r = await fetch(url)
+    const r = await apiFetch(url)
     if (!r.ok) return { tasks: [], ok: false }
     const body = (await r.json()) as { tasks?: BoardTask[] }
     return { tasks: body.tasks ?? [], ok: true }
@@ -237,7 +238,7 @@ export async function updateStatusResult(
   opts: { humanOverride?: boolean } = {},
 ): Promise<StatusChangeResult> {
   try {
-    const r = await fetch(`/api/board/${encodeURIComponent(taskId)}`, {
+    const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}`, {
       method: 'PATCH',
       headers: JSON_HEADERS,
       body: JSON.stringify({ status, ...(opts.humanOverride ? { humanOverride: true } : {}) }),
@@ -266,7 +267,7 @@ export interface BoardExecution {
 
 export async function getTaskExecutions(taskId: string): Promise<BoardExecution[]> {
   try {
-    const r = await fetch(`/api/board/${encodeURIComponent(taskId)}/executions`)
+    const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}/executions`)
     if (!r.ok) return []
     const body = (await r.json()) as { executions?: BoardExecution[] }
     return body.executions ?? []
@@ -297,7 +298,7 @@ export interface WorkspaceDetail {
 
 export async function getWorkspaceDetail(taskId: string): Promise<WorkspaceDetail | null> {
   try {
-    const r = await fetch(`/api/board/${encodeURIComponent(taskId)}/workspace/detail`)
+    const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}/workspace/detail`)
     if (!r.ok) return null
     return (await r.json()) as WorkspaceDetail
   } catch {

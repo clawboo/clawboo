@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
+import { apiFetch } from '@clawboo/control-client'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
@@ -377,7 +378,7 @@ export function GroupChatPanel({
       const existing = useChatStore.getState().transcripts.get(teamSk)
       if (existing && existing.length > 0) continue
 
-      void fetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
+      void apiFetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
         .then((r) => r.json())
         .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
           if (cancelled) return

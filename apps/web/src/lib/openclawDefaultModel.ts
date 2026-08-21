@@ -12,6 +12,7 @@
 // Sharing one fetch keeps them consistent (they must agree for the same agent).
 
 import { useEffect, useState } from 'react'
+import { apiFetch } from '@clawboo/control-client'
 
 /**
  * Reads the OpenClaw default model from `/api/system/openclaw-config`.
@@ -20,7 +21,7 @@ import { useEffect, useState } from 'react'
  */
 export async function fetchOpenclawDefaultModel(): Promise<string | null> {
   try {
-    const res = await fetch('/api/system/openclaw-config')
+    const res = await apiFetch('/api/system/openclaw-config')
     const data = (await res.json()) as {
       config?: { agents?: { defaults?: { model?: { primary?: string } } } }
     }

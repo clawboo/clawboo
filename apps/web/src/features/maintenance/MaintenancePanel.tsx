@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
 import { RefreshCw, Settings } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
-import { consumeApiSSE } from '@clawboo/control-client'
+import { apiFetch, consumeApiSSE } from '@clawboo/control-client'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Button } from '@/features/shared/Button'
@@ -89,7 +89,7 @@ function CommandApprovalDefault() {
 
   // Fetch current value from openclaw.json
   useEffect(() => {
-    fetch('/api/system/openclaw-config')
+    apiFetch('/api/system/openclaw-config')
       .then((r) => r.json() as Promise<{ config?: { tools?: { exec?: { ask?: string } } } }>)
       .then((data) => {
         const ask = data?.config?.tools?.exec?.ask
@@ -106,7 +106,7 @@ function CommandApprovalDefault() {
       const prev = execAsk
       setExecAsk(value)
       try {
-        const res = await fetch('/api/system/openclaw-config', {
+        const res = await apiFetch('/api/system/openclaw-config', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ exec: { ask: value } }),
@@ -173,7 +173,7 @@ export function MaintenancePanel() {
   useEffect(() => {
     let cancelled = false
 
-    fetch('/api/system/status')
+    apiFetch('/api/system/status')
       .then((r) => r.json() as Promise<SystemStatus>)
       .then((statusData) => {
         if (cancelled) return
@@ -214,7 +214,7 @@ export function MaintenancePanel() {
           if (e.success) {
             addToast({ message: `Updated to ${e.version ?? 'latest'}`, type: 'success' })
             // Refresh status to get new version
-            void fetch('/api/system/status')
+            void apiFetch('/api/system/status')
               .then((r) => r.json() as Promise<SystemStatus>)
               .then(setStatus)
           } else {

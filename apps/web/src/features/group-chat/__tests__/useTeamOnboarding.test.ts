@@ -37,7 +37,10 @@ describe('useTeamOnboarding', () => {
 
     expect(result.current.agentsIntroduced).toBe(true)
     expect(result.current.userIntroduced).toBe(false)
-    expect(mockFetch).toHaveBeenCalledWith('/api/teams/team-1/onboarding')
+    // `headers: {}` is the control-client seam's injected-header slot (empty by
+    // default). The PATCH assertions below pass their own Content-Type, which
+    // wins the merge, so only this header-less GET shows the empty object.
+    expect(mockFetch).toHaveBeenCalledWith('/api/teams/team-1/onboarding', { headers: {} })
   })
 
   it('defaults to false/false when teamId is null and never fetches', async () => {

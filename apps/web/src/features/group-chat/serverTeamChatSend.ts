@@ -7,6 +7,7 @@
 // `client` dependency (native mode has `client === null`).
 
 import type { TranscriptEntry } from '@clawboo/protocol'
+import { apiFetch } from '@clawboo/control-client'
 
 import { nextSeq } from '@/lib/sequenceKey'
 import { useChatStore } from '@/stores/chat'
@@ -49,7 +50,7 @@ export async function sendServerTeamMessage(params: SendServerTeamMessageParams)
   useChatStore.getState().appendTranscript(targetSessionKey, [optimistic])
 
   try {
-    const res = await fetch(`/api/teams/${encodeURIComponent(teamId)}/chat`, {
+    const res = await apiFetch(`/api/teams/${encodeURIComponent(teamId)}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, targetAgentId, entryId }),
@@ -84,7 +85,7 @@ export async function stopServerTeam(params: StopServerTeamParams): Promise<void
     chat.clearStreamStart(sk)
   }
   try {
-    await fetch(`/api/teams/${encodeURIComponent(teamId)}/chat/stop`, { method: 'POST' })
+    await apiFetch(`/api/teams/${encodeURIComponent(teamId)}/chat/stop`, { method: 'POST' })
   } catch {
     // best-effort — the server also releases via its idle watchdog
   }

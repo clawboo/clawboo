@@ -1,4 +1,4 @@
-import { readAgentFile, writeAgentFile } from '@clawboo/control-client'
+import { apiFetch, readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Save, X } from 'lucide-react'
 import {
@@ -113,7 +113,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
         // description, or values are out of date).
         const soulRaw = next['SOUL.md']?.content ?? ''
         try {
-          const res = await fetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
+          const res = await apiFetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
           const data = (await res.json()) as { values: unknown }
           if (data.values && isPersonalityValues(data.values)) {
             const base = stripPersonalityBlock(soulRaw)
@@ -141,7 +141,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
     // Re-fetch personality from SQLite + re-merge into current SOUL.md
     void (async () => {
       try {
-        const res = await fetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
+        const res = await apiFetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
         const data = (await res.json()) as { values: unknown }
         if (data.values && isPersonalityValues(data.values)) {
           const currentSoul = filesRef.current['SOUL.md']?.content ?? ''

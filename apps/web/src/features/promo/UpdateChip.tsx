@@ -16,7 +16,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { AlertCircle, Check, Copy, X } from 'lucide-react'
-import { consumeApiSSE, type SSEEvent } from '@clawboo/control-client'
+import { apiFetch, consumeApiSSE, type SSEEvent } from '@clawboo/control-client'
 
 import { Spinner } from '@/features/shared/Spinner'
 import { useUpdateCheck } from './useUpdateCheck'
@@ -39,7 +39,7 @@ async function pollThenReload(onTimeout: () => void): Promise<void> {
   while (Date.now() < deadline) {
     await sleep(1000)
     try {
-      const res = await fetch('/api/settings', { cache: 'no-store' })
+      const res = await apiFetch('/api/settings', { cache: 'no-store' })
       if (res.ok) {
         const body = (await res.json()) as { gatewayUrl?: unknown }
         if (typeof body.gatewayUrl === 'string') {

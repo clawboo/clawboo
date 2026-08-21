@@ -1,7 +1,7 @@
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
-import { archiveAgentRecord } from '@clawboo/control-client'
+import { apiFetch, archiveAgentRecord } from '@clawboo/control-client'
 
 export async function deleteAgentOperation(
   agentId: string,
@@ -22,7 +22,7 @@ export async function deleteAgentOperation(
   // 4. Clear transcript + SQLite history (if session key exists)
   if (sessionKey) {
     useChatStore.getState().clearTranscript(sessionKey)
-    fetch(`/api/chat-history?sessionKey=${encodeURIComponent(sessionKey)}`, {
+    apiFetch(`/api/chat-history?sessionKey=${encodeURIComponent(sessionKey)}`, {
       method: 'DELETE',
     }).catch(() => {})
   }

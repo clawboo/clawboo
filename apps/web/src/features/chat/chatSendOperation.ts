@@ -2,6 +2,7 @@
 
 import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { TranscriptEntry } from '@clawboo/protocol'
+import { apiFetch } from '@clawboo/control-client'
 import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -134,7 +135,7 @@ export async function sendChatMessage({
 
   // Persist user message to SQLite (best-effort)
   const gwUrl = useConnectionStore.getState().gatewayUrl ?? ''
-  void fetch('/api/chat-history', {
+  void apiFetch('/api/chat-history', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionKey, gatewayUrl: gwUrl, entries: [userEntry] }),

@@ -196,7 +196,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
           {/* Glow */}
           <div className="pointer-events-none absolute -inset-8 bg-[radial-gradient(circle,rgb(var(--primary-rgb) / 0.15),transparent)]" />
           <motion.img
-            src="/logo.svg"
+            src="logo.svg"
             alt="Clawboo"
             className="relative h-20 w-20"
             animate={

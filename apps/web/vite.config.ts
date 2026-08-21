@@ -43,6 +43,13 @@ function resolveApiPort(): number {
 const apiPort = resolveApiPort()
 
 export default defineConfig({
+  // RELATIVE, so one prebuilt bundle serves from any mount point. clawboo ships
+  // `dist/ui` through npm, so a build-time absolute base would force users to
+  // rebuild just to serve under a path prefix. With './' every asset URL the
+  // bundle emits resolves at RUNTIME: JS-hosted ones against the importing
+  // chunk's own URL, CSS ones against the stylesheet, and index.html's own refs
+  // against the `<base href>` the server injects (see `server/lib/serveSpa.ts`).
+  base: './',
   plugins: [react(), tsconfigPaths({ ignoreConfigErrors: true })],
   build: {
     outDir: 'dist/ui',

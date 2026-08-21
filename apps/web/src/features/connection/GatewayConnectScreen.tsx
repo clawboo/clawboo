@@ -8,6 +8,7 @@ import {
   isLocalGatewayUrl,
   resolveProxyGatewayUrl,
 } from '@clawboo/gateway-client'
+import { apiFetch } from '@clawboo/control-client'
 import { useConnectionStore } from '@/stores/connection'
 import { DevicePairingApproval } from './DevicePairingApproval'
 
@@ -60,7 +61,7 @@ export function GatewayConnectScreen({
 
   // Pre-fill from persisted settings on mount
   useEffect(() => {
-    fetch('/api/settings')
+    apiFetch('/api/settings')
       .then((r) => r.json())
       .then((data: { gatewayUrl?: string; hasToken?: boolean }) => {
         if (data.gatewayUrl?.trim()) setUrl(data.gatewayUrl.trim())
@@ -104,7 +105,7 @@ export function GatewayConnectScreen({
       // only save the URL — leave the existing saved token intact so the proxy
       // can inject it. If the user explicitly cleared or typed a new token, save that.
       const tokenChanged = trimmedToken.length > 0
-      await fetch('/api/settings', {
+      await apiFetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -195,7 +196,7 @@ export function GatewayConnectScreen({
         {/* ── Logo / header ── */}
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/12 ring-1 ring-accent/20">
-            <img src="/logo.svg" alt="Clawboo" width={32} height={30} />
+            <img src="logo.svg" alt="Clawboo" width={32} height={30} />
           </div>
           <div>
             <h1

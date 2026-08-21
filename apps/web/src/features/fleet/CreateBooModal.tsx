@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useId } from 'react'
+import { apiFetch } from '@clawboo/control-client'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
 import { createAgent } from '@/lib/createAgent'
@@ -70,7 +71,7 @@ export function CreateBooModal({
       })
 
       // Persist default personality to SQLite so sliders load correctly
-      void fetch('/api/personality', {
+      void apiFetch('/api/personality', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentId, values: DEFAULT_PERSONALITY }),
@@ -80,7 +81,7 @@ export function CreateBooModal({
       const selectedTeamId = useTeamStore.getState().selectedTeamId
       if (selectedTeamId) {
         try {
-          await fetch(`/api/teams/${selectedTeamId}/agents`, {
+          await apiFetch(`/api/teams/${selectedTeamId}/agents`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentId }),

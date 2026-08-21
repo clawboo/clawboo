@@ -64,7 +64,7 @@ import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { DEFAULT_COLLECTION_ID } from '@/lib/teamPalettes'
 import { TEAM_ACCENT_PRESETS } from '@/features/teams/TeamAccentPicker'
-import { consumeApiSSE, pushAgentSync, listAgents } from '@clawboo/control-client'
+import { apiFetch, consumeApiSSE, pushAgentSync, listAgents } from '@clawboo/control-client'
 import { fetchAgentModelMap } from '@/lib/agentModelMap'
 import type { AgentState } from '@/stores/fleet'
 import type { SystemInfo } from '@/stores/system'
@@ -89,7 +89,7 @@ function markOnboarded(): void {
  *  dashboard on reload rather than re-running the wizard. Best-effort (REST). */
 async function hasNativeAgents(): Promise<boolean> {
   try {
-    const res = await fetch('/api/agents')
+    const res = await apiFetch('/api/agents')
     if (!res.ok) return false
     const body = (await res.json()) as {
       agents?: { id?: string; runtime?: string; sourceId?: string }[]
@@ -114,7 +114,7 @@ async function hasNativeAgents(): Promise<boolean> {
  *  Best-effort (REST). */
 async function hasGatewayIndependentAgents(): Promise<boolean> {
   try {
-    const res = await fetch('/api/agents')
+    const res = await apiFetch('/api/agents')
     if (!res.ok) return false
     const body = (await res.json()) as {
       agents?: { runtime?: string; sourceId?: string }[]
@@ -141,7 +141,7 @@ async function hasGatewayIndependentAgents(): Promise<boolean> {
  *  non-OpenClaw runtimes, so OpenClaw is excluded by construction. Best-effort. */
 async function hasConnectedRuntime(): Promise<boolean> {
   try {
-    const res = await fetch('/api/runtimes')
+    const res = await apiFetch('/api/runtimes')
     if (!res.ok) return false
     const body = (await res.json()) as {
       runtimes?: { hasVaultCredential?: boolean; authKind?: string; loggedIn?: boolean }[]
@@ -160,7 +160,7 @@ async function hasConnectedRuntime(): Promise<boolean> {
  *  not-configured reading may have left set. */
 async function hasAnyTeam(): Promise<boolean> {
   try {
-    const res = await fetch('/api/teams')
+    const res = await apiFetch('/api/teams')
     if (!res.ok) return false
     const body = (await res.json()) as { teams?: unknown[] } | unknown[]
     const teams = Array.isArray(body) ? body : (body.teams ?? [])
@@ -197,7 +197,7 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
   } else {
     // Case A: no active teams (either empty or all archived) — create "Default" team
     try {
-      const res = await fetch('/api/teams', {
+      const res = await apiFetch('/api/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -241,9 +241,9 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
   if (booZeroId) {
     const booZero = agents.find((a) => a.id === booZeroId)
     if (booZero?.teamId) {
-      await fetch(`/api/teams/${booZero.teamId}/agents/${booZeroId}`, { method: 'DELETE' }).catch(
-        () => {},
-      )
+      await apiFetch(`/api/teams/${booZero.teamId}/agents/${booZeroId}`, {
+        method: 'DELETE',
+      }).catch(() => {})
       useFleetStore.setState((s) => ({
         agents: s.agents.map((a) => (a.id === booZeroId ? { ...a, teamId: null } : a)),
       }))
@@ -269,7 +269,7 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
   // Assign each unassigned agent to the target team (upserts SQLite row)
   for (const agent of unassigned) {
     try {
-      await fetch(`/api/teams/${targetTeamId}/agents`, {
+      await apiFetch(`/api/teams/${targetTeamId}/agents`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentId: agent.id, agentName: agent.name }),
@@ -293,7 +293,7 @@ async function autoMigrateTeamlessAgents(): Promise<void> {
 
 /** Fire-and-forget: pre-populate approval history from SQLite on connect. */
 function preloadApprovalHistory(): void {
-  fetch('/api/approvals')
+  apiFetch('/api/approvals')
     .then((r) => r.json())
     .then(({ records }: { records?: DbApprovalHistory[] }) => {
       if (records?.length) {
@@ -445,7 +445,7 @@ async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number
     if (booZeroId) {
       let override = ''
       try {
-        const res = await fetch(`/api/boo-zero/display-name/${encodeURIComponent(booZeroId)}`)
+        const res = await apiFetch(`/api/boo-zero/display-name/${encodeURIComponent(booZeroId)}`)
         if (res.ok) {
           const body = (await res.json()) as { name?: string | null }
           override = (body.name ?? '').trim()
@@ -458,11 +458,14 @@ async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number
       // Gateway-side name; the next successful connect will seed).
       if (override.length === 0) {
         try {
-          const seed = await fetch(`/api/boo-zero/display-name/${encodeURIComponent(booZeroId)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: 'Boo Zero' }),
-          })
+          const seed = await apiFetch(
+            `/api/boo-zero/display-name/${encodeURIComponent(booZeroId)}`,
+            {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: 'Boo Zero' }),
+            },
+          )
           if (seed.ok) override = 'Boo Zero'
         } catch {
           // Best-effort.
@@ -589,7 +592,7 @@ export function GatewayBootstrap() {
       // then got trapped in the wizard forever. `info === null` ⇒ transient.
       let info: SystemInfo | null = null
       try {
-        const resp = await fetch('/api/system/status')
+        const resp = await apiFetch('/api/system/status')
         if (resp.ok) info = (await resp.json()) as SystemInfo
       } catch {
         // Transient — `info` stays null; the decision preserves existing flags.
@@ -786,7 +789,7 @@ export function GatewayBootstrap() {
         // 1. Check system status first
         let gatewayRunning = true // optimistic default if status check fails
         try {
-          const statusResp = await fetch('/api/system/status')
+          const statusResp = await apiFetch('/api/system/status')
           if (statusResp.ok) {
             const systemInfo = (await statusResp.json()) as SystemInfo
             gatewayRunning = systemInfo.gateway.running
@@ -808,7 +811,7 @@ export function GatewayBootstrap() {
         }
 
         // 2. If Gateway is running (or status unknown), try normal auto-connect
-        const resp = await fetch('/api/settings')
+        const resp = await apiFetch('/api/settings')
         if (!resp.ok) return
 
         const data = (await resp.json()) as { gatewayUrl?: string }
@@ -886,7 +889,7 @@ export function GatewayBootstrap() {
 
           // Gateway is up — now auto-connect
           try {
-            const resp = await fetch('/api/settings')
+            const resp = await apiFetch('/api/settings')
             const data = resp.ok
               ? ((await resp.json()) as { gatewayUrl?: string })
               : { gatewayUrl: 'ws://localhost:18789' }
@@ -975,7 +978,7 @@ export function GatewayBootstrap() {
 
   /** Connect a fresh client + upgrade native mode → gateway mode. */
   const connectAndEnterGatewayMode = useCallback(async () => {
-    const resp = await fetch('/api/settings')
+    const resp = await apiFetch('/api/settings')
     const data = resp.ok ? ((await resp.json()) as { gatewayUrl?: string }) : {}
     const url = data.gatewayUrl?.trim() || 'ws://localhost:18789'
     const prev = useConnectionStore.getState().client
@@ -1024,7 +1027,7 @@ export function GatewayBootstrap() {
       // 1. Ensure the Gateway process is running (start it if not).
       let running = true
       try {
-        const st = await fetch('/api/system/status')
+        const st = await apiFetch('/api/system/status')
         if (st.ok) running = ((await st.json()) as SystemInfo).gateway.running
       } catch {
         /* optimistic — attempt the connect anyway */
@@ -1231,7 +1234,7 @@ export function GatewayBootstrap() {
               className="surface-overlay-tier w-full max-w-[340px] rounded-2xl p-8"
             >
               <div className="flex flex-col items-center gap-4 text-center">
-                <img src="/logo.svg" alt="Clawboo" width={48} height={44} className="opacity-40" />
+                <img src="logo.svg" alt="Clawboo" width={48} height={44} className="opacity-40" />
                 <div>
                   <h2
                     className="text-[20px] font-bold text-text"

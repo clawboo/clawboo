@@ -5,6 +5,7 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
 import { useReadSequencer } from '@/lib/useReadSequencer'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
+import { apiFetch } from '@clawboo/control-client'
 
 // A pending MCP tool-call / delegation approval (from GET /api/tools/approvals).
 // Distinct from the OpenClaw exec `ApprovalRequest` — different fields + a different
@@ -55,7 +56,7 @@ export function useToolApprovals(): {
   const refetch = useCallback(async () => {
     const read = reads.beginRead()
     try {
-      const r = await fetch('/api/tools/approvals?status=pending')
+      const r = await apiFetch('/api/tools/approvals?status=pending')
       const body = r.ok ? ((await r.json()) as { approvals?: ToolApproval[] }) : { approvals: [] }
       if (!read.isCurrent()) return // predates a resolve, or superseded by a newer read
       setTool(body.approvals ?? [])
@@ -75,7 +76,7 @@ export function useToolApprovals(): {
       reads.commitLocalWrite() // any read already in flight still lists this approval
       setTool((prev) => prev.filter((a) => a.id !== id)) // optimistic removal
       try {
-        await fetch(`/api/tools/approvals/${id}/resolve`, {
+        await apiFetch(`/api/tools/approvals/${id}/resolve`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ decision }),

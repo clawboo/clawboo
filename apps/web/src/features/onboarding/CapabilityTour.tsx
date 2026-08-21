@@ -245,7 +245,7 @@ function BooMascot({ size = 60 }: { size?: number }) {
         style={{ background: 'rgb(var(--primary-rgb) / 0.1)', filter: 'blur(3px)' }}
       />
       <motion.img
-        src="/logo.svg"
+        src="logo.svg"
         alt=""
         width={size}
         height={size * 0.92}

@@ -35,7 +35,7 @@ import { nativeProviderIdForGroup } from '@/lib/nativeModelCatalog'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
 import { onReducedMotionChange, prefersReducedMotion } from '@/lib/prefersReducedMotion'
-import { setAgentModel } from '@clawboo/control-client'
+import { apiFetch, setAgentModel } from '@clawboo/control-client'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData } from '@/features/graph/types'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -652,7 +652,7 @@ export function MiniGraph({ agentId }: { agentId: string }) {
       }
       // OpenClaw: persist to openclaw.json + apply to the live session.
       try {
-        await fetch('/api/system/openclaw-config', {
+        await apiFetch('/api/system/openclaw-config', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agentModel: { agentId: agent.id, model } }),

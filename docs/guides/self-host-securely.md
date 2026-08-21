@@ -82,6 +82,8 @@ Skip those two variables and the proxy recipe fails in a way that looks like it 
 
 With either option, Clawboo never accepts a connection off-host directly; your tunnel or proxy is the only network-facing surface, and it brings its own authentication and TLS. You can still add an access token on top, but you do not have to widen the bind to get there.
 
+**Sharing a hostname with other apps.** The recipe above gives Clawboo the whole origin. To put it under a path instead, set `CLAWBOO_BASE_PATH=/clawboo` and forward `location /clawboo/` with a `proxy_pass` that carries no URI part, so the prefix reaches Clawboo intact ([Serving under a path prefix](/operating/deployment#serving-under-a-path-prefix)). Requests are stripped of the prefix before any security check runs, so the same-origin guard and the access gate enforce exactly what they do at the root, and the access cookie is scoped to `Path=/clawboo` so the sibling apps on that origin never receive it.
+
 ## Step 3: Or widen the bind, and set an access token
 
 If you do bind a non-loopback interface, you take on the access gate yourself. Set `HOST` **and** `STUDIO_ACCESS_TOKEN` together (a token-less wide bind refuses to start):
@@ -108,7 +110,7 @@ The token must come from the safe charset `[A-Za-z0-9._~-]` (which `openssl rand
 
 When `STUDIO_ACCESS_TOKEN` is set, the access gate is the only authentication on the dashboard. Four behaviors matter for a self-host setup; the [security page](/operating/security#the-access-gate-opt-in) has the full treatment.
 
-**Presenting the token, and the cookie.** Open `/?access_token=<token>` once. The gate validates it, sets an `HttpOnly`, `SameSite=Lax`, `Path=/` cookie named `clawboo_access`, and 302-redirects to strip the token from the URL. After that the cookie is the steady-state credential, validated on every `/api/*` request and on the `/api/gateway/ws` WebSocket upgrade. A request without a valid cookie gets `401` with a JSON `{ error }` body whose message tells you to open `/?access_token=<token>` once.
+**Presenting the token, and the cookie.** Open `/?access_token=<token>` once. The gate validates it, sets an `HttpOnly`, `SameSite=Lax` cookie named `clawboo_access` scoped to the path the app is served under (`Path=/` by default, or the `CLAWBOO_BASE_PATH` prefix when one is set), and 302-redirects to strip the token from the URL. After that the cookie is the steady-state credential, validated on every `/api/*` request and on the `/api/gateway/ws` WebSocket upgrade. A request without a valid cookie gets `401` with a JSON `{ error }` body whose message tells you to open `/?access_token=<token>` once.
 
 **Constant-time, length-hiding compare.** The token is never compared byte-by-byte. Both the cookie value and the configured token are SHA-256-hashed to a fixed 32-byte digest first, then compared in constant time; so the check neither short-circuits on the first differing byte (a timing oracle) nor leaks the token's length.
 

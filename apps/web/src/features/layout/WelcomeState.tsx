@@ -6,7 +6,7 @@ import { useViewStore } from '@/stores/view'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { CreateTeamModalLazy, preloadCreateTeamModal } from '@/features/teams/CreateTeamModalLazy'
-import { consumeApiSSE } from '@clawboo/control-client'
+import { apiFetch, consumeApiSSE } from '@clawboo/control-client'
 import { SkyAtmosphere } from '@/features/atmosphere'
 import { Button } from '@/features/shared/Button'
 import type { SystemInfo } from '@/stores/system'
@@ -22,7 +22,7 @@ function SystemHint({ isConnected }: { isConnected: boolean }) {
   useEffect(() => {
     if (isConnected) return
     let cancelled = false
-    fetch('/api/system/status')
+    apiFetch('/api/system/status')
       .then((r) => r.json())
       .then((data: SystemInfo) => {
         if (!cancelled) setSystemInfo(data)
@@ -165,7 +165,7 @@ export function WelcomeState() {
         transition={{ type: 'spring', stiffness: 200, damping: 22 }}
       >
         <motion.img
-          src="/logo.svg"
+          src="logo.svg"
           alt="Clawboo"
           width={96}
           height={88}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Shield } from 'lucide-react'
+import { apiFetch } from '@clawboo/control-client'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
@@ -36,7 +37,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
   // Load saved exec config from SQLite on mount
   useEffect(() => {
     setLoaded(false)
-    fetch(`/api/exec-settings?agentId=${encodeURIComponent(agentId)}`)
+    apiFetch(`/api/exec-settings?agentId=${encodeURIComponent(agentId)}`)
       .then((r) => r.json())
       .then((data: { values: { execAsk?: string } | null }) => {
         if (data.values?.execAsk) {
@@ -55,7 +56,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
 
       // Persist to SQLite
       try {
-        await fetch('/api/exec-settings', {
+        await apiFetch('/api/exec-settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agentId, values: { execAsk: newAsk } }),

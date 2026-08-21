@@ -5,6 +5,7 @@
 // and resumes from the last `seq` via its `Last-Event-ID` header.
 
 import { useEffect, useRef, useState } from 'react'
+import { apiFetch, apiUrl } from '@clawboo/control-client'
 
 /** One row of the obs event log (server-redacted `data`, parsed to an object). */
 export interface ObsLogEvent {
@@ -106,7 +107,7 @@ export function useObsStream(
       if (typeof EventSource === 'undefined') return
       const sp = new URLSearchParams(base)
       sp.set('since', String(maxSeq))
-      es = new EventSource(`/api/obs/stream?${sp.toString()}`)
+      es = new EventSource(apiUrl(`/api/obs/stream?${sp.toString()}`))
       es.onopen = () => {
         if (!cancelled) setLive(true)
       }
@@ -143,7 +144,9 @@ export function useObsStream(
         // terminal still renders chronologically and the cursor starts live.
         bp.set('order', 'desc')
         bp.set('limit', String(limit))
-        const r = await fetch(`/api/obs/events?${bp.toString()}`, { signal: backfillAbort.signal })
+        const r = await apiFetch(`/api/obs/events?${bp.toString()}`, {
+          signal: backfillAbort.signal,
+        })
         if (!cancelled && r.ok) {
           const body = (await r.json()) as { events?: Record<string, unknown>[] }
           const rows = (body.events ?? []).map(parseRow).reverse()

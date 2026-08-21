@@ -3,7 +3,7 @@
 // task/verification pass-rate · spend · budgets). Never throws; an unreachable
 // server resolves to null and the view shows an empty state.
 
-import type { RuntimeClass } from '@clawboo/control-client'
+import { apiFetch, type RuntimeClass } from '@clawboo/control-client'
 
 export interface FleetRuntimeTile {
   runtime: string
@@ -40,7 +40,7 @@ export interface FleetSummary {
 
 export async function fetchFleetSummary(): Promise<FleetSummary | null> {
   try {
-    const res = await fetch('/api/fleet/summary')
+    const res = await apiFetch('/api/fleet/summary')
     if (!res.ok) return null
     return (await res.json()) as FleetSummary
   } catch {
@@ -58,7 +58,7 @@ export interface FleetIssue {
 /** Recent issues = the last N error events from the obs taxonomy (GET /api/obs/errors). */
 export async function fetchRecentIssues(limit = 6): Promise<FleetIssue[]> {
   try {
-    const res = await fetch('/api/obs/errors')
+    const res = await apiFetch('/api/obs/errors')
     if (!res.ok) return []
     const body = (await res.json()) as { errors?: FleetIssue[] }
     return (body.errors ?? []).slice(0, limit)

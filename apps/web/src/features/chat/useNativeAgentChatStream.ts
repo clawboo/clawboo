@@ -13,6 +13,7 @@ import {
   applyDeltaFrame,
   type EventSourceFactory,
 } from '@/features/group-chat/useTeamChatStream'
+import { apiUrl } from '@clawboo/control-client'
 
 export interface UseNativeAgentChatStreamParams {
   agentId: string
@@ -39,7 +40,7 @@ export function useNativeAgentChatStream({
       (typeof EventSource !== 'undefined' ? (url: string) => new EventSource(url) : null)
     if (!factory) return
 
-    const es = factory(`/api/agents/${encodeURIComponent(agentId)}/chat/stream`)
+    const es = factory(apiUrl(`/api/agents/${encodeURIComponent(agentId)}/chat/stream`))
     const onCommitted = (e: MessageEvent): void => {
       applyCommittedFrame(e.data as string)
       onActivityRef.current?.()

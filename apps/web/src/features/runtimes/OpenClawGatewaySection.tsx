@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Play, RotateCw } from 'lucide-react'
 
-import { consumeApiSSE } from '@clawboo/control-client'
+import { apiFetch, consumeApiSSE } from '@clawboo/control-client'
 
 import { Button } from '@/features/shared/Button'
 import { StatusPill } from '@/features/shared/StatusPill'
@@ -54,7 +54,7 @@ export function OpenClawGatewaySection({
     // poll that was already in flight and still reports the pre-action gateway state.
     const read = reads.beginRead()
     try {
-      const data = (await fetch('/api/system/status').then((r) => r.json())) as {
+      const data = (await apiFetch('/api/system/status').then((r) => r.json())) as {
         gateway?: GatewayState
       }
       if (data.gateway && read.isCurrent()) setGw(data.gateway)

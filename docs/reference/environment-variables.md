@@ -34,6 +34,7 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, 
 | `HOSTNAME`                             | Ports & binding    | (ignored)                        | ignored (no longer a bind signal)       |
 | `CLAWBOO_ALLOWED_ORIGINS`              | Ports & binding    | (loopback only)                  | same-origin guard (widen)               |
 | `CLAWBOO_ALLOWED_HOSTS`                | Ports & binding    | (loopback only)                  | same-origin guard (widen)               |
+| `CLAWBOO_BASE_PATH`                    | Ports & binding    | (none, served at `/`)            | server boot + CLI printed URLs          |
 | `STUDIO_ACCESS_TOKEN`                  | Secrets & auth     | (none)                           | access gate                             |
 | `CLAWBOO_ALLOW_INSECURE`               | Secrets & auth     | (unset)                          | boot guard (wide-bind opt-out)          |
 | `CLAWBOO_SECRETS_MASTER_KEY`           | Secrets & auth     | auto-generated key file          | secrets vault                           |
@@ -179,6 +180,12 @@ A non-loopback bind (`HOST=0.0.0.0`, a LAN IP, or a hostname) WITHOUT `STUDIO_AC
 - **Read by**: the always-on same-origin guard (`createOriginGuard`), constructed at server boot in `apps/web/server/index.ts`.
 - **Purpose**: a comma-separated list of extra hostnames to accept in the HTTP `Host` header (the guard's DNS-rebinding defense). Like `CLAWBOO_ALLOWED_ORIGINS`, it only widens the always-enforced loopback allowlist. Set it when a reverse proxy forwards a public hostname to the dashboard.
 - **Default**: none (only loopback hostnames plus the actual bind host are accepted).
+
+### `CLAWBOO_BASE_PATH`
+
+- **Read by**: server boot in `apps/web/server/index.ts` (via `resolveBasePath()` in `@clawboo/config`), the SPA shell the server templates (`mountSpa`), and the URLs the CLI prints.
+- **Purpose**: serve the whole dashboard under a URL path prefix instead of the origin root, for example `/clawboo` when clawboo shares a hostname with other apps behind a reverse proxy. The SPA, every `/api` route, the SSE streams, and the Gateway WebSocket proxy all move under the prefix together. The prebuilt bundle needs no rebuild: the server templates the mount point into the shell it serves, and the app reads it at runtime. Requests are stripped of the prefix before any routing or security check runs, so the same-origin guard and the access gate enforce exactly what they do at the root. The access cookie is scoped to the prefix, so a sibling app on the same origin never receives it. The unprefixed `/api` surface stays served for the loopback control plane (the CLI discovery probe, the MCP callback URLs handed to spawned runtimes, the self-update check) and stays exactly as gated as before. Accepts a value with or without a leading or trailing slash. A malformed value (an empty or dot segment, whitespace, a percent sign, or a first segment of `api`, which would collide with the API routes) makes the server **refuse to start** with the reason, rather than quietly falling back to the root and looking like a broken deployment. In `pnpm dev` the Vite dev server serves the SPA at the root and proxies `/api`, so the prefix shapes only what the API server accepts; the dashboard itself is developed at the root.
+- **Default**: none (served at `/`, behaving as every release before this existed; the served shell gains a `<base href="/">` naming its mount, which at the root resolves exactly as the absolute paths it replaces).
 
 ### `CLAWBOO_AWAIT_PORT`
 

@@ -1,3 +1,9 @@
+// FIRST import, deliberately: it reads the URL prefix the server templated into
+// the shell and points the control client at it. Module evaluation is depth-first
+// in import order, so this runs before App's graph and no request is ever built
+// against the wrong base. See `app/bootstrapBase.ts`.
+import './app/bootstrapBase'
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'

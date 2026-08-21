@@ -9,6 +9,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import { apiFetch } from '@clawboo/control-client'
+
 import { ModelSelector } from '@/features/maintenance/ModelSelector'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
@@ -23,7 +25,7 @@ export function OpenClawDefaultModel() {
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/system/openclaw-config')
+    apiFetch('/api/system/openclaw-config')
       .then(
         (r) =>
           r.json() as Promise<{
@@ -46,7 +48,7 @@ export function OpenClawDefaultModel() {
   const handleModelChange = useCallback(
     async (model: string) => {
       try {
-        const res = await fetch('/api/system/openclaw-config', {
+        const res = await apiFetch('/api/system/openclaw-config', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model }),

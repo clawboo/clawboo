@@ -116,14 +116,29 @@ export const authRetryAfterMs = (err: unknown): number | null => {
 
 // ─── URL helpers ──────────────────────────────────────────────────────────────
 
-export const resolveProxyGatewayUrl = (): string => {
+/** The URL prefix the app is served under, templated into the shell by the server.
+ *  Read defensively so this helper stays usable outside the SPA bundle. */
+const injectedBasePath = (): string => {
+  const raw = (globalThis as { __CLAWBOO_BASE__?: unknown }).__CLAWBOO_BASE__
+  if (typeof raw !== 'string') return ''
+  const trimmed = raw.trim()
+  if (!trimmed || trimmed === '/') return ''
+  const withLeading = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  return withLeading.replace(/\/+$/, '')
+}
+
+export const resolveProxyGatewayUrl = (basePath?: string): string => {
+  // The proxy route lives UNDER the app's path prefix, so a subpath mount has to
+  // carry it here too. `window.location.pathname` is not a substitute: it is the
+  // current route, not the mount point.
+  const base = basePath ?? injectedBasePath()
   // Browser path: same-origin, so we never hardcode a port. The string below
   // is only used in SSR / Node test contexts where `window` is undefined —
   // 18790 mirrors the default in `apps/web/server/lib/portUtils.ts`.
-  if (typeof window === 'undefined') return 'ws://localhost:18790/api/gateway/ws'
+  if (typeof window === 'undefined') return `ws://localhost:18790${base}/api/gateway/ws`
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const host = window.location.host
-  return `${protocol}://${host}/api/gateway/ws`
+  return `${protocol}://${host}${base}/api/gateway/ws`
 }
 
 export const isLocalGatewayUrl = (url: string): boolean => {

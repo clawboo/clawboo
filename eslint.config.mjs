@@ -72,6 +72,34 @@ const CAPTURE_KEY_LISTENER_OBJ =
 const CAPTURE_KEY_LISTENER_MESSAGE =
   'No capture-phase key listeners in the SPA. Capture runs before both the dismissable-layer stack and every React onKeyDown, so two overlays act on one Escape (issue #95). Register the overlay with useDismissableLayer() instead; if you truly need a raw listener, use the bubble phase.'
 
+// Root-absolute API URLs in the SPA. clawboo can be mounted under a URL path
+// prefix (CLAWBOO_BASE_PATH), so a hardcoded `/api/...` request bypasses the
+// prefix and 404s at the origin root. The failure is invisible on a default
+// install, where the prefix is empty and the two spellings coincide, which is
+// exactly why it needs a lint rule rather than review attention.
+//
+// Both the string and template-literal forms, for `fetch` and `EventSource`.
+const ROOT_ABSOLUTE_API_FETCH =
+  "CallExpression[callee.name='fetch'] > Literal.arguments:first-child[value=/^\\/api\\//]"
+const ROOT_ABSOLUTE_API_FETCH_TEMPLATE =
+  "CallExpression[callee.name='fetch'] > TemplateLiteral.arguments:first-child > TemplateElement:first-child[value.raw=/^\\/api\\//]"
+const ROOT_ABSOLUTE_API_EVENTSOURCE =
+  "NewExpression[callee.name='EventSource'] > Literal.arguments:first-child[value=/^\\/api\\//]"
+const ROOT_ABSOLUTE_API_EVENTSOURCE_TEMPLATE =
+  "NewExpression[callee.name='EventSource'] > TemplateLiteral.arguments:first-child > TemplateElement:first-child[value.raw=/^\\/api\\//]"
+// Root-absolute STATIC asset refs in JSX (`src="/logo.svg"`). Vite rewrites the
+// ones in index.html and in CSS, but a string literal in a component is emitted
+// verbatim, so it escapes the mount and 404s at the origin root. A relative ref
+// resolves against the `<base href>` the server injects, which is correct at the
+// root and under a prefix.
+const ROOT_ABSOLUTE_ASSET_JSX =
+  'JSXAttribute[name.name=/^(src|href|poster)$/] > Literal[value=/^\\/[^/].*\\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|mp4|webm)$/]'
+const ROOT_ABSOLUTE_ASSET_MESSAGE =
+  'Use a RELATIVE asset path (e.g. "logo.svg", not "/logo.svg"). clawboo can be served under a path prefix (CLAWBOO_BASE_PATH); a root-absolute reference escapes the mount and 404s. Relative paths resolve against the <base href> the server injects, which is correct at the root too.'
+
+const ROOT_ABSOLUTE_API_MESSAGE =
+  "Use apiFetch()/apiUrl() from '@clawboo/control-client' instead of a root-absolute '/api/...' URL. clawboo can be served under a path prefix (CLAWBOO_BASE_PATH), and a hardcoded root path skips it and 404s. Both helpers are identity at the root, so the default install is unchanged."
+
 const SERVER_TO_SPA_MESSAGE =
   'apps/web/server must not import from apps/web/src. The server and the browser SPA are separate build targets — move anything they share into a @clawboo/* package (see packages/model-catalog).'
 const SPA_TO_SERVER_MESSAGE =
@@ -154,6 +182,11 @@ export default tseslint.config(
         { selector: DYNAMIC_IMPORT_INTO_SERVER, message: SPA_TO_SERVER_MESSAGE },
         { selector: CAPTURE_KEY_LISTENER, message: CAPTURE_KEY_LISTENER_MESSAGE },
         { selector: CAPTURE_KEY_LISTENER_OBJ, message: CAPTURE_KEY_LISTENER_MESSAGE },
+        { selector: ROOT_ABSOLUTE_API_FETCH, message: ROOT_ABSOLUTE_API_MESSAGE },
+        { selector: ROOT_ABSOLUTE_API_FETCH_TEMPLATE, message: ROOT_ABSOLUTE_API_MESSAGE },
+        { selector: ROOT_ABSOLUTE_API_EVENTSOURCE, message: ROOT_ABSOLUTE_API_MESSAGE },
+        { selector: ROOT_ABSOLUTE_API_EVENTSOURCE_TEMPLATE, message: ROOT_ABSOLUTE_API_MESSAGE },
+        { selector: ROOT_ABSOLUTE_ASSET_JSX, message: ROOT_ABSOLUTE_ASSET_MESSAGE },
       ],
     },
   },

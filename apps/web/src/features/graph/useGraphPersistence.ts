@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { apiFetch } from '@clawboo/control-client'
 import { useGraphStore } from './store'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
@@ -69,7 +70,7 @@ export function useGraphPersistence(scope: GhostGraphScope = 'team') {
     setIsLoaded(false) // Reset on team / mode switch — wait for fresh positions
 
     const url = `/api/graph-layout?name=${encodeURIComponent(layoutName)}&url=${encodeURIComponent(scopeUrl)}`
-    void fetch(url)
+    void apiFetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: LayoutData | null) => {
         // Always reset savedPositions to whatever the new key holds —
@@ -96,7 +97,7 @@ export function useGraphPersistence(scope: GhostGraphScope = 'team') {
     (positions: LayoutData['positions']) => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => {
-        void fetch('/api/graph-layout', {
+        void apiFetch('/api/graph-layout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: layoutName, positions, gatewayUrl: scopeUrl }),

@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw, Save } from 'lucide-react'
+import { apiFetch } from '@clawboo/control-client'
 import { Button } from '@/features/shared/Button'
 import { Spinner } from '@/features/shared/Spinner'
 import { useFleetStore } from '@/stores/fleet'
@@ -20,13 +21,13 @@ interface BriefResponse {
 }
 
 async function fetchTeamBrief(teamId: string): Promise<BriefResponse> {
-  const res = await fetch(`/api/boo-zero/team-briefs/${encodeURIComponent(teamId)}`)
+  const res = await apiFetch(`/api/boo-zero/team-briefs/${encodeURIComponent(teamId)}`)
   if (!res.ok) throw new Error('Failed to load team brief')
   return (await res.json()) as BriefResponse
 }
 
 async function putTeamBrief(teamId: string, content: string): Promise<void> {
-  const res = await fetch(`/api/boo-zero/team-briefs/${encodeURIComponent(teamId)}`, {
+  const res = await apiFetch(`/api/boo-zero/team-briefs/${encodeURIComponent(teamId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),

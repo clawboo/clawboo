@@ -5,6 +5,8 @@
 // here (they match `@clawboo/evals` `SuiteReport` / `TaskReport` and the
 // `AblationScorecard` shape the scorecard renders).
 
+import { apiFetch } from '@clawboo/control-client'
+
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const
 
 export type EvalSuite = 'capability' | 'regression'
@@ -47,7 +49,7 @@ export interface AblationScorecard {
 /** POST /api/eval/smoke — run the deterministic smoke suite, return a SuiteReport. */
 export async function runSmokeEvals(opts: { trials?: number } = {}): Promise<SuiteReport | null> {
   try {
-    const r = await fetch('/api/eval/smoke', {
+    const r = await apiFetch('/api/eval/smoke', {
       method: 'POST',
       headers: JSON_HEADERS,
       body: JSON.stringify(opts.trials ? { trials: opts.trials } : {}),
