@@ -66,9 +66,24 @@ describe('MemberModelSelect', () => {
 
     // Seeded on the first group → Anthropic's models are shown; pick one.
     await userEvent.click(screen.getByRole('option', { name: /Claude Haiku 4\.5/i }))
-    expect(onChange).toHaveBeenCalledWith('anthropic/claude-haiku-4-5')
+    expect(onChange).toHaveBeenCalledWith('anthropic/claude-haiku-4-5', 'Anthropic')
     // Menu closed on select.
     expect(screen.queryByTestId('model-provider-anthropic')).toBeNull()
+  })
+
+  it('reports the GROUP a model was picked from, even for an id no catalog knows', async () => {
+    // Once a provider key is stored the picker lists that provider's OWN model
+    // ids, which the curated catalog does not contain. Recovering the provider
+    // from such an id returns nothing, so the group has to travel with the pick
+    // or the choice is silently dropped and the agent gets a default instead.
+    const onChange = vi.fn()
+    const live: ModelPickerGroup[] = [
+      { provider: 'Anthropic', models: [{ id: 'claude-opus-4-1-20250805', label: 'Opus 4.1' }] },
+    ]
+    render(<MemberModelSelect value="" onChange={onChange} groups={live} data-testid="pick" />)
+    await userEvent.click(screen.getByTestId('pick'))
+    await userEvent.click(screen.getByRole('option', { name: /Opus 4\.1/i }))
+    expect(onChange).toHaveBeenCalledWith('claude-opus-4-1-20250805', 'Anthropic')
   })
 
   it('clicking a different provider switches the model column', async () => {

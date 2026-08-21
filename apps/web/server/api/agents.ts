@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express'
+import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
 import { agents, costRecords, approvalHistory, settings, getSetting } from '@clawboo/db'
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
 import { eq, sql, inArray } from 'drizzle-orm'
@@ -187,22 +188,34 @@ export async function agentGET(req: Request, res: Response): Promise<void> {
 }
 
 // ─── PATCH /api/agents/:agentId/model ────────────────────────────────────────
-// Change an agent's model. Native persists to its AgentConfig `primaryModel` (via the
-// AgentConfig KV directly, NOT `updateAgent`, which would clobber `agents.execConfig`).
-// Hermes persists to its execConfig `{ provider, model }` — it routes every model
-// through OpenRouter, so a model change is an execConfig edit the run reads into
-// ctx.model + providerHint. Codex / Claude Code (account / SDK default) + OpenClaw
-// (via the Gateway) are not editable here → 404.
+// Change an agent's model, and optionally its provider. Native persists to its
+// AgentConfig (via the AgentConfig KV directly, NOT `updateAgent`, which would
+// clobber `agents.execConfig`): with a `provider` in the body the
+// primaryProvider + primaryModel + envVar triple moves ATOMICALLY (the model
+// picker offers every provider's models, and a cross-provider model left on the
+// old provider posts to the wrong endpoint and fails auth); without one, only
+// primaryModel changes (back-compat, and how a custom id for the current
+// provider is set). The server has no model-to-provider catalog (custom ids are
+// supported), so it validates the provider name and trusts the model string;
+// the SPA sends the provider of the group the user picked from. Hermes persists
+// to its execConfig `{ provider, model }`: it routes every model through
+// OpenRouter, so any other explicit provider is a 400. Codex / Claude Code
+// (account / SDK default) + OpenClaw (via the Gateway) are not editable here → 404.
 export async function agentModelPATCH(req: Request, res: Response): Promise<void> {
   const agentId = req.params['agentId'] as string | undefined
   if (!agentId) {
     res.status(400).json({ error: 'agentId required' })
     return
   }
-  const body = req.body as { model?: unknown } | undefined
+  const body = req.body as { model?: unknown; provider?: unknown } | undefined
   const model = typeof body?.model === 'string' ? body.model.trim() : ''
+  const provider = typeof body?.provider === 'string' ? body.provider.trim() : ''
   if (!model) {
     res.status(400).json({ error: 'model (non-empty string) required' })
+    return
+  }
+  if (provider && !(KNOWN_PROVIDERS as readonly string[]).includes(provider)) {
+    res.status(400).json({ error: `unknown provider '${provider}'` })
     return
   }
   try {
@@ -219,15 +232,32 @@ export async function agentModelPATCH(req: Request, res: Response): Promise<void
         res.status(404).json({ error: 'native agent config not found' })
         return
       }
-      saveAgentConfig(db, { ...config, primaryModel: model, updatedAt: Date.now() })
-      res.json({ ok: true, model })
+      saveAgentConfig(db, {
+        ...config,
+        ...(provider
+          ? {
+              primaryProvider: provider,
+              // Ollama is keyless; the placeholder mirrors the onboarding seed.
+              envVar: envVarForProvider(provider) ?? 'OLLAMA_BASE_URL',
+            }
+          : {}),
+        primaryModel: model,
+        updatedAt: Date.now(),
+      })
+      res.json({ ok: true, model, ...(provider ? { provider } : {}) })
       return
     }
     if (agent.runtime === 'hermes') {
+      if (provider && provider !== 'openrouter') {
+        res.status(400).json({
+          error: `hermes routes every model via OpenRouter; provider must be 'openrouter' or omitted`,
+        })
+        return
+      }
       // Hermes routes every model via OpenRouter, so store { provider, model } in the
       // execConfig the run reads (serverDeliver → ctx.model + providerHint).
       await source.updateAgent(agentId, { execConfig: { provider: 'openrouter', model } })
-      res.json({ ok: true, model })
+      res.json({ ok: true, model, ...(provider ? { provider } : {}) })
       return
     }
     res.status(404).json({ error: 'model change via this route is native/hermes-only' })

@@ -38,6 +38,8 @@ export async function refreshFleetFromRegistry(): Promise<number> {
             // authoritative from its AgentConfig (record.model = base.model), so take
             // the fresh value so a server-side change (onboarding / another client) shows.
             model: r.runtime === 'clawboo-native' ? base.model : prev.model,
+            // providerReady is server-computed on every list (like a native model),
+            // so the fresh value always wins.
             streamingText: prev.streamingText,
             runId: prev.runId,
             lastSeenAt: prev.lastSeenAt,
@@ -69,5 +71,6 @@ export function agentRecordToFleetState(record: AgentRecord): AgentState {
     teamId: record.teamId,
     runtime: record.runtime ?? null,
     execConfig: (record.execConfig as { execAsk: string } | null) ?? null,
+    providerReady: record.providerReady ?? null,
   }
 }

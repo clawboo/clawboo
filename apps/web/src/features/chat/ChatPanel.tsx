@@ -116,6 +116,14 @@ export function ChatPanel({
   // null (probe pending/failed) never degrades the UI.
   const nativeState = useNativeRuntimeState(isNativeChat)
   const nativeKeyless = isNativeChat && nativeState === 'needs-auth'
+  // A per-agent mismatch: the runtime has SOME provider connected (so it is not
+  // 'needs-auth'), but this agent's own configured slot has no key. It BADGES but
+  // deliberately does not gate the composer: the flag is only refreshed on a
+  // registry read, so gating on it would leave the composer dead after the user
+  // fixes the key, whereas a send that still fails now surfaces the reason in the
+  // transcript. `nativeKeyless` self-heals through the runtime-state poll.
+  const providerUnready = isNativeChat && agent?.providerReady === false
+  const showDisconnected = nativeKeyless || providerUnready
   // A native chat rides the SERVER's SSE — no Gateway client, and a dropped
   // Gateway socket is irrelevant to it, so `reconnecting` must not gate it off
   // (mixed fleets are real: `hydrateFleetFromClient` merges non-OpenClaw agents
@@ -305,7 +313,7 @@ export function ChatPanel({
           <div className="flex shrink-0 items-center gap-2">
             <span
               className={`h-1.5 w-1.5 rounded-full ${
-                nativeKeyless
+                showDisconnected
                   ? 'bg-amber/80'
                   : connectionTone === 'live'
                     ? 'bg-mint'
@@ -317,14 +325,19 @@ export function ChatPanel({
             />
             {/* The DOT carries the reconnect signal (amber + pulse); the label
                 keeps the standard muted tone. Same split as AgentDetailView, and
-                it keeps `nativeKeyless` — a real error — as the only state that
-                colours the text. */}
+                it keeps a real credential error as the only state that colours
+                the text: either the runtime has no provider at all, or THIS
+                agent's configured provider is the one that is disconnected. */}
             <span
-              className={`font-mono text-[10px] uppercase tracking-[0.1em] ${nativeKeyless ? 'text-amber/90' : 'text-muted-foreground'}`}
+              className={`font-mono text-[10px] uppercase tracking-[0.1em] ${showDisconnected ? 'text-amber/90' : 'text-muted-foreground'}`}
             >
-              {nativeKeyless ? 'Disconnected' : connectionStatusLabel(connectionStatus)}
+              {nativeKeyless
+                ? 'Disconnected'
+                : providerUnready
+                  ? 'No provider key'
+                  : connectionStatusLabel(connectionStatus)}
             </span>
-            {nativeKeyless && (
+            {showDisconnected && (
               <button
                 type="button"
                 data-testid="native-disconnected-chip"

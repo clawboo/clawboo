@@ -69,17 +69,65 @@ export function resolveConnectedNativeDefaults(tier: ModelTier): NativeProviderD
   return { primaryProvider: 'anthropic', primaryModel: models[tier], envVar: 'ANTHROPIC_API_KEY' }
 }
 
+// Two different questions get asked about a provider, and Ollama is the one place
+// they diverge. "Has the user SET UP this provider?" needs an explicit signal, so
+// keyless Ollama counts only with OLLAMA_BASE_URL configured (otherwise every
+// install would look provider-ready and auto-mint a native Boo Zero that cannot
+// run). "Can a provider the user ALREADY CHOSE actually run?" is the router's
+// question, and there an Ollama candidate always routes (buildCandidates pushes it
+// with no key, and ollamaBaseUrl falls back to localhost). Conflating the two
+// silently swaps a deliberate Ollama pick for a paid provider.
+
+/** True when THIS provider is SET UP: a key in the vault/env for its env var, or an
+ *  explicitly configured Ollama. Powers `hasConnectedNativeProvider`'s "is anything
+ *  set up at all" gate; use `canRunNativeProvider` to judge an existing pick. */
+function isNativeProviderConnected(provider: string): boolean {
+  if (provider === 'ollama') return Boolean(process.env['OLLAMA_BASE_URL'])
+  const envVar = envVarForProvider(provider)
+  return Boolean(envVar && resolveRuntimeKeyForRuntime('clawboo-native', envVar))
+}
+
+/** True when a provider the user already chose can serve a run, matching the
+ *  router's own candidate rule: keyless Ollama always routes, every other provider
+ *  needs a key in its env var. Use this to validate a STORED choice (a recorded
+ *  leader-model pick, a seeded provider); discarding a runnable Ollama pick here
+ *  would silently re-point the user at a billed provider. */
+export function canRunNativeProvider(provider: string): boolean {
+  if (provider === 'ollama') return true
+  const envVar = envVarForProvider(provider)
+  return Boolean(envVar && resolveRuntimeKeyForRuntime('clawboo-native', envVar))
+}
+
+/** True when THIS agent has at least one runnable candidate, mirroring
+ *  `buildCandidates` in routeCall: keyless Ollama always routes, otherwise a key
+ *  must resolve in the candidate's env var. Fallbacks count, exactly as the
+ *  router counts them, so the flag can never contradict what a run would do.
+ *  This is the per-agent counterpart of `nativeKeyHealth`, which is deliberately
+ *  permissive (ANY connected provider reads healthy): the router keys off THIS
+ *  agent's slots, so an agent parked on a disconnected provider fails every run
+ *  while the runtime card stays green. Surfaced as `AgentRecord.providerReady`. */
+export function nativeAgentProviderReady(config: {
+  primaryProvider: string
+  envVar: string
+  fallbacks?: { provider: string; model: string }[] | undefined
+}): boolean {
+  const candidates = [
+    { provider: config.primaryProvider, envVar: config.envVar },
+    ...(config.fallbacks ?? []).map((f) => ({
+      provider: f.provider,
+      envVar: envVarForProvider(f.provider),
+    })),
+  ]
+  return candidates.some((c) =>
+    c.provider === 'ollama'
+      ? true
+      : Boolean(c.envVar && resolveRuntimeKeyForRuntime('clawboo-native', c.envVar)),
+  )
+}
+
 /** True when ANY native provider key resolves (a key in the vault/env, or a
  *  configured Ollama). Used to gate auto-creating a native Boo Zero — without a key
  *  a native agent can't run, so we don't materialize an unrunnable universal leader. */
 export function hasConnectedNativeProvider(): boolean {
-  for (const provider of KNOWN_PROVIDERS) {
-    if (provider === 'ollama') {
-      if (process.env['OLLAMA_BASE_URL']) return true
-      continue
-    }
-    const envVar = envVarForProvider(provider)
-    if (envVar && resolveRuntimeKeyForRuntime('clawboo-native', envVar)) return true
-  }
-  return false
+  return KNOWN_PROVIDERS.some(isNativeProviderConnected)
 }

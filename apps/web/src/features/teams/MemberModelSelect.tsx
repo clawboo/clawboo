@@ -33,7 +33,12 @@ export interface ModelPickerGroup {
 export interface MemberModelSelectProps {
   /** The picked model id, or '' to follow the runtime's default. */
   value: string
-  onChange: (id: string) => void
+  /** `groupProvider` is the DISPLAY name of the group the model was picked from.
+   *  It is the only reliable provider signal: the Anthropic / OpenAI / OpenRouter
+   *  groups fill with live model lists once a key is stored, and those ids are the
+   *  provider's own, absent from the curated catalog, so the caller cannot recover
+   *  the provider from the id alone. */
+  onChange: (id: string, groupProvider?: string) => void
   /** Provider groups — ALREADY filtered to the connected providers. */
   groups: ModelPickerGroup[]
   /** The model that actually runs when `value` is '' (the runtime's resolved
@@ -257,8 +262,8 @@ export function MemberModelSelect({
   }, [open, computePosition])
 
   const choose = useCallback(
-    (id: string) => {
-      onChange(id)
+    (id: string, groupProvider?: string) => {
+      onChange(id, groupProvider)
       setOpen(false)
     },
     [onChange],
@@ -482,7 +487,7 @@ export function MemberModelSelect({
                       type="button"
                       role="option"
                       aria-selected={isSelected}
-                      onClick={() => choose(m.id)}
+                      onClick={() => choose(m.id, activeGroup?.provider)}
                       style={{
                         display: 'flex',
                         alignItems: 'center',

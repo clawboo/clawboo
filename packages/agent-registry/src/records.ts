@@ -50,6 +50,12 @@ export interface AgentRecord {
    *  AgentConfig `primaryModel` (surfaced so the UI's model selector shows it);
    *  omitted for sources whose model lives elsewhere (OpenClaw = Gateway-side). */
   model?: string | null
+  /** Whether the agent can actually run, mirroring the native router's own
+   *  candidate rule: a key resolves in ITS `envVar` slot, or in one of its
+   *  `fallbacks`, or its provider is keyless Ollama. Runtime-level health stays
+   *  green with ANY provider connected, so this per-agent flag is what reveals an
+   *  agent parked on a disconnected provider. Omitted/null for other sources. */
+  providerReady?: boolean | null
 
   // ── Classification (dormant seams) ──────────────────────────
   participantKind: ParticipantKind

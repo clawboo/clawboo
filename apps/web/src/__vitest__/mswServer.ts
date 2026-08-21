@@ -38,6 +38,13 @@ export const server = setupServer(
   http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [] })),
   http.get('/api/runtimes/openrouter/models', () => HttpResponse.json({ models: [] })),
   http.get('/api/providers', () => HttpResponse.json({ providers: [] })),
+  // A credential mutation (Providers hub / Runtimes panel) re-reads the registry,
+  // because each agent's `providerReady` is derived from the vault. A benign empty
+  // default keeps every save-path test from tripping onUnhandledRequest; a test
+  // that asserts on the refresh overrides it with its own counting handler.
+  http.get('/api/agents', () =>
+    HttpResponse.json({ defaultId: '', mainKey: 'main', agents: [], stale: false }),
+  ),
   // The native model pickers also fetch each provider's LIVE model list (Anthropic /
   // OpenAI via the stored/typed key); the onboarding step POSTs a typed key. Benign
   // empty defaults keep the components on their static fallback list.

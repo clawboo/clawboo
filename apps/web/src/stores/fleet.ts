@@ -27,6 +27,11 @@ export interface AgentState {
   runtime?: string | null
   /** Per-agent execution permission config (null = use Gateway default) */
   execConfig: { execAsk: string } | null
+  /** Native only: whether a key resolves in THIS agent's configured provider
+   *  slot (or the provider is keyless Ollama). Runtime health is green with ANY
+   *  provider connected, so this is what flags an agent whose own provider is
+   *  disconnected. null/undefined = not applicable (non-native) or unknown. */
+  providerReady?: boolean | null
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────

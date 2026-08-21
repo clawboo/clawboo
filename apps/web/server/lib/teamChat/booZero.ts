@@ -15,7 +15,10 @@ import { agents, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
 import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 
 import { SETTING_DEFAULT_ID } from '../agentSource/openClawAgentSource'
-import { hasConnectedNativeProvider } from '../runtimes/native/nativeProviderDefaults'
+import {
+  canRunNativeProvider,
+  hasConnectedNativeProvider,
+} from '../runtimes/native/nativeProviderDefaults'
 
 /** User OVERRIDE: designate ANY agent (any runtime) as Boo Zero. Wins over the
  *  per-runtime defaults; set via the "Make this agent Boo Zero" action. */
@@ -140,7 +143,11 @@ function hasNativeTeamMember(db: ClawbooDb): boolean {
 }
 
 /** The provider + model the user picked at native onboarding (SETTING_NATIVE_LEADER_MODEL),
- *  with the provider's vault env-var resolved — or null when unset/invalid (auto-resolve). */
+ *  with the provider's vault env-var resolved, or null when unset/invalid (auto-resolve).
+ *  A pick whose key is no longer connected is treated as absent: the caller's
+ *  fallback auto-resolves a CONNECTED provider, whereas honoring a stale pick would
+ *  mint a universal leader that fails every run while the runtime reads healthy on
+ *  the key that IS connected. */
 function readChosenLeaderModel(
   db: ClawbooDb,
 ): { provider: string; model: string; envVar: string } | null {
@@ -149,6 +156,7 @@ function readChosenLeaderModel(
   try {
     const p = JSON.parse(raw) as { provider?: unknown; model?: unknown }
     if (typeof p.provider !== 'string' || typeof p.model !== 'string' || !p.model) return null
+    if (!canRunNativeProvider(p.provider)) return null
     // Ollama is keyless; AgentConfig.envVar is non-empty by schema (a harmless placeholder).
     const envVar = envVarForProvider(p.provider) ?? 'OLLAMA_BASE_URL'
     return { provider: p.provider, model: p.model, envVar }

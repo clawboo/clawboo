@@ -236,6 +236,103 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     expect(empty.status()).toBe(400)
   })
 
+  it('PATCH /api/agents/:id/model with a provider moves the native triple atomically', async () => {
+    const create = mockRes()
+    await agentsCreatePOST(
+      req({ body: { name: 'Cross Provider', sourceId: 'clawboo-native' } }),
+      create.res,
+    )
+    const id = (create.body() as { agent: { id: string } }).agent.id
+    const db = getDb()
+
+    // A cross-provider pick moves provider + model + envVar together. Leaving the
+    // old provider in place posts the model to the wrong endpoint and fails auth,
+    // which was the audited way to silently brick a working agent.
+    const patch = mockRes()
+    await agentModelPATCH(
+      req({
+        params: { agentId: id },
+        body: { model: 'anthropic/claude-haiku-4.5', provider: 'openrouter' },
+      }),
+      patch.res,
+    )
+    expect(patch.status()).toBe(200)
+    expect(patch.body()).toEqual({
+      ok: true,
+      model: 'anthropic/claude-haiku-4.5',
+      provider: 'openrouter',
+    })
+    const cfg = loadAgentConfig(db, id)
+    expect(cfg?.primaryProvider).toBe('openrouter')
+    expect(cfg?.primaryModel).toBe('anthropic/claude-haiku-4.5')
+    expect(cfg?.envVar).toBe('OPENROUTER_API_KEY')
+
+    // Model-only request: provider + envVar stay put (back-compat, and how a
+    // custom id for the agent's CURRENT provider is set).
+    const modelOnly = mockRes()
+    await agentModelPATCH(
+      req({ params: { agentId: id }, body: { model: 'custom-openrouter-id' } }),
+      modelOnly.res,
+    )
+    expect(modelOnly.status()).toBe(200)
+    const cfg2 = loadAgentConfig(db, id)
+    expect(cfg2?.primaryProvider).toBe('openrouter')
+    expect(cfg2?.envVar).toBe('OPENROUTER_API_KEY')
+    expect(cfg2?.primaryModel).toBe('custom-openrouter-id')
+
+    // Ollama is keyless: the envVar slot carries the placeholder.
+    const ollama = mockRes()
+    await agentModelPATCH(
+      req({ params: { agentId: id }, body: { model: 'llama3.2', provider: 'ollama' } }),
+      ollama.res,
+    )
+    expect(ollama.status()).toBe(200)
+    expect(loadAgentConfig(db, id)?.envVar).toBe('OLLAMA_BASE_URL')
+
+    // Unknown provider → 400 with the config untouched (never accept-and-drop).
+    const bad = mockRes()
+    await agentModelPATCH(
+      req({ params: { agentId: id }, body: { model: 'x', provider: 'not-a-provider' } }),
+      bad.res,
+    )
+    expect(bad.status()).toBe(400)
+    expect(loadAgentConfig(db, id)?.primaryModel).toBe('llama3.2')
+  })
+
+  it('PATCH /api/agents/:id/model on hermes accepts only openrouter (or no) provider', async () => {
+    const create = mockRes()
+    await agentsCreatePOST(req({ body: { name: 'Hermes Peer', sourceId: 'hermes' } }), create.res)
+    const id = (create.body() as { agent: { id: string } }).agent.id
+    expect(id).toBeTruthy()
+
+    // Hermes routes every model via OpenRouter; another provider is a 400, not
+    // a silent drop.
+    const wrong = mockRes()
+    await agentModelPATCH(
+      req({
+        params: { agentId: id },
+        body: { model: 'claude-haiku-4-5', provider: 'anthropic' },
+      }),
+      wrong.res,
+    )
+    expect(wrong.status()).toBe(400)
+
+    const explicit = mockRes()
+    await agentModelPATCH(
+      req({
+        params: { agentId: id },
+        body: { model: 'openai/gpt-4o-mini', provider: 'openrouter' },
+      }),
+      explicit.res,
+    )
+    expect(explicit.status()).toBe(200)
+    expect(explicit.body()).toEqual({
+      ok: true,
+      model: 'openai/gpt-4o-mini',
+      provider: 'openrouter',
+    })
+  })
+
   it('POST /api/agents 400s an unknown sourceId', async () => {
     const r = mockRes()
     await agentsCreatePOST(req({ body: { name: 'X', sourceId: 'not-a-source' } }), r.res)

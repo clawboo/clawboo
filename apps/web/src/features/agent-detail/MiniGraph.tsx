@@ -31,6 +31,8 @@ import { useToastStore } from '@/stores/toast'
 import { AgentModelControl } from './AgentModelControl'
 import { useMiniGraphData } from './useMiniGraphData'
 import { useHermesModelGroups, useNativeModelGroups } from '@/lib/useOpenRouterModels'
+import { nativeProviderIdForGroup } from '@/lib/nativeModelCatalog'
+import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
 import { onReducedMotionChange, prefersReducedMotion } from '@/lib/prefersReducedMotion'
 import { setAgentModel } from '@clawboo/control-client'
@@ -613,7 +615,7 @@ export function MiniGraph({ agentId }: { agentId: string }) {
   const defaultModel = useOpenclawDefaultModel()
 
   const handleModelChange = useCallback(
-    async (model: string | null) => {
+    async (model: string | null, groupProvider?: string) => {
       if (!agent) return
       // Update fleet store immediately
       useFleetStore.getState().updateAgentModel(agent.id, model)
@@ -626,7 +628,22 @@ export function MiniGraph({ agentId }: { agentId: string }) {
       if (agent.runtime === 'clawboo-native' || agent.runtime === 'hermes') {
         if (model) {
           try {
-            await setAgentModel(agent.id, model)
+            // The picker offers every provider's models, so a native pick sends the
+            // provider of the GROUP the user clicked and the server moves
+            // primaryProvider + envVar with it. The group is the only reliable
+            // signal: Anthropic / OpenAI / OpenRouter groups swap in live lists
+            // whose ids are the provider's verbatim ones, so an id lookup would
+            // miss nearly all of them. No group (the custom-id input) means no
+            // provider, which leaves the agent's provider untouched.
+            const provider =
+              agent.runtime === 'clawboo-native' && groupProvider
+                ? (nativeProviderIdForGroup(groupProvider) ?? undefined)
+                : undefined
+            await setAgentModel(agent.id, model, provider)
+            // The stored provider decides whether this agent's key slot resolves,
+            // so re-read the registry to refresh `providerReady` (the badge would
+            // otherwise keep reporting the pre-move state until the next hydration).
+            if (provider) void refreshFleetFromRegistry().catch(() => undefined)
           } catch {
             addToast({ message: 'Failed to save model', type: 'error' })
           }

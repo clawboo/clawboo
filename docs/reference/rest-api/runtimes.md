@@ -507,10 +507,15 @@ This route is not under `/api/runtimes` and takes no `:id` segment. It is groupe
 {
   provider?: string  // 'anthropic' | 'openai' | 'openrouter' | 'ollama' |
                      // 'google' | 'xai' | 'groq' | 'mistral' | 'together' |
-                     // 'cerebras' | 'moonshot'; default 'anthropic'
+                     // 'cerebras' | 'moonshot'; resolved from the connected
+                     // provider when omitted (see below)
   model?: string     // optional leader-model override (the specialist keeps its default)
 }
 ```
+
+When `provider` is omitted, the seed resolves one from what is actually usable instead of assuming Anthropic: first the recorded leader-model pick (`POST /api/onboarding/native-leader-model`) when that provider can still run, then the first connected provider in `KNOWN_PROVIDERS` priority order, and only when nothing is connected at all does it fall back to `anthropic`. This keeps a bare `{}` seed from minting a team whose configured key slot is empty, which would pass health checks and then fail every run.
+
+The two Ollama rules differ on purpose, because it is keyless. Judging a pick the user already made asks whether it can run, and an Ollama pick always can (the runtime falls back to a local base URL), so a deliberate local-model choice is never swapped for a billed provider. Deriving a provider when the user chose none asks whether Ollama was actually set up, which takes a configured `OLLAMA_BASE_URL`; without that signal every install would look Ollama-ready.
 
 Per-provider model defaults (leader = a capable model, specialist = a cheap one) come from `MODEL_DEFAULTS` in `apps/web/server/lib/runtimes/native/nativeProviderDefaults.ts`, which is the drift-free source: `anthropic` → `claude-sonnet-5` / `claude-haiku-4-5`; `openai` → `gpt-5.4` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`; `google` → `gemini-2.0-flash` (both tiers); `xai` → `grok-2-latest` (both tiers); `groq` → `llama-3.3-70b-versatile` / `llama-3.1-8b-instant`; `mistral` → `mistral-large-latest` / `mistral-small-latest`; `together` → `meta-llama/Llama-3.3-70B-Instruct-Turbo` (both tiers); `cerebras` → `llama-3.3-70b` (both tiers); `moonshot` → `moonshot-v1-32k` / `moonshot-v1-8k`.
 
