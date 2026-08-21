@@ -24,6 +24,7 @@ import { usdToFractionalCents } from '@clawboo/governance'
 import { eq } from 'drizzle-orm'
 
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
+import { runFailureText } from '../runFailureText'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
@@ -227,10 +228,11 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
       // to be a completely silent non-response — optimistic bubble, brief Working
       // badge, then nothing, under a green header. Persist a visible meta with the
       // REASON so the user always learns why (and how to fix a keyless runtime).
-      const friendly = /no provider key/i.test(errorMessage ?? '')
-        ? 'Clawboo Native has no provider key connected. Open Settings → Runtimes → Clawboo Native to connect a provider.'
-        : `The run failed: ${errorMessage ?? 'unknown error'}`
-      persistNativeChatEntry(db, agentId, friendly, { kind: 'meta', role: 'system' })
+      // The wording is shared with the team-chat drain so the two cannot drift.
+      persistNativeChatEntry(db, agentId, runFailureText(errorMessage), {
+        kind: 'meta',
+        role: 'system',
+      })
       if (publishedDelta) publishChatDelta(sessionKey, { sessionKey, runId: null, text: '' })
     } else if (publishedDelta && !sawCleanCommit) {
       publishChatDelta(sessionKey, { sessionKey, runId: null, text: '' })

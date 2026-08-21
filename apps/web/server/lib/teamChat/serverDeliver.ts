@@ -58,6 +58,7 @@ import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource/registry'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
+import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
 import { emitEvent } from '../obs'
 import { connectedAgentKey, connectedAgentMutex } from '../routines/openclawDispatch'
 import { adapterFactoryFor } from '../runtimes'
@@ -83,6 +84,15 @@ const NATIVE_RUNTIME = 'clawboo-native'
 export interface RunEntry {
   adapter: RuntimeAdapter
   run: RunHandle
+  /**
+   * Why the SERVER aborted this run, when it did. Every runtime reports an abort
+   * as a clean `done: 'aborted'`, which makes a deliberate user Stop and a
+   * server-initiated kill (the idle guard, the budget cap, the wedge) look
+   * identical at the terminal. A user Stop should be silent; the others are
+   * unexplained non-answers that must be reported. Set by whoever asks for the
+   * abort, before asking; left null for a user Stop.
+   */
+  serverAbortReason?: string | null
 }
 
 export interface ServerDeliverDeps {
@@ -110,6 +120,12 @@ export interface ServerDeliverDeps {
    *  CLEARING delta so a streamed turn without a commit never leaves a lingering
    *  StreamingCard. A `void` return (legacy stubs) counts as persisted. */
   persistTurn?: (sessionKey: string, text: string) => boolean | void
+  /** Persist a SYSTEM notice into the team transcript (role `system`, kind `meta`),
+   *  for something the user must be told that is not the agent speaking. Used for a
+   *  run that failed before its first token, which is otherwise indistinguishable
+   *  from an agent that chose to stay silent. Optional; omitted in tests that only
+   *  assert the wiring. */
+  persistMeta?: (sessionKey: string, text: string) => boolean | void
   /** Tier-2 live-token hook: publish a run's FULL running assistant text on each
    *  streamed delta (the team-chat SSE's ephemeral channel). `text` is the running
    *  accumulation, NOT the chunk — it matches the client store's REPLACE semantics.
@@ -330,18 +346,40 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       if (!persistTurn) return false
       return persistTurn(sessionKey, text) !== false
     }
+    /**
+     * Record that the SERVER killed this run, and why.
+     *
+     * Every runtime reports an abort as a clean `done: 'aborted'`, so the terminal
+     * alone cannot tell a deliberate user Stop from a kill the server decided on.
+     * A Stop should be silent; a kill is an unexplained non-answer and has to be
+     * reported. The reason is kept on the shared abort-map entry so the wedge
+     * abort in `teamOrchestrator` can set it too.
+     */
+    const markServerAbort = (reason: string): void => {
+      const entry = abortMap.get(sessionKey)
+      if (entry) entry.serverAbortReason = reason
+      else serverAbortReason = reason
+    }
+    let serverAbortReason: string | null = null
+    /** The recorded reason, from wherever it was set. */
+    const takeServerAbortReason = (): string | null =>
+      abortMap.get(sessionKey)?.serverAbortReason ?? serverAbortReason
+
     // Drain idle guard: a wedged adapter iterator must not hang this drain (and
     // with it the agent's home mutex + the engine's view of the session) forever.
-    // Silence past the ceiling aborts the run; the abort surfaces `done:aborted`
-    // (→ the engine fails the delegation with a notice, since no user Stop is in
-    // effect), and a stream silent through the grace ends → `onSessionClosed`
-    // fails it with "ended before reporting". Either way, someone is told.
+    // Silence past the ceiling aborts the run; the abort surfaces `done:aborted`,
+    // which `markServerAbort` marks so the terminal below reports it rather than
+    // reading it as a deliberate stop, and a stream silent through the grace ends
+    // → `onSessionClosed` fails it with "ended before reporting".
     const silentMs =
       Number(process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']) || DEFAULT_RUN_SILENT_TIMEOUT_MS
     try {
       for await (const ev of withIdleTimeout(adapter.events(run) as AsyncIterable<RuntimeEvent>, {
         idleMs: silentMs,
         onIdle: async () => {
+          // Mark BEFORE aborting: the terminal this produces is a clean
+          // `done: aborted`, indistinguishable from a user Stop without it.
+          markServerAbort('the run went quiet for too long and was ended')
           try {
             await adapter.abort(run)
           } catch {
@@ -370,8 +408,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // kill-switch — a paused CAP budget aborts the run; the resulting `done:aborted`
           // flows through this same loop (the engine fails the task).
           runCostUsd += ev.costUsd
-          if (recordSpendForRun(sessionKey, agentId, ev.costUsd))
+          if (recordSpendForRun(sessionKey, agentId, ev.costUsd)) {
+            markServerAbort('the run was stopped by a budget cap')
             await adapter.abort(run).catch(() => undefined)
+          }
         }
         if (ev.kind === 'done') {
           // Commit a chat-visible (leader / user-facing) turn — a DELEGATED-CHILD task
@@ -385,6 +425,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // cumulative) accumulation — `acc` is the correctly-merged text for both.
           const doneText = acc.trim() ? acc : (ev.summary ?? '')
           if (chatVisible && doneText.trim()) persistedTurn = tryPersist(doneText)
+          // A clean terminal that produced NOTHING. Most of the time that is
+          // legitimate (a leader that delegated and had nothing to add speaks
+          // through the board, and a user Stop is a silence the user chose), so
+          // the only case reported is the one nobody chose: the server killed the
+          // run. Without this those kills are indistinguishable from a Stop, since
+          // every runtime reports both as `done: 'aborted'`.
+          if (chatVisible && !doneText.trim()) {
+            const killed = takeServerAbortReason()
+            if (killed) deps.persistMeta?.(sessionKey, runFailureText(killed, obs.runtime))
+          }
           // Cost fallback for a runtime that reports no USD (OpenClaw's Gateway, Codex,
           // Hermes): a char-based ESTIMATE so the task ledger + budget cap aren't stuck
           // at $0. Only when nothing real was summed (native already has runCostUsd > 0).
@@ -438,7 +488,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // A fatal-error terminal never reaches the `done` persist above — commit the
           // partial streamed text (what the user already watched) so it survives the
           // failure instead of vanishing with the stream.
-          if (ev.kind === 'error' && chatVisible && acc.trim()) persistedTurn = tryPersist(acc)
+          if (ev.kind === 'error' && chatVisible) {
+            if (acc.trim()) persistedTurn = tryPersist(acc)
+            // Nothing streamed at all: without a notice this is a silent
+            // non-response, which reads exactly like an agent that decided not to
+            // answer. Persist the REASON instead (the 1:1 chat drain does the same,
+            // through the same wording). Deliberately NOT `persistedTurn`: a system
+            // notice is not the agent's turn, and nothing streamed, so the clearing
+            // delta below is not in play either.
+            else deps.persistMeta?.(sessionKey, runFailureText(ev.message, obs.runtime))
+          }
           // Stream-without-commit belt: a turn that streamed live tokens but persisted
           // nothing (pure silent delegation, a write-time drop, an insert error) gets
           // one CLEARING delta — empty text tells the client to drop its StreamingCard
@@ -496,6 +555,18 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       // delegation instead of leaving the leader waiting on a dead observer. The
       // dead stream never commits, so drop any lingering StreamingCard + flip the
       // left-pane badge back.
+      // Commit whatever the user already watched streaming, exactly as the
+      // fatal-error terminal does. A dead stream is not a reason to throw away
+      // real content: without this the reply visibly vanishes and is replaced by
+      // a notice saying nothing came back, when something did.
+      if (chatVisible && !persistedTurn && acc.trim()) persistedTurn = tryPersist(acc)
+      // Only a run that produced NOTHING needs its silence explained. No terminal
+      // ever said why, and the user simply never heard back. A deliberate stop
+      // does not land here, because every runtime reports an abort as a clean
+      // `done` terminal.
+      if (chatVisible && !persistedTurn) deps.persistMeta?.(sessionKey, RUN_ENDED_WITHOUT_RESULT)
+      // Ordered last: a partial committed just above replaces the StreamingCard on
+      // its own, so only a turn that truly committed nothing needs clearing.
       if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
       abortMap.delete(sessionKey)
       nudge.markIdle(sessionKey)

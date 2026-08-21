@@ -142,6 +142,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     const persisted: Array<{ sk: string; text: string }> = []
     const deltas: Array<{ sk: string; runId: string | null; text: string }> = []
     const statuses: Array<{ agentId: string; status: string }> = []
+    const metas: Array<{ sk: string; text: string }> = []
     const abortMap = new Map<string, RunEntry>()
     const real = createNudgeQueue()
     // Wrap markBusy/markIdle to record ordering vs onEvent.
@@ -183,11 +184,15 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
         // explicit false simulates a write-time drop / insert error.
         return opts?.persistReturns
       },
+      persistMeta: (sk, text) => {
+        metas.push({ sk, text })
+        return true
+      },
       publishDelta: (sk, runId, text) => deltas.push({ sk, runId, text }),
       publishStatus: (agentId, status) => statuses.push({ agentId, status }),
       makeAdapterForAgent: () => adapter,
     })
-    return { deliver, order, events, closed, persisted, deltas, statuses, abortMap }
+    return { deliver, order, events, closed, persisted, metas, deltas, statuses, abortMap }
   }
 
   it('resolves AFTER start (detached drain), forwards events, markIdle precedes onEvent(done), evicts the abort map, persists the terminal', async () => {
@@ -344,6 +349,173 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     expect(w.persisted).toEqual([{ sk: SK, text: 'partial answer' }])
     // …and the badge flips to error, not a silent stuck-Working.
     expect(w.statuses.at(-1)).toEqual({ agentId: 'a1', status: 'error' })
+    // The partial IS the explanation, so no system notice is added on top of it.
+    expect(w.metas).toEqual([])
+  })
+
+  it('a fatal error BEFORE any text posts a system notice with the reason', async () => {
+    // Otherwise this is a silent non-response: the turn just never arrives, which
+    // reads exactly like an agent that decided not to answer. The classic cause
+    // is a missing provider key, so the notice says where to fix it.
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'error',
+          code: 'auth',
+          message: 'no provider key available (checked ANTHROPIC_API_KEY and fallbacks)',
+          fatal: true,
+        }
+      })(),
+    )
+    const w = wire(adapter)
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+
+    expect(w.metas).toHaveLength(1)
+    expect(w.metas[0]?.sk).toBe(SK)
+    expect(w.metas[0]?.text).toMatch(/no provider key connected/i)
+    expect(w.metas[0]?.text).toMatch(/Settings/)
+    // It is a notice, not the agent's turn.
+    expect(w.persisted).toEqual([])
+    expect(w.statuses.at(-1)).toEqual({ agentId: 'a1', status: 'error' })
+  })
+
+  it('an unrecognized failure still reports its reason rather than nothing', async () => {
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'error',
+          code: 'provider_down',
+          message: 'upstream 503',
+          fatal: true,
+        }
+      })(),
+    )
+    const w = wire(adapter)
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(w.metas[0]?.text).toBe('The run failed: upstream 503')
+  })
+
+  it('a stream that ends with NO terminal also says so instead of going quiet', async () => {
+    // The other half of the same silence: the iterator just stops (a dropped
+    // connection, a crashed harness) and no event ever explains why. The engine
+    // is told, the badge clears, and before this the chat showed nothing at all.
+    const adapter = new FakeAdapter(() =>
+      (async function* () {
+        // Ends immediately: no text, no done, no error.
+      })(),
+    )
+    const w = wire(adapter)
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+
+    expect(w.metas).toHaveLength(1)
+    expect(w.metas[0]?.text).toMatch(/ended without reporting a result/i)
+    expect(w.persisted).toEqual([])
+  })
+
+  it('a dead stream COMMITS the partial the user watched instead of replacing it with a notice', async () => {
+    // The fatal-error terminal already does this. A stream that just stops has to
+    // agree: the text was on screen, and clearing it to say "nothing came back"
+    // both loses real content and contradicts what the user saw.
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'text-delta',
+          text: 'half an answer',
+          channel: 'assistant',
+        }
+        // Iterator ends here: no done, no error.
+      })(),
+    )
+    const w = wire(adapter)
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+
+    expect(w.persisted).toEqual([{ sk: SK, text: 'half an answer' }])
+    expect(w.metas).toEqual([])
+    // The committed card replaces the StreamingCard, so no clearing delta.
+    expect(w.deltas.filter((d) => d.text === '')).toEqual([])
+  })
+
+  it('a committed turn followed by a dead stream posts no notice', async () => {
+    // The turn arrived; the stream dying afterwards is not the user's problem.
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'all done' }
+      })(),
+    )
+    const w = wire(adapter)
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(w.persisted).toEqual([{ sk: SK, text: 'all done' }])
+    expect(w.metas).toEqual([])
+  })
+
+  it('a user Stop stays silent: an abort nobody explained is the one the user chose', async () => {
+    // Every runtime reports an abort as a clean `done: aborted`, so this terminal
+    // is byte-identical to the server-kill cases below. The only thing telling
+    // them apart is whether someone recorded a reason, and a user Stop does not.
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+      })(),
+    )
+    const w = wire(adapter)
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(w.metas).toEqual([])
+    expect(w.persisted).toEqual([])
+  })
+
+  it('a run the SERVER killed reports the kill, not silence', async () => {
+    // The budget kill-switch, the idle guard and the wedge all abort the run
+    // themselves and all produce `done: aborted`. Reading that as a deliberate
+    // stop would hide a cap the user never saw hit.
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 1, mode: 'cap' })
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'cost',
+          costUsd: 1.0,
+          usage: { inputTokens: 10, outputTokens: 10 },
+          model: null,
+          estimated: false,
+        }
+        yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'aborted', summary: '' }
+      })(),
+    )
+    const w = wire(adapter)
+    await w.deliver(SK, 'a1', 'spendy', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(adapter.aborted).toBeGreaterThanOrEqual(1)
+    expect(w.metas).toHaveLength(1)
+    expect(w.metas[0]?.text).toMatch(/budget cap/i)
+  })
+
+  it('a delegated CHILD run posts no notice: its failure surfaces on the board', async () => {
+    // A task run is not chat-visible, so a notice here would appear in a room the
+    // user did not address, duplicating the engine's own task-failure reporting.
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'error',
+          code: 'auth',
+          message: 'no provider key available (checked ANTHROPIC_API_KEY and fallbacks)',
+          fatal: true,
+        }
+      })(),
+    )
+    const w = wire(adapter, { taskId: 't-1' })
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(w.metas).toEqual([])
   })
 
   it('an empty-summary done falls back to the ACCUMULATED stream text so a watched turn never vanishes', async () => {
@@ -397,9 +569,13 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     await tick()
     expect(w.closed).toEqual([SK])
     expect(w.abortMap.has(SK)).toBe(false)
-    // The dead stream never commits — the client's StreamingCard is cleared (the
-    // empty-text sentinel) and the badge flips back to idle.
-    expect(w.deltas.at(-1)?.text).toBe('')
+    // The partial the user watched is COMMITTED rather than cleared. This used to
+    // assert the opposite (an empty-text sentinel that dropped the StreamingCard),
+    // which threw away text that was on screen; the fatal-error terminal always
+    // committed the same partial, so the two paths disagreed about identical
+    // content. The committed card replaces the StreamingCard on its own.
+    expect(w.persisted).toEqual([{ sk: SK, text: 'partial' }])
+    expect(w.deltas.at(-1)?.text).toBe('partial')
     expect(w.statuses.at(-1)).toEqual({ agentId: 'a1', status: 'idle' })
   })
 

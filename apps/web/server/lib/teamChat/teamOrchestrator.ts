@@ -175,7 +175,12 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       // its genuinely-still-running run so the nudge's force-idle flush can't start
       // a SECOND concurrent run on it.
       const e = abortMap.get(sk)
-      if (e) void e.adapter.abort(e.run).catch(() => undefined)
+      if (e) {
+        // Not a user Stop: mark it so the drain reports the kill instead of
+        // reading the resulting clean `done: aborted` as a deliberate silence.
+        e.serverAbortReason = 'the run stopped responding and was ended'
+        void e.adapter.abort(e.run).catch(() => undefined)
+      }
     },
   })
 
@@ -220,6 +225,20 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
         text,
         role: 'assistant',
         kind: 'assistant',
+      })
+    },
+    // A system notice, not the agent's turn: `role: 'system'` also keeps it clear
+    // of the assistant-only control-token drop, so a failure reason can never be
+    // mistaken for a refusal and silently discarded.
+    persistMeta: (sk, text) => {
+      const agentId = agentIdFromSessionKey(sk)
+      if (!agentId) return false
+      return persistTeamChatEntry(db, {
+        teamId,
+        agentId,
+        text,
+        role: 'system',
+        kind: 'meta',
       })
     },
     // Tier-2 live tokens: fan a run's running assistant text to the team's in-memory
