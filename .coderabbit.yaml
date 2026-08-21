@@ -1,20 +1,16 @@
-# CodeRabbit configuration.
+# CodeRabbit configuration. TEMPORARY, and deleted before this PR merges.
 #
-# The OSS plan caps a review at 100 files, counted AFTER these filters run (the
-# skip message reports "files selected for processing", which is the post-filter
-# number). So a large PR can still be reviewed by narrowing what is in scope
-# rather than by splitting the branch.
+# The OSS plan caps a review at 100 files, counted after these filters run, so
+# this large PR is reviewed in passes. Pass 1 (source, 74 files) is done; this is
+# PASS 2: tests only (39 changed test files). With inclusion patterns present,
+# only matching files are in scope, so the previously-reviewed source does not
+# count against the cap and the never-reviewed tests get their sweep.
 #
-# PASS 1 (this file as it stands): source only, 74 files. Docs and tests are out
-# of scope, not because they do not matter, but because prose and test bodies are
-# the cheapest things to review by hand and the most expensive to spend a capped
-# review on.
-#
-# PASS 2: comment out the two test exclusions below, push, and comment
-# `@coderabbitai full review`. That scopes the next pass to the tests.
+# DELETE THIS FILE BEFORE MERGE. It is repository configuration, not a per-PR
+# switch: left in place it would scope every future PR's review to test files
+# only, which is the inverse of useful.
 reviews:
   path_filters:
-    - '!docs/**'
-    - '!**/__tests__/**'
-    - '!**/*.test.ts'
-    - '!tests/e2e/**'
+    - '**/__tests__/**'
+    - '**/*.test.ts'
+    - 'tests/e2e/**'
