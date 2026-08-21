@@ -217,12 +217,23 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
           description: optStr(args['description']),
           status: optStr(args['status']) as TaskStatus | undefined,
           priority: typeof args['priority'] === 'number' ? args['priority'] : undefined,
-          teamId: optStr(args['teamId']),
+          // A bound session creates INTO ITS TEAM, full stop. The caller's teamId
+          // was honoured verbatim, so a bound model could create into any team by
+          // naming it: the one write the outOfTeam guard below cannot catch,
+          // because the task does not exist yet. Membership in the team is the
+          // binding's decision, not the argument's.
+          teamId: boundTeamId ?? optStr(args['teamId']),
           assigneeRuntime: optStr(args['assigneeRuntime']),
         }
         // No parent ⇒ a ROOT task, bounded by a rolling-window rate cap instead
         // (a per-parent ceiling has no subject there).
         const parentTaskId = optStr(args['parentTaskId'])
+        // A subtask INHERITS its parent's team, so a parent outside the binding
+        // is a cross-team write wearing a create's clothes.
+        if (parentTaskId) {
+          const denied = outOfTeam(parentTaskId)
+          if (denied) return denied
+        }
         const result = parentTaskId
           ? createCappedSubtask(db, parentTaskId, input)
           : createCappedRootTask(db, input)

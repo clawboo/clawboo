@@ -76,6 +76,20 @@ describe('classifyTurn — the two cases that were wrong', () => {
   })
 })
 
+describe('classifyTurn, a busy worker mentioned by the user', () => {
+  it('a HUMAN turn to an agent still holding a board task is a worker turn, not user-facing', () => {
+    // The user can @mention a specialist mid-task. Framing that turn with BOTH
+    // the worker guardrail ("you CANNOT reach the user") and [About the User]
+    // hands the model a contradiction. The guardrail wins; the message still
+    // arrives as content.
+    expect(frame(HUMAN_TURN, WORKER, true)).toEqual({
+      isWorker: true,
+      isLeader: false,
+      isUserFacing: false,
+    })
+  })
+})
+
 describe('classifyTurn — degenerate input', () => {
   it('a team with no resolvable leader frames nobody as the leader', () => {
     // `resolveLeaderId` returns null for an empty roster. Comparing against null

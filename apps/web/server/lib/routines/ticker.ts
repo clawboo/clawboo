@@ -182,13 +182,18 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
       if (claimedRuns.length > 0) {
         const deadlineMs =
           Number(process.env['CLAWBOO_ROUTINE_DISPATCH_DEADLINE_MS']) || 15 * 60_000
+        // The handle lives OUTSIDE the promise so the winner can clear it:
+        // unref() keeps the process exitable but does not release the timer, so
+        // every settled batch retained one for up to the full deadline.
+        let deadlineTimer: ReturnType<typeof setTimeout> | undefined
         const outcome = await Promise.race([
           settledAll.then(() => 'settled' as const),
           new Promise<'deadline'>((resolve) => {
-            const t = setTimeout(() => resolve('deadline'), deadlineMs)
-            ;(t as { unref?: () => void }).unref?.()
+            deadlineTimer = setTimeout(() => resolve('deadline'), deadlineMs)
+            ;(deadlineTimer as { unref?: () => void }).unref?.()
           }),
         ])
+        clearTimeout(deadlineTimer)
         if (outcome === 'deadline')
           deps.log.warn(
             { claimed: claimedRuns.length, deadlineMs },

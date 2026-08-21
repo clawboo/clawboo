@@ -42,6 +42,29 @@ describe('Tasks MCP — a bound session cannot write across the boundary', () =>
     expect(getTask(db, theirs.id)?.status).toBe('todo') // untouched
   })
 
+  it('create_task cannot escape the binding by NAMING another team', async () => {
+    // The one write the outOfTeam guard cannot catch: the task does not exist
+    // yet. The caller's teamId was honoured verbatim, so a bound model could
+    // create into any team. The binding now decides the team, not the argument.
+    const client = await connectInMemory(createTasksServer(db, { boundScope: { teamId: 'A' } }))
+    const res = await callText(client, 'create_task', { title: 'sneaky', teamId: 'B' })
+    const created = JSON.parse(res.text) as { id: string; teamId: string }
+    expect(created.teamId).toBe('A') // forced into the bound team
+    expect(getTask(db, created.id)?.teamId).toBe('A')
+  })
+
+  it('create_task refuses a PARENT from another team (inheritance escape)', async () => {
+    // A subtask inherits its parent's team, so a foreign parent is a cross-team
+    // write wearing a create's clothes.
+    const theirs = createTask(db, { title: 'theirs', status: 'todo', teamId: 'B' })
+    const client = await connectInMemory(createTasksServer(db, { boundScope: { teamId: 'A' } }))
+    const res = await callText(client, 'create_task', {
+      title: 'child',
+      parentTaskId: theirs.id,
+    })
+    expect(res.text).toContain('not found') // same wording as a refused read
+  })
+
   it('still permits the same writes INSIDE the bound team', async () => {
     const mine = createTask(db, { title: 'mine', status: 'todo', teamId: 'A' })
     const client = await connectInMemory(createTasksServer(db, { boundScope: { teamId: 'A' } }))

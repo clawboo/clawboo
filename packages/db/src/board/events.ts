@@ -18,6 +18,10 @@ export type BoardLifecycleEvent =
       kind: 'task_created'
       taskId: string
       teamId: string | null
+      /** The status the task was CREATED with. `create_task` accepts one, so a
+       *  projection that assumes `todo` files a task born `in_progress` into the
+       *  wrong column until the next mutation corrects it. */
+      status: string
       sourceDelegationId: string | null
     }
   | { kind: 'task_claimed'; taskId: string; teamId: string | null; assigneeAgentId: string }

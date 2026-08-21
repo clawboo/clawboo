@@ -848,6 +848,9 @@ async function runTaskInner(
     // yields zero recorded spend — the budget ledger would then under-count real
     // money with no signal at all. Surfaced after the loop.
     let sawSpend = false
+    // Did the adapter surface a real `done` terminal (possibly inside the idle
+    // guard's grace window)? Gates the synthetic "runtime silent" diagnosis.
+    let sawTerminal = false
 
     for await (const ev of withIdleTimeout(adapter.events(run), {
       idleMs: silentMs,
@@ -1046,6 +1049,7 @@ async function runTaskInner(
           }
         }
       } else if (ev.kind === 'done') {
+        sawTerminal = true
         doneReason = ev.reason
         summary = ev.summary || lastText
         if (ev.costUsd != null) {
@@ -1089,8 +1093,12 @@ async function runTaskInner(
 
     // A silent-timeout abort is a FAILURE with a stated cause, never a clean
     // abort (that would release the task with no trace of why) — and never a
-    // rotation candidate (the runtime is wedged, not out of room).
-    if (!stopForCancel && silentTimeout) {
+    // rotation candidate (the runtime is wedged, not out of room). But the grace
+    // window exists precisely so the adapter can surface its OWN terminal after
+    // the abort: when one arrived, it carries the true cause, and overwriting
+    // it with "runtime silent" erases the real reason from the ledger and the
+    // board comment.
+    if (!stopForCancel && silentTimeout && !sawTerminal) {
       doneReason = 'error'
       summary = `runtime silent: no events for ${Math.round(silentMs / 60_000)} minutes — the run was aborted by the drain idle guard`
       break

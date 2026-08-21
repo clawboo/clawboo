@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from './db'
 import { withWriteRetry } from './board/contention'
@@ -161,6 +161,23 @@ export function renderInboxDigest(
   const { bodies, includedIds } = packInboxRows(rows, budgetChars - header.length)
   if (bodies.length === 0) return { text: null, includedIds: [] }
   return { text: `${header}\n${bodies.join('\n')}`, includedIds }
+}
+
+/** Undelivered-row retention: rows whose recipient no longer exists, plus any
+ *  row older than the cutoff, are deleted. Without this an archived or deleted
+ *  agent's rows stay `deliveredAt IS NULL` forever and the boot scan re-surfaces
+ *  that agent every start. Returns how many rows were reaped. Called at boot,
+ *  BEFORE the undelivered scan, so the scan never wakes a ghost. */
+export const INBOX_MAX_AGE_MS = 30 * 24 * 60 * 60_000
+
+export function reapOrphanInbox(db: ClawbooDb, maxAgeMs = INBOX_MAX_AGE_MS): number {
+  const cutoff = Date.now() - maxAgeMs
+  const result = withWriteRetry(() =>
+    db.run(
+      sql`DELETE FROM agent_inbox WHERE delivered_at IS NULL AND (created_at < ${cutoff} OR agent_id NOT IN (SELECT id FROM agents))`,
+    ),
+  )
+  return Number((result as { changes?: number }).changes ?? 0)
 }
 
 /** Agents (with their team) holding undelivered mail — the boot-resume scan. */

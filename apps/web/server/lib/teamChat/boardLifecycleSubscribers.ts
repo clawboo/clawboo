@@ -64,7 +64,10 @@ function statusForSse(
 ): { status?: string; assigneeAgentId?: string | null } | null {
   switch (ev.kind) {
     case 'task_created':
-      return { status: 'todo' }
+      // The event carries the CREATED status: `create_task` accepts one, so a
+      // hardcoded 'todo' filed a task born in_progress/blocked into the wrong
+      // column until the next mutation corrected it.
+      return { status: ev.status }
     case 'task_claimed':
       // Carry the assignee: an external claim (MCP, executor) must not render
       // as an ownerless in_progress card.

@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { createDb, type ClawbooDb } from '../../db'
 import { defaultAvailabilityContext, evaluateAvailability } from '../availability'
 import { executeBrokeredCall } from '../broker'
-import { runInspectors } from '../inspectors'
+import { riskClassifierInspector, runInspectors } from '../inspectors'
 import { isSkillSafe, scanForInjection } from '../injection'
 import {
   createApproval,
@@ -19,7 +19,7 @@ import {
 import { bytesToB64url, signProvenance, verifyProvenance } from '../provenance'
 import { createBuiltinRegistry } from '../registry'
 import { scrubArgsSummary, scrubSecrets } from '../scrub'
-import type { ToolCallContext, ToolDescriptor } from '../types'
+import type { Inspector, ToolCallContext, ToolDescriptor } from '../types'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -241,6 +241,42 @@ describe('broker pipeline', () => {
     expect(observed).toBeTruthy()
     expect(observed!.resultSummary).toContain('would-deny')
     expect(observed!.resultSummary).toContain('recursive-delete-root')
+  })
+
+  it('an observed call that ALSO needs approval keeps its would-deny note', async () => {
+    // The require_approval audit row dropped the observations, so an
+    // observed-then-approved call left no record of what a stricter gate would
+    // have refused: and the observe mode exists precisely to count those. With
+    // the DEFAULT chain the combination is unreachable (observe fires only on
+    // risk:'safe', approval only on destructive/external), so this drives the
+    // custom-inspector seam, which is where a host would wire such a gate.
+    const registry = createBuiltinRegistry()
+    const observing: Inspector = () => ({ kind: 'observe', reason: 'mention:test-gate' })
+    const callPromise = executeBrokeredCall(
+      db,
+      { name: 'delete_path', args: { path: '/tmp/x' } },
+      ctx(),
+      {
+        registry,
+        inspectors: [observing, riskClassifierInspector],
+        approvalTimeoutMs: 3_000,
+        approvalPollMs: 10,
+      },
+    )
+    let pendingId: string | undefined
+    for (let i = 0; i < 100 && !pendingId; i++) {
+      const pending = listPendingApprovals(db)
+      if (pending.length > 0) pendingId = pending[0]?.id
+      else await sleep(10)
+    }
+    expect(pendingId).toBeTruthy()
+    resolveApproval(db, pendingId!, 'allow_once')
+    await callPromise
+    const before = listAudit(db, { toolName: 'delete_path' }).filter((a) => a.phase === 'before')
+    const noted = before.find((a) => a.decision === 'require_approval')
+    expect(noted).toBeTruthy()
+    expect(noted!.resultSummary).toContain('would-deny')
+    expect(noted!.resultSummary).toContain('mention:test-gate')
   })
 
   it('a destructive pattern on a tool that can ACT is still denied', async () => {

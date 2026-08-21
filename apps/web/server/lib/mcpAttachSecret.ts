@@ -8,7 +8,7 @@
 
 import { randomBytes } from 'node:crypto'
 
-import { getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { getSetting, settings, type ClawbooDb } from '@clawboo/db'
 
 const KEY = 'mcp-attach-scope-secret'
 
@@ -22,10 +22,19 @@ export function getMcpAttachSecret(db: ClawbooDb): string {
     cached = existing
     return existing
   }
+  // INSERT-OR-IGNORE, then read the stored winner. `setSetting` is an upsert,
+  // so two processes initializing against one database would each mint, both
+  // "win" their own write, and cache DIFFERENT secrets: every scoped URL signed
+  // by one process would fail verification on the other. Conflict-ignore makes
+  // the first insert authoritative and everyone else adopts it.
   const minted = randomBytes(32).toString('hex')
-  setSetting(db, KEY, minted)
-  cached = minted
-  return minted
+  db.insert(settings)
+    .values({ key: KEY, value: minted, updatedAt: Date.now() })
+    .onConflictDoNothing({ target: settings.key })
+    .run()
+  const winner = getSetting(db, KEY) ?? minted
+  cached = winner
+  return winner
 }
 
 /** Test-only: forget the process cache so a fresh db mints/reads its own. */

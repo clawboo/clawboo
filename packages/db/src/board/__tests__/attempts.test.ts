@@ -94,6 +94,24 @@ describe('classifyAttempts', () => {
     expect(classifyAttempts([{ ...failed(), afterCommit: 'abc123' }]).lastCrashLeftWork).toBe(false)
   })
 
+  it('a still-RUNNING row is not an attempt at all', () => {
+    // The caller filters its own open row; a concurrent dispatch's (or a leaked)
+    // running row used to classify as an error, inflate the streak, and even
+    // become lastKind: turning "someone else is mid-run" into "this task keeps
+    // failing".
+    const running = (): AttemptRow => ({ status: 'running' })
+    expect(classifyAttempts([running()])).toMatchObject({ lastKind: null, errorAttempts: 0 })
+    expect(classifyAttempts([swept(), running()])).toMatchObject({
+      lastKind: 'crash',
+      crashAttempts: 1,
+      errorAttempts: 0,
+    })
+    expect(classifyAttempts([failed(), running(), failed()])).toMatchObject({
+      errorAttempts: 2,
+      lastKind: 'error',
+    })
+  })
+
   it('carries the tombstone reason forward, so the next attempt can be told why', () => {
     expect(classifyAttempts([orphaned()]).lastCrashReason).toMatch(/process not alive/)
     expect(classifyAttempts([swept()]).lastCrashReason).toMatch(/no heartbeat/)

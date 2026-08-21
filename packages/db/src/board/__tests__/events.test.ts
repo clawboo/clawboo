@@ -7,9 +7,11 @@ import {
   listUndeliveredInbox,
   markInboxDelivered,
   packInboxRows,
+  reapOrphanInbox,
   renderInboxDigest,
   splitInboxByAddressing,
 } from '../../inbox'
+import { agentInbox, agents } from '../../schema'
 import { onBoardLifecycle, resetBoardLifecycleListeners, type BoardLifecycleEvent } from '../events'
 import {
   addComment,
@@ -45,6 +47,7 @@ describe('board lifecycle bus', () => {
       kind: 'task_created',
       taskId: t.id,
       teamId: 'T',
+      status: 'todo',
       sourceDelegationId: 'r1:deleg:agent:a1:reflectTo:leader',
     })
 
@@ -128,6 +131,7 @@ describe('board lifecycle bus', () => {
       kind: 'task_created',
       taskId: root.ok ? root.task.id : '',
       teamId: 'T',
+      status: 'todo',
       sourceDelegationId: null,
     })
 
@@ -137,9 +141,20 @@ describe('board lifecycle bus', () => {
       kind: 'task_created',
       taskId: child.ok ? child.task.id : '',
       teamId: 'T', // inherited from the parent
+      status: 'todo',
       sourceDelegationId: null,
     })
-    expect(seen.filter((e) => e.kind === 'task_created')).toHaveLength(2)
+    // The status is the CREATED one, not a hardcoded todo: a task born
+    // in_progress must not be filed into the wrong column by the projection.
+    const born = createTask(db, { title: 'hot', status: 'in_progress', teamId: 'T' })
+    expect(seen).toContainEqual({
+      kind: 'task_created',
+      taskId: born.id,
+      teamId: 'T',
+      status: 'in_progress',
+      sourceDelegationId: null,
+    })
+    expect(seen.filter((e) => e.kind === 'task_created')).toHaveLength(3)
   })
 
   it('a REFUSED capped create publishes nothing', () => {
@@ -227,6 +242,39 @@ describe('agent inbox (durable mailbox)', () => {
     expect(first.usedChars).toBe(twoLines)
     // Nothing left: the third row is not rendered and so is not marked.
     expect(packInboxRows(rows.slice(2), twoLines - first.usedChars).includedIds).toEqual([])
+  })
+
+  it("reapOrphanInbox deletes ONLY ghost and stale rows, never a live agent's fresh mail", () => {
+    // Destructive SQL, so the negative half is the test that matters: rows for a
+    // recipient that still exists, younger than the cutoff, must survive
+    // untouched, delivered or not.
+    const now = Date.now()
+    db.insert(agents)
+      .values({ id: 'alive', name: 'Alive', gatewayId: 'g', createdAt: now, updatedAt: now })
+      .run()
+    enqueueInbox(db, { agentId: 'alive', kind: 'signal', body: 'fresh, keep me' })
+    enqueueInbox(db, { agentId: 'ghost-agent', kind: 'alert', body: 'recipient is gone' })
+    // A live agent's row that is simply OLD is stale mail nobody will ever read.
+    db.insert(agentInbox)
+      .values({
+        id: 'old-row',
+        agentId: 'alive',
+        teamId: null,
+        kind: 'signal',
+        body: 'ancient',
+        taskId: null,
+        createdAt: now - 31 * 24 * 60 * 60_000,
+        deliveredAt: null,
+        deliveredVia: null,
+        tenantId: null,
+      })
+      .run()
+
+    const reaped = reapOrphanInbox(db)
+    expect(reaped).toBe(2) // the ghost's row + the ancient row, nothing else
+    const left = listUndeliveredInbox(db, 'alive')
+    expect(left.map((r) => r.body)).toEqual(['fresh, keep me'])
+    expect(listUndeliveredInbox(db, 'ghost-agent')).toEqual([])
   })
 
   it('renderInboxDigest: empty input renders nothing, and an over-long row is truncated', () => {

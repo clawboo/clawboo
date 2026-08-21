@@ -564,7 +564,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // a task released underneath a live run already degrades to the documented
     // late-result comment path.
     if (deps.isSessionBusy?.(found)) return false
-    forgetSession(found)
+    // Drop the tracking WITHOUT arming the late-replay guard. A detach is an
+    // out-of-band release (stale sweep, orphan reap, a human moving the card),
+    // the agent's session is usually still alive, and `recentlyTerminated` would
+    // silently drop every <delegate>/<plan> it emits for the next 60s: the exact
+    // silent-loss failure detach exists to prevent. The guard is for RUN
+    // terminals, where a stale summary really can replay.
+    dropSessionTracking(found)
     // The exec this task was tracking is whatever closed it (the sweep's
     // `timed_out`). Keeping the id would let a later terminal complete a row that
     // is already terminal — refused, but misleading.
@@ -572,11 +578,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     return true
   }
 
-  const forgetSession = (sessionKey: string): void => {
+  /** Tracking teardown alone, no replay guard. Callers that observed a RUN
+   *  terminal want `forgetSession`, which also arms `recentlyTerminated`. */
+  const dropSessionTracking = (sessionKey: string): void => {
     sessionToTask.delete(sessionKey)
     sessionStartGen.delete(sessionKey)
     lastActivityAt.delete(sessionKey)
     openToolCall.delete(sessionKey)
+  }
+  const forgetSession = (sessionKey: string): void => {
+    dropSessionTracking(sessionKey)
     recentlyTerminated.set(sessionKey, now())
   }
 

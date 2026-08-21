@@ -92,12 +92,16 @@ export async function executeBrokeredCall(
 
   let effectiveArgs = validatedCall.args
   if (outcome.decision === 'require_approval') {
+    // Observations survive on THIS path too: an observed-then-approved call is
+    // exactly the false-positive datum the observe mode exists to count.
+    const approvalObs = outcome.observations ?? []
     writeAuditBefore(db, {
       toolName: call.name,
       agentId: ctx.agentId,
       decision: 'require_approval',
       args: outcome.args,
       tenantId: ctx.tenantId,
+      ...(approvalObs.length > 0 ? { note: `would-deny: ${approvalObs.join('; ')}` } : {}),
     })
     const approval = createApproval(db, {
       toolName: call.name,

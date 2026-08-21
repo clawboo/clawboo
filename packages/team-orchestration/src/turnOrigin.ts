@@ -79,5 +79,14 @@ export function classifyTurn(input: {
   const isWorker = input.origin.kind === 'delegation' || input.hasBoardTask
   const isLeader =
     !isWorker && input.leaderAgentId !== null && input.targetAgentId === input.leaderAgentId
-  return { isWorker, isLeader, isUserFacing: input.origin.kind === 'human' || isLeader }
+  // A worker is NEVER user-facing, even on a human-origin turn: the user can
+  // @mention a specialist mid-task, and framing that turn with both the worker
+  // guardrail ("you CANNOT reach the user") and [About the User] is a
+  // contradiction handed to the model. The guardrail wins; the message itself
+  // still arrives as content.
+  return {
+    isWorker,
+    isLeader,
+    isUserFacing: (input.origin.kind === 'human' && !isWorker) || isLeader,
+  }
 }

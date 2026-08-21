@@ -806,6 +806,32 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.statusOf(t1)).toBe('in_progress')
     })
 
+    it('a DETACHED session still delegates, detach must not arm the late-replay guard', async () => {
+      // Detach is an out-of-band release: the sweep freed the task, but the
+      // agent's session is usually STILL ALIVE. `forgetSession` also arms
+      // `recentlyTerminated`, and via that path a detach silently dropped every
+      // <delegate>/<plan> the live agent emitted for the next 60 seconds: the
+      // same silent-loss failure detach exists to prevent. The guard is for run
+      // TERMINALS, where a stale summary really can replay.
+      const h = makeHarness()
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
+      board.forceRelease(t1)
+      expect(orchestrator.detachTask(t1)).toBe(true)
+
+      // The SAME live session immediately delegates. Before the fix this event
+      // hit the recently-terminated early-return and vanished without record.
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r9', '<delegate to="@Design Boo">follow-up work</delegate>'),
+      )
+      const created = board.created.map((t) => t.title)
+      expect(created).toContain('follow-up work')
+    })
+
     it('detach REFUSES while a live run still owns the session (no second concurrent run)', async () => {
       // One run per session is load-bearing. If a release detached a session that
       // still has a run streaming on it, the ready-pump would claim the task again

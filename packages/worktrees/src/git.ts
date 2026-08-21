@@ -313,13 +313,19 @@ export class KeyedMutex {
     const gate =
       acquireMs === undefined
         ? settled
-        : Promise.race([
-            settled,
-            new Promise<'timeout'>((resolve) => {
-              const t = setTimeout(() => resolve('timeout'), acquireMs)
-              ;(t as { unref?: () => void }).unref?.()
-            }),
-          ])
+        : (() => {
+            // Handle held outside so a won race clears it: unref() keeps the
+            // process exitable but retains the timer, and sustained dispatch
+            // accumulated one per successful bounded acquire.
+            let t: ReturnType<typeof setTimeout> | undefined
+            return Promise.race([
+              settled.finally(() => clearTimeout(t)),
+              new Promise<'timeout'>((resolve) => {
+                t = setTimeout(() => resolve('timeout'), acquireMs)
+                ;(t as { unref?: () => void }).unref?.()
+              }),
+            ])
+          })()
     const result = gate.then((g) => {
       if (g === 'timeout') throw new MutexAcquireTimeoutError(key, acquireMs!)
       return fn()

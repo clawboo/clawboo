@@ -79,15 +79,20 @@ export function classifyAttempts(execs: AttemptRow[]): AttemptSummary {
     lastCrashLeftWork: false,
     lastCrashReason: null,
   }
-  if (execs.length === 0) return empty
+  // A row that has not FINISHED is not an attempt: a concurrent dispatch's
+  // still-`running` row (or a leaked one) would otherwise classify as an error,
+  // inflate the streak, and even become `lastKind`. The caller filters its OWN
+  // open row; this covers everyone else's.
+  const terminal = execs.filter((e) => e.status !== 'running' && e.status !== 'pending')
+  if (terminal.length === 0) return empty
 
-  const last = execs[execs.length - 1]!
+  const last = terminal[terminal.length - 1]!
   const lastKind = kindOf(last)
 
   let crashAttempts = 0
   let errorAttempts = 0
-  for (let i = execs.length - 1; i >= 0; i--) {
-    const k = kindOf(execs[i]!)
+  for (let i = terminal.length - 1; i >= 0; i--) {
+    const k = kindOf(terminal[i]!)
     if (k === 'success' || k === 'cancelled') break
     if (k === 'crash') crashAttempts += 1
     else errorAttempts += 1

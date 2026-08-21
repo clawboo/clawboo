@@ -9,6 +9,7 @@ import { loadSettings } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 import {
   listAgentsWithUndeliveredInbox,
+  reapOrphanInbox,
   listTeamsWithFireableDelegations,
   reconcileOrphans,
   reconcileStaleInProgress,
@@ -37,6 +38,15 @@ import {
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
 import { mountSpa } from './lib/serveSpa'
+
+/** A duration env var, defaulted and BOUNDED to a positive integer. The bare
+ *  `Number(...) || fallback` pattern rejects 0/''/NaN but accepts a negative,
+ *  so one mistyped value became either an instant mass-reap (negative TTL) or a
+ *  1ms hot timer loop (negative interval clamped by setInterval). */
+function positiveIntEnv(name: string, fallback: number): number {
+  const n = Number(process.env[name])
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback
+}
 
 // ── Loggers ─────────────────────────────────────────────────────────────────
 
@@ -293,7 +303,7 @@ async function main() {
   // The recovery tombstone keeps the reap idempotent. Best-effort; never blocks
   // boot. Shares CLAWBOO_BOARD_STALE_TTL_MS with the sweep.
   try {
-    const staleAfterMs = Number(process.env['CLAWBOO_BOARD_STALE_TTL_MS']) || 3 * 60_000
+    const staleAfterMs = positiveIntEnv('CLAWBOO_BOARD_STALE_TTL_MS', 3 * 60_000)
     const { reconciled } = reconcileOrphans(getDb(), { staleAfterMs })
     if (reconciled > 0) {
       log.info({ reconciled }, 'Board: reconciled orphaned executions on startup')
@@ -381,8 +391,8 @@ async function main() {
     // watchdog, the watchdog reaches a phantom session FIRST, fails the task to
     // `blocked` and cancel-chains its dependents — the exact permanent stall the
     // detach exists to prevent. A guard test pins the relationship.
-    const ttlMs = Number(process.env['CLAWBOO_BOARD_STALE_TTL_MS']) || 3 * 60_000
-    const intervalMs = Number(process.env['CLAWBOO_BOARD_STALE_SWEEP_MS']) || 60_000
+    const ttlMs = positiveIntEnv('CLAWBOO_BOARD_STALE_TTL_MS', 3 * 60_000)
+    const intervalMs = positiveIntEnv('CLAWBOO_BOARD_STALE_SWEEP_MS', 60_000)
     const sweep = (): void => {
       try {
         const { reconciled } = reconcileStaleInProgress(getDb(), ttlMs)
@@ -408,7 +418,7 @@ async function main() {
   // any race with a live engine. Human/board-created cards WITHOUT the marker
   // stay manual by design. Best-effort, unref'd.
   safeStart('board-dispatch-pump', () => {
-    const pumpMs = Number(process.env['CLAWBOO_DISPATCH_PUMP_MS']) || 60_000
+    const pumpMs = positiveIntEnv('CLAWBOO_DISPATCH_PUMP_MS', 60_000)
     const mcpBase = `http://127.0.0.1:${port}`
     // The bus subscribers make pushes immediate; this interval is the durable
     // BACKSTOP (and the boot-resume path: the first pass rebuilds every team
@@ -422,6 +432,9 @@ async function main() {
         // rebuilds its orchestrator; the rows ride the next run's digest (or,
         // for a team that stays idle, wait for the next user turn — waking is
         // about the ORCHESTRATOR being resident again after a restart).
+        // Retention first: drop rows for recipients that no longer exist (and
+        // stale rows past the cutoff) so the scan below never wakes a ghost.
+        reapOrphanInbox(db)
         for (const a of listAgentsWithUndeliveredInbox(db)) if (a.teamId) wake.add(a.teamId)
         for (const teamId of wake) {
           getTeamOrchestrator(teamId, { mcpBaseUrl: mcpBase })

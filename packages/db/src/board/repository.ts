@@ -94,6 +94,7 @@ export function createTask(db: ClawbooDb, input: CreateTaskInput): DbTask {
     kind: 'task_created',
     taskId: row.id,
     teamId: row.teamId ?? null,
+    status: row.status,
     sourceDelegationId: row.sourceDelegationId ?? null,
   })
   return row
@@ -250,6 +251,7 @@ export function createCappedSubtask(
       kind: 'task_created',
       taskId: result.task.id,
       teamId: result.task.teamId ?? null,
+      status: result.task.status,
       sourceDelegationId: result.task.sourceDelegationId ?? null,
     })
   return result
@@ -303,6 +305,7 @@ export function createCappedRootTask(
       kind: 'task_created',
       taskId: result.task.id,
       teamId: result.task.teamId ?? null,
+      status: result.task.status,
       sourceDelegationId: result.task.sourceDelegationId ?? null,
     })
   return result
